@@ -488,7 +488,7 @@ func TestListUserModelsForEvoIncludesCustomChatModel(t *testing.T) {
 	}
 }
 
-func TestListVisionChatInChatAndVisionSlotsKeepsTenantAndVerificationScope(t *testing.T) {
+func TestListVisionChatInChatAndVisionSlotsKeepsTenantAndCredentialScope(t *testing.T) {
 	db := setupListProviderTestDB(t)
 	store.Init(db, db, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -503,7 +503,7 @@ func TestListVisionChatInChatAndVisionSlotsKeepsTenantAndVerificationScope(t *te
 		if err := db.Create(&orm.UserModelProvider{ID: providerID, DefaultModelProviderID: "default-openai", Name: "OpenAI", Capabilities: "has_models", BaseModel: base}).Error; err != nil {
 			t.Fatal(err)
 		}
-		if err := db.Create(&orm.UserModelProviderGroup{ID: groupID, UserModelProviderID: providerID, BaseURL: "https://api.openai.com/v1/", IsVerified: true, BaseModel: base}).Error; err != nil {
+		if err := db.Create(&orm.UserModelProviderGroup{ID: groupID, UserModelProviderID: providerID, BaseURL: "https://api.openai.com/v1/", APIKey: "saved-key", IsVerified: true, BaseModel: base}).Error; err != nil {
 			t.Fatal(err)
 		}
 		models := []orm.UserModelProviderGroupModel{
@@ -519,16 +519,16 @@ func TestListVisionChatInChatAndVisionSlotsKeepsTenantAndVerificationScope(t *te
 	if err := db.Create(&orm.UserModelProviderGroup{ID: "unverified", UserModelProviderID: "provider-user-1", BaseURL: "https://api.openai.com/v1/", BaseModel: base}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.UserModelProviderGroupModel{ID: "unverified-vision", UserModelProviderID: "provider-user-1", UserModelProviderGroupID: "unverified", Name: "unverified", ModelType: "llm", Vision: true, BaseModel: base}).Error; err != nil {
+	if err := db.Create(&orm.UserModelProviderGroupModel{ID: "unverified-vision", UserModelProviderID: "provider-user-1", UserModelProviderGroupID: "unverified", ProviderName: "OpenAI", Name: "unverified", ModelType: "llm", Vision: true, BaseModel: base}).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
 		slot string
 		want []string
 	}{
-		{slot: "llm", want: []string{"text-user-1", "vision-user-1"}},
-		{slot: "vlm", want: []string{"legacy-user-1", "vision-user-1"}},
-		{slot: "evo_llm", want: []string{"legacy-user-1", "text-user-1", "vision-user-1"}},
+		{slot: "llm", want: []string{"text-user-1", "unverified-vision", "vision-user-1"}},
+		{slot: "vlm", want: []string{"legacy-user-1", "unverified-vision", "vision-user-1"}},
+		{slot: "evo_llm", want: []string{"legacy-user-1", "text-user-1", "unverified-vision", "vision-user-1"}},
 	} {
 		t.Run(tc.slot, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/core/model_providers/models?model_type="+tc.slot, nil)

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -114,8 +115,8 @@ func TestInactiveKeyChecksDoNotChangeSelectionOrVerification(t *testing.T) {
 	if reloaded.IsVerified {
 		t.Fatal("checking an inactive addition verified the active credential")
 	}
-	if _, err := ResolveProviderAPIKey(t.Context(), db, group.ID); !errors.Is(err, ErrProviderKeyUnverified) {
-		t.Fatalf("unverified active key usable: %v", err)
+	if key, err := ResolveProviderAPIKey(t.Context(), db, group.ID); err != nil || key != "chosen-key" {
+		t.Fatalf("explicit runtime call lost its enabled key: %v", err)
 	}
 	if rec := call(CheckGroup, http.MethodPost, `{"api_key":"inactive-key"}`); rec.Code != http.StatusOK {
 		t.Fatal(rec.Body.String())
@@ -132,7 +133,7 @@ func TestInactiveKeyChecksDoNotChangeSelectionOrVerification(t *testing.T) {
 	}
 }
 
-func TestFailedActivationAndForeignKeysKeepPreviousChoice(t *testing.T) {
+func TestForeignActivationRejectedAndExplicitKeyChoiceDoesNotRequireModelList(t *testing.T) {
 	db, parent, group := setupEncryptedGroupKeyTest(t, "chosen-key\nrejected-key")
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	if err := prepareProviderKeySelection(t.Context(), db, &parent); err != nil {
@@ -167,11 +168,14 @@ func TestFailedActivationAndForeignKeysKeepPreviousChoice(t *testing.T) {
 	if calls != 0 {
 		t.Fatal("invalid requests probed an upstream")
 	}
-	if rec := activate("user-1", group.ID, groupKeyID(group.ID, "rejected-key")); rec.Code != http.StatusBadGateway {
-		t.Fatalf("rejected key status=%d", rec.Code)
+	if rec := activate("user-1", group.ID, groupKeyID(group.ID, "rejected-key")); rec.Code != http.StatusOK {
+		t.Fatalf("explicit key selection status=%d", rec.Code)
 	}
-	if got, err := ResolveProviderAPIKey(t.Context(), db, group.ID); err != nil || got != "chosen-key" {
-		t.Fatal("failed switch replaced chosen key", err)
+	if calls != 0 {
+		t.Fatal("changing selection contacted the provider")
+	}
+	if got, err := ResolveProviderAPIKey(t.Context(), db, group.ID); err != nil || got != "rejected-key" {
+		t.Fatal("explicit choice did not preserve saved key", err)
 	}
 }
 
@@ -278,7 +282,7 @@ func TestNoSavedKeysAllowsVerifiedCustomEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	baseURL, key, err := ResolveProviderRuntimeCredential(t.Context(), db, group.ID)
-	if err != nil || key != "" || baseURL != parent.BaseURL {
+	if err != nil || key != "" || baseURL != "https://custom.example/v1/" {
 		t.Fatalf("keyless custom endpoint unavailable: %s %v", baseURL, err)
 	}
 }
@@ -290,14 +294,17 @@ func TestOlderActivationCannotOverrideLaterExplicitDisable(t *testing.T) {
 		t.Fatal(err)
 	}
 	started, release := make(chan struct{}), make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		close(started)
-		<-release
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"success":true}`))
-	}))
-	defer server.Close()
-	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	type pausedActivation struct{}
+	var once sync.Once
+	const callback = "test:pause-activation-read"
+	if err := db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_model_provider_groups" && tx.Statement.Context.Value(pausedActivation{}) == true {
+			once.Do(func() { close(started); <-release })
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove(callback) })
 	request := func(groupID, keyID string) *http.Request {
 		body, _ := json.Marshal(activeProviderKeyRequest{GroupID: groupID, KeyID: keyID})
 		req := httptest.NewRequest(http.MethodPut, "/active", strings.NewReader(string(body)))
@@ -307,7 +314,9 @@ func TestOlderActivationCannotOverrideLaterExplicitDisable(t *testing.T) {
 	result := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		rec := httptest.NewRecorder()
-		SetActiveProviderKey(rec, request(group.ID, groupKeyID(group.ID, "next-key")))
+		req := request(group.ID, groupKeyID(group.ID, "next-key"))
+		req = req.WithContext(context.WithValue(req.Context(), pausedActivation{}, true))
+		SetActiveProviderKey(rec, req)
 		result <- rec
 	}()
 	<-started
@@ -322,6 +331,52 @@ func TestOlderActivationCannotOverrideLaterExplicitDisable(t *testing.T) {
 	}
 	if _, err := ResolveProviderAPIKey(t.Context(), db, group.ID); !errors.Is(err, ErrProviderKeyDisabled) {
 		t.Fatal("later disable was lost", err)
+	}
+}
+
+func TestNoopActivationKeepsLatestVerificationResult(t *testing.T) {
+	db, parent, group := setupEncryptedGroupKeyTest(t, "chosen-key")
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	if err := prepareProviderKeySelection(t.Context(), db, &parent); err != nil {
+		t.Fatal(err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	type pausedActivation struct{}
+	var once sync.Once
+	const callback = "test:pause-noop-activation-read"
+	if err := db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_model_provider_groups" && tx.Statement.Context.Value(pausedActivation{}) == true {
+			once.Do(func() { close(started); <-release })
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Callback().Query().Remove(callback) })
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		body, _ := json.Marshal(activeProviderKeyRequest{GroupID: group.ID, KeyID: groupKeyID(group.ID, "chosen-key")})
+		req := httptest.NewRequest(http.MethodPut, "/active", strings.NewReader(string(body)))
+		req.Header.Set("X-User-Id", parent.CreateUserID)
+		req = mux.SetURLVars(req, map[string]string{"model_provider_id": parent.ID})
+		req = req.WithContext(context.WithValue(req.Context(), pausedActivation{}, true))
+		rec := httptest.NewRecorder()
+		SetActiveProviderKey(rec, req)
+		result <- rec
+	}()
+	<-started
+	err := setSupplierVerification(db, parent, false, time.Now())
+	close(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := <-result; rec.Code != http.StatusOK {
+		t.Fatal(rec.Body.String())
+	}
+	if err := db.Take(&group, "id = ?", group.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if group.IsVerified {
+		t.Fatal("an older repeated activation restored stale successful verification")
 	}
 }
 

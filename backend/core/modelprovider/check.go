@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -61,13 +62,14 @@ type checkModelProviderRequest struct {
 	Model        string `json:"model,omitempty"`
 }
 
-// algoModelCheckBody matches the algorithm POST /api/model/check JSON contract (lazyllm.OnlineModule).
+// algoModelCheckBody matches the read-only algorithm POST /api/model/check contract.
 type algoModelCheckBody struct {
-	Model    string `json:"model,omitempty"`
-	Source   string `json:"source"`
-	URL      string `json:"url"`
-	APIKey   string `json:"api_key"`
-	SkipAuth bool   `json:"skip_auth,omitempty"`
+	Model     string `json:"model,omitempty"`
+	ModelsURL string `json:"models_url,omitempty"`
+	Source    string `json:"source"`
+	URL       string `json:"url"`
+	APIKey    string `json:"api_key"`
+	SkipAuth  bool   `json:"skip_auth,omitempty"`
 }
 
 // modelCheckResponse mirrors the algorithm /api/model/check JSON (internal parse only).
@@ -77,22 +79,18 @@ type modelCheckResponse struct {
 	Model   string `json:"model,omitempty"`
 	Source  string `json:"source,omitempty"`
 	URL     string `json:"url,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // CheckModelProviderData is the API response for a model check (mirrors algorithm fields we expose).
 type CheckModelProviderData struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // doCheck calls the appropriate algorithm endpoint based on provider category and returns the result.
 func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
-	// The Token Plan mode of SenseNova requires a model name for connectivity check.
-	// If no model is specified, default to a representative model that the platform supports.
-	if model == "" && strings.EqualFold(providerName, "SenseNova") &&
-		normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL) {
-		model = "sensenova-6.8-flash-lite"
-	}
 	var checkEndpoint string
 	switch category {
 	case "ocr":
@@ -110,9 +108,28 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model
 		APIKey:   apiKey,
 		SkipAuth: apiKey == "",
 	}
+	if checkEndpoint == "/api/model/check" {
+		modelsURL, err := ProviderModelsListURL(providerName, baseURL)
+		if err != nil {
+			return &modelCheckResponse{Success: false, Message: "provider connection check failed", Reason: "invalid_request"}, nil
+		}
+		body.ModelsURL = modelsURL
+	}
 	var result modelCheckResponse
 	if err := common.ApiPost(ctx, upstream, body, nil, &result, modelProviderCheckTimeout); err != nil {
-		return &result, err
+		var httpErr *common.HTTPError
+		reason := FailureCodeForRemoteModels(0, nil, err)
+		if errors.As(err, &httpErr) {
+			reason = FailureCodeForRemoteModels(httpErr.StatusCode, httpErr.Body, nil)
+		}
+		return &modelCheckResponse{Success: false, Message: "provider connection check failed", Reason: reason}, errors.New("provider connection check failed")
+	}
+	if !result.Success {
+		result.Reason = safeConnectionReason(result.Reason)
+		result.Message = "provider connection check failed"
+	} else {
+		result.Reason = ""
+		result.Message = "model connection is available"
 	}
 	return &result, nil
 }
@@ -712,9 +729,9 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 			cacheKey := verifyCheckCacheKey(groupID, urlStr, apiKey)
 			recentVerifyCache.Store(cacheKey, time.Now().Add(5*time.Minute))
 		}
-		common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message})
+		common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message, Reason: algo.Reason})
 		return
 	}
 
-	common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message})
+	common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message, Reason: algo.Reason})
 }

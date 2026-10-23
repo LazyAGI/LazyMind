@@ -1,7 +1,7 @@
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Body
-import lazyllm
+from lazymind.chat.provider_connection import check_provider_connection
 
 router = APIRouter()
 
@@ -13,29 +13,7 @@ async def check_model_connection(
     url: Annotated[Optional[str], Body(description='Provider URL')] = None,
     api_key: Annotated[Optional[str], Body(description='Provider API key')] = None,
     skip_auth: Annotated[bool, Body(description='Skip authentication for a self-hosted endpoint')] = False,
+    models_url: Annotated[Optional[str], Body(description='Core-resolved model catalog URL')] = None,
 ):
-    try:
-        module = lazyllm.OnlineModule(
-            model=model,
-            source=source,
-            url=url,
-            api_key=api_key,
-            skip_auth=skip_auth,
-        )
-        if not module._validate_api_key():
-            raise RuntimeError('API key validation failed')
-        return {
-            'success': True,
-            'message': 'model connection is available',
-            'model': model,
-            'source': source,
-            'url': url,
-        }
-    except Exception as exc:
-        return {
-            'success': False,
-            'message': str(exc),
-            'model': model,
-            'source': source,
-            'url': url,
-        }
+    return await check_provider_connection(model=model, source=source, url=url, api_key=api_key,
+                                           skip_auth=skip_auth, models_url=models_url)

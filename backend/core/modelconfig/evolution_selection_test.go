@@ -109,7 +109,6 @@ func TestEvolutionSelectionDoesNotRequireEvidenceAndRevalidates(t *testing.T) {
 		update map[string]any
 		reason string
 	}{
-		{map[string]any{"is_verified": false}, "connection_unverified"},
 		{map[string]any{"base_url": ""}, "configuration_incomplete"},
 		{map[string]any{"api_key": "", "api_key_ciphertext": ""}, "credentials_unavailable"},
 		{map[string]any{"api_key_ciphertext": "invalid-test-ciphertext"}, "credentials_unavailable"},

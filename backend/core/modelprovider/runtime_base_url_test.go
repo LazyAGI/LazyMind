@@ -2,6 +2,58 @@ package modelprovider
 
 import "testing"
 
+func TestAPIModelsListURLUsesTheInferenceRoot(t *testing.T) {
+	cases := []struct{ input, want string }{
+		{"https://gateway.example", "https://gateway.example/v1/models"},
+		{"https://gateway.example/v1", "https://gateway.example/v1/models"},
+		{"https://gateway.example/api/v3", "https://gateway.example/api/v3/models"},
+		{"https://gateway.example/api/v3/", "https://gateway.example/api/v3/models"},
+		{"https://gateway.example/api/paas/v4/", "https://gateway.example/api/paas/v4/models"},
+		{"https://gateway.example/custom-prefix", "https://gateway.example/custom-prefix/models"},
+		{"https://gateway.example/proxy/models", "https://gateway.example/proxy/models/models"},
+		{"https://gateway.example/tenant%2Fname/v4", "https://gateway.example/tenant%2Fname/v4/models"},
+		{"https://gateway.example/api/v3/chat/completions", "https://gateway.example/api/v3/models"},
+		{"https://gateway.example/api/v4/models/", "https://gateway.example/api/v4/models"},
+		{"https://gateway.example/tenant/v4/openai/v1/", "https://gateway.example/tenant/v4/openai/v1/models"},
+		{"https://gateway.example/v3/gateway/v4/chat/completions", "https://gateway.example/v3/gateway/v4/models"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.input, func(t *testing.T) {
+			got, err := APIModelsListURL(tc.input)
+			if err != nil || got != tc.want {
+				t.Fatalf("URL=%q err=%v want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestProviderModelsListURLMatchesNativeInferenceRoot(t *testing.T) {
+	cases := []struct{ source, base, want string }{
+		{"OpenAI", "https://gateway.example", "https://gateway.example/v1/models"},
+		{"DeepSeek", "https://api.deepseek.com", "https://api.deepseek.com/models"},
+		{"Doubao", "https://ark.example/api/v3", "https://ark.example/api/v3/models"},
+		{"GLM", "https://glm.example/api/paas/v4/", "https://glm.example/api/paas/v4/models"},
+		{"Qwen", "https://qwen.example/", "https://qwen.example/compatible-mode/v1/models"},
+		{"Qwen", "https://qwen.example/proxy/compatible-mode/v1", "https://qwen.example/proxy/compatible-mode/v1/models"},
+		{"Kimi", "https://kimi.example/proxy/v1/", "https://kimi.example/proxy/v1/models"},
+		{"Claude", "https://claude.example/proxy", "https://claude.example/proxy/v1/models"},
+		{"PPIO", "https://ppio.example/openai", "https://ppio.example/openai/models"},
+		{"OpenRouter", "https://router.example/proxy", "https://router.example/proxy/models"},
+		{"SenseNova", "https://api.sensenova.cn/compatible-mode/v1/", "https://api.sensenova.cn/v1/llm/models"},
+		{"SenseNova", "https://token.sensenova.cn/v1/chat/completions/", "https://token.sensenova.cn/v1/models"},
+		{"SenseNova", "https://sense-proxy.example/prefix/v1/chat/completions/", "https://sense-proxy.example/prefix/v1/models"},
+		{"SenseNova", "https://api.sensenova.cn.evil.example/prefix/", "https://api.sensenova.cn.evil.example/prefix/models"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.source+tc.base, func(t *testing.T) {
+			got, err := ProviderModelsListURL(tc.source, tc.base)
+			if err != nil || got != tc.want {
+				t.Fatalf("URL=%q err=%v want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestLazyLLMBaseURLNormalizesOpenAIAndOfficialOpenRouter(t *testing.T) {
 	tests := []struct {
 		name, provider, input, want string
@@ -25,7 +77,7 @@ func TestLazyLLMBaseURLNormalizesOpenAIAndOfficialOpenRouter(t *testing.T) {
 		{"official openrouter suffix is cropped", "OpenRouter", "https://openrouter.ai/api/v1/invalid_suffix", "https://openrouter.ai/api/v1/"},
 		{"official openrouter query is cropped", "OpenRouter", "https://openrouter.ai/api/v1/?debug=1#result", "https://openrouter.ai/api/v1/"},
 		{"openrouter proxy path is preserved", "OpenRouter", "https://proxy.example.com/openrouter/v1/", "https://proxy.example.com/openrouter/v1/"},
-		{"other provider is untouched", "Qwen", "https://model.test/random/input?debug=1", "https://model.test/random/input?debug=1"},
+		{"native proxy root keeps its path", "Qwen", "https://model.test/random/input?debug=1", "https://model.test/random/input/?debug=1"},
 		{"invalid input is left for validation", "OpenAI", "not a url", "not a url"},
 	}
 	for _, tc := range tests {
@@ -46,6 +98,7 @@ func TestHasOpenAIRequestPath(t *testing.T) {
 		{"vllm requires API root", "vLLM", "http://inference.test:8000/v1/chat/completions", true},
 		{"proxy responses endpoint", "OpenAI", "https://proxy.example.com/openai/v1/responses", true},
 		{"prefixed API root", "OpenAI", "https://proxy.example.com/openai/v1/", false},
+		{"multiple versions in prefix", "OpenAI", "https://proxy.example.com/tenant/v4/openai/v1/", false},
 		{"host without version", "OpenAI", "http://127.0.0.1:8000", false},
 		{"other provider", "SenseNova", "https://token.sensenova.cn/v1/chat/completions/", false},
 	}

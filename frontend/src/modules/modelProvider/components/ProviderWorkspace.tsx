@@ -47,6 +47,7 @@ import { getProviderDisplayName, getProviderSearchText } from "../providerDispla
 import { useSupplierOrder } from "../hooks/useSupplierOrder";
 import { useFocusModality } from "../hooks/useFocusModality";
 import { canDiscoverWithoutApiKey } from "../providerAuthentication";
+import { getProviderConnectionFailureMessage } from "../connectionFailure";
 import { SortableSupplierList } from "./SortableSupplierList";
 import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./ModelTaskTabs";
 import { SavedProviderModels } from "./SavedProviderModels";
@@ -259,6 +260,15 @@ export function ProviderWorkspace(props: Props) {
     setKeyOpen(true);
     keyDraft.captureSavedValues();
   };
+  const checkSavedKey = (supplier: AddedProvider, groupId: string, isCurrent: () => boolean) => {
+    void (async () => {
+      try {
+        await props.onKeySaved?.(supplier, groupId, isCurrent);
+      } catch (error) {
+        if (isCurrent()) message.error(getProviderConnectionFailureMessage(error, t));
+      }
+    })();
+  };
   const addKey = async ({ apiKey }: { apiKey: string }): Promise<boolean> => {
     if (!provider || addKeyRequestPending.current || !apiKey.trim()) return false;
     const supplierId = provider.id;
@@ -266,7 +276,6 @@ export function ProviderWorkspace(props: Props) {
     setKeySaving(true);
     let saved = false;
     let savedGroupId = group?.id || "";
-    let verified = Boolean(group);
     try {
       if (group) {
         await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
@@ -283,14 +292,13 @@ export function ProviderWorkspace(props: Props) {
             createModelProviderGroupOpenAPIRequest: {
               name: provider.name,
               api_key: apiKey.trim(),
-              verify: true,
+              verify: false,
             },
           },
           { timeout: 180000 },
         );
         const created = unwrapModelProviderData<{ id: string; is_verified?: boolean }>(response.data);
         savedGroupId = created.id;
-        verified = created.is_verified === true;
       }
       saved = true;
       if (activeSupplierId.current === supplierId) {
@@ -300,8 +308,8 @@ export function ProviderWorkspace(props: Props) {
       }
       await props.onReload();
       if (activeSupplierId.current === supplierId) message.success(label("keyAdded"));
-      if (verified && savedGroupId && activeSupplierId.current === supplierId) {
-        await props.onKeySaved?.(provider, savedGroupId, () => activeSupplierId.current === supplierId);
+      if (savedGroupId && activeSupplierId.current === supplierId) {
+        checkSavedKey(provider, savedGroupId, () => activeSupplierId.current === supplierId);
       }
       return true;
     } catch (error) {
@@ -695,7 +703,7 @@ export function ProviderWorkspace(props: Props) {
                       const supplierId = provider.id;
                       await props.onReload();
                       if (group && activeSupplierId.current === supplierId) {
-                        await props.onKeySaved?.(provider, group.id, () => activeSupplierId.current === supplierId);
+                        checkSavedKey(provider, group.id, () => activeSupplierId.current === supplierId);
                       }
                     }}
                     checkAction={

@@ -28,12 +28,15 @@ func TestModelsListURL(t *testing.T) {
 		{"https://api.deepseek.com/v1/", "https://api.deepseek.com/v1/models"},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1/", "https://dashscope.aliyuncs.com/compatible-mode/v1/models"},
 		{"https://api.openai.com/v1/chat/completions", "https://api.openai.com/v1/models"},
-		{"https://gateway.example.com/openai", "https://gateway.example.com/openai/v1/models"},
-		{"https://gateway.example.com/openai/", "https://gateway.example.com/openai/v1/models"},
-		{"https://gateway.example.com/compatible", "https://gateway.example.com/compatible/v1/models"},
+		{"https://gateway.example.com/openai", "https://gateway.example.com/openai/models"},
+		{"https://gateway.example.com/openai/", "https://gateway.example.com/openai/models"},
+		{"https://gateway.example.com/compatible", "https://gateway.example.com/compatible/models"},
+		{"https://gateway.example.com/api/v3", "https://gateway.example.com/api/v3/models"},
+		{"https://gateway.example.com/api/v4/", "https://gateway.example.com/api/v4/models"},
+		{"https://gateway.example.com/team%2Fprivate/v3/", "https://gateway.example.com/team%2Fprivate/v3/models"},
 	}
 	for _, tt := range tests {
-		got, err := modelsListURL(tt.in)
+		got, err := modelsListURL("OpenAI", tt.in)
 		if err != nil {
 			t.Fatalf("modelsListURL(%q) error: %v", tt.in, err)
 		}
@@ -49,7 +52,7 @@ func TestModelsListURL(t *testing.T) {
 		"https://user:pass@api.openai.com/v1",
 	}
 	for _, in := range blocked {
-		if _, err := modelsListURL(in); err == nil {
+		if _, err := modelsListURL("OpenAI", in); err == nil {
 			t.Fatalf("modelsListURL(%q) succeeded, want error", in)
 		}
 	}
@@ -59,11 +62,11 @@ func TestModelsListURL(t *testing.T) {
 		want string
 	}{
 		{"http://10.0.0.8/v1", "http://10.0.0.8/v1/models"},
-		{"http://172.16.1.4/openai", "http://172.16.1.4/openai/v1/models"},
+		{"http://172.16.1.4/openai", "http://172.16.1.4/openai/models"},
 		{"http://192.168.1.10/", "http://192.168.1.10/v1/models"},
 	}
 	for _, tt := range allowedPrivate {
-		got, err := modelsListURL(tt.in)
+		got, err := modelsListURL("OpenAI", tt.in)
 		if err != nil {
 			t.Fatalf("modelsListURL(%q) error: %v", tt.in, err)
 		}
@@ -78,7 +81,7 @@ func TestListRemoteGroupModels(t *testing.T) {
 	t.Cleanup(func() { remoteModelsAllowPrivateHosts = false })
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
+		if r.URL.Path != "/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -199,7 +202,7 @@ func TestListRemoteGroupModelsKeepsPathPrefix(t *testing.T) {
 	t.Cleanup(func() { remoteModelsAllowPrivateHosts = false })
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/openai/v1/models" {
+		if r.URL.Path != "/openai/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -217,7 +220,7 @@ func TestListRemoteGroupModelsKeepsPathPrefix(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Data.URL != upstream.URL+"/openai/v1/models" {
+	if payload.Data.URL != upstream.URL+"/openai/models" {
 		t.Fatalf("url = %q", payload.Data.URL)
 	}
 	if len(payload.Data.Models) != 1 || payload.Data.Models[0].Name != "gpt-test" {
@@ -363,6 +366,7 @@ func listRemoteGroupModelsForURL(t *testing.T, baseURL string) *httptest.Respons
 	provider := orm.UserModelProvider{
 		ID:           "provider-rm",
 		Name:         "Remote",
+		ProtocolName: "OpenAI",
 		Category:     "model",
 		Capabilities: "has_models",
 		BaseModel:    orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},

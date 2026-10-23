@@ -323,8 +323,8 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.create_user_id = usm.user_id AND "+
-				"g.deleted_at IS NULL AND g.is_verified = ?",
-			true,
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
+				"g.deleted_at IS NULL",
 		).
 		Where("usm.user_id = ?", strings.TrimSpace(userID)).
 		Scan(&ownRows).Error
@@ -332,9 +332,21 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		return nil, err
 	}
 	ownRows = eligibleRuntimeModels(ownRows)
-	if err := decryptRuntimeModels(ctx, db, ownRows); err != nil {
-		return nil, err
+	availableOwn := make([]SelectedRuntimeModel, 0, len(ownRows))
+	blockedOwnTypes := make(map[string]struct{})
+	var ownCredentialError error
+	for _, row := range ownRows {
+		candidate := []SelectedRuntimeModel{row}
+		if err := decryptRuntimeModels(ctx, db, candidate); err != nil {
+			blockedOwnTypes[strings.ToLower(strings.TrimSpace(row.ModelType))] = struct{}{}
+			if ownCredentialError == nil {
+				ownCredentialError = err
+			}
+			continue
+		}
+		availableOwn = append(availableOwn, candidate[0])
 	}
+	ownRows = availableOwn
 
 	var cloudSelections []orm.UserSelectedCloudModel
 	if db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
@@ -373,6 +385,14 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	rows := make([]SelectedRuntimeModel, 0, len(ownRows)+len(resolvedCloudRows))
 	rows = append(rows, ownRows...)
 	rows = append(rows, resolvedCloudRows...)
+	if len(rows) == 0 && ownCredentialError != nil {
+		return nil, ownCredentialError
+	}
+	for modelType := range blockedOwnTypes {
+		// A disabled explicit selection must not silently borrow another user's
+		// supplier; unrelated roles can continue with their own credentials.
+		coveredTypes[modelType] = struct{}{}
+	}
 	for _, row := range rows {
 		coveredTypes[strings.ToLower(strings.TrimSpace(row.ModelType))] = struct{}{}
 	}
@@ -395,11 +415,14 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
 				"m.id = usm.user_model_provider_group_model_id AND "+
+				"m.create_user_id = usm.user_id AND "+
 				"m.deleted_at IS NULL",
 		).
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
+				"g.create_user_id = usm.user_id AND "+
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
 				"g.deleted_at IS NULL AND g.is_verified = ?",
 			true,
 		).
@@ -409,15 +432,16 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		return nil, err
 	}
 	sharedRows = eligibleRuntimeModels(sharedRows)
-	if err := decryptRuntimeModels(ctx, db, sharedRows); err != nil {
-		return nil, err
-	}
 
 	// Explicit own/Cloud selections take priority; shared rows fill missing types.
 	for _, row := range sharedRows {
 		normalized := strings.ToLower(strings.TrimSpace(row.ModelType))
 		if _, covered := coveredTypes[normalized]; !covered {
-			rows = append(rows, row)
+			candidate := []SelectedRuntimeModel{row}
+			if err := decryptRuntimeModels(ctx, db, candidate); err != nil {
+				continue
+			}
+			rows = append(rows, candidate[0])
 			coveredTypes[normalized] = struct{}{}
 		}
 	}
@@ -773,7 +797,9 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
-				"g.deleted_at IS NULL",
+				"g.create_user_id = m.create_user_id AND "+
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
+				"g.deleted_at IS NULL AND g.is_verified = ?", true,
 		).
 		Where("m.model_type IN ? AND m.is_default = ? AND m.deleted_at IS NULL", []string{"embed", "cross_modal_embed"}, true).
 		Order("m.created_at ASC").

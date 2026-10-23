@@ -124,6 +124,10 @@ def build_plan(request: ProbeInput) -> ProbePlan:
             'model': request.model, 'query': 'test', 'documents': ['test'], 'top_n': 1,
         })
     if kind == 'text2image':
+        if source == 'siliconflow':
+            return ProbePlan('images/generations', 'siliconflow_image', json={
+                'model': request.model, 'prompt': 'A blue square.',
+            })
         return ProbePlan('images' if source == 'openrouter' else 'images/generations', 'image', json={
             'model': request.model, 'prompt': 'A blue square.', 'n': 1,
         })

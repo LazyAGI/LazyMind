@@ -87,6 +87,24 @@ def test_openrouter_uses_its_dedicated_image_endpoint():
     assert requests[0].url.path == '/v1/images'
 
 
+def test_siliconflow_image_probe_uses_native_request_and_response():
+    result, requests = run_probe('text2image', 'SiliconFlow', response={
+        'images': [{'url': 'https://media.example/image?signature=test'}],
+    })
+    assert result['status'] == 'passed'
+    body = json.loads(requests[0].content)
+    assert body == {'model': 'fixture-model', 'prompt': 'A blue square.'}
+    assert requests[0].url.path == '/v1/images/generations'
+
+
+def test_siliconflow_model_not_found_code_is_distinct_from_invalid_parameters():
+    result, _ = run_probe(source='SiliconFlow', status=400, response={
+        'code': 20012, 'message': 'secret-that-must-not-leak', 'data': None,
+    })
+    assert result['code'] == 'model_not_found'
+    assert 'secret-that-must-not-leak' not in json.dumps(result)
+
+
 @pytest.mark.parametrize(('model', 'voice'), [
     ('mistralai/voxtral-mini-tts-2603', 'en_paul_neutral'),
     ('x-ai/grok-voice-tts-1.0', 'eve'),

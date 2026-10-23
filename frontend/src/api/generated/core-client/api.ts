@@ -1079,6 +1079,7 @@ export interface CheckFileHashesResponse {
 }
 export interface CheckModelProviderData {
     'message'?: string;
+    'reason'?: string;
     'success': boolean;
 }
 export interface CheckModelProviderOpenAPIRequest {
@@ -2223,6 +2224,9 @@ export interface CreateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
     'base_url'?: string;
     'name': string;
+    /**
+     * Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
+     */
     'verify': boolean;
 }
 export interface CreateModelProviderGroupOpenAPIResponse {
@@ -4572,6 +4576,10 @@ export interface ListRemoteGroupModelsOpenAPIItem {
     'model_type': string;
     'name': string;
     'output'?: Array<string>;
+    /**
+     * Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog.
+     */
+    'sub_types'?: Array<string>;
 }
 export interface ListRemoteGroupModelsOpenAPIResponse {
     'models'?: Array<ListRemoteGroupModelsOpenAPIItem>;
@@ -7246,6 +7254,9 @@ export interface UpdateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
     'base_url'?: string;
     'name': string;
+    /**
+     * Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
+     */
     'verify': boolean;
 }
 export interface UpdateProviderRequestConfigOpenAPIRequest {
@@ -47565,7 +47576,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47646,7 +47657,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Verifies a replacement before atomically updating the encrypted key pool. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Returns the new opaque key ID without plaintext.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
          * @summary Replace one saved supplier API key
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47990,7 +48001,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48067,7 +48078,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
          * @summary Set the single enabled key for a model supplier
          * @param {string} modelProviderId
          * @param {SetActiveModelProviderKeyOpenAPIRequest} setActiveModelProviderKeyOpenAPIRequest
@@ -48635,7 +48646,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48664,7 +48675,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Verifies a replacement before atomically updating the encrypted key pool. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Returns the new opaque key ID without plaintext.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
          * @summary Replace one saved supplier API key
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48785,7 +48796,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48813,7 +48824,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
          * @summary Set the single enabled key for a model supplier
          * @param {string} modelProviderId
          * @param {SetActiveModelProviderKeyOpenAPIRequest} setActiveModelProviderKeyOpenAPIRequest
@@ -49054,7 +49065,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGet(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49074,7 +49085,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete(requestParameters.modelProviderId, requestParameters.groupId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Verifies a replacement before atomically updating the encrypted key pool. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Returns the new opaque key ID without plaintext.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
          * @summary Replace one saved supplier API key
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49154,7 +49165,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.updateModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49174,7 +49185,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters.modelProviderId, requestParameters.createModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
          * @summary Set the single enabled key for a model supplier
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49638,7 +49649,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+     * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
      * @summary Check model provider connectivity
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49660,7 +49671,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Verifies a replacement before atomically updating the encrypted key pool. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Returns the new opaque key ID without plaintext.
+     * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
      * @summary Replace one saved supplier API key
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49748,7 +49759,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+     * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
      * @summary List models advertised by a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49770,7 +49781,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+     * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
      * @summary Set the single enabled key for a model supplier
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

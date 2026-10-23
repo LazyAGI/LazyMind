@@ -930,6 +930,8 @@ components:
             properties:
                 message:
                     type: string
+                reason:
+                    type: string
                 success:
                     type: boolean
             required:
@@ -11279,6 +11281,7 @@ components:
                 name:
                     type: string
                 verify:
+                    description: Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
                     type: boolean
             required:
                 - name
@@ -12395,6 +12398,11 @@ components:
                 name:
                     type: string
                 output:
+                    items:
+                        type: string
+                    type: array
+                sub_types:
+                    description: Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog.
                     items:
                         type: string
                     type: array
@@ -14959,6 +14967,7 @@ components:
                 name:
                     type: string
                 verify:
+                    description: Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
                     type: boolean
             required:
                 - name
@@ -26181,7 +26190,7 @@ paths:
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}:
         put:
-            description: Verifies a replacement before atomically updating the encrypted key pool. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Returns the new opaque key ID without plaintext.
+            description: Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -26390,7 +26399,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/remote_models:
         get:
-            description: Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+            description: Lists models with the supplier's saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -26414,7 +26423,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}:check:
         post:
-            description: Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+            description: Checks the provider's model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model's probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -26444,7 +26453,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/keys/active:
         put:
-            description: Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+            description: Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
             parameters:
                 - in: path
                   name: model_provider_id

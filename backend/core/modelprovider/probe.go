@@ -148,6 +148,9 @@ func loadProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID, gro
 		if isVLLMSupplier(ctx, tx, parent) && (normalizeProviderName(snapshot.Source) == "openai" || normalizeProviderName(snapshot.Source) == "vllm") {
 			snapshot.Source = "VLLM"
 		}
+		if normalizeProviderName(snapshot.Source) == "lmdeploy" {
+			snapshot.Source = "OpenAI"
+		}
 		key, code := readProbeCredential(ctx, tx, parent, snapshot.URL)
 		if code != "" {
 			reject("failed", code)

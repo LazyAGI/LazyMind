@@ -284,6 +284,11 @@ func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, use
 		for i := range defs {
 			d := defs[i]
 			if row, ok := existingByDefault[d.ID]; ok {
+				if d.Name == "vLLM" && row.Name == "VLLM" {
+					if err := tx.Model(row).Update("name", d.Name).Error; err != nil {
+						return err
+					}
+				}
 				// Sync category / capabilities from defaults if changed.
 				if row.Category != d.Category || row.Capabilities != d.Capabilities {
 					_ = tx.Model(row).Updates(map[string]interface{}{

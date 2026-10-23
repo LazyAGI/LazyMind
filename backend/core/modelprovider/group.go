@@ -305,7 +305,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 	}
-	if req.Verify && checkData == nil && apiKey != "" {
+	if req.Verify && !hasSharedProviderEndpoint(parent) && checkData == nil && apiKey != "" {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
@@ -621,30 +621,6 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	if effectiveAPIKey == "" {
 		effectiveAPIKey = storedAPIKey
 	}
-	selectedKey := ""
-	if hasSharedProviderEndpoint(parent) {
-		_, selectedKey, err = selectedProviderKey(db.WithContext(r.Context()), parent)
-		if err != nil && !errors.Is(err, ErrProviderKeyDisabled) {
-			common.ReplyErr(w, "resolve enabled api key failed", http.StatusInternalServerError)
-			return
-		}
-		if apiKey == "" {
-			effectiveAPIKey = selectedKey
-		} else if keys := splitAPIKeys(apiKey); len(keys) > 0 {
-			effectiveAPIKey = keys[0]
-		}
-		if req.Verify && apiKey == "" && selectedKey == "" {
-			hasKeys, err := hasStoredProviderKeys(db.WithContext(r.Context()), parent)
-			if err != nil {
-				common.ReplyErr(w, "resolve enabled api key failed", http.StatusInternalServerError)
-				return
-			}
-			if hasKeys {
-				common.ReplyErr(w, ErrProviderKeyDisabled.Error(), http.StatusBadRequest)
-				return
-			}
-		}
-	}
 	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, RuntimeProviderName(parent)) {
 		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "")
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
@@ -666,8 +642,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["is_verified"] = true
 	}
 
-	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
-	if req.Verify && checkData == nil {
+	// Shared model suppliers save independently of connection checks. The
+	// legacy verify flag remains meaningful only for auxiliary services.
+	if req.Verify && !hasSharedProviderEndpoint(parent) && checkData == nil {
 		if effectiveAPIKey == "" && providerAPIKeyRequiredForBaseURL(r.Context(), db, parent, baseURL) {
 			common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 			return
@@ -691,9 +668,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
-		if !hasSharedProviderEndpoint(parent) || effectiveAPIKey == selectedKey || !parent.ActiveKeyInitialized {
-			updates["is_verified"] = true
-		}
+		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := updateConnectionSafely(tx, &parent, &row, baseURL, updates); err != nil {
@@ -907,7 +882,7 @@ func providerAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, parent o
 	if strings.TrimSpace(baseURL) == "" {
 		return true
 	}
-	if isVLLMSupplier(ctx, db, parent) && hasSharedProviderEndpoint(parent) {
+	if isLocalOpenAISupplier(ctx, db, parent) && hasSharedProviderEndpoint(parent) {
 		return !validCustomProviderURL(RuntimeProviderName(parent), baseURL)
 	}
 	defaultURL, known := defaultBaseURL(ctx, db, parent.DefaultModelProviderID)
@@ -1064,7 +1039,7 @@ type removeKeyRequest struct {
 	KeyID  string `json:"key_id,omitempty"`
 }
 
-// AddKey validates and appends a single API key to the group.
+// AddKey saves one key. Shared suppliers validate connectivity separately.
 // POST /model_providers/{model_provider_id}/groups/{group_id}/keys
 func AddKey(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
@@ -1146,8 +1121,11 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "api_key pool exceeds credential limits", http.StatusBadRequest)
 		return
 	}
-	// Verify the key before storing.
-	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), connectionBaseURL(parent, row.BaseURL), newKey, "")
+	checkResult := &modelCheckResponse{Success: true, Message: "saved"}
+	var checkErr error
+	if !hasSharedProviderEndpoint(parent) {
+		checkResult, checkErr = doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), connectionBaseURL(parent, row.BaseURL), newKey, "")
+	}
 	if checkErr != nil || checkResult == nil || !checkResult.Success {
 		msg := "verification failed"
 		if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {
@@ -1175,11 +1153,6 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
 			return err
-		}
-		if hasSharedProviderEndpoint(parent) && parent.ActiveKeyGroupID == row.ID && parent.ActiveKeyID == groupKeyID(row.ID, newKey) {
-			if err := setSupplierVerification(tx, parent, true, now); err != nil {
-				return err
-			}
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {

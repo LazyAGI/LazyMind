@@ -5,7 +5,7 @@ import ModelProviderPage, { type AddedProvider, type ProviderOption } from "./Mo
 
 const mocks = vi.hoisted(() => ({
   providers: vi.fn(), withGroups: vi.fn(), groups: vi.fn(), models: vi.fn(),
-  remote: vi.fn(), add: vi.fn(), remove: vi.fn(), finished: vi.fn(), failed: vi.fn(), lookup: vi.fn(),
+  remote: vi.fn(), check: vi.fn(), add: vi.fn(), remove: vi.fn(), finished: vi.fn(), failed: vi.fn(), lookup: vi.fn(),
   current: true,
   translate: (key: string, options?: { name?: string }) => options?.name ? `${key}:${options.name}` : key,
 }));
@@ -19,6 +19,7 @@ vi.mock("../api", () => ({
     apiCoreModelProvidersWithGroupsGet: mocks.withGroups,
     apiCoreModelProvidersModelProviderIdGroupsGet: mocks.groups,
     apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet: mocks.models,
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPost: mocks.check,
     apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost: mocks.add,
     apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete: mocks.remove,
   },
@@ -33,6 +34,7 @@ vi.mock("../components/ProviderWorkspace", () => ({ ProviderWorkspace: (props: {
   providers: ProviderOption[];
   configuredProviders: AddedProvider[];
   loading: boolean;
+  modelsLoading: Record<string, boolean>;
   onKeySaved?: (provider: AddedProvider, groupId: string, isCurrent: () => boolean) => Promise<void>;
   onSyncModels: (provider: AddedProvider, group: AddedProvider["groups"][number]) => void;
 }) => {
@@ -47,6 +49,7 @@ vi.mock("../components/ProviderWorkspace", () => ({ ProviderWorkspace: (props: {
       if (provider && group) props.onSyncModels(provider, group);
     }}>Sync models</button>
     <output data-testid="group-models">{JSON.stringify(group?.models || [])}</output>
+    <output data-testid="discovery-state">{provider && group && props.modelsLoading[provider.id + ":" + group.id] ? "loading" : "ready"}</output>
   </>;
 } }));
 vi.mock("@/runtime/cloud/session", () => ({ LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "cloud-changed", getCloudSession: vi.fn().mockResolvedValue({ configured: false, state: "signed_out" }), isCloudBusinessAvailable: () => false, beginCloudLogin: vi.fn() }));
@@ -68,6 +71,7 @@ beforeEach(() => {
   mocks.groups.mockResolvedValue({ data: { groups: [savedGroup] } });
   mocks.models.mockResolvedValue({ data: { models: [] } });
   mocks.remote.mockResolvedValue({ models: [] });
+  mocks.check.mockResolvedValue({ data: { success: false, reason: "model_not_found" } });
   mocks.add.mockImplementation(async (request: { addModelProviderGroupModelOpenAPIRequest: { name: string; model_type: string } }) => ({ data: { id: `saved-${request.addModelProviderGroupModelOpenAPIRequest.name}`, ...request.addModelProviderGroupModelOpenAPIRequest, is_default: false } }));
   mocks.remove.mockResolvedValue({ data: {} });
 });
@@ -108,6 +112,44 @@ describe("model discovery after verified key save", () => {
     fireEvent.click(sync);
     expect(await screen.findByText("modelProvider.catalog.verifyBeforeSync")).toBeInTheDocument();
     expect(mocks.remote).not.toHaveBeenCalled();
+  });
+
+  it("checks a saved unverified active key separately before discovery", async () => {
+    let verified = false;
+    mocks.groups.mockImplementation(async () => ({ data: { groups: [{ ...savedGroup, is_verified: verified }] } }));
+    mocks.check.mockImplementation(async () => {
+      verified = true;
+      return { data: { success: true } };
+    });
+    mocks.remote.mockResolvedValue({ models: remoteModels(1) });
+    await discoverAfterKeySave();
+    expect(mocks.check).toHaveBeenCalledOnce();
+    expect(mocks.check).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ silentError: true }));
+    expect(mocks.remote).toHaveBeenCalledWith("supplier", "store");
+    expect(mocks.add).toHaveBeenCalledOnce();
+  });
+
+  it("keeps saved model rows usable while the separate connection check is pending", async () => {
+    let finish!: (value: { data: { success: boolean; reason: string } }) => void;
+    mocks.groups.mockResolvedValue({ data: { groups: [{ ...savedGroup, is_verified: false }] } });
+    mocks.check.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    await startDiscoveryAfterKeySave();
+    await waitFor(() => expect(mocks.check).toHaveBeenCalledOnce());
+    expect(screen.getByTestId("discovery-state")).toHaveTextContent("ready");
+    await act(async () => finish({ data: { success: false, reason: "model_list_unavailable" } }));
+    await waitFor(() => expect(mocks.finished).toHaveBeenCalledOnce());
+  });
+
+  it.each(["authentication_failed", "permission_denied", "model_not_found", "quota_exceeded", "rate_limited", "timeout"])("keeps the saved key and explains %s without discovering models", async (reason) => {
+    mocks.groups.mockResolvedValue({ data: { groups: [{ ...savedGroup, is_verified: false }] } });
+    mocks.check.mockResolvedValue({ data: { success: false, reason } });
+    await discoverAfterKeySave();
+    expect(mocks.check).toHaveBeenCalledOnce();
+    expect(await screen.findByText("modelProvider.probe.reason." + reason)).toBeVisible();
+    expect(mocks.remote).not.toHaveBeenCalled();
+    expect(mocks.add).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
+    expect(mocks.failed).not.toHaveBeenCalled();
   });
 
   it("adds catalog-recognized ID-only models using their recognized types", async () => {

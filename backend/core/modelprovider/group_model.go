@@ -587,8 +587,8 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	modelType := strings.TrimSpace(r.URL.Query().Get("model_type"))
 	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
 	q := db.WithContext(r.Context()).
-		Joins("JOIN user_model_providers ON user_model_providers.id = user_model_provider_group_models.user_model_provider_id AND user_model_providers.deleted_at IS NULL AND user_model_providers.capabilities LIKE '%has_models%'").
-		Joins("JOIN user_model_provider_groups ON user_model_provider_groups.id = user_model_provider_group_models.user_model_provider_group_id AND user_model_provider_groups.create_user_id = user_model_provider_group_models.create_user_id AND user_model_provider_groups.deleted_at IS NULL AND user_model_provider_groups.is_verified = ?", true).
+		Joins("JOIN user_model_providers ON user_model_providers.id = user_model_provider_group_models.user_model_provider_id AND user_model_providers.create_user_id = user_model_provider_group_models.create_user_id AND user_model_providers.deleted_at IS NULL AND user_model_providers.capabilities LIKE '%has_models%'").
+		Joins("JOIN user_model_provider_groups ON user_model_provider_groups.id = user_model_provider_group_models.user_model_provider_group_id AND user_model_provider_groups.user_model_provider_id = user_model_provider_group_models.user_model_provider_id AND user_model_provider_groups.create_user_id = user_model_provider_group_models.create_user_id AND user_model_provider_groups.deleted_at IS NULL").
 		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL", userID)
 	if modelType != "" {
 		// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
@@ -631,9 +631,9 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type groupInfo struct {
-		name       string
-		baseURL    string
-		isVerified bool
+		name      string
+		baseURL   string
+		available bool
 	}
 	groupByID := make(map[string]groupInfo)
 	if len(groupIDs) > 0 {
@@ -645,7 +645,8 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for i := range grps {
-			groupByID[grps[i].ID] = groupInfo{name: grps[i].Name, baseURL: grps[i].BaseURL, isVerified: grps[i].IsVerified}
+			baseURL, _, err := ResolveProviderRuntimeCredential(r.Context(), db, grps[i].ID)
+			groupByID[grps[i].ID] = groupInfo{name: grps[i].Name, baseURL: baseURL, available: err == nil}
 		}
 	}
 
@@ -653,7 +654,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	for i := range rows {
 		m := rows[i]
 		grp, ok := groupByID[m.UserModelProviderGroupID]
-		if !ok || !grp.isVerified {
+		if !ok || !grp.available {
 			continue
 		}
 		if !RuntimeSupportsModelType(m.ProviderName, m.ModelType) {

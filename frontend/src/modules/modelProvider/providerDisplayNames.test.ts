@@ -18,6 +18,7 @@ describe("supplier display names", () => {
     ["OpenRouter", "OpenRouter", "OpenRouter"],
     ["Minimax", "MiniMax", "MiniMax"],
     ["VLLM", "vLLM", "vLLM"],
+    ["lmdeploy", "LMDeploy", "LMDeploy"],
   ])("localizes the built-in %s supplier without changing its identity", (name, chinese, english) => {
     const supplier = { name, id: `stored-${name}`, protocolName: name };
     expect(getProviderDisplayName(supplier, "zh-CN")).toBe(chinese);

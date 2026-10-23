@@ -42,6 +42,7 @@ const providerNames: readonly ProviderBrandName[] = [
   },
   { en: "SiliconFlow", zh: "硅基流动", aliases: ["siliconflow", "硅基流动"] },
   { en: "vLLM", zh: "vLLM", aliases: ["vllm"] },
+  { en: "LMDeploy", zh: "LMDeploy", aliases: ["lmdeploy"] },
 ];
 
 const brandByAlias = new Map(

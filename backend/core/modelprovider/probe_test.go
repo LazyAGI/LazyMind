@@ -19,9 +19,10 @@ import (
 	"lazymind/core/store"
 )
 
-func setupProbeTest(t *testing.T) (*gorm.DB, orm.UserModelProvider, orm.UserModelProviderGroup, orm.UserModelProviderGroupModel) {
+func setupProbeTest(t *testing.T, extraModels ...any) (*gorm.DB, orm.UserModelProvider, orm.UserModelProviderGroup, orm.UserModelProviderGroupModel) {
 	t.Helper()
-	db := orm.MigrateTestDB(t, &orm.DefaultModelProvider{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}).DB
+	models := append([]any{&orm.DefaultModelProvider{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}}, extraModels...)
+	db := orm.MigrateTestDB(t, models...).DB
 	store.Init(db, db, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	base := orm.BaseModel{CreateUserID: "probe-owner", CreatedAt: time.Now(), UpdatedAt: time.Now()}
@@ -197,6 +198,30 @@ func TestProbeUnsupportedTypesNeverReachAlgorithm(t *testing.T) {
 				t.Fatalf("unsupported model called algorithm: %s", rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestProbeLMDeployUsesOpenAIWithTheConfiguredRoot(t *testing.T) {
+	db, parent, group, model := setupProbeTest(t)
+	if err := db.Model(&parent).Updates(map[string]any{"name": "LMDeploy", "protocol_name": "LMDeploy", "is_custom": false, "base_url": "https://deploy.example/api/v3"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	algorithm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body modelProbeSnapshot
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Source != "OpenAI" || body.URL != "https://deploy.example/api/v3/" {
+			t.Errorf("unexpected local supplier request: source=%s url=%s", body.Source, body.URL)
+		}
+		_, _ = w.Write([]byte(`{"status":"passed","code":"ok"}`))
+	}))
+	defer algorithm.Close()
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", algorithm.URL)
+	rec := httptest.NewRecorder()
+	ProbeGroupModel(rec, probeRequest(parent.ID, group.ID, model.ID))
+	if got := decodeProbeTest(t, rec); got.Status != "passed" {
+		t.Fatal(rec.Body.String())
 	}
 }
 

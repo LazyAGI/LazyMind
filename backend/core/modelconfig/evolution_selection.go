@@ -159,7 +159,7 @@ func loadEvolutionModels(ctx context.Context, db *gorm.DB, userID string) (Evolu
 			out.ConfiguredDefault = &copy
 		}
 		row.ModelType = "evo_llm"
-		if !row.Verified {
+		if !row.Verified && row.OwnerID != strings.TrimSpace(userID) {
 			if isDefault {
 				out.UnavailableReason = "connection_unverified"
 			}

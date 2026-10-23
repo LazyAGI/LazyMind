@@ -74,7 +74,7 @@ func TestOpenRouterRuntimeCandidatesExcludeMissingAdaptersButInventoryRetainsThe
 	now := time.Now().UTC()
 	base := orm.BaseModel{CreateUserID: "u", CreatedAt: now, UpdatedAt: now}
 	parent := orm.UserModelProvider{ID: "p", Name: "OpenRouter", Capabilities: "has_models", Category: "model", BaseModel: base}
-	group := orm.UserModelProviderGroup{ID: "g", UserModelProviderID: "p", Name: "OpenRouter", IsVerified: true, BaseModel: base}
+	group := orm.UserModelProviderGroup{ID: "g", UserModelProviderID: "p", Name: "OpenRouter", BaseURL: "https://openrouter.ai/api/v1/", APIKey: "saved-key", IsVerified: true, BaseModel: base}
 	models := []orm.UserModelProviderGroupModel{
 		{ID: "unsupported", UserModelProviderID: "p", UserModelProviderGroupID: "g", ProviderName: "OpenRouter", Name: "vector-image", ModelType: "multimodal_embedding", BaseModel: base},
 		{ID: "supported", UserModelProviderID: "p", UserModelProviderGroupID: "g", ProviderName: "OpenRouter", Name: "chat", ModelType: "llm", BaseModel: base},

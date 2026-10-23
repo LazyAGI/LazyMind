@@ -7,7 +7,8 @@ export function resolveRemoteModelMetadata(protocolName: string, model: RemoteGr
   const upstream = lookupUpstreamModel(protocolName, model.name);
   const declaredType = normalizeRuntimeModelType(model.model_type || "");
   const hasRawOutput = model.output?.some((value) => value.trim().length > 0) === true;
-  const modelType = declaredType || (hasRawOutput ? "" : normalizeRuntimeModelType(upstream?.model_type || ""));
+  const hasOfficialTypes = model.sub_types?.some((value) => value.trim().length > 0) === true;
+  const modelType = declaredType || (hasRawOutput || hasOfficialTypes ? "" : normalizeRuntimeModelType(upstream?.model_type || ""));
   return {
     modelType,
     vision: modelType === "llm" && (model.input ?? upstream?.input ?? []).some((value) => value === "image" || value === "video"),

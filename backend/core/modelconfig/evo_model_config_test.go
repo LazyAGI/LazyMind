@@ -66,7 +66,7 @@ func TestBuildLLMConfigNormalizesOnlyOpenAIBaseURLForLazyLLM(t *testing.T) {
 	if vlm["source"] != "qwen" {
 		t.Fatalf("proxied Qwen source = %q", vlm["source"])
 	}
-	if vlm["base_url"] != "https://models.example.com/custom/path" {
+	if vlm["base_url"] != "https://models.example.com/custom/path/" {
 		t.Fatalf("non-OpenAI base_url changed: %q", vlm["base_url"])
 	}
 }

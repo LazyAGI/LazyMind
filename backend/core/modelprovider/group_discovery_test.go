@@ -80,8 +80,8 @@ func TestCreateGroupDefersSupplierModelsToRemoteDiscovery(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
 			}
-			if !response.Data.IsVerified || response.Data.ID == "" {
-				t.Fatalf("expected verified saved credentials: %s", rec.Body.String())
+			if response.Data.IsVerified != (tc.category != defaultProviderCategory) || response.Data.ID == "" {
+				t.Fatalf("supplier save and verification must be independent: %s", rec.Body.String())
 			}
 			var seeded int64
 			if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("user_model_provider_group_id = ?", response.Data.ID).Count(&seeded).Error; err != nil {

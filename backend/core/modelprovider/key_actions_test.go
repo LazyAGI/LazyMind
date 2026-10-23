@@ -75,7 +75,7 @@ func TestReplaceKeyRetainsOneEnabledSlotAndEncryptedPool(t *testing.T) {
 			if target == "first-key" {
 				wantPool, wantActive = "replacement-key\nsecond-key", "replacement-key"
 			}
-			assertStoredEncryptedAPIKeys(t, db, group.ID, wantPool, true)
+			assertStoredEncryptedAPIKeys(t, db, group.ID, wantPool, target != "first-key")
 			var current orm.UserModelProvider
 			db.Take(&current, "id = ?", parent.ID)
 			if current.ActiveKeyID != groupKeyID(group.ID, wantActive) {
@@ -97,7 +97,7 @@ func TestReplaceKeyRetainsOneEnabledSlotAndEncryptedPool(t *testing.T) {
 	}
 }
 
-func TestReplaceKeyRejectsFailedVerificationWithoutChangingStoredKey(t *testing.T) {
+func TestReplaceKeySavesWithoutRequiringProviderVerification(t *testing.T) {
 	db, parent, group := setupEncryptedGroupKeyTest(t, "first-key\nsecond-key")
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,8 +107,8 @@ func TestReplaceKeyRejectsFailedVerificationWithoutChangingStoredKey(t *testing.
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
 	rec := httptest.NewRecorder()
 	ReplaceKey(rec, savedKeyRequest(http.MethodPut, "user-1", parent.ID, group.ID, groupKeyID(group.ID, "first-key"), `{"api_key":"replacement-key"}`))
-	if rec.Code != http.StatusBadGateway {
+	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d", rec.Code)
 	}
-	assertStoredEncryptedAPIKeys(t, db, group.ID, "first-key\nsecond-key", true)
+	assertStoredEncryptedAPIKeys(t, db, group.ID, "replacement-key\nsecond-key", false)
 }

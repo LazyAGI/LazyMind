@@ -60,7 +60,7 @@ func RevealKey(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]string{"api_key": keyMatchingID(group.ID, strings.TrimSpace(mux.Vars(r)["key_id"]), pool)})
 }
 
-// ReplaceKey verifies the replacement before atomically swapping its encrypted
+// ReplaceKey atomically swaps its encrypted
 // pool entry. Replacing the enabled slot retains that slot; other slots stay off.
 func ReplaceKey(w http.ResponseWriter, r *http.Request) {
 	db, parent, group, pool, ok := savedKeyForRequest(w, r)
@@ -104,7 +104,11 @@ func ReplaceKey(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "api_key pool exceeds credential limits", http.StatusBadRequest)
 		return
 	}
-	result, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), expectedURL, newKey, "")
+	result := &modelCheckResponse{Success: true}
+	var checkErr error
+	if !hasSharedProviderEndpoint(parent) {
+		result, checkErr = doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), expectedURL, newKey, "")
+	}
 	if checkErr != nil || result == nil || !result.Success {
 		// An upstream error may echo request credentials. Keep the public mutation
 		// response generic; the original saved secret and selection remain intact.
@@ -130,7 +134,7 @@ func ReplaceKey(w http.ResponseWriter, r *http.Request) {
 				return errConnectionChanged
 			}
 			if wasEnabled {
-				if err := saveActiveProviderKey(tx, &parent, group.ID, newID, true, now); err != nil {
+				if err := saveActiveProviderKey(tx, &parent, group.ID, newID, false, now); err != nil {
 					return err
 				}
 			}

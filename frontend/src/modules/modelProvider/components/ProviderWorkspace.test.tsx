@@ -645,12 +645,25 @@ describe("compact provider workspace", () => {
     await waitFor(() => expect(mocks.createGroup).toHaveBeenCalledTimes(1));
     expect(mocks.createGroup).toHaveBeenCalledWith({
       modelProviderId: "openai",
-      createModelProviderGroupOpenAPIRequest: { name: "OpenAI", api_key: "fixture-first-key", verify: true },
+      createModelProviderGroupOpenAPIRequest: { name: "OpenAI", api_key: "fixture-first-key", verify: false },
     }, { timeout: 180000 });
     await waitFor(() => expect(input).toHaveValue(""));
     expect(mocks.addKey).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(onKeySaved).toHaveBeenCalledWith(expect.objectContaining({ id: "openai" }), "new-private-record", expect.any(Function)));
+  });
+  it("releases key editing after saving while a separate connection check is still running", async () => {
+    let finish!: () => void;
+    const onKeySaved = vi.fn().mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+    const callbacks = setup({ onKeySaved });
+    await act(async () => callbacks.setProvider({ ...provider, groups: [] }));
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" });
+    fireEvent.change(input, { target: { value: "saved-before-check" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(onKeySaved).toHaveBeenCalledOnce());
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(input).toHaveValue("");
+    await act(async () => finish());
   });
   it("clears a persisted inline key when refreshing fails instead of allowing a duplicate retry", async () => {
     const onReload = vi.fn().mockRejectedValue(new Error("Refresh unavailable"));
@@ -931,7 +944,7 @@ describe("compact provider workspace", () => {
           createModelProviderGroupOpenAPIRequest: {
             name: "OpenAI",
             api_key: "first-key",
-            verify: true,
+            verify: false,
           },
         },
         { timeout: 180000 },
@@ -940,7 +953,7 @@ describe("compact provider workspace", () => {
     await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
     expect(mocks.addKey).not.toHaveBeenCalled();
   });
-  it("does not start discovery when first-key creation was saved without verified status", async () => {
+  it("starts the separate check workflow after saving an unverified first key", async () => {
     mocks.createGroup.mockResolvedValueOnce({ data: { id: "new-private-record", is_verified: false } });
     const onKeySaved = vi.fn().mockResolvedValue(undefined);
     const callbacks = setup({ onKeySaved });
@@ -950,6 +963,6 @@ describe("compact provider workspace", () => {
     fireEvent.blur(input);
     await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(input).toHaveValue(""));
-    expect(onKeySaved).not.toHaveBeenCalled();
+    await waitFor(() => expect(onKeySaved).toHaveBeenCalledWith(expect.objectContaining({ id: "openai" }), "new-private-record", expect.any(Function)));
   });
 });

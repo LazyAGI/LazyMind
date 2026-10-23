@@ -126,8 +126,8 @@ def _validate_response(kind: str, payload) -> tuple[str, str]:
             isinstance(row, dict) and type(row.get('index')) is int and row['index'] == 0
             and _number(row.get('relevance_score')) for row in rows
         )
-    elif kind == 'image':
-        rows = payload.get('data')
+    elif kind in {'image', 'siliconflow_image'}:
+        rows = payload.get('images' if kind == 'siliconflow_image' else 'data')
         valid = isinstance(rows, list) and bool(rows) and all(
             isinstance(row, dict) and _media_reference(row) for row in rows
         )
@@ -151,6 +151,9 @@ def _error_code(status: int, payload) -> str | None:
                 '2013': 'invalid_request', '2045': 'rate_limited', '2049': 'authentication_failed',
                 '2056': 'quota_exceeded'}.get(str(base_response.get('status_code')), 'upstream_error')
     error = payload.get('error') if isinstance(payload, dict) else None
+    top_code = payload.get('code') if isinstance(payload, dict) else None
+    if not error and top_code is not None and top_code != 0 and top_code not in ('', '0'):
+        error = {'code': top_code}
     if error:
         error = error if isinstance(error, dict) else {}
         code = str(error.get('code') or error.get('type') or '').lower()
@@ -193,6 +196,11 @@ async def _execute(client: httpx.AsyncClient, request: ProbeInput, plan) -> tupl
         except ValueError:
             code = _error_code(response.status_code, None) or ('empty_response' if not content else 'invalid_response')
             return 'failed', code, response.status_code
+        # SiliconFlow documents model lookup failures as HTTP 400 + code 20012.
+        # https://api-docs.siliconflow.cn/docs/userguide/faqs/error-code
+        if (request.source.strip().lower() == 'siliconflow' and response.status_code == 400
+                and isinstance(payload, dict) and str(payload.get('code')) == '20012'):
+            return 'failed', 'model_not_found', response.status_code
         if error := _error_code(response.status_code, payload):
             return 'failed', error, response.status_code
         status, code = _validate_response(plan.response_kind, payload)

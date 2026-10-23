@@ -70,6 +70,7 @@ import { ModelTypeIcon } from "../components/ModelTypeBadge";
 import { getSelectableCapabilities, isModelTypeSupportedByProtocol, normalizeRuntimeModelType, supportsModelContext } from "../modelCapabilities";
 import { resolveRemoteModelMetadata } from "../remoteModelMetadata";
 import { canDiscoverWithoutApiKey } from "../providerAuthentication";
+import { getProviderConnectionFailureMessage } from "../connectionFailure";
 import { getProviderDisplayName } from "../providerDisplayNames";
 import { ModelEditorModal, type ModelEditorValues } from "../components/ModelEditorModal";
 import "../index.scss";
@@ -172,28 +173,6 @@ const capabilityLabelKeys: Record<ModelCapability, string> = {
   IMAGE_EDITING: "modelProvider.capability.imageEditing",
   LLM_SELF_EVOLUTION: "modelProvider.capability.selfEvolution",
 };
-
-// SenseNova base URL values and new-platform defaults.
-const SENSENOVA_NEW_BASE_URL = "https://token.sensenova.cn/v1/";
-
-const SENSENOVA_DEFAULT_VERIFY_MODEL = "sensenova-6.8-flash-lite";
-
-function isSensenovaProvider(
-  provider?: Pick<ProviderOption, "source" | "name"> | null,
-): boolean {
-  if (!provider) return false;
-  return (
-    provider.source === "sensenova" ||
-    provider.name?.toLowerCase() === "sensenova"
-  );
-}
-
-function isSensenovaNewBaseUrl(url?: string): boolean {
-  return (
-    normalizeBaseUrlForCompare(url) ===
-    normalizeBaseUrlForCompare(SENSENOVA_NEW_BASE_URL)
-  );
-}
 
 function createConnectionGroup(
   provider: ProviderOption,
@@ -369,6 +348,7 @@ interface ApiGroup {
 interface CheckModelProviderResult {
   success: boolean;
   message?: string;
+  reason?: string;
 }
 
 export function resolveSavedProviderGroupVerified(group: {
@@ -471,13 +451,6 @@ function normalizeModelName(value: string) {
 
 function normalizeFormText(value?: string) {
   return value?.trim() || "";
-}
-
-function normalizeBaseUrlForCompare(value?: string) {
-  const normalized = normalizeFormText(value).replace(/\/+$/, "");
-  return normalized === "https://token.sensenova.cn/v1/chat/completions"
-    ? "https://token.sensenova.cn/v1"
-    : normalized;
 }
 
 function getCredentialRestoreFailureCode(error: unknown) {
@@ -1032,6 +1005,7 @@ export default function ModelProviderPage({
     provider: AddedProvider,
     group: ProviderConnectionGroup,
     apiKey: string,
+    isCurrent: () => boolean = () => true,
   ) => {
     const providerId = provider.id;
     const groupId = group.id;
@@ -1050,19 +1024,6 @@ export default function ModelProviderPage({
         ...(requestApiKey ? { api_key: requestApiKey } : {}),
         dry_run: false,
       };
-      const representativeChatModel = group.models.find(
-        (model) => model.capability === "LLM_CHAT",
-      )?.name;
-      if (representativeChatModel) {
-        payload.model = representativeChatModel;
-      }
-      // The new SenseNova platform URL requires a model name for connectivity check.
-      if (
-        isSensenovaProvider(provider) &&
-        isSensenovaNewBaseUrl(group.baseUrl)
-      ) {
-        payload.model = SENSENOVA_DEFAULT_VERIFY_MODEL;
-      }
       const checkResponse =
         await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPost(
           {
@@ -1071,7 +1032,7 @@ export default function ModelProviderPage({
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             checkModelProviderOpenAPIRequest: payload as any,
           },
-          { timeout: 3 * 60 * 1000 },
+          withModelProviderJsonOptions({ timeout: 3 * 60 * 1000, silentError: true }),
         );
       const checkResult = unwrapModelProviderData<CheckModelProviderResult>(
         checkResponse.data,
@@ -1096,17 +1057,17 @@ export default function ModelProviderPage({
       );
       if (isVerified) {
         await loadModelProviders();
-        message.success(t("modelProvider.message.groupVerified"));
+        if (isCurrent()) message.success(t("modelProvider.message.groupVerified"));
         void onConfigurationChanged?.();
         return true;
       }
-      message.error(localizeErrorCode("2000509"));
+      if (isCurrent()) message.error(getProviderConnectionFailureMessage(checkResult, t, localizeErrorCode("2000509")));
       void onConfigurationChanged?.();
     } catch (error) {
       // A failed upstream check may still have persisted an unverified state.
       await loadModelProviders();
       void onConfigurationChanged?.();
-      message.error(getLocalizedErrorMessage(error));
+      if (isCurrent()) message.error(getProviderConnectionFailureMessage(error, t));
     } finally {
       setVerifyingGroupIds((current) => {
         const next = { ...current };
@@ -1189,7 +1150,7 @@ export default function ModelProviderPage({
     } catch (error) {
       if (remoteModelRequest.current === request) {
         setRemoteModels([]);
-        message.error(getLocalizedErrorMessage(error));
+        message.error(getProviderConnectionFailureMessage(error, t));
       }
     } finally {
       if (remoteModelRequest.current === request) setRemoteModelsLoading(false);
@@ -1276,7 +1237,6 @@ export default function ModelProviderPage({
     const key = `${provider.id}:${groupId}`;
     if (!isCurrent() || keyDiscoveryRequests.current.has(key)) return;
     keyDiscoveryRequests.current.add(key);
-    setDiscoveringGroupIds((current) => ({ ...current, [key]: true }));
     let discovered: RemoteGroupModel[] | undefined;
     let added = false;
     const openCatalog = () => {
@@ -1286,8 +1246,19 @@ export default function ModelProviderPage({
       // Read the saved selection: adding a second key must not enable it or
       // bypass a deliberately disabled supplier's current key.
       const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGet({ modelProviderId: provider.id });
-      const savedGroup = unwrapModelProviderData<{ groups?: ApiGroup[] }>(response.data).groups?.find((group) => group.id === groupId);
-      if (!isCurrent() || !savedGroup?.is_verified || !(savedGroup.keys?.length ? savedGroup.keys.some((key) => key.enabled) : savedGroup.has_api_key)) return;
+      let savedGroup = unwrapModelProviderData<{ groups?: ApiGroup[] }>(response.data).groups?.find((group) => group.id === groupId);
+      const hasEnabledSavedKey = (candidate?: ApiGroup) => Boolean(candidate && (candidate.keys?.length ? candidate.keys.some((key) => key.enabled) : candidate.has_api_key));
+      if (!isCurrent() || !savedGroup || !hasEnabledSavedKey(savedGroup)) return;
+      if (!savedGroup.is_verified) {
+        const currentModels = addedProviderListRef.current.find((item) => item.id === provider.id)?.groups.find((group) => group.id === groupId)?.models || [];
+        const canonical = mapApiGroup(provider, savedGroup, []);
+        const verified = await verifyProviderGroup(provider, { ...canonical, models: currentModels }, "", isCurrent);
+        if (!isCurrent() || !verified) return;
+        const refreshed = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGet({ modelProviderId: provider.id });
+        savedGroup = unwrapModelProviderData<{ groups?: ApiGroup[] }>(refreshed.data).groups?.find((group) => group.id === groupId);
+        if (!isCurrent() || !savedGroup?.is_verified || !hasEnabledSavedKey(savedGroup)) return;
+      }
+      setDiscoveringGroupIds((current) => ({ ...current, [key]: true }));
       const version = groupModelVersions.current[key] || 0;
       const savedResponse = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet({ modelProviderId: provider.id, groupId });
       if (!isCurrent() || version !== (groupModelVersions.current[key] || 0)) return;
@@ -1344,7 +1315,7 @@ export default function ModelProviderPage({
     } catch (error) {
       if (isCurrent()) {
         if (discovered) openCatalog();
-        message.error(getLocalizedErrorMessage(error));
+        message.error(getProviderConnectionFailureMessage(error, t));
       }
     } finally {
       if (added) void onConfigurationChanged?.();

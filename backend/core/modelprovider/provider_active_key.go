@@ -32,7 +32,7 @@ type activeProviderKeyResponse struct {
 }
 
 // SetActiveProviderKey enables exactly one saved key for the whole supplier.
-// A failed check leaves the previous choice intact. Empty IDs disable all keys.
+// Connection validation is separate. Empty IDs disable all keys.
 func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -87,20 +87,12 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		checkedURL = connectionBaseURL(parent, checkedGroup.BaseURL)
-		result, err := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), checkedURL, checkedKey, "")
-		if err != nil || result == nil || !result.Success {
-			msg := "verification failed"
-			if result != nil && strings.TrimSpace(result.Message) != "" {
-				msg = strings.TrimSpace(result.Message)
-			}
-			common.ReplyErrWithData(w, "verification failed: "+msg, CheckModelProviderData{Success: false, Message: msg}, http.StatusBadGateway)
-			return
-		}
 	}
 	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := lockProvider(tx, &parent); err != nil {
 			return err
 		}
+		verified := false
 		if req.KeyID != "" {
 			if parent.ActiveKeyRevision != preferenceRevision {
 				return errConnectionChanged
@@ -122,9 +114,10 @@ func SetActiveProviderKey(w http.ResponseWriter, r *http.Request) {
 			if keyMatchingID(current.ID, req.KeyID, pool) != checkedKey {
 				return errConnectionChanged
 			}
+			verified = parent.ActiveKeyGroupID == req.GroupID && parent.ActiveKeyID == req.KeyID && current.IsVerified
 		}
 		now := time.Now()
-		if err := saveActiveProviderKey(tx, &parent, req.GroupID, req.KeyID, req.KeyID != "", now); err != nil {
+		if err := saveActiveProviderKey(tx, &parent, req.GroupID, req.KeyID, verified, now); err != nil {
 			return err
 		}
 		return refreshProviderSelectionBackup(tx, parent, now)
@@ -284,10 +277,10 @@ func selectedProviderKey(tx *gorm.DB, parent orm.UserModelProvider) (orm.UserMod
 // ResolveProviderRuntimeCredential returns one consistent supplier endpoint/key
 // snapshot. Model keys never rotate and inactive saved keys are never returned.
 func ResolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID string) (string, string, error) {
-	return resolveProviderRuntimeCredential(ctx, db, groupID, false)
+	return resolveProviderRuntimeCredential(ctx, db, groupID)
 }
 
-func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID string, allowUnverifiedKeylessCustom bool) (string, string, error) {
+func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID string) (string, string, error) {
 	if db == nil {
 		return "", "", errors.New("store not initialized")
 	}
@@ -335,13 +328,13 @@ func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 			if err := tx.Where("id = ? AND deleted_at IS NULL", requested.ID).Take(&requested).Error; err != nil {
 				return err
 			}
-			if !requested.IsVerified && !(allowUnverifiedKeylessCustom && (parent.IsCustom || isVLLMSupplier(ctx, tx, parent))) {
+			if !validCustomProviderURL(RuntimeProviderName(parent), baseURL) {
 				unavailable = ErrProviderKeyUnverified
 				return nil
 			}
 			return nil
 		}
-		selected, selectedKey, err := selectedProviderKey(tx, parent)
+		_, selectedKey, err := selectedProviderKey(tx, parent)
 		if err != nil {
 			if errors.Is(err, ErrProviderKeyDisabled) {
 				unavailable = err
@@ -349,10 +342,8 @@ func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 			}
 			return err
 		}
-		if !selected.IsVerified {
-			unavailable = ErrProviderKeyUnverified
-			return nil
-		}
+		// A user's explicit saved-model call uses its enabled credential. A
+		// list-only diagnostic is not admission for the actual inference API.
 		key = selectedKey
 		return nil
 	})
@@ -480,7 +471,7 @@ func checkSharedProviderGroup(w http.ResponseWriter, r *http.Request, db *gorm.D
 	if req.DryRun && result.Success {
 		recentVerifyCache.Store(verifyCheckCacheKey(group.ID, baseURL, key), time.Now().Add(5*time.Minute))
 	}
-	common.ReplyOK(w, CheckModelProviderData{Success: result.Success, Message: result.Message})
+	common.ReplyOK(w, CheckModelProviderData{Success: result.Success, Message: result.Message, Reason: result.Reason})
 }
 
 func validateSavedKeyPool(parent orm.UserModelProvider, groupName, baseURL, pool string) error {

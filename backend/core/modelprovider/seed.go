@@ -100,7 +100,12 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, category string, caps []s
 
 	baseURL := normalizeBaseURL(item.BaseURL)
 	var row orm.DefaultModelProvider
-	err = tx.Where("name = ?", name).Take(&row).Error
+	lookup := tx.Where("name = ?", name)
+	if name == "vLLM" {
+		// Correct the old all-caps spelling without duplicating the catalog ID.
+		lookup = tx.Where("LOWER(name) = ?", "vllm")
+	}
+	err = lookup.Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.DefaultModelProvider{
 			ID:              common.GenerateID(),
@@ -122,6 +127,7 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, category string, caps []s
 	return row.ID, tx.Model(&orm.DefaultModelProvider{}).
 		Where("id = ?", row.ID).
 		Updates(map[string]any{
+			"name":             name,
 			"description":      descriptionZh,
 			"description_i18n": orm.RawJSON(descriptionI18n),
 			"base_url":         baseURL,

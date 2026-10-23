@@ -10,6 +10,7 @@ func TestLazyLLMSourceDependsOnProviderName(t *testing.T) {
 		"Tongyi-Qianwen":   "qwen",
 		"Anthropic":        "claude",
 		"vLLM":             "openai",
+		"LMDeploy":         "openai",
 		"Zhipu AI":         "glm",
 		"future-provider!": "futureprovider",
 	}

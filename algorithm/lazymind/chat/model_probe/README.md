@@ -31,6 +31,10 @@ runtime adapters support them. Native Qwen embedding/reranking accepts an origin
 or an `/api/v1/` base; native SenseNova embedding requires a `/v1/llm/` base. Custom
 origins and proxy prefixes are preserved rather than replaced by a public host.
 
+SiliconFlow image probes use its native `images` response envelope. Its documented
+HTTP 400 / code 20012 model lookup failure is reported as `model_not_found`.
+An explicit nonzero provider error code is never accepted as a successful result.
+
 OpenRouter TTS requests MP3 with a verified model/voice pair, because its endpoint
 supports MP3/PCM and many models require an explicit voice. The supported pairs
 are Voxtral Mini TTS 2603 / `en_paul_neutral`, Grok Voice TTS 1.0 / `eve`, MAI-Voice-2

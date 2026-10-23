@@ -18,6 +18,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
+import { getProviderConnectionFailureMessage } from "../connectionFailure";
 import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
 import { listRemoteGroupModels, type RemoteGroupModel } from "../api";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
@@ -141,7 +142,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
       })
       .catch((cause) => {
         if (request === sequence.current)
-          setError(getLocalizedErrorMessage(cause));
+          setError(getProviderConnectionFailureMessage(cause, t));
       })
       .finally(() => {
         if (request === sequence.current) setLoading(false);

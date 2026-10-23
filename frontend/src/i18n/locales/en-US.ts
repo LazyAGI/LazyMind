@@ -409,6 +409,11 @@ const enUS = {
       "baseUrlNoCredentials": "The endpoint must not include a username or password.",
       "baseUrlMax": "API endpoints must not exceed 512 characters."
     },
+    connection: {
+      reason: {
+        model_list_unavailable: "This provider does not expose a model-list endpoint. Add a model manually and test its connection.",
+      },
+    },
     probe: {
       action: "Test connection: {{name}}",
       running: "Testing {{name}}",
@@ -520,7 +525,7 @@ const enUS = {
       "keyActivated": "Supplier key switched",
       "keysDisabled": "Supplier key disabled",
       "addKey": "Add key",
-      "addAndCheckKey": "Verify and add",
+      "addAndCheckKey": "Save key",
       "deleteKey": "Delete API key",
       "deleteKeyNumber": "Delete key {{number}}",
       "deleteKeyHint": "This cannot be undone. If this is the enabled key, enable another saved key manually afterward.",

@@ -1289,7 +1289,7 @@ type updateModelProviderGroupOpenAPIRequest struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty"`
-	Verify  bool   `json:"verify"`
+	Verify  bool   `json:"verify" desc:"Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately."`
 }
 
 type updateModelProviderEndpointOpenAPIRequest struct {
@@ -1315,7 +1315,7 @@ type createModelProviderGroupOpenAPIRequest struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty"`
-	Verify  bool   `json:"verify"`
+	Verify  bool   `json:"verify" desc:"Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately."`
 }
 
 type createModelProviderGroupOpenAPIResponse struct {
@@ -1337,6 +1337,7 @@ type listRemoteGroupModelsOpenAPIItem struct {
 	ModelType      string   `json:"model_type"`
 	Input          []string `json:"input"`
 	Output         []string `json:"output"`
+	SubTypes       []string `json:"sub_types,omitempty" desc:"Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog."`
 	MaxInputTokens *string  `json:"max_input_tokens,omitempty"`
 	Added          bool     `json:"added"`
 }
@@ -4504,7 +4505,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}:check",
 			Summary:     "Check model provider connectivity",
-			Description: "Validates credentials. Model suppliers use their shared endpoint and the currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.",
+			Description: "Checks the provider's model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model's probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.",
 			Tags:        []string{"model_providers"},
 			RequestBody: jsonBodyOf(checkModelProviderOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("data: success and message from provider check", modelprovider.CheckModelProviderData{})},
@@ -4558,7 +4559,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PUT",
 			Path:        "/model_providers/{model_provider_id}/keys/active",
 			Summary:     "Set the single enabled key for a model supplier",
-			Description: "Verifies a saved key before atomically enabling it for every connection to the supplier. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.",
+			Description: "Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupPathParams{},
 			RequestBody: jsonBodyOf(setActiveModelProviderKeyOpenAPIRequest{}, true),
@@ -4582,7 +4583,7 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method: "PUT", Path: "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}",
 			Summary:     "Replace one saved supplier API key",
-			Description: "Verifies a replacement before atomically updating the encrypted key pool. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Returns the new opaque key ID without plaintext.",
+			Description: "Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.",
 			Tags:        []string{"model_providers"}, PathParams: modelProviderSavedKeyPathParams{},
 			RequestBody: jsonBodyOf(replaceModelProviderKeyOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Replaced key", replaceModelProviderKeyOpenAPIResponse{})},
@@ -4636,7 +4637,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/remote_models",
 			Summary:     "List models advertised by a connection group",
-			Description: "Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.",
+			Description: "Lists models with the supplier's saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Remote models list", listRemoteGroupModelsOpenAPIResponse{})},

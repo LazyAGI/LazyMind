@@ -407,6 +407,11 @@ const zhCN = {
       "baseUrlNoCredentials": "地址不能包含用户名或密码。",
       "baseUrlMax": "API地址不能超过 512 个字符。"
     },
+    connection: {
+      reason: {
+        model_list_unavailable: "供应商未提供模型列表接口，可手动添加模型并测试连接。",
+      },
+    },
     probe: {
       action: "测试连接：{{name}}",
       running: "正在测试 {{name}}",
@@ -518,7 +523,7 @@ const zhCN = {
       "keyActivated": "已切换当前供应商的秘钥",
       "keysDisabled": "已停用当前供应商的秘钥",
       "addKey": "添加秘钥",
-      "addAndCheckKey": "验证并添加",
+      "addAndCheckKey": "保存秘钥",
       "deleteKey": "删除 API秘钥",
       "deleteKeyNumber": "删除秘钥 {{number}}",
       "deleteKeyHint": "删除后无法恢复；删除当前启用项后，需手动启用其他秘钥。",

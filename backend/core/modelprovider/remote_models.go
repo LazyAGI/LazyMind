@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -104,6 +102,7 @@ type remoteGroupModelItem struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
 	ModelType      string   `json:"model_type"`
+	SubTypes       []string `json:"sub_types,omitempty"`
 	Input          []string `json:"input"`
 	Output         []string `json:"output"`
 	MaxInputTokens *string  `json:"max_input_tokens,omitempty"`
@@ -132,7 +131,10 @@ type openaiModelListEntry struct {
 	MaxModelLen      int      `json:"max_model_len"`
 	InputModalities  []string `json:"input_modalities"`
 	OutputModalities []string `json:"output_modalities"`
-	Architecture     struct {
+	// DiscoverySubTypes is supplied by trusted category-specific requests, never
+	// accepted from an arbitrary compatible endpoint's response body.
+	DiscoverySubTypes []string `json:"-"`
+	Architecture      struct {
 		Input  []string `json:"input_modalities"`
 		Output []string `json:"output_modalities"`
 	} `json:"architecture"`
@@ -175,43 +177,19 @@ func parseRemoteModelEntries(raw []byte) []openaiModelListEntry {
 	return result
 }
 
-func modelsListURL(baseURL string) (string, error) {
-	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", errors.New("invalid group base_url")
+func modelsListURL(providerName, baseURL string) (string, error) {
+	listURL, err := ProviderModelsListURL(providerName, baseURL)
+	if err != nil {
+		return "", err
 	}
-	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(segments) == 1 && segments[0] == "" {
-		segments = nil
+	parsed, err := url.Parse(listURL)
+	if err != nil {
+		return "", err
 	}
-	if n := len(segments); n > 0 && strings.EqualFold(segments[n-1], "models") {
-		parsed.Path = "/" + strings.Join(segments, "/")
-	} else if n := len(segments); n > 0 && strings.EqualFold(segments[n-1], "v1") {
-		parsed.Path = "/" + strings.Join(segments, "/") + "/models"
-	} else {
-		v1Index := -1
-		for i, segment := range segments {
-			if strings.EqualFold(segment, "v1") {
-				v1Index = i
-				break
-			}
-		}
-		if v1Index >= 0 {
-			parsed.Path = "/" + strings.Join(segments[:v1Index+1], "/") + "/models"
-		} else if len(segments) == 0 {
-			parsed.Path = "/v1/models"
-		} else {
-			parsed.Path = "/" + strings.Join(segments, "/") + "/v1/models"
-		}
-	}
-	parsed.RawPath = ""
-	parsed.RawQuery = ""
-	parsed.ForceQuery = false
-	parsed.Fragment = ""
 	if err := validateRemoteModelsURL(parsed); err != nil {
 		return "", err
 	}
-	return parsed.String(), nil
+	return listURL, nil
 }
 
 func validateRemoteModelsURL(parsed *url.URL) error {
@@ -364,7 +342,7 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 
 	// A new keyless custom service can expose its catalog before a connection
 	// check. Discovery does not verify it or loosen runtime admission.
-	baseURL, apiKey, err := resolveProviderRuntimeCredential(r.Context(), db, group.ID, true)
+	baseURL, apiKey, err := resolveProviderRuntimeCredential(r.Context(), db, group.ID)
 	if err != nil {
 		if errors.Is(err, ErrProviderKeyDisabled) || errors.Is(err, ErrProviderKeyUnverified) {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -373,7 +351,7 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 		}
 		return
 	}
-	listURL, err := modelsListURL(baseURL)
+	listURL, err := modelsListURL(RuntimeProviderName(parent), baseURL)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
@@ -390,7 +368,9 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 		listURL = parsedListURL.String()
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, listURL, nil)
+	discoveryContext, cancelDiscovery := context.WithTimeout(r.Context(), remoteModelsTimeout)
+	defer cancelDiscovery()
+	req, err := http.NewRequestWithContext(discoveryContext, http.MethodGet, listURL, nil)
 	if err != nil {
 		common.ReplyErr(w, "build remote models request failed", http.StatusInternalServerError)
 		return
@@ -405,23 +385,18 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 
-	resp, err := remoteModelsHTTPClient.Do(req)
+	entries, err := fetchRemoteModelEntries(req)
 	if err != nil {
-		if errors.Is(err, errRemoteModelsHostNotAllowed) {
-			common.ReplyErr(w, errRemoteModelsHostNotAllowed.Error(), http.StatusBadRequest)
+		replyRemoteModelsFailure(w, err)
+		return
+	}
+	if isSiliconFlowSupplier(r.Context(), db, parent) {
+		entries, err = listSiliconFlowModelCategories(req, entries)
+		if err != nil {
+			replyRemoteModelsFailure(w, err)
 			return
 		}
-		common.ReplyErr(w, "list remote models failed", http.StatusBadGateway)
-		return
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		common.ReplyErr(w, fmt.Sprintf("list remote models failed: HTTP %d", resp.StatusCode), http.StatusBadGateway)
-		return
-	}
-
-	entries := parseRemoteModelEntries(body)
 	var existing []orm.UserModelProviderGroupModel
 	if err := db.WithContext(r.Context()).
 		Where("user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, userID).
@@ -437,6 +412,8 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 	metadataProvider := RuntimeProviderName(parent)
 	if isVLLMSupplier(r.Context(), db, parent) {
 		metadataProvider = "VLLM"
+	} else if isSiliconFlowSupplier(r.Context(), db, parent) {
+		metadataProvider = "SiliconFlow"
 	}
 	models := make([]remoteGroupModelItem, 0, len(entries))
 	for _, entry := range entries {
@@ -448,6 +425,19 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 	}
 
 	common.ReplyOK(w, remoteGroupModelsResponse{URL: listURL, Models: models})
+}
+
+func replyRemoteModelsFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, errRemoteModelsHostNotAllowed) {
+		common.ReplyErr(w, errRemoteModelsHostNotAllowed.Error(), http.StatusBadRequest)
+		return
+	}
+	reason := "connection_error"
+	var failure interface{ FailureCode() string }
+	if errors.As(err, &failure) {
+		reason = safeConnectionReason(failure.FailureCode())
+	}
+	common.ReplyErrWithData(w, "list remote models failed", map[string]string{"reason": reason}, http.StatusBadGateway)
 }
 
 func remoteModelItem(entry openaiModelListEntry, providerName string, recognition *upstreamModelRecognitionIndex) remoteGroupModelItem {
@@ -480,6 +470,11 @@ func remoteModelItem(entry openaiModelListEntry, providerName string, recognitio
 	item := remoteGroupModelItem{
 		ID: entry.ID, Name: entry.ID, ModelType: modelType,
 		Input: append([]string{}, input...), Output: append([]string{}, output...),
+	}
+	if len(entry.DiscoverySubTypes) > 0 {
+		item.SubTypes = append([]string(nil), entry.DiscoverySubTypes...)
+		modelType = siliconFlowDiscoveredModelType(entry, input, output, recognition.modelType(providerName, entry.ID))
+		item.ModelType = modelType
 	}
 	hasInputLimit := modelType == "llm" || modelType == "vlm" || modelType == "embed" || modelType == "multimodal_embedding" || modelType == "rerank"
 	contextLength := entry.ContextLength

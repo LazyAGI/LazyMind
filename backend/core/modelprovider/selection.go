@@ -99,6 +99,7 @@ type modelReadyResponse struct {
 
 type selectedModelCandidate struct {
 	ModelID            string `gorm:"column:model_id"`
+	RuntimeGroupID     string `gorm:"column:runtime_group_id"`
 	UserID             string `gorm:"column:user_id"`
 	UserName           string `gorm:"column:user_name"`
 	ProviderName       string `gorm:"column:provider_name"`
@@ -112,10 +113,10 @@ func openCodeCandidateQuery(ctx context.Context, db *gorm.DB) *gorm.DB {
 	return db.WithContext(ctx).
 		Table("user_model_provider_group_models m").
 		Select(
-			"m.id AS model_id, m.provider_name, m.name AS model_name, "+
-				"m.model_type AS technical_model_type, m.is_default, g.base_url",
+			"m.id AS model_id, m.provider_name, m.name AS model_name, " +
+				"m.model_type AS technical_model_type, m.is_default, g.id AS runtime_group_id, g.base_url",
 		).
-		Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.deleted_at IS NULL AND g.is_verified = ?", true).
+		Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.user_model_provider_id = m.user_model_provider_id AND g.create_user_id = m.create_user_id AND g.deleted_at IS NULL").
 		Where("m.deleted_at IS NULL")
 }
 
@@ -125,16 +126,22 @@ func (row selectedModelCandidate) isOpenCodeEligible() bool {
 }
 
 func loadEligibleOpenCodeSelection(ctx context.Context, db *gorm.DB, userID string, sharedOnly bool) (*selectedModelCandidate, error) {
+	if sharedOnly && strings.TrimSpace(userID) != "" {
+		blocked, err := hasUnavailableOwnCredentialSelection(ctx, db, userID, EvoModelKey)
+		if err != nil || blocked {
+			return nil, err
+		}
+	}
 	var rows []selectedModelCandidate
 	q := openCodeCandidateQuery(ctx, db).
 		Select(
 			"m.id AS model_id, usm.user_id, usm.user_name, "+
-				"m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.is_default, g.base_url",
+				"m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.is_default, g.id AS runtime_group_id, g.base_url",
 		).
-		Joins("JOIN user_selected_models usm ON usm.user_model_provider_group_model_id = m.id").
+		Joins("JOIN user_selected_models usm ON usm.user_model_provider_group_model_id = m.id AND usm.user_id = m.create_user_id").
 		Where("usm.model_type = ?", EvoModelKey)
 	if sharedOnly {
-		q = q.Where("usm.share = ?", true)
+		q = q.Where("usm.share = ? AND g.is_verified = ?", true, true)
 	} else {
 		q = q.Where("usm.user_id = ? AND m.create_user_id = usm.user_id", userID)
 	}
@@ -143,7 +150,9 @@ func loadEligibleOpenCodeSelection(ctx context.Context, db *gorm.DB, userID stri
 	}
 	for i := range rows {
 		row := &rows[i]
-		if row.isOpenCodeEligible() {
+		baseURL, _, credentialErr := ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID)
+		row.BaseURL = baseURL
+		if credentialErr == nil && row.isOpenCodeEligible() {
 			return row, nil
 		}
 	}
@@ -158,7 +167,9 @@ func openCodeModelEligible(ctx context.Context, db *gorm.DB, modelID, userID str
 	if err != nil || row.ModelID == "" {
 		return false, err
 	}
-	return row.isOpenCodeEligible(), nil
+	baseURL, _, credentialErr := ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID)
+	row.BaseURL = baseURL
+	return credentialErr == nil && row.isOpenCodeEligible(), nil
 }
 
 // getSharedModelDetail returns the detail of the active shared selection for the given model_type.
@@ -390,10 +401,14 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 				return errConnectionChanged
 			}
 			var group orm.UserModelProviderGroup
-			if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", model.UserModelProviderGroupID, userID).Take(&group).Error; err != nil {
+			if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", model.UserModelProviderGroupID, model.UserModelProviderID, userID).Take(&group).Error; err != nil {
 				return errConnectionChanged
 			}
-			if !modelSupportsSelection(model, slot, group.BaseURL) {
+			baseURL, _, credentialErr := ResolveProviderRuntimeCredential(r.Context(), tx, group.ID)
+			if credentialErr != nil {
+				return credentialErr
+			}
+			if !modelSupportsSelection(model, slot, baseURL) {
 				return errSelectionModelType
 			}
 		}
@@ -487,7 +502,7 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, errSelectionModelType) {
+		if errors.Is(err, errSelectionModelType) || errors.Is(err, ErrProviderKeyDisabled) || errors.Is(err, ErrProviderKeyUnverified) {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		} else if errors.Is(err, errConnectionChanged) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
@@ -541,8 +556,8 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.create_user_id = usm.user_id AND "+
-				"g.deleted_at IS NULL AND g.is_verified = ?",
-			true,
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
+				"g.deleted_at IS NULL",
 		).
 		Where("usm.user_id = ?", strings.TrimSpace(userID)).
 		Order("usm.model_type ASC").
@@ -559,6 +574,11 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		if !RuntimeSupportsModelType(item.ProviderName, item.TechnicalModelType) {
 			item.Availability = "unavailable"
 			item.UnavailableReason = "runtime_unsupported"
+		} else if baseURL, _, credentialErr := ResolveProviderRuntimeCredential(ctx, db, item.UserModelProviderGroupID); credentialErr != nil {
+			item.Availability = "unavailable"
+			item.UnavailableReason = "credentials_unavailable"
+		} else {
+			item.BaseURL = baseURL
 		}
 		item.IsEditable = strings.EqualFold(strings.TrimSpace(item.ModelKey), "image_editing")
 		if item.ModelKey == EvoModelKey {
@@ -903,6 +923,26 @@ func maybeScheduleImageGroupLazyReset(ctx context.Context, db *gorm.DB) {
 	scheduleImageGroupLazyEmbed(ctx)
 }
 
+func hasUnavailableOwnCredentialSelection(ctx context.Context, db *gorm.DB, userID, modelType string) (bool, error) {
+	var rows []orm.UserModelProviderGroupModel
+	err := db.WithContext(ctx).Table("user_model_provider_group_models m").
+		Select("m.*").
+		Joins("JOIN user_selected_models usm ON usm.user_model_provider_group_model_id = m.id AND usm.user_id = m.create_user_id").
+		Where("usm.user_id = ? AND usm.model_type = ? AND m.deleted_at IS NULL", userID, modelType).
+		Scan(&rows).Error
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if RuntimeSupportsModelType(row.ProviderName, row.ModelType) {
+			if _, _, credentialErr := ResolveProviderRuntimeCredential(ctx, db, row.UserModelProviderGroupID); credentialErr != nil {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 // hasValidModelSelection reports whether a non-deleted selection exists.
 // When sharedOnly is true, only share=true rows are considered.
 func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType string, sharedOnly bool) (bool, error) {
@@ -910,29 +950,40 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 		row, err := loadEligibleOpenCodeSelection(ctx, db, userID, sharedOnly)
 		return row != nil, err
 	}
+	if sharedOnly {
+		blocked, err := hasUnavailableOwnCredentialSelection(ctx, db, userID, modelType)
+		if err != nil || blocked {
+			return false, err
+		}
+	}
 	var rows []struct {
-		ProviderName string
-		ModelType    string
+		ProviderName   string
+		ModelType      string
+		RuntimeGroupID string
 	}
 	q := db.WithContext(ctx).
 		Table("user_selected_models usm").
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
 				"m.id = usm.user_model_provider_group_model_id AND "+
+				"m.create_user_id = usm.user_id AND "+
 				"m.deleted_at IS NULL",
 		).
+		Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.user_model_provider_id = m.user_model_provider_id AND g.create_user_id = m.create_user_id AND g.deleted_at IS NULL").
 		Where("usm.model_type = ?", modelType)
 	if sharedOnly {
-		q = q.Where("usm.share = ?", true)
+		q = q.Where("usm.share = ? AND g.is_verified = ?", true, true)
 	} else {
 		q = q.Where("usm.user_id = ?", userID)
 	}
-	if err := q.Select("m.provider_name, m.model_type").Scan(&rows).Error; err != nil {
+	if err := q.Select("m.provider_name, m.model_type, g.id AS runtime_group_id").Scan(&rows).Error; err != nil {
 		return false, err
 	}
 	for _, row := range rows {
 		if RuntimeSupportsModelType(row.ProviderName, row.ModelType) {
-			return true, nil
+			if _, _, err := ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID); err == nil {
+				return true, nil
+			}
 		}
 	}
 	return false, nil
@@ -987,27 +1038,33 @@ func requiresDynamicSelection(ctx context.Context, modelType string) (bool, erro
 // the vision flag of somebody else's shared LLM.
 func hasVisionLLMSelection(ctx context.Context, db *gorm.DB, userID string) (bool, error) {
 	type candidate struct {
-		ID        string
-		Vision    bool
-		ModelType string
+		ID             string
+		Vision         bool
+		ModelType      string
+		RuntimeGroupID string
 	}
 	for _, shared := range []bool{false, true} {
-		var row candidate
+		var rows []candidate
 		q := db.WithContext(ctx).Table("user_selected_models usm").
-			Select("m.id, m.vision, m.model_type").
+			Select("m.id, m.vision, m.model_type, g.id AS runtime_group_id").
 			Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL AND m.create_user_id = usm.user_id").
-			Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.deleted_at IS NULL AND g.is_verified = ?", true).
+			Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.user_model_provider_id = m.user_model_provider_id AND g.create_user_id = m.create_user_id AND g.deleted_at IS NULL").
 			Where("usm.model_type = ?", "llm")
 		if shared {
-			q = q.Where("usm.share = ?", true)
+			q = q.Where("usm.share = ? AND g.is_verified = ?", true, true)
 		} else {
 			q = q.Where("usm.user_id = ?", userID)
 		}
-		if err := q.Limit(1).Scan(&row).Error; err != nil {
+		if err := q.Order("usm.updated_at DESC").Scan(&rows).Error; err != nil {
 			return false, err
 		}
-		if row.ID != "" {
-			return row.Vision || strings.EqualFold(row.ModelType, "vlm"), nil
+		for _, row := range rows {
+			if _, _, err := ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID); err == nil {
+				return row.Vision || strings.EqualFold(row.ModelType, "vlm"), nil
+			}
+		}
+		if !shared && len(rows) > 0 {
+			return false, nil
 		}
 	}
 	return false, nil

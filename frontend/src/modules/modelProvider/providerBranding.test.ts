@@ -15,6 +15,7 @@ describe("model provider branding", () => {
     ["MiniMax", "/provider-icons/minimax.svg"],
     ["OpenRouter", "/provider-icons/openrouter.svg"],
     ["vLLM", "/provider-icons/vllm.svg"],
+    ["LMDeploy", "/provider-icons/lmdeploy.svg"],
   ])("maps %s to a bundled provider icon", (provider, expected) => {
     expect(getProviderLogoUrl(provider)).toBe(expected);
   });

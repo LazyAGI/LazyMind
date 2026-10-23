@@ -1524,6 +1524,9 @@
 }
 
 // Model services occupy the same detail surface as the other settings sections.
+.settings-reference {
+  --settings-model-workspace-width: 1080px;
+}
 .settings-integrated-page.is-models-page {
   display: flex;
   flex-direction: column;
@@ -1552,7 +1555,7 @@
   min-height: 0;
 }
 .settings-integrated-surface.is-models > .model-provider-page-content {
-  margin-inline: max(0px, calc((100% - 1080px) / 4)) auto;
+  margin-inline: max(0px, calc((100% - var(--settings-model-workspace-width)) / 4)) auto;
 }
 @media (min-width: 801px) {
   .settings-integrated-surface.is-models .provider-workspace-body {
@@ -1569,13 +1572,16 @@
   flex-direction: column;
   width: 100%;
   min-height: 100%;
-  padding: 18px 24px 24px;
+  padding: 2px 12px 24px;
 
   .model-defaults-workspace {
     flex: 1 0 auto;
     height: auto;
     min-height: 0;
     overflow: visible;
+    width: 100%;
+    max-width: var(--settings-model-workspace-width);
+    margin-inline: max(0px, calc((100% - var(--settings-model-workspace-width)) / 4)) auto;
   }
   .settings-integrated-surface.is-default-models { margin: 0; padding: 20px 24px 32px; border: 0; overflow: visible; }
   .model-provider-service-page { height: auto; min-height: 0; padding: 0; overflow: visible; }
@@ -1592,7 +1598,6 @@
   .model-provider-section-subtitle { margin-top: 0; }
 
   @media (max-width: 800px) {
-    padding: 12px;
     .settings-integrated-surface.is-default-models { padding: 16px; }
   }
 }

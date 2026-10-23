@@ -2,7 +2,6 @@ package modelprovider
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,8 +53,8 @@ func TestKeylessCustomProviderCanDiscoverBeforeVerificationAndConnect(t *testing
 	if group.IsVerified {
 		t.Fatal("discovery alone must not verify a connection")
 	}
-	if _, _, err := ResolveProviderRuntimeCredential(t.Context(), db, group.ID); !errors.Is(err, ErrProviderKeyUnverified) {
-		t.Fatalf("unverified endpoint reached runtime: %v", err)
+	if _, key, err := ResolveProviderRuntimeCredential(t.Context(), db, group.ID); err != nil || key != "" {
+		t.Fatalf("explicit keyless custom runtime was blocked: %v", err)
 	}
 	algorithm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body algoModelCheckBody

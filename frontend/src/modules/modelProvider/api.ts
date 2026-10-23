@@ -28,7 +28,7 @@ export const modelProvidersDefaultApi = DefaultApiFactory(
 );
 
 export function withModelProviderJsonOptions(
-  options: RawAxiosRequestConfig = {},
+  options: RawAxiosRequestConfig & { silentError?: boolean } = {},
 ): RawAxiosRequestConfig {
   return {
     ...options,
@@ -289,6 +289,7 @@ export interface RemoteGroupModel {
   model_type: string;
   input?: string[];
   output?: string[];
+  sub_types?: string[];
   max_input_tokens?: string;
   added: boolean;
 }
@@ -303,6 +304,7 @@ export async function listRemoteGroupModels(
         modelProviderId: providerId,
         groupId,
       },
+      withModelProviderJsonOptions({ silentError: true }),
     );
   return unwrapModelProviderData<{ url?: string; models?: RemoteGroupModel[] }>(
     response.data,
