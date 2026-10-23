@@ -169,13 +169,6 @@ func (s *OriginalService) AcquireOriginal(ctx context.Context, caller DatasetCat
 func originalRef(row orm.UploadedFile, meta originalMetadata) OriginalRef {
 	return OriginalRef{FileRef: row.UploadFileID, Filename: meta.OriginalFilename, ContentType: meta.ContentType, Size: meta.FileSize, ContentSHA256: row.ContentHash, FinalURL: meta.FinalURL, ExpiresAt: meta.ExpiresAt}
 }
-func (s *OriginalService) ResolveOriginal(ctx context.Context, caller DatasetCatalogCaller, id string) (OriginalRef, error) {
-	row, meta, err := s.resolve(ctx, s.db, caller, id)
-	if err != nil {
-		return OriginalRef{}, err
-	}
-	return originalRef(row, meta), nil
-}
 func (s *OriginalService) resolve(ctx context.Context, db *gorm.DB, caller DatasetCatalogCaller, id string) (orm.UploadedFile, originalMetadata, error) {
 	var row orm.UploadedFile
 	var meta originalMetadata

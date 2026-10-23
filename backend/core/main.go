@@ -1012,8 +1012,6 @@ func run(ctx context.Context) error {
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
 	if capabilityRuntime.KnowledgeInternal != nil {
-		r.Handle("/internal/knowledge-management:upload-original", capabilityRuntime.KnowledgeInternalUpload).Methods(http.MethodPost)
-		handleAPI(r, "POST", "/knowledge/originals", []string{"document.write"}, capabilityRuntime.KnowledgeUpload.ServeHTTP)
 		for _, action := range []string{"credential", "prepare", "status", "claim"} {
 			r.Handle("/internal/knowledge-management:"+action, capabilityRuntime.KnowledgeInternal).Methods(http.MethodPost)
 		}

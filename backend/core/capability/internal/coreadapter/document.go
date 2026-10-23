@@ -84,7 +84,6 @@ func (r *KnowledgeDocumentReader) ListKnowledgeDocuments(ctx context.Context, ca
 		item.LogicalPath = page.LogicalPaths[row.ID]
 		dataset := page.Datasets[row.DatasetID]
 		item.AllowedActions = append([]string(nil), dataset.AllowedActions...)
-		item.EntryURL = "/lib/knowledge/detail/" + row.DatasetID + "?document=" + row.ID
 		if strings.EqualFold(row.DocumentType, "FOLDER") {
 			item.ResourceType = "folder"
 			item.ProcessingStatus = "not_requested"

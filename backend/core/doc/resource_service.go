@@ -231,7 +231,7 @@ func resourceRef(row orm.Document) ResourceRef {
 	return ResourceRef{Kind: "document", KnowledgeBaseID: row.DatasetID, DocumentID: row.ID}
 }
 func resourceItem(row orm.Document, status string) ResourceOperationItem {
-	return ResourceOperationItem{ResourceRef: resourceRef(row), Name: row.DisplayName, ParentID: row.PID, ResourceStatus: status, EntryURL: "/lib/knowledge/detail/" + row.DatasetID + "?document=" + row.ID}
+	return ResourceOperationItem{ResourceRef: resourceRef(row), Name: row.DisplayName, ParentID: row.PID, ResourceStatus: status}
 }
 func resourceDocument(tx *gorm.DB, ref ResourceRef) (orm.Document, error) {
 	var row orm.Document

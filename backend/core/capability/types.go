@@ -282,7 +282,6 @@ type KnowledgeSummary struct {
 	ResourceRef       ResourceRef    `json:"resource_ref"`
 	Scene             string         `json:"scene"`
 	AllowedActions    []string       `json:"allowed_actions"`
-	EntryURL          string         `json:"-"`
 	ID                string         `json:"id"`
 	Name              string         `json:"name"`
 	Description       string         `json:"description,omitempty"`
@@ -326,7 +325,6 @@ type KnowledgeDocumentSummary struct {
 	ParentID         string                `json:"parent_id"`
 	LogicalPath      string                `json:"logical_path"`
 	AllowedActions   []string              `json:"allowed_actions"`
-	EntryURL         string                `json:"-"`
 	ProcessingStatus string                `json:"processing_status,omitempty"`
 	ID               string                `json:"id"`
 	KnowledgeID      string                `json:"knowledge_id"`

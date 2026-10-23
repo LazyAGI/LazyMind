@@ -112,7 +112,6 @@ type ResourceOperationItem struct {
 	IDMapping        map[string]string     `json:"id_mapping,omitempty"`
 	Before           map[string]any        `json:"before,omitempty"`
 	After            map[string]any        `json:"after,omitempty"`
-	EntryURL         string                `json:"-"`
 	Error            *ResourceError        `json:"error,omitempty"`
 }
 type ResourceOperationResult struct {

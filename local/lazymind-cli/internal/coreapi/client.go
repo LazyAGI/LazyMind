@@ -177,18 +177,9 @@ type authenticatedTransport struct {
 }
 
 func (t *authenticatedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	streaming, _ := request.Context().Value(originalUploadContextKey{}).(bool)
-	var body []byte
-	var err error
-	if streaming {
-		if request.GetBody == nil || request.ContentLength <= 0 || request.ContentLength > MaxOriginalBytes+(1<<20) {
-			return nil, errors.New("invalid original upload stream")
-		}
-	} else {
-		body, err = readRequestBody(request)
-		if err != nil {
-			return nil, err
-		}
+	body, err := readRequestBody(request)
+	if err != nil {
+		return nil, err
 	}
 	token, err := t.credentials.AccessToken(request.Context())
 	if err != nil {
@@ -210,14 +201,7 @@ func (t *authenticatedTransport) RoundTrip(request *http.Request) (*http.Respons
 	if err := t.validateEndpoint(request); err != nil {
 		return nil, err
 	}
-	retry := cloneRequest(request, body, refreshed)
-	if streaming {
-		retry.Body, err = request.GetBody()
-		if err != nil {
-			return nil, err
-		}
-	}
-	return t.base.RoundTrip(retry)
+	return t.base.RoundTrip(cloneRequest(request, body, refreshed))
 }
 
 func readRequestBody(request *http.Request) ([]byte, error) {

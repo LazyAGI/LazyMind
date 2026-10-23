@@ -219,7 +219,7 @@ func (s *ResourceService) Delete(ctx context.Context, op ResourceOperationContex
 			if err = deleteResourceRows(tx, tree.rows); err != nil {
 				return out, err
 			}
-			item := ResourceOperationItem{ResourceRef: tree.root, Name: ds.DisplayName, ResourceStatus: "deleted", CleanupStatus: "not_submitted", EntryURL: "/lib/knowledge/detail/" + ds.ID}
+			item := ResourceOperationItem{ResourceRef: tree.root, Name: ds.DisplayName, ResourceStatus: "deleted", CleanupStatus: "not_submitted"}
 			if tree.root.Kind == "knowledge_base" {
 				now := time.Now().UTC()
 				if err = tx.Model(&orm.Dataset{}).Where("id = ? AND deleted_at IS NULL", ds.ID).Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {

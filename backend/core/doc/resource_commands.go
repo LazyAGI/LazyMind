@@ -123,7 +123,7 @@ func (s *ResourceService) CreateKnowledge(ctx context.Context, op ResourceOperat
 				return ResourceOperationResult{}, err
 			}
 		}
-		return ResourceOperationResult{Items: []ResourceOperationItem{{ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}, Name: ds.DisplayName, ResourceStatus: "created", EntryURL: "/lib/knowledge/detail/" + ds.ID, After: map[string]any{"description": ds.Desc, "scene": ds.Scene, "processing_level": ds.ProcessingLevel, "tags": parseDatasetTags(ds.Ext), "algo_id": parseDatasetAlgo(ds.Ext).AlgoID, "profile_id": req.ProfileID, "capabilities": refs}}}}, nil
+		return ResourceOperationResult{Items: []ResourceOperationItem{{ResourceRef: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: ds.ID}, Name: ds.DisplayName, ResourceStatus: "created", After: map[string]any{"description": ds.Desc, "scene": ds.Scene, "processing_level": ds.ProcessingLevel, "tags": parseDatasetTags(ds.Ext), "algo_id": parseDatasetAlgo(ds.Ext).AlgoID, "profile_id": req.ProfileID, "capabilities": refs}}}}, nil
 	})
 }
 func (s *ResourceService) knowledgeNameConflict(ctx context.Context, tx *gorm.DB, op ResourceOperationContext, name, exclude string) error {
@@ -343,7 +343,7 @@ func (s *ResourceService) UpdateMetadata(ctx context.Context, op ResourceOperati
 				if err = tx.Model(&orm.Dataset{}).Where("id = ?", ds.ID).Updates(updates).Error; err != nil {
 					return out, err
 				}
-				result = ResourceOperationItem{ResourceRef: item.Target, Name: ds.DisplayName, ResourceStatus: "updated", EntryURL: "/lib/knowledge/detail/" + ds.ID}
+				result = ResourceOperationItem{ResourceRef: item.Target, Name: ds.DisplayName, ResourceStatus: "updated"}
 			} else {
 				row, e := resourceDocument(tx, item.Target)
 				if e != nil {

@@ -252,7 +252,6 @@ func (s *ResourceService) moveAtomic(ctx context.Context, op ResourceOperationCo
 					item.ProcessingStatus = "not_requested"
 				}
 				item.CleanupStatus = "not_submitted"
-				item.EntryURL = "/lib/knowledge/detail/" + target.ID + "?document=" + ids[root.ID]
 			}
 			affected[tree.dataset.ID] = append(affected[tree.dataset.ID], root.PID)
 			affected[target.ID] = append(affected[target.ID], pid)

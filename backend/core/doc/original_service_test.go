@@ -82,13 +82,13 @@ func TestOriginalRejectsForeignExpiredAndMalformedSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, other := range []DatasetCatalogCaller{{UserID: "other", TenantID: "tenant"}, {UserID: "owner", TenantID: "other"}} {
-		if _, err := svc.ResolveOriginal(context.Background(), other, ref.FileRef); err == nil {
-			t.Fatal("foreign ref accepted")
+		if _, err := svc.PrepareOriginalBinding(context.Background(), other, ImportOriginalRequest{FileRef: ref.FileRef, DatasetID: "target"}); codeOfDatasetServiceError(err) != DatasetServiceForbidden {
+			t.Fatalf("foreign ref error: %v", err)
 		}
 	}
 	svc.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
-	if _, err := svc.ResolveOriginal(context.Background(), caller, ref.FileRef); err == nil {
-		t.Fatal("expired accepted")
+	if _, err := svc.PrepareOriginalBinding(context.Background(), caller, ImportOriginalRequest{FileRef: ref.FileRef, DatasetID: "target"}); codeOfDatasetServiceError(err) != "SOURCE_EXPIRED" {
+		t.Fatalf("expired ref error: %v", err)
 	}
 	for _, data := range []struct{ name, body string }{{"bad.pdf", "<html>login</html>"}, {"bad.docx", "not a zip"}, {"bad.txt", string([]byte{0xff, 0xfe})}} {
 		if _, err := svc.AcquireOriginal(context.Background(), caller, AcquireOriginalRequest{Filename: data.name, Reader: strings.NewReader(data.body)}); err == nil {

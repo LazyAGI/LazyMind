@@ -118,7 +118,7 @@ func TestProcessingObservationUsesExactBindingAndSubmittedRevision(t *testing.T)
 	if err := db.Create(&external).Error; err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := observeDocumentProcessing(context.Background(), db.DB, db.DB, row)
+	got, _, _, err := observeDocumentProcessingDetails(context.Background(), db.DB, db.DB, row)
 	if err != nil || got.ParseStatus != "succeeded" || got.ChunkStatus != "unknown" || got.IndexStatus != "unknown" {
 		t.Fatalf("parsed stage overclaimed: %+v %v", got, err)
 	}
@@ -134,14 +134,14 @@ func TestProcessingObservationUsesExactBindingAndSubmittedRevision(t *testing.T)
 	}
 	// An exact task ID associated with another document cannot publish success.
 	db.Model(&external).Update("doc_id", "foreign")
-	got, raw, err := observeDocumentProcessing(context.Background(), db.DB, db.DB, row)
+	got, raw, _, err := observeDocumentProcessingDetails(context.Background(), db.DB, db.DB, row)
 	if err != nil || got.ParseStatus != "unknown" || raw != "UNKNOWN" {
 		t.Fatalf("foreign binding accepted: %+v %q %v", got, raw, err)
 	}
 	db.Model(&external).Update("doc_id", "external")
 	// Same for another KB, even with the same task/document strings.
 	db.Model(&external).Update("kb_id", "foreign-kb")
-	got, _, err = observeDocumentProcessing(context.Background(), db.DB, db.DB, row)
+	got, _, _, err = observeDocumentProcessingDetails(context.Background(), db.DB, db.DB, row)
 	if err != nil || got.ParseStatus != "unknown" {
 		t.Fatalf("foreign KB accepted: %+v %v", got, err)
 	}
@@ -150,13 +150,13 @@ func TestProcessingObservationUsesExactBindingAndSubmittedRevision(t *testing.T)
 	previousRevision := dataset.ProcessingRevision
 	db.Model(&dataset).Updates(map[string]any{"processing_level": ProcessingLevelIndexed, "processing_revision": previousRevision + 1})
 	db.Model(&task).Update("ext", mustJSON(taskExt{ProcessingLevel: ProcessingLevelIndexed, ProcessingRevision: previousRevision}))
-	got, _, err = observeDocumentProcessing(context.Background(), db.DB, db.DB, row)
+	got, _, _, err = observeDocumentProcessingDetails(context.Background(), db.DB, db.DB, row)
 	if err != nil || got.ParseStatus != "succeeded" || got.IndexStatus != "unknown" {
 		t.Fatalf("stale revision inferred indexing: %+v %v", got, err)
 	}
 	// Historical task with no level still proves only parsing.
 	db.Model(&task).Update("ext", mustJSON(taskExt{}))
-	got, _, err = observeDocumentProcessing(context.Background(), db.DB, db.DB, row)
+	got, _, _, err = observeDocumentProcessingDetails(context.Background(), db.DB, db.DB, row)
 	if err != nil || got.ParseStatus != "succeeded" || got.IndexStatus != "unknown" {
 		t.Fatalf("historical task overclaimed: %+v %v", got, err)
 	}
@@ -174,14 +174,14 @@ func TestProcessingObservationMissingEvidenceIsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, lazy := range []*gorm.DB{db.DB, nil} {
-		state, raw, err := observeDocumentProcessing(context.Background(), db.DB, lazy, row)
+		state, raw, _, err := observeDocumentProcessingDetails(context.Background(), db.DB, lazy, row)
 		if err != nil || raw != "UNKNOWN" || state.ParseStatus != "unknown" {
 			t.Fatalf("missing task invented status: %+v %q %v", state, raw, err)
 		}
 	}
 	db.Model(&row).Update("resource_version", 2)
 	row.ResourceVersion = 1
-	state, raw, err := observeDocumentProcessing(context.Background(), db.DB, db.DB, row)
+	state, raw, _, err := observeDocumentProcessingDetails(context.Background(), db.DB, db.DB, row)
 	if err != nil || raw != "UNKNOWN" || state.ParseStatus != "unknown" || state.ChunkStatus != "unknown" || state.IndexStatus != "unknown" {
 		t.Fatalf("changed binding invented pending: %+v %q %v", state, raw, err)
 	}

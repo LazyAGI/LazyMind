@@ -75,33 +75,6 @@ func (r *Runtime) Decision(w http.ResponseWriter, req *http.Request) {
 	common.ReplyJSON(w, map[string]any{"status": in.Decision})
 }
 
-// OriginalUpload verifies the live run before accepting host-transferred bytes.
-func (r *Runtime) OriginalUpload(secret string, next http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		token := req.Header.Get("X-LazyMind-Internal-Token")
-		if secret == "" || subtle.ConstantTimeCompare([]byte(secret), []byte(token)) != 1 {
-			common.ReplyErr(w, "forbidden", 403)
-			return
-		}
-		raw := req.Header.Get("X-LazyMind-Execution")
-		var execution Execution
-		if len(raw) > 8192 || json.Unmarshal([]byte(raw), &execution) != nil {
-			common.ReplyErr(w, "invalid request", 400)
-			return
-		}
-		id, err := r.validate(req.Context(), execution)
-		if err != nil || !toolAllowed(id, "knowledge.document.upload") || (!id.Principal.Permissions.Has("document.write") && !id.Principal.Permissions.Has("*")) {
-			common.ReplyErr(w, "forbidden", 403)
-			return
-		}
-		clone := req.Clone(req.Context())
-		clone.Header = clone.Header.Clone()
-		clone.Header.Set("X-User-Id", id.Principal.UserID)
-		clone.Header.Set("X-Tenant-Id", id.Principal.TenantID)
-		next(w, clone)
-	})
-}
-
 func replyRuntimeError(w http.ResponseWriter, err error) {
 	code, message := "EXECUTION_REJECTED", err.Error()
 	var details map[string]any

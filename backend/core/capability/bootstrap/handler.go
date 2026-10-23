@@ -41,12 +41,10 @@ type Config struct {
 }
 
 type Runtime struct {
-	MCP                     http.Handler
-	KnowledgeInternal       http.Handler
-	KnowledgeMCP            http.Handler
-	KnowledgeDecision       http.HandlerFunc
-	KnowledgeUpload         http.Handler
-	KnowledgeInternalUpload http.Handler
+	MCP               http.Handler
+	KnowledgeInternal http.Handler
+	KnowledgeMCP      http.Handler
+	KnowledgeDecision http.HandlerFunc
 }
 
 func NewHandler(config Config) (http.Handler, error) {
@@ -245,35 +243,6 @@ func NewRuntime(config Config) (*Runtime, error) {
 		if e != nil {
 			return nil, e
 		}
-		runtime.KnowledgeInternalUpload = kr.OriginalUpload(config.InternalServiceToken, doc.UploadOriginalHTTP)
-		runtime.KnowledgeUpload = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			raw := strings.TrimSpace(r.Header.Get("Authorization"))
-			if !strings.HasPrefix(raw, "Bearer ") {
-				http.Error(w, "unauthorized", 401)
-				return
-			}
-			info, e := verifier(r.Context(), strings.TrimPrefix(raw, "Bearer "), r)
-			if e != nil || info == nil {
-				http.Error(w, "unauthorized", 401)
-				return
-			}
-			allowed := false
-			for _, p := range info.Scopes {
-				if p == "document.write" || p == "*" {
-					allowed = true
-				}
-			}
-			if !allowed {
-				http.Error(w, "forbidden", 403)
-				return
-			}
-			clone := r.Clone(r.Context())
-			clone.Header = clone.Header.Clone()
-			clone.Header.Set("X-User-Id", info.UserID)
-			tenant, _ := info.Extra["tenant_id"].(string)
-			clone.Header.Set("X-Tenant-Id", tenant)
-			doc.UploadOriginalHTTP(w, clone)
-		})
 		runtime.KnowledgeInternal = kr.InternalHandler(config.InternalServiceToken)
 		runtime.KnowledgeDecision = kr.Decision
 	}

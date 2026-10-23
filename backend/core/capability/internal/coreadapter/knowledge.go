@@ -64,7 +64,7 @@ func (c *KnowledgeCatalog) ListKnowledge(ctx context.Context, call capability.In
 		}
 		items = append(items, capability.KnowledgeSummary{
 			Configuration: configuration, ID: item.DatasetID, Name: item.DisplayName, Description: item.Desc,
-			AllowedActions: item.AllowedActions, EntryURL: "/lib/knowledge/detail/" + item.DatasetID, Scene: item.Scene, ResourceRef: capability.ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: item.DatasetID},
+			AllowedActions: item.AllowedActions, Scene: item.Scene, ResourceRef: capability.ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: item.DatasetID},
 			Tags: append([]string(nil), item.Tags...), UpdatedAt: item.UpdateTime,
 			DocumentSizeBytes: item.DocumentSize, DocumentCount: item.DocumentCount,
 		})

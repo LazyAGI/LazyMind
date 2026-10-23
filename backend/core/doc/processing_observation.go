@@ -202,11 +202,6 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	return state, raw
 }
 
-func observeDocumentProcessing(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (orm.DocumentProcessingState, string, error) {
-	state, raw, _, err := observeDocumentProcessingDetails(ctx, db, lazyDB, document)
-	return state, raw, err
-}
-
 func observeDocumentProcessingDetails(ctx context.Context, db, lazyDB *gorm.DB, document orm.Document) (orm.DocumentProcessingState, string, *ProcessingDiagnostic, error) {
 	snapshot, err := loadProcessingSnapshot(ctx, db, lazyDB, document.DatasetID, document.ID)
 	if err != nil {
