@@ -345,6 +345,17 @@ const enUS = {
     cloudSystemRetired: "Retired",
     visionSupported: "Multimodal",
     vision: "Supports multimodal input",
+    modality: {
+      input: "In",
+      output: "Out",
+      inputAria: "Input modalities",
+      outputAria: "Output modalities",
+      text: "Text",
+      image: "Image",
+      audio: "Audio",
+      video: "Video",
+      file: "File",
+    },
     tabs: {
       aria: "Model service configuration navigation",
       models: "User Models",

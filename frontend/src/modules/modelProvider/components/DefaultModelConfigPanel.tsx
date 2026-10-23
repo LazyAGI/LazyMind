@@ -14,6 +14,7 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
+import { ModelModalityMarks } from "./ModelModalityMarks";
 import {
   cloudServiceConfigs,
   normalizeProviderKey,
@@ -485,6 +486,7 @@ export default function DefaultModelConfigPanel({
                     <ProviderLogo provider={provider} compact />
                     <span className="model-provider-select-copy">
                       <strong>{displayName}</strong>
+                      <ModelModalityMarks compact providerName={provider.name} modelName={model.name} />
                       <small>
                         {option.source === "cloud"
                           ? t("modelProvider.cloudSystemReadOnly")

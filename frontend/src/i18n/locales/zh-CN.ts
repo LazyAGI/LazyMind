@@ -343,6 +343,17 @@ const zhCN = {
     cloudSystemRetired: "已下线",
     visionSupported: "支持多模态",
     vision: "是否支持多模态",
+    modality: {
+      input: "输入",
+      output: "输出",
+      inputAria: "输入模态",
+      outputAria: "输出模态",
+      text: "文本",
+      image: "图像",
+      audio: "音频",
+      video: "视频",
+      file: "文件",
+    },
     tabs: {
       aria: "模型服务配置导航",
       models: "模型供应商",
