@@ -56,12 +56,12 @@ vi.mock("../api", () => ({
 }));
 
 const selectedLlm = {
-  model_key: "llm", model_id: "model", name: "Demo model", provider_name: "Demo",
+  model_key: "llm", model_id: "model", name: "Demo model", provider_name: "SiliconFlow",
   user_model_provider_id: "provider", user_model_provider_group_id: "group",
   group_name: "Demo group", availability: "available", max_input_tokens: "128K", share: true,
 };
 const availableModel = {
-  id: "model", name: "Demo model", model_type: "llm", provider_name: "Demo",
+  id: "model", name: "Demo model", model_type: "llm", provider_name: "SiliconFlow",
   user_model_provider_id: "provider", user_model_provider_group_id: "group", group_name: "Demo group",
 };
 const selectedParsing = {
@@ -127,7 +127,7 @@ describe("default capability configuration groups", () => {
     mocks.role = "system-admin";
     mocks.imageEmbedEnabled = true;
     mocks.cloudAvailable = false;
-    mocks.providers.mockResolvedValue({ data: { providers: [{ id: "provider", name: "Demo" }] } });
+    mocks.providers.mockResolvedValue({ data: { providers: [{ id: "provider", name: "Demo", protocol_name: "SiliconFlow", is_custom: true }] } });
     mocks.selections.mockResolvedValue({ data: { selections: [selectedLlm] } });
     mocks.services.mockResolvedValue({ data: { selections: [selectedParsing] } });
     mocks.models.mockResolvedValue({ data: { models: [availableModel] } });

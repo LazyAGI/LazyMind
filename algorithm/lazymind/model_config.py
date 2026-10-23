@@ -3,6 +3,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 import yaml
 from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
@@ -22,6 +23,7 @@ _TYPE_TO_SLOT: Dict[str, str] = {
     'image_editing': 'multimodal',
     'text2video': 'multimodal',
 }
+
 
 def resolve_request_api_keys(model_config: Dict[str, Any]) -> Dict[str, Any]:
     '''Preserve the backend-selected key; legacy pools use their first key.
@@ -308,6 +310,19 @@ def _enrich_role_types(model_config: Dict[str, Any]) -> Dict[str, Any]:
             yaml_tokens = entry.get('max_input_tokens')
             if yaml_tokens is not None and 'max_input_tokens' not in merged:
                 merged['max_input_tokens'] = yaml_tokens
+        # The pinned SiliconFlow reranker inherits the embedding URL suffix.
+        # Pass its explicit task endpoint so dynamic requests cannot go to
+        # /embeddings. Keep the supplied origin, proxy path and API version.
+        base_url = merged.get('base_url')
+        kind = str(merged.get('type') or ('rerank' if role == 'reranker' else '')).strip().lower()
+        if str(merged.get('source') or '').strip().lower() == 'siliconflow' and kind == 'rerank' and base_url:
+            parsed = urlsplit(base_url)
+            if (parsed.scheme in {'http', 'https'} and parsed.netloc
+                    and not any((parsed.username, parsed.password, parsed.query, parsed.fragment))):
+                path = parsed.path.rstrip('/')
+                if not path.endswith('/rerank'):
+                    path += '/rerank'
+                merged['base_url'] = parsed._replace(path=path).geturl()
         enriched[role] = merged
     return enriched
 

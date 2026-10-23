@@ -83,6 +83,10 @@ func TestModelEditorSupportsVLMAndNonChatMetadata(t *testing.T) {
 	}{{"vlm", `{"max_input_tokens":"200K"}`, "vlm", true}, {"rerank", `{"name":"new-rerank-id","model_type":"tts","vision":true}`, "tts", false}} {
 		t.Run(tc.typ, func(t *testing.T) {
 			db, m := modelEditFixture(t, tc.typ, false)
+			// SiliconFlow has both rerank and TTS adapters; OpenAI does not.
+			if err := db.Model(&orm.UserModelProvider{}).Where("id = ?", m.UserModelProviderID).Update("protocol_name", "SiliconFlow").Error; err != nil {
+				t.Fatal(err)
+			}
 			rec := modelEditCall(t, m.ID, "user-1", tc.body)
 			if rec.Code != 200 {
 				t.Fatalf("edit=%d %s", rec.Code, rec.Body.String())

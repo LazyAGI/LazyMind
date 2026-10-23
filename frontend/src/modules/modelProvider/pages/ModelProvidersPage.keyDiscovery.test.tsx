@@ -155,15 +155,15 @@ describe("model discovery after verified key save", () => {
   it("adds catalog-recognized ID-only models using their recognized types", async () => {
     mocks.remote.mockResolvedValue({ models: [
       { id: "gateway/vector", name: "gateway/vector" },
-      { id: "gateway/speech", name: "gateway/speech" },
+      { id: "gateway/reranker", name: "gateway/reranker" },
     ] });
     mocks.lookup.mockImplementation((_protocol: string, name: string) => ({
-      name, model_type: name.endsWith("vector") ? "embed" : "tts", input: ["text"], output: [], context: 0, max_output: 0,
+      name, model_type: name.endsWith("vector") ? "embed" : "rerank", input: ["text"], output: [], context: 0, max_output: 0,
     }));
     await discoverAfterKeySave();
     expect(mocks.add.mock.calls.map(([request]) => request.addModelProviderGroupModelOpenAPIRequest)).toEqual([
       { name: "gateway/vector", model_type: "embed", vision: false },
-      { name: "gateway/speech", model_type: "tts", vision: false },
+      { name: "gateway/reranker", model_type: "rerank", vision: false },
     ]);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

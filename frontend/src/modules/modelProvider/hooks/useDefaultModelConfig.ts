@@ -704,7 +704,9 @@ export function useDefaultModelConfig({
           builtIn: Boolean(selection.is_default),
           enabled: true,
           maxInputTokens: selection.max_input_tokens,
-          availability: isModelTypeSupportedByProtocol(selection.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
+          // Cloud availability comes from the gateway, whose provider label is
+          // independent of the host's local LazyLLM adapter registry.
+          availability: source === "cloud" || isModelTypeSupportedByProtocol(selection.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
             ? selection.availability : "unavailable",
           readOnly: selection.read_only,
         };
@@ -917,7 +919,7 @@ export function useDefaultModelConfig({
               builtIn: Boolean(model.is_default),
               enabled: true,
               maxInputTokens: model.max_input_tokens,
-              availability: isModelTypeSupportedByProtocol(model.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
+              availability: source === "cloud" || isModelTypeSupportedByProtocol(model.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
                 ? model.availability : "unavailable",
               lifecycle: model.lifecycle,
               readOnly: model.read_only,

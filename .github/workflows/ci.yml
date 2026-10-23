@@ -183,7 +183,7 @@ jobs:
       - name: Type-check workflow panel integration
         working-directory: frontend
         run: pnpm typecheck
-      - name: Test frontend application including workflow panel boundaries
+      - name: Test frontend including model settings and workflow boundaries
         working-directory: frontend
         run: pnpm test --maxWorkers=2 --minWorkers=1
 

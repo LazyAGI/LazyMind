@@ -312,10 +312,10 @@ func TestSeedUpstreamPreservesUserModelsAndSelectionsAcrossRestart(t *testing.T)
 	})
 	customLimit := "777"
 	create(&[]orm.UserModelProviderGroupModel{
-		{ID: "selected-old", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", Name: "old-chat", ModelType: "llm", IsDefault: true},
-		{ID: "unselected-old", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", Name: "old-unused", ModelType: "llm", IsDefault: true},
-		{ID: "custom", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", Name: "new-chat", ModelType: "llm", MaxInputTokens: &customLimit, IsDefault: false},
-		{ID: "proxy-old", UserModelProviderID: "user-provider", UserModelProviderGroupID: "proxy", Name: "old-chat", ModelType: "llm", IsDefault: true},
+		{ID: "selected-old", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", ProviderName: "OpenAI", Name: "old-chat", ModelType: "llm", IsDefault: true},
+		{ID: "unselected-old", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", ProviderName: "OpenAI", Name: "old-unused", ModelType: "llm", IsDefault: true},
+		{ID: "custom", UserModelProviderID: "user-provider", UserModelProviderGroupID: "official", ProviderName: "OpenAI", Name: "new-chat", ModelType: "llm", MaxInputTokens: &customLimit, IsDefault: false},
+		{ID: "proxy-old", UserModelProviderID: "user-provider", UserModelProviderGroupID: "proxy", ProviderName: "OpenAI", Name: "old-chat", ModelType: "llm", IsDefault: true},
 	})
 	create(&orm.UserSelectedModel{UserID: "user", ModelKey: "llm", UserModelProviderGroupModelID: "selected-old"})
 	for i := 0; i < 2; i++ {

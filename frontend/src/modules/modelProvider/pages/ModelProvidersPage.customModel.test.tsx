@@ -72,7 +72,7 @@ describe("custom model name controls", () => {
   it("offers evolution as a dialogue role while retaining distinct runtime subtypes", () => {
     expect(getSelectableModelCapabilities([
       "LLM_SELF_EVOLUTION", "LLM_CHAT", "VLM", "EMBEDDING", "MULTIMODAL_EMBEDDING",
-    ])).toEqual(["LLM_CHAT", "VLM", "EMBEDDING", "MULTIMODAL_EMBEDDING"]);
+    ], "OpenAI")).toEqual(["LLM_CHAT", "VLM", "EMBEDDING", "MULTIMODAL_EMBEDDING"]);
   });
   it("keeps the clear control inside the input and the remote search as a separate button", async () => {
     render(

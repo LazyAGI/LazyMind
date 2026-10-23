@@ -86,20 +86,34 @@ func classifyUpstreamModel(declared string, inputValues, outputValues []string) 
 	return ""
 }
 
-// RuntimeSupportsModelType follows registered adapters. OpenRouter currently
-// lacks rerank, image-editing and multimodal-embedding adapters. Other providers
-// retain their existing validation and supported integrations.
+// These are executable LazyLLM adapters, not the types advertised by an upstream
+// model catalog. Keep this boundary aligned with modelCapabilities.ts and the
+// algorithm runtime_support registry contract test. OpenAI-compatible image
+// embeddings retain the existing self-hosted embedding fallback.
+var runtimeModelTypesBySource = map[string][]string{
+	"aiping":      {"llm", "vlm", "embed", "rerank", "text2image"},
+	"claude":      {"llm", "vlm"},
+	"deepseek":    {"llm", "vlm"},
+	"doubao":      {"llm", "vlm", "embed", "multimodal_embedding", "text2image", "image_editing", "text2video"},
+	"glm":         {"llm", "vlm", "embed", "rerank", "text2image", "stt"},
+	"kimi":        {"llm", "vlm"},
+	"minimax":     {"llm", "vlm", "text2image", "tts"},
+	"openai":      {"llm", "vlm", "embed", "multimodal_embedding", "rerank"},
+	"openrouter":  {"llm", "vlm", "embed", "text2image", "text2video", "tts", "stt"},
+	"ppio":        {"llm", "vlm"},
+	"qwen":        {"llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "image_editing", "text2video", "tts", "stt"},
+	"sensenova":   {"llm", "vlm", "embed", "text2image", "image_editing"},
+	"siliconflow": {"llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "image_editing", "text2video", "tts", "stt"},
+}
+
+// RuntimeSupportsModelType rejects combinations without an executable adapter.
+// A working compatible endpoint or public catalog entry cannot add an adapter.
 func RuntimeSupportsModelType(providerName, modelType string) bool {
-	if strings.TrimSpace(modelType) == "" {
-		return false
+	modelType = normalizedDeclaredModelType(modelType)
+	for _, supported := range runtimeModelTypesBySource[LazyLLMSource(providerName)] {
+		if modelType == supported {
+			return true
+		}
 	}
-	if LazyLLMSource(providerName) != "openrouter" {
-		return true
-	}
-	switch normalizedDeclaredModelType(modelType) {
-	case "llm", "vlm", "embed", "text2image", "text2video", "tts", "stt":
-		return true
-	default:
-		return false
-	}
+	return false
 }

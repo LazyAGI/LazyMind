@@ -7,6 +7,17 @@ import {
 } from "./modelCapabilities";
 
 describe("supplier model capabilities", () => {
+  it.each(["DeepSeek", "Kimi", "Moonshot", "Claude", "Anthropic", "PPIO"])("only offers registered chat adapters for %s", (protocol) => {
+    expect(getSelectableCapabilities(["LLM_CHAT", "VLM", "EMBEDDING", "RERANK", "TTS", "TEXT_TO_IMAGE"], protocol))
+      .toEqual(["LLM_CHAT", "VLM"]);
+  });
+  it.each(["OpenAI", "vLLM", "LMDeploy"])("keeps compatible embedding/reranking but excludes missing media adapters for %s", (protocol) => {
+    expect(getSelectableCapabilities(["EMBEDDING", "RERANK", "MULTIMODAL_EMBEDDING", "TEXT_TO_IMAGE", "TEXT_TO_VIDEO", "TTS", "ASR"], protocol))
+      .toEqual(["EMBEDDING", "RERANK", "MULTIMODAL_EMBEDDING"]);
+  });
+  it("rejects unknown supplier adapters", () => {
+    expect(isModelTypeSupportedByProtocol("llm", "UnknownProvider")).toBe(false);
+  });
   it("only enables the OpenRouter adapters implemented by the runtime", () => {
     for (const type of ["llm", "vlm", "embed", "text2image", "text2video", "tts", "stt"])
       expect(isModelTypeSupportedByProtocol(type, "OpenRouter")).toBe(true);

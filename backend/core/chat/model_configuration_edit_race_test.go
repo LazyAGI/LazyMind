@@ -34,7 +34,7 @@ func TestFixedBindingsRevalidateAfterConcurrentModelConfigurationEdit(t *testing
 		t.Run(mode, func(t *testing.T) {
 			var database *orm.DB
 			if strings.EqualFold(strings.TrimSpace(os.Getenv("TEST_DB_DRIVER")), "postgres") {
-				database = newPromptTestDB(t)
+				database = newChatModelTestDB(t)
 			} else {
 				// All connections must share a read-uncommitted cache. Merely
 				// setting the PRAGMA on one pooled connection keeps a stale WAL

@@ -6,6 +6,7 @@ does not change keys, provider verification, default models or model metadata.
 
 - `contracts.py`: internal input and request plan contracts. Credentials are excluded from `ProbeInput` representations.
 - `profiles.py`: explicit model type and provider request shapes. There is no fallback from an unknown type to chat.
+- `runtime_support.py`: executable supplier/type boundary, checked against the pinned LazyLLM registry. A compatible HTTP endpoint alone does not imply application support.
 - `fixtures.py`: deterministic in-memory PNG and silent WAV inputs; no user files or temporary files.
 - `runner.py`: bounded asynchronous HTTP transport, response validation and safe result codes.
 - `../api/model_probe_routes.py`: request validation and the internal HTTP boundary.
@@ -30,6 +31,14 @@ multimodal embedding and image editing stay unsupported until the application's
 runtime adapters support them. Native Qwen embedding/reranking accepts an origin
 or an `/api/v1/` base; native SenseNova embedding requires a `/v1/llm/` base. Custom
 origins and proxy prefixes are preserved rather than replaced by a public host.
+
+DeepSeek, Kimi, Claude and PPIO currently have chat adapters only. The current
+OpenAI adapter (also used by vLLM/LMDeploy) supports chat, embedding and reranking,
+plus the existing self-hosted cross-modal embedding fallback; it has no media
+generation or speech adapter. Those missing combinations are rejected before a
+probe makes a request. Reranking remains enabled for OpenAI-compatible gateways,
+Qwen, GLM, SiliconFlow and Aiping, and is consumed by both knowledge-base and
+temporary-file retrieval.
 
 SiliconFlow image probes use its native `images` response envelope. Its documented
 HTTP 400 / code 20012 model lookup failure is reported as `model_not_found`.

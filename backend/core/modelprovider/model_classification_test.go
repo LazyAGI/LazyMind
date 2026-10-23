@@ -46,9 +46,39 @@ func TestOpenRouterRuntimeSupportMatchesImplementedAdapters(t *testing.T) {
 			t.Errorf("missing adapter %s accepted", typ)
 		}
 	}
-	for _, provider := range []string{"OpenAI", "Qwen", "SenseNova"} {
+	for _, provider := range []string{"OpenAI", "Qwen", "GLM", "SiliconFlow", "Aiping"} {
 		if !RuntimeSupportsModelType(provider, "rerank") {
 			t.Errorf("changed other provider %s", provider)
+		}
+	}
+}
+
+func TestRuntimeSupportRejectsUnregisteredSupplierAdapters(t *testing.T) {
+	for _, provider := range []string{"DeepSeek", "Kimi", "Moonshot", "Claude", "Anthropic", "PPIO"} {
+		for _, typ := range []string{"embed", "embedding", "multimodal_embedding", "rerank", "tts", "stt", "text2image", "text2video", "image_editing"} {
+			if RuntimeSupportsModelType(provider, typ) {
+				t.Errorf("unregistered %s %s adapter accepted", provider, typ)
+			}
+		}
+		if !RuntimeSupportsModelType(provider, "llm") || !RuntimeSupportsModelType(provider, "vlm") {
+			t.Errorf("existing chat adapter rejected for %s", provider)
+		}
+	}
+	for _, typ := range []string{"llm", "embed", "future-task"} {
+		if RuntimeSupportsModelType("UnknownProvider", typ) {
+			t.Errorf("unknown provider accepted for %s", typ)
+		}
+	}
+	for _, provider := range []string{"OpenAI", "vLLM", "LMDeploy"} {
+		for _, typ := range []string{"text2image", "text2video", "tts", "stt", "image_editing"} {
+			if RuntimeSupportsModelType(provider, typ) {
+				t.Errorf("unregistered OpenAI-compatible %s adapter accepted for %s", typ, provider)
+			}
+		}
+		for _, typ := range []string{"embed", "rerank", "cross_modal_embed"} {
+			if !RuntimeSupportsModelType(provider, typ) {
+				t.Errorf("existing compatible %s adapter rejected for %s", typ, provider)
+			}
 		}
 	}
 }

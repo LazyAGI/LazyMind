@@ -42,8 +42,12 @@ def run_probe(kind='llm', source='OpenAI', response=None, status=200, **values):
     ('tts', '/audio/speech', b'RIFF1234WAVEaudio'),
 ])
 def test_each_type_sends_one_minimal_inference_request(kind, suffix, response):
-    result, requests = run_probe(kind, source='SiliconFlow' if kind == 'multimodal_embedding' else 'OpenAI',
-                                 response=response)
+    source = {
+        'multimodal_embedding': 'SiliconFlow', 'text2image': 'SenseNova',
+        'image_editing': 'SenseNova', 'stt': 'GLM', 'tts': 'SiliconFlow',
+    }.get(kind, 'OpenAI')
+    values = {'model': 'FunAudioLLM/CosyVoice2-0.5B'} if kind == 'tts' else {}
+    result, requests = run_probe(kind, source=source, response=response, **values)
     assert result['status'] == 'passed'
     assert result['code'] == 'ok'
     assert result['model_type'] == kind
@@ -136,7 +140,7 @@ def test_openrouter_tts_without_a_verified_voice_contract_makes_no_request(model
     assert requests == []
 
 
-@pytest.mark.parametrize('source', ['OpenAI', 'OpenRouter'])
+@pytest.mark.parametrize('source', ['OpenRouter'])
 def test_video_is_only_accepted_and_never_polled_or_downloaded(source):
     result, requests = run_probe('text2video', source, response={'id': 'task-id', 'status': 'queued'})
     assert result['status'] == 'accepted'
@@ -158,6 +162,24 @@ def test_unsupported_types_never_fall_back_to_chat_or_make_requests(kind, source
     result, requests = run_probe(kind, source, response={})
     assert result['status'] == 'unsupported'
     assert result['code'] == code
+    assert requests == []
+
+
+@pytest.mark.parametrize('source', ['DeepSeek', 'Kimi', 'Claude', 'PPIO'])
+@pytest.mark.parametrize('kind', ['embed', 'rerank', 'text2image', 'text2video', 'tts', 'stt'])
+def test_missing_runtime_adapters_never_produce_false_positive_probes(source, kind):
+    result, requests = run_probe(kind, source, response={'data': [{'embedding': [0.1]}]})
+    assert result['status'] == 'unsupported'
+    assert result['code'] == 'unsupported_provider'
+    assert requests == []
+
+
+@pytest.mark.parametrize('source', ['OpenAI', 'VLLM', 'LMDeploy'])
+@pytest.mark.parametrize('kind', ['text2image', 'text2video', 'image_editing', 'tts', 'stt'])
+def test_compatible_protocol_does_not_imply_missing_runtime_media_support(source, kind):
+    result, requests = run_probe(kind, source, response={'id': 'task-id'})
+    assert result['status'] == 'unsupported'
+    assert result['code'] == 'unsupported_provider'
     assert requests == []
 
 
@@ -225,7 +247,7 @@ def test_sensenova_image_edit_uses_the_native_image_objects():
 
 
 def test_signed_image_reference_is_valid_and_never_downloaded():
-    result, requests = run_probe('text2image', response={
+    result, requests = run_probe('text2image', 'SenseNova', response={
         'data': [{'url': 'https://media.example/result.png?signature=secret-that-must-not-leak&expires=123'}],
     })
     assert result['status'] == 'passed'
@@ -354,7 +376,9 @@ def test_unexpected_compression_is_rejected_before_decompressing_or_reading():
     ('embed', b'', 'empty_response'),
 ])
 def test_non_json_or_invalid_audio_is_not_a_success(kind, response, code):
-    result, requests = run_probe(kind, response=response)
+    source = 'SiliconFlow' if kind == 'tts' else 'OpenAI'
+    values = {'model': 'FunAudioLLM/CosyVoice2-0.5B'} if kind == 'tts' else {}
+    result, requests = run_probe(kind, source, response=response, **values)
     assert result['status'] == 'failed'
     assert result['code'] == code
     assert len(requests) == 1

@@ -7,7 +7,7 @@ import (
 	"lazymind/core/common/orm"
 )
 
-func TestVerifiedKeylessCustomSupplierEmitsSkipAuthForAllModelRoles(t *testing.T) {
+func TestVerifiedKeylessCustomSupplierEmitsOnlySupportedRuntimeRoles(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.DefaultModelProvider{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}, &orm.UserSelectedModel{}, &orm.EvolutionModelValidation{})
 	base := orm.BaseModel{CreateUserID: "owner", CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	parent := orm.UserModelProvider{ID: "local", DefaultModelProviderID: "missing-catalog", Name: "qwen自用", IsCustom: true, ProtocolName: "OpenAI", Category: "model", Capabilities: "has_models", BaseURL: "http://local.example:8000/", BaseModel: base}
@@ -18,7 +18,7 @@ func TestVerifiedKeylessCustomSupplierEmitsSkipAuthForAllModelRoles(t *testing.T
 	if err := db.DB.Create(&group).Error; err != nil {
 		t.Fatal(err)
 	}
-	roles := map[string]string{"llm": "llm", "evo_llm": "llm", "embed_main": "embed", "vlm": "vlm", "stt": "stt", "tts": "tts", "text2image": "text2image", "image_editing": "image_editing", "text2video": "text2video"}
+	roles := map[string]string{"llm": "llm", "evo_llm": "llm", "embed_main": "embed", "embed_image": "multimodal_embedding", "reranker": "rerank", "vlm": "vlm", "stt": "stt", "tts": "tts", "text2image": "text2image", "image_editing": "image_editing", "text2video": "text2video"}
 	for role, technical := range roles {
 		model := orm.UserModelProviderGroupModel{ID: role, UserModelProviderID: parent.ID, UserModelProviderGroupID: group.ID, ProviderName: "OpenAI", Name: "local-" + role, ModelType: technical, IsDefault: role == "embed_main", BaseModel: base}
 		if err := db.DB.Create(&model).Error; err != nil {
@@ -34,6 +34,12 @@ func TestVerifiedKeylessCustomSupplierEmitsSkipAuthForAllModelRoles(t *testing.T
 			t.Fatal(err)
 		}
 		for role := range roles {
+			if role == "stt" || role == "tts" || role == "text2image" || role == "image_editing" || role == "text2video" {
+				if config[role] != nil {
+					t.Errorf("%s unsupported OpenAI runtime role %s was emitted: %#v", user, role, config[role])
+				}
+				continue
+			}
 			got, ok := config[role].(map[string]any)
 			if !ok || got["skip_auth"] != true || got["api_key"] != "" || got["base_url"] != "http://local.example:8000/v1/" {
 				t.Errorf("%s role %s did not preserve keyless runtime: %#v", user, role, config[role])

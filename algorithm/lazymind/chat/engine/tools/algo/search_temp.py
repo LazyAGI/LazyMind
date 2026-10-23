@@ -18,7 +18,7 @@ from lazymind.chat.engine.tools.temporary_retrieval_session import (
     temporary_retrieval_scope,
 )
 from lazymind.config import EMBED_MAIN
-from lazymind.model_config import get_dynamic_role_slot_map
+from lazymind.model_config import is_model_role_available
 from lazymind.parsing.engine.transform import GeneralParser
 
 _TEMP_NODE_GROUP_NAME = 'block'
@@ -42,16 +42,7 @@ class _ConversationTempDocRetriever(TempDocRetriever):
 
 
 def _is_reranker_enabled() -> bool:
-    import lazyllm
-    role_slots = get_dynamic_role_slot_map()
-    if 'reranker' not in role_slots:
-        return True
-    try:
-        cfg = lazyllm.globals.config['dynamic_model_configs']
-    except Exception:
-        cfg = None
-    role_cfg = cfg.get('reranker') if isinstance(cfg, dict) else None
-    return isinstance(role_cfg, dict) and bool(role_cfg.get(role_slots['reranker']))
+    return is_model_role_available(_RERANKER_MODEL)
 
 
 def _build_reranker() -> Optional[Reranker]:

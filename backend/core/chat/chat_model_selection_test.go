@@ -42,9 +42,17 @@ func seedAvailableChatModel(
 ) orm.UserModelProviderGroupModel {
 	t.Helper()
 	now := time.Now().UTC()
+	// Friendly fixture names describe independent connections; each still needs
+	// a real registered runtime protocol, just like a custom supplier in the UI.
+	runtimeProvider := "OpenAI"
+	switch providerName {
+	case "OpenAI", "DeepSeek", "Moonshot", "Qwen", "Claude", "SiliconFlow":
+		runtimeProvider = providerName
+	}
 	provider := orm.UserModelProvider{
 		ID: providerID, DefaultModelProviderID: "catalog-" + providerID,
 		Name: providerName, Description: providerName, Category: "model", Capabilities: "has_models",
+		ProtocolName: runtimeProvider, IsCustom: runtimeProvider != providerName,
 		BaseModel: orm.BaseModel{
 			CreateUserID: owner, CreateUserName: owner, CreatedAt: now, UpdatedAt: now,
 		},
@@ -64,7 +72,7 @@ func seedAvailableChatModel(
 	}
 	model := orm.UserModelProviderGroupModel{
 		ID: modelID, UserModelProviderID: providerID, UserModelProviderGroupID: groupID,
-		ProviderName: providerName, Name: modelName, ModelType: modelType,
+		ProviderName: runtimeProvider, Name: modelName, ModelType: modelType,
 		BaseModel: orm.BaseModel{
 			CreateUserID: owner, CreateUserName: owner, CreatedAt: now, UpdatedAt: now,
 		},

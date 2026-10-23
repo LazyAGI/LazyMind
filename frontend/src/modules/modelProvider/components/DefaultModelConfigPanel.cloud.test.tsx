@@ -140,7 +140,7 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
   it("renders the existing TTS capability as a selectable default service", async () => {
     mocks.listModels.mockResolvedValue({ data: { models: [{
       id: "tts-model", name: "Speech model", model_type: "tts", source: "own",
-      user_model_provider_id: "provider", user_model_provider_group_id: "group", provider_name: "Demo",
+      user_model_provider_id: "provider", user_model_provider_group_id: "group", provider_name: "SiliconFlow",
     }] } });
     renderPanel();
     await waitFor(() => expect(mocks.getSelectedModels).toHaveBeenCalled());
@@ -148,6 +148,47 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
     expect(
       await screen.findByRole("combobox", { name: "modelProvider.module.ttsTitle" }),
     ).toBeInTheDocument();
+  });
+
+  it.each(["available", "degraded", "unavailable"] as const)(
+    "preserves the server's %s availability for a saved Cloud selection",
+    async (availability) => {
+      mocks.getSelectedModels.mockResolvedValue({ data: { selections: [{
+        model_key: "llm", model_type: "llm", model_id: "lazymind-text-default",
+        name: "LazyMind Text", source: "cloud", provider_id: "lazymind-cloud",
+        provider_name: "LazyMind Cloud", availability,
+      }] } });
+      mocks.listModels.mockResolvedValue({ data: { models: [] } });
+      renderPanel();
+
+      const basic = await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+      const llmRow = within(basic).getByRole("group", { name: "modelProvider.module.llmChatTitle" });
+      if (availability === "unavailable") {
+        await within(llmRow).findByRole("button", { name: "modelProvider.configureCapability" });
+        expect(llmRow).toHaveClass("is-pending");
+        expect(within(llmRow).queryByRole("combobox")).not.toBeInTheDocument();
+      } else {
+        await within(llmRow).findByRole("combobox");
+        expect(llmRow).not.toHaveClass("is-pending");
+        expect(within(llmRow).getByText("LazyMind Text · LazyMind Cloud")).toBeInTheDocument();
+      }
+      expect(mocks.saveSelectedModels).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a Cloud catalog model unavailable when the server rejects its availability", async () => {
+    mocks.listModels.mockResolvedValue({ data: { models: [{
+      id: "lazymind-text-default", model_type: "llm", name: "LazyMind Text",
+      source: "cloud", provider_id: "lazymind-cloud", provider_name: "LazyMind Cloud",
+      availability: "unavailable", read_only: true,
+    }] } });
+    renderPanel();
+
+    const basic = await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const llmRow = within(basic).getByRole("group", { name: "modelProvider.module.llmChatTitle" });
+    await within(llmRow).findByRole("button", { name: "modelProvider.configureCapability" });
+    expect(within(llmRow).queryByRole("combobox")).not.toBeInTheDocument();
+    expect(mocks.saveSelectedModels).not.toHaveBeenCalled();
   });
 
   it("reloads model selections after the Cloud session changes", async () => {

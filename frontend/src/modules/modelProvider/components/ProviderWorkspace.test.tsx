@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsNavigationGuard } from "@/modules/settings/SettingsNavigationGuard";
 import { ProviderWorkspace } from "./ProviderWorkspace";
 import type { AddedProvider } from "../pages/ModelProvidersPage";
@@ -205,6 +205,118 @@ beforeEach(() => {
   mocks.setActiveKey.mockResolvedValue({
     group_id: "backup",
     key_id: "opaque-backup",
+  });
+});
+
+describe("supplier navigation accessibility", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function narrowViewport() {
+    const original = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      ...original(query), matches: query === "(max-width: 800px)",
+    }));
+  }
+
+  it("announces the pressed supplier filter", () => {
+    setup();
+    const all = screen.getByRole("button", { name: "modelProvider.workspace.all" });
+    const configured = screen.getByRole("button", { name: "modelProvider.workspace.configured" });
+    expect(all).toHaveAttribute("aria-pressed", "true");
+    expect(configured).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(configured);
+    expect(all).toHaveAttribute("aria-pressed", "false");
+    expect(configured).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("moves narrow-screen focus into detail and back to the selected supplier", () => {
+    narrowViewport();
+    setup();
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    const supplier = navigation.getByRole("button", { name: "OpenAI" });
+    supplier.focus();
+    fireEvent.click(supplier);
+    const title = within(screen.getByRole("heading", { name: "OpenAI", level: 2 })).getByRole("button");
+    expect(title).toHaveFocus();
+    const back = screen.getByRole("button", { name: "modelProvider.workspace.suppliers" });
+    back.focus();
+    fireEvent.click(back);
+    expect(supplier).toHaveFocus();
+    expect(document.querySelector(".provider-workspace")).not.toHaveClass("is-mobile-detail");
+  });
+
+  it("restores focus to a nested service after returning from narrow-screen detail", () => {
+    narrowViewport();
+    const services = [provider, standardInformationProvider, codingInformationProvider];
+    setup({ providers: services, configuredProviders: services });
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    fireEvent.click(navigation.getByRole("button", { name: "Volcengine" }));
+    const supplier = navigation.getByRole("button", { name: "Coding Plan" });
+    supplier.focus();
+    fireEvent.click(supplier);
+    expect(within(screen.getByRole("heading", { name: "Volcengine · Coding Plan", level: 2 })).getByRole("button")).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.suppliers" }));
+    expect(supplier).toHaveFocus();
+  });
+
+  it("preserves desktop navigation focus when selecting a supplier", () => {
+    setup();
+    const supplier = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" })).getByRole("button", { name: "OpenAI" });
+    supplier.focus();
+    fireEvent.click(supplier);
+    expect(supplier).toHaveFocus();
+  });
+
+  it("returns to search when supplier buttons are temporarily disabled", async () => {
+    narrowViewport();
+    const unconfigured = { ...provider, groups: [] };
+    let finishCreate!: (result: unknown) => void;
+    mocks.createGroup.mockImplementationOnce(() => new Promise((resolve) => { finishCreate = resolve; }));
+    setup({ providers: [unconfigured], configuredProviders: [unconfigured] });
+    fireEvent.click(within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" })).getByRole("button", { name: "OpenAI" }));
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.getModelList" }));
+    await waitFor(() => expect(mocks.createGroup).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.suppliers" }));
+    expect(screen.getByRole("textbox", { name: "modelProvider.searchAria" })).toHaveFocus();
+    await act(async () => finishCreate({ data: { id: "new-private-record" } }));
+  });
+
+  it("moves focus out of a sidebar that becomes hidden at the narrow breakpoint", () => {
+    let narrow = false;
+    let onChange: ((event: MediaQueryListEvent) => void) | undefined;
+    const original = window.matchMedia;
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => query === "(max-width: 800px)" ? {
+      ...original(query),
+      get matches() { return narrow; },
+      addEventListener: (_type, listener) => { onChange = listener as (event: MediaQueryListEvent) => void; },
+      removeEventListener: () => { onChange = undefined; },
+    } : original(query));
+    setup();
+    const supplier = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" })).getByRole("button", { name: "OpenAI" });
+    supplier.focus();
+    fireEvent.click(supplier);
+    expect(supplier).toHaveFocus();
+    act(() => {
+      narrow = true;
+      onChange?.({ matches: true } as MediaQueryListEvent);
+    });
+    expect(within(screen.getByRole("heading", { name: "OpenAI", level: 2 })).getByRole("button")).toHaveFocus();
+  });
+
+  it("leaves narrow-screen focus in detail when unsaved navigation is cancelled", async () => {
+    narrowViewport();
+    setup({}, true);
+    const supplier = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" })).getByRole("button", { name: "OpenAI" });
+    fireEvent.click(supplier);
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }), { target: { value: "https://draft.example.test/v1" } });
+    const back = screen.getByRole("button", { name: "modelProvider.workspace.suppliers" });
+    back.focus();
+    fireEvent.click(back);
+    fireEvent.click(await screen.findByRole("button", { name: "settingsPage.unsaved.stay" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(document.querySelector(".provider-workspace")).toHaveClass("is-mobile-detail");
+    expect(back).toHaveFocus();
+    expect(screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" })).toHaveValue("https://draft.example.test/v1");
   });
 });
 

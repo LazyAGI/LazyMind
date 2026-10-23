@@ -26,6 +26,7 @@ import {
   Spin,
   Tooltip,
   message,
+  type InputRef,
 } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
@@ -150,6 +151,12 @@ export function ProviderWorkspace(props: Props) {
   const [informationOpen, setInformationOpen] = useState(false);
   const informationTrigger = useRef<HTMLButtonElement>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
+  const supplierSearch = useRef<InputRef>(null);
+  const supplierSidebar = useRef<HTMLElement>(null);
+  const supplierDetail = useRef<HTMLElement>(null);
+  const supplierButtons = useRef(new Map<string, HTMLButtonElement>());
+  const supplierReturnTarget = useRef<HTMLButtonElement | null>(null);
+  const navigationFocus = useRef<"detail" | "list" | null>(null);
   const [endpointSaving, setEndpointSaving] = useState(false);
   const [savedEndpoint, setSavedEndpoint] = useState<{ providerId: string; baseUrl: string }>();
   const [keyOpen, setKeyOpen] = useState(false);
@@ -262,14 +269,47 @@ export function ProviderWorkspace(props: Props) {
     props.onLoadModels(provider, group);
   }, [groupKey]);
 
-  const selectProvider = (id: string) => {
+  useEffect(() => {
+    const narrowViewport = window.matchMedia("(max-width: 800px)");
+    const focusList = () => {
+      const target = [supplierReturnTarget.current, supplierButtons.current.get(provider?.id || ""),
+        supplierButtons.current.get(selectedAncestorId || "")].find((button) => button?.isConnected && !button.disabled && !button.closest("[hidden]"));
+      if (target) target.focus({ preventScroll: true });
+      else supplierSearch.current?.focus({ preventScroll: true });
+    };
+    const focusDetail = () => informationTrigger.current?.focus({ preventScroll: true });
+    const destination = navigationFocus.current;
+    if (destination && (destination === "detail") === mobileDetail) {
+      navigationFocus.current = null;
+      // Desktop keeps both panes visible, so retain the initiating control's focus.
+      if (narrowViewport.matches) {
+        if (destination === "detail") focusDetail(); else focusList();
+      }
+    }
+    const onBreakpointChange = (event: MediaQueryListEvent) => {
+      if (!event.matches) return;
+      const focused = document.activeElement;
+      if (mobileDetail && supplierSidebar.current?.contains(focused)) focusDetail();
+      else if (!mobileDetail && supplierDetail.current?.contains(focused)) focusList();
+    };
+    narrowViewport.addEventListener("change", onBreakpointChange);
+    return () => narrowViewport.removeEventListener("change", onBreakpointChange);
+  }, [mobileDetail, provider?.id, selectedAncestorId]);
+
+  const selectProvider = (id: string, trigger?: HTMLButtonElement) => {
+    supplierReturnTarget.current = trigger || supplierButtons.current.get(id) || null;
+    navigationFocus.current = "detail";
     setSelectedId(id);
     setModelSearch("");
     setModelType("all");
     setMobileDetail(true);
   };
-  const changeProvider = (id: string) =>
-    confirmEndpointLeave(() => selectProvider(id));
+  const changeProvider = (id: string, trigger: HTMLButtonElement) =>
+    confirmEndpointLeave(() => selectProvider(id, trigger));
+  const returnToSuppliers = () => confirmEndpointLeave(() => {
+    navigationFocus.current = "list";
+    setMobileDetail(false);
+  });
   const configureInformationProvider = (id: string) => {
     if (id === provider?.id) {
       setInformationOpen(false);
@@ -578,11 +618,12 @@ export function ProviderWorkspace(props: Props) {
   ) : null;
   const leafButton = (item: AddedProvider, nested = false) => (
     <button type="button" key={item.id} data-provider-id={item.id}
+      ref={(button) => { if (button) supplierButtons.current.set(item.id, button); else supplierButtons.current.delete(item.id); }}
       aria-label={nested ? getProviderServiceDisplayName(item, language) : getProviderDisplayName(item, language)}
       className={`provider-workspace-provider${nested ? " is-service" : ""}${provider?.id === item.id ? " is-active" : ""}`}
       aria-current={provider?.id === item.id ? "page" : undefined}
       disabled={initializing || providerSaving || providerDeleting}
-      onClick={() => changeProvider(item.id)} title={getProviderDisplayName(item, language)}>
+      onClick={(event) => changeProvider(item.id, event.currentTarget)} title={getProviderDisplayName(item, language)}>
       {!nested ? <Logo provider={item} /> : null}
       <span className="provider-workspace-provider-name">{nested ? getProviderServiceDisplayName(item, language) : getProviderDisplayName(item, language)}</span>
       {statusMark([item])}
@@ -622,10 +663,12 @@ export function ProviderWorkspace(props: Props) {
       ) : null}
       <div className="provider-workspace-body">
         <aside
+          ref={supplierSidebar}
           className="provider-workspace-sidebar"
           aria-label={label("suppliers")}
         >
           <Input
+            ref={supplierSearch}
             allowClear
             prefix={<SearchOutlined aria-hidden="true" />}
             aria-label={t("modelProvider.searchAria")}
@@ -636,6 +679,7 @@ export function ProviderWorkspace(props: Props) {
           <div className="provider-workspace-filters">
             <button
               aria-label={label("all")}
+              aria-pressed={!configuredOnly}
               className={!configuredOnly ? "is-active" : ""}
               type="button"
               onClick={() => setConfiguredOnly(false)}
@@ -644,6 +688,7 @@ export function ProviderWorkspace(props: Props) {
             </button>
             <button
               aria-label={label("configured")}
+              aria-pressed={configuredOnly}
               className={configuredOnly ? "is-active" : ""}
               type="button"
               onClick={() => setConfiguredOnly(true)}
@@ -664,6 +709,7 @@ export function ProviderWorkspace(props: Props) {
               const listId = `${navigationId}-${node.id}`;
               return <>
                 <button type="button" className="provider-workspace-provider is-brand"
+                  ref={(button) => { if (button) supplierButtons.current.set(node.id, button); else supplierButtons.current.delete(node.id); }}
                   aria-label={getProviderBrandDisplayName(node, language)} aria-expanded={expanded} aria-controls={listId}
                   disabled={initializing || providerSaving || providerDeleting}
                   title={getProviderBrandDisplayName(node, language)}
@@ -711,7 +757,7 @@ export function ProviderWorkspace(props: Props) {
             </Tooltip>
           </div>
         </aside>
-        <main className="provider-workspace-detail">
+        <main ref={supplierDetail} className="provider-workspace-detail">
           {provider ? (
             <>
               <header className="provider-workspace-supplier-header">
@@ -721,7 +767,7 @@ export function ProviderWorkspace(props: Props) {
                     className="provider-workspace-mobile-back"
                     aria-label={label("suppliers")}
                     icon={<ArrowLeftOutlined aria-hidden="true" />}
-                    onClick={() => confirmEndpointLeave(() => setMobileDetail(false))}
+                    onClick={returnToSuppliers}
                   />
                   <Logo provider={provider} />
                   <div className="provider-workspace-supplier-identity">

@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from .contracts import ProbeInput, ProbePlan, UnsupportedProbe
 from .fixtures import AUDIO, AUDIO_BASE64, IMAGE, IMAGE_DATA_URL
+from .runtime_support import runtime_source, supports_runtime_type
 
 MODEL_TYPES = {'llm', 'vlm', 'embed', 'multimodal_embedding', 'rerank', 'text2image',
                'image_editing', 'text2video', 'tts', 'stt'}
@@ -64,7 +65,9 @@ def build_plan(request: ProbeInput) -> ProbePlan:
         raise UnsupportedProbe('unknown_type')
     if kind not in MODEL_TYPES:
         raise UnsupportedProbe('unsupported_type')
-    source = request.source.strip().lower().replace('_', '').replace('-', '')
+    if not supports_runtime_type(request.source, kind):
+        raise UnsupportedProbe('unsupported_provider')
+    source = runtime_source(request.source)
     if kind in {'llm', 'vlm'}:
         if source not in COMPATIBLE | {'anthropic', 'claude', 'qwen', 'doubao', 'sensenova', 'minimax'}:
             raise UnsupportedProbe('unsupported_provider')

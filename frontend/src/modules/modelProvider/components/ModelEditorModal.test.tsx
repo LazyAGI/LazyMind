@@ -28,6 +28,7 @@ function props(current: ProviderModel = model) {
   return {
     model: current,
     providerName: "Gateway",
+    protocolName: "SiliconFlow",
     capabilities,
     models: [current],
     onSave: vi.fn().mockResolvedValue(undefined),

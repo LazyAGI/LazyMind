@@ -143,14 +143,14 @@ func TestBuildLLMConfigPreservesVisionCapabilityOfMainModel(t *testing.T) {
 	if config["llm"].(map[string]any)["vision"] != true {
 		t.Fatal("main model's visual capability was dropped")
 	}
-	config = BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm"}})
+	config = BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm", ProviderName: "OpenAI"}})
 	if config["llm"].(map[string]any)["vision"] != false {
 		t.Fatal("plain llm must default to no image support")
 	}
 }
 
 func TestBuildLLMConfigDeclaredVision(t *testing.T) {
-	config := BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm", Vision: true}})
+	config := BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm", ProviderName: "OpenAI", Vision: true}})
 	if config["llm"].(map[string]any)["vision"] != true {
 		t.Fatal("declared LLM vision capability lost")
 	}

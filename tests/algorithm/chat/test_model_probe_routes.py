@@ -94,7 +94,7 @@ def test_route_does_not_send_authentication_for_self_hosted_models(monkeypatch):
 
 
 def test_route_reports_async_generation_as_accepted_without_polling(monkeypatch):
-    response, requests = call_route(monkeypatch, request_body(model_type='text2video'), response={
+    response, requests = call_route(monkeypatch, request_body(model_type='text2video', source='OpenRouter'), response={
         'id': 'secret-do-not-return', 'status': 'queued',
     })
     assert response.json()['status'] == 'accepted'

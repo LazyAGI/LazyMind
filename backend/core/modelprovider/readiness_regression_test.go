@@ -40,15 +40,15 @@ func TestTTSReadinessWithoutRuntimeRole(t *testing.T) {
 			if tc.owner != "" {
 				now := time.Now().UTC()
 				model := orm.UserModelProviderGroupModel{
-					ID: "speech-model", UserModelProviderID: "supplier", UserModelProviderGroupID: "connection", Name: "Demo speech", ProviderName: "Demo", ModelType: "tts",
+					ID: "speech-model", UserModelProviderID: "supplier", UserModelProviderGroupID: "connection", Name: "Demo speech", ProviderName: "SiliconFlow", ModelType: "tts",
 					BaseModel: orm.BaseModel{CreateUserID: tc.owner, CreatedAt: now, UpdatedAt: now},
 				}
 				selection := orm.UserSelectedModel{
 					UserID: tc.owner, UserName: "Demo admin", ModelKey: "tts", Share: tc.shared,
 					UserModelProviderGroupModelID: model.ID, CreatedAt: now, UpdatedAt: now,
 				}
-				parent := orm.UserModelProvider{ID: "supplier", Name: "OpenAI", Capabilities: "has_models", BaseModel: model.BaseModel}
-				group := orm.UserModelProviderGroup{ID: "connection", UserModelProviderID: "supplier", BaseURL: "https://api.openai.com/v1/", APIKey: "saved-key", IsVerified: true, BaseModel: model.BaseModel}
+				parent := orm.UserModelProvider{ID: "supplier", Name: "SiliconFlow", Capabilities: "has_models", BaseModel: model.BaseModel}
+				group := orm.UserModelProviderGroup{ID: "connection", UserModelProviderID: "supplier", BaseURL: "https://api.siliconflow.cn/v1/", APIKey: "saved-key", IsVerified: true, BaseModel: model.BaseModel}
 				for _, row := range []any{&parent, &group, &model, &selection} {
 					if err := db.DB.Create(row).Error; err != nil {
 						t.Fatal(err)

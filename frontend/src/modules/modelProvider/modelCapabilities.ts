@@ -21,11 +21,33 @@ export function isKnownRuntimeModelType(value: string): boolean {
   return runtimeModelTypes.has(normalizeRuntimeModelType(value));
 }
 
-function isAnthropicProtocol(protocol?: string) {
-  return /^(claude|anthropic)$/i.test(protocol?.trim() || "");
-}
+// Executable LazyLLM adapters, matching Core's runtimeModelTypesBySource and the
+// algorithm registry contract. Catalog membership alone does not imply support.
+const runtimeModelTypesBySource: Record<string, readonly string[]> = {
+  aiping: ["llm", "vlm", "embed", "rerank", "text2image"],
+  claude: ["llm", "vlm"],
+  deepseek: ["llm", "vlm"],
+  doubao: ["llm", "vlm", "embed", "multimodal_embedding", "text2image", "image_editing", "text2video"],
+  glm: ["llm", "vlm", "embed", "rerank", "text2image", "stt"],
+  kimi: ["llm", "vlm"],
+  minimax: ["llm", "vlm", "text2image", "tts"],
+  openai: ["llm", "vlm", "embed", "multimodal_embedding", "rerank"],
+  openrouter: ["llm", "vlm", "embed", "text2image", "text2video", "tts", "stt"],
+  ppio: ["llm", "vlm"],
+  qwen: ["llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "image_editing", "text2video", "tts", "stt"],
+  sensenova: ["llm", "vlm", "embed", "text2image", "image_editing"],
+  siliconflow: ["llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "image_editing", "text2video", "tts", "stt"],
+};
 
-const openRouterRuntimeTypes = new Set(["llm", "vlm", "embed", "text2image", "text2video", "tts", "stt"]);
+function runtimeSource(protocol?: string) {
+  const source = (protocol || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const aliases: Record<string, string> = {
+    anthropic: "claude", bigmodel: "glm", moonshot: "kimi", tongyiqianwen: "qwen",
+    volcanoark: "doubao", volcengine: "doubao", zhipu: "glm", zhipuai: "glm",
+    vllm: "openai", lmdeploy: "openai",
+  };
+  return Object.prototype.hasOwnProperty.call(aliases, source) ? aliases[source] : source;
+}
 
 const capabilityRuntimeTypes: Record<ModelCapability, string> = {
   LLM_CHAT: "llm", LLM_SELF_EVOLUTION: "llm", VLM: "vlm", EMBEDDING: "embed",
@@ -40,9 +62,9 @@ export function getRuntimeModelTypeForCapability(capability: ModelCapability): s
 /** A protocol determines which real runtime adapters can serve a model. */
 export function isModelTypeSupportedByProtocol(modelType: string, protocol?: string) {
   const normalized = normalizeRuntimeModelType(modelType);
-  return runtimeModelTypes.has(normalized) &&
-    (!isAnthropicProtocol(protocol) || normalized === "llm" || normalized === "vlm") &&
-    (!/^openrouter$/i.test(protocol?.trim() || "") || openRouterRuntimeTypes.has(normalized));
+  const source = runtimeSource(protocol);
+  return runtimeModelTypes.has(normalized) && Object.prototype.hasOwnProperty.call(runtimeModelTypesBySource, source) &&
+    runtimeModelTypesBySource[source].includes(normalized);
 }
 
 export function getSelectableCapabilities(
