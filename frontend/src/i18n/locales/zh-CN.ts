@@ -2712,6 +2712,18 @@ const zhCN = {
   },
 
   chat: {
+    preview: {
+      workflowUnavailable: '对应的工作流当前不可用，请先打开该工作流再预览。',
+      workflowStepUnavailable: '暂时无法定位产物所属步骤，请刷新工作流后重试。',
+      messageArtifacts: '本次产物',
+      "failed": "暂时无法预览此文件，请重试或下载后查看。",
+      "unavailable": "文件已不可访问，请确认文件仍存在且你有访问权限。",
+      "unsupported": "暂不支持预览此格式，可以下载后查看。",
+      "retry": "重新加载",
+      "download": "下载 {{name}}",
+      "downloadFailed": "下载失败，请重试。",
+      "versions": "版本记录"
+},
     sidebar: {
       expand: "展开", collapse: "收起",
       overview: "概览", sidechat: "侧面聊天", open: "展开侧面面板", close: "收起侧面面板",

@@ -2763,6 +2763,18 @@ const enUS = {
 
   // Chat
   chat: {
+    preview: {
+      workflowUnavailable: 'Open the corresponding workflow before previewing this output.',
+      workflowStepUnavailable: 'The output step could not be located. Refresh the workflow and try again.',
+      messageArtifacts: 'Outputs',
+      "failed": "Unable to preview this file. Retry or download it to view.",
+      "unavailable": "This file is unavailable. Check that it exists and you have access.",
+      "unsupported": "Preview is not supported for this format. You can download the file.",
+      "retry": "Reload",
+      "download": "Download {{name}}",
+      "downloadFailed": "Download failed. Please retry.",
+      "versions": "Version history"
+},
     sidebar: {
       expand: "Expand", collapse: "Collapse",
       overview: "Overview", sidechat: "Side chat", open: "Open side panel", close: "Collapse side panel",

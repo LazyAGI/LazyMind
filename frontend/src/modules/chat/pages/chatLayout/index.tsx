@@ -56,6 +56,8 @@ import {
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
+import ArtifactPreview from "@/modules/chat/components/ArtifactPreview";
+import { ArtifactPreviewContext, useArtifactPreviewController } from "@/modules/chat/components/ArtifactPreview/context";
 import ArtifactPanel from "@/modules/chat/components/ArtifactPanel";
 import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { taskCenterDisplayCount } from "@/modules/chat/components/TaskCenter/taskTimeline";
@@ -139,6 +141,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     initPendingConversationSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
+  const artifactPreview = useArtifactPreviewController(routeConversationId || sessionId);
   const fork = useForkConversation(routeConversationId || sessionId);
   const location = useLocation();
   const anchorHistoryId = new URLSearchParams(location.search).get("anchor_history_id") || undefined;
@@ -976,8 +979,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     (chatRef.current as any)?.uploadFiles?.(files);
   };
 
+  const sidebarPreview = artifactPreview.target?.workflow ? null : artifactPreview.target;
   const isTaskPanelRestoreVisible =
-    Boolean(sessionId) && !workflowPanelExpanded && isTaskPanelCollapsed;
+    Boolean(sessionId) && !workflowPanelExpanded && isTaskPanelCollapsed && !sidebarPreview;
   const isRetainedSidechat =
     conversationRelation?.relationType === CONVERSATION_RELATION_SIDECHAT;
   const canOpenSideChat =
@@ -987,6 +991,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     !conversationRelation;
 
   return (
+    <ArtifactPreviewContext.Provider value={artifactPreview}>
     <div
       className={`detail-container${workflowPanelExpanded ? " detail-container--workflow-expanded" : ""}`}
       onDragEnter={handleDragEnter}
@@ -1094,7 +1099,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           }
         />
       </div>
-      {sessionId && !workflowPanelExpanded && (
+      {sessionId && !workflowPanelExpanded && !sidebarPreview && (
         <button
           type="button"
           className={`task-panel-restore-btn${showOrdinaryRightBox ? " is-expanded" : ""}`}
@@ -1111,6 +1116,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       )}
       {(sessionId || workflowPanelExpanded) && (
         <div
+          hidden={Boolean(sidebarPreview) && !workflowPanelExpanded}
           id="conversation-context-panel"
           className={`right-box${!showOrdinaryRightBox && !workflowPanelExpanded ? " right-box--collapsed" : ""}${!developerModeActive && !workflowPanelExpanded ? " right-box--ordinary" : ""}${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" ? " right-box--tab-hidden" : ""}`}
           aria-hidden={(workflowPanelExpanded && expandedRailTab !== "tasks") || (!showOrdinaryRightBox && !workflowPanelExpanded)}
@@ -1190,7 +1196,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           )}
         </div>
       )}
+      {sidebarPreview && <ArtifactPreview target={sidebarPreview} onClose={artifactPreview.close}
+        onVersions={artifactPreview.onVersions} />}
     </div>
+    </ArtifactPreviewContext.Provider>
   );
 };
 

@@ -4,10 +4,13 @@ import i18n from "@/i18n";
 
 interface RenderPptProps {
   fileData: ArrayBuffer;
+  onPreviewError?: () => void;
 }
 
 const RenderPpt = (props: RenderPptProps) => {
   const { fileData } = props;
+  const errorCallback = useRef(props.onPreviewError);
+  errorCallback.current = props.onPreviewError;
 
   const showFile = useRef<HTMLDivElement>(null);
 
@@ -38,6 +41,8 @@ const RenderPpt = (props: RenderPptProps) => {
         showFile.current.appendChild(previewContainer);
       }
     } catch (err) {
+      if (!showFile.current) return;
+      if (errorCallback.current) { errorCallback.current(); return; }
       console.error("PPTX preview error:", err);
 
       showFile.current.innerHTML = "";

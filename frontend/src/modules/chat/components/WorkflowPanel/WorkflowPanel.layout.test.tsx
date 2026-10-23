@@ -7,6 +7,11 @@ import { SlotEditingContext, WorkflowPanelTabActiveContext, type SlotEditingCont
 import { WorkflowPanel } from './index';
 import { controlActions, type WorkflowControlView } from '@/modules/chat/utils/workflowControl';
 import { loadWorkflowRunSnapshot } from '@/modules/chat/utils/loadWorkflowRun';
+import { ArtifactPreviewContext, useArtifactPreviewController } from '../ArtifactPreview/context';
+
+vi.mock('../ArtifactPreview', () => ({ PreviewContent: ({ target, close }: any) => <section aria-label={target.filename}>
+  {target.content}<button onClick={close}>关闭预览</button>
+</section> }));
 
 const fixture = vi.hoisted(() => ({
   session: {} as WorkflowSession,
@@ -129,6 +134,56 @@ describe('shared workflow compact layout', () => {
     act(() => setDeveloperModeActive(false));
     expect(screen.queryByRole('tab', { name: '写作准备' })).not.toBeInTheDocument();
     expect(fixture.session.slots!.some(slot => slot.slot_id === 'internal_prompt')).toBe(true);
+  });
+
+  it('leaves expanded workflow mode when previewing an ordinary reply in the same conversation', async () => {
+    const controller = { target: null, open: vi.fn(), close: vi.fn(), onVersions: undefined };
+    const view = render(<ArtifactPreviewContext.Provider value={controller}><WorkflowPanel conversationId="layout-test" /></ArtifactPreviewContext.Provider>);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    fireEvent.click(screen.getByRole('button', { name: '展开工作流面板' }));
+    expect(document.querySelector('.workflow-panel--expanded')).not.toBeNull();
+    view.rerender(<ArtifactPreviewContext.Provider value={{ ...controller, target: { key: 'ordinary', filename: 'report.md', content: 'report' } }}>
+      <WorkflowPanel conversationId="layout-test" />
+    </ArtifactPreviewContext.Provider>);
+    await waitFor(() => expect(document.querySelector('.workflow-panel--expanded')).toBeNull());
+    expect(screen.getByText('正文 document')).toBeInTheDocument();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+  });
+
+  it('opens an auxiliary output in a shared result tab through status_step_ids', async () => {
+    fixture.ui.tabs![1].status_step_ids = ['write_document', 'write_flat_document'];
+    const controller = { target: { key: 'visual:1', filename: 'visual.json', content: 'visual plan',
+      workflow: { sessionId: 'layout-test', stepId: 'write_flat_document' } }, open: vi.fn(), close: vi.fn(), onVersions: undefined };
+    render(<ArtifactPreviewContext.Provider value={controller}><WorkflowPanel conversationId="layout-test" /></ArtifactPreviewContext.Provider>);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(screen.getByRole('region', { name: 'visual.json' })).toHaveTextContent('visual plan');
+    expect(controller.close).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole('region', { name: 'visual.json' }).parentElement!, { key: 'Escape' });
+    expect(controller.close).toHaveBeenCalledOnce();
+  });
+
+  it('locates a stage output inside its workflow step without unmounting the editor', async () => {
+    function Host() {
+      const controller = useArtifactPreviewController('layout-test');
+      return <ArtifactPreviewContext.Provider value={controller}>
+        <button onClick={() => controller.open({ key: 'plan:2', filename: 'plan.json', content: 'exact plan revision 2',
+          workflow: { sessionId: 'layout-test', stepId: 'prepare' } })}>预览计划</button>
+        <WorkflowPanel conversationId='layout-test' />
+      </ArtifactPreviewContext.Provider>;
+    }
+    render(<Host />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    const editor = screen.getByText('正文 document');
+    fireEvent.click(screen.getByRole('button', { name: '预览计划' }));
+    await screen.findByRole('tab', { name: '写作准备', selected: true });
+    expect(screen.getByRole('region', { name: 'plan.json' }).closest('.workflow-panel__body')).not.toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(editor).toBeInTheDocument();
+    expect(editor).not.toBeVisible();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('tab', { name: '成稿' }));
+    expect(screen.queryByRole('region', { name: 'plan.json' })).not.toBeInTheDocument();
+    expect(editor).toBeVisible();
   });
 
   it('keeps a replacement document action when the previous registration cleans up', async () => {

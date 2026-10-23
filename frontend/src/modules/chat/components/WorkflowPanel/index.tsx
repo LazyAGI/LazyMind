@@ -72,6 +72,8 @@ import {
 } from './compositeArtifactLayout';
 import { linkedPageTabs, buildPageOrderChange } from './workflowPageGroup';
 import { WorkflowTrustNotice } from './WorkflowTrustNotice';
+import { PreviewContent } from '../ArtifactPreview';
+import { useArtifactPreview } from '../ArtifactPreview/context';
 import './WorkflowPanel.scss';
 
 const PageGroupContext = React.createContext<{ tabs: TabDef[]; pages: Record<string, number>; select: (group: string, page: number) => void }>({ tabs: [], pages: {}, select: () => {} });
@@ -1675,6 +1677,10 @@ export function WorkflowPanel({
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
   const { session, loading, refresh: refreshConversation } = useWorkflowSession(conversationId, Boolean(onRefresh));
+  const artifactPreview = useArtifactPreview();
+  const previewTarget = artifactPreview?.target?.workflow && artifactPreview.target.workflow.sessionId === session?.session_id
+    ? artifactPreview?.target : null;
+  const previewFocusRef = useRef<HTMLDivElement>(null);
   const refresh = onRefresh ?? refreshConversation;
   const activities = externalPresentation?.activities ?? {};
   const runningTasks = externalPresentation ? activeExecutionTasks(session) : [];
@@ -1770,6 +1776,11 @@ export function WorkflowPanel({
       detail: { conversationId, expanded: nextExpanded },
     }));
   }, [conversationId]);
+
+  useEffect(() => {
+    // A conversation can contain both ordinary replies and a workflow.
+    if (!embedded && expanded && artifactPreview?.target && !artifactPreview.target.workflow) setExpandedMode(false);
+  }, [artifactPreview?.target, embedded, expanded, setExpandedMode]);
 
   useEffect(() => {
     window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
@@ -1897,12 +1908,37 @@ export function WorkflowPanel({
   }, [session?.session_id]);
 
   // Track focused tab changes.
+  useEffect(() => {
+    if (!previewTarget?.workflow) return;
+    const tabs = filterWorkflowTabs(ui.tabs ?? [], session?.slots ?? [], ui.tab_visibility_ready_material);
+    const stepId = previewTarget.workflow.stepId;
+    const idx = tabs.findIndex(tab => [tab.step_id ?? tab.id, ...(tab.status_step_ids ?? [])].includes(stepId));
+    if (tabs.length && idx === -1) {
+      antdMessage.info(t('chat.preview.workflowStepUnavailable'));
+      artifactPreview?.close();
+      return;
+    }
+    if (idx !== -1) {
+      setActiveTabIdx(idx);
+      setFocusedTab(conversationId, tabs[idx].id);
+    }
+    setFocusedSortOrder(conversationId, undefined);
+    if (externalPresentation?.collapsed) externalPresentation.onToggleCollapse?.();
+    setCollapsed(false);
+    const frame = requestAnimationFrame(() => {
+      previewFocusRef.current?.scrollIntoView?.({ block: 'nearest' });
+      previewFocusRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [previewTarget, ui, conversationId, session?.session_id, setFocusedTab, setFocusedSortOrder]);
+
   const handleTabChange = useCallback((idx: number, tabId: string) => {
+    if (previewTarget) artifactPreview?.close();
     setActiveTabIdx(idx);
     setFocusedTab(conversationId, tabId);
     const group = ui.tabs?.find(tab => tab.id === tabId)?.page_group;
     setFocusedSortOrder(conversationId, group ? groupPages[group] : undefined);
-  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages]);
+  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages, previewTarget, artifactPreview?.close]);
 
   const handleFocusSortOrder = useCallback((sortOrder: number | undefined) => {
     setFocusedSortOrder(conversationId, sortOrder);
@@ -2368,8 +2404,12 @@ export function WorkflowPanel({
 
       {/* Body */}
       {!collapsed && (
-        <div className='workflow-panel__body' key={session.session_id}>
+        <div className={`workflow-panel__body${previewTarget ? ' workflow-panel__body--artifact-preview' : ''}`} key={session.session_id}>
           <PageGroupContext.Provider value={{ tabs: ui.tabs ?? [], pages: groupPages, select: selectGroupPage }}>
+          {previewTarget && <div className="workflow-panel__artifact-preview" ref={previewFocusRef} tabIndex={-1}
+            onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); artifactPreview?.close(); } }}>
+            <PreviewContent key={previewTarget.key} target={previewTarget} close={() => artifactPreview?.close()} onVersions={artifactPreview?.onVersions} />
+          </div>}
           <WorkflowExtensions names={ui?.extensions} session={session} disabled={actionPending}
             beforeAction={flushPendingEdits} onRefresh={refresh} onSendMessage={onSendMessage} />
           {hasTabs ? (
@@ -2381,7 +2421,7 @@ export function WorkflowPanel({
                 id={`workflow-tab-panel-${tab.id}`}
                 role='tabpanel'
                 aria-labelledby={`workflow-tab-${session.session_id}-${tab.id}`}
-                hidden={idx !== visibleActiveTabIdx}
+                hidden={Boolean(previewTarget) || idx !== visibleActiveTabIdx}
               >
                 <WorkflowPanelTabActiveContext.Provider value={idx === visibleActiveTabIdx}>
                 <SlotDownloadContext.Provider value={!previewing && workflowTabAllowsDownload(tab, idx, tabs.length)}>
@@ -2414,7 +2454,7 @@ export function WorkflowPanel({
       {!collapsed && (showActions || controlAdapter) && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0
         || rollbackSteps.length > 0 || sessionBusy || (showContinue && !approvalStepId) || displayStatus === 'failed' || displayStatus === 'stopped') && (
         <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
-          {documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0 ? (
+          {!previewTarget && (documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0) ? (
             <DocumentActions documentFooter={documentFooter} actionPending={actionPending} runFooterAction={runFooterAction} />
           ) : null}
           {sessionBusy && !approvalStepId && (
