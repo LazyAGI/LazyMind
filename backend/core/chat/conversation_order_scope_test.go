@@ -15,7 +15,7 @@ func TestConversationOrderWithinExistingRelationships(t *testing.T) {
 	for _, kind := range []string{"recent", "group", "project", "children"} {
 		for _, task := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/task=%t", kind, task), func(t *testing.T) {
-				db := newPromptTestDB(t).DB
+				db := newConversationTestDB(t).DB
 				store.Init(db, nil, nil)
 				t.Cleanup(func() { store.Init(nil, nil, nil) })
 				before := time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)
@@ -108,7 +108,7 @@ func TestConversationOrderWithinExistingRelationships(t *testing.T) {
 func TestConversationOrderRejectsDifferentLists(t *testing.T) {
 	for _, kind := range []string{"mode", "parent", "group", "project"} {
 		t.Run(kind, func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newConversationTestDB(t).DB
 			store.Init(db, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			for _, id := range []string{"moved", "target", "parent-a", "parent-b"} {
@@ -152,7 +152,7 @@ func TestConversationOrderRejectsDifferentLists(t *testing.T) {
 func TestConversationOrderRejectsOrganizerLockedScope(t *testing.T) {
 	for _, lockedID := range []string{"moved", "target", "unloaded"} {
 		t.Run(lockedID, func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newConversationTestDB(t).DB
 			store.Init(db, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			for _, id := range []string{"moved", "target", "unloaded"} {

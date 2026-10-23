@@ -1958,5 +1958,6 @@
   "2004925": { "en-US": "Invalid paper library data", "zh-CN": "论文库数据无效" },
   "2004926": { "en-US": "Failed to read the imported document file", "zh-CN": "读取已导入的文档文件失败" },
   "2004927": { "en-US": "Failed to recover the imported document task", "zh-CN": "恢复已导入的文档任务失败" },
-  "2004928": { "en-US": "Failed to read the imported document task metadata", "zh-CN": "读取已导入文档的任务元数据失败" }
+  "2004928": { "en-US": "Failed to read the imported document task metadata", "zh-CN": "读取已导入文档的任务元数据失败" },
+  "2003219": { "en-US": "Failed to update the side chat source", "zh-CN": "更新侧聊引用失败" }
 }

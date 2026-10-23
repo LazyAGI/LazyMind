@@ -9,7 +9,7 @@ import (
 )
 
 func TestGlobalChannelGateAndTaskContentOverrideAreIndependent(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	global := DefaultNotificationConfig()
 	global.Channels["wecom"] = NotificationChannelRule{Enabled: false}
 	global.Events["succeeded"] = NotificationEventRule{Enabled: true, Content: "full"}
@@ -81,7 +81,7 @@ func TestNotificationRequiresBothMasterAndTaskEventEnabled(t *testing.T) {
 		{name: "both on", masterEnabled: true, taskEnabled: true, wantCount: 1, wantStatus: "pending"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newNotificationTestDB(t).DB
 			defaults, err := json.Marshal(DefaultNotificationConfig())
 			if err != nil {
 				t.Fatal(err)
@@ -149,7 +149,7 @@ func TestNotificationRequiresBothMasterAndTaskEventEnabled(t *testing.T) {
 }
 
 func TestTaskChannelOffDoesNotNotifyWhenMasterIsOn(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	defaults, _ := json.Marshal(DefaultNotificationConfig())
 	if err := db.Create(&orm.UserNotificationPreferences{UserID: "owner", Enabled: true, Revision: 1, Defaults: defaults, UpdatedAt: time.Now().UTC()}).Error; err != nil {
 		t.Fatal(err)

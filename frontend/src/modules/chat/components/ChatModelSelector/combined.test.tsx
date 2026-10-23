@@ -135,7 +135,11 @@ describe("ChatModelSelector combined thinking depth controls", () => {
       );
     }
     render(<ControlledSelector />);
-    await openControls("中");
+    const trigger = await openControls("中");
+    expect(trigger.querySelector("img")).toHaveAttribute(
+      "src",
+      "/provider-icons/deepseek.svg",
+    );
 
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
@@ -200,11 +204,13 @@ describe("ChatModelSelector combined thinking depth controls", () => {
     );
     fireEvent.click(await openModels());
 
-    expect(
-      await screen.findByRole("button", {
-        name: "当前模型：OpenAI · GPT-4o，思考深度：最高",
-      }),
-    ).toBeInTheDocument();
+    const trigger = await screen.findByRole("button", {
+      name: "当前模型：OpenAI · GPT-4o，思考深度：最高",
+    });
+    expect(trigger.querySelector("img")).toHaveAttribute(
+      "src",
+      "/provider-icons/openai.svg",
+    );
     expect(updateSelectionMock).toHaveBeenCalledWith(
       "conversation-1",
       { mode: "fixed", model_id: "gpt-4o" },

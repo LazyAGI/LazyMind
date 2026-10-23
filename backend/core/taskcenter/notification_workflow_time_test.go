@@ -8,7 +8,7 @@ import (
 )
 
 func TestWorkflowNotificationCompletionUsesCurrentDurableTransition(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	session := orm.WorkflowSession{ID: "session", CreateUserID: "owner", Status: "failed", CreatedAt: start, UpdatedAt: time.Now().UTC()}
 	if err := db.Create(&session).Error; err != nil {
@@ -37,7 +37,7 @@ func TestWorkflowNotificationCompletionUsesCurrentDurableTransition(t *testing.T
 }
 
 func TestWorkflowCallbackDoesNotEndActiveReplacement(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	sessionID := "session"
 	if err := db.Create(&orm.WorkflowSession{ID: sessionID, CreateUserID: "owner", Status: "active"}).Error; err != nil {
 		t.Fatal(err)

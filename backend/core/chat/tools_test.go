@@ -21,12 +21,16 @@ import (
 
 func newToolsTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db := orm.OpenTestDB(t)
-	models := append(orm.AllModelsForDDL(), &orm.UserSelectedProvider{})
-	if err := db.AutoMigrate(models...); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateTestDB(t,
+		&orm.MCPServer{}, &orm.MCPServerTool{}, &orm.UserDisabledTool{},
+		&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
+		&orm.UserSelectedProvider{}, &orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{},
+		&orm.UserChatSettings{}, &orm.UserUIPreferences{}, &orm.UserPersonalizationSetting{},
+		&orm.UserWorkflowSetting{}, &orm.UserEnvironmentVariable{}, &orm.SkillV2Skill{},
+		&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{}, &orm.ConversationIdleEvent{},
+		&orm.SubAgentTask{}, &orm.TaskCenterTask{}, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{},
+		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{},
+	)
 }
 
 func startChatToolsTestServer(t *testing.T, handler http.Handler) string {
