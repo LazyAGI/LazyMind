@@ -1,0 +1,26 @@
+.model-features-editor {
+  margin-bottom: 20px;
+  .model-features-heading,
+  .model-feature-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 60px;
+    align-items: center;
+    gap: 10px;
+  }
+  .model-features-heading {
+    color: var(--ant-color-text-secondary, #667085);
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .model-feature-row {
+    min-height: 44px;
+    .ant-form-item { margin: 0; }
+    .ant-select { width: 100%; }
+  }
+  .model-features-hint {
+    margin: 8px 0 0;
+    color: var(--ant-color-text-secondary, #667085);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}

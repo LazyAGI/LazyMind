@@ -109,6 +109,7 @@ function resolveStoredSelection(
     ...selection,
     provider_name: provider.name,
     model_name: model.name,
+    logo_data_url: model.logo_data_url || provider.logo_data_url,
     group_name: model.group_name,
     source: model.source ?? provider.source ?? selection.source,
     availability: isModelAvailable(model)
@@ -368,9 +369,11 @@ const ChatModelSelector = ({
     (model) => model.id === currentSelection?.model_id,
   );
   const currentProviderName = currentProvider?.name ?? currentSelection?.provider_name;
-  const currentProviderLogoUrl = currentProviderName
-    ? getProviderLogoUrl(currentProviderName)
-    : undefined;
+  const currentProviderLogoUrl =
+    currentModel?.logo_data_url || currentProvider?.logo_data_url || currentSelection?.logo_data_url ||
+    (currentProviderName
+      ? getProviderLogoUrl(currentProviderName, currentProvider?.is_custom)
+      : undefined);
   const visibleProviders = useMemo(() => {
     const providers = (catalog?.providers ?? []).filter(
       (provider) => provider.models.length > 0,
@@ -747,7 +750,7 @@ const ChatModelSelector = ({
                       ) : null}
                     </div>
                     {provider.models.map((model) => {
-                      const logoUrl = getProviderLogoUrl(provider.name);
+                      const logoUrl = model.logo_data_url || provider.logo_data_url || getProviderLogoUrl(provider.name, provider.is_custom);
                       const isCurrent =
                         currentSelection?.mode === "fixed" &&
                         (currentSelection.model_id

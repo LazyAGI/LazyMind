@@ -145,7 +145,8 @@ def run_traj_to_skill(request: TrajToSkillRequest, taskid: str | None = None) ->
     with lazyllm.new_session(request.requestid):
         inject_model_config(prefer_evolution_or_chat_llm(request.model_configs))
         llm = AutoModel(model='llm')
-        emb = AutoModel(model='embed_main')
+        from lazymind.embedding_options import wrap_embedding_model
+        emb = wrap_embedding_model(AutoModel(model='embed_main'), role='embed_main')
         return _run_traj_to_skill(request, llm, emb, taskid=taskid)
 
 

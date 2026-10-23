@@ -58,7 +58,7 @@ vi.mock("../api", () => ({
     apiCoreModelProvidersGet: mocks.getProviders,
     apiCoreModelProvidersSelectedModelsPut: mocks.saveModels,
     apiCoreModelProvidersModelsGet: vi.fn().mockResolvedValue({ data: { models: [{
-      id: "model", name: "Demo model", provider_name: "Demo",
+      id: "model", name: "Demo model", provider_name: "SiliconFlow",
       user_model_provider_id: "provider", user_model_provider_group_id: "group", group_name: "Demo group",
     }] } }),
     apiCoreModelProvidersSelectedModelsGet: mocks.getSelectedModels,
@@ -106,7 +106,7 @@ describe("DefaultModelConfigPanel collaboration visibility", () => {
   it("keeps model sharing controls for cloud administrators", async () => {
     mocks.runtimeFeatures.hideUserGroupSurfaces = false;
     mocks.getSelectedModels.mockResolvedValue({ data: { selections: [{
-      model_key: "llm", model_id: "model", name: "Demo model", provider_name: "Demo",
+      model_key: "llm", model_id: "model", name: "Demo model", provider_name: "SiliconFlow",
       user_model_provider_id: "provider", user_model_provider_group_id: "group", group_name: "Demo group",
     }] } });
     renderPanel();

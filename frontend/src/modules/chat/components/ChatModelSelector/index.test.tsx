@@ -133,6 +133,32 @@ function catalog(modelName = "DeepSeek-V3", version = 3): ChatModelCatalog {
 }
 
 describe("ChatModelSelector", () => {
+  it("inherits the uploaded supplier logo in both the current trigger and chooser", async () => {
+    const value = catalog();
+    const logo = "data:image/png;base64,uploaded-model";
+    value.providers[0].source = "own";
+    value.providers[0].logo_data_url = logo;
+    fetchCatalogMock.mockResolvedValue(value);
+    render(<ChatModelSelector />);
+    const trigger = await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" });
+    expect(trigger.querySelector("img")).toHaveAttribute("src", logo);
+    fireEvent.click(trigger);
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByRole("button", { name: /DeepSeek-V3/ }).querySelector("img")).toHaveAttribute("src", logo);
+  });
+  it("refreshes a stored selection after its supplier logo is reset", async () => {
+    const value = catalog();
+    value.providers[0].source = "own";
+    useModelSelectionStore.getState().setSelection(NEW_CHAT_MODEL_SELECTION_KEY, {
+      ...value.selection,
+      logo_data_url: "data:image/png;base64,old-logo",
+    });
+    fetchCatalogMock.mockResolvedValue(value);
+    render(<ChatModelSelector />);
+    const trigger = await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" });
+    expect(trigger.querySelector("img")).toHaveAttribute("src", "/provider-icons/deepseek.svg");
+    expect(useModelSelectionStore.getState().selections[NEW_CHAT_MODEL_SELECTION_KEY]?.logo_data_url).toBeUndefined();
+  });
   it('shows the selected provider brand in the trigger and beside each model', async () => {
     fetchCatalogMock.mockResolvedValue(catalog());
     render(<ChatModelSelector />);
@@ -153,6 +179,22 @@ describe("ChatModelSelector", () => {
     expect(deepseekIcon).toHaveAttribute('alt', '');
     expect(openaiIcon).toHaveAttribute('alt', '');
     expect(document.querySelector('.chat-model-provider-heading img')).toBeNull();
+  });
+
+  it('uses the default supplier logo for a custom supplier with a protocol brand in its name', async () => {
+    const customCatalog = catalog();
+    customCatalog.providers[1] = {
+      ...customCatalog.providers[1],
+      name: 'OpenAI compatible gateway',
+      is_custom: true,
+    };
+    fetchCatalogMock.mockResolvedValue(customCatalog);
+    render(<ChatModelSelector />);
+    fireEvent.click(await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    const customSupplier = dialog.getByRole('region', { name: 'OpenAI compatible gateway' });
+    const customModel = within(customSupplier).getByRole('button', { name: /GPT-4o/ });
+    expect(customModel.querySelector('img')).toHaveAttribute('src', '/provider-icons/custom.svg');
   });
   afterEach(() => {
     useModelSelectionStore.setState({ selections: {} });

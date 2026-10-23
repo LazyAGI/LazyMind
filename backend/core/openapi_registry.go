@@ -11,12 +11,14 @@ import (
 	"lazymind/core/agent"
 	"lazymind/core/algo"
 	"lazymind/core/chat"
+	"lazymind/core/credentialvault"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
 	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
+	"lazymind/core/modelsettings"
 	"lazymind/core/showcase"
 	"lazymind/core/wordgroup"
 	"lazymind/core/workflow"
@@ -690,6 +692,7 @@ type chatModelsQueryParams struct {
 }
 
 type chatModelSelectionOpenAPI struct {
+	LogoDataURL  string `json:"logo_data_url,omitempty" desc:"Optional normalized PNG logo inherited from the selected supplier, including a shared model."`
 	Mode         string `json:"mode" enum:"fixed,auto"`
 	ModelID      string `json:"model_id,omitempty"`
 	ProviderID   string `json:"provider_id,omitempty"`
@@ -704,6 +707,7 @@ type chatModelSelectionOpenAPI struct {
 
 type chatModelListOpenAPIItem struct {
 	ID           string   `json:"id"`
+	LogoDataURL  string   `json:"logo_data_url,omitempty" desc:"Optional normalized PNG supplier logo data URL. Display metadata only."`
 	Name         string   `json:"name"`
 	GroupID      string   `json:"group_id"`
 	GroupName    string   `json:"group_name"`
@@ -718,10 +722,12 @@ type chatModelListOpenAPIItem struct {
 }
 
 type chatModelProviderOpenAPIItem struct {
-	ID     string                     `json:"id"`
-	Name   string                     `json:"name"`
-	Source string                     `json:"source" enum:"own,shared,cloud"`
-	Models []chatModelListOpenAPIItem `json:"models"`
+	LogoDataURL string                     `json:"logo_data_url,omitempty"`
+	ID          string                     `json:"id"`
+	Name        string                     `json:"name"`
+	IsCustom    bool                       `json:"is_custom"`
+	Source      string                     `json:"source" enum:"own,shared,cloud"`
+	Models      []chatModelListOpenAPIItem `json:"models"`
 }
 
 type chatModelsOpenAPIResponse struct {
@@ -1203,10 +1209,11 @@ type listUserModelProvidersQueryParams struct {
 }
 
 type checkModelProviderOpenAPIRequest struct {
-	ProviderName string `json:"provider_name"`
-	BaseURL      string `json:"base_url"`
-	APIKey       string `json:"api_key"`
-	DryRun       bool   `json:"dry_run"`
+	ProviderName string  `json:"provider_name,omitempty"`
+	BaseURL      string  `json:"base_url,omitempty"`
+	APIKey       *string `json:"api_key,omitempty" desc:"Omit to check the supplier's enabled key. An explicit empty string tests a keyless connection."`
+	Model        string  `json:"model,omitempty"`
+	DryRun       bool    `json:"dry_run,omitempty"`
 }
 
 type modelProviderGroupPathParams struct {
@@ -1218,18 +1225,108 @@ type modelProviderGroupByIDPathParams struct {
 	GroupID         string `path:"group_id"`
 }
 
+type modelProviderSavedKeyPathParams struct {
+	ModelProviderID string `path:"model_provider_id"`
+	GroupID         string `path:"group_id"`
+	KeyID           string `path:"key_id"`
+}
+
+type providerRequestProtocolOpenAPIItem struct {
+	Protocol       string `json:"protocol" enum:"openai,anthropic,gemini,openai-responses"`
+	Name           string `json:"name"`
+	BaseURL        string `json:"base_url"`
+	DefaultBaseURL string `json:"default_base_url"`
+	Supported      bool   `json:"supported" desc:"False when the current runtime has no adapter for this protocol."`
+}
+
+type providerRequestConfigOpenAPIResponse struct {
+	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
+	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,anthropic"`
+	Protocols       []providerRequestProtocolOpenAPIItem     `json:"protocols"`
+}
+
+type updateProviderRequestConfigOpenAPIRequest struct {
+	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
+	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,anthropic"`
+	Endpoints       map[string]string                        `json:"endpoints,omitempty" desc:"Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected."`
+}
+
+type replaceModelProviderKeyOpenAPIRequest struct {
+	APIKey string `json:"api_key"`
+}
+
+type replaceModelProviderKeyOpenAPIResponse struct {
+	KeyID   string `json:"key_id"`
+	Enabled bool   `json:"enabled"`
+}
+
+type revealModelProviderKeyOpenAPIResponse struct {
+	APIKey string `json:"api_key" desc:"The selected saved secret, returned only by an explicit owner-authorized action with Cache-Control: no-store."`
+}
+
+type createCustomModelProviderOpenAPIRequest struct {
+	LogoDataURL      *string `json:"logo_data_url,omitempty" desc:"Optional PNG data URL, at most 128 by 128 pixels and 96 KiB decoded. Empty uses the default custom supplier icon."`
+	Name             string  `json:"name"`
+	SourceProviderID string  `json:"source_provider_id" desc:"An owned model provider whose technical protocol is used for this custom supplier."`
+	BaseURL          string  `json:"base_url"`
+}
+
+type createCustomModelProviderOpenAPIResponse struct {
+	LogoDataURL string `json:"logo_data_url,omitempty"`
+	ID          string `json:"id"`
+	GroupID     string `json:"group_id" desc:"Private credential/model storage ID retained for API compatibility."`
+}
+
+type updateCustomModelProviderOpenAPIRequest struct {
+	LogoDataURL *string `json:"logo_data_url,omitempty" desc:"Optional normalized PNG supplier logo. Omit to preserve; empty restores the default icon."`
+	Name        *string `json:"name,omitempty" desc:"Optional custom supplier display name. Omit for a logo-only edit."`
+}
+
+type customModelProviderMutationOpenAPIResponse struct {
+	LogoDataURL string `json:"logo_data_url,omitempty"`
+	ID          string `json:"id"`
+}
+
+type deleteCustomModelProviderQueryParams struct {
+	ConfirmIndexedDowngrade bool `query:"confirm_indexed_downgrade" desc:"Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier."`
+}
+
+type deleteCustomModelProviderOpenAPIResponse struct {
+	ID                       string `json:"id"`
+	DowngradedKnowledgeBases int    `json:"downgraded_knowledge_bases"`
+}
+
 type updateModelProviderGroupOpenAPIRequest struct {
 	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
+	BaseURL string `json:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty"`
-	Verify  bool   `json:"verify"`
+	Verify  bool   `json:"verify" desc:"Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately."`
+}
+
+type updateModelProviderEndpointOpenAPIRequest struct {
+	BaseURL string `json:"base_url"`
+}
+
+type updateModelProviderEndpointOpenAPIResponse struct {
+	ID      string `json:"id"`
+	BaseURL string `json:"base_url"`
+}
+
+type setActiveModelProviderKeyOpenAPIRequest struct {
+	GroupID string `json:"group_id" desc:"Connection containing the saved key; empty with key_id disables the supplier's active key."`
+	KeyID   string `json:"key_id" desc:"Opaque saved key ID. At most one key can be enabled across all connections to a supplier."`
+}
+
+type setActiveModelProviderKeyOpenAPIResponse struct {
+	GroupID string `json:"group_id"`
+	KeyID   string `json:"key_id"`
 }
 
 type createModelProviderGroupOpenAPIRequest struct {
 	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
+	BaseURL string `json:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty"`
-	Verify  bool   `json:"verify"`
+	Verify  bool   `json:"verify" desc:"Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately."`
 }
 
 type createModelProviderGroupOpenAPIResponse struct {
@@ -1246,11 +1343,16 @@ type deleteModelProviderGroupOpenAPIResponse struct {
 }
 
 type listRemoteGroupModelsOpenAPIItem struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	ModelType      string  `json:"model_type"`
-	MaxInputTokens *string `json:"max_input_tokens,omitempty"`
-	Added          bool    `json:"added"`
+	FeatureSupport *modelsettings.FeatureFlags `json:"feature_support,omitempty" desc:"Explicit provider/catalog capability evidence; absent means unknown."`
+	ModelSettings  *modelsettings.Settings     `json:"model_settings,omitempty" desc:"Existing saved declarations and enabled overrides, preserved during discovery."`
+	ID             string                      `json:"id"`
+	Name           string                      `json:"name"`
+	ModelType      string                      `json:"model_type"`
+	Input          []string                    `json:"input"`
+	Output         []string                    `json:"output"`
+	SubTypes       []string                    `json:"sub_types,omitempty" desc:"Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog."`
+	MaxInputTokens *string                     `json:"max_input_tokens,omitempty"`
+	Added          bool                        `json:"added"`
 }
 
 type listRemoteGroupModelsOpenAPIResponse struct {
@@ -1259,50 +1361,87 @@ type listRemoteGroupModelsOpenAPIResponse struct {
 }
 
 type addModelProviderGroupModelOpenAPIRequest struct {
-	Vision         bool    `json:"vision,omitempty" desc:"Whether this LLM accepts image input"`
-	Name           string  `json:"name"`
-	ModelType      string  `json:"model_type"`
-	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K."`
+	ModelSettings   *modelsettings.Settings `json:"model_settings,omitempty" desc:"Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings."`
+	Vision          bool                    `json:"vision,omitempty" desc:"Whether this LLM accepts image input"`
+	Name            string                  `json:"name"`
+	ModelType       string                  `json:"model_type" desc:"Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use."`
+	MaxInputTokens  *string                 `json:"max_input_tokens,omitempty" desc:"Optional context window. Explicit discovered values are preserved for unclassified models. When omitted for LLM/VLM models, resolves from config/model_context_windows.yaml with a 128K fallback; unclassified models have no inferred default."`
+	InputTokenLimit *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
-	Vision                   bool    `json:"vision" desc:"Whether this LLM accepts image input"`
-	ID                       string  `json:"id"`
-	UserModelProviderID      string  `json:"user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
-	Name                     string  `json:"name"`
-	ModelType                string  `json:"model_type"`
-	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name"`
-	BaseURL                  string  `json:"base_url"`
-	IsDefault                bool    `json:"is_default"`
-	MaxInputTokens           *string `json:"max_input_tokens,omitempty" desc:"Stored LLM input context window, for example 512, 128K, or 1M" nullable:"true"`
+	ModelSettings            *modelsettings.Settings `json:"model_settings,omitempty" desc:"Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings."`
+	Vision                   bool                    `json:"vision" desc:"Whether this LLM accepts image input"`
+	ID                       string                  `json:"id"`
+	UserModelProviderID      string                  `json:"user_model_provider_id"`
+	UserModelProviderGroupID string                  `json:"user_model_provider_group_id"`
+	Name                     string                  `json:"name"`
+	ModelType                string                  `json:"model_type"`
+	ProviderName             string                  `json:"provider_name"`
+	GroupName                string                  `json:"group_name"`
+	BaseURL                  string                  `json:"base_url"`
+	IsDefault                bool                    `json:"is_default"`
+	MaxInputTokens           *string                 `json:"max_input_tokens,omitempty" desc:"Stored context window, including an explicit discovered value on an unclassified model; for example 262144, 128K, or 1M" nullable:"true"`
+	InputTokenLimit          *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens          *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+}
+
+type addModelProviderGroupModelsOpenAPIRequest struct {
+	Models []addModelProviderGroupModelOpenAPIRequest `json:"models" desc:"One to 1000 models. Existing active names are returned without overwriting saved metadata; deleted models are restored with their original UUID."`
+}
+
+type addModelProviderGroupModelsOpenAPIFailure struct {
+	Name    string `json:"name"`
+	Message string `json:"message" desc:"Safe per-model validation failure."`
+}
+
+type addModelProviderGroupModelsOpenAPIResponse struct {
+	Models        []addModelProviderGroupModelOpenAPIResponse `json:"models"`
+	AddedCount    int                                         `json:"added_count"`
+	ExistingCount int                                         `json:"existing_count"`
+	TotalCount    int64                                       `json:"total_count" desc:"Total active saved models in this group after the batch, including models outside the request."`
+	Failures      []addModelProviderGroupModelsOpenAPIFailure `json:"failures"`
 }
 
 type updateModelProviderGroupModelOpenAPIRequest struct {
-	MaxInputTokens string `json:"max_input_tokens" desc:"LLM input context window, for example 512, 128K, or 1M"`
+	ModelSettings   *modelsettings.Settings `json:"model_settings,omitempty" desc:"Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings."`
+	Name            *string                 `json:"name,omitempty" desc:"Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID."`
+	ModelType       *string                 `json:"model_type,omitempty" desc:"Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references."`
+	Vision          *bool                   `json:"vision,omitempty" desc:"Optional image-input support for chat models."`
+	MaxInputTokens  *string                 `json:"max_input_tokens,omitempty" desc:"Optional stored context window for LLM/VLM or unclassified models, for example 262144, 128K, or 1M. Empty clears an unclassified model's value; omitted fields remain unchanged."`
+	InputTokenLimit *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	Customize       bool                    `json:"customize,omitempty" desc:"Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it."`
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
-	Vision                   bool     `json:"vision" desc:"Whether this LLM accepts image input"`
-	ID                       string   `json:"id"`
-	Source                   string   `json:"source" enum:"own,cloud"`
-	ProviderID               string   `json:"provider_id"`
-	ProviderGroupID          string   `json:"provider_group_id,omitempty"`
-	UserModelProviderID      string   `json:"user_model_provider_id,omitempty"`
-	UserModelProviderGroupID string   `json:"user_model_provider_group_id,omitempty"`
-	Name                     string   `json:"name"`
-	ModelType                string   `json:"model_type"`
-	ProviderName             string   `json:"provider_name"`
-	GroupName                string   `json:"group_name,omitempty"`
-	BaseURL                  string   `json:"base_url,omitempty"`
-	IsDefault                bool     `json:"is_default"`
-	IsEditable               bool     `json:"is_editable" desc:"Whether this option supports image editing"`
-	MaxInputTokens           *string  `json:"max_input_tokens" desc:"Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
-	Availability             string   `json:"availability" enum:"available,degraded,unavailable"`
-	Lifecycle                string   `json:"lifecycle" enum:"active,deprecated,retired"`
-	ReadOnly                 bool     `json:"read_only"`
-	Capabilities             []string `json:"capabilities"`
+	ModelSettings            *modelsettings.Settings `json:"model_settings,omitempty" desc:"Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings."`
+	LogoDataURL              string                  `json:"logo_data_url,omitempty"`
+	Vision                   bool                    `json:"vision" desc:"Whether this LLM accepts image input"`
+	ID                       string                  `json:"id"`
+	Source                   string                  `json:"source" enum:"own,cloud"`
+	ProviderID               string                  `json:"provider_id"`
+	ProviderGroupID          string                  `json:"provider_group_id,omitempty"`
+	UserModelProviderID      string                  `json:"user_model_provider_id,omitempty"`
+	UserModelProviderGroupID string                  `json:"user_model_provider_group_id,omitempty"`
+	Name                     string                  `json:"name"`
+	ModelType                string                  `json:"model_type"`
+	ProviderName             string                  `json:"provider_name"`
+	BrandKey                 string                  `json:"brand_key,omitempty"`
+	ServiceKey               string                  `json:"service_key,omitempty"`
+	IsCustom                 bool                    `json:"is_custom"`
+	GroupName                string                  `json:"group_name,omitempty"`
+	BaseURL                  string                  `json:"base_url,omitempty"`
+	IsDefault                bool                    `json:"is_default"`
+	IsEditable               bool                    `json:"is_editable" desc:"Whether this option supports image editing"`
+	MaxInputTokens           *string                 `json:"max_input_tokens" desc:"Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported" nullable:"true"`
+	InputTokenLimit          *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens          *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	Availability             string                  `json:"availability" enum:"available,degraded,unavailable"`
+	Lifecycle                string                  `json:"lifecycle" enum:"active,deprecated,retired"`
+	ReadOnly                 bool                    `json:"read_only"`
+	Capabilities             []string                `json:"capabilities"`
 }
 
 type listModelProviderGroupModelsOpenAPIResponse struct {
@@ -1314,23 +1453,30 @@ type listUserModelsByModelTypeQueryParams struct {
 }
 
 type selectedModelOpenAPIItem struct {
-	ModelKey                 string  `json:"model_key"`
-	ModelID                  string  `json:"model_id"`
-	Source                   string  `json:"source" enum:"own,cloud"`
-	ProviderID               string  `json:"provider_id"`
-	ProviderGroupID          string  `json:"provider_group_id,omitempty"`
-	UserModelProviderID      string  `json:"user_model_provider_id,omitempty"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id,omitempty"`
-	Name                     string  `json:"name"`
-	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name,omitempty"`
-	BaseURL                  string  `json:"base_url,omitempty"`
-	IsDefault                bool    `json:"is_default" desc:"True when the selection was copied from catalog YAML"`
-	IsEditable               bool    `json:"is_editable" desc:"Whether the selected model supports image editing"`
-	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
-	Availability             string  `json:"availability" enum:"available,degraded,unavailable"`
-	UnavailableReason        string  `json:"unavailable_reason,omitempty"`
-	ReadOnly                 bool    `json:"read_only"`
+	ModelSettings            *modelsettings.Settings `json:"model_settings,omitempty"`
+	LogoDataURL              string                  `json:"logo_data_url,omitempty"`
+	ModelKey                 string                  `json:"model_key"`
+	ModelType                string                  `json:"model_type,omitempty" desc:"Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata"`
+	Vision                   *bool                   `json:"vision,omitempty" desc:"Actual configured vision support, including explicit false; omitted when unknown for cloud models"`
+	ModelID                  string                  `json:"model_id"`
+	Source                   string                  `json:"source" enum:"own,cloud"`
+	ProviderID               string                  `json:"provider_id"`
+	ProviderGroupID          string                  `json:"provider_group_id,omitempty"`
+	UserModelProviderID      string                  `json:"user_model_provider_id,omitempty"`
+	UserModelProviderGroupID string                  `json:"user_model_provider_group_id,omitempty"`
+	Name                     string                  `json:"name"`
+	ProviderName             string                  `json:"provider_name"`
+	BrandKey                 string                  `json:"brand_key,omitempty"`
+	ServiceKey               string                  `json:"service_key,omitempty"`
+	IsCustom                 bool                    `json:"is_custom"`
+	GroupName                string                  `json:"group_name,omitempty"`
+	BaseURL                  string                  `json:"base_url,omitempty"`
+	IsDefault                bool                    `json:"is_default" desc:"True when the selection was copied from catalog YAML"`
+	IsEditable               bool                    `json:"is_editable" desc:"Whether the selected model supports image editing"`
+	MaxInputTokens           *string                 `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
+	Availability             string                  `json:"availability" enum:"available,degraded,unavailable"`
+	UnavailableReason        string                  `json:"unavailable_reason,omitempty"`
+	ReadOnly                 bool                    `json:"read_only"`
 }
 
 type listSelectedModelsOpenAPIResponse struct {
@@ -1412,9 +1558,14 @@ type setSharedProviderOpenAPIRequest struct {
 }
 
 type userModelProviderOpenAPIItem struct {
+	LogoDataURL            string                           `json:"logo_data_url,omitempty"`
 	ID                     string                           `json:"id"`
 	DefaultModelProviderID string                           `json:"default_model_provider_id"`
 	Name                   string                           `json:"name"`
+	IsCustom               bool                             `json:"is_custom"`
+	ProtocolName           string                           `json:"protocol_name"`
+	BrandKey               string                           `json:"brand_key,omitempty" desc:"Stable built-in navigation brand; absent for custom providers. Independent of the runtime protocol."`
+	ServiceKey             string                           `json:"service_key,omitempty" desc:"Stable configurable service within the brand. Each service owns independent credentials and models."`
 	Description            string                           `json:"description"`
 	BaseURL                string                           `json:"base_url"`
 	BaseURLPresets         []modelProviderBaseURLPresetItem `json:"base_url_presets,omitempty"`
@@ -1435,13 +1586,21 @@ type listUserModelProvidersOpenAPIResponse struct {
 	Providers []userModelProviderOpenAPIItem `json:"providers"`
 }
 
+type modelProviderGroupKeyOpenAPIItem struct {
+	ID      string `json:"id"`
+	Masked  string `json:"masked"`
+	Enabled bool   `json:"enabled"`
+}
+
 type listModelProviderGroupsOpenAPIItem struct {
-	ID                  string `json:"id"`
-	UserModelProviderID string `json:"user_model_provider_id"`
-	Name                string `json:"name"`
-	BaseURL             string `json:"base_url"`
-	APIKey              string `json:"api_key"`
-	IsVerified          bool   `json:"is_verified"`
+	ID                  string                             `json:"id"`
+	UserModelProviderID string                             `json:"user_model_provider_id"`
+	Name                string                             `json:"name"`
+	BaseURL             string                             `json:"base_url"`
+	Keys                []modelProviderGroupKeyOpenAPIItem `json:"keys"`
+	HasAPIKey           bool                               `json:"has_api_key"`
+	ModelCount          int                                `json:"model_count" description:"Number of undeleted models owned by the current user in this supplier group; returned without loading model contents"`
+	IsVerified          bool                               `json:"is_verified"`
 }
 
 type listModelProviderGroupsOpenAPIResponse struct {
@@ -4354,6 +4513,35 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("User model provider list", listUserModelProvidersOpenAPIResponse{})},
 		},
 		{
+			Method:      "POST",
+			Path:        "/model_providers",
+			Summary:     "Create a custom model supplier",
+			Description: "Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.",
+			Tags:        []string{"model_providers"},
+			RequestBody: jsonBodyOf(createCustomModelProviderOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Created custom supplier", createCustomModelProviderOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/model_providers/{model_provider_id}",
+			Summary:     "Rename a custom model supplier",
+			Description: "Changes an owned custom supplier's display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			RequestBody: jsonBodyOf(updateCustomModelProviderOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Renamed custom supplier", customModelProviderMutationOpenAPIResponse{})},
+		},
+		{
+			Method:      "DELETE",
+			Path:        "/model_providers/{model_provider_id}",
+			Summary:     "Delete a custom model supplier",
+			Description: "Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			QueryParams: deleteCustomModelProviderQueryParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Deleted custom supplier", deleteCustomModelProviderOpenAPIResponse{})},
+		},
+		{
 			Method:      "GET",
 			Path:        "/model_providers:with_groups",
 			Summary:     "List user model providers that have groups",
@@ -4366,7 +4554,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}:check",
 			Summary:     "Check model provider connectivity",
-			Description: "Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.",
+			Description: "Checks the provider's model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model's probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.",
 			Tags:        []string{"model_providers"},
 			RequestBody: jsonBodyOf(checkModelProviderOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("data: success and message from provider check", modelprovider.CheckModelProviderData{})},
@@ -4405,11 +4593,62 @@ func registeredCoreOperations() []openAPIOperation {
 			RequestBody: jsonBodyOf(setSelectedModelsOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Saved selected models", listSelectedModelsOpenAPIResponse{})},
 		},
+
+		{
+			Method:      "PUT",
+			Path:        "/model_providers/{model_provider_id}/endpoint",
+			Summary:     "Update a model supplier's shared endpoint",
+			Description: "Updates the current user's model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			RequestBody: jsonBodyOf(updateModelProviderEndpointOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated supplier endpoint", updateModelProviderEndpointOpenAPIResponse{})},
+		},
+		{
+			Method:      "PUT",
+			Path:        "/model_providers/{model_provider_id}/keys/active",
+			Summary:     "Set the single enabled key for a model supplier",
+			Description: "Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			RequestBody: jsonBodyOf(setActiveModelProviderKeyOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Supplier active key", setActiveModelProviderKeyOpenAPIResponse{})},
+		},
+		{
+			Method: "GET", Path: "/model_providers/{model_provider_id}/request-config",
+			Summary:     "Get supplier request protocols and endpoint overrides",
+			Description: "Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.",
+			Tags:        []string{"model_providers"}, PathParams: modelProviderGroupPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Supplier request configuration", providerRequestConfigOpenAPIResponse{})},
+		},
+		{
+			Method: "PUT", Path: "/model_providers/{model_provider_id}/request-config",
+			Summary:     "Update supplier request configuration",
+			Description: "Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.",
+			Tags:        []string{"model_providers"}, PathParams: modelProviderGroupPathParams{},
+			RequestBody: jsonBodyOf(updateProviderRequestConfigOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Supplier request configuration", providerRequestConfigOpenAPIResponse{})},
+		},
+		{
+			Method: "PUT", Path: "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}",
+			Summary:     "Replace one saved supplier API key",
+			Description: "Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.",
+			Tags:        []string{"model_providers"}, PathParams: modelProviderSavedKeyPathParams{},
+			RequestBody: jsonBodyOf(replaceModelProviderKeyOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Replaced key", replaceModelProviderKeyOpenAPIResponse{})},
+		},
+		{
+			Method: "POST", Path: "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal",
+			Summary:     "Explicitly reveal one saved supplier API key",
+			Description: "Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.",
+			Tags:        []string{"model_providers"}, PathParams: modelProviderSavedKeyPathParams{},
+			Responses: map[int]openAPIResponse{200: resp("Selected saved key", revealModelProviderKeyOpenAPIResponse{})},
+		},
 		{
 			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups",
 			Summary:     "List model provider connection groups",
-			Description: "Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.",
+			Description: "Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Group list", listModelProviderGroupsOpenAPIResponse{})},
@@ -4418,7 +4657,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups",
 			Summary:     "Create model provider connection group",
-			Description: "Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.",
+			Description: "Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupPathParams{},
 			RequestBody: jsonBodyOf(createModelProviderGroupOpenAPIRequest{}, true),
@@ -4428,7 +4667,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PATCH",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}",
 			Summary:     "Update model provider connection group",
-			Description: "Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.",
+			Description: "Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			RequestBody: jsonBodyOf(updateModelProviderGroupOpenAPIRequest{}, true),
@@ -4447,7 +4686,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/remote_models",
 			Summary:     "List models advertised by a connection group",
-			Description: "Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.",
+			Description: "Lists models with the supplier's saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Remote models list", listRemoteGroupModelsOpenAPIResponse{})},
@@ -4456,7 +4695,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "List models under a connection group",
-			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.",
+			Description: "Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Group models list", listModelProviderGroupModelsOpenAPIResponse{})},
@@ -4465,17 +4704,36 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models",
 			Summary:     "Add custom model under a connection group",
-			Description: "Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).",
+			Description: "Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupByIDPathParams{},
 			RequestBody: jsonBodyOf(addModelProviderGroupModelOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Created group model", addModelProviderGroupModelOpenAPIResponse{})},
 		},
 		{
+			Method:      "POST",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models:batch",
+			Summary:     "Add multiple models under a connection group",
+			Description: "Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupByIDPathParams{},
+			RequestBody: jsonBodyOf(addModelProviderGroupModelsOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Saved and existing models with per-item failures", addModelProviderGroupModelsOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe",
+			Summary:     "Test one saved model with a minimal inference request",
+			Description: "Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupModelPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Bounded model availability result without provider text or secrets", modelprovider.ModelProbeResponse{})},
+		},
+		{
 			Method:      "PATCH",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}",
 			Summary:     "Update a connection group model",
-			Description: "Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.",
+			Description: "Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.",
 			Tags:        []string{"model_providers"},
 			PathParams:  modelProviderGroupModelPathParams{},
 			RequestBody: jsonBodyOf(updateModelProviderGroupModelOpenAPIRequest{}, true),

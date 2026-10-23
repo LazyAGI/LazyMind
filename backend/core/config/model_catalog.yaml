@@ -956,15 +956,10 @@ model_providers:
         zh-CN: |
           商汤科技打造的国产重磅基座，深度推理与多模态理解能力出色，综合性能强悍。
 
-          官网（注册 & 获取 API Key）：
-          - 经典模式官网：https://console.sensecore.cn/cn-sh-01/aistudio/management/api-key
-          - Token Plan模式官网：https://platform.sensenova.cn/
+          经典 API 的注册与密钥管理：
+          https://console.sensecore.cn/cn-sh-01/aistudio/management/api-key
 
-          配置时提供两个 Base URL 可选：
-          - 经典模式：https://api.sensenova.cn/compatible-mode/v1/
-          - Token Plan 模式：https://token.sensenova.cn/v1/
-
-          申请教程1（经典）：
+          申请教程：
 
           1. 访问商汤大模型开放平台（https://console.sensecore.cn/），注册并完成企业或个人开发者认证。
 
@@ -972,27 +967,16 @@ model_providers:
 
           3. 点击"创建API-Key"，自定义名称后即可生成，复制该 API Key 即可进行模型调用。
 
-          申请教程2（Token Plan）：
-
-          1. 访问商汤日日新官网（https://platform.sensenova.cn/），手机号完成注册。
-
-          2. 登录控制台，在左侧导航栏找到"API-Keys"。
-
-          3. 点击"创建 API Key"，输入名称后生成，复制该 API Key 即可进行模型调用。
+          Token Plan 请在同品牌下选择独立的 Token Plan 服务，分别保存地址与密钥。
         en-US: |
           SenseNova by SenseTime provides strong deep-reasoning and multimodal-understanding capabilities.
 
-          Register and get an API key:
-          - Classic mode: https://console.sensecore.cn/cn-sh-01/aistudio/management/api-key
-          - Token Plan mode: https://platform.sensenova.cn/
-
-          Available Base URLs:
-          - Classic mode: https://api.sensenova.cn/compatible-mode/v1/
-          - Token Plan mode: https://token.sensenova.cn/v1/
+          Register and manage classic API keys:
+          https://console.sensecore.cn/cn-sh-01/aistudio/management/api-key
 
           For classic mode, register and complete developer verification, open API Key Management, and create a named key.
 
-          For Token Plan mode, register at the SenseNova platform, open API Keys, and create a named key.
+          For Token Plan, select the separate Token Plan service under this brand and configure its endpoint and credentials independently.
 
       base_url: "https://api.sensenova.cn/compatible-mode/v1/"
       models:
@@ -1297,6 +1281,148 @@ model_providers:
           type: stt
         - name: TeleAI/TeleSpeechASR
           type: stt
+
+    - name: vLLM
+      description:
+        zh-CN: |
+          连接自行部署的 vLLM OpenAI 兼容服务。填写服务的 API地址；未开启认证时可留空 API秘钥。
+          通过模型列表发现已部署模型，并读取 max_model_len 作为上下文窗口。
+        en-US: |
+          Connect to your self-hosted vLLM OpenAI-compatible server. Set its API address; leave the API key empty when authentication is disabled.
+          Discover deployed models and read max_model_len as their context window.
+      base_url: "http://localhost:8000/v1/"
+      models: []
+    - name: LMDeploy
+      description:
+        zh-CN: |
+          连接自行部署的 LMDeploy OpenAI 兼容服务。填写服务的 API地址；未开启认证时可留空 API秘钥。
+          从服务发现已部署模型，也可手动添加模型 ID。
+        en-US: |
+          Connect to your self-hosted LMDeploy OpenAI-compatible server. Set its API address; leave the API key empty when authentication is disabled.
+          Discover deployed models from the server or add a model ID manually.
+      base_url: "http://localhost:23333/v1/"
+      models: []
+
+    # Service identities are independent from the brand and selected protocol.
+    # Plan model sets are deliberately not copied from standard API catalogs.
+    - name: DoubaoCodingPlan
+      description:
+        zh-CN: |
+          火山方舟 Coding Plan。使用方舟 API Key 与 Coding Plan 专属地址；模型与额度以套餐为准。
+          配置说明：https://docs.volcengine.com/docs/ark/coding-plan-personal-get-started?lang=zh
+          使用标准 API 地址不会消耗 Coding Plan 额度。请按官方适用范围使用，可手动添加套餐支持的模型。
+        en-US: |
+          Volcengine Ark Coding Plan uses an Ark API key and its dedicated API root. Models and quota depend on the plan.
+          Setup: https://docs.volcengine.com/docs/ark/coding-plan-personal-get-started?lang=en
+          Standard API calls do not consume Coding Plan quota. Follow the official usage scope and add supported models manually when discovery is unavailable.
+      base_url: "https://ark.cn-beijing.volces.com/api/coding/v3/"
+      models: []
+
+    - name: DoubaoAgentPlan
+      description:
+        zh-CN: |
+          火山方舟 Agent Plan，使用专属 API Key，与标准方舟及 Coding Plan 凭据不通用。
+          配置说明：https://docs.volcengine.com/docs/ark/agent-plan-personal-other-tools?lang=zh
+          模型及可用能力以套餐为准；若目录接口不可用，可手动添加官方支持的模型。
+        en-US: |
+          Volcengine Ark Agent Plan requires its dedicated API key, which is separate from standard Ark and Coding Plan credentials.
+          Setup: https://docs.volcengine.com/docs/ark/agent-plan-personal-other-tools?lang=en
+          Models and capabilities depend on the plan. Add officially supported models manually when discovery is unavailable.
+      base_url: "https://ark.cn-beijing.volces.com/api/plan/v3/"
+      models: []
+
+    - name: SenseNovaTokenPlan
+      description:
+        zh-CN: |
+          商汤日日新 Token Plan。请在 Token Plan 控制台创建 API Key，使用此服务独立配置。
+          控制台：https://platform.sensenova.cn/console/keys
+          API 与模型目录：https://platform.sensenova.cn/docs
+          支持 OpenAI、Anthropic Messages 和部分模型的 Responses 协议，具体能力以官方文档为准。
+        en-US: |
+          SenseNova Token Plan has its own API root and configuration. Create an API key in the Token Plan console.
+          Console: https://platform.sensenova.cn/console/keys
+          API and model discovery: https://platform.sensenova.cn/docs
+          OpenAI, Anthropic Messages and model-dependent Responses compatibility follow the official documentation.
+      base_url: "https://token.sensenova.cn/v1/"
+      models: []
+
+    - name: QwenCodingPlan
+      description:
+        zh-CN: |
+          阿里云百炼 Coding Plan。使用套餐专属 API Key，不与标准按量或 Token Plan 凭据混用。
+          配置说明：https://help.aliyun.com/zh/model-studio/coding-plan
+          套餐限官方允许的 AI 编程工具及 Agent 场景，不适用于通用应用后端或自动化工作流。可手动添加套餐支持的模型。
+        en-US: |
+          Alibaba Cloud Model Studio Coding Plan requires its dedicated API key, separate from standard API and Token Plan credentials.
+          Setup: https://help.aliyun.com/zh/model-studio/coding-plan
+          The plan is limited to officially permitted coding tools and agents, not general application backends or automated workflows. Add supported models manually when needed.
+      base_url: "https://coding.dashscope.aliyuncs.com/v1/"
+      models: []
+
+    - name: QwenTokenPlan
+      description:
+        zh-CN: |
+          阿里云百炼 Token Plan 个人版。使用个人版专属 API Key，与团队版、Coding Plan 和标准按量凭据不通用。
+          配置说明：https://help.aliyun.com/zh/model-studio/token-plan-personal-quick-start
+          套餐适用范围及模型以官方文档为准，不适用于通用应用后端或自动化工作流。
+        en-US: |
+          Alibaba Cloud Model Studio Token Plan Personal uses a dedicated key, separate from Team, Coding Plan and standard API credentials.
+          Setup: https://help.aliyun.com/zh/model-studio/token-plan-personal-quick-start
+          Follow the official supported tools and models; this plan is not for general application backends or automated workflows.
+      base_url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/"
+      models: []
+
+    - name: QwenTokenPlanTeam
+      description:
+        zh-CN: |
+          阿里云百炼 Token Plan 团队版。地址与个人版相同，但必须使用团队版专属 API Key；请勿混用凭据。
+          配置说明：https://help.aliyun.com/zh/model-studio/more-tools
+          套餐适用范围及模型以官方文档为准，不适用于通用应用后端或自动化工作流。
+        en-US: |
+          Alibaba Cloud Model Studio Token Plan Team shares the Personal API root but requires a separate Team API key.
+          Setup: https://help.aliyun.com/zh/model-studio/more-tools
+          Follow the official supported tools and models; this plan is not for general application backends or automated workflows.
+      base_url: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/"
+      models: []
+
+    - name: GLMCodingPlan
+      description:
+        zh-CN: |
+          智谱 GLM Coding Plan，使用 Coding Plan 专属服务地址与套餐授权。
+          配置说明：https://docs.bigmodel.cn/cn/coding-plan/quick-start
+          仅适用于官方支持的工具和使用场景，不代表可用于任意工作流。模型以当前套餐为准，可手动添加。
+        en-US: |
+          GLM Coding Plan uses the dedicated Coding Plan API root and subscription access.
+          Setup: https://docs.bigmodel.cn/cn/coding-plan/quick-start
+          Only officially supported tools and use cases are covered; arbitrary workflows are not implied. Add models supported by the current plan manually when needed.
+      base_url: "https://open.bigmodel.cn/api/coding/paas/v4/"
+      models: []
+
+    - name: KimiCode
+      description:
+        zh-CN: |
+          Kimi Code，使用 Kimi Code 控制台的 API Key，与 Moonshot 标准 API 独立配置。
+          配置说明：https://www.kimi.com/code/docs/
+          默认使用 Anthropic Messages 兼容协议。模型、客户端要求与适用范围以官方说明为准。
+        en-US: |
+          Kimi Code uses a Kimi Code API key and is configured separately from the standard Moonshot API.
+          Setup: https://www.kimi.com/code/docs/
+          Anthropic Messages is the default compatible protocol. Supported models, clients and usage scope follow the official documentation.
+      base_url: "https://api.kimi.com/coding/"
+      models: []
+
+    - name: MiniMaxMPlan
+      description:
+        zh-CN: |
+          MiniMax M Plan，使用 M Plan 专属 API Key，与标准按量 API 凭据分开配置。
+          配置说明：https://platform.minimax.cn/docs/m-plan/other-tools
+          与标准 API 共用地址不代表凭据或额度通用。模型和使用范围以套餐说明为准。
+        en-US: |
+          MiniMax M Plan uses a dedicated subscription API key, configured separately from standard pay-as-you-go credentials.
+          Setup: https://platform.minimax.cn/docs/m-plan/other-tools
+          Shared API roots do not imply shared credentials or quota. Supported models and usage follow the plan documentation.
+      base_url: "https://api.minimax.cn/v1/"
+      models: []
 
 ocr_providers:
   capabilities: [custom_base_url]

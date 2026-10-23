@@ -14,7 +14,9 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/modelprovider"
+	"lazymind/core/modelsettings"
 	coreproviderconnection "lazymind/core/providerconnection"
 )
 
@@ -217,16 +219,22 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string, scope
 }
 
 type SelectedRuntimeModel struct {
+	RuntimeGroupID     string `gorm:"column:runtime_group_id"`
 	ModelType          string
 	TechnicalModelType string
 	Vision             bool
+	ModelSettings      string                                  `gorm:"column:model_settings"`
+	RequestAdvanced    credentialvault.ProviderRequestAdvanced `gorm:"-" json:"-"`
 	IsDefault          bool
 	ProviderName       string
 	ModelName          string
 	BaseURL            string
 	APIKey             string
 	APIKeyCiphertext   string
+	SkipAuth           bool `gorm:"-"`
 	MaxInputTokens     *string
+	InputTokenLimit    *string
+	MaxOutputTokens    *string
 }
 
 // LoadMaxInputTokens returns the configured context window for a runtime model role.
@@ -301,13 +309,13 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, m.vision, "+
+				"m.model_type AS technical_model_type, m.vision, m.model_settings, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
-				"g.base_url, "+
+				"g.id AS runtime_group_id, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
-				"m.max_input_tokens",
+				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
@@ -319,8 +327,8 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.create_user_id = usm.user_id AND "+
-				"g.deleted_at IS NULL AND g.is_verified = ?",
-			true,
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
+				"g.deleted_at IS NULL",
 		).
 		Where("usm.user_id = ?", strings.TrimSpace(userID)).
 		Scan(&ownRows).Error
@@ -328,9 +336,21 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		return nil, err
 	}
 	ownRows = eligibleRuntimeModels(ownRows)
-	if err := decryptRuntimeModels(ownRows); err != nil {
-		return nil, err
+	availableOwn := make([]SelectedRuntimeModel, 0, len(ownRows))
+	blockedOwnTypes := make(map[string]struct{})
+	var ownCredentialError error
+	for _, row := range ownRows {
+		candidate := []SelectedRuntimeModel{row}
+		if err := decryptRuntimeModels(ctx, db, candidate); err != nil {
+			blockedOwnTypes[strings.ToLower(strings.TrimSpace(row.ModelType))] = struct{}{}
+			if ownCredentialError == nil {
+				ownCredentialError = err
+			}
+			continue
+		}
+		availableOwn = append(availableOwn, candidate[0])
 	}
+	ownRows = availableOwn
 
 	var cloudSelections []orm.UserSelectedCloudModel
 	if db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
@@ -369,6 +389,14 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	rows := make([]SelectedRuntimeModel, 0, len(ownRows)+len(resolvedCloudRows))
 	rows = append(rows, ownRows...)
 	rows = append(rows, resolvedCloudRows...)
+	if len(rows) == 0 && ownCredentialError != nil {
+		return nil, ownCredentialError
+	}
+	for modelType := range blockedOwnTypes {
+		// A disabled explicit selection must not silently borrow another user's
+		// supplier; unrelated roles can continue with their own credentials.
+		coveredTypes[modelType] = struct{}{}
+	}
 	for _, row := range rows {
 		coveredTypes[strings.ToLower(strings.TrimSpace(row.ModelType))] = struct{}{}
 	}
@@ -380,22 +408,25 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, m.vision, "+
+				"m.model_type AS technical_model_type, m.vision, m.model_settings, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
-				"g.base_url, "+
+				"g.id AS runtime_group_id, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
-				"m.max_input_tokens",
+				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
 				"m.id = usm.user_model_provider_group_model_id AND "+
+				"m.create_user_id = usm.user_id AND "+
 				"m.deleted_at IS NULL",
 		).
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
+				"g.create_user_id = usm.user_id AND "+
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
 				"g.deleted_at IS NULL AND g.is_verified = ?",
 			true,
 		).
@@ -405,15 +436,16 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		return nil, err
 	}
 	sharedRows = eligibleRuntimeModels(sharedRows)
-	if err := decryptRuntimeModels(sharedRows); err != nil {
-		return nil, err
-	}
 
 	// Explicit own/Cloud selections take priority; shared rows fill missing types.
 	for _, row := range sharedRows {
 		normalized := strings.ToLower(strings.TrimSpace(row.ModelType))
 		if _, covered := coveredTypes[normalized]; !covered {
-			rows = append(rows, row)
+			candidate := []SelectedRuntimeModel{row}
+			if err := decryptRuntimeModels(ctx, db, candidate); err != nil {
+				continue
+			}
+			rows = append(rows, candidate[0])
 			coveredTypes[normalized] = struct{}{}
 		}
 	}
@@ -765,11 +797,13 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	var row SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_model_provider_group_models m").
-		Select("m.provider_name, m.name AS model_name, g.base_url, g.api_key, g.api_key_ciphertext").
+		Select("g.id AS runtime_group_id, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.base_url, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
-				"g.deleted_at IS NULL",
+				"g.create_user_id = m.create_user_id AND "+
+				"g.user_model_provider_id = m.user_model_provider_id AND "+
+				"g.deleted_at IS NULL AND g.is_verified = ?", true,
 		).
 		Where("m.model_type IN ? AND m.is_default = ? AND m.deleted_at IS NULL", []string{"embed", "cross_modal_embed"}, true).
 		Order("m.created_at ASC").
@@ -781,26 +815,26 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	if row.ProviderName == "" && row.ModelName == "" {
 		return nil, nil
 	}
-	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
-	if err != nil {
+	rows := []SelectedRuntimeModel{row}
+	if err := decryptRuntimeModels(ctx, db, rows); err != nil {
 		return nil, err
 	}
-	cfg := map[string]any{
-		"source":   modelprovider.LazyLLMSource(row.ProviderName),
-		"model":    row.ModelName,
-		"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
-		"api_key":  row.APIKey,
-	}
+	rows[0].ModelType = "embed_main"
+	config := BuildLLMConfig(rows)
+	cfg, _ := config["embed_main"].(map[string]any)
+
 	return cfg, nil
 }
 
-func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
+func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) error {
 	for i := range rows {
-		apiKey, err := modelprovider.ResolveAPIKey(rows[i].APIKey, rows[i].APIKeyCiphertext)
+		runtimeConfig, err := modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, rows[i].RuntimeGroupID)
 		if err != nil {
 			return err
 		}
-		rows[i].APIKey = apiKey
+		rows[i].BaseURL, rows[i].APIKey = runtimeConfig.BaseURL, runtimeConfig.APIKey
+		rows[i].RequestAdvanced = runtimeConfig.Advanced
+		rows[i].SkipAuth = strings.TrimSpace(runtimeConfig.APIKey) == "" && strings.TrimSpace(runtimeConfig.BaseURL) != ""
 	}
 	return nil
 }
@@ -808,6 +842,9 @@ func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
 func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 	eligible := rows[:0]
 	for _, row := range rows {
+		if !runtimeModelAdapterAvailable(row) {
+			continue
+		}
 		// Ignore retired metadata selections, including their stored credentials.
 		if strings.EqualFold(strings.TrimSpace(row.ModelType), "conversation_metadata") {
 			continue
@@ -825,6 +862,9 @@ func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 	out := map[string]any{}
 	for _, row := range rows {
+		if !runtimeModelAdapterAvailable(row) {
+			continue
+		}
 		role := strings.ToLower(strings.TrimSpace(row.ModelType))
 		baseURL := modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL)
 		cfg := map[string]any{
@@ -833,9 +873,42 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"base_url": baseURL,
 			"api_key":  row.APIKey,
 		}
-		cfg["vision"] = row.Vision || strings.EqualFold(strings.TrimSpace(row.TechnicalModelType), "vlm")
+		if row.SkipAuth && strings.TrimSpace(row.APIKey) == "" {
+			cfg["skip_auth"] = true
+		}
+		settings, err := modelsettings.Decode(row.ModelSettings)
+		if err != nil {
+			continue
+		}
+		technical := row.TechnicalModelType
+		if technical == "" {
+			technical = role
+		}
+		// A legacy dedicated vision binding is itself an explicit vision choice.
+		// Saved feature overrides still take precedence over that old binding.
+		legacyVision := row.Vision || role == "vlm" && isChatTechnicalType(technical)
+		features := modelsettings.Effective(settings, legacyVision, technical)
+		if role == "vlm" && (features.Vision == nil || !*features.Vision) {
+			continue
+		}
+		cfg["vision"] = features.Vision != nil && *features.Vision
+		if technical == "llm" || technical == "vlm" || role == "llm" || role == "vlm" || role == "evo_llm" {
+			cfg["features"] = features
+		}
+		if settings.Embedding != nil {
+			cfg["embedding"] = settings.Embedding
+		}
+		if !row.RequestAdvanced.Empty() {
+			cfg["request_advanced"] = row.RequestAdvanced
+		}
 		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
 			cfg["max_input_tokens"] = *tokens
+		}
+		if row.InputTokenLimit != nil && strings.TrimSpace(*row.InputTokenLimit) != "" {
+			cfg["input_token_limit"] = *row.InputTokenLimit
+		}
+		if row.MaxOutputTokens != nil && strings.TrimSpace(*row.MaxOutputTokens) != "" {
+			cfg["max_output_tokens"] = *row.MaxOutputTokens
 		}
 		if role == modelprovider.EvoModelKey {
 			descriptor, ok := openCodeDescriptor(row)
@@ -852,7 +925,24 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 	return out
 }
 
+func runtimeModelAdapterAvailable(row SelectedRuntimeModel) bool {
+	technical := strings.TrimSpace(row.TechnicalModelType)
+	if technical == "" {
+		// Stored selections carry a group ID and their actual technical type.
+		// A role binding must never classify an unclassified saved model.
+		if strings.TrimSpace(row.RuntimeGroupID) != "" {
+			return false
+		}
+		technical = row.ModelType
+	}
+	return modelprovider.RuntimeSupportsModelType(row.ProviderName, technical)
+}
+
 func openCodeDescriptor(row SelectedRuntimeModel) (modelprovider.OpenCodeModelDescriptor, bool) {
+	features := modelprovider.EffectiveModelFeatures(orm.UserModelProviderGroupModel{ModelType: row.TechnicalModelType, Vision: row.Vision, ModelSettings: row.ModelSettings})
+	if features.ToolCalling != nil && !*features.ToolCalling {
+		return modelprovider.OpenCodeModelDescriptor{}, false
+	}
 	return modelprovider.ResolveOpenCodeModel(
 		row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType, row.IsDefault,
 	)
@@ -936,4 +1026,9 @@ func APIKeyState(value any) string {
 		return "empty"
 	}
 	return "set"
+}
+
+func isChatTechnicalType(technical string) bool {
+	technical = strings.ToLower(strings.TrimSpace(technical))
+	return technical == "llm" || technical == "vlm"
 }

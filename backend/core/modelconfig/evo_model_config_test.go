@@ -66,7 +66,7 @@ func TestBuildLLMConfigNormalizesOnlyOpenAIBaseURLForLazyLLM(t *testing.T) {
 	if vlm["source"] != "qwen" {
 		t.Fatalf("proxied Qwen source = %q", vlm["source"])
 	}
-	if vlm["base_url"] != "https://models.example.com/custom/path" {
+	if vlm["base_url"] != "https://models.example.com/custom/path/" {
 		t.Fatalf("non-OpenAI base_url changed: %q", vlm["base_url"])
 	}
 }
@@ -87,6 +87,7 @@ func TestLoadLLMConfigSkipsStaleOwnEvoAndUsesEligibleSharedSelection(t *testing.
 		&orm.UserSelectedModel{},
 		&orm.UserModelProviderGroupModel{},
 		&orm.UserModelProviderGroup{},
+		&orm.UserModelProvider{},
 	)
 	now := time.Now().UTC()
 	seed := func(userID, suffix, provider, model, technicalType string, isDefault, shared bool) {
@@ -106,6 +107,9 @@ func TestLoadLLMConfigSkipsStaleOwnEvoAndUsesEligibleSharedSelection(t *testing.
 			UserID: userID, ModelKey: "evo_llm",
 			UserModelProviderGroupModelID: modelRow.ID, Share: shared,
 			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := db.DB.Create(&orm.UserModelProvider{ID: group.UserModelProviderID, Name: provider, BaseURL: group.BaseURL, BaseModel: group.BaseModel}).Error; err != nil {
+			t.Fatal(err)
 		}
 		if err := db.DB.Create(&group).Error; err != nil {
 			t.Fatal(err)
@@ -139,14 +143,14 @@ func TestBuildLLMConfigPreservesVisionCapabilityOfMainModel(t *testing.T) {
 	if config["llm"].(map[string]any)["vision"] != true {
 		t.Fatal("main model's visual capability was dropped")
 	}
-	config = BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm"}})
+	config = BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm", ProviderName: "OpenAI"}})
 	if config["llm"].(map[string]any)["vision"] != false {
 		t.Fatal("plain llm must default to no image support")
 	}
 }
 
 func TestBuildLLMConfigDeclaredVision(t *testing.T) {
-	config := BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm", Vision: true}})
+	config := BuildLLMConfig([]SelectedRuntimeModel{{ModelType: "llm", TechnicalModelType: "llm", ProviderName: "OpenAI", Vision: true}})
 	if config["llm"].(map[string]any)["vision"] != true {
 		t.Fatal("declared LLM vision capability lost")
 	}

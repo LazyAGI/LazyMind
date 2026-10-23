@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveModelNavigationStatus } from "../../frontend/src/modules/settings/modelNavigationStatus.ts";
+import { settingsRouteParams } from "../../frontend/src/modules/settings/settingsRouteContext.ts";
 
 const frontendSourceRoot = fileURLToPath(
   new URL("../../frontend/src", import.meta.url),
@@ -44,18 +45,26 @@ describe("model provider Settings navigation", () => {
     expect(settingsDestinations).toHaveLength(2);
   });
 
-  it("supports linking directly to the model provider tab", () => {
-    const settingsSource = readFileSync(
-      join(frontendSourceRoot, "modules/settings/index.tsx"),
-      "utf8",
-    );
+  it("builds a provider deep link while retaining model setup and return context", () => {
+    const current = new URLSearchParams({
+      section: "model_defaults",
+      target: "vlm",
+      provider_id: "openai",
+      return_to: "/agent/chat/home/conversation-1",
+    });
+    const destination = new URL(`/settings?${settingsRouteParams(current, {
+      section: "models",
+      view: "providers",
+    })}`, "https://desktop.test");
 
-    expect(settingsSource).toContain(
-      'searchParams.get("view") === "providers"',
-    );
-    expect(settingsSource).toContain(
-      '{ section: "models", view: "providers" }',
-    );
+    expect(destination.pathname).toBe("/settings");
+    expect(Object.fromEntries(destination.searchParams)).toEqual({
+      section: "models",
+      view: "providers",
+      target: "vlm",
+      provider_id: "openai",
+      return_to: "/agent/chat/home/conversation-1",
+    });
   });
 
   it("wires the model navigation badge to the asynchronous overview state", () => {

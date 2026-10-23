@@ -15,6 +15,8 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
+import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
+import type { ModelSettings } from "../modelSettings";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
 
@@ -41,7 +43,11 @@ export type ModelCapability =
 
 interface ProviderModel {
   id: string;
+  logoDataUrl?: string;
   name: string;
+  modelType?: string;
+  vision?: boolean;
+  modelSettings?: ModelSettings;
   capability: ModelCapability;
   builtIn: boolean;
   enabled: boolean;
@@ -54,6 +60,10 @@ interface ProviderModel {
 export interface ProviderOption {
   id: string;
   name: string;
+  brandKey?: string;
+  serviceKey?: string;
+  isCustom?: boolean;
+  protocolName?: string;
   brand: string;
   logoUrl?: string;
   headline: string;
@@ -83,17 +93,28 @@ interface ModuleConfig {
 }
 
 interface ApiProvider {
+  logo_data_url?: string;
   id: string;
   name: string;
+  brand_key?: string;
+  service_key?: string;
+  is_custom?: boolean;
+  protocol_name?: string;
   description?: string;
   base_url?: string;
 }
 
 interface ApiModel {
+  logo_data_url?: string;
+  brand_key?: string;
+  service_key?: string;
+  is_custom?: boolean;
   id: string;
   is_editable?: boolean;
   name: string;
   model_type?: string;
+  vision?: boolean;
+  model_settings?: ModelSettings;
   is_default?: boolean;
   max_input_tokens?: string;
   source?: "own" | "cloud";
@@ -111,12 +132,19 @@ interface ApiModel {
 }
 
 interface SelectedModelApiItem {
+  logo_data_url?: string;
+  brand_key?: string;
+  service_key?: string;
+  is_custom?: boolean;
   base_url?: string;
   group_name: string;
   is_default?: boolean;
   is_editable?: boolean;
   model_id: string;
   model_key: string;
+  model_type?: string;
+  vision?: boolean;
+  model_settings?: ModelSettings;
   name: string;
   provider_name: string;
   share?: boolean;
@@ -207,6 +235,7 @@ interface SelectedCloudServiceApiItem {
 }
 
 export interface ModelReadyResponse {
+  logo_data_url?: string;
   ready: boolean;
   source?: string;
 	fallback_from?: string;
@@ -453,15 +482,19 @@ function mapApiProvider(
   return {
     id: provider.id,
     name: provider.name,
-    brand: getProviderBrand(provider.name),
-    logoUrl: getProviderLogoUrl(provider.name),
+    brandKey: provider.brand_key,
+    serviceKey: provider.service_key,
+    isCustom: provider.is_custom === true,
+    protocolName: provider.protocol_name || provider.name,
+    brand: provider.is_custom ? "API" : getProviderBrand(provider.brand_key || provider.name || provider.protocol_name || ""),
+    logoUrl: provider.logo_data_url || getProviderLogoUrl(provider.brand_key || provider.name || provider.protocol_name || "", provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,
       fallbacks,
     ),
     backendDescription,
-    source: provider.name,
+    source: provider.protocol_name || provider.name,
     baseUrl: provider.base_url || "",
     capabilities: [],
     models: [],
@@ -649,7 +682,11 @@ export function useDefaultModelConfig({
           mapApiProvider(
             {
               id: providerId,
-              name: selection.provider_name,
+              brand_key: selection.brand_key,
+              service_key: selection.service_key,
+              name: source === "cloud" ? selection.provider_name : selection.group_name || selection.provider_name,
+              protocol_name: selection.provider_name,
+              is_custom: source !== "cloud" && (selection.is_custom ?? (selection.brand_key ? false : !!selection.group_name && selection.group_name !== selection.provider_name)),
               base_url: selection.base_url,
             },
             localizedFallbacks,
@@ -663,12 +700,19 @@ export function useDefaultModelConfig({
         });
         const model: ProviderModel = {
           id: selection.model_id,
+          logoDataUrl: selection.logo_data_url,
           name: selection.name,
+          modelType: selection.model_type,
+          vision: selection.vision,
+          modelSettings: selection.model_settings,
           capability,
           builtIn: Boolean(selection.is_default),
           enabled: true,
           maxInputTokens: selection.max_input_tokens,
-          availability: selection.availability,
+          // Cloud availability comes from the gateway, whose provider label is
+          // independent of the host's local LazyLLM adapter registry.
+          availability: source === "cloud" || isModelTypeSupportedByProtocol(selection.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
+            ? selection.availability : "unavailable",
           readOnly: selection.read_only,
         };
         const option: ModelOptionItem = {
@@ -855,7 +899,11 @@ export function useDefaultModelConfig({
               mapApiProvider(
                 {
                   id: providerId,
-                  name: model.provider_name || "LazyMind Cloud",
+                  brand_key: model.brand_key,
+                  service_key: model.service_key,
+                  name: source === "cloud" ? model.provider_name || "LazyMind Cloud" : model.group_name || model.provider_name || "",
+                  protocol_name: model.provider_name,
+                  is_custom: source !== "cloud" && (model.is_custom ?? (model.brand_key ? false : !!model.group_name && model.group_name !== model.provider_name)),
                   base_url: model.base_url,
                 },
                 localizedFallbacks,
@@ -868,12 +916,17 @@ export function useDefaultModelConfig({
             });
             const providerModel: ProviderModel = {
               id: model.id,
+              logoDataUrl: model.logo_data_url,
               name: model.name,
+              modelType: model.model_type,
+              vision: model.vision,
+              modelSettings: model.model_settings,
               capability,
               builtIn: Boolean(model.is_default),
               enabled: true,
               maxInputTokens: model.max_input_tokens,
-              availability: model.availability,
+              availability: source === "cloud" || isModelTypeSupportedByProtocol(model.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
+                ? model.availability : "unavailable",
               lifecycle: model.lifecycle,
               readOnly: model.read_only,
             };

@@ -1,0 +1,48 @@
+// Ant Design already draws a focus cue on its controls. Avoid the additional
+// Settings outline on nested native inputs, including controls in portals.
+.model-provider-focus-pointer input:focus-visible,
+.model-provider-focus-keyboard input:focus-visible {
+  outline: none !important;
+}
+
+:is(.model-provider-focus-pointer, .model-provider-focus-keyboard) {
+  .ant-btn-default:not(.ant-btn-dangerous):hover {
+    border-color: var(--provider-line, #e6e9ef);
+  }
+
+  .ant-input:not(.ant-input-status-error):not(.ant-input-status-warning):hover:not(:focus),
+  .ant-input-affix-wrapper:not(.ant-input-affix-wrapper-status-error):not(.ant-input-affix-wrapper-status-warning):hover:not(:focus-within),
+  .ant-select:not(.ant-select-status-error):not(.ant-select-status-warning):hover:not(.ant-select-focused):not(.ant-select-open) .ant-select-selector {
+    border-color: var(--provider-line, #e6e9ef) !important;
+    box-shadow: none !important;
+  }
+}
+
+.model-provider-focus-pointer {
+  button:focus,
+  button:focus-visible,
+  a:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .ant-btn-default:not(.ant-btn-dangerous):hover,
+  .ant-btn-default:not(.ant-btn-dangerous):focus {
+    border-color: var(--provider-line, #e6e9ef);
+  }
+
+  .ant-input:not(.ant-input-status-error):not(.ant-input-status-warning):is(:hover, :focus),
+  .ant-input-affix-wrapper:not(.ant-input-affix-wrapper-status-error):not(.ant-input-affix-wrapper-status-warning):is(:hover, :focus-within, .ant-input-affix-wrapper-focused),
+  .ant-select:not(.ant-select-status-error):not(.ant-select-status-warning):is(:hover, .ant-select-focused, .ant-select-open) .ant-select-selector {
+    border-color: var(--provider-line, #e6e9ef) !important;
+    box-shadow: none !important;
+  }
+}
+
+.model-provider-focus-keyboard {
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid var(--provider-blue, #2f6df6);
+    outline-offset: 2px;
+  }
+}
