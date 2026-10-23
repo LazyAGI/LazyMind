@@ -39,9 +39,9 @@ vi.mock("@/modules/user/uiPreferencesApi", () => ({
   patchUserUiPreferences: vi.fn(),
 }));
 vi.mock("@/modules/modelProvider/pages/ModelProvidersPage", () => ({
-  default: ({ onBack }: { onBack?: () => void }) => (
+  default: ({ onBack, highlightProviderId }: { onBack?: () => void; highlightProviderId?: string }) => (
     <div>
-      <nav aria-label="suppliers">Existing suppliers</nav>
+      <nav aria-label="suppliers" data-provider-id={highlightProviderId}>Existing suppliers</nav>
       {onBack ? <button onClick={onBack}>Back to settings</button> : null}
     </div>
   ),
@@ -129,6 +129,19 @@ describe("separate supplier and default model settings", () => {
         screen.queryByText("Default model choices"),
       ).not.toBeInTheDocument(),
     );
+  });
+  it.each([
+    { url: "/settings?section=models&view=providers", providerId: null },
+    { url: "/settings?section=models&view=providers&target=vlm&provider_id=openai", providerId: "openai" },
+  ])("opens the supplier page for legacy provider deep links: $url", async ({ url, providerId }) => {
+    renderAt(url);
+    const suppliers = await screen.findByRole("navigation", { name: "suppliers" });
+    expect(suppliers).toBeVisible();
+    expect(suppliers.getAttribute("data-provider-id")).toBe(providerId);
+    expect(screen.queryByText("Default model choices")).not.toBeInTheDocument();
+    const navigation = within(screen.getByRole("navigation", { name: "settingsPage.navAria" }));
+    expect(navigation.getByRole("button", { name: /settingsPage.sections.models/ }))
+      .toHaveAttribute("aria-current", "page");
   });
   it.each([
     "/settings?section=models&view=defaults",
