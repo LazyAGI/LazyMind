@@ -70,9 +70,10 @@ class WeChatClient:
         }
 
     @staticmethod
-    def _decode_response(response: httpx.Response) -> dict[str, Any]:
+    def _decode_response(response: httpx.Response, operation: str = 'unknown') -> dict[str, Any]:
         if response.status_code in {401, 403, 429}:
-            raise WeChatRejectedError(retryable=response.status_code == 429)
+            raise WeChatRejectedError(retryable=response.status_code == 429,
+                                      operation=operation, http_status=response.status_code)
         if response.status_code < 200 or response.status_code >= 300:
             raise WeChatError(f'WeChat returned HTTP {response.status_code}')
         try:
@@ -87,12 +88,17 @@ class WeChatClient:
     def _raise_provider_error(
         payload: dict[str, Any],
         operation: str,
+        http_status: int | None = None,
     ) -> None:
         ret = payload.get('ret')
         errcode = payload.get('errcode')
         errmsg = str(payload.get('errmsg') or '').strip()
-        if ret not in (None, 0) or errcode not in (None, 0) or errmsg:
-            raise WeChatRejectedError()
+        malformed_code = any(value is not None and type(value) is not int for value in (ret, errcode))
+        # Numeric status codes are authoritative. A successful response may
+        # carry informational text; an error-only/malformed response still fails.
+        explicit_success = any(type(value) is int and value == 0 for value in (ret, errcode))
+        if malformed_code or ret not in (None, 0) or errcode not in (None, 0) or (errmsg and not explicit_success):
+            raise WeChatRejectedError(operation=operation, http_status=http_status, ret=ret, errcode=errcode)
 
     @classmethod
     def _authenticated_post(
@@ -103,6 +109,7 @@ class WeChatClient:
         body: dict[str, Any],
         timeout: float,
         network_error: str,
+        operation: str,
         allow_empty: bool = False,
     ) -> dict[str, Any]:
         try:
@@ -116,7 +123,9 @@ class WeChatClient:
             raise WeChatError(network_error) from exc
         if allow_empty and 200 <= response.status_code < 300 and not response.content:
             return {}
-        return cls._decode_response(response)
+        payload = cls._decode_response(response, operation)
+        cls._raise_provider_error(payload, operation, response.status_code)
+        return payload
 
     def start_login(
         self,
@@ -178,20 +187,20 @@ class WeChatClient:
             )
         except httpx.HTTPError as exc:
             raise WeChatError('Cannot receive WeChat messages') from exc
-        payload = self._decode_response(response)
-        self._raise_provider_error(payload, 'getupdates')
+        payload = self._decode_response(response, 'getupdates')
+        self._raise_provider_error(payload, 'getupdates', response.status_code)
         return payload
 
     def notify_start(self, *, base_url: str, token: str) -> None:
         endpoint = f'{base_url.rstrip("/")}/ilink/bot/msg/notifystart'
-        payload = self._authenticated_post(
+        self._authenticated_post(
             endpoint=endpoint,
             token=token,
             body={'base_info': self._base_info()},
             timeout=_CONFIG_TIMEOUT_SECONDS,
             network_error='Cannot notify WeChat adapter start',
+            operation='notifystart',
         )
-        self._raise_provider_error(payload, 'notifystart')
 
     def get_config(
         self,
@@ -200,6 +209,7 @@ class WeChatClient:
         token: str,
         to_user_id: str,
         context_token: str,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         endpoint = f'{base_url.rstrip("/")}/ilink/bot/getconfig'
         payload = self._authenticated_post(
@@ -210,10 +220,10 @@ class WeChatClient:
                 'context_token': context_token,
                 'base_info': self._base_info(),
             },
-            timeout=_CONFIG_TIMEOUT_SECONDS,
+            timeout=_CONFIG_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds,
             network_error='Cannot load WeChat bot config',
+            operation='getconfig',
         )
-        self._raise_provider_error(payload, 'getconfig')
         return payload
 
     def send_typing(
@@ -226,7 +236,7 @@ class WeChatClient:
         typing: bool,
     ) -> None:
         endpoint = f'{base_url.rstrip("/")}/ilink/bot/sendtyping'
-        payload = self._authenticated_post(
+        self._authenticated_post(
             endpoint=endpoint,
             token=token,
             body={
@@ -241,8 +251,8 @@ class WeChatClient:
             },
             timeout=_CONFIG_TIMEOUT_SECONDS,
             network_error='Cannot update WeChat typing status',
+            operation='sendtyping',
         )
-        self._raise_provider_error(payload, 'sendtyping')
 
     def download_media(
         self,
@@ -577,8 +587,8 @@ class WeChatClient:
             },
             timeout=_MESSAGE_TIMEOUT_SECONDS,
             network_error='Cannot request a WeChat media upload URL',
+            operation='getuploadurl',
         )
-        self._raise_provider_error(payload, 'getuploadurl')
         return payload
 
     @staticmethod
@@ -626,7 +636,7 @@ class WeChatClient:
         run_id: str,
     ) -> None:
         endpoint = f'{base_url.rstrip("/")}/ilink/bot/sendmessage'
-        payload = self._authenticated_post(
+        self._authenticated_post(
             endpoint=endpoint,
             token=token,
             body={
@@ -644,9 +654,9 @@ class WeChatClient:
             },
             timeout=_MESSAGE_TIMEOUT_SECONDS,
             network_error='Cannot send WeChat message',
+            operation='sendmessage',
             allow_empty=True,
         )
-        self._raise_provider_error(payload, 'sendmessage')
 
     @staticmethod
     def _encrypt_media(plaintext: bytes, aes_key: bytes) -> bytes:

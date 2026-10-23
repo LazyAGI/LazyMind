@@ -1,0 +1,102 @@
+{
+  "classification": "fault injection: brief deleted after generation; real Runtime; no child",
+  "execution_source": "113585a430e5b5f8f2d97b8963d7d1431329a1a0",
+  "records": {
+    "result": {
+      "source": "evidence/pr-validation/missing-brief/result.json",
+      "sha256": "4584567f731fe034f0c7db1d91b47dfaa531e48c0fa539c15dbaaf3e45d8a0ce",
+      "format": "json",
+      "values": {
+        "/result": "FAIL",
+        "/failure": "BRIEF_MISSING",
+        "/session_id": "e8d6a9425f67429b9b44c57d934de720",
+        "/launch_count": 0,
+        "/completed_at": "2026-10-20T09:49:03.165902+00:00",
+        "/control/session/status": "failed",
+        "/control/session/pinned_revision_id": "80cebe93-5bc3-4f46-b311-2868e77834c1",
+        "/control/projection/completed": false,
+        "/control/projection/nodes/collect/execution": "none",
+        "/control/projection/nodes/dispatch/execution": "none",
+        "/control/projection/nodes/prepare/execution": "succeeded",
+        "/control/projection/nodes/record/execution": "none",
+        "/control/projection/nodes/validate_completion/execution": "none",
+        "/control/projection/nodes/validate_dispatch/execution": "failed",
+        "/control/session/steps/0/step_id": "prepare",
+        "/control/session/steps/0/attempt": 1,
+        "/control/session/steps/0/status": "succeeded",
+        "/control/session/steps/1/step_id": "validate_dispatch",
+        "/control/session/steps/1/attempt": 1,
+        "/control/session/steps/1/status": "failed",
+        "/artifacts/artifacts/0/slot_id": "preparation",
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/step_id": "prepare"
+      }
+    },
+    "events": {
+      "source": "evidence/pr-validation/missing-brief/trace.jsonl",
+      "sha256": "d7acd39626a40f326f55dedeb34844395f1f580d5f6660b8efa4f1a6a096a292",
+      "format": "jsonl",
+      "values": {
+        "/7/at": "2026-10-20T09:49:02.868663+00:00",
+        "/7/event": "project_run_started",
+        "/7/task_id": "csv-records",
+        "/7/resume": false,
+        "/7/fault": "missing-brief",
+        "/7/requested_model": "gpt-6-astra",
+        "/7/actual_backend_model": "N/A",
+        "/11/at": "2026-10-20T09:49:02.895515+00:00",
+        "/11/event": "step_started",
+        "/11/step": "prepare",
+        "/11/attempt_id": "7646c1de-1e5d-449e-a7e4-5a8018f4cd52",
+        "/12/at": "2026-10-20T09:49:02.969402+00:00",
+        "/12/event": "brief_generated",
+        "/12/started_at": "2026-10-20T09:49:02.958522+00:00",
+        "/12/returncode": 0,
+        "/12/task_id": "csv-records",
+        "/12/plan_sha256": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+        "/13/at": "2026-10-20T09:49:02.970290+00:00",
+        "/13/event": "todo_updated",
+        "/13/task_id": "csv-records",
+        "/13/status": "in_progress",
+        "/14/at": "2026-10-20T09:49:03.091241+00:00",
+        "/14/event": "fault_injected",
+        "/14/fault": "missing-brief",
+        "/17/at": "2026-10-20T09:49:03.112872+00:00",
+        "/17/event": "step_completed",
+        "/17/step": "prepare",
+        "/17/attempt_id": "7646c1de-1e5d-449e-a7e4-5a8018f4cd52",
+        "/21/at": "2026-10-20T09:49:03.144059+00:00",
+        "/21/event": "step_started",
+        "/21/step": "validate_dispatch",
+        "/21/attempt_id": "efc81091-8c07-4cc9-91ce-18a77a8d93af",
+        "/23/at": "2026-10-20T09:49:03.152884+00:00",
+        "/23/event": "step_failed",
+        "/23/step": "validate_dispatch",
+        "/23/error_code": "BRIEF_MISSING",
+        "/24/at": "2026-10-20T09:49:03.153058+00:00",
+        "/24/event": "run_blocked",
+        "/24/step": "validate_dispatch",
+        "/24/code": "BRIEF_MISSING",
+        "/24/launch_count": 0,
+        "/27/at": "2026-10-20T09:49:03.166438+00:00",
+        "/27/event": "project_run_completed",
+        "/27/result": "FAIL",
+        "/27/failure": "BRIEF_MISSING"
+      }
+    },
+    "independent_readback": {
+      "source": "evidence/pr-validation/verification-live.json",
+      "sha256": "a34dc8a6d7c04e9d6cbc93edaba8dd3d3a18084441e08a5d2231cbaab012ce84",
+      "format": "json",
+      "values": {
+        "/cases/missing-brief/session_id": "e8d6a9425f67429b9b44c57d934de720",
+        "/cases/missing-brief/changed_files": [],
+        "/cases/missing-brief/parent_unchanged": true,
+        "/cases/missing-brief/protected_inputs_unchanged": true,
+        "/cases/missing-brief/selected_slots": [
+          "preparation"
+        ]
+      }
+    }
+  }
+}

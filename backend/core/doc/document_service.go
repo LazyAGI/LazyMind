@@ -21,6 +21,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
+	"lazymind/core/systemdeps"
 )
 
 const documentContentMaxBytes int64 = 1024 * 1024
@@ -286,6 +287,20 @@ func (s *DocumentService) GetDocument(ctx context.Context, req DocumentReadReque
 }
 
 func readDocumentContentFromRecord(rec documentServiceRecord) (DocumentContent, error) {
+	if artifact, err := readBaseArtifact(context.Background(), rec); err != nil {
+		return DocumentContent{}, err
+	} else if artifact != nil {
+		parts := make([]string, 0, len(artifact.Roots))
+		for _, node := range artifact.Roots {
+			parts = append(parts, node.Text)
+		}
+		text := strings.Join(parts, "\n")
+		truncated := int64(len(text)) > documentContentMaxBytes
+		if truncated {
+			text = text[:documentContentMaxBytes]
+		}
+		return DocumentContent{Text: text, MIMEType: "text/plain", Truncated: truncated}, nil
+	}
 	storedPath := previewPathForContent(rec.ext)
 	mimeType := previewContentTypeForContent(rec.ext)
 	filename := previewFilenameForContent(rec.ext)
@@ -309,6 +324,12 @@ func readDocumentContentFromRecord(rec documentServiceRecord) (DocumentContent, 
 }
 
 func listDocumentChunksFromRecord(ctx context.Context, rec documentServiceRecord, datasetID, documentID, pageToken string, requestedPageSize int, requestedGroup string) (DocumentChunksResult, error) {
+	if artifact, err := readBaseArtifact(ctx, rec); err != nil {
+		return DocumentChunksResult{}, err
+	} else if artifact != nil && (rec.row.LazyllmDocID == "" || !systemdeps.PythonComponentActive("rag") ||
+		useBaseChunks(ctx, datasetID, documentID)) {
+		return baseDocumentChunks(artifact, pageToken, requestedPageSize, requestedGroup)
+	}
 	lazyDocID := strings.TrimSpace(rec.row.LazyllmDocID)
 	if lazyDocID == "" {
 		return DocumentChunksResult{Chunks: []DocumentChunk{}, TotalSize: 0}, nil

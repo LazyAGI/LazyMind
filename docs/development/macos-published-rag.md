@@ -1,5 +1,34 @@
 # Mac ARM64 固定复用已发布 RAG 组件
 
+安装完成但服务重启失败、出现 `reader signature mismatch` 或节点组指纹冲突时，参见 [2026-10-22 macOS RAG 旧注册冲突与恢复记录](macos-rag-registration-recovery-20261022.md)。该问题与 Team ID、下载 SHA 校验不同；文档包含保留数据与清空知识库两种处理边界。
+
+## 当前正式发布流程（2026-10-21）
+
+以下替代下文历史记录中的“正式包固定复用旧 ZIP”流程。Developer ID 和 ad-hoc CI 构建均重新生成与宿主配套的组件；ad-hoc 可以上传测试依赖，但不代表正式签名或公证。
+
+1. macOS CI 使用同一个 Developer ID 给宿主 Python 和所有 RAG Mach-O 文件签名并取得时间戳，然后拆分 ZIP，最后生成 revision、SHA-256、大小及清单。不能在生成 SHA 后再改 ZIP/签名。
+2. 本地分包验证检查每个原生文件签名有效、Team ID 与宿主相同，并执行基础导入、RAG overlay 导入和 Milvus 持久化验证。独立发布 job 上传前再次从 ZIP 解压检查签名；最终 DMG 安装测试下载同次构建的 RAG Artifact 验证，不依赖云端发布完成。云端回验留在发布 job。
+3. macOS 正式和 ad-hoc 构建均通过独立 matrix job 发布 RAG 到 MS/HF，互不取消。正式构建仍需要 `mac_dev` 的 Apple 签名/公证 secrets；发布使用 `MODELSCOPE_API_TOKEN` / `HF_TOKEN`，仓库变量为 `LAZYMIND_MS_COMPONENT_REPO`（默认 `CarlosShaoting/lazymind-cst`）/ `LAZYMIND_HF_COMPONENT_REPO`（默认 `LazyAGI/LazyMind`）。fork 必须配置具有目标写权限的 token，或把变量改为自己的数据集。缺少 token 时警告跳过，唯正式版 MS 主源缺少 token 时失败。Windows 发布规则不变。
+4. RAG 目录不变：MS `master/RAG/tags/<tag>/`，HF `main/RAG/tags/<tag>/`，包含 ZIP、`SHA256SUMS`、`python-components.json`。Mac 文件名包含 `cp311-adhoc-` 或 `cp311-developer-id-`，签名模式参与 revision 计算，开发包和正式包不会共用初始通道。先签名再分包，先上传 ZIP/校验文件再上传 JSON，最后从各自主机公开 URL 下载回验。HF 使用指向自己的镜像清单，不修改客户端内置的 MS 主源清单，也不提前声明可能上传失败的 HF fallback。
+5. 客户端只在安装时请求内置 `catalogUrl` 对应的 HTTPS JSON，以在线 revision、SHA、大小、文件名和 URL 为准；内置值仅作初始显示及旧格式兼容，不要求新 SHA 等于旧值。平台、架构、CPython ABI、基础 fingerprint 和依赖版本集合必须与客户端相同，下载仍严格校验 SHA、大小、manifest 和真实导入。在线清单失败时不静默退回过时校验值。
+6. 成功后将实际 descriptor 与 `.ready` 安装状态保存到用户 runtime，后续启动离线复用；不会启动时联网或自动替换正在使用的组件。重新签名导致 revision 变化时新装使用新 revision。旧客户端没有在线清单支持，仍需升级客户端；只覆盖云端旧 ZIP 无法修复旧客户端。
+
+对同一 tag 做兼容修复时，先验证新包与该客户端宿主 Team ID 一致，上传新文件名的 ZIP，再更新该 tag 的 JSON（保留 tag 和 catalogUrl，可更新 revision/SHA/大小/文件名）。不允许跨基础环境、依赖版本或 CPU 架构替换。在线 JSON 依赖 HTTPS 和受控数据集写权限，不是独立数字签名；token 应限制到发布账户/仓库。
+
+本次收到的 `lazymind-python-rag-darwin-arm64-cp311-df40b6dcc4170480.zip`：65,532,733 字节，SHA-256 `50cb5a7970ca427b406b317eb729d30f03499fb416b8c9d5c28c3f6c9870e172`；108 个原生文件签名已核验为 `UZ37FB2A8Y`，仅适用于同 Team ID、ARM64、CPython 3.11、fingerprint `772bd8a61a0a297c2b4f69d036893b806f69efa5c62a9e02d7a98bfd9e655fe0` 的客户端。本次未代为上传该交接包，也未将其未发布地址替换为仓库固定清单。
+
+### 安装包镜像与下载时序
+
+Windows RAG 同样使用 MS/HF 独立 matrix 上传，沿用上述 token、仓库变量和 `RAG/tags/<tag>/` 路径。开发构建缺少对应 token 时跳过该源；Windows release 缺少 MS 主源 token 时发布失败，HF 缺少 token 时仅跳过镜像。两源均上传后下载回验，安装测试不等待上传。此规则替代上文“Windows 发布规则不变”的说明。
+
+构建先上传 GitHub installer Artifact 并展示下载链接，构建结束后安装测试、RAG 发布、安装包镜像三个分支并行；安装测试不依赖任何镜像 job。MS/HF 安装包分别使用独立 matrix job，互不取消。镜像失败仍会显示 job 错误，但不影响已生成的 Artifact 和安装测试；缺少对应 token 时警告并跳过该安装包镜像。GitHub draft release 仍沿用既有平台 workflow 完成后的汇总规则。
+
+只为安装包新增 **`Realease/`**（保留约定拼写），不移动 RAG。MS 使用 `MODELSCOPE_API_TOKEN`、`LAZYMIND_MS_COMPONENT_REPO`（默认 `CarlosShaoting/lazymind-cst`）；HF 使用 `HF_TOKEN`、`LAZYMIND_HF_COMPONENT_REPO`（默认 `LazyAGI/LazyMind`）。目录内只保存原名 `.exe`/`.dmg`，不额外生成或上传 `.sha256` 文件；SHA 仅在 CI 摘要中展示，RAG 完整性校验不变。Mac 开发包保留 `.unnotarized.dmg` 文件名。
+
+注意：安装包可以先下载测试普通功能，但首次在线安装 RAG 仍须等独立 RAG 发布 job 成功；在线 JSON 未就绪时不会绕过校验。CI 的本地配套 RAG 测试不代表云端发布成功，云端结果须看发布 job。
+
+## 历史固定包实现
+
 日期：2026-09-23。基于 origin/cst/installer_opt 的 fa6e7094，沿用当天 Windows 固定发布包方案，替换 Mac ARM64 每次动态生成 ZIP 的流程。
 
 ## 固定资源与配套环境

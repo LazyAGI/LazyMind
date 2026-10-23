@@ -18,6 +18,8 @@ export interface RuntimeAdapter<A> {
   suspendGoal?(agent: A, input: { runId: string; goalId?: string; continuation: string }): void
   resumeGoal?(agent: A, runId: string): void
   resolve(sessionId: string): Promise<{ agent: A } | { error: string }>
+  /** Host availability only. Runs before claiming a pending continuation; never reads Workflow eligibility. */
+  ready?(sessionId: string, signal: AbortSignal): Promise<boolean>
   /** Resolves after host admission, not after execution. Throws if admission is uncertain. */
   prompt(agent: A, input: { actionId: string; message: string }, signal: AbortSignal): Promise<number>
   /** Session cancellation is called only through the host ownership guard. */

@@ -95,7 +95,7 @@ func automationTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.ScheduleDependency{}, &orm.TaskCenterTask{}, &orm.ChatHistory{}, &orm.ConversationArtifact{}, &orm.TaskRunOutput{}, &orm.TaskRunInput{}, &orm.SubAgentTask{}, &orm.SubAgentArtifact{}); err != nil {
+	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.ScheduleDependency{}, &orm.TaskCenterTask{}, &orm.ChatHistory{}, &orm.ConversationArtifact{}, &orm.TaskRunOutput{}, &orm.TaskRunInput{}, &orm.SubAgentTask{}, &orm.SubAgentArtifact{}, &orm.UserNotificationPreferences{}, &orm.TaskNotification{}); err != nil {
 		t.Fatal(err)
 	}
 	return db

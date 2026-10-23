@@ -246,6 +246,9 @@ mkdir -p \
 
 install_feishu_cli
 
+echo "==> Building WorkBuddy Workflow resources"
+(cd "${ROOT}/integrations/workbuddy-workflow/connector" && "${PNPM_BIN}" install --frozen-lockfile && "${PNPM_BIN}" run build)
+
 echo "==> Building Go desktop runtime binaries"
 (cd "${ROOT}/backend/feishu-credential-helper" && "${GO_BIN}" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -mod=readonly -o "${RUNTIME_ROOT}/bin/feishu-credential-helper" .)
 shasum -a 256 "${RUNTIME_ROOT}/bin/feishu-credential-helper" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/feishu-credential-helper.sha256"
@@ -305,6 +308,7 @@ else
   "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements.txt"
   "${UV_BIN}" pip install --python "${RUNTIME_ROOT}/deps/python/algorithm/bin/python" --link-mode copy --strict -r "${ROOT}/algorithm/requirements-local.txt"
 fi
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/patch-reader-imports.py"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/auth-service" "${PYTHON}"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/channel-gateway" "${PYTHON}"
 make_python_venv_relocatable "${RUNTIME_ROOT}/deps/python/algorithm" "${PYTHON}"
@@ -336,6 +340,9 @@ rsync -a --delete \
   --exclude "/volumes" \
   --exclude "/local/config.env" \
   --exclude "/history-injection" \
+  --exclude "/integrations/workbuddy-workflow/cdp-demo" \
+  --exclude "/integrations/workbuddy-workflow/panel-demo" \
+  --exclude "/integrations/workbuddy-workflow/panel" \
   --exclude "lazymind-history-injection*.zip" \
   --exclude "local/build" \
   --exclude "local/runtime" \
@@ -393,7 +400,7 @@ BUILTIN_SKILL_BUNDLE_ARGS=(
 )
 (cd "${ROOT}/backend/core" && "${GO_BIN}" "${BUILTIN_SKILL_BUNDLE_ARGS[@]}")
 
-"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/stage-featured-assets.py" "${RUNTIME_ROOT}"
+"${RUNTIME_ROOT}/deps/python/algorithm/bin/python" "${ROOT}/desktop/scripts/stage-featured-assets.py" "${RUNTIME_ROOT}" --bundle-unpublished
 
 echo "==> Preparing workflow example metadata (download during warmup by default)"
 node "${ROOT}/desktop/scripts/stage-history-injection-package.mjs" "${RUNTIME_ROOT}"

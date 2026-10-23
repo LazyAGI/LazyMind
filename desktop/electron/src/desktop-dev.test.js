@@ -44,6 +44,29 @@ test("desktop notifications accept an external ready runtime in development", ()
   assert.equal(desktopNotificationRuntimeReady({ ...status, overallStatus: "starting" }, true), false);
 });
 
+test("desktop notifications remain ready when unrelated runtime services fail", () => {
+  const status = {
+    overallStatus: "stale", ownerMatched: true,
+    services: {
+      "local-proxy": { status: "running" },
+      "auth-service": { status: "ready" },
+      core: { status: "running" },
+      "channel-gateway": { status: "stale" },
+      "lazyllm-algo": { status: "stopped" },
+    },
+  };
+  assert.equal(desktopNotificationRuntimeReady(status), true);
+  assert.equal(desktopNotificationRuntimeReady({ ...status, ownerMatched: false }), false);
+  for (const service of ["local-proxy", "auth-service", "core"]) {
+    assert.equal(desktopNotificationRuntimeReady({
+      ...status, services: { ...status.services, [service]: { status: "stale" } },
+    }), false, `must wait for ${service}`);
+  }
+  for (const overallStatus of ["starting", "stopping", "stopped", "failed"]) {
+    assert.equal(desktopNotificationRuntimeReady({ ...status, overallStatus }), false);
+  }
+});
+
 test("desktop notifications use the external runtime URL in development", () => {
   const status = desktopDevRuntimeStatus("http://127.0.0.1:8090");
   assert.equal(desktopNotificationAPIOrigin(status, true), "http://127.0.0.1:8090");

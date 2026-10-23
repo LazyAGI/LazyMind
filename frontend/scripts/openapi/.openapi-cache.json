@@ -8,11 +8,11 @@
     "outputHash": "c5dd06b3e78c67d87fecb99ec1604e30358f493945dc0660ad1ea60e52262354"
   },
   "channel-gateway": {
-    "specHash": "ac1282510793f9fc41f9e1cac919f64a636929412c08dd7198148c9952d91c43",
-    "outputHash": "da0e29ede73a4c4a20ecb4f272bb416bd5bbc81ffa7292517e8c635dfc38dcae"
+    "specHash": "594f7d903505a551e0976b9e0901a55f089a381ea6f0f33a75a87f6ac683a0a4",
+    "outputHash": "a2b8d43e94b3e9b3195ecd62e4a575ee6ac7b8fa9cb364c43146f290f6a26af3"
   },
   "core": {
-    "specHash": "681dfa8fefb10740f899ef1ae515c184c66afd8b31b6170834516bcc26587a81",
-    "outputHash": "269d98b69d8727850b87f88956cd2e90da222448c9de95e2a3e9f198d43699d7"
+    "specHash": "978fb2ab1a316359c0861f01e7b60141fb5b8b0abc29bbaa826f7061dddaa34c",
+    "outputHash": "d439595d7e35ef7ade81c346b35dce25a399e3733ae54f0e900b59e40f596833"
   }
 }

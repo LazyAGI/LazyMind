@@ -55,7 +55,7 @@ func orderedConversationIDs(t *testing.T, query string) []string {
 func TestConversationManualOrder(t *testing.T) {
 	for _, task := range []bool{false, true} {
 		t.Run(fmt.Sprint(task), func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newConversationTestDB(t).DB
 			store.Init(db, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			base := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
@@ -115,7 +115,7 @@ func TestConversationManualOrder(t *testing.T) {
 }
 
 func TestConversationUnpinRestoresManualPosition(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -146,7 +146,7 @@ func TestConversationUnpinRestoresManualPosition(t *testing.T) {
 func TestConversationUnpinWithMultiplePinsAndNewHistory(t *testing.T) {
 	for _, rearrange := range []bool{false, true} {
 		t.Run(fmt.Sprint(rearrange), func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newConversationTestDB(t).DB
 			store.Init(db, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -205,7 +205,7 @@ func TestConversationUnpinWithMultiplePinsAndNewHistory(t *testing.T) {
 }
 
 func TestConversationOrderRollsBackPinnedPlaceholderChanges(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	base := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
@@ -257,7 +257,7 @@ func TestConversationOrderRollsBackPinnedPlaceholderChanges(t *testing.T) {
 }
 
 func TestConversationOrderRejectsUnavailableTargets(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC()
@@ -303,7 +303,7 @@ func TestConversationOrderPaginatesChildrenAfterTheirParent(t *testing.T) {
 	for _, task := range []bool{false, true} {
 		for _, pinned := range []bool{false, true} {
 			t.Run(fmt.Sprintf("task=%t/pinned=%t", task, pinned), func(t *testing.T) {
-				db := newPromptTestDB(t).DB
+				db := newConversationTestDB(t).DB
 				store.Init(db, nil, nil)
 				t.Cleanup(func() { store.Init(nil, nil, nil) })
 				base := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
@@ -356,7 +356,7 @@ func TestConversationOrderPaginatesChildrenAfterTheirParent(t *testing.T) {
 }
 
 func TestConversationOrderUnpinPreservesOtherManualPositions(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	base := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
@@ -381,7 +381,7 @@ func TestConversationOrderUnpinPreservesOtherManualPositions(t *testing.T) {
 }
 
 func TestConversationOrderRetainsFilteredAndUnloadedRows(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	base := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
@@ -405,7 +405,7 @@ func TestConversationOrderRetainsFilteredAndUnloadedRows(t *testing.T) {
 }
 
 func TestConversationOrderConcurrentMoves(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	for _, id := range []string{"a", "b", "c", "d"} {

@@ -262,7 +262,8 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 		return err
 	}
 	defer release()
-	stamp, err := algorithmReadyStamp(paths, includeEvo)
+	includeRAG := !cfg.Algorithm.RAGDisabled
+	stamp, err := algorithmReadyStamp(paths, includeEvo, includeRAG)
 	if err != nil {
 		return err
 	}
@@ -276,11 +277,11 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 			return err
 		}
 	}
-	if err := m.installAlgorithmPythonDeps(ctx, paths, includeEvo); err != nil {
+	if err := m.installAlgorithmPythonDeps(ctx, paths, includeEvo, includeRAG); err != nil {
 		if rebuildErr := m.createVenv(ctx, paths, true); rebuildErr != nil {
 			return fmt.Errorf("prepare algorithm python failed and venv rebuild failed: %w (original install error: %v)", rebuildErr, err)
 		}
-		if retryErr := m.installAlgorithmPythonDeps(ctx, paths, includeEvo); retryErr != nil {
+		if retryErr := m.installAlgorithmPythonDeps(ctx, paths, includeEvo, includeRAG); retryErr != nil {
 			return fmt.Errorf("prepare algorithm python failed after venv rebuild: %w (original install error: %v)", retryErr, err)
 		}
 	}
@@ -356,7 +357,7 @@ func (m *AlgorithmServiceManager) ensureTiktokenCache(ctx context.Context, paths
 	return nil
 }
 
-func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
+func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo, includeRAG bool) error {
 	version, err := lazyLLMVersion(paths.RepoRoot)
 	if err != nil {
 		return err
@@ -369,9 +370,13 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 	installSteps := []Command{
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "setuptools<81"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm=="+version), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
-		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)},
-		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
-		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+	}
+	if includeRAG {
+		installSteps = append(installSteps, Command{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)})
+	}
+	installSteps = append(installSteps, Command{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)})
+	if includeRAG {
+		installSteps = append(installSteps, Command{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)})
 	}
 	if includeEvo {
 		installSteps = append(installSteps, Command{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "evo", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)})
@@ -385,7 +390,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 	return nil
 }
 
-func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
+func algorithmReadyStamp(paths RuntimePaths, includeEvo, includeRAG bool) (string, error) {
 	version, err := lazyLLMVersion(paths.RepoRoot)
 	if err != nil {
 		return "", err
@@ -393,14 +398,17 @@ func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("lazyllm==" + version))
 	_, _ = hash.Write([]byte{0})
-	files := []string{
-		filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt"),
-		filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt"),
+	files := []string{filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")}
+	if includeRAG {
+		files = append(files, filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt"))
 	}
 	prefix := "algorithm"
+	if !includeRAG {
+		prefix = "algorithm-no-rag"
+	}
 	if includeEvo {
 		files = append(files, filepath.Join(paths.RepoRoot, "evo", "requirements.txt"))
-		prefix = "algorithm-evo"
+		prefix += "-evo"
 	}
 	for _, path := range files {
 		data, err := os.ReadFile(path)
@@ -761,7 +769,7 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	if pandocPath := strings.TrimSpace(paths.PandocBin); pandocPath != "" {
 		env = append(env, "LAZYMIND_PANDOC_PATH="+pandocPath)
 	}
-	return append(env, pythonComponentEnvironment(paths)...)
+	return append(env, pythonComponentEnvironment(paths, cfg.Algorithm.RAGDisabled)...)
 }
 
 func ensureEditablePPTNodeModulesLink(exportSrc, exportDeps string) error {
@@ -812,6 +820,11 @@ func joinPathList(parts ...string) string {
 }
 
 func algorithmRegisterPolicy(cfg RuntimeConfig, paths RuntimePaths) string {
+	// Desktop packages may reuse a version while changing registration fingerprints.
+	// This opt-out override only replaces definitions; it never resets knowledge data.
+	if envBool("LAZYMIND_FORCE_ALGO_REGISTER", cfg.Profile == "desktop") {
+		return "force"
+	}
 	if policy := strings.TrimSpace(os.Getenv("LAZYLLM_ALGO_REGISTER_POLICY")); policy != "" {
 		return policy
 	}

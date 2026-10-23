@@ -20,12 +20,12 @@ import {
   CommentOutlined,
   EditOutlined,
   PaperClipOutlined,
+  PlusOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
 import SkillRecordingPanel from "../SkillRecording";
 import SendIcon from "../../assets/icons/send_icon.svg?react";
-import AddIcon from "../../assets/icons/add.svg?react";
 
 import ImageUpload, {
   allowedImageTypes,
@@ -79,6 +79,7 @@ import {
   listSkillLinkedWorkflows,
   type SkillLinkedWorkflow,
 } from "@/modules/workflow/workflowDraftApi";
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
@@ -694,6 +695,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       onThinkingDepthChange ?? setThinkingDepth;
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
+    const { availability: ragAvailability } = useRAGComponent();
+    const ragReady = ragAvailability === "ready";
     const [recordingOpen, setRecordingOpen] = useState(false);
     const [text, setText] = useState("");
     const [featuredMentions, setFeaturedMentions] = useState<ChatMention[]>([]);
@@ -705,11 +708,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if (!allowMentions) return [];
       const merged = new Map<string, ChatMention>();
       for (const mention of [...boundMentions, ...featuredMentions, ...mentions]) {
-        if (!allowKnowledgeBaseSelection && mention.type === "knowledge_base") continue;
+        if ((!allowKnowledgeBaseSelection || !ragReady) && mention.type === "knowledge_base") continue;
         merged.set(`${mention.type}:${mention.resource_id}`, mention);
       }
       return [...merged.values()];
-    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions]);
+    }, [allowKnowledgeBaseSelection, allowMentions, boundMentions, featuredMentions, mentions, ragReady]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [menuHeight, setMenuHeight] = useState(420);
@@ -726,6 +729,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return () => { window.removeEventListener('resize', updateHeight); window.removeEventListener('scroll', updateHeight, true); };
     }, [activeMenu]);
     const addMenuOpen = activeMenu === "add";
+    const addMenuId = useId();
     const setAddMenuOpen = (open: boolean) => setActiveMenu(open ? "add" : null);
     const [knowledgeToolsEnabled, setKnowledgeToolsEnabled] = useState<{
       kb: boolean | null;
@@ -855,12 +859,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       );
     }, [handleToolAvailabilityChanged, refreshKnowledgeToolAvailability]);
 
-    const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false;
+    const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false && ragReady;
     const knowledgeBaseSelectable =
       allowKnowledgeBaseSelection && knowledgeBaseEnabled;
-    const knowledgeBaseDisabledReason = allowKnowledgeBaseSelection
-      ? t("chat.knowledgeSearchDisabled")
-      : t("chat.sideChat.knowledgeInheritedOnly");
+    const knowledgeBaseDisabledReason = !ragReady
+      ? ragAvailability === "checking"
+        ? "正在检查本地知识库组件状态"
+        : "请先安装并启用本地知识库组件"
+      : allowKnowledgeBaseSelection
+        ? t("chat.knowledgeSearchDisabled")
+        : t("chat.sideChat.knowledgeInheritedOnly");
+    // Chat attachments use the independent reader, not knowledge-base indexing.
     const uploadTypes = allowedUploadTypes;
 
     const debouncedSaveInput = useMemo(
@@ -1223,9 +1232,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       const sendParams: SendMessageParams = {
         text: normalizedText,
         chatConfigSnapshot: {
-          knowledgeBaseId: [...(chatConfig?.knowledgeBaseId ?? [])],
-          creators: [...(chatConfig?.creators ?? [])],
-          tags: [...(chatConfig?.tags ?? [])],
+          knowledgeBaseId: ragReady ? [...(chatConfig?.knowledgeBaseId ?? [])] : [],
+          creators: ragReady ? [...(chatConfig?.creators ?? [])] : [],
+          tags: ragReady ? [...(chatConfig?.tags ?? [])] : [],
           databaseBaseId: chatConfig?.databaseBaseId,
         },
         thinking_depth: effectiveThinkingDepth,
@@ -1587,7 +1596,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       styles={{ body: { height: menuHeight } }}
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
-                        <div className="chat-add-resource-menu">
+                        <div id={addMenuId} className="chat-add-resource-menu">
                           <button type="button" onClick={() => { setAddMenuOpen(false); setRecordingOpen(true); }}>
                             <span aria-hidden="true">◉</span>{t("recording.title")}
                           </button>
@@ -1670,13 +1679,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     >
                       <Tooltip title={t(allowKnowledgeBaseSelection ? "chat.addResourceTooltip" : "chat.addFileTooltip")}>
                         <button type="button"
-                          className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
-                          role="button"
+                          className="chat-add-resource-trigger"
                           tabIndex={disabled || isPromptPolishing ? -1 : 0}
+                          aria-label={t("chat.addResource")}
+                          aria-expanded={addMenuOpen}
+                          aria-controls={addMenuOpen ? addMenuId : undefined}
                           aria-disabled={disabled || isPromptPolishing}
                         >
-                          <AddIcon />
-                          {t("chat.addResource")}
+                          <PlusOutlined className="chat-add-resource-icon" aria-hidden="true" />
                         </button>
                       </Tooltip>
                     </Popover>

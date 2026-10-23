@@ -3,11 +3,36 @@ package chat
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"lazymind/core/doc"
 	"lazymind/core/log"
 )
+
+// Chat has native DOCX/PPTX readers, unlike the knowledge-base ingestion pipeline.
+// Preserve converted PDFs when available, but do not require an Office service
+// merely to read an attachment on desktop.
+func resolveChatAttachmentPath(ctx context.Context, path string, ocrConfig map[string]any) (string, error) {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+		switch strings.ToLower(filepath.Ext(strings.TrimSpace(path))) {
+		case ".docx", ".pptx":
+			return strings.TrimSpace(path), nil
+		}
+		if doc.NeedsOfficeConvertForPath(path, "", ocrConfig) {
+			return "", fmt.Errorf("desktop does not support Office conversion; upload DOCX, PPTX or PDF instead")
+		}
+	}
+	resolved, err := doc.ResolveParsePath(ctx, path, ocrConfig)
+	if err != nil && strings.TrimSpace(os.Getenv("LAZYMIND_OFFICE_CONVERT_URL")) == "" {
+		switch strings.ToLower(filepath.Ext(strings.TrimSpace(path))) {
+		case ".docx", ".pptx":
+			return strings.TrimSpace(path), nil
+		}
+	}
+	return resolved, err
+}
 
 func resolveChatAttachmentFiles(ctx context.Context, files any, ocrConfig map[string]any) (any, error) {
 	if files == nil {
@@ -51,7 +76,7 @@ func resolveChatAttachmentFiles(ctx context.Context, files any, ocrConfig map[st
 		}
 		out := make([]string, 0, len(xs))
 		for _, path := range xs {
-			resolved, err := doc.ResolveParsePath(ctx, path, ocrConfig)
+			resolved, err := resolveChatAttachmentPath(ctx, path, ocrConfig)
 			if err != nil {
 				return nil, fmt.Errorf("convert attachment %q: %w", strings.TrimSpace(path), err)
 			}
@@ -75,7 +100,7 @@ func resolveChatAttachmentFiles(ctx context.Context, files any, ocrConfig map[st
 				out = append(out, item)
 				continue
 			}
-			resolved, err := doc.ResolveParsePath(ctx, path, ocrConfig)
+			resolved, err := resolveChatAttachmentPath(ctx, path, ocrConfig)
 			if err != nil {
 				return nil, fmt.Errorf("convert attachment %q: %w", strings.TrimSpace(path), err)
 			}

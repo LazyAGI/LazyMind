@@ -98,6 +98,14 @@ type ArtifactGetResult struct {
 	Rendered bool     `json:"rendered_as_mcp_content,omitempty"`
 }
 
+func workflowStartDescription(provider string) string {
+	presentation := ""
+	if provider == "codex" {
+		presentation = "Also returns interaction_url. In Codex, immediately open interaction_url once with the host open_in_codex tool (target.type=browser, target.url=interaction_url, placement=bottom), without asking the user to click a link. If the host tool is unavailable or fails, report that and provide the link. "
+	}
+	return "Create a durable Workflow session and pin its revision. Returns session_id, workflow_id, and revision_id. " + presentation + "Then call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent."
+}
+
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.list", Title: "List LazyMind Workflows",
@@ -138,11 +146,21 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, InputGetResult{Resource: resource}, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.start", Title: "Start a LazyMind Workflow",
-		Description: "Create a durable Workflow session and pin its revision. Returns session_id, workflow_id, revision_id, and interaction_url. In Codex, immediately open interaction_url once with the host open_in_codex tool (target.type=browser, target.url=interaction_url, placement=bottom), without asking the user to click a link. If the host tool is unavailable or fails, report that and provide the link. Then call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent.", Annotations: write},
+		Description: workflowStartDescription(client.HostProvider), Annotations: write},
 		func(ctx context.Context, request *mcp.CallToolRequest, input StartInput) (*mcp.CallToolResult, StartResult, error) {
 			if client.HostProvider == "codex" && client.RequireHostBinding {
 				var err error
 				input.DriverSessionID, err = codexDriver(request, input.DriverSessionID)
+				if err != nil {
+					return nil, StartResult{}, err
+				}
+			}
+			if client.HostProvider == "workbuddy" && client.RequireHostBinding {
+				if client.ResolveDriver == nil || request == nil || request.Params == nil {
+					return nil, StartResult{}, errors.New("WorkBuddy native identity resolver unavailable")
+				}
+				var err error
+				input.DriverSessionID, err = client.ResolveDriver(ctx, request.Params.Arguments)
 				if err != nil {
 					return nil, StartResult{}, err
 				}
@@ -200,7 +218,7 @@ func Register(server *mcp.Server, client *Client) {
 				return nil, value, err
 			}
 			if AwaitingReview(value.State) {
-				message := "Stop this turn. The submitted step requires user review"
+				message := "Stop this turn. The submitted step requires user review in the Workflow panel"
 				if value.State.InteractionURL != "" {
 					message += " at " + value.State.InteractionURL
 				}

@@ -384,6 +384,46 @@ describe('shared workflow compact layout', () => {
 
 
 describe('external workflow surface boundary', () => {
+  it.each(['automatic-gap', 'delivery-pending', 'review-without-checkpoint', 'interrupted', 'completed-follow-on'] as const)(
+    'keeps native footer controls on the external surface: %s', async scenario => {
+      const completed = scenario === 'completed-follow-on';
+      const interrupted = scenario === 'interrupted';
+      fixture.session.status = completed ? 'completed' : 'waiting';
+      fixture.session.projection = {
+        past: ['prepare'], current: interrupted ? ['write_document'] : [], completed,
+        nodes: { write_document: {
+          execution: interrupted ? 'interrupted' : 'succeeded', requires_approval: false,
+          validity: 'effective', reachability: 'reachable', readiness: 'not_applicable', branch: 'active',
+        } },
+      };
+      fixture.session.steps![1].status = interrupted ? 'interrupted' : 'succeeded';
+      if (completed) fixture.ui.tabs![1].completed_continue_step = 'write_document';
+      const control = {
+        protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 64,
+        continuation: completed ? 'completed' : scenario === 'review-without-checkpoint' ? 'awaiting_user' : 'continue',
+        reviews: scenario === 'review-without-checkpoint' ? [{
+          id: 'review', step_id: 'prepare', execution_id: 'old-attempt', status: 'pending', version: 1, manifest_hash: 'hash',
+        }] : [],
+        active_executions: 0, active_execution_ids: [], admission: { can_begin: false },
+        binding: { bound: true, generation: 1 },
+        delivery: scenario === 'delivery-pending' ? { kind: 'continue', status: 'accepted' } : null,
+        available_actions: ['save', 'continue', 'resume', 'rewind', 'retry', 'confirm', 'confirm_and_continue'],
+      } as WorkflowControlView;
+      const view = render(<WorkflowPanel conversationId='layout-test' />);
+      await screen.findByRole('button', { name: '发布' });
+      const footerButtons = () => within(screen.getByRole('group', { name: '工作流会话操作' }))
+        .getAllByRole('button').map(button => ({ label: button.textContent, disabled: (button as HTMLButtonElement).disabled }));
+      const native = footerButtons();
+      view.rerender(<WorkflowPanel conversationId='layout-test' embedded
+        externalPresentation={{ activities: {}, compactEmptyStates: false }}
+        controlAdapter={{ control, execute: vi.fn(async () => {}) }} />);
+      expect(footerButtons()).toEqual(native);
+      expect(screen.queryByRole('group', { name: '工作流审批操作' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '保存并继续' })).not.toBeInTheDocument();
+      if (interrupted || completed) expect(screen.getByRole('button', { name: '继续', exact: true })).toBeEnabled();
+    },
+  );
+
   it('uses the native running footer and routes stop without saving editors', async () => {
     fixture.session.status = 'active';
     fixture.session.steps![1].status = 'running';
@@ -444,10 +484,27 @@ describe('external workflow surface boundary', () => {
     const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
     expect(within(shortcuts).getByRole('button', { name: '成稿' })).toBeVisible();
     expect(screen.queryByRole('button', { name: '展开工作流面板' })).not.toBeInTheDocument();
+    // Author styles such as display:flex can override the HTML hidden attribute.
+    // A host without expansion support must not mount an inert button at all.
+    expect(document.querySelector('.workflow-panel__expand-btn')).toBeNull();
     fireEvent.click(within(shortcuts).getByRole('button', { name: '成稿' }));
     await waitFor(() => expect(execute).toHaveBeenCalledWith({ kind: 'rewind', stepId: 'write_document' }));
     expect(fixture.flush).toHaveBeenCalledOnce();
     expect(fixture.flush.mock.invocationCallOrder[0]).toBeLessThan(execute.mock.invocationCallOrder[0]);
+  });
+
+  it('preserves native expansion and delegates embedded expansion only to a capable host', async () => {
+    const toggle = vi.fn();
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('button', { name: '发布' });
+    expect(view.container.querySelector('.workflow-panel__expand-btn')).not.toBeNull();
+    view.rerender(<WorkflowPanel conversationId='layout-test' embedded
+      externalPresentation={{ activities: {}, expanded: false, onToggleExpand: toggle }} />);
+    fireEvent.click(view.container.querySelector<HTMLButtonElement>('.workflow-panel__expand-btn')!);
+    expect(toggle).toHaveBeenCalledOnce();
+    view.rerender(<WorkflowPanel conversationId='layout-test' embedded
+      externalPresentation={{ activities: {} }} />);
+    expect(view.container.querySelector('.workflow-panel__expand-btn')).toBeNull();
   });
 
   it('shows the host-backed collapse action for an embedded external panel', async () => {

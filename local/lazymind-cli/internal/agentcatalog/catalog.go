@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"lazymind/agentconnector/internal/chatagent"
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 const maxSessions = 5000
@@ -489,7 +490,7 @@ func isLazyMindWorkspace(path string) bool {
 	if path == "" {
 		return false
 	}
-	home := strings.TrimSpace(os.Getenv("LAZYMIND_HOME"))
+	home := strings.TrimSpace(connectorconfig.Value("LAZYMIND_HOME"))
 	if home == "" {
 		userHome, err := os.UserHomeDir()
 		if err != nil {
@@ -591,7 +592,7 @@ func workBuddySessionMeta(path string) (sessionMeta, bool) {
 }
 
 func codexHome() string {
-	if configured := strings.TrimSpace(os.Getenv("CODEX_HOME")); configured != "" {
+	if configured := strings.TrimSpace(connectorconfig.Value("CODEX_HOME")); configured != "" {
 		return configured
 	}
 	home, err := os.UserHomeDir()

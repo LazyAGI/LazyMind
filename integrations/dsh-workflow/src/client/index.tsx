@@ -8,6 +8,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { createPortal } from 'react-dom'
 import { eventRun, type RunLink } from '../protocol'
 import { runKey, windowStore } from './window-store'
+import { readPresentationConfig } from '../presentation-config'
 
 declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap { 'lazymind-workflow': RunLink }
@@ -18,20 +19,21 @@ const interactiveRegion = { WebkitAppRegion: 'no-drag' } as CSSProperties
 
 export const inject = ['uiConversation', 'slots']
 
-export function apply(ctx: ClientContext, config: { serverName?: string } = {}): void {
+export function apply(ctx: ClientContext): void {
+  const config = readPresentationConfig(globalThis)
   const windows = windowStore()
-  const serverName = config.serverName ?? 'lazymind'
+  const serverName = config.serverName
   ctx.effect(() => () => windows.dispose())
   const definition: ConversationNodeDefinition<RunLink> = {
     kind: 'lazymind-workflow', target: 'chat',
     match(event) {
-      const run = eventRun(event, serverName)
+      const run = eventRun(event, serverName, config.webUrl)
       // Each standard event is immutable. Reusing runId as a start identity would
       // make a repeated state/start result violate DSH's unique-start contract.
       return run ? { id: `${run.runId}:${event.seq}`, role: 'start' } : null
     },
     start(_context, match) {
-      const run = eventRun(match.event, serverName)
+      const run = eventRun(match.event, serverName, config.webUrl)
       if (!run) throw new Error('Workflow presentation requires a valid standard tool result')
       return run
     },
@@ -120,7 +122,7 @@ export function apply(ctx: ClientContext, config: { serverName?: string } = {}):
     }
     useEffect(syncExpansion, [expanded, collapsed, origin, runId])
     if (!current) return <span ref={anchor} hidden />
-    const url = new URL(`/workflow-runs/${encodeURIComponent(current.run.runId)}/embed`, origin)
+    const url = new URL(`${current.run.url.replace(/\/$/, "")}/embed`)
     url.searchParams.set('hostOrigin', window.location.origin)
     const panel = <section aria-label="LazyMind Workflow" style={{
       ...interactiveRegion,

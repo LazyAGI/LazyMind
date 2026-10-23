@@ -22,9 +22,11 @@ import (
 	workbuddyadapter "lazymind/agentconnector/internal/adapters/workbuddy"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
+	"lazymind/agentconnector/internal/workbuddyhost"
 )
 
 const (
@@ -36,16 +38,17 @@ const (
 )
 
 type Server struct {
-	address       string
-	bridge        *mcpbridge.Bridge
-	executorProbe bridgeProber
-	store         *credentials.Store
-	policy        *executorpolicy.Store
-	mu            sync.Mutex
-	stop          context.CancelFunc
-	loginMu       sync.Mutex
-	logins        map[string]agentLogin
-	loginID       uint64
+	workbuddyIdentities workbuddyhost.Broker
+	address             string
+	bridge              *mcpbridge.Bridge
+	executorProbe       bridgeProber
+	store               *credentials.Store
+	policy              *executorpolicy.Store
+	mu                  sync.Mutex
+	stop                context.CancelFunc
+	loginMu             sync.Mutex
+	logins              map[string]agentLogin
+	loginID             uint64
 
 	loginOverride func(context.Context, string) error
 }
@@ -53,6 +56,7 @@ type Server struct {
 type agentLogin struct {
 	id     uint64
 	cancel context.CancelFunc
+	status agentintegration.LoginStatus
 }
 
 func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, policy *executorpolicy.Store) (*Server, error) {
@@ -86,7 +90,7 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		if err := validateBridgeIdentity(status, self); err != nil {
 			return nil, err
 		}
-		if status["version"] == "v2" {
+		if status["version"] == "v4" {
 			return status, nil
 		}
 		if err := Stop(ctx, address); err != nil {
@@ -107,6 +111,7 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		return nil, err
 	}
 	command := exec.Command(self, "assistant", "serve", "--listen", address)
+	command.Env = connectorconfig.ServiceEnvironment(home)
 	command.SysProcAttr = detachedProcessAttributes()
 	command.Stdout = logFile
 	command.Stderr = logFile
@@ -206,7 +211,7 @@ func Health(ctx context.Context, address string) (map[string]any, error) {
 }
 
 func assistantHome() (string, error) {
-	if configured := strings.TrimSpace(os.Getenv("LAZYMIND_HOME")); configured != "" {
+	if configured := strings.TrimSpace(connectorconfig.Value("LAZYMIND_HOME")); configured != "" {
 		return filepath.Abs(configured)
 	}
 	home, err := os.UserHomeDir()
@@ -221,6 +226,12 @@ func (s *Server) Serve(ctx context.Context) error {
 	s.stop = cancel
 	defer cancel()
 	defer s.cancelAgentLogins()
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		workbuddyhost.Supervise(runCtx, s.store.Directory(), "http://"+s.address, s.store.AccountScope)
+	}()
+	defer func() { cancel(); <-workerDone }()
 	httpServer := &http.Server{
 		Addr:              s.address,
 		Handler:           s.routes(),
@@ -259,11 +270,16 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/health", func(writer http.ResponseWriter, _ *http.Request) {
 		executable, _ := os.Executable()
 		writeJSON(writer, http.StatusOK, map[string]any{
-			"ok": true, "pid": os.Getpid(), "version": "v2",
+			"ok": true, "pid": os.Getpid(), "version": "v4",
 			"platform": runtime.GOOS, "executable": executable,
 		})
 	})
 	mux.HandleFunc("POST /v1/workflow-runs/{session}/control", s.handleWorkflowControl)
+	mux.HandleFunc("GET /v1/workbuddy/presentation", s.handleWorkBuddyPresentation)
+	mux.HandleFunc("GET /v1/workbuddy/frame", s.handleWorkBuddyFrame)
+	mux.HandleFunc("POST /v1/workbuddy/resolve", s.handleWorkBuddyResolve)
+	mux.HandleFunc("GET /v1/workbuddy/identity-requests", s.handleWorkBuddyIdentities)
+	mux.HandleFunc("POST /v1/workbuddy/identity-receipts", s.handleWorkBuddyIdentityReceipt)
 	mux.HandleFunc("POST /v1/workflow-host/bind", s.handleWorkflowHostBind)
 	mux.HandleFunc("GET /v1/workflow-host/runs/{session}/control", s.handleWorkflowHostState)
 	mux.HandleFunc("GET /v1/workflow-host/actions", s.handleWorkflowHostActions)
@@ -378,6 +394,7 @@ func (s *Server) handleExecutableBinding(writer http.ResponseWriter, request *ht
 			writeError(writer, err)
 			return
 		}
+		s.executableBindingChanged(target)
 		writeJSON(writer, http.StatusOK, map[string]any{
 			"target": target, "configured": false, "path": "",
 		})
@@ -395,9 +412,27 @@ func (s *Server) handleExecutableBinding(writer http.ResponseWriter, request *ht
 		writeError(writer, err)
 		return
 	}
+	s.executableBindingChanged(target)
 	writeJSON(writer, http.StatusOK, map[string]any{
 		"target": target, "configured": true, "path": path,
 	})
+}
+
+func (s *Server) executableBindingChanged(target agentexec.BindingTarget) {
+	var agent string
+	switch target {
+	case agentexec.CodexCLI, agentexec.CodexDesktop:
+		agent = "codex"
+	case agentexec.CursorCLI, agentexec.CursorDesktop:
+		agent = "cursor"
+	}
+	s.loginMu.Lock()
+	if current, ok := s.logins[agent]; ok {
+		current.cancel()
+		delete(s.logins, agent)
+	}
+	s.loginMu.Unlock()
+	s.policy.Recheck()
 }
 
 func (s *Server) handleExecutorPolicies(writer http.ResponseWriter, request *http.Request) {
@@ -444,8 +479,14 @@ func ExecutorStatuses(policy *executorpolicy.Store) (map[string]executorpolicy.S
 	if err != nil {
 		return nil, err
 	}
+	codexRuntime := codex.Inspect("")
+	codexStatus := statuses["codex"]
+	codexStatus.Installed, codexStatus.Ready = &codexRuntime.Installed, &codexRuntime.Ready
+	codexStatus.UnavailableReason = codexRuntime.Reason
+	codexStatus.CLIPath, codexStatus.CLISource = codexRuntime.Path, codexRuntime.Source
+	statuses["codex"] = codexStatus
 	probes := map[string]func(string) (bool, bool, string){
-		"codex": codex.Probe, "cursor": cursoradapter.Probe, "workbuddy": workbuddyadapter.Probe,
+		"cursor": cursoradapter.Probe, "workbuddy": workbuddyadapter.Probe,
 	}
 	for provider, probe := range probes {
 		status := statuses[provider]
@@ -503,6 +544,9 @@ func (s *Server) handleAgentStatuses(writer http.ResponseWriter, request *http.R
 		writeError(writer, err)
 		return
 	}
+	for agent, status := range statuses {
+		statuses[agent] = s.withLoginStatus(status)
+	}
 	writeJSON(writer, http.StatusOK, map[string]any{"agents": statuses})
 }
 
@@ -558,13 +602,13 @@ func (s *Server) agentStatus(ctx context.Context, agent string) (agentintegratio
 		if err != nil {
 			return agentintegration.Status{}, err
 		}
-		return adapter.Status(ctx), nil
+		return s.withLoginStatus(adapter.Status(ctx)), nil
 	}
 	adapter, err := s.mcpClient(agent)
 	if err != nil {
 		return agentintegration.Status{}, err
 	}
-	return adapter.Status(ctx), nil
+	return s.withLoginStatus(adapter.Status(ctx)), nil
 }
 
 func (s *Server) agentAction(ctx context.Context, agent, action string) (agentintegration.Status, error) {
@@ -580,6 +624,7 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 		case "disconnect":
 			return adapter.Disconnect(ctx), nil
 		case "login":
+			status := adapter.Status(ctx)
 			s.startAgentLogin(agent, func(loginCtx context.Context) error {
 				status := adapter.Login(loginCtx)
 				if status.State == agentintegration.Failed {
@@ -587,7 +632,7 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 				}
 				return nil
 			})
-			return loginOpenedStatus(adapter.Status(ctx)), nil
+			return s.withLoginStatus(status), nil
 		default:
 			return agentintegration.Status{}, fmt.Errorf("unsupported Codex action %q", action)
 		}
@@ -608,14 +653,19 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 		s.startAgentLogin(agent, func(loginCtx context.Context) error {
 			return cursoradapter.Login(loginCtx, "")
 		})
-		return loginOpenedStatus(adapter.Status(ctx)), nil
+		return s.withLoginStatus(adapter.Status(ctx)), nil
 	default:
 		return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 	}
 }
 
-func loginOpenedStatus(status agentintegration.Status) agentintegration.Status {
-	status.Message = "Login opened. Complete or close it, then return to LazyMind and check again."
+func (s *Server) withLoginStatus(status agentintegration.Status) agentintegration.Status {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	if login, ok := s.logins[status.Agent]; ok {
+		outcome := login.status
+		status.Login = &outcome
+	}
 	return status
 }
 
@@ -627,21 +677,41 @@ func (s *Server) startAgentLogin(agent string, login func(context.Context) error
 	loginCtx, cancel := context.WithTimeout(context.Background(), agentLoginTimeout)
 	s.loginID++
 	id := s.loginID
-	s.logins[agent] = agentLogin{id: id, cancel: cancel}
+	s.logins[agent] = agentLogin{id: id, cancel: cancel, status: agentintegration.LoginStatus{
+		State: "running", Message: "Login is starting. Complete authentication when prompted, then return to LazyMind and check again.",
+	}}
 	override := s.loginOverride
 	s.loginMu.Unlock()
 
 	go func() {
 		defer cancel()
 		defer s.policy.Recheck()
+		var err error
 		if override != nil {
-			_ = override(loginCtx, agent)
+			err = override(loginCtx, agent)
 		} else {
-			_ = login(loginCtx)
+			err = login(loginCtx)
+		}
+		if loginCtx.Err() != nil {
+			err = loginCtx.Err()
+		}
+		outcome := agentintegration.LoginStatus{State: "succeeded"}
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			outcome = agentintegration.LoginStatus{State: "failed", Message: "Login timed out. Try again and complete authentication before the timeout."}
+		case errors.Is(err, context.Canceled):
+			outcome = agentintegration.LoginStatus{State: "cancelled", Message: "Login was cancelled. Try again when ready."}
+		case err != nil:
+			message := []rune(strings.TrimSpace(err.Error()))
+			if len(message) > 2048 {
+				message = append(message[:2047], '…')
+			}
+			outcome = agentintegration.LoginStatus{State: "failed", Message: string(message)}
 		}
 		s.loginMu.Lock()
 		if current, ok := s.logins[agent]; ok && current.id == id {
-			delete(s.logins, agent)
+			current.status = outcome
+			s.logins[agent] = current
 		}
 		s.loginMu.Unlock()
 	}()

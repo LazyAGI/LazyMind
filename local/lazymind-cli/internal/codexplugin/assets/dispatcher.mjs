@@ -80,6 +80,7 @@ var HostBridge = class {
 /** Polling and delivery policy are shared; only host admission/history live in the adapter. */
 function createDispatcher(runtime, host, bridge, instanceId, signal) {
 	async function deliver(action) {
+		if (action.status === "pending" && action.kind === "continue" && runtime.ready && !await runtime.ready(action.native_session_id, signal)) return;
 		if (action.status !== "pending") {
 			const current = await bridge.action(action.id, signal);
 			if (![
@@ -130,7 +131,7 @@ function createDispatcher(runtime, host, bridge, instanceId, signal) {
 				let after = "";
 				do {
 					const page = await bridge.actions(after, signal);
-					for (const action of page.actions) try {
+					for (const action of [...page.actions].sort((a, b) => Number(b.kind === "cancel") - Number(a.kind === "cancel"))) try {
 						await deliver(action);
 					} catch (error) {
 						if (!(error instanceof BridgeError && ["DELIVERY_PENDING", "ACTION_CONSUMED"].includes(error.code)) && !signal.aborted) runtime.warn(`lazymind-workflow: delivery pending: ${String(error)}`);
@@ -175,9 +176,9 @@ function continuationMessage(action) {
 }
 
 //#endregion
-//#region src/runtime-lock.ts
+//#region ../workflow-agent-core/node/runtime-lock.ts
 var DispatcherBusy = class extends Error {};
-/** One cooperating dispatcher per Codex profile pairing. */
+/** One cooperating dispatcher per host profile pairing. */
 async function dispatcherLock(pairingFile, instanceId) {
 	const path = `${pairingFile}.runtime.lock`;
 	for (let attempt = 0; attempt < 2; attempt++) try {
@@ -200,7 +201,7 @@ async function dispatcherLock(pairingFile, instanceId) {
 	} catch (error) {
 		if (error.code !== "EEXIST") throw error;
 		const previous = JSON.parse(await readFile(path, "utf8"));
-		if (!Number.isSafeInteger(previous.pid) || previous.pid < 1) throw new Error("Invalid Codex dispatcher lock; repair this connection explicitly");
+		if (!Number.isSafeInteger(previous.pid) || previous.pid < 1) throw new Error("Invalid host dispatcher lock; repair this connection explicitly");
 		try {
 			process.kill(previous.pid, 0);
 		} catch (error$1) {
@@ -210,9 +211,9 @@ async function dispatcherLock(pairingFile, instanceId) {
 			}
 			throw error$1;
 		}
-		throw new DispatcherBusy("This Codex profile pairing already has a workflow dispatcher");
+		throw new DispatcherBusy("This host profile pairing already has a workflow dispatcher");
 	}
-	throw new Error("Could not acquire the Codex workflow dispatcher lock");
+	throw new Error("Could not acquire the host workflow dispatcher lock");
 }
 
 //#endregion

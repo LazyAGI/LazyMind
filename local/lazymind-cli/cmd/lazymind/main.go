@@ -21,6 +21,7 @@ import (
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/assistantbridge"
 	"lazymind/agentconnector/internal/chatagent"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
@@ -65,6 +66,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 2 && args[0] == "connection" && args[1] == "resolve" {
+		return resolveConnection(ctx, stdout)
+	}
 	if len(args) > 0 && args[0] == "codex-workflow-pair" {
 		return runCodexWorkflowPair(args[1:], stdout, stderr)
 	}
@@ -199,7 +203,13 @@ func runInternalSession(args []string, stdin io.Reader, stdout io.Writer) error 
 		if err := json.Unmarshal(body, &value); err != nil {
 			return fmt.Errorf("decode LazyMind session: %w", err)
 		}
-		if err := store.Save(value); err != nil {
+		if os.Getenv("LAZYMIND_RUNTIME_PROFILE") == "desktop" {
+			err = store.SaveDesktop(value, os.Getenv("LAZYMIND_RUNTIME_ROOT"))
+		} else {
+			value.LocalRuntimeID = ""
+			err = store.Save(value)
+		}
+		if err != nil {
 			return err
 		}
 	case "clear":
@@ -361,13 +371,21 @@ func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) 
 	action := strings.ToLower(args[0])
 	flags := flag.NewFlagSet("assistant "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	address := flags.String("listen", assistantbridge.DefaultAddress, "Assistant Bridge loopback address")
+	address := flags.String("listen", "", "Assistant Bridge loopback address")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("unexpected Assistant Bridge arguments")
 	}
+	if *address == "" {
+		var err error
+		*address, err = connectorconfig.BridgeAddress()
+		if err != nil {
+			return err
+		}
+	}
+
 	switch action {
 	case "serve":
 		return serveAssistant(ctx, *address, stderr)
@@ -483,6 +501,14 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			return err
 		}
 		defer stopOwnerWatch()
+		if *ownerPID > 0 {
+			for _, provider := range providers {
+				if provider == "workbuddy" {
+					go assistantbridge.KeepWorkBuddyAvailable(hostCtx, credentialStore, stderr)
+					break
+				}
+			}
+		}
 		return runAgentHosts(hostCtx, api, policy, providers, *agentBinary, stderr)
 	}
 	return errors.New("usage: lazymind agent host <run|status>")

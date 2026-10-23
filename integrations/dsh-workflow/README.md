@@ -33,9 +33,11 @@ From this directory, run `pnpm install --frozen-lockfile`, `pnpm run typecheck`,
 
 ## Configuration
 
-The connector writes a user-layer override for `lazymind-workflow-panel`: `bridgeUrl` (loopback root), `webUrl` (LazyMind frontend), `serverName`, and `pairingFile`. The file path is configuration; its secret is read only in the Node Host and is never passed to browser code or MCP results.
+The connector writes only `connectorConfig` (an absolute connection record path) and `command` (the installed LazyMind CLI) into the user-layer override. MCP receives the same record through `LAZYMIND_CONNECTOR_CONFIG`. The record references the LazyMind home, DSH profile and pairing; it does not copy credentials, service addresses or program bindings.
 
-`DSH_HOME` selects the installation root, `LAZYMIND_DSH_PROFILE` selects a profile (default `web`), `LAZYMIND_WEB_URL` optionally overrides the frontend origin, and `LAZYMIND_ASSISTANT_BRIDGE_URL` optionally overrides the loopback Bridge root. A disconnected pairing is disabled while retained for explicit reconnection to existing runs.
+The Node host runs `internal connection resolve` to read current credentials and validate the account and pairing. It checks for changes every three seconds, releases the previous controller before replacement, and stops control when configuration is invalid or pairing is revoked. Reload the DSH page after an address change to refresh its public panel configuration. The pairing secret remains in the Node host and is never injected into browser code.
+
+`DSH_HOME` selects the installation root and `LAZYMIND_DSH_PROFILE` selects a profile (default `web`). Desktop-managed integrations ignore inherited endpoint and executable overrides. Deliberate deployment overrides belong in the connection record's `overrides` object, for example `LAZYMIND_WEB_URL`; invalid values report a configuration error. A standalone CLI without a connection record retains explicit environment overrides. Reconnecting preserves explicit record overrides and backs up the managed client configuration. A disconnected pairing is disabled while retained for explicit reconnection to existing runs.
 
 Closing or minimizing the window does not stop a workflow. Old runs do not gain fabricated approval records. A historical log already corrupted by the old custom event must be backed up and repaired explicitly; replacing the plugin alone cannot run before DSH's cold-reader rejects that log.
 

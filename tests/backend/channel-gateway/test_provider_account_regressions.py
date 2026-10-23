@@ -244,9 +244,10 @@ def test_wechat_scan_after_disconnect_renews_original_account(
     # activates notifications again without changing the task's recipient id.
     assert targets[0]['available'] is False
     incoming(restored, context='renewed-notification-context')
-    assert gateway.store.notification_context('owner', original['id'], 'recipient-a', 'wechat') == {
-        'context_token': 'renewed-notification-context',
-    }
+    context = gateway.store.notification_context('owner', original['id'], 'recipient-a', 'wechat')
+    assert context['context_token'] == 'renewed-notification-context'
+    assert len(context['_notification_context_version']) == 64
+    assert context['_notification_credential_revision'] == restored['credential_revision']
 
 
 def test_wechat_runtime_disconnects_account_when_provider_rejects_token():

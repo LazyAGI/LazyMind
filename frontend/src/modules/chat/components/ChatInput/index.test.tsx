@@ -1,5 +1,5 @@
 import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { getRuntimeMode } from "@/runtime/mode";
 import {
   NEW_CHAT_MODEL_SELECTION_KEY,
@@ -27,6 +27,11 @@ vi.mock("@/runtime/mode", async (importOriginal) => ({
 vi.mock("../SkillRecording", () => ({ default: () => null }));
 
 const promptMocks = vi.hoisted(() => ({ polish: vi.fn() }));
+const rag = vi.hoisted(() => ({ availability: "ready" }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({
+  useRAGComponent: () => ({ availability: rag.availability }),
+}));
+afterEach(() => { rag.availability = "ready"; });
 const datasets = vi.hoisted(() => ({ list: vi.fn(() => new Promise(() => undefined)) }));
 vi.mock("@/modules/chat/utils/request", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/modules/chat/utils/request")>()),
@@ -92,6 +97,7 @@ vi.mock("../ImageUpload", async () => {
     allowedTextTypes: [".txt"],
     allowedUploadTypes: [".png", ".pdf", ".csv", ".tsv", ".xls", ".xlsx", ".txt"],
     default: React.forwardRef(function MockImageUpload(props: {
+      types: string[];
       max: number;
       listNum: number;
       updateFiles: (files: (File & { uid: string; uri: string })[]) => void;
@@ -114,7 +120,17 @@ vi.mock("../ImageUpload", async () => {
           props.updateFiles(files.current);
         },
       }));
-      return <span data-testid="upload-slots" data-max={props.max} data-count={props.listNum} />;
+      return <>
+        <span data-testid="upload-slots" data-max={props.max} data-count={props.listNum} />
+        <button type="button" data-testid="attach-test-pdf" data-accept={props.types.join(",")}
+        onClick={() => {
+          const file = Object.assign(new File(["PDF"], "paper.pdf", { type: "application/pdf" }), {
+            uid: "pdf-1", uri: "/uploads/paper.pdf",
+          });
+          files.current = [file];
+          props.updateFiles([file]);
+        }}>attach PDF</button>
+      </>;
     }),
   };
 });
@@ -282,6 +298,29 @@ describe("ChatInput model switch save lock", () => {
   afterEach(() => {
     vi.clearAllMocks();
     useModelSelectionStore.getState().resetForNewChat();
+  });
+
+  it("accepts and sends PDF attachments without RAG while leaving knowledge search disabled", async () => {
+    const createObjectURL = URL.createObjectURL;
+    const revokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn(() => "blob:test-pdf");
+    URL.revokeObjectURL = vi.fn();
+    onTestFinished(() => {
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+    });
+    rag.availability = "missing";
+    const onSend = vi.fn();
+    render(<ChatInput value="Read this PDF" onChange={vi.fn()} onSend={onSend} isChatContent />);
+    const upload = screen.getByTestId("attach-test-pdf");
+    expect(upload).toHaveAttribute("data-accept", expect.stringContaining(".pdf"));
+    fireEvent.click(upload);
+    fireEvent.click(screen.getByRole("button", { name: "chat.send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(expect.objectContaining({
+      fileList: [expect.objectContaining({ name: "paper.pdf" })],
+      files: [expect.objectContaining({ name: "paper.pdf" })],
+      chatConfigSnapshot: expect.objectContaining({ knowledgeBaseId: [] }),
+    })));
   });
 
   it("does not mount workspace polling for document previews", () => {
@@ -586,6 +625,38 @@ describe("ChatInput model switch save lock", () => {
     expect(screen.getByTestId("local-workspace-control")).toHaveTextContent("conversation-1");
   });
 
+  it("reports whether the resource picker is open and closes after choosing an action", async () => {
+    render(<ChatInput value="" onChange={vi.fn()} isChatContent
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+    const trigger = screen.getByRole("button", { name: "chat.addResource" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const attachment = await screen.findByRole("button", { name: /chat\.addAttachment/ });
+    expect(document.getElementById(trigger.getAttribute("aria-controls")!)).toContainElement(attachment);
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("button", { name: /chat\.promptTemplate/ }));
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps the resource picker closed when the composer is disabled", () => {
+    render(<ChatInput value="" onChange={vi.fn()} isChatContent disabled
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+    const trigger = screen.getByRole("button", { name: "chat.addResource" });
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-disabled", "true");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /chat\.addAttachment/ })).not.toBeInTheDocument();
+  });
+
   it("hides knowledge-base selection for inherited child conversations", async () => {
     render(
       <ChatInput
@@ -602,7 +673,7 @@ describe("ChatInput model switch save lock", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("chat.addResource"));
+    fireEvent.click(screen.getByRole("button", { name: "chat.addResource" }));
 
     expect(
       await screen.findByRole("button", { name: /chat\.addAttachment/ }),

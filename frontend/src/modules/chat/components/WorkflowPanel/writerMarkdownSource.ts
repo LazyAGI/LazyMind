@@ -142,6 +142,8 @@ export function markdownSelectionRange(source: string, selection: {
 
 interface SourceEdit { from: number; to: number; value: string }
 
+const SOURCE_DIFF_TIMEOUT_MS = 1000;
+
 function changesToEdits(changes: Change[]): SourceEdit[] {
   const edits: SourceEdit[] = [];
   let offset = 0;
@@ -165,12 +167,12 @@ function sourceEdits(before: string, after: string): SourceEdit[] {
   // A whole-document character diff can time out on ordinary README tables.
   // First anchor unchanged lines, then refine only the changed spans. Never
   // substitute the normalized export when a mapping cannot be completed.
-  const lines = diffLines(before, after, { timeout: 100 });
+  const lines = diffLines(before, after, { timeout: SOURCE_DIFF_TIMEOUT_MS });
   if (!lines) throw new Error('Markdown source mapping timed out');
   const refine = (from: number, oldText: string, newText: string): SourceEdit[] => {
     if (oldText === newText) return [];
     if (!oldText || !newText) return [{ from, to: from + oldText.length, value: newText }];
-    const changes = diffChars(oldText, newText, { timeout: 100 });
+    const changes = diffChars(oldText, newText, { timeout: SOURCE_DIFF_TIMEOUT_MS });
     if (!changes) throw new Error('Markdown source mapping timed out');
     return changesToEdits(changes).map(edit => ({ ...edit, from: from + edit.from, to: from + edit.to }));
   };

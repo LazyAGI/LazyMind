@@ -48,8 +48,8 @@ class DependencyGroupsTests(unittest.TestCase):
             self.assertFalse(names & {'numpy', 'shared', 'core-child'})
 
     def test_default_host_matches_existing_ffmpeg_modelscope_host(self):
-        self.assertIn(components.DEFAULT_BASE_URL, (ROOT / 'backend/core/systemdeps/ffmpeg.go').read_text())
-        self.assertTrue(components.DEFAULT_BASE_URL.endswith('/resolve/master/'))
+        self.assertIn(components.DEFAULT_BASE_URL.removesuffix('RAG/'), (ROOT / 'backend/core/systemdeps/ffmpeg.go').read_text())
+        self.assertTrue(components.DEFAULT_BASE_URL.endswith('/resolve/master/RAG/'))
 
     def test_refuses_removing_a_core_requirement(self):
         deps = {name: Distribution(name) for name in set.union(*components.SEEDS.values())}
@@ -65,7 +65,8 @@ class DependencyGroupsTests(unittest.TestCase):
             binary = site / '../../../bin/milvus-lite'
             binary.parent.mkdir(parents=True)
             binary.write_text('entrypoint stays in base')
-            for name in set.union(*components.SEEDS.values()) | {'numpy', 'dashscope'}:
+            base_packages = {'numpy', 'dashscope', 'bm25s', 'pystemmer', 'jieba', 'scipy'}
+            for name in set.union(*components.SEEDS.values()) | base_packages:
                 module = name.replace('-', '_')
                 (site / module).mkdir()
                 (site / module / '__init__.py').write_text('# test module\n')
@@ -85,8 +86,17 @@ class DependencyGroupsTests(unittest.TestCase):
             self.assertTrue((site / 'numpy/__init__.py').is_file())
             self.assertFalse((site / 'spacy').exists())
             self.assertTrue((site / 'dashscope/__init__.py').is_file())
+            for name in base_packages:
+                self.assertTrue((site / name / '__init__.py').is_file())
             self.assertEqual(set(catalog['components']), {'rag'})
             for ident, item in catalog['components'].items():
+                self.assertRegex(
+                    item['filename'],
+                    r'^lazymind-(?:mac|win|linux)-[a-z0-9]+-rag-cp\d+-'
+                    r'(?:(?:adhoc|developer-id|none)-)?\d{8}T\d{6}Z-[0-9a-f]{16}\.zip$',
+                )
+                if item['platform'] == 'darwin':
+                    self.assertIn('-' + item['signingMode'] + '-', item['filename'])
                 archive = Path(temp) / 'output' / item['filename']
                 self.assertEqual(components.digest(archive.read_bytes()), item['sha256'])
                 with zipfile.ZipFile(archive) as bundle:
@@ -94,7 +104,13 @@ class DependencyGroupsTests(unittest.TestCase):
                     self.assertEqual(manifest['id'], ident)
                     self.assertTrue(any(n.endswith('/LICENSE') for n in bundle.namelist()))
                     self.assertFalse(any('bin/' in n or '..' in n for n in bundle.namelist()))
+                    self.assertFalse(base_packages & manifest['packages'].keys())
                 self.assertTrue(item['url'].startswith('https://cdn.example/components/'))
+                self.assertEqual(item['tag'], item['revision'])
+                base = f'https://cdn.example/components/tags/{item["tag"]}/'
+                self.assertEqual(item['catalogUrl'], base + 'python-components.json')
+                self.assertEqual(item['url'], base + item['filename'])
+                self.assertNotIn('fallbackUrl', item)
 
 
 if __name__ == '__main__':

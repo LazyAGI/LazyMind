@@ -159,6 +159,8 @@ export interface AssetDraft {
   source: GlossarySource;
   content: string;
   protect: boolean;
+  autoEvo?: boolean;
+  hasPendingRemoveSuggestion?: boolean;
 }
 
 export interface SkillTreeNode extends StructuredAsset {
@@ -274,6 +276,7 @@ export const createDraft = (): AssetDraft => ({
   source: "user",
   content: "",
   protect: false,
+  autoEvo: false,
 });
 
 export const createStructuredDraft = (
@@ -303,6 +306,8 @@ export const createStructuredDraft = (
     source: "user",
     content: normalizedContent,
     protect: Boolean(item.protect),
+    autoEvo: Boolean(item.autoEvo),
+    hasPendingRemoveSuggestion: Boolean(item.hasPendingRemoveSuggestion),
   };
 };
 

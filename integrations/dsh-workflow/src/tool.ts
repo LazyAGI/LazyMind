@@ -1,8 +1,7 @@
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { interaction, object, readControl, type WorkflowControl } from './protocol'
+import { object, readControl, type WorkflowControl } from './protocol'
 
 export interface ToolHooks {
-  trustedOrigin?: string
   hostSessionId?: string
   operation?: string
   afterResult?(value: unknown, exec: ToolRunContext): Promise<WorkflowControl | null>
@@ -30,12 +29,10 @@ export function workflowTool(original: ToolDefinition, hooks: ToolHooks): ToolDe
       presentationMeta(args, value) {
         const previous = original.output.presentationMeta?.(args, value)
         const control = readControl(value)
-        const run = interaction(value, hooks.trustedOrigin) ?? (control && hooks.trustedOrigin
-          ? { runId: control.session_id, url: new URL(`/workflow-runs/${encodeURIComponent(control.session_id)}`, hooks.trustedOrigin).href } : null)
         const fields = object(object(value)?.structuredContent)
         const executionId = fields?.execution_id ?? object(fields?.execution)?.execution_id
         const hostSessionId = hooks.hostSessionId
-        return run ? { lazymind_workflow: { ...run,
+        return control ? { lazymind_workflow: { runId: control.session_id,
           ...(hostSessionId ? { hostSessionId } : {}), ...(hooks.operation ? { operation: hooks.operation } : {}),
           ...(typeof executionId === 'string' ? { executionId } : {}),
         }, original: previous ?? null } : previous ?? null

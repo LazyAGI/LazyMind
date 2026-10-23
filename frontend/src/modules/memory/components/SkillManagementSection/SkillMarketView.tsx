@@ -3,6 +3,7 @@ import type { StructuredAsset } from "../../shared";
 import { getMarketSource } from "./skillMarketMockData";
 import { isMarketSkillInstalled } from "./skillHelpers";
 import { renderSkillCategoryIcon } from "./skillCategoryIcon";
+import SkillModuleState from "./SkillModuleState";
 
 interface SkillMarketViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -21,7 +22,7 @@ interface SkillMarketViewProps {
   onPageChange: (page: number, pageSize: number) => void;
 }
 
-const marketPageSizeOptions = ["8", "12", "20"];
+const marketPageSizeOptions = ["12", "20", "24"];
 
 export default function SkillMarketView({
   t,
@@ -43,19 +44,11 @@ export default function SkillMarketView({
     <div className="memory-skill-market">
       <div className="memory-skill-market-scroll">
         {loading ? (
-          <div className="memory-skill-market-loading">{t("common.loading")}</div>
+          <div className="memory-skill-market-loading">
+            <SkillModuleState tone="loading">{t("common.loading")}</SkillModuleState>
+          </div>
         ) : skillAssets.length ? (
           <section className="memory-skill-section">
-            <div className="memory-skill-section-head">
-              <div className="memory-skill-section-title">
-                <h3>{t("admin.memorySkillMarketRecommendTitle")}</h3>
-                <span className="memory-skill-section-count">
-                  {t("admin.memorySkillMarketRecommendCount", {
-                    count: total,
-                  })}
-                </span>
-              </div>
-            </div>
             <div className="memory-skill-recommend-grid">
               {skillAssets.map((item) => {
                 const installed = isMarketSkillInstalled(installedSkills, item);
@@ -74,71 +67,55 @@ export default function SkillMarketView({
                       : "is-personal";
 
                 return (
-                  <div
+                  <article
                     key={item.id}
                     className={`memory-skill-tile ${installed ? "is-installed" : ""}`}
                   >
-                    <span className="memory-skill-tile-icon">
-                      {renderSkillCategoryIcon(item.tags[0] || "default")}
-                    </span>
-                    <div className="memory-skill-tile-copy">
-                      <div className="memory-skill-tile-title-line">
-                        <strong className="memory-skill-tile-name">{item.name}</strong>
-                        <div className="memory-skill-tile-badges">
-                          {installed ? (
-                            <span className="memory-skill-badge memory-skill-badge-installed">
-                              {t("admin.memorySkillInstalledBadge")}
-                            </span>
-                          ) : null}
-                          <span className={`memory-skill-badge memory-skill-badge-source ${sourceBadgeClass}`}>
-                            {sourceLabel}
-                          </span>
-                        </div>
+                    <div className="memory-skill-tile-top">
+                      <span className="memory-skill-tile-icon">
+                        {renderSkillCategoryIcon(item.tags[0] || item.category || "default")}
+                      </span>
+                      <span className={`memory-skill-badge memory-skill-badge-source ${sourceBadgeClass}`}>
+                        {sourceLabel}
+                      </span>
+                    </div>
+                    <strong className="memory-skill-tile-name">{item.name}</strong>
+                    <Tooltip title={item.description}>
+                      <p className="memory-skill-tile-desc">{item.description}</p>
+                    </Tooltip>
+                    <div className="memory-skill-tile-foot">
+                      <div className="memory-skill-tile-actions">
+                        <Button size="small" onClick={() => onDetail(item)}>
+                          {t("admin.memorySkillMarketDetail")}
+                        </Button>
+                        {installed ? (
+                          <Button size="small" disabled className="memory-skill-installed-action">
+                            {t("admin.memorySkillInstalledBadge")}
+                          </Button>
+                        ) : (
+                          <Button
+                            type="primary"
+                            size="small"
+                            loading={installingUid === item.id}
+                            onClick={() => onInstall(item)}
+                          >
+                            {t("admin.memorySkillMarketInstall")}
+                          </Button>
+                        )}
+                        {isAdmin && marketSource === "admin" ? (
+                          <Button
+                            danger
+                            size="small"
+                            loading={deletingUid === item.id}
+                            disabled={Boolean(deletingUid) && deletingUid !== item.id}
+                            onClick={() => onDelete(item)}
+                          >
+                            {t("admin.memorySkillMarketDelete")}
+                          </Button>
+                        ) : null}
                       </div>
-                      <Tooltip title={item.description}>
-                        <p className="memory-skill-tile-desc">{item.description}</p>
-                      </Tooltip>
-                      {item.tags.length ? (
-                        <div className="memory-skill-tile-meta">
-                          {item.tags.map((tag) => (
-                            <span key={tag} className="memory-skill-tile-category">
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
                     </div>
-                    <div className="memory-skill-tile-actions">
-                      <Button size="small" onClick={() => onDetail(item)}>
-                        {t("admin.memorySkillMarketDetail")}
-                      </Button>
-                      {installed ? (
-                        <Button size="small" disabled>
-                          {t("admin.memorySkillInstalledBadge")}
-                        </Button>
-                      ) : (
-                        <Button
-                          type="primary"
-                          size="small"
-                          loading={installingUid === item.id}
-                          onClick={() => onInstall(item)}
-                        >
-                          {t("admin.memorySkillMarketInstall")}
-                        </Button>
-                      )}
-                      {isAdmin && marketSource === "admin" ? (
-                        <Button
-                          danger
-                          size="small"
-                          loading={deletingUid === item.id}
-                          disabled={Boolean(deletingUid) && deletingUid !== item.id}
-                          onClick={() => onDelete(item)}
-                        >
-                          {t("admin.memorySkillMarketDelete")}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
+                  </article>
                 );
               })}
             </div>

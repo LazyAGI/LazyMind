@@ -11,7 +11,7 @@ vi.mock("@/components/request", () => ({
 }));
 
 import {
-  createSideChat, deleteSideChat, patchSideChatThinkingDepth, retainSideChat,
+  createSideChat, deleteSideChat, patchSideChatThinkingDepth, patchSideChatSource, retainSideChat,
 } from "./api";
 
 describe("side-chat API", () => {
@@ -68,6 +68,20 @@ describe("side-chat API", () => {
       { thinking_depth: "low" },
       { silentError: true },
     );
+  });
+
+  it("updates the existing child's quoted source with normalized source-only fields", async () => {
+    requestMocks.request.mockResolvedValueOnce({ data: { conversation: {
+      id: "child/1", relation_type: "sidechat", thinking_depth: "high", selected_text: "new quote",
+    } } });
+    const updated = await patchSideChatSource("child/1", {
+      historyId: "history-2", sequence: 3, selectedText: " new quote ",
+    });
+    expect(requestMocks.request).toHaveBeenCalledWith(expect.objectContaining({
+      url: "/base/api/core/conversations/child%2F1/sidechat", method: "PATCH", silentError: true,
+      data: JSON.stringify({ source_history_id: "history-2", source_seq: 3, selected_text: "new quote" }),
+    }));
+    expect(updated).toMatchObject({ id: "child/1", selectedText: "new quote", thinkingDepth: "high" });
   });
 
   it("propagates retention failures so the panel can keep content and offer retry", async () => {

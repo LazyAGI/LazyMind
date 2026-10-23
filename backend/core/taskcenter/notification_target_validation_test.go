@@ -27,10 +27,12 @@ func TestResolveNotificationTargetReturnsProviderSpecificGuidance(t *testing.T) 
 	}
 }
 
-func TestInitializeScheduleNotificationsDisablesUntargetedExternalDefaults(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+func TestInitializeScheduleNotificationsPreservesEnabledExternalDefaultsWithoutTargets(t *testing.T) {
+	db := newNotificationTestDB(t).DB
 	defaults := DefaultNotificationConfig()
-	defaults.Channels["wechat"] = NotificationChannelRule{Enabled: true}
+	for _, provider := range []string{"feishu", "wecom", "wechat"} {
+		defaults.Channels[provider] = NotificationChannelRule{Enabled: true}
+	}
 	raw, err := json.Marshal(defaults)
 	if err != nil {
 		t.Fatal(err)
@@ -52,8 +54,10 @@ func TestInitializeScheduleNotificationsDisablesUntargetedExternalDefaults(t *te
 	if err := json.Unmarshal([]byte(*schedule.NotificationConfig), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Channels["wechat"].Enabled {
-		t.Fatalf("accountless wechat default remained enabled: %#v", got.Channels["wechat"])
+	for _, provider := range []string{"feishu", "wecom", "wechat"} {
+		if channel := got.Channels[provider]; !channel.Enabled || channel.AccountID != "" || channel.RecipientID != "" {
+			t.Fatalf("%s default lost its selection or invented a target: %#v", provider, channel)
+		}
 	}
 	if !got.Channels["desktop"].Enabled {
 		t.Fatal("valid desktop default was unexpectedly disabled")
@@ -74,7 +78,7 @@ func TestSaveScheduleNotificationUpdateUsesAccountDefaultRecipient(t *testing.T)
 	defer server.Close()
 	t.Setenv("LAZYMIND_CHANNEL_GATEWAY_BASE_URL", server.URL)
 
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	schedule := orm.UserSchedule{ID: "schedule", UserID: "owner", NotificationRevision: 1}
 	if err := db.Create(&schedule).Error; err != nil {
 		t.Fatal(err)
@@ -99,7 +103,7 @@ func TestSaveScheduleNotificationUpdateUsesAccountDefaultRecipient(t *testing.T)
 }
 
 func TestDispatchNotificationsSkipsExternalRowsWithoutTargets(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	defaults, err := json.Marshal(DefaultNotificationConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +129,7 @@ func TestDispatchNotificationsSkipsExternalRowsWithoutTargets(t *testing.T) {
 	if err := db.First(&notice, "id = ?", notice.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if notice.Status != "skipped" || notice.Reason != "NOTIFICATION_TARGET_UNAVAILABLE" {
+	if notice.Status != "skipped" || notice.Reason != "NOTIFICATION_TARGET_REQUIRED" {
 		t.Fatalf("invalid target remained dispatchable: status=%q reason=%q", notice.Status, notice.Reason)
 	}
 }
@@ -138,7 +142,7 @@ func TestInitializeScheduleNotificationsIgnoresLegacyGlobalTarget(t *testing.T) 
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_CHANNEL_GATEWAY_BASE_URL", server.URL)
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	config := DefaultNotificationConfig()
 	config.Channels["wechat"] = NotificationChannelRule{Enabled: true, AccountID: "account"}
 	raw, _ := json.Marshal(config)
@@ -156,13 +160,13 @@ func TestInitializeScheduleNotificationsIgnoresLegacyGlobalTarget(t *testing.T) 
 	if err := json.Unmarshal([]byte(*schedule.NotificationConfig), &saved); err != nil {
 		t.Fatal(err)
 	}
-	if channel := saved.Channels["wechat"]; channel.Enabled || channel.AccountID != "" || channel.RecipientID != "" {
-		t.Fatalf("new task inherited a global target: %#v", channel)
+	if channel := saved.Channels["wechat"]; !channel.Enabled || channel.AccountID != "" || channel.RecipientID != "" {
+		t.Fatalf("new task lost the global switch or inherited a target: %#v", channel)
 	}
 }
 
 func TestReadNotificationPreferencesDoesNotCreateRows(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	prefs, err := ReadNotificationPreferences(t.Context(), db, "missing")
 	if err != nil || !prefs.Enabled {
 		t.Fatalf("preferences=%+v error=%v", prefs, err)

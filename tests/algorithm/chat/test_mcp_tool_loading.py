@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import pytest
 
 from lazymind.chat.service import chat_service
 
@@ -220,6 +221,7 @@ def test_batch_loading_is_bounded_concurrent_and_preserves_source_order(monkeypa
     asyncio.run(run())
 
 
+@pytest.mark.skip(reason='PR #859: pending MCP naming compatibility with LazyLLM #1361; restore after follow-up fix')
 def test_oauth_preview_uses_authorized_snapshot_with_execution_schema_identity(monkeypatch):
     from types import SimpleNamespace
     from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool

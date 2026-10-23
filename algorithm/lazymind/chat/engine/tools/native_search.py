@@ -83,7 +83,11 @@ def native_search(query: str, match: str = 'either', path: str = '',
     """Discover local paths in the OS index without reading document bodies.
 
     Args:
-        query: Short literal keywords (1–256 characters), not a full question.
+        query: One literal term or contiguous phrase (1–256 characters). Spaces
+            are literal, not OR separators. Use the most distinctive term first;
+            if results are weak or empty, try one alternative term once. For
+            example, search 述职, then 周报 if needed, not 述职 周报 月报.
+            Preserve exact names/phrases such as Enterprise Search intact.
         match: name, content, or either (default).
         path: Optional directory scope; empty uses the system index's default scope.
         kind: any, file, or directory.

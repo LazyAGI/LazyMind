@@ -4,6 +4,14 @@ import "net/http"
 
 // Catalog desktop resource failures without exposing low-level diagnostics as UI messages.
 func init() {
+	registerAdditionalErrorAlias("too many catalog redirects", "Python dependency installation failed", http.StatusBadGateway, 2003155)
+	registerAdditionalErrorAlias("download rag catalog", "Python dependency installation failed", http.StatusBadGateway, 2003155)
+	registerAdditionalErrorPattern("RAG catalog returned HTTP %d", "Python dependency installation failed", http.StatusBadGateway, 2003155)
+	registerAdditionalErrorAlias("rag catalog exceeds 1 mib", "Python dependency installation failed", http.StatusBadGateway, 2003155)
+	registerAdditionalErrorAlias("online rag catalog is incompatible with this client", "Python dependency installation failed", http.StatusBadGateway, 2003155)
+	registerAdditionalErrorAlias("cannot create component installation log", "Python dependency installation failed", http.StatusBadGateway, 2003155)
+	registerAdditionalErrorAlias("cannot open component installation log", "Python dependency installation failed", http.StatusBadGateway, 2003155)
+	registerAdditionalErrorAlias("本地 rag 依赖安装失败，请检查本地安装日志后重试", "Python dependency installation failed", http.StatusBadGateway, 2003155)
 	registerAdditionalErrorAlias("pdf font download is only available in local mode", "PDF font download is only available in local mode", http.StatusForbidden, 2003148)
 	registerAdditionalErrorAlias("pdf 中文字体准备失败，请检查网络后重试：", "PDF font preparation failed; check your network and retry", http.StatusBadGateway, 2003149)
 	registerAdditionalErrorAlias("dependency installation is only supported in desktop/local mode", "Dependency installation is only supported in desktop/local mode", http.StatusForbidden, 2003150)
