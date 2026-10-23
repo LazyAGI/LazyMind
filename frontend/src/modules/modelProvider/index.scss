@@ -4037,10 +4037,13 @@
     object-fit: contain;
   }
 }
-.provider-workspace-add-supplier.ant-btn {
+.provider-workspace-sidebar-actions {
+  display: flex;
   flex-shrink: 0;
-  margin-top: 12px;
-  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
 }
 .provider-workspace-supplier-actions,
 .provider-workspace-key-actions {

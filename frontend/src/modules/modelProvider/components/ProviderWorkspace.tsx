@@ -490,14 +490,6 @@ export function ProviderWorkspace(props: Props) {
           ) : null}
           <h1>{label("title")}</h1>
         </div>
-        <div>
-          <Button
-            icon={<CloudOutlined aria-hidden="true" />}
-            onClick={() => setCloudOpen(true)}
-          >
-            {label("cloud")}
-          </Button>
-        </div>
       </header>
       {props.loadError ? (
         <div className="provider-workspace-load-error" role="alert">
@@ -582,14 +574,27 @@ export function ProviderWorkspace(props: Props) {
               </div>
             ) : null}
           </nav>
-          <Button
-            className="provider-workspace-add-supplier"
-            icon={<PlusOutlined aria-hidden="true" />}
-            onClick={() => openProviderModal("create")}
-            disabled={initializing || providerSaving}
-          >
-            {label("addSupplier")}
-          </Button>
+          <div className="provider-workspace-sidebar-actions">
+            <Tooltip title={label("cloud")}>
+              <Button
+                type="text"
+                className="provider-workspace-icon-button"
+                aria-label={label("cloud")}
+                icon={<CloudOutlined aria-hidden="true" />}
+                onClick={() => setCloudOpen(true)}
+              />
+            </Tooltip>
+            <Tooltip title={label("addSupplier")}>
+              <Button
+                type="text"
+                className="provider-workspace-icon-button"
+                aria-label={label("addSupplier")}
+                icon={<PlusOutlined aria-hidden="true" />}
+                onClick={() => openProviderModal("create")}
+                disabled={initializing || providerSaving}
+              />
+            </Tooltip>
+          </div>
         </aside>
         <main className="provider-workspace-detail">
           {provider ? (
