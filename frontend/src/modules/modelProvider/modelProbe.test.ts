@@ -8,6 +8,20 @@ vi.mock("./api", () => ({
 }));
 beforeEach(() => vi.clearAllMocks());
 describe("model probe API", () => {
+  it("returns measured dimensions for a successful embedding probe", async () => {
+    mocks.request.mockResolvedValue({ data: { data: { status: "passed", code: "ok", model_type: "embed", elapsed_ms: 31, embedding_dimensions: 1024 } } });
+    await expect(probeModel({ providerId: "p", groupId: "g", modelId: "m" })).resolves.toMatchObject({ embedding_dimensions: 1024 });
+  });
+  it.each([0, -1, 1.5, "1024", true])("omits invalid measured dimensions %s", async (dimensions) => {
+    mocks.request.mockResolvedValue({ data: { data: { status: "passed", code: "ok", model_type: "embed", elapsed_ms: 31, embedding_dimensions: dimensions } } });
+    expect(await probeModel({ providerId: "p", groupId: "g", modelId: "m" })).not.toHaveProperty("embedding_dimensions");
+  });
+  it("omits dimensions for a failed or unrelated probe", async () => {
+    mocks.request.mockResolvedValue({ data: { data: { status: "failed", code: "invalid_response", model_type: "embed", elapsed_ms: 31, embedding_dimensions: 1024 } } });
+    expect(await probeModel({ providerId: "p", groupId: "g", modelId: "m" })).not.toHaveProperty("embedding_dimensions");
+    mocks.request.mockResolvedValue({ data: { data: { status: "passed", code: "ok", model_type: "llm", elapsed_ms: 31, embedding_dimensions: 1024 } } });
+    expect(await probeModel({ providerId: "p", groupId: "g", modelId: "m" })).not.toHaveProperty("embedding_dimensions");
+  });
   it("sends only saved identity with a bounded timeout and cancellation", async () => {
     mocks.request.mockResolvedValue({ data: { data: { status: "passed", code: "ok", model_type: "llm", elapsed_ms: 31 } } });
     const signal = new AbortController().signal;

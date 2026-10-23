@@ -5,6 +5,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from lazymind.provider_request import apply_request_advanced
+
 from .model_probe import ProbeInput
 from .model_probe.runner import _error_code, _headers, _valid_url
 
@@ -34,6 +36,7 @@ def _models_url(source: str, url: str) -> str:
 async def check_provider_connection(*, source: str | None, url: str | None, api_key: str | None = None,
                                     skip_auth: bool = False, model: str | None = None,
                                     models_url: str | None = None,
+                                    request_advanced: dict | None = None,
                                     client: httpx.AsyncClient | None = None) -> dict:
     """Never choose a default model or issue inference while saving/checking keys."""
     del model  # Kept for compatibility with older internal callers.
@@ -49,7 +52,8 @@ async def check_provider_connection(*, source: str | None, url: str | None, api_
 
     async def execute(active_client):
         auth = 'anthropic' if source in {'claude', 'anthropic'} else 'bearer'
-        async with active_client.stream('GET', target, headers=_headers(request, auth), follow_redirects=False,
+        options = apply_request_advanced(request_advanced, method='GET', url=target, headers=_headers(request, auth))
+        async with active_client.stream('GET', options['url'], headers=options['headers'], follow_redirects=False,
                                         timeout=httpx.Timeout(15, connect=5)) as response:
             if response.headers.get('content-encoding', 'identity').lower() not in {'', 'identity'}:
                 return failure | {'reason': 'invalid_response'}

@@ -26,6 +26,14 @@ describe("upstream model catalog", () => {
     name, model_type, input: ["text"], output: ["text"], context: 1000, max_output: 100,
   });
 
+  it("does not declare a feature supported when matching sources disagree", () => {
+    const index = createUpstreamCatalogIndex({ generated_at: "fixture", providers: {}, recognition_models: [
+      { ...record("vendor-a/model-v1"), feature_support: { tool_calling: true, reasoning: true } },
+      { ...record("vendor-b/model-v1"), feature_support: { tool_calling: false, reasoning: true } },
+    ] });
+    expect(index.lookupModel("Custom", "gateway/model-v1")?.feature_support).toEqual({ reasoning: true });
+  });
+
   it("recognizes IDs from the full recognition catalog without adding provider entries", () => {
     const index = createUpstreamCatalogIndex({
       generated_at: "fixture", providers: {},

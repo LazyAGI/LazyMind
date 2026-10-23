@@ -19,6 +19,7 @@ from lazymind.chat.engine.tools.temporary_retrieval_session import (
 )
 from lazymind.config import EMBED_MAIN
 from lazymind.model_config import is_model_role_available
+from lazymind.embedding_options import embedding_configuration_key, embedding_query, wrap_embedding_model
 from lazymind.parsing.engine.transform import GeneralParser
 
 _TEMP_NODE_GROUP_NAME = 'block'
@@ -39,6 +40,9 @@ class _ConversationTempDocRetriever(TempDocRetriever):
         # its destructor clears that cache. Give each conversation its own.
         self._get_retrievers = lru_cache(maxsize=8)(self._get_retrievers_impl)
         self.retrieval_lock = RLock()
+
+    def forward(self, files, query, topk=None):
+        return super().forward(files, embedding_query(query), topk=topk)
 
 
 def _is_reranker_enabled() -> bool:
@@ -66,7 +70,8 @@ def embed_available() -> bool:
 
 
 def _make_retriever(*, use_embed: bool) -> TempDocRetriever:
-    retriever = _ConversationTempDocRetriever(embed=AutoModel(model=EMBED_MAIN) if use_embed else None)
+    embed = wrap_embedding_model(AutoModel(model=EMBED_MAIN), role=EMBED_MAIN) if use_embed else None
+    retriever = _ConversationTempDocRetriever(embed=embed)
     retriever.create_node_group(
         name=_TEMP_NODE_GROUP_NAME,
         transform=GeneralParser(
@@ -85,8 +90,12 @@ def _ensure_retriever() -> TempDocRetriever:
     scope = temporary_retrieval_scope()
     with _session_lock:
         retriever = _session_retrievers.pop(scope, None)
-        if retriever is None:
-            retriever = _make_retriever(use_embed=embed_available())
+        use_embed = retriever._lazymind_use_embed if retriever is not None else embed_available()
+        configuration_key = embedding_configuration_key() if use_embed else None
+        if retriever is None or retriever._lazymind_embedding_key != configuration_key:
+            retriever = _make_retriever(use_embed=use_embed)
+            retriever._lazymind_use_embed = use_embed
+            retriever._lazymind_embedding_key = configuration_key
         _session_retrievers[scope] = retriever
         if len(_session_retrievers) > _MAX_CACHED_CONVERSATIONS:
             _session_retrievers.popitem(last=False)

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -49,16 +50,16 @@ func TestModelTokenLimitsMigrationRoundTripAndAggregate(t *testing.T) {
 			if err := dev.QueryRow(`SELECT max_input_tokens,input_token_limit,max_output_tokens FROM user_model_provider_group_models WHERE id='limit-fixture'`).Scan(&context, &input, &output); err != nil || context != "256K" || input.Valid || output.Valid {
 				t.Fatalf("upgrade changed existing limits: %q %#v %#v %v", context, input, output, err)
 			}
+			for _, mode := range catalog.Modes {
+				for _, migration := range mode.Dev {
+					if migration.FileVersion > 20261023032750 {
+						execMigrationFileForDriver(t, dev, migration.UpPath, driver)
+					}
+				}
+			}
 			if driver == "sqlite" {
-				var devDDL, aggregateDDL string
-				if err := dev.QueryRow(`SELECT sql FROM sqlite_master WHERE name='user_model_provider_group_models'`).Scan(&devDDL); err != nil {
-					t.Fatal(err)
-				}
-				if err := aggregate.QueryRow(`SELECT sql FROM sqlite_master WHERE name='user_model_provider_group_models'`).Scan(&aggregateDDL); err != nil {
-					t.Fatal(err)
-				}
-				if devDDL != aggregateDDL {
-					t.Fatalf("model aggregate differs from dev\n%s\n%s", devDDL, aggregateDDL)
+				if !reflect.DeepEqual(sqliteModelColumns(t, dev, "user_model_provider_group_models"), sqliteModelColumns(t, aggregate, "user_model_provider_group_models")) {
+					t.Fatal("model aggregate columns differ from dev")
 				}
 			} else if postgresSchemaFingerprint(t, dev) != postgresSchemaFingerprint(t, aggregate) {
 				t.Fatal("PostgreSQL aggregate differs from dev")

@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AutoComplete,
   Button,
-  Checkbox,
   Form,
   Input,
   Modal,
@@ -74,6 +73,9 @@ import { canDiscoverWithoutApiKey } from "../providerAuthentication";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
 import { getProviderDisplayName } from "../providerDisplayNames";
 import { ModelEditorModal, type ModelEditorValues } from "../components/ModelEditorModal";
+import { ModelFeaturesEditor } from "../components/ModelFeaturesEditor";
+import { EmbeddingOptionsEditor } from "../components/EmbeddingOptionsEditor";
+import { editableModelSettings, isModelFeatureEnabled, type EmbeddingEditorValues, type ModelSettings } from "../modelSettings";
 import "../index.scss";
 
 export type ModelCapability =
@@ -98,6 +100,7 @@ export function getSelectableModelCapabilities(
 }
 
 export interface ProviderModel {
+  modelSettings?: ModelSettings;
   vision?: boolean;
   id: string;
   name: string;
@@ -154,7 +157,8 @@ interface EditModelWindowModalState {
   model: ProviderModel;
 }
 
-interface CustomModelFormValues {
+interface CustomModelFormValues extends EmbeddingEditorValues {
+  modelSettings?: ModelSettings;
   vision?: boolean;
   providerId: string;
   groupId: string;
@@ -369,6 +373,7 @@ export function resolveSavedProviderGroupVerified(group: {
 }
 
 interface ApiModel {
+  model_settings?: ModelSettings;
   vision?: boolean;
   id: string;
   name: string;
@@ -446,6 +451,7 @@ function mapApiGroup(
       name: model.name,
       capability: mapModelTypeToCapability(model.model_type),
       vision: model.vision,
+      modelSettings: model.model_settings,
       builtIn: Boolean(model.is_default),
       enabled: true,
       maxInputTokens: model.max_input_tokens,
@@ -1233,6 +1239,7 @@ export default function ModelProviderPage({
         name: choice.name.trim(),
         model_type: choice.model_type,
         vision: choice.model_type === "llm" && choice.vision === true,
+        ...(choice.model_settings ? { model_settings: choice.model_settings } : {}),
         ...(choice.max_input_tokens && supportsStoredModelContext(choice.model_type) ? { max_input_tokens: choice.max_input_tokens } : {}),
       },
     });
@@ -1243,6 +1250,7 @@ export default function ModelProviderPage({
       capability: mapModelTypeToCapability(created.model_type || choice.model_type),
       builtIn: Boolean(created.is_default),
       vision: created.vision,
+      modelSettings: created.model_settings,
       enabled: true,
       maxInputTokens: created.max_input_tokens || choice.max_input_tokens,
     });
@@ -1258,6 +1266,7 @@ export default function ModelProviderPage({
           name: choice.name.trim(),
           model_type: choice.model_type,
           vision: choice.model_type === "llm" && choice.vision === true,
+          ...(choice.model_settings ? { model_settings: choice.model_settings } : {}),
           ...(choice.max_input_tokens && supportsStoredModelContext(choice.model_type) ? { max_input_tokens: choice.max_input_tokens } : {}),
         })));
         const saved = result.models || [];
@@ -1267,6 +1276,7 @@ export default function ModelProviderPage({
           capability: mapModelTypeToCapability(model.model_type),
           builtIn: model.is_default,
           vision: model.vision,
+          modelSettings: model.model_settings,
           enabled: true,
           maxInputTokens: model.max_input_tokens || undefined,
           inputTokenLimit: model.input_token_limit || undefined,
@@ -1361,6 +1371,7 @@ export default function ModelProviderPage({
           model_type: modelType,
           max_input_tokens: model.max_input_tokens,
           vision: metadata.vision,
+          model_settings: metadata.modelSettings,
         });
         added = true;
       }
@@ -1401,6 +1412,7 @@ export default function ModelProviderPage({
       name: values.name.trim(),
       model_type: getModelTypeForCapability(values.capability),
       vision: values.capability === "LLM_CHAT" && values.vision === true,
+      ...(values.modelSettings !== undefined ? { model_settings: values.modelSettings } : {}),
       ...(supportsStoredModelContext(values.capability) ? { max_input_tokens: values.maxInputTokens, input_token_limit: values.inputTokenLimit, max_output_tokens: values.maxOutputTokens } : {}),
       ...(target.model.builtIn ? { customize: true } : {}),
     });
@@ -1415,6 +1427,7 @@ export default function ModelProviderPage({
           name: updated.name,
           capability: mapModelTypeToCapability(updated.model_type),
           vision: updated.vision,
+          modelSettings: updated.model_settings,
           maxInputTokens: updated.max_input_tokens,
           inputTokenLimit: updated.input_token_limit || undefined,
           maxOutputTokens: updated.max_output_tokens || undefined,
@@ -1488,7 +1501,8 @@ export default function ModelProviderPage({
                 name: values.name.trim(),
                 model_type: getModelTypeForCapability(values.capability),
                 vision:
-                  values.capability === "LLM_CHAT" && values.vision === true,
+                  values.capability === "LLM_CHAT" && isModelFeatureEnabled(values.modelSettings, "vision", values.vision === true),
+                ...(editableModelSettings(values.capability, values.modelSettings, values) !== undefined ? { model_settings: editableModelSettings(values.capability, values.modelSettings, values) } : {}),
                 ...(maxInputTokens ? { max_input_tokens: maxInputTokens } : {}),
               },
             },
@@ -1504,6 +1518,7 @@ export default function ModelProviderPage({
         ),
         builtIn: Boolean(createdModel.is_default),
         vision: createdModel.vision,
+        modelSettings: createdModel.model_settings,
         enabled: true,
         maxInputTokens:
           createdModel.max_input_tokens || maxInputTokens || undefined,
@@ -1806,15 +1821,8 @@ export default function ModelProviderPage({
             </Select>
           </Form.Item>
 
-          {watchedCustomCapability === "LLM_CHAT" ? (
-            <Form.Item
-              name="vision"
-              valuePropName="checked"
-              initialValue={false}
-            >
-              <Checkbox>{t("modelProvider.vision")}</Checkbox>
-            </Form.Item>
-          ) : null}
+          {supportsModelContext(watchedCustomCapability) ? <ModelFeaturesEditor disabled={customModelSaving} visualModel={watchedCustomCapability === "VLM"} /> : null}
+          {watchedCustomCapability === "EMBEDDING" ? <EmbeddingOptionsEditor disabled={customModelSaving} /> : null}
 
           {supportsModelContext(watchedCustomCapability) ? (
             <div className="model-provider-context-window">

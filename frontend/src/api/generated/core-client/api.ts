@@ -67,6 +67,7 @@ export interface AddModelProviderGroupModelOpenAPIRequest {
      * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
      */
     'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
     /**
      * Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use.
      */
@@ -94,6 +95,7 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
      * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
      */
     'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
     'provider_name': string;
@@ -3786,6 +3788,11 @@ export interface DocumentTableColumn {
 export interface DocumentTagsResponse {
     'tags'?: Array<string>;
 }
+export interface EmbeddingOptions {
+    'batch_size'?: number | null;
+    'passage_prefix'?: string;
+    'query_prefix'?: string;
+}
 export interface EpisodeMemory {
     'conversation_id': string;
     'episode_type': EpisodeMemoryEpisodeTypeEnum;
@@ -3995,6 +4002,11 @@ export const FailedRunAttemptRunStatusEnum = {
 
 export type FailedRunAttemptRunStatusEnum = typeof FailedRunAttemptRunStatusEnum[keyof typeof FailedRunAttemptRunStatusEnum];
 
+export interface FeatureFlags {
+    'reasoning'?: boolean;
+    'tool_calling'?: boolean;
+    'vision'?: boolean;
+}
 export interface ForkAttachment {
     'name': string;
     'reason'?: string;
@@ -4595,6 +4607,7 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
      * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
      */
     'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
     'provider_group_id'?: string;
@@ -4650,9 +4663,11 @@ export interface ListModelProviderGroupsOpenAPIResponse {
 }
 export interface ListRemoteGroupModelsOpenAPIItem {
     'added': boolean;
+    'feature_support'?: FeatureFlags;
     'id': string;
     'input'?: Array<string>;
     'max_input_tokens'?: string;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
     'output'?: Array<string>;
@@ -5015,6 +5030,7 @@ export interface ModelFeaturesResponse {
 export interface ModelProbeResponse {
     'code': ModelProbeResponseCodeEnum;
     'elapsed_ms': number;
+    'embedding_dimensions'?: number;
     'http_status'?: number;
     'model_type': string;
     'status': ModelProbeResponseStatusEnum;
@@ -5604,7 +5620,13 @@ export interface ProviderConnectionSession {
     'session_id': string;
     'status': string;
 }
+export interface ProviderRequestAdvanced {
+    'extra_body'?: { [key: string]: any; };
+    'headers'?: { [key: string]: string; };
+    'query'?: { [key: string]: string; };
+}
 export interface ProviderRequestConfigOpenAPIResponse {
+    'advanced'?: ProviderRequestAdvanced;
     'default_protocol': ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum;
     'protocols'?: Array<ProviderRequestProtocolOpenAPIItem>;
 }
@@ -5988,6 +6010,7 @@ export interface SelectedModelOpenAPIItem {
     'max_input_tokens'?: string | null;
     'model_id': string;
     'model_key': string;
+    'model_settings'?: Settings;
     /**
      * Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata
      */
@@ -6122,6 +6145,11 @@ export interface SetSelectedProviderOpenAPIRequest {
 export interface SetSharedProviderOpenAPIRequest {
     'group_id': string;
     'share': boolean;
+}
+export interface Settings {
+    'embedding'?: EmbeddingOptions;
+    'feature_enabled'?: FeatureFlags;
+    'feature_support'?: FeatureFlags;
 }
 export interface SettingsCheckResultOpenAPIResponse {
     'id': string;
@@ -7380,6 +7408,7 @@ export interface UpdateModelProviderGroupModelOpenAPIRequest {
      * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
      */
     'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
     /**
      * Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references.
      */
@@ -7403,6 +7432,7 @@ export interface UpdateModelProviderGroupOpenAPIRequest {
     'verify': boolean;
 }
 export interface UpdateProviderRequestConfigOpenAPIRequest {
+    'advanced'?: ProviderRequestAdvanced;
     'default_protocol': UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum;
     /**
      * Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.

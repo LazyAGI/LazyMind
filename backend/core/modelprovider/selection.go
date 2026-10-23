@@ -53,30 +53,32 @@ type setSelectedModelsRequest struct {
 }
 
 type selectedModelItem struct {
-	ModelKey                 string  `json:"model_key" gorm:"column:model_type"`
-	ModelID                  string  `json:"model_id" gorm:"column:model_id"`
-	Source                   string  `json:"source" gorm:"-"`
-	ProviderID               string  `json:"provider_id" gorm:"-"`
-	ProviderGroupID          string  `json:"provider_group_id,omitempty" gorm:"-"`
-	UserModelProviderID      string  `json:"user_model_provider_id,omitempty" gorm:"column:user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id,omitempty" gorm:"column:user_model_provider_group_id"`
-	Name                     string  `json:"name" gorm:"column:name"`
-	LogoDataURL              string  `json:"logo_data_url,omitempty" gorm:"column:logo_data_url"`
-	Vision                   *bool   `json:"vision,omitempty" gorm:"column:vision"`
-	ProviderName             string  `json:"provider_name" gorm:"column:provider_name"`
-	BrandKey                 string  `json:"brand_key,omitempty" gorm:"-"`
-	ServiceKey               string  `json:"service_key,omitempty" gorm:"-"`
-	IsCustom                 bool    `json:"is_custom" gorm:"-"`
-	GroupName                string  `json:"group_name,omitempty" gorm:"column:group_name"`
-	BaseURL                  string  `json:"base_url,omitempty" gorm:"column:base_url"`
-	Share                    bool    `json:"share" gorm:"column:share"`
-	IsEditable               bool    `json:"is_editable" gorm:"-"`
-	MaxInputTokens           *string `json:"max_input_tokens" gorm:"column:max_input_tokens"`
-	Availability             string  `json:"availability" gorm:"-"`
-	UnavailableReason        string  `json:"unavailable_reason,omitempty" gorm:"-"`
-	ReadOnly                 bool    `json:"read_only" gorm:"-"`
-	TechnicalModelType       string  `json:"model_type,omitempty" gorm:"column:technical_model_type"`
-	IsDefault                bool    `json:"is_default" gorm:"column:is_default"`
+	ModelKey                 string         `json:"model_key" gorm:"column:model_type"`
+	ModelID                  string         `json:"model_id" gorm:"column:model_id"`
+	Source                   string         `json:"source" gorm:"-"`
+	ProviderID               string         `json:"provider_id" gorm:"-"`
+	ProviderGroupID          string         `json:"provider_group_id,omitempty" gorm:"-"`
+	UserModelProviderID      string         `json:"user_model_provider_id,omitempty" gorm:"column:user_model_provider_id"`
+	UserModelProviderGroupID string         `json:"user_model_provider_group_id,omitempty" gorm:"column:user_model_provider_group_id"`
+	Name                     string         `json:"name" gorm:"column:name"`
+	LogoDataURL              string         `json:"logo_data_url,omitempty" gorm:"column:logo_data_url"`
+	ModelSettingsRaw         string         `json:"-" gorm:"column:model_settings"`
+	ModelSettings            *ModelSettings `json:"model_settings,omitempty" gorm:"-"`
+	Vision                   *bool          `json:"vision,omitempty" gorm:"column:vision"`
+	ProviderName             string         `json:"provider_name" gorm:"column:provider_name"`
+	BrandKey                 string         `json:"brand_key,omitempty" gorm:"-"`
+	ServiceKey               string         `json:"service_key,omitempty" gorm:"-"`
+	IsCustom                 bool           `json:"is_custom" gorm:"-"`
+	GroupName                string         `json:"group_name,omitempty" gorm:"column:group_name"`
+	BaseURL                  string         `json:"base_url,omitempty" gorm:"column:base_url"`
+	Share                    bool           `json:"share" gorm:"column:share"`
+	IsEditable               bool           `json:"is_editable" gorm:"-"`
+	MaxInputTokens           *string        `json:"max_input_tokens" gorm:"column:max_input_tokens"`
+	Availability             string         `json:"availability" gorm:"-"`
+	UnavailableReason        string         `json:"unavailable_reason,omitempty" gorm:"-"`
+	ReadOnly                 bool           `json:"read_only" gorm:"-"`
+	TechnicalModelType       string         `json:"model_type,omitempty" gorm:"column:technical_model_type"`
+	IsDefault                bool           `json:"is_default" gorm:"column:is_default"`
 }
 
 type selectedModelsResponse struct {
@@ -112,6 +114,7 @@ type selectedModelCandidate struct {
 	ModelName          string `gorm:"column:model_name"`
 	BaseURL            string `gorm:"column:base_url"`
 	TechnicalModelType string `gorm:"column:technical_model_type"`
+	ModelSettings      string `gorm:"column:model_settings"`
 	IsDefault          bool   `gorm:"column:is_default"`
 }
 
@@ -120,13 +123,17 @@ func openCodeCandidateQuery(ctx context.Context, db *gorm.DB) *gorm.DB {
 		Table("user_model_provider_group_models m").
 		Select(
 			"m.id AS model_id, m.provider_name, m.name AS model_name, " +
-				"m.model_type AS technical_model_type, m.is_default, g.id AS runtime_group_id, g.base_url",
+				"m.model_type AS technical_model_type, m.model_settings, m.is_default, g.id AS runtime_group_id, g.base_url",
 		).
 		Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.user_model_provider_id = m.user_model_provider_id AND g.create_user_id = m.create_user_id AND g.deleted_at IS NULL").
 		Where("m.deleted_at IS NULL")
 }
 
 func (row selectedModelCandidate) isOpenCodeEligible() bool {
+	features := EffectiveModelFeatures(orm.UserModelProviderGroupModel{ModelType: row.TechnicalModelType, ModelSettings: row.ModelSettings})
+	if features.ToolCalling != nil && !*features.ToolCalling {
+		return false
+	}
 	_, ok := ResolveOpenCodeModel(row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType, row.IsDefault)
 	return ok
 }
@@ -142,7 +149,7 @@ func loadEligibleOpenCodeSelection(ctx context.Context, db *gorm.DB, userID stri
 	q := openCodeCandidateQuery(ctx, db).
 		Select(
 			"m.id AS model_id, usm.user_id, usm.user_name, "+
-				"m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.is_default, g.id AS runtime_group_id, g.base_url",
+				"m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.model_settings, m.is_default, g.id AS runtime_group_id, g.base_url",
 		).
 		Joins("JOIN user_selected_models usm ON usm.user_model_provider_group_model_id = m.id AND usm.user_id = m.create_user_id").
 		Where("usm.model_type = ?", EvoModelKey)
@@ -558,7 +565,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.user_model_provider_id, "+
 				"m.user_model_provider_group_id, "+
 				"m.name, "+
-				"m.vision, "+
+				"m.vision, m.model_settings, "+
 				"m.provider_name, "+
 				"m.model_type AS technical_model_type, "+
 				"m.is_default, "+
@@ -598,6 +605,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		identity := identities[item.UserModelProviderID]
 		item.BrandKey, item.ServiceKey, item.IsCustom = identity.BrandKey, identity.ServiceKey, identity.IsCustom
 		item.LogoDataURL = identity.LogoDataURL
+		item.ModelSettings = modelSettingsResponse(item.ModelSettingsRaw)
 		item.Source = "own"
 		item.ProviderID = item.UserModelProviderID
 		item.ProviderGroupID = item.UserModelProviderGroupID
@@ -612,7 +620,18 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 			item.BaseURL = baseURL
 		}
 		item.IsEditable = strings.EqualFold(strings.TrimSpace(item.ModelKey), "image_editing")
+		if item.ModelKey == "vlm" {
+			f := EffectiveModelFeatures(orm.UserModelProviderGroupModel{ModelType: item.TechnicalModelType, ModelSettings: item.ModelSettingsRaw, Vision: isChatTechnicalType(item.TechnicalModelType) || item.Vision != nil && *item.Vision})
+			if f.Vision == nil || !*f.Vision {
+				item.Availability = "unavailable"
+				item.UnavailableReason = "runtime_unsupported"
+			}
+		}
 		if item.ModelKey == EvoModelKey {
+			features := EffectiveModelFeatures(orm.UserModelProviderGroupModel{ModelType: item.TechnicalModelType, ModelSettings: item.ModelSettingsRaw})
+			if features.ToolCalling != nil && !*features.ToolCalling {
+				continue
+			}
 			if _, ok := ResolveOpenCodeModel(item.ProviderName, item.Name, item.BaseURL, item.TechnicalModelType, item.IsDefault); !ok {
 				continue
 			}
@@ -992,6 +1011,8 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 	var rows []struct {
 		ProviderName   string
 		ModelType      string
+		Vision         bool
+		ModelSettings  string
 		RuntimeGroupID string
 	}
 	q := db.WithContext(ctx).
@@ -1009,10 +1030,16 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 	} else {
 		q = q.Where("usm.user_id = ?", userID)
 	}
-	if err := q.Select("m.provider_name, m.model_type, g.id AS runtime_group_id").Scan(&rows).Error; err != nil {
+	if err := q.Select("m.provider_name, m.model_type, m.vision, m.model_settings, g.id AS runtime_group_id").Scan(&rows).Error; err != nil {
 		return false, err
 	}
 	for _, row := range rows {
+		if strings.EqualFold(strings.TrimSpace(modelType), "vlm") {
+			features := EffectiveModelFeatures(orm.UserModelProviderGroupModel{ModelType: row.ModelType, Vision: row.Vision || isChatTechnicalType(row.ModelType), ModelSettings: row.ModelSettings})
+			if features.Vision == nil || !*features.Vision {
+				continue
+			}
+		}
 		if RuntimeSupportsModelType(row.ProviderName, row.ModelType) {
 			if _, _, err := ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID); err == nil {
 				return true, nil
@@ -1074,12 +1101,13 @@ func hasVisionLLMSelection(ctx context.Context, db *gorm.DB, userID string) (boo
 		ID             string
 		Vision         bool
 		ModelType      string
+		ModelSettings  string
 		RuntimeGroupID string
 	}
 	for _, shared := range []bool{false, true} {
 		var rows []candidate
 		q := db.WithContext(ctx).Table("user_selected_models usm").
-			Select("m.id, m.vision, m.model_type, g.id AS runtime_group_id").
+			Select("m.id, m.vision, m.model_type, m.model_settings, g.id AS runtime_group_id").
 			Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL AND m.create_user_id = usm.user_id").
 			Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.user_model_provider_id = m.user_model_provider_id AND g.create_user_id = m.create_user_id AND g.deleted_at IS NULL").
 			Where("usm.model_type = ?", "llm")
@@ -1093,7 +1121,8 @@ func hasVisionLLMSelection(ctx context.Context, db *gorm.DB, userID string) (boo
 		}
 		for _, row := range rows {
 			if _, _, err := ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID); err == nil {
-				return row.Vision || strings.EqualFold(row.ModelType, "vlm"), nil
+				features := EffectiveModelFeatures(orm.UserModelProviderGroupModel{ModelType: row.ModelType, Vision: row.Vision, ModelSettings: row.ModelSettings})
+				return features.Vision != nil && *features.Vision, nil
 			}
 		}
 		if !shared && len(rows) > 0 {

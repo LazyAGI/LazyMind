@@ -25,6 +25,9 @@ func prepareGroupModelAddition(req addGroupModelRequest) (orm.UserModelProviderG
 	}
 	row.InputTokenLimit, row.MaxOutputTokens, err = resolveModelTokenLimits(row.ModelType, row.MaxInputTokens, req.InputTokenLimit, req.MaxOutputTokens)
 	row.Vision = req.Vision && isChatTechnicalType(row.ModelType)
+	if err == nil {
+		err = normalizeSavedModelSettings(&row, req.ModelSettings)
+	}
 	return row, err
 }
 
@@ -57,7 +60,7 @@ func loadModelWriteGroup(w http.ResponseWriter, r *http.Request, db *gorm.DB, us
 func groupModelAdditionResponse(row orm.UserModelProviderGroupModel, group orm.UserModelProviderGroup) addGroupModelResponse {
 	return addGroupModelResponse{
 		ID: row.ID, UserModelProviderID: row.UserModelProviderID, UserModelProviderGroupID: row.UserModelProviderGroupID,
-		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ProviderName: row.ProviderName, GroupName: group.Name,
+		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ModelSettings: modelSettingsResponse(row.ModelSettings), ProviderName: row.ProviderName, GroupName: group.Name,
 		BaseURL: group.BaseURL, IsDefault: row.IsDefault, MaxInputTokens: row.MaxInputTokens,
 		InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens,
 	}

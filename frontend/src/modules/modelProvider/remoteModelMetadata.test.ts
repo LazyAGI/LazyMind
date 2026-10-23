@@ -7,6 +7,24 @@ vi.mock("./upstreamCatalog", () => ({ lookupUpstreamModel: lookup }));
 describe("official model discovery evidence", () => {
   beforeEach(() => lookup.mockReturnValue({ model_type: "llm", input: ["text"], output: ["text"] }));
 
+  it("preserves explicit feature support over catalog evidence without inventing enabled flags", () => {
+    lookup.mockReturnValue({ model_type: "llm", input: ["text"], output: ["text"], feature_support: { tool_calling: true, reasoning: true } });
+    expect(resolveRemoteModelMetadata("OpenAI", {
+      id: "plain", name: "plain", model_type: "llm", added: false,
+      model_settings: { feature_support: { tool_calling: false } },
+    }).modelSettings).toEqual({ feature_support: { tool_calling: false } });
+  });
+
+  it("fills feature support for a legacy ID-only discovery response", () => {
+    lookup.mockReturnValue({ model_type: "llm", input: ["text"], output: ["text"], feature_support: { tool_calling: true, reasoning: false } });
+    expect(resolveRemoteModelMetadata("OpenAI", { id: "plain", name: "plain", added: false }).modelSettings).toEqual({ feature_support: { tool_calling: true, reasoning: false } });
+  });
+
+  it("does not attach chat-only feature settings to Core's unclassified result", () => {
+    lookup.mockReturnValue({ model_type: "llm", input: ["text"], output: ["text"], feature_support: { tool_calling: true } });
+    expect(resolveRemoteModelMetadata("OpenAI", { id: "plain", name: "plain", model_type: "", added: false }).modelSettings).toBeUndefined();
+  });
+
   it.each([["embedding"], ["chat", "reranker"]])("does not replace unresolved official types %j with a catalog guess", (...subTypes) => {
     expect(resolveRemoteModelMetadata("SiliconFlow", {
       id: "ambiguous", name: "ambiguous", model_type: "", added: false, sub_types: subTypes,

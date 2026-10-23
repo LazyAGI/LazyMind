@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Form, Input, Modal, Select, Switch } from "antd";
+import { Alert, Button, Form, Input, Modal, Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useSettingsFormDraft } from "@/modules/settings/SettingsNavigationGuard";
@@ -15,15 +15,19 @@ import {
 import { getRuntimeModelTypeForCapability, isModelTypeSupportedByProtocol, supportsModelContext, supportsStoredModelContext } from "../modelCapabilities";
 import { getModelTaskType } from "../modelTaskTypes";
 import { ModelTypeIcon } from "./ModelTypeBadge";
+import { ModelFeaturesEditor } from "./ModelFeaturesEditor";
+import { EmbeddingOptionsEditor } from "./EmbeddingOptionsEditor";
+import { editableModelSettings, isModelFeatureEnabled, type EmbeddingEditorValues, type ModelSettings } from "../modelSettings";
 import "./ModelEditorModal.scss";
 
-export interface ModelEditorValues {
+export interface ModelEditorValues extends EmbeddingEditorValues {
   name: string;
   capability: ModelCapability;
   vision?: boolean;
   maxInputTokens?: string;
   inputTokenLimit?: string;
   maxOutputTokens?: string;
+  modelSettings?: ModelSettings;
 }
 
 function TokenLimitInput({ id, value, onChange, label, presets, placeholder, disabled }: {
@@ -57,13 +61,15 @@ interface ModelEditorModalProps {
   capabilityLabel: (capability: ModelCapability) => string;
 }
 
-function normalizeValues(values: ModelEditorValues): ModelEditorValues {
+function normalizeValues(values: ModelEditorValues, preserveEmptySettings = false): ModelEditorValues {
+  const modelSettings = editableModelSettings(values.capability, values.modelSettings, values, preserveEmptySettings);
   return {
     name: values.name?.trim() || "",
     capability: values.capability,
     ...(isLlmChatCapability(values.capability)
-      ? { vision: values.vision === true }
+      ? { vision: isModelFeatureEnabled(modelSettings, "vision", values.vision === true) }
       : {}),
+    ...(modelSettings !== undefined ? { modelSettings } : {}),
     ...(supportsStoredModelContext(values.capability)
       ? {
         maxInputTokens: values.maxInputTokens?.trim().toUpperCase() || "",
@@ -106,14 +112,18 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
       const values: ModelEditorValues = {
         name: model.name,
         capability: model.capability,
-        vision: model.vision === true,
+        vision: isModelFeatureEnabled(model.modelSettings, "vision", model.vision === true || model.capability === "VLM"),
+        modelSettings: model.modelSettings,
+        embeddingQueryPrefix: model.modelSettings?.embedding?.query_prefix,
+        embeddingPassagePrefix: model.modelSettings?.embedding?.passage_prefix,
+        embeddingBatchSize: model.modelSettings?.embedding?.batch_size ?? undefined,
         maxInputTokens: model.capability === "UNKNOWN" ? model.maxInputTokens?.trim().toUpperCase() || "" : resolveLlmMaxInputTokens(model.maxInputTokens),
         inputTokenLimit: model.inputTokenLimit || undefined,
         maxOutputTokens: model.maxOutputTokens || undefined,
       };
       form.resetFields();
       form.setFieldsValue(values);
-      setInitialValues(normalizeValues(values));
+      setInitialValues(normalizeValues(values, model.modelSettings !== undefined));
       captureSavedValues();
     } else {
       setInitialValues(null);
@@ -123,10 +133,11 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
     };
   }, [modelId, form, captureSavedValues]);
 
-  const values = watchedValues || form.getFieldsValue(true);
+  const values = { ...form.getFieldsValue(true), ...watchedValues };
+  const normalize = (submitted: ModelEditorValues) => normalizeValues(submitted, props.model?.modelSettings !== undefined);
   const capability = values.capability || props.model?.capability;
   const hasChanges = Boolean(initialValues) &&
-    JSON.stringify(normalizeValues(values)) !== JSON.stringify(initialValues);
+    JSON.stringify(normalize(values)) !== JSON.stringify(initialValues);
   const options = [...new Set([
     ...props.capabilities,
     ...(props.model ? [props.model.capability] : []),
@@ -145,7 +156,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
     if (!savingRef.current) confirmClose(props.onClose);
   };
   const save = async (submitted: ModelEditorValues) => {
-    const normalized = normalizeValues(submitted);
+    const normalized = normalize(submitted);
     if (!props.model || savingRef.current ||
       JSON.stringify(normalized) === JSON.stringify(initialValues)) return;
     const operation = generation.current;
@@ -272,11 +283,8 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
           </Form.Item>) : null}
           </>
         ) : null}
-        {isLlmChatCapability(capability) ? (
-          <Form.Item label={t("modelProvider.vision")} name="vision" valuePropName="checked">
-            <Switch aria-label={t("modelProvider.vision")} />
-          </Form.Item>
-        ) : null}
+        {supportsModelContext(capability) ? <ModelFeaturesEditor disabled={saving} legacyVision={props.model?.vision === true} visualModel={capability === "VLM"} /> : null}
+        {capability === "EMBEDDING" ? <EmbeddingOptionsEditor disabled={saving} /> : null}
       </Form>
     </Modal>
   );

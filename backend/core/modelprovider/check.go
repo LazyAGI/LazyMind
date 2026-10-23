@@ -20,6 +20,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/log"
 	"lazymind/core/store"
 )
@@ -64,12 +65,13 @@ type checkModelProviderRequest struct {
 
 // algoModelCheckBody matches the read-only algorithm POST /api/model/check contract.
 type algoModelCheckBody struct {
-	Model     string `json:"model,omitempty"`
-	ModelsURL string `json:"models_url,omitempty"`
-	Source    string `json:"source"`
-	URL       string `json:"url"`
-	APIKey    string `json:"api_key"`
-	SkipAuth  bool   `json:"skip_auth,omitempty"`
+	Model           string                                   `json:"model,omitempty"`
+	ModelsURL       string                                   `json:"models_url,omitempty"`
+	Source          string                                   `json:"source"`
+	URL             string                                   `json:"url"`
+	APIKey          string                                   `json:"api_key"`
+	SkipAuth        bool                                     `json:"skip_auth,omitempty"`
+	RequestAdvanced *credentialvault.ProviderRequestAdvanced `json:"request_advanced,omitempty"`
 }
 
 // modelCheckResponse mirrors the algorithm /api/model/check JSON (internal parse only).
@@ -90,7 +92,7 @@ type CheckModelProviderData struct {
 }
 
 // doCheck calls the appropriate algorithm endpoint based on provider category and returns the result.
-func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
+func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string, advanced ...credentialvault.ProviderRequestAdvanced) (*modelCheckResponse, error) {
 	var checkEndpoint string
 	switch category {
 	case "ocr":
@@ -109,6 +111,9 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model
 		SkipAuth: apiKey == "",
 	}
 	if checkEndpoint == "/api/model/check" {
+		if len(advanced) > 0 && !advanced[0].Empty() {
+			body.RequestAdvanced = &advanced[0]
+		}
 		modelsURL, err := ProviderModelsListURL(providerName, baseURL)
 		if err != nil {
 			return &modelCheckResponse{Success: false, Message: "provider connection check failed", Reason: "invalid_request"}, nil
@@ -134,14 +139,22 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model
 	return &result, nil
 }
 
-func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
+func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string, parents ...orm.UserModelProvider) (*modelCheckResponse, error) {
 	if category == "ocr" && isSupportedOCRCloudProvider(providerName) {
 		return doOCRCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	}
 	if usesSearchCloudServiceCheck(category, providerName) {
 		return doSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	}
-	return doCheck(ctx, category, providerName, baseURL, apiKey, model)
+	var advanced credentialvault.ProviderRequestAdvanced
+	if len(parents) > 0 && hasSharedProviderEndpoint(parents[0]) {
+		var err error
+		advanced, err = ResolveProviderRequestAdvanced(parents[0])
+		if err != nil {
+			return nil, errors.New("read advanced request configuration failed")
+		}
+	}
+	return doCheck(ctx, category, providerName, baseURL, apiKey, model, advanced)
 }
 
 func isSupportedOCRCloudProvider(providerName string) bool {
@@ -675,7 +688,7 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	checkStart := time.Now()
-	algo, err := doProviderGroupCheck(r.Context(), parent.Category, source, urlStr, apiKey, model)
+	algo, err := doProviderGroupCheck(r.Context(), parent.Category, source, urlStr, apiKey, model, parent)
 	if !req.DryRun {
 		verified := err == nil && algo != nil && algo.Success
 		now := time.Now()

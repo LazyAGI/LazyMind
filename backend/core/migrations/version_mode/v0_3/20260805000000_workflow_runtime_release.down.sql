@@ -1,3 +1,5 @@
+ALTER TABLE user_model_provider_group_models DROP COLUMN model_settings;
+ALTER TABLE default_models DROP COLUMN model_settings;
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE user_model_providers DROP COLUMN logo_data_url;
 ALTER TABLE user_model_providers DROP COLUMN request_config;

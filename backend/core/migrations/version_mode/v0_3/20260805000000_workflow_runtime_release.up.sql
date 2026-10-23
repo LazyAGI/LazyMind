@@ -2828,6 +2828,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_recordings_active_user ON skill_reco
 
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE default_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE default_models ADD COLUMN model_settings TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE user_model_provider_group_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_model_provider_group_models ADD COLUMN input_token_limit VARCHAR(16);
 ALTER TABLE user_model_provider_group_models ADD COLUMN max_output_tokens VARCHAR(16);
@@ -3522,3 +3523,6 @@ ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE 
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE user_model_providers ADD COLUMN request_config TEXT NOT NULL DEFAULT '';
 ALTER TABLE user_model_providers ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT '';
+
+-- Per-model capability declarations and runtime options.
+ALTER TABLE user_model_provider_group_models ADD COLUMN model_settings TEXT NOT NULL DEFAULT '{}';

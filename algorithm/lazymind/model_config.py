@@ -339,13 +339,20 @@ def inject_model_config(model_config: Optional[Dict[str, Any]]) -> None:
         normalized = _enrich_role_types(normalized)
         normalized = resolve_request_api_keys(normalized)
     _lazyllm_inject(normalized)
+    from lazymind.embedding_options import configure_embedding_options
+    from lazymind.provider_request import configure_request_advanced
+    configure_embedding_options(normalized)
+    configure_request_advanced(normalized)
     if isinstance(normalized, dict):
         import lazyllm
         # LazyLLM routing drops capability metadata; retain only these safe fields per request.
         lazyllm.globals['lazymind_model_capabilities'] = {
-            role: {key: value[key] for key in ('type', 'vision') if key in value}
+            role: {key: value[key] for key in ('type', 'vision', 'features') if key in value}
             for role, value in normalized.items() if isinstance(value, dict)
         }
+    else:
+        import lazyllm
+        lazyllm.globals['lazymind_model_capabilities'] = {}
 
 
 def _expand_env(value: str) -> str:

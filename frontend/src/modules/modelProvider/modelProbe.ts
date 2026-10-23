@@ -26,6 +26,7 @@ export interface ModelProbeResult {
   model_type: string;
   elapsed_ms: number;
   http_status?: number;
+  embedding_dimensions?: number;
 }
 const isCode = (value: unknown): value is ModelProbeCode => typeof value === "string" && (modelProbeCodes as readonly string[]).includes(value);
 const invalidResult = (): ModelProbeResult => ({ status: "failed", code: "invalid_response", model_type: "", elapsed_ms: 0 });
@@ -50,6 +51,9 @@ export async function probeModel(identity: ModelProbeIdentity, signal?: AbortSig
     model_type: typeof result.model_type === "string" ? result.model_type : "",
     elapsed_ms: Math.round(result.elapsed_ms),
     ...(Number.isInteger(result.http_status) && result.http_status! >= 100 && result.http_status! <= 599 ? { http_status: result.http_status } : {}),
+    ...(result.status === "passed" && ["embed", "multimodal_embedding"].includes(result.model_type || "") &&
+      Number.isSafeInteger(result.embedding_dimensions) && result.embedding_dimensions! > 0
+      ? { embedding_dimensions: result.embedding_dimensions } : {}),
   };
 }
 

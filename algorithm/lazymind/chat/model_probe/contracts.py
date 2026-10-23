@@ -11,7 +11,10 @@ class ProbeInput:
     url: str
     api_key: str = field(default='', repr=False)
     skip_auth: bool = False
-    vision: bool = False
+    vision: bool | None = None
+    embedding: dict = field(default_factory=dict, repr=False)
+    request_advanced: dict = field(default_factory=dict, repr=False)
+    features: dict = field(default_factory=dict, repr=False)
 
 
 @dataclass

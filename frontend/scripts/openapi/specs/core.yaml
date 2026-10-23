@@ -5713,6 +5713,16 @@ components:
                         type: string
                     type: array
             type: object
+        EmbeddingOptions:
+            properties:
+                batch_size:
+                    nullable: true
+                    type: integer
+                passage_prefix:
+                    type: string
+                query_prefix:
+                    type: string
+            type: object
         EmptyObject:
             properties: {}
             type: object
@@ -6205,6 +6215,15 @@ components:
                     type: string
                 run_terminal:
                     $ref: '#/components/schemas/RunTerminal'
+            type: object
+        FeatureFlags:
+            properties:
+                reasoning:
+                    type: boolean
+                tool_calling:
+                    type: boolean
+                vision:
+                    type: boolean
             type: object
         ForkAttachment:
             properties:
@@ -7355,6 +7374,9 @@ components:
                 elapsed_ms:
                     format: int64
                     type: integer
+                embedding_dimensions:
+                    format: int64
+                    type: integer
                 http_status:
                     type: integer
                 model_type:
@@ -8301,6 +8323,20 @@ components:
                 - session_id
                 - status
             type: object
+        ProviderRequestAdvanced:
+            properties:
+                extra_body:
+                    additionalProperties: true
+                    type: object
+                headers:
+                    additionalProperties:
+                        type: string
+                    type: object
+                query:
+                    additionalProperties:
+                        type: string
+                    type: object
+            type: object
         PublicArtifact:
             properties:
                 artifact_id:
@@ -9093,6 +9129,15 @@ components:
                     items:
                         $ref: '#/components/schemas/AuthorizationSubjectGrant'
                     type: array
+            type: object
+        Settings:
+            properties:
+                embedding:
+                    $ref: '#/components/schemas/EmbeddingOptions'
+                feature_enabled:
+                    $ref: '#/components/schemas/FeatureFlags'
+                feature_support:
+                    $ref: '#/components/schemas/FeatureFlags'
             type: object
         ShowcaseCase:
             properties:
@@ -10749,6 +10794,9 @@ components:
                     description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
                     nullable: true
                     type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings.
                 model_type:
                     description: Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use.
                     type: string
@@ -10783,6 +10831,9 @@ components:
                     description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
                     nullable: true
                     type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings.
                 model_type:
                     type: string
                 name:
@@ -12603,6 +12654,9 @@ components:
                     description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
                     nullable: true
                     type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings.
                 model_type:
                     type: string
                 name:
@@ -12691,6 +12745,9 @@ components:
             properties:
                 added:
                     type: boolean
+                feature_support:
+                    $ref: '#/components/schemas/FeatureFlags'
+                    description: Explicit provider/catalog capability evidence; absent means unknown.
                 id:
                     type: string
                 input:
@@ -12699,6 +12756,9 @@ components:
                     type: array
                 max_input_tokens:
                     type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Existing saved declarations and enabled overrides, preserved during discovery.
                 model_type:
                     type: string
                 name:
@@ -13244,6 +13304,9 @@ components:
             type: object
         providerRequestConfigOpenAPIResponse:
             properties:
+                advanced:
+                    $ref: '#/components/schemas/ProviderRequestAdvanced'
+                    description: Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
                 default_protocol:
                     enum:
                         - openai
@@ -13390,6 +13453,8 @@ components:
                     type: string
                 model_key:
                     type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
                 model_type:
                     description: Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata
                     type: string
@@ -15265,6 +15330,9 @@ components:
                     description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
                     nullable: true
                     type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings.
                 model_type:
                     description: Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references.
                     type: string
@@ -15292,6 +15360,9 @@ components:
             type: object
         updateProviderRequestConfigOpenAPIRequest:
             properties:
+                advanced:
+                    $ref: '#/components/schemas/ProviderRequestAdvanced'
+                    description: Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
                 default_protocol:
                     enum:
                         - openai

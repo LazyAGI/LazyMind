@@ -10,6 +10,7 @@ import type { CredentialBackupStatus } from "./credentialBackupModel";
 import type { CredentialRestoreMode } from "./credentialRestoreModel";
 import type { RawAxiosRequestConfig } from "axios";
 import { silentCloudRequest } from "@/api/cloudClient";
+import type { ModelSettings } from "./modelSettings";
 
 interface ApiEnvelope<T> {
   data?: T;
@@ -296,6 +297,8 @@ export interface RemoteGroupModel {
   sub_types?: string[];
   max_input_tokens?: string;
   added: boolean;
+  model_settings?: ModelSettings;
+  feature_support?: ModelSettings["feature_support"];
 }
 
 export async function listRemoteGroupModels(
@@ -323,6 +326,7 @@ export interface UpdateGroupModelInput {
   input_token_limit?: string;
   max_output_tokens?: string;
   customize?: boolean;
+  model_settings?: ModelSettings;
 }
 
 export async function updateGroupModel(
@@ -346,6 +350,7 @@ export async function updateGroupModel(
     max_input_tokens?: string;
     input_token_limit?: string | null;
     max_output_tokens?: string | null;
+    model_settings?: ModelSettings;
   }>(response.data);
 }
 
@@ -373,7 +378,14 @@ export type RequestProtocol =
   | "gemini"
   | "openai-responses";
 
+export interface ProviderRequestAdvanced {
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  extra_body?: Record<string, unknown>;
+}
+
 export interface ProviderRequestConfig {
+  advanced?: ProviderRequestAdvanced;
   default_protocol: RequestProtocol;
   protocols: Array<{
     protocol: RequestProtocol;
@@ -385,6 +397,7 @@ export interface ProviderRequestConfig {
 }
 
 export interface ProviderRequestConfigInput {
+  advanced?: ProviderRequestAdvanced;
   default_protocol: RequestProtocol;
   endpoints: { openai?: string; anthropic?: string };
 }

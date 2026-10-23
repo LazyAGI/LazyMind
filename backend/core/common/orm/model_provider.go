@@ -58,6 +58,7 @@ func (DefaultModelProvider) TableName() string { return "default_model_providers
 // This is distinct from the runtime_models.yaml role key (e.g. "evo_llm", "embed_main") stored in
 // user_selected_models.model_type (mapped via UserSelectedModel.ModelKey).
 type DefaultModel struct {
+	ModelSettings          string     `gorm:"column:model_settings;type:text;not null;default:'{}'"`
 	ID                     string     `gorm:"column:id;type:varchar(64);primaryKey"`
 	DefaultModelProviderID string     `gorm:"column:default_model_provider_id;type:varchar(64);not null;uniqueIndex:uk_default_models_provider_name,priority:1"`
 	ProviderName           string     `gorm:"column:provider_name;type:varchar(255);not null;default:''"`
@@ -128,6 +129,7 @@ func (UserModelProviderGroup) TableName() string { return "user_model_provider_g
 // ModelType stores the lazyllm technical type (e.g. "llm", "embed", "rerank", "vlm", "cross_modal_embed"),
 // matching the type values in model_catalog.yaml and DefaultModel.ModelType.
 type UserModelProviderGroupModel struct {
+	ModelSettings            string  `gorm:"column:model_settings;type:text;not null;default:'{}'"`
 	ID                       string  `gorm:"column:id;type:varchar(64);primaryKey"`
 	UserModelProviderID      string  `gorm:"column:user_model_provider_id;type:varchar(64);not null;index:idx_user_model_provider_group_models_provider"`
 	UserModelProviderGroupID string  `gorm:"column:user_model_provider_group_id;type:varchar(64);not null;uniqueIndex:uk_user_model_provider_group_models_group_name,priority:1"`

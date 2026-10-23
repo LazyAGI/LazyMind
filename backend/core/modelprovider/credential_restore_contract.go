@@ -157,7 +157,7 @@ func (sink *CredentialRestoreSink) persistOne(ctx context.Context, tx *gorm.DB, 
 		}
 	} else {
 		var err error
-		provider, err = restoredSupplier(tx, sink.localUserID, restored.Provider, resolution, now)
+		provider, err = restoredSupplier(tx, sink.localUserID, restored.Provider, resolution, now, sink.keys)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return credentialvault.ErrLocalConflict
@@ -370,7 +370,10 @@ func (sink *CredentialRestoreSink) TemporaryCredential(recordID string) (credent
 			return credentialvault.ProviderCredential{}, false
 		}
 		result.BaseURL = connectionBaseURL(provider, result.BaseURL)
-		result.RequestConfig = provider.RequestConfig
+		result.RequestConfig, err = portableProviderRequestConfig(provider)
+		if err != nil {
+			return credentialvault.ProviderCredential{}, false
+		}
 		index := 0
 		if value.provider.ActiveKeyIndex != nil {
 			index = *value.provider.ActiveKeyIndex

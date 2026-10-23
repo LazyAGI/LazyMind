@@ -16,6 +16,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/modelsettings"
 	"lazymind/core/store"
 )
 
@@ -99,14 +100,16 @@ func resolveRemoteModelsDialIPs(ctx context.Context, host string) ([]net.IP, err
 }
 
 type remoteGroupModelItem struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	ModelType      string   `json:"model_type"`
-	SubTypes       []string `json:"sub_types,omitempty"`
-	Input          []string `json:"input"`
-	Output         []string `json:"output"`
-	MaxInputTokens *string  `json:"max_input_tokens,omitempty"`
-	Added          bool     `json:"added"`
+	FeatureSupport *modelsettings.FeatureFlags `json:"feature_support,omitempty"`
+	ModelSettings  *ModelSettings              `json:"model_settings,omitempty"`
+	ID             string                      `json:"id"`
+	Name           string                      `json:"name"`
+	ModelType      string                      `json:"model_type"`
+	SubTypes       []string                    `json:"sub_types,omitempty"`
+	Input          []string                    `json:"input"`
+	Output         []string                    `json:"output"`
+	MaxInputTokens *string                     `json:"max_input_tokens,omitempty"`
+	Added          bool                        `json:"added"`
 }
 
 type remoteGroupModelsResponse struct {
@@ -120,18 +123,22 @@ type openaiModelListResponse struct {
 }
 
 type openaiModelListEntry struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	Model            string          `json:"model"`
-	Root             json.RawMessage `json:"root"`
-	ModelType        string          `json:"model_type"`
-	TaskType         string          `json:"task_type"`
-	Task             string          `json:"task"`
-	Type             string          `json:"type"`
-	ContextLength    int             `json:"context_length"`
-	MaxModelLen      int             `json:"max_model_len"`
-	InputModalities  []string        `json:"input_modalities"`
-	OutputModalities []string        `json:"output_modalities"`
+	FeatureSupport      *modelsettings.FeatureFlags `json:"feature_support"`
+	ToolCall            *bool                       `json:"tool_call"`
+	Reasoning           *bool                       `json:"reasoning"`
+	SupportedParameters json.RawMessage             `json:"supported_parameters"`
+	ID                  string                      `json:"id"`
+	Name                string                      `json:"name"`
+	Model               string                      `json:"model"`
+	Root                json.RawMessage             `json:"root"`
+	ModelType           string                      `json:"model_type"`
+	TaskType            string                      `json:"task_type"`
+	Task                string                      `json:"task"`
+	Type                string                      `json:"type"`
+	ContextLength       int                         `json:"context_length"`
+	MaxModelLen         int                         `json:"max_model_len"`
+	InputModalities     []string                    `json:"input_modalities"`
+	OutputModalities    []string                    `json:"output_modalities"`
 	// DiscoverySubTypes is supplied by trusted category-specific requests, never
 	// accepted from an arbitrary compatible endpoint's response body.
 	DiscoverySubTypes []string `json:"-"`
@@ -343,7 +350,7 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 
 	// A new keyless custom service can expose its catalog before a connection
 	// check. Discovery does not verify it or loosen runtime admission.
-	baseURL, apiKey, err := resolveProviderRuntimeCredential(r.Context(), db, group.ID)
+	runtimeConfig, err := ResolveProviderRuntimeConfiguration(r.Context(), db, group.ID)
 	if err != nil {
 		if errors.Is(err, ErrProviderKeyDisabled) || errors.Is(err, ErrProviderKeyUnverified) {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -352,6 +359,7 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 		}
 		return
 	}
+	baseURL, apiKey := runtimeConfig.BaseURL, runtimeConfig.APIKey
 	listURL, err := modelsListURL(RuntimeProviderName(parent), baseURL)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -385,6 +393,7 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 	} else if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
+	applyProviderRequestAdvanced(req, runtimeConfig.Advanced)
 
 	entries, err := fetchRemoteModelEntries(req)
 	if err != nil {
@@ -405,9 +414,9 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 		common.ReplyErr(w, "query group models failed", http.StatusInternalServerError)
 		return
 	}
-	added := make(map[string]struct{}, len(existing))
+	added := make(map[string]orm.UserModelProviderGroupModel, len(existing))
 	for _, row := range existing {
-		added[strings.ToLower(strings.TrimSpace(row.Name))] = struct{}{}
+		added[strings.ToLower(strings.TrimSpace(row.Name))] = row
 	}
 
 	metadataProvider := RuntimeProviderName(parent)
@@ -419,8 +428,13 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 	models := make([]remoteGroupModelItem, 0, len(entries))
 	for _, entry := range entries {
 		item := remoteModelItem(entry, metadataProvider, recognition)
-		if _, ok := added[strings.ToLower(item.ID)]; ok {
+		if row, ok := added[strings.ToLower(item.ID)]; ok {
 			item.Added = true
+			item.ModelSettings = modelSettingsResponse(row.ModelSettings)
+			if item.ModelSettings != nil && isChatTechnicalType(row.ModelType) {
+				inheritMissingModelFeatureSupport(item.ModelSettings, item.FeatureSupport)
+				item.FeatureSupport = item.ModelSettings.FeatureSupport
+			}
 		}
 		models = append(models, item)
 	}
@@ -500,6 +514,9 @@ func remoteModelItem(entry openaiModelListEntry, providerName string, recognitio
 		modelType = siliconFlowDiscoveredModelType(entry, input, output, recognition.modelType(providerName, entry.ID))
 		item.ModelType = modelType
 	}
+	if isChatTechnicalType(item.ModelType) {
+		item.FeatureSupport = remoteModelFeatureSupport(entry, providerName, recognition)
+	}
 	hasInputLimit := modelType == "llm" || modelType == "vlm" || modelType == "embed" || modelType == "multimodal_embedding" || modelType == "rerank"
 	contextLength := entry.ContextLength
 	if isVLLM && entry.MaxModelLen > 0 {
@@ -514,6 +531,68 @@ func remoteModelItem(entry openaiModelListEntry, providerName string, recognitio
 		}
 	}
 	return item
+}
+
+func remoteModelFeatureSupport(entry openaiModelListEntry, providerName string, recognition *upstreamModelRecognitionIndex) *modelsettings.FeatureFlags {
+	flags := modelsettings.FeatureFlags{}
+	if known := recognition.featureSupport(providerName, entry.ID); known != nil {
+		flags = *known
+	}
+	if normalizeProviderName(providerName) == "vllm" {
+		if root := vllmLoadedModelIdentity(entry.Root); root != "" {
+			if _, found := recognition.lookupExact(providerName, entry.ID); !found {
+				if known := recognition.featureSupport(providerName, root); known != nil {
+					flags = *known
+				}
+			}
+		}
+	}
+	if entry.Architecture.Input != nil || entry.InputModalities != nil {
+		input := entry.Architecture.Input
+		if input == nil {
+			input = entry.InputModalities
+		}
+		modalities := modalitySet(input)
+		vision := modalities["image"] || modalities["video"]
+		flags.Vision = &vision
+	}
+	var parameters []any
+	if raw := strings.TrimSpace(string(entry.SupportedParameters)); strings.HasPrefix(raw, "[") && json.Unmarshal(entry.SupportedParameters, &parameters) == nil {
+		hasTools, hasReasoning, valid := false, false, true
+		for _, value := range parameters {
+			parameter, ok := value.(string)
+			if !ok {
+				valid = false
+				break
+			}
+			hasTools = hasTools || parameter == "tools"
+			hasReasoning = hasReasoning || parameter == "reasoning" || parameter == "include_reasoning"
+		}
+		if valid {
+			flags.ToolCalling, flags.Reasoning = &hasTools, &hasReasoning
+		}
+	}
+	if entry.ToolCall != nil {
+		flags.ToolCalling = entry.ToolCall
+	}
+	if entry.Reasoning != nil {
+		flags.Reasoning = entry.Reasoning
+	}
+	if entry.FeatureSupport != nil {
+		if entry.FeatureSupport.Vision != nil {
+			flags.Vision = entry.FeatureSupport.Vision
+		}
+		if entry.FeatureSupport.ToolCalling != nil {
+			flags.ToolCalling = entry.FeatureSupport.ToolCalling
+		}
+		if entry.FeatureSupport.Reasoning != nil {
+			flags.Reasoning = entry.FeatureSupport.Reasoning
+		}
+	}
+	if flags.Vision == nil && flags.ToolCalling == nil && flags.Reasoning == nil {
+		return nil
+	}
+	return &flags
 }
 
 // vLLM's root is the loaded model path, not its public served-model alias.

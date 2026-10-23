@@ -12,6 +12,7 @@ import {
   type RequestProtocol,
 } from "../api";
 import "./ProviderRequestConfigDrawer.scss";
+import { ProviderRequestAdvancedFields, advancedRequestFormValues, advancedRequestInput, type AdvancedRequestFormValues } from "./ProviderRequestAdvancedFields";
 
 interface ProviderRequestConfigDrawerProps {
   providerId: string;
@@ -24,6 +25,7 @@ interface ProviderRequestConfigDrawerProps {
 type FormValues = {
   default_protocol: RequestProtocol;
   endpoints: { openai: string; anthropic: string };
+  advanced: AdvancedRequestFormValues;
 };
 
 function editableProtocol(protocol: RequestProtocol): protocol is "openai" | "anthropic" {
@@ -69,7 +71,7 @@ export function ProviderRequestConfigDrawer({
       for (const item of nextConfig.protocols) {
         if (editableProtocol(item.protocol)) endpoints[item.protocol] = item.base_url;
       }
-      form.setFieldsValue({default_protocol: nextConfig.default_protocol, endpoints});
+      form.setFieldsValue({default_protocol: nextConfig.default_protocol, endpoints, advanced: advancedRequestFormValues(nextConfig.advanced)});
       draft.captureSavedValues();
       setConfig(nextConfig);
     }).catch((error) => {
@@ -108,6 +110,7 @@ export function ProviderRequestConfigDrawer({
         openai: values.endpoints.openai?.trim() || "",
         anthropic: values.endpoints.anthropic?.trim() || "",
       },
+      advanced: advancedRequestInput(values.advanced),
     };
     setSaving(true);
     try {
@@ -176,6 +179,7 @@ export function ProviderRequestConfigDrawer({
               {supported && item.default_base_url ? <p className="provider-request-config-default-address">{text("defaultAddress", {address: item.default_base_url})}</p> : null}
             </section>;
           })}
+          {config ? <ProviderRequestAdvancedFields form={form} /> : null}
         </Form>
       </Spin>
     </div>

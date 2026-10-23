@@ -11,12 +11,14 @@ import (
 	"lazymind/core/agent"
 	"lazymind/core/algo"
 	"lazymind/core/chat"
+	"lazymind/core/credentialvault"
 	"lazymind/core/datasource"
 	"lazymind/core/doc"
 	"lazymind/core/evalset"
 	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
+	"lazymind/core/modelsettings"
 	"lazymind/core/showcase"
 	"lazymind/core/wordgroup"
 	"lazymind/core/workflow"
@@ -1238,13 +1240,15 @@ type providerRequestProtocolOpenAPIItem struct {
 }
 
 type providerRequestConfigOpenAPIResponse struct {
-	DefaultProtocol string                               `json:"default_protocol" enum:"openai,anthropic"`
-	Protocols       []providerRequestProtocolOpenAPIItem `json:"protocols"`
+	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
+	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,anthropic"`
+	Protocols       []providerRequestProtocolOpenAPIItem     `json:"protocols"`
 }
 
 type updateProviderRequestConfigOpenAPIRequest struct {
-	DefaultProtocol string            `json:"default_protocol" enum:"openai,anthropic"`
-	Endpoints       map[string]string `json:"endpoints,omitempty" desc:"Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected."`
+	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty" desc:"Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind."`
+	DefaultProtocol string                                   `json:"default_protocol" enum:"openai,anthropic"`
+	Endpoints       map[string]string                        `json:"endpoints,omitempty" desc:"Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected."`
 }
 
 type replaceModelProviderKeyOpenAPIRequest struct {
@@ -1339,14 +1343,16 @@ type deleteModelProviderGroupOpenAPIResponse struct {
 }
 
 type listRemoteGroupModelsOpenAPIItem struct {
-	ID             string   `json:"id"`
-	Name           string   `json:"name"`
-	ModelType      string   `json:"model_type"`
-	Input          []string `json:"input"`
-	Output         []string `json:"output"`
-	SubTypes       []string `json:"sub_types,omitempty" desc:"Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog."`
-	MaxInputTokens *string  `json:"max_input_tokens,omitempty"`
-	Added          bool     `json:"added"`
+	FeatureSupport *modelsettings.FeatureFlags `json:"feature_support,omitempty" desc:"Explicit provider/catalog capability evidence; absent means unknown."`
+	ModelSettings  *modelsettings.Settings     `json:"model_settings,omitempty" desc:"Existing saved declarations and enabled overrides, preserved during discovery."`
+	ID             string                      `json:"id"`
+	Name           string                      `json:"name"`
+	ModelType      string                      `json:"model_type"`
+	Input          []string                    `json:"input"`
+	Output         []string                    `json:"output"`
+	SubTypes       []string                    `json:"sub_types,omitempty" desc:"Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog."`
+	MaxInputTokens *string                     `json:"max_input_tokens,omitempty"`
+	Added          bool                        `json:"added"`
 }
 
 type listRemoteGroupModelsOpenAPIResponse struct {
@@ -1355,28 +1361,30 @@ type listRemoteGroupModelsOpenAPIResponse struct {
 }
 
 type addModelProviderGroupModelOpenAPIRequest struct {
-	Vision          bool    `json:"vision,omitempty" desc:"Whether this LLM accepts image input"`
-	Name            string  `json:"name"`
-	ModelType       string  `json:"model_type" desc:"Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use."`
-	MaxInputTokens  *string `json:"max_input_tokens,omitempty" desc:"Optional context window. Explicit discovered values are preserved for unclassified models. When omitted for LLM/VLM models, resolves from config/model_context_windows.yaml with a 128K fallback; unclassified models have no inferred default."`
-	InputTokenLimit *string `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
-	MaxOutputTokens *string `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	ModelSettings   *modelsettings.Settings `json:"model_settings,omitempty" desc:"Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings."`
+	Vision          bool                    `json:"vision,omitempty" desc:"Whether this LLM accepts image input"`
+	Name            string                  `json:"name"`
+	ModelType       string                  `json:"model_type" desc:"Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use."`
+	MaxInputTokens  *string                 `json:"max_input_tokens,omitempty" desc:"Optional context window. Explicit discovered values are preserved for unclassified models. When omitted for LLM/VLM models, resolves from config/model_context_windows.yaml with a 128K fallback; unclassified models have no inferred default."`
+	InputTokenLimit *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
-	Vision                   bool    `json:"vision" desc:"Whether this LLM accepts image input"`
-	ID                       string  `json:"id"`
-	UserModelProviderID      string  `json:"user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
-	Name                     string  `json:"name"`
-	ModelType                string  `json:"model_type"`
-	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name"`
-	BaseURL                  string  `json:"base_url"`
-	IsDefault                bool    `json:"is_default"`
-	MaxInputTokens           *string `json:"max_input_tokens,omitempty" desc:"Stored context window, including an explicit discovered value on an unclassified model; for example 262144, 128K, or 1M" nullable:"true"`
-	InputTokenLimit          *string `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
-	MaxOutputTokens          *string `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	ModelSettings            *modelsettings.Settings `json:"model_settings,omitempty" desc:"Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings."`
+	Vision                   bool                    `json:"vision" desc:"Whether this LLM accepts image input"`
+	ID                       string                  `json:"id"`
+	UserModelProviderID      string                  `json:"user_model_provider_id"`
+	UserModelProviderGroupID string                  `json:"user_model_provider_group_id"`
+	Name                     string                  `json:"name"`
+	ModelType                string                  `json:"model_type"`
+	ProviderName             string                  `json:"provider_name"`
+	GroupName                string                  `json:"group_name"`
+	BaseURL                  string                  `json:"base_url"`
+	IsDefault                bool                    `json:"is_default"`
+	MaxInputTokens           *string                 `json:"max_input_tokens,omitempty" desc:"Stored context window, including an explicit discovered value on an unclassified model; for example 262144, 128K, or 1M" nullable:"true"`
+	InputTokenLimit          *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens          *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 }
 
 type addModelProviderGroupModelsOpenAPIRequest struct {
@@ -1397,41 +1405,43 @@ type addModelProviderGroupModelsOpenAPIResponse struct {
 }
 
 type updateModelProviderGroupModelOpenAPIRequest struct {
-	Name            *string `json:"name,omitempty" desc:"Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID."`
-	ModelType       *string `json:"model_type,omitempty" desc:"Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references."`
-	Vision          *bool   `json:"vision,omitempty" desc:"Optional image-input support for chat models."`
-	MaxInputTokens  *string `json:"max_input_tokens,omitempty" desc:"Optional stored context window for LLM/VLM or unclassified models, for example 262144, 128K, or 1M. Empty clears an unclassified model's value; omitted fields remain unchanged."`
-	InputTokenLimit *string `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
-	MaxOutputTokens *string `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
-	Customize       bool    `json:"customize,omitempty" desc:"Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it."`
+	ModelSettings   *modelsettings.Settings `json:"model_settings,omitempty" desc:"Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings."`
+	Name            *string                 `json:"name,omitempty" desc:"Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID."`
+	ModelType       *string                 `json:"model_type,omitempty" desc:"Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references."`
+	Vision          *bool                   `json:"vision,omitempty" desc:"Optional image-input support for chat models."`
+	MaxInputTokens  *string                 `json:"max_input_tokens,omitempty" desc:"Optional stored context window for LLM/VLM or unclassified models, for example 262144, 128K, or 1M. Empty clears an unclassified model's value; omitted fields remain unchanged."`
+	InputTokenLimit *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	Customize       bool                    `json:"customize,omitempty" desc:"Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it."`
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
-	LogoDataURL              string   `json:"logo_data_url,omitempty"`
-	Vision                   bool     `json:"vision" desc:"Whether this LLM accepts image input"`
-	ID                       string   `json:"id"`
-	Source                   string   `json:"source" enum:"own,cloud"`
-	ProviderID               string   `json:"provider_id"`
-	ProviderGroupID          string   `json:"provider_group_id,omitempty"`
-	UserModelProviderID      string   `json:"user_model_provider_id,omitempty"`
-	UserModelProviderGroupID string   `json:"user_model_provider_group_id,omitempty"`
-	Name                     string   `json:"name"`
-	ModelType                string   `json:"model_type"`
-	ProviderName             string   `json:"provider_name"`
-	BrandKey                 string   `json:"brand_key,omitempty"`
-	ServiceKey               string   `json:"service_key,omitempty"`
-	IsCustom                 bool     `json:"is_custom"`
-	GroupName                string   `json:"group_name,omitempty"`
-	BaseURL                  string   `json:"base_url,omitempty"`
-	IsDefault                bool     `json:"is_default"`
-	IsEditable               bool     `json:"is_editable" desc:"Whether this option supports image editing"`
-	MaxInputTokens           *string  `json:"max_input_tokens" desc:"Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported" nullable:"true"`
-	InputTokenLimit          *string  `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
-	MaxOutputTokens          *string  `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
-	Availability             string   `json:"availability" enum:"available,degraded,unavailable"`
-	Lifecycle                string   `json:"lifecycle" enum:"active,deprecated,retired"`
-	ReadOnly                 bool     `json:"read_only"`
-	Capabilities             []string `json:"capabilities"`
+	ModelSettings            *modelsettings.Settings `json:"model_settings,omitempty" desc:"Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings."`
+	LogoDataURL              string                  `json:"logo_data_url,omitempty"`
+	Vision                   bool                    `json:"vision" desc:"Whether this LLM accepts image input"`
+	ID                       string                  `json:"id"`
+	Source                   string                  `json:"source" enum:"own,cloud"`
+	ProviderID               string                  `json:"provider_id"`
+	ProviderGroupID          string                  `json:"provider_group_id,omitempty"`
+	UserModelProviderID      string                  `json:"user_model_provider_id,omitempty"`
+	UserModelProviderGroupID string                  `json:"user_model_provider_group_id,omitempty"`
+	Name                     string                  `json:"name"`
+	ModelType                string                  `json:"model_type"`
+	ProviderName             string                  `json:"provider_name"`
+	BrandKey                 string                  `json:"brand_key,omitempty"`
+	ServiceKey               string                  `json:"service_key,omitempty"`
+	IsCustom                 bool                    `json:"is_custom"`
+	GroupName                string                  `json:"group_name,omitempty"`
+	BaseURL                  string                  `json:"base_url,omitempty"`
+	IsDefault                bool                    `json:"is_default"`
+	IsEditable               bool                    `json:"is_editable" desc:"Whether this option supports image editing"`
+	MaxInputTokens           *string                 `json:"max_input_tokens" desc:"Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported" nullable:"true"`
+	InputTokenLimit          *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens          *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	Availability             string                  `json:"availability" enum:"available,degraded,unavailable"`
+	Lifecycle                string                  `json:"lifecycle" enum:"active,deprecated,retired"`
+	ReadOnly                 bool                    `json:"read_only"`
+	Capabilities             []string                `json:"capabilities"`
 }
 
 type listModelProviderGroupModelsOpenAPIResponse struct {
@@ -1443,29 +1453,30 @@ type listUserModelsByModelTypeQueryParams struct {
 }
 
 type selectedModelOpenAPIItem struct {
-	LogoDataURL              string  `json:"logo_data_url,omitempty"`
-	ModelKey                 string  `json:"model_key"`
-	ModelType                string  `json:"model_type,omitempty" desc:"Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata"`
-	Vision                   *bool   `json:"vision,omitempty" desc:"Actual configured vision support, including explicit false; omitted when unknown for cloud models"`
-	ModelID                  string  `json:"model_id"`
-	Source                   string  `json:"source" enum:"own,cloud"`
-	ProviderID               string  `json:"provider_id"`
-	ProviderGroupID          string  `json:"provider_group_id,omitempty"`
-	UserModelProviderID      string  `json:"user_model_provider_id,omitempty"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id,omitempty"`
-	Name                     string  `json:"name"`
-	ProviderName             string  `json:"provider_name"`
-	BrandKey                 string  `json:"brand_key,omitempty"`
-	ServiceKey               string  `json:"service_key,omitempty"`
-	IsCustom                 bool    `json:"is_custom"`
-	GroupName                string  `json:"group_name,omitempty"`
-	BaseURL                  string  `json:"base_url,omitempty"`
-	IsDefault                bool    `json:"is_default" desc:"True when the selection was copied from catalog YAML"`
-	IsEditable               bool    `json:"is_editable" desc:"Whether the selected model supports image editing"`
-	MaxInputTokens           *string `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
-	Availability             string  `json:"availability" enum:"available,degraded,unavailable"`
-	UnavailableReason        string  `json:"unavailable_reason,omitempty"`
-	ReadOnly                 bool    `json:"read_only"`
+	ModelSettings            *modelsettings.Settings `json:"model_settings,omitempty"`
+	LogoDataURL              string                  `json:"logo_data_url,omitempty"`
+	ModelKey                 string                  `json:"model_key"`
+	ModelType                string                  `json:"model_type,omitempty" desc:"Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata"`
+	Vision                   *bool                   `json:"vision,omitempty" desc:"Actual configured vision support, including explicit false; omitted when unknown for cloud models"`
+	ModelID                  string                  `json:"model_id"`
+	Source                   string                  `json:"source" enum:"own,cloud"`
+	ProviderID               string                  `json:"provider_id"`
+	ProviderGroupID          string                  `json:"provider_group_id,omitempty"`
+	UserModelProviderID      string                  `json:"user_model_provider_id,omitempty"`
+	UserModelProviderGroupID string                  `json:"user_model_provider_group_id,omitempty"`
+	Name                     string                  `json:"name"`
+	ProviderName             string                  `json:"provider_name"`
+	BrandKey                 string                  `json:"brand_key,omitempty"`
+	ServiceKey               string                  `json:"service_key,omitempty"`
+	IsCustom                 bool                    `json:"is_custom"`
+	GroupName                string                  `json:"group_name,omitempty"`
+	BaseURL                  string                  `json:"base_url,omitempty"`
+	IsDefault                bool                    `json:"is_default" desc:"True when the selection was copied from catalog YAML"`
+	IsEditable               bool                    `json:"is_editable" desc:"Whether the selected model supports image editing"`
+	MaxInputTokens           *string                 `json:"max_input_tokens" desc:"Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
+	Availability             string                  `json:"availability" enum:"available,degraded,unavailable"`
+	UnavailableReason        string                  `json:"unavailable_reason,omitempty"`
+	ReadOnly                 bool                    `json:"read_only"`
 }
 
 type listSelectedModelsOpenAPIResponse struct {

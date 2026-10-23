@@ -16,9 +16,11 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
+	"lazymind/core/modelsettings"
 )
 
 type catalogModel struct {
+	ModelSettings          string   `yaml:"-"`
 	Vision                 bool     `yaml:"vision"`
 	Name                   string   `yaml:"name"`
 	Type                   string   `yaml:"type"`
@@ -144,8 +146,15 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	if name == "" || modelType == "" {
 		return errors.New("model name and type are required")
 	}
+	settings, err := modelsettings.Decode(item.ModelSettings)
+	if err != nil {
+		return err
+	}
+	settingsJSON, err := modelsettings.Normalize(modelType, &settings)
+	if err != nil {
+		return err
+	}
 	var maxInputTokens *string
-	var err error
 	if override := strings.TrimSpace(item.MaxInputTokensOverride); override != "" {
 		maxInputTokens = &override
 	} else {
@@ -175,6 +184,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			Name:                   name,
 			ModelType:              modelType,
 			Vision:                 item.Vision,
+			ModelSettings:          settingsJSON,
 			MaxInputTokens:         maxInputTokens,
 			FreeAutoSelectPriority: item.FreeAutoSelectPriority,
 			FreeAutoSelectBaseURLs: freeAutoSelectBaseURLs,
@@ -186,7 +196,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 		}
 		return syncDefaultModelToUserGroups(
 			tx, now, providerID, providerName, name, modelType, maxInputTokens,
-			item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision,
+			item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision, settingsJSON,
 		)
 	}
 	if err != nil {
@@ -199,6 +209,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			"provider_name":              providerName,
 			"model_type":                 modelType,
 			"vision":                     item.Vision,
+			"model_settings":             settingsJSON,
 			"max_input_tokens":           maxInputTokens,
 			"free_auto_select_priority":  item.FreeAutoSelectPriority,
 			"free_auto_select_base_urls": freeAutoSelectBaseURLs,
@@ -209,7 +220,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	}
 	return syncDefaultModelToUserGroups(
 		tx, now, providerID, providerName, name, modelType, maxInputTokens,
-		item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision,
+		item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision, settingsJSON,
 	)
 }
 
@@ -248,7 +259,12 @@ func syncDefaultModelToUserGroups(
 	freeAutoSelectPriority int,
 	freeAutoSelectBaseURLs string,
 	vision bool,
+	modelSettings ...string,
 ) error {
+	settingsJSON := "{}"
+	if len(modelSettings) > 0 {
+		settingsJSON = modelSettings[0]
+	}
 	providerIDs := tx.Model(&orm.UserModelProvider{}).
 		Select("id").
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", providerID)
@@ -269,6 +285,11 @@ func syncDefaultModelToUserGroups(
 		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
 		Updates(updates).Error; err != nil {
 		return err
+	}
+	if isChatTechnicalType(modelType) {
+		if err := inheritCatalogModelSupport(tx, providerID, modelName, modelType, settingsJSON); err != nil {
+			return err
+		}
 	}
 
 	var catalog orm.DefaultModelProvider
@@ -334,6 +355,7 @@ func syncDefaultModelToUserGroups(
 			Name:                     modelName,
 			ModelType:                modelType,
 			Vision:                   vision,
+			ModelSettings:            settingsJSON,
 			MaxInputTokens:           maxInputTokens,
 			FreeAutoSelectPriority:   freeAutoSelectPriority,
 			FreeAutoSelectBaseURLs:   freeAutoSelectBaseURLs,

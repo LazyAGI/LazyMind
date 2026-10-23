@@ -38,6 +38,12 @@ vi.mock("react-i18next", () => {
     baseUrlNoCredentials:
       "The endpoint must not include a username or password.",
     baseUrlMax: "Endpoint is too long.",
+    advanced: "Advanced request options",
+    headers: "Custom headers",
+    query: "Query parameters",
+    extraBody: "Extra JSON body",
+    jsonObject: "Enter a JSON object.",
+    stringValues: "Each value must be text.",
   };
   const t = (key: string, options?: Record<string, unknown>) => {
     const value = key.startsWith("modelProvider.requestConfig.")
@@ -153,6 +159,7 @@ describe("provider request configuration drawer", () => {
           openai: "https://gateway.test/v1",
           anthropic: "https://proxy.test/anthropic",
         },
+        advanced: {},
       }),
     );
     await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledOnce());
@@ -170,6 +177,7 @@ describe("provider request configuration drawer", () => {
       expect(saveConfig).toHaveBeenCalledWith("provider-a", {
         default_protocol: "openai",
         endpoints: { openai: "", anthropic: "" },
+        advanced: {},
       }),
     );
   });
@@ -259,5 +267,36 @@ describe("provider request configuration drawer", () => {
     expect(callbacks.onClose).not.toHaveBeenCalled();
     fireEvent.click(discard);
     expect(callbacks.onClose).toHaveBeenCalledOnce();
+  });
+
+  it("loads and saves gateway request options with JSON value types intact", async () => {
+    fetchConfig.mockResolvedValueOnce({...config(), advanced: {
+      headers: {"X-Gateway-Token": "saved-private-token"}, query: {tenant: "one"},
+      extra_body: {metadata: {project: "one"}},
+    }});
+    render(<ProviderRequestConfigDrawer {...props()} />, {wrapper: harness});
+    await screen.findByRole("textbox", {name: "OpenAI"});
+    fireEvent.click(screen.getByText("Advanced request options"));
+    expect(screen.getByRole("textbox", {name: "Custom headers"})).toHaveValue(
+      JSON.stringify({"X-Gateway-Token": "saved-private-token"}, null, 2),
+    );
+    fireEvent.change(screen.getByRole("textbox", {name: "Extra JSON body"}), {
+      target: {value: '{"metadata":{"project":"two"},"temperature":0.2}'},
+    });
+    fireEvent.click(screen.getByRole("button", {name: "Save"}));
+    await waitFor(() => expect(saveConfig).toHaveBeenCalledWith("provider-a", expect.objectContaining({
+      advanced: {headers: {"X-Gateway-Token": "saved-private-token"}, query: {tenant: "one"},
+        extra_body: {metadata: {project: "two"}, temperature: 0.2}},
+    })));
+  });
+
+  it("rejects non-text custom header values before saving", async () => {
+    render(<ProviderRequestConfigDrawer {...props()} />, {wrapper: harness});
+    await screen.findByRole("textbox", {name: "OpenAI"});
+    fireEvent.click(screen.getByText("Advanced request options"));
+    fireEvent.change(screen.getByRole("textbox", {name: "Custom headers"}), {target: {value: '{"X-Test":123}'}});
+    fireEvent.click(screen.getByRole("button", {name: "Save"}));
+    expect(await screen.findByText("Each value must be text.")).toBeVisible();
+    expect(saveConfig).not.toHaveBeenCalled();
   });
 });

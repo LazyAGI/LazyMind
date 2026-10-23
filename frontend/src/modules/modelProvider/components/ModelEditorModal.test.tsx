@@ -62,6 +62,78 @@ async function chooseCapability(capability: string) {
 }
 
 describe("model editor", () => {
+  it("uses known vision support when no separate enabled override exists", async () => {
+    const options = props({ ...model, vision: false, modelSettings: { feature_support: { vision: true } } });
+    setup(options);
+    expect(screen.getByRole("switch", { name: "modelProvider.vision" })).toBeChecked();
+    expect(saveButton()).toBeDisabled();
+    fireEvent.change(nameInput(), { target: { value: "renamed-vision" } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({ vision: true, modelSettings: { feature_support: { vision: true } } })));
+  });
+  it("preserves exact embedding prefixes and clears a saved batch override", async () => {
+    const options = props({ ...model, capability: "EMBEDDING", modelSettings: { embedding: {
+      query_prefix: "query: ", passage_prefix: "passage:\n", batch_size: 32,
+    } } });
+    setup(options);
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.editor.embeddingQueryPrefix" }), { target: { value: "  query:\n" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "modelProvider.editor.embeddingBatchSize" }), { target: { value: "" } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({
+      name: model.name, capability: "EMBEDDING", modelSettings: { embedding: {
+        query_prefix: "  query:\n", passage_prefix: "passage:\n", batch_size: null,
+      } },
+    }));
+  });
+  it("preserves declared support and enabled state when only the model ID changes", async () => {
+    const options = props({ ...model, modelSettings: {
+      feature_support: { vision: true, tool_calling: true, reasoning: false },
+      feature_enabled: { vision: false, tool_calling: false },
+    } });
+    setup(options);
+    fireEvent.change(nameInput(), { target: { value: "renamed" } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({
+      name: "renamed", modelSettings: {
+        feature_support: { vision: true, tool_calling: true, reasoning: false },
+        feature_enabled: { vision: false, tool_calling: false },
+      },
+    })));
+  });
+
+  it("lets an unknown tool capability be explicitly disabled without declaring support", async () => {
+    const options = props();
+    setup(options);
+    const tools = screen.getByRole("switch", { name: "modelProvider.editor.featureEnabled.tool_calling" });
+    expect(tools).toBeChecked();
+    fireEvent.click(tools);
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({
+      modelSettings: { feature_enabled: { tool_calling: false } },
+    })));
+  });
+
+  it("keeps unsupported reasoning disabled and separate from declared support", async () => {
+    setup(props({ ...model, modelSettings: { feature_support: { reasoning: false } } }));
+    const reasoning = screen.getByRole("switch", { name: "modelProvider.editor.featureEnabled.reasoning" });
+    expect(reasoning).not.toBeChecked();
+    expect(reasoning).toBeDisabled();
+    expect(saveButton()).toBeDisabled();
+  });
+
+  it("turns an explicitly enabled tool feature off when support is changed to unsupported", async () => {
+    const options = props({ ...model, modelSettings: { feature_enabled: { tool_calling: true } } });
+    setup(options);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "modelProvider.editor.featureSupport.tool_calling" }));
+    fireEvent.click(await screen.findByText("modelProvider.editor.unsupported", { selector: ".ant-select-item-option-content" }));
+    const tools = screen.getByRole("switch", { name: "modelProvider.editor.featureEnabled.tool_calling" });
+    expect(tools).not.toBeChecked();
+    expect(tools).toBeDisabled();
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({
+      modelSettings: { feature_support: { tool_calling: false }, feature_enabled: { tool_calling: false } },
+    })));
+  });
   it("retains an unclassified model and its exact discovered context when saved", async () => {
     const options = props({ ...model, capability: "UNKNOWN", maxInputTokens: "262144" });
     setup(options);
@@ -144,7 +216,7 @@ describe("model editor", () => {
     setup(options);
     const context = screen.getByRole("textbox", { name: "modelProvider.maxInputTokensLabel" });
     expect(context).toHaveValue("256K");
-    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "modelProvider.vision" })).toBeChecked();
     fireEvent.change(context, { target: { value: "1m" } });
     fireEvent.click(saveButton());
     await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({ name: model.name, capability: "VLM", maxInputTokens: "1M" }));
@@ -159,6 +231,7 @@ describe("model editor", () => {
     fireEvent.click(saveButton());
     await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({
       name: model.name, capability: "LLM_CHAT", vision: false, maxInputTokens: "256K",
+      modelSettings: { feature_enabled: { vision: false } },
     }));
   });
 

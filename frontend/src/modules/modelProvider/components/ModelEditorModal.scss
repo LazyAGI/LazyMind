@@ -1,4 +1,13 @@
 .model-editor-modal {
+  padding-bottom: 0;
+  .ant-modal-content {
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100dvh - 32px);
+  }
+  .ant-modal-header,
+  .ant-modal-footer { flex-shrink: 0; }
+  .ant-modal-body { min-height: 0; overflow-y: auto; padding-right: 4px; }
   .model-editor-info,
   .model-editor-error {
     margin-bottom: 16px;

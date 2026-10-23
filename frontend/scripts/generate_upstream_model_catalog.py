@@ -30,7 +30,7 @@ def find_root():
 ROOT = find_root()
 MODELS_DEV_URL = 'https://models.dev/api.json?type=all'
 OPENROUTER_URL = 'https://openrouter.ai/api/v1/models?output_modalities=all'
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 PROVIDER_SOURCES = {
     'Claude': ['anthropic'],
@@ -123,6 +123,15 @@ def from_models_dev(entry, fallback_name):
     model['max_input'] = int(limit.get('input') or 0)
     model['max_output'] = int(limit.get('output') or 0)
     model['model_type'] = model_type(entry.get('type'), model)
+    support = {}
+    if model['model_type'] in {'llm', 'vlm'}:
+        if isinstance(modalities.get('input'), list):
+            support['vision'] = bool(set(model['input']) & {'image', 'video'})
+        for field, target in [('tool_call', 'tool_calling'), ('reasoning', 'reasoning')]:
+            if isinstance(entry.get(field), bool):
+                support[target] = entry[field]
+    if support:
+        model['feature_support'] = support
     return model
 
 
@@ -137,6 +146,16 @@ def from_openrouter(entry):
     model['max_output'] = int(top.get('max_completion_tokens') or 0)
     # Live task modalities take precedence over optional declared metadata.
     model['model_type'] = model_type(None if model['output'] else entry.get('model_type') or entry.get('type'), model)
+    support = {}
+    if model['model_type'] in {'llm', 'vlm'}:
+        if isinstance(architecture.get('input_modalities'), list):
+            support['vision'] = bool(set(model['input']) & {'image', 'video'})
+        parameters = entry.get('supported_parameters')
+        if isinstance(parameters, list) and all(isinstance(value, str) for value in parameters):
+            support['tool_calling'] = 'tools' in parameters
+            support['reasoning'] = bool(set(parameters) & {'reasoning', 'include_reasoning'})
+    if support:
+        model['feature_support'] = support
     return model
 
 
@@ -186,7 +205,8 @@ def collect_recognition_models(models_dev, openrouter_models):
     for model in models:
         # A name alone is not an identity: different suppliers may use the same
         # ID for different tasks. Consumers must see those conflicting records.
-        identity = (model['name'], model['model_type'], tuple(model['input']), tuple(model['output']))
+        identity = (model['name'], model['model_type'], tuple(model['input']), tuple(model['output']),
+                    tuple(sorted(model.get('feature_support', {}).items())))
         if identity not in distinct:
             distinct[identity] = finalize(model)
     return [distinct[identity] for identity in sorted(distinct)]
@@ -263,7 +283,7 @@ def read_snapshot(path):
         with open(path, encoding='utf-8') as handle:
             payload = json.load(handle)
         version = payload.get('schema_version', 0)
-        if version not in (0, 1, 2, SCHEMA_VERSION):
+        if version not in (0, 1, 2, 3, SCHEMA_VERSION):
             return None
         payload['schema_version'] = version
         providers = payload['providers']
@@ -271,7 +291,7 @@ def read_snapshot(path):
             return None
         datetime.strptime(payload['generated_at'], '%Y-%m-%dT%H:%M:%SZ')
         model_lists = list(providers.values())
-        if version == SCHEMA_VERSION:
+        if version >= 3:
             recognition = payload.get('recognition_models')
             if not isinstance(recognition, list) or not recognition:
                 return None
@@ -288,6 +308,12 @@ def read_snapshot(path):
                 if not isinstance(model['name'], str) or not model['name'].strip():
                     return None
                 if not isinstance(model['model_type'], str):
+                    return None
+                support = model.get('feature_support', {})
+                if not isinstance(support, dict) or any(
+                    key not in {'vision', 'tool_calling', 'reasoning'} or not isinstance(value, bool)
+                    for key, value in support.items()
+                ):
                     return None
                 if any(
                     not isinstance(model[key], list) or any(not isinstance(v, str) or not v.strip() for v in model[key])

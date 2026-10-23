@@ -33,7 +33,15 @@ func preferredAutoModel(
 	for _, model := range models {
 		modelType := strings.ToLower(strings.TrimSpace(model.ModelType))
 		_, exactType := typeSet[modelType]
-		if exactType || (acceptsVisionChat && modelType == "llm" && model.Vision) {
+		visionCandidate := false
+		if acceptsVisionChat && isChatTechnicalType(modelType) {
+			features := EffectiveModelFeatures(model)
+			visionCandidate = features.Vision != nil && *features.Vision
+			if modelType == "vlm" && !visionCandidate {
+				exactType = false
+			}
+		}
+		if exactType || visionCandidate {
 			candidates = append(candidates, model)
 		}
 	}

@@ -68,6 +68,7 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
     <div className="model-probe-result">
       <strong>{t(`modelProvider.probe.${result.status}`, { name: props.modelName })}</strong>
       <span>{t(`modelProvider.probe.reason.${result.code}`)}</span>
+      {result.embedding_dimensions ? <span>{t("modelProvider.probe.embeddingDimensions", { dimensions: result.embedding_dimensions })}</span> : null}
       <small>{t("modelProvider.probe.elapsed", { elapsed: result.elapsed_ms })}</small>
     </div>
   ) : t("modelProvider.probe.hint"));

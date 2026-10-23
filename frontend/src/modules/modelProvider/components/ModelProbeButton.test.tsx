@@ -5,8 +5,9 @@ import { ModelProbeButton } from "./ModelProbeButton";
 
 const mocks = vi.hoisted(() => ({ probe: vi.fn() }));
 vi.mock("../modelProbe", () => ({ probeModel: mocks.probe, probeFailureCode: () => "connection_error" }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { name?: string; elapsed?: number }) =>
-  values?.name ? `${key}:${values.name}` : values?.elapsed !== undefined ? `${key}:${values.elapsed}` : key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, values?: { name?: string; elapsed?: number; dimensions?: number }) =>
+  values?.name ? `${key}:${values.name}` : values?.elapsed !== undefined ? `${key}:${values.elapsed}` :
+    values?.dimensions !== undefined ? `${key}:${values.dimensions}` : key }) }));
 
 const identity = { providerId: "supplier", groupId: "group", modelId: "model" };
 function setup(configurationKey = "config-1", disabledReason?: string) {
@@ -18,6 +19,14 @@ function setup(configurationKey = "config-1", disabledReason?: string) {
 beforeEach(() => { vi.clearAllMocks(); mocks.probe.mockResolvedValue({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 24 }); });
 
 describe("model inference probe", () => {
+  it("announces measured embedding dimensions in the result tooltip", async () => {
+    mocks.probe.mockResolvedValueOnce({ status: "passed", code: "ok", model_type: "embed", elapsed_ms: 24, embedding_dimensions: 1024 });
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.probe.action:qwen-test" }));
+    const button = await screen.findByRole("button", { name: "modelProvider.probe.passed:qwen-test" });
+    fireEvent.mouseEnter(button);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("modelProvider.probe.embeddingDimensions:1024");
+  });
   it.each([[2999, "normal"], [3000, "slow"], [3001, "slow"]] as const)("shows passed probes at %i ms with %s latency tone", async (elapsed, tone) => {
     mocks.probe.mockResolvedValueOnce({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: elapsed });
     setup();

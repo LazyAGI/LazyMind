@@ -119,6 +119,7 @@ func TestListRemoteGroupModels(t *testing.T) {
 		UserModelProviderGroupID: group.ID,
 		Name:                     "qwen-plus",
 		ModelType:                "llm",
+		ModelSettings:            `{"feature_support":{"tool_calling":false},"feature_enabled":{"tool_calling":false}}`,
 		BaseModel:                orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
 	}
 	if err := db.Create(&provider).Error; err != nil {
@@ -167,6 +168,22 @@ func TestListRemoteGroupModels(t *testing.T) {
 	}
 	if byName["qwen-plus"].ModelType != "llm" {
 		t.Fatalf("qwen-plus type = %q, want llm", byName["qwen-plus"].ModelType)
+	}
+	var featurePayload struct {
+		Data struct {
+			Models []struct {
+				Name     string         `json:"name"`
+				Settings *ModelSettings `json:"model_settings"`
+			} `json:"models"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &featurePayload); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range featurePayload.Data.Models {
+		if item.Name == "qwen-plus" && (item.Settings == nil || item.Settings.FeatureSupport == nil || item.Settings.FeatureSupport.ToolCalling == nil || *item.Settings.FeatureSupport.ToolCalling || item.Settings.FeatureEnabled == nil || item.Settings.FeatureEnabled.ToolCalling == nil || *item.Settings.FeatureEnabled.ToolCalling) {
+			t.Fatalf("saved support/enabled settings lost in discovery: %s", rec.Body.String())
+		}
 	}
 }
 

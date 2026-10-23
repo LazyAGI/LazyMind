@@ -281,10 +281,24 @@ func ResolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 }
 
 func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID string) (string, string, error) {
+	config, err := ResolveProviderRuntimeConfiguration(ctx, db, groupID)
+	return config.BaseURL, config.APIKey, err
+}
+
+type RuntimeProviderConfiguration struct {
+	BaseURL  string
+	APIKey   string
+	Advanced credentialvault.ProviderRequestAdvanced
+}
+
+// ResolveProviderRuntimeConfiguration reads credentials and private request
+// settings under the same supplier lock, preventing mixed runtime snapshots.
+func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, groupID string) (RuntimeProviderConfiguration, error) {
 	if db == nil {
-		return "", "", errors.New("store not initialized")
+		return RuntimeProviderConfiguration{}, errors.New("store not initialized")
 	}
 	var baseURL, key string
+	var advanced credentialvault.ProviderRequestAdvanced
 	var unavailable error
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var requested orm.UserModelProviderGroup
@@ -307,6 +321,11 @@ func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 			return nil
 		}
 		if err := lockProvider(tx, &parent); err != nil {
+			return err
+		}
+		var err error
+		advanced, err = ResolveProviderRequestAdvanced(parent)
+		if err != nil {
 			return err
 		}
 		if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", requested.ID, parent.ID, parent.CreateUserID).Take(&requested).Error; err != nil {
@@ -348,12 +367,12 @@ func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 		return nil
 	})
 	if err != nil {
-		return "", "", err
+		return RuntimeProviderConfiguration{}, err
 	}
 	if unavailable != nil {
-		return "", "", unavailable
+		return RuntimeProviderConfiguration{}, unavailable
 	}
-	return baseURL, key, nil
+	return RuntimeProviderConfiguration{BaseURL: baseURL, APIKey: key, Advanced: advanced}, nil
 }
 
 func ResolveProviderAPIKey(ctx context.Context, db *gorm.DB, groupID string) (string, error) {
@@ -415,7 +434,7 @@ func checkSharedProviderGroup(w http.ResponseWriter, r *http.Request, db *gorm.D
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
-	result, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, key, strings.TrimSpace(req.Model))
+	result, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, key, strings.TrimSpace(req.Model), parent)
 	verifiesCurrent := (selectedKey != "" && key == selectedKey) || (!storedKeys && key == "")
 	if !req.DryRun && verifiesCurrent {
 		err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -479,8 +498,12 @@ func validateSavedKeyPool(parent orm.UserModelProvider, groupName, baseURL, pool
 		return nil
 	}
 	catalogKey := CatalogCredentialKey(parent)
+	requestConfig, err := portableProviderRequestConfig(parent)
+	if err != nil {
+		return err
+	}
 	payload, err := credentialvault.EncodeProviderCredentialPayload(credentialvault.ProviderCredential{
-		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool), RequestConfig: parent.RequestConfig,
+		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool), RequestConfig: requestConfig,
 		ActiveKeyIndex: selectionMetadataCapacity(parent, pool),
 	})
 	clear(payload)

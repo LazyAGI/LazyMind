@@ -53,7 +53,7 @@ func (row evolutionCandidate) summary(userID string) EvolutionModelSummary {
 	// endpoint or credentials. Hash the resolved credential so switching a key
 	// in another connection invalidates the old validation evidence as well.
 	descriptor, _ := openCodeDescriptor(row.SelectedRuntimeModel)
-	raw, _ := json.Marshal([]any{row.ID, row.OwnerID, row.GroupID, row.ProviderName, row.ModelName, row.TechnicalModelType, row.BaseURL, row.APIKey, row.MaxInputTokens, row.InputTokenLimit, row.MaxOutputTokens, row.CredentialVersion, row.CredentialRevision, row.ModelUpdatedAt.UTC(), descriptor, EvolutionValidationVersion})
+	raw, _ := json.Marshal([]any{row.ID, row.OwnerID, row.GroupID, row.ProviderName, row.ModelName, row.TechnicalModelType, row.BaseURL, row.APIKey, row.MaxInputTokens, row.InputTokenLimit, row.MaxOutputTokens, row.CredentialVersion, row.CredentialRevision, row.ModelUpdatedAt.UTC(), row.ModelSettings, row.RequestAdvanced, descriptor, EvolutionValidationVersion})
 	hash := sha256.Sum256(raw)
 	source := "personal"
 	if row.OwnerID != userID {
@@ -66,7 +66,7 @@ func evolutionCandidates(ctx context.Context, db *gorm.DB, userID string) ([]evo
 	var rows []evolutionCandidate
 	// Reuse the existing personal / explicitly shared evo_llm selection boundary.
 	err := db.WithContext(ctx).Table("user_model_provider_group_models m").
-		Select("m.id, m.create_user_id AS owner_id, m.user_model_provider_group_id AS group_id, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.is_default, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, m.updated_at AS model_updated_at, g.updated_at AS group_updated_at, g.id AS runtime_group_id, g.base_url, g.api_key, g.api_key_ciphertext, g.credential_version, g.is_verified AS verified").
+		Select("m.id, m.create_user_id AS owner_id, m.user_model_provider_group_id AS group_id, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.model_settings, m.vision, m.is_default, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, m.updated_at AS model_updated_at, g.updated_at AS group_updated_at, g.id AS runtime_group_id, g.base_url, g.api_key, g.api_key_ciphertext, g.credential_version, g.is_verified AS verified").
 		Joins("JOIN user_model_providers p ON p.id = m.user_model_provider_id AND p.create_user_id = m.create_user_id AND p.deleted_at IS NULL AND p.capabilities LIKE ?", "%has_models%").
 		Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.user_model_provider_id = m.user_model_provider_id AND g.create_user_id = m.create_user_id AND g.deleted_at IS NULL").
 		Where("m.deleted_at IS NULL AND (m.create_user_id = ? OR EXISTS (SELECT 1 FROM user_selected_models s WHERE s.user_model_provider_group_model_id = m.id AND s.user_id = m.create_user_id AND s.model_type = ? AND s.share = ?))", userID, "evo_llm", true).

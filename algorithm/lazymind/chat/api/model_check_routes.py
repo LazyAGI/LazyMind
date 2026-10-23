@@ -14,6 +14,7 @@ async def check_model_connection(
     api_key: Annotated[Optional[str], Body(description='Provider API key')] = None,
     skip_auth: Annotated[bool, Body(description='Skip authentication for a self-hosted endpoint')] = False,
     models_url: Annotated[Optional[str], Body(description='Core-resolved model catalog URL')] = None,
+    request_advanced: Annotated[Optional[dict], Body(description='Private supplier request options')] = None,
 ):
     return await check_provider_connection(model=model, source=source, url=url, api_key=api_key,
-                                           skip_auth=skip_auth, models_url=models_url)
+                                           skip_auth=skip_auth, models_url=models_url, request_advanced=request_advanced)

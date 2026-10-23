@@ -102,8 +102,8 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 123 {
-		t.Fatalf("v0_3 dev migration count=%d, want 123", len(v03.Dev))
+	if len(v03.Dev) != 124 {
+		t.Fatalf("v0_3 dev migration count=%d, want 124", len(v03.Dev))
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20261023020205) {
 		t.Fatal("v0_3 dev migrations are missing the document directories default")

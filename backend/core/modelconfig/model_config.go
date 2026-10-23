@@ -14,7 +14,9 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/modelprovider"
+	"lazymind/core/modelsettings"
 	coreproviderconnection "lazymind/core/providerconnection"
 )
 
@@ -221,6 +223,8 @@ type SelectedRuntimeModel struct {
 	ModelType          string
 	TechnicalModelType string
 	Vision             bool
+	ModelSettings      string                                  `gorm:"column:model_settings"`
+	RequestAdvanced    credentialvault.ProviderRequestAdvanced `gorm:"-" json:"-"`
 	IsDefault          bool
 	ProviderName       string
 	ModelName          string
@@ -305,7 +309,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, m.vision, "+
+				"m.model_type AS technical_model_type, m.vision, m.model_settings, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
@@ -404,7 +408,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		Scopes(selectionScope).
 		Select(
 			"usm.model_type, "+
-				"m.model_type AS technical_model_type, m.vision, "+
+				"m.model_type AS technical_model_type, m.vision, m.model_settings, "+
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
@@ -793,7 +797,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	var row SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_model_provider_group_models m").
-		Select("g.id AS runtime_group_id, m.provider_name, m.name AS model_name, g.base_url, g.api_key, g.api_key_ciphertext").
+		Select("g.id AS runtime_group_id, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.base_url, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
@@ -811,30 +815,26 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	if row.ProviderName == "" && row.ModelName == "" {
 		return nil, nil
 	}
-	row.BaseURL, row.APIKey, err = modelprovider.ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID)
-	if err != nil {
+	rows := []SelectedRuntimeModel{row}
+	if err := decryptRuntimeModels(ctx, db, rows); err != nil {
 		return nil, err
 	}
-	cfg := map[string]any{
-		"source":   modelprovider.LazyLLMSource(row.ProviderName),
-		"model":    row.ModelName,
-		"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
-		"api_key":  row.APIKey,
-	}
-	if strings.TrimSpace(row.APIKey) == "" && strings.TrimSpace(row.BaseURL) != "" {
-		cfg["skip_auth"] = true
-	}
+	rows[0].ModelType = "embed_main"
+	config := BuildLLMConfig(rows)
+	cfg, _ := config["embed_main"].(map[string]any)
+
 	return cfg, nil
 }
 
 func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) error {
 	for i := range rows {
-		baseURL, apiKey, err := modelprovider.ResolveProviderRuntimeCredential(ctx, db, rows[i].RuntimeGroupID)
+		runtimeConfig, err := modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, rows[i].RuntimeGroupID)
 		if err != nil {
 			return err
 		}
-		rows[i].BaseURL, rows[i].APIKey = baseURL, apiKey
-		rows[i].SkipAuth = strings.TrimSpace(apiKey) == "" && strings.TrimSpace(baseURL) != ""
+		rows[i].BaseURL, rows[i].APIKey = runtimeConfig.BaseURL, runtimeConfig.APIKey
+		rows[i].RequestAdvanced = runtimeConfig.Advanced
+		rows[i].SkipAuth = strings.TrimSpace(runtimeConfig.APIKey) == "" && strings.TrimSpace(runtimeConfig.BaseURL) != ""
 	}
 	return nil
 }
@@ -876,7 +876,31 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 		if row.SkipAuth && strings.TrimSpace(row.APIKey) == "" {
 			cfg["skip_auth"] = true
 		}
-		cfg["vision"] = row.Vision || strings.EqualFold(strings.TrimSpace(row.TechnicalModelType), "vlm")
+		settings, err := modelsettings.Decode(row.ModelSettings)
+		if err != nil {
+			continue
+		}
+		technical := row.TechnicalModelType
+		if technical == "" {
+			technical = role
+		}
+		// A legacy dedicated vision binding is itself an explicit vision choice.
+		// Saved feature overrides still take precedence over that old binding.
+		legacyVision := row.Vision || role == "vlm" && isChatTechnicalType(technical)
+		features := modelsettings.Effective(settings, legacyVision, technical)
+		if role == "vlm" && (features.Vision == nil || !*features.Vision) {
+			continue
+		}
+		cfg["vision"] = features.Vision != nil && *features.Vision
+		if technical == "llm" || technical == "vlm" || role == "llm" || role == "vlm" || role == "evo_llm" {
+			cfg["features"] = features
+		}
+		if settings.Embedding != nil {
+			cfg["embedding"] = settings.Embedding
+		}
+		if !row.RequestAdvanced.Empty() {
+			cfg["request_advanced"] = row.RequestAdvanced
+		}
 		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
 			cfg["max_input_tokens"] = *tokens
 		}
@@ -915,6 +939,10 @@ func runtimeModelAdapterAvailable(row SelectedRuntimeModel) bool {
 }
 
 func openCodeDescriptor(row SelectedRuntimeModel) (modelprovider.OpenCodeModelDescriptor, bool) {
+	features := modelprovider.EffectiveModelFeatures(orm.UserModelProviderGroupModel{ModelType: row.TechnicalModelType, Vision: row.Vision, ModelSettings: row.ModelSettings})
+	if features.ToolCalling != nil && !*features.ToolCalling {
+		return modelprovider.OpenCodeModelDescriptor{}, false
+	}
 	return modelprovider.ResolveOpenCodeModel(
 		row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType, row.IsDefault,
 	)
@@ -998,4 +1026,9 @@ func APIKeyState(value any) string {
 		return "empty"
 	}
 	return "set"
+}
+
+func isChatTechnicalType(technical string) bool {
+	technical = strings.ToLower(strings.TrimSpace(technical))
+	return technical == "llm" || technical == "vlm"
 }

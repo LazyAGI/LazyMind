@@ -287,7 +287,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	var checkData *CheckModelProviderData
 	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, RuntimeProviderName(parent)) {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "")
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -306,7 +306,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 	}
 	if req.Verify && !hasSharedProviderEndpoint(parent) && checkData == nil && apiKey != "" {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "")
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -622,7 +622,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		effectiveAPIKey = storedAPIKey
 	}
 	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, RuntimeProviderName(parent)) {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "")
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -649,7 +649,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 			return
 		}
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "")
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -1124,7 +1124,7 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 	checkResult := &modelCheckResponse{Success: true, Message: "saved"}
 	var checkErr error
 	if !hasSharedProviderEndpoint(parent) {
-		checkResult, checkErr = doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), connectionBaseURL(parent, row.BaseURL), newKey, "")
+		checkResult, checkErr = doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), connectionBaseURL(parent, row.BaseURL), newKey, "", parent)
 	}
 	if checkErr != nil || checkResult == nil || !checkResult.Success {
 		msg := "verification failed"

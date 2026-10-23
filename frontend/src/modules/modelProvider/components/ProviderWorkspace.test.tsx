@@ -24,8 +24,12 @@ const mocks = vi.hoisted(() => ({
   updateProvider: vi.fn(),
   deleteProvider: vi.fn(),
   getModels: vi.fn(),
+  getRequestConfig: vi.fn(),
+  updateRequestConfig: vi.fn(),
+  probe: vi.fn(),
   logoObservers: [] as Array<(busy: boolean) => void>,
 }));
+vi.mock("../modelProbe", () => ({ probeModel: mocks.probe, probeFailureCode: () => "connection_error" }));
 vi.mock("./CustomLogoPicker", () => ({
   CustomLogoPicker: ({ value, onChange, onBusyChange }: { value?: string; onChange: (value: string) => void; onBusyChange: (busy: boolean) => void }) => {
     mocks.logoObservers.push(onBusyChange);
@@ -57,6 +61,8 @@ vi.mock("../api", () => ({
   updateProviderEndpoint: mocks.updateEndpoint,
   setProviderActiveKey: mocks.setActiveKey,
   withModelProviderJsonOptions: (value: unknown) => value,
+  getProviderRequestConfig: mocks.getRequestConfig,
+  updateProviderRequestConfig: mocks.updateRequestConfig,
 }));
 const provider: AddedProvider = {
   id: "openai",
@@ -190,6 +196,9 @@ async function openAddKeyDialog() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.logoObservers = [];
+  mocks.getRequestConfig.mockResolvedValue({ default_protocol: "openai", protocols: [{ protocol: "openai", name: "OpenAI", base_url: provider.baseUrl, default_base_url: provider.baseUrl, supported: true }], advanced: {} });
+  mocks.updateRequestConfig.mockResolvedValue({});
+  mocks.probe.mockResolvedValue({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 12 });
   mocks.addKey.mockResolvedValue({ data: { success: true } });
   mocks.deleteKey.mockResolvedValue({ data: { success: true } });
   mocks.createGroup.mockResolvedValue({
@@ -318,6 +327,19 @@ describe("supplier navigation accessibility", () => {
     expect(back).toHaveFocus();
     expect(screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" })).toHaveValue("https://draft.example.test/v1");
   });
+});
+
+it("clears an old probe result when only advanced request options are saved", async () => {
+  const callbacks = setup();
+  fireEvent.click(screen.getByRole("button", { name: "modelProvider.probe.action" }));
+  expect(await screen.findByRole("button", { name: "modelProvider.probe.passed" })).toHaveAttribute("data-probe-status", "passed");
+  fireEvent.click(screen.getByRole("button", { name: "modelProvider.requestConfig.title" }));
+  await waitFor(() => expect(mocks.getRequestConfig).toHaveBeenCalledWith("openai"));
+  fireEvent.click(await screen.findByText("modelProvider.requestConfig.advanced"));
+  fireEvent.change(await screen.findByRole("textbox", { name: "modelProvider.requestConfig.query" }), { target: { value: '{"api-version":"preview"}' } });
+  fireEvent.click(screen.getByRole("button", { name: "modelProvider.requestConfig.save" }));
+  await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledOnce());
+  await waitFor(() => expect(screen.getByRole("button", { name: "modelProvider.probe.action" })).not.toHaveAttribute("data-probe-status"));
 });
 
 describe("compact provider workspace", () => {

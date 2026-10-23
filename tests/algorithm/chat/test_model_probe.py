@@ -64,6 +64,94 @@ def test_chat_length_finish_is_reachable_not_a_false_failure():
     assert result['status'] == 'passed'
 
 
+@pytest.mark.parametrize(('source', 'url', 'response'), [
+    ('OpenAI', 'https://provider.example/v1/', {'data': [{'embedding': [0.1, 0.2, 0.3]}]}),
+    ('Qwen', 'https://provider.example/api/v1/', {'output': {'embeddings': [{'embedding': [0.1, 0.2, 0.3]}]}}),
+    ('SenseNova', 'https://provider.example/v1/llm/', {'embeddings': [{'embedding': [0.1, 0.2, 0.3]}]}),
+])
+def test_embedding_probe_returns_measured_dimensions_only(source, url, response):
+    result, _ = run_probe('embed', source=source, url=url, response=response)
+    assert result['status'] == 'passed'
+    assert result['embedding_dimensions'] == 3
+    assert 'embedding' not in result
+    assert 'data' not in result
+
+
+def test_embedding_probe_rejects_inconsistent_vector_dimensions():
+    result, _ = run_probe('embed', response={'data': [{'embedding': [0.1]}, {'embedding': [0.1, 0.2]}]})
+    assert result['status'] == 'failed'
+    assert 'embedding_dimensions' not in result
+
+
+def test_embedding_probe_uses_saved_query_prefix_without_leaking_it():
+    result, requests = run_probe('embed', embedding={'query_prefix': 'query: ', 'passage_prefix': 'passage: ',
+                                                   'batch_size': 2},
+                                 response={'data': [{'embedding': [0.1, 0.2]}]})
+    assert result['status'] == 'passed'
+    assert json.loads(requests[0].content)['input'] == 'query: test'
+    assert 'query: ' not in json.dumps(result)
+
+
+def test_embedding_probe_applies_advanced_transport_to_same_minimal_request():
+    result, requests = run_probe('embed', request_advanced={
+        'headers': {'X-Tenant': 'sample'}, 'query': {'version': '42'}, 'extra_body': {'user': 'sample'},
+    }, response={'data': [{'embedding': [0.1, 0.2]}]})
+    assert result['status'] == 'passed'
+    assert requests[0].headers['X-Tenant'] == 'sample'
+    assert requests[0].url.params['version'] == '42'
+    assert json.loads(requests[0].content) == {'model': 'fixture-model', 'input': 'test', 'user': 'sample'}
+    assert 'sample' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('vision', [False, True])
+def test_vlm_probe_respects_explicit_vision_gate(vision):
+    result, requests = run_probe('vlm', vision=vision, response={'choices': [{'message': {'content': 'OK'}}]})
+    assert result['status'] == 'passed'
+    content = json.loads(requests[0].content)['messages'][0]['content']
+    assert isinstance(content, list) is vision
+
+
+def test_probe_feature_gates_override_gateway_extra_body():
+    result, requests = run_probe(features={'tool_calling': False, 'reasoning': False}, request_advanced={
+        'extra_body': {'tools': [{'type': 'function'}], 'reasoning_effort': 'high',
+                       'chat_template_kwargs': {'enable_thinking': True}},
+    }, response={'choices': [{'message': {'content': 'OK'}}]})
+    assert result['status'] == 'passed'
+    body = json.loads(requests[0].content)
+    assert 'tools' not in body
+    assert 'reasoning_effort' not in body
+    assert body['chat_template_kwargs'] == {}
+
+
+def test_embedding_probe_does_not_apply_chat_feature_gates():
+    result, requests = run_probe('embed', features={'tool_calling': False, 'reasoning': False},
+                                 response={'data': [{'embedding': [0.1, 0.2]}]})
+    assert result['status'] == 'passed'
+    assert json.loads(requests[0].content) == {'model': 'fixture-model', 'input': 'test'}
+
+
+@pytest.mark.parametrize(('kind', 'response'), [
+    ('stt', {'text': 'transcript'}),
+    ('text2image', {'data': [{'url': 'https://media.example/image.png'}]}),
+])
+def test_probe_rejects_advanced_settings_for_native_sdk_runtime_transports(kind, response):
+    result, requests = run_probe(kind, 'GLM', request_advanced={'headers': {'X-Tenant': 'sample'}},
+                                 response=response)
+    assert result['status'] == 'unsupported'
+    assert result['code'] == 'unsupported_provider'
+    assert requests == []
+
+
+@pytest.mark.parametrize(('kind', 'response'), [
+    ('stt', {'text': 'transcript'}),
+    ('text2image', {'data': [{'url': 'https://media.example/image.png'}]}),
+])
+def test_native_sdk_profiles_still_probe_without_advanced_options(kind, response):
+    result, requests = run_probe(kind, 'GLM', response=response)
+    assert result['status'] == 'passed'
+    assert len(requests) == 1
+
+
 def test_reasoning_openai_chat_uses_completion_budget_without_temperature():
     result, requests = run_probe(model='o3-mini', url='https://api.openai.com/v1/',
                                  response={'choices': [{'message': {'content': 'OK'}}]})

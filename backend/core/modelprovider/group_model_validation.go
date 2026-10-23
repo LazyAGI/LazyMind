@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/modelsettings"
 )
 
 var (
@@ -79,8 +80,13 @@ func modelSupportsSelection(m orm.UserModelProviderGroupModel, slot, baseURL str
 	case "llm":
 		return m.ModelType == "llm"
 	case "vlm":
-		return m.ModelType == "vlm" || (m.ModelType == "llm" && m.Vision)
+		features := EffectiveModelFeatures(m)
+		return isChatTechnicalType(m.ModelType) && features.Vision != nil && *features.Vision
 	case EvoModelKey:
+		features := EffectiveModelFeatures(m)
+		if features.ToolCalling != nil && !*features.ToolCalling {
+			return false
+		}
 		_, ok := ResolveOpenCodeModel(m.ProviderName, m.Name, baseURL, m.ModelType, m.IsDefault)
 		return ok
 	case "embed_main":
@@ -99,7 +105,7 @@ func modelSupportsSelection(m orm.UserModelProviderGroupModel, slot, baseURL str
 // The model UUID is kept stable. Reject changes that would make its existing
 // role bindings invalid rather than silently clearing or repointing them.
 func validateModelEditReferences(tx *gorm.DB, before, after orm.UserModelProviderGroupModel, baseURL string) error {
-	identityChanged := before.Name != after.Name || equivalentTechnicalType(before.ModelType) != equivalentTechnicalType(after.ModelType)
+	identityChanged := before.Name != after.Name || equivalentTechnicalType(before.ModelType) != equivalentTechnicalType(after.ModelType) || modelsettings.EmbeddingIdentityChanged(before.ModelSettings, after.ModelSettings)
 	var selections []orm.UserSelectedModel
 	if tx.Migrator().HasTable(&orm.UserSelectedModel{}) {
 		if err := tx.Where("user_model_provider_group_model_id = ?", before.ID).Find(&selections).Error; err != nil {

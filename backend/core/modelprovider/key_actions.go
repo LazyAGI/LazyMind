@@ -107,7 +107,7 @@ func ReplaceKey(w http.ResponseWriter, r *http.Request) {
 	result := &modelCheckResponse{Success: true}
 	var checkErr error
 	if !hasSharedProviderEndpoint(parent) {
-		result, checkErr = doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), expectedURL, newKey, "")
+		result, checkErr = doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), expectedURL, newKey, "", parent)
 	}
 	if checkErr != nil || result == nil || !result.Success {
 		// An upstream error may echo request credentials. Keep the public mutation

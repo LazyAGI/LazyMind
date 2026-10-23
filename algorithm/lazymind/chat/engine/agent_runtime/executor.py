@@ -129,6 +129,16 @@ class AgentInvocation:
         return self._executor.stream_agent(self._agent, self._plan)
 
 
+class _ChatWithoutTools(_agent_mod.ReactAgent):
+    """The pinned ReactAgent requires tools even for a plain conversation.
+
+    Its FunctionCall supports an empty supplied ToolManager; bypass only the
+    constructor assertion while keeping streaming/history handling unchanged.
+    """
+    def _assert_tools(self):
+        pass
+
+
 class AgentExecutor:
     """Create and drive ReactAgent instances from a fully assembled run plan."""
 
@@ -136,6 +146,8 @@ class AgentExecutor:
         from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
         options = plan.execution_options
+        from lazymind.model_features import feature_is_enabled
+        tools_enabled = feature_is_enabled('tool_calling', options.llm_config)
         llm = bounded_model_for_role(llm, options.llm_config)
         keep_full_turns = options.keep_full_turns
         if keep_full_turns is None:
@@ -183,7 +195,7 @@ class AgentExecutor:
             if options.extra_stop_condition and options.extra_stop_condition(value):
                 return True
             return options.stop_on_repeated_results and repeat_monitor.stop_requested
-        configuration_runtime = None if options.context_preview else options.configuration_runtime
+        configuration_runtime = None if options.context_preview or not tools_enabled else options.configuration_runtime
 
         def prepare_request():
             if options.before_model_request is not None:
@@ -241,7 +253,7 @@ class AgentExecutor:
             ),
         }
         optional = {
-            'skills': options.skills,
+            'skills': options.skills if tools_enabled else False,
             'prompt_skills': options.prompt_skills,
             'excluded_skills': options.excluded_skills,
             'skill_search': options.skill_search,
@@ -257,9 +269,12 @@ class AgentExecutor:
                                      else options.before_model_request) if not options.context_preview else None,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
-        tools = _sanitize_tools(_deduplicate_tools(plan.tools))
+        if not tools_enabled:
+            kwargs['enable_builtin_tools'] = False
+        tools = _sanitize_tools(_deduplicate_tools(plan.tools)) if tools_enabled else []
         ensure_lazyllm_tool_docs(tools)
-        agent = _agent_mod.ReactAgent(
+        agent_class = _agent_mod.ReactAgent if tools_enabled else _ChatWithoutTools
+        agent = agent_class(
             llm=llm,
             tools=tools,
             prompt=plan.prompt.system_prompt,
@@ -269,8 +284,9 @@ class AgentExecutor:
             configuration_runtime.bind(agent._tools_manager)
         configure_skill_sandbox(getattr(agent, '_skill_manager', None))
         from .tool_retrieval import configure_tool_retrieval
-        configure_tool_retrieval(agent, plan)
-        restore_loaded_skill_runtime(getattr(agent, '_skill_manager', None), plan.history)
+        if tools_enabled:
+            configure_tool_retrieval(agent, plan)
+            restore_loaded_skill_runtime(getattr(agent, '_skill_manager', None), plan.history)
         trusted_opaque_tools = tuple(
             tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script', 'run_skill_script'})
             if (tool := agent._tools_manager.tools_info.get(name)) is not None

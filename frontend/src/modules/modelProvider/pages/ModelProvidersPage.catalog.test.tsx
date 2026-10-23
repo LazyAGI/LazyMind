@@ -115,7 +115,7 @@ describe("model catalog integration", () => {
     await waitFor(() => expect(sync).toBeEnabled());
     fireEvent.click(sync);
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:qwen38-27b" }));
-    await waitFor(() => expect(mocks.add).toHaveBeenCalledWith({ modelProviderId: "supplier", groupId: "store", addModelProviderGroupModelOpenAPIRequest: { name: "qwen38-27b", model_type: modelType, vision: modelType === "llm", max_input_tokens: "262144" } }));
+    await waitFor(() => expect(mocks.add).toHaveBeenCalledWith({ modelProviderId: "supplier", groupId: "store", addModelProviderGroupModelOpenAPIRequest: { name: "qwen38-27b", model_type: modelType, vision: modelType === "llm", max_input_tokens: "262144", ...(modelType === "llm" ? { model_settings: { feature_support: { vision: true } } } : {}) } }));
   });
 
   it("preserves discovered context while saving an unclassified model and then choosing dialogue", async () => {

@@ -65,6 +65,26 @@ def _vector(value) -> bool:
     return isinstance(value, list) and bool(value) and all(_number(item) for item in value)
 
 
+def _embedding_dimensions(kind: str, payload) -> int | None:
+    if kind not in {'embedding', 'qwen_embedding', 'sensenova_embedding'} or not isinstance(payload, dict):
+        return None
+    rows = payload.get('data')
+    if kind == 'qwen_embedding':
+        output = payload.get('output')
+        rows = output.get('embeddings') if isinstance(output, dict) else None
+    elif kind == 'sensenova_embedding':
+        rows = payload.get('embeddings')
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not isinstance(rows, list) or not rows:
+        return None
+    vectors = [row.get('embedding') if isinstance(row, dict) else None for row in rows]
+    if not all(_vector(vector) for vector in vectors):
+        return None
+    dimensions = len(vectors[0])
+    return dimensions if all(len(vector) == dimensions for vector in vectors) else None
+
+
 def _nonempty_string(value) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
@@ -108,17 +128,7 @@ def _validate_response(kind: str, payload) -> tuple[str, str]:
             for item in (blocks if isinstance(blocks, list) else [])
         )
     elif kind in {'embedding', 'qwen_embedding', 'sensenova_embedding'}:
-        rows = payload.get('data')
-        if kind == 'qwen_embedding':
-            output = payload.get('output')
-            rows = output.get('embeddings') if isinstance(output, dict) else None
-        elif kind == 'sensenova_embedding':
-            rows = payload.get('embeddings')
-        if isinstance(rows, dict):
-            rows = [rows]
-        valid = isinstance(rows, list) and bool(rows) and all(
-            isinstance(row, dict) and _vector(row.get('embedding')) for row in rows
-        )
+        valid = _embedding_dimensions(kind, payload) is not None
     elif kind in {'rerank', 'qwen_rerank'}:
         root = payload.get('output') if kind == 'qwen_rerank' else payload
         rows = root.get('results') if isinstance(root, dict) else None
@@ -169,42 +179,53 @@ def _error_code(status: int, payload) -> str | None:
             429: 'rate_limited'}.get(status, 'upstream_error')
 
 
-async def _execute(client: httpx.AsyncClient, request: ProbeInput, plan) -> tuple[str, str, int]:
+async def _execute(client: httpx.AsyncClient, request: ProbeInput, plan) -> tuple[str, str, int, int | None]:
     url = request.url.rstrip('/') + '/' + plan.endpoint
     options = {key: value for key, value in {'json': plan.json, 'data': plan.data, 'files': plan.files}.items()
                if value is not None}
-    async with client.stream('POST', url, headers=_headers(request, plan.auth), timeout=HTTP_TIMEOUT,
+    headers = _headers(request, plan.auth)
+    features = request.features if normalize_type(request.model_type) in {'llm', 'vlm'} else {}
+    if request.request_advanced or features:
+        from lazymind.provider_request import apply_request_advanced
+        overrides = apply_request_advanced(request.request_advanced, method='POST', url=url,
+                                           headers=headers, json_body=plan.json, data=plan.data, files=plan.files,
+                                           features=features, source=request.source)
+        url = overrides.pop('url')
+        headers = overrides.pop('headers')
+        options.update(overrides)
+    async with client.stream('POST', url, headers=headers, timeout=HTTP_TIMEOUT,
                              follow_redirects=False, **options) as response:
         # The body cap must apply before decompression. Explicitly request identity
         # and reject a server that ignores it instead of inflating unbounded bytes.
         if response.headers.get('content-encoding', 'identity').lower() not in {'', 'identity'}:
-            return 'failed', _error_code(response.status_code, None) or 'invalid_response', response.status_code
+            return 'failed', _error_code(response.status_code, None) or 'invalid_response', response.status_code, None
         content = bytearray()
         limit = MAX_RESPONSE_BYTES if plan.response_kind == 'tts' else min(MAX_RESPONSE_BYTES, MAX_JSON_RESPONSE_BYTES)
         async for chunk in response.aiter_bytes():
             if len(content) + len(chunk) > limit:
-                return 'failed', 'invalid_response', response.status_code
+                return 'failed', 'invalid_response', response.status_code, None
             content.extend(chunk)
         audio = bytes(content)
         if plan.response_kind == 'tts' and 200 <= response.status_code < 300:
             is_audio = ((len(audio) >= 12 and audio[:4] == b'RIFF' and audio[8:12] == b'WAVE')
                         or audio.startswith((b'ID3', b'OggS', b'fLaC', b'\xff\xfb', b'\xff\xf3', b'\xff\xf2')))
             if is_audio:
-                return 'passed', 'ok', response.status_code
+                return 'passed', 'ok', response.status_code, None
         try:
             payload = json.loads(content)
         except ValueError:
             code = _error_code(response.status_code, None) or ('empty_response' if not content else 'invalid_response')
-            return 'failed', code, response.status_code
+            return 'failed', code, response.status_code, None
         # SiliconFlow documents model lookup failures as HTTP 400 + code 20012.
         # https://api-docs.siliconflow.cn/docs/userguide/faqs/error-code
         if (request.source.strip().lower() == 'siliconflow' and response.status_code == 400
                 and isinstance(payload, dict) and str(payload.get('code')) == '20012'):
-            return 'failed', 'model_not_found', response.status_code
+            return 'failed', 'model_not_found', response.status_code, None
         if error := _error_code(response.status_code, payload):
-            return 'failed', error, response.status_code
+            return 'failed', error, response.status_code, None
         status, code = _validate_response(plan.response_kind, payload)
-        return status, code, response.status_code
+        dimensions = _embedding_dimensions(plan.response_kind, payload) if status == 'passed' else None
+        return status, code, response.status_code, dimensions
 
 
 async def probe_model(request: ProbeInput, *, client: httpx.AsyncClient | None = None) -> dict:
@@ -214,14 +235,26 @@ async def probe_model(request: ProbeInput, *, client: httpx.AsyncClient | None =
     try:
         if not request.model.strip() or not _valid_url(request.url):
             return result | {'elapsed_ms': int((time.monotonic() - started) * 1000)}
+        from lazymind.embedding_options import validate_embedding_options
+        validate_embedding_options(request.embedding)
+        if request.embedding and normalize_type(request.model_type) != 'embed':
+            raise UnsupportedProbe('unsupported_type')
+        if request.request_advanced:
+            from lazymind.provider_request import ProviderRequestConfigurationError, validate_runtime_request_transport
+            try:
+                validate_runtime_request_transport(request.source, normalize_type(request.model_type), request.model)
+            except ProviderRequestConfigurationError:
+                raise UnsupportedProbe('unsupported_provider') from None
         plan = build_plan(request)
         async with asyncio.timeout(TOTAL_TIMEOUT_SECONDS):
             if client is None:
                 async with httpx.AsyncClient() as owned_client:
-                    status, code, http_status = await _execute(owned_client, request, plan)
+                    status, code, http_status, dimensions = await _execute(owned_client, request, plan)
             else:
-                status, code, http_status = await _execute(client, request, plan)
+                status, code, http_status, dimensions = await _execute(client, request, plan)
         result.update(status=status, code=code, http_status=http_status)
+        if dimensions is not None:
+            result['embedding_dimensions'] = dimensions
     except UnsupportedProbe as exc:
         result.update(status='unsupported', code=exc.code)
     except (TimeoutError, httpx.TimeoutException):

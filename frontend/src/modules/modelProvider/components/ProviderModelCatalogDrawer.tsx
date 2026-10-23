@@ -23,6 +23,7 @@ import { listRemoteGroupModels, type RemoteGroupModel } from "../api";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 import { getModelIdentity } from "../modelIdentity";
 import { resolveRemoteModelMetadata } from "../remoteModelMetadata";
+import type { ModelSettings } from "../modelSettings";
 import {
   availableModelTaskTypes,
   getModelTaskType,
@@ -40,6 +41,7 @@ export interface CatalogModelChoice {
   model_type: string;
   max_input_tokens?: string;
   vision?: boolean;
+  model_settings?: ModelSettings;
 }
 
 interface Props {
@@ -178,6 +180,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
         model_type: modelType,
         max_input_tokens: existing?.maxInputTokens || model.max_input_tokens,
         vision: existing ? existing.vision : metadata.vision,
+        model_settings: existing ? existing.modelSettings : metadata.modelSettings,
         existing,
         missing: false,
         vendor: getModelIdentity(model.name, props.providerName).vendor,
@@ -192,6 +195,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
           model_type: savedModelType(model),
           max_input_tokens: model.maxInputTokens,
           vision: model.vision,
+          model_settings: model.modelSettings,
           existing: model,
           missing: loaded,
           vendor: getModelIdentity(model.name, props.providerName).vendor,
@@ -287,6 +291,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
               model_type: model.model_type,
               max_input_tokens: model.max_input_tokens,
               vision: model.vision,
+              ...(model.model_settings ? { model_settings: model.model_settings } : {}),
             });
           }
           succeeded += 1;
@@ -305,7 +310,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
       if (!remove && props.onAddMany && items.length > 1) {
         setPending(new Set(items.map((model) => normalizedName(model.name))));
         try {
-          const result = await props.onAddMany(items.map(({ name, model_type, max_input_tokens, vision }) => ({ name, model_type, max_input_tokens, vision })));
+          const result = await props.onAddMany(items.map(({ name, model_type, max_input_tokens, vision, model_settings }) => ({ name, model_type, max_input_tokens, vision, ...(model_settings ? { model_settings } : {}) })));
           succeeded = result.succeeded;
           failed = result.failed;
         } catch {

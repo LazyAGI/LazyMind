@@ -16,6 +16,7 @@ import {
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
 import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
+import type { ModelSettings } from "../modelSettings";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
 
@@ -46,6 +47,7 @@ interface ProviderModel {
   name: string;
   modelType?: string;
   vision?: boolean;
+  modelSettings?: ModelSettings;
   capability: ModelCapability;
   builtIn: boolean;
   enabled: boolean;
@@ -112,6 +114,7 @@ interface ApiModel {
   name: string;
   model_type?: string;
   vision?: boolean;
+  model_settings?: ModelSettings;
   is_default?: boolean;
   max_input_tokens?: string;
   source?: "own" | "cloud";
@@ -141,6 +144,7 @@ interface SelectedModelApiItem {
   model_key: string;
   model_type?: string;
   vision?: boolean;
+  model_settings?: ModelSettings;
   name: string;
   provider_name: string;
   share?: boolean;
@@ -700,6 +704,7 @@ export function useDefaultModelConfig({
           name: selection.name,
           modelType: selection.model_type,
           vision: selection.vision,
+          modelSettings: selection.model_settings,
           capability,
           builtIn: Boolean(selection.is_default),
           enabled: true,
@@ -915,6 +920,7 @@ export function useDefaultModelConfig({
               name: model.name,
               modelType: model.model_type,
               vision: model.vision,
+              modelSettings: model.model_settings,
               capability,
               builtIn: Boolean(model.is_default),
               enabled: true,

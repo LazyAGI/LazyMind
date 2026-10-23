@@ -15,6 +15,35 @@ SPEC.loader.exec_module(catalog)
 
 
 class UpstreamCatalogTests(unittest.TestCase):
+    def test_models_dev_keeps_explicit_feature_booleans_and_missing_is_unknown(self):
+        base = {'id': 'opaque', 'modalities': {'input': ['text', 'image'], 'output': ['text']}}
+        model = catalog.from_models_dev(dict(base, tool_call=False, reasoning=True), 'fallback')
+        self.assertEqual(model.get('feature_support'), {'vision': True, 'tool_calling': False, 'reasoning': True})
+        missing = catalog.from_models_dev({'id': 'not-a-capability-name', 'type': 'chat'}, 'fallback')
+        self.assertNotIn('feature_support', missing)
+        invalid = catalog.from_models_dev(dict(base, tool_call='false', reasoning=1), 'fallback')
+        self.assertEqual(invalid.get('feature_support'), {'vision': True})
+
+    def test_openrouter_supported_parameters_require_a_real_list(self):
+        base = {'id': 'opaque', 'architecture': {'input_modalities': ['text'], 'output_modalities': ['text']}}
+        for params, expected in [(['tools', 'reasoning'], {'vision': False, 'tool_calling': True, 'reasoning': True}),
+                                 (['include_reasoning'], {'vision': False, 'tool_calling': False, 'reasoning': True}),
+                                 ([], {'vision': False, 'tool_calling': False, 'reasoning': False})]:
+            with self.subTest(params=params):
+                support = catalog.from_openrouter(dict(base, supported_parameters=params)).get('feature_support')
+                self.assertEqual(support, expected)
+        for value in [None, 'tools', [None]]:
+            support = catalog.from_openrouter(dict(base, supported_parameters=value)).get('feature_support')
+            self.assertEqual(support, {'vision': False})
+        self.assertEqual(catalog.from_openrouter(base).get('feature_support'), {'vision': False})
+
+    def test_recognition_keeps_conflicting_feature_evidence_for_consumers(self):
+        data = {'openai': {'models': {'one': {'id': 'same', 'type': 'chat', 'tool_call': True}}},
+                'other': {'models': {'two': {'id': 'same', 'type': 'chat', 'tool_call': False}}}}
+        records = catalog.collect_recognition_models(data, {})
+        self.assertEqual(len(records), 2)
+        self.assertEqual({record['feature_support']['tool_calling'] for record in records}, {True, False})
+
     def test_specialized_type_and_exact_input_limit_survive_normalization(self):
         model = catalog.from_models_dev({
             'id': 'mini_lm_l12_v2', 'type': 'embedding',
@@ -233,7 +262,7 @@ class UpstreamCatalogTests(unittest.TestCase):
             with patch.object(catalog, 'fetch_json', side_effect=[dev, router]):
                 catalog.generate([str(path)])
             result = catalog.read_snapshot(str(path))
-            self.assertEqual(result['schema_version'], 3)
+            self.assertEqual(result['schema_version'], catalog.SCHEMA_VERSION)
             self.assertEqual({model['name'] for model in result['recognition_models']}, {'fresh', 'live'})
 
     def test_regional_fallback_does_not_merge_models_from_another_endpoint(self):

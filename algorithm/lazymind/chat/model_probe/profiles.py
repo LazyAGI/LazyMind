@@ -35,7 +35,7 @@ def normalize_type(value: str) -> str:
 
 
 def _chat(request: ProbeInput, source: str) -> ProbePlan:
-    visual = request.vision or request.model_type == 'vlm'
+    visual = request.vision if request.vision is not None else request.model_type == 'vlm'
     if source in {'anthropic', 'claude'}:
         content = [{'type': 'text', 'text': PROMPT}]
         if visual:
@@ -68,6 +68,7 @@ def build_plan(request: ProbeInput) -> ProbePlan:
     if not supports_runtime_type(request.source, kind):
         raise UnsupportedProbe('unsupported_provider')
     source = runtime_source(request.source)
+    embedding_input = request.embedding.get('query_prefix', '') + 'test'
     if kind in {'llm', 'vlm'}:
         if source not in COMPATIBLE | {'anthropic', 'claude', 'qwen', 'doubao', 'sensenova', 'minimax'}:
             raise UnsupportedProbe('unsupported_provider')
@@ -90,7 +91,7 @@ def build_plan(request: ProbeInput) -> ProbePlan:
         prefix = '' if path else 'api/v1/'
         if kind == 'embed':
             return ProbePlan(prefix + 'services/embeddings/text-embedding/text-embedding', 'qwen_embedding',
-                             json={'model': request.model, 'input': {'texts': ['test']}})
+                             json={'model': request.model, 'input': {'texts': [embedding_input]}})
         return ProbePlan(prefix + 'services/rerank/text-rerank/text-rerank', 'qwen_rerank', json={
             'model': request.model, 'input': {'query': 'test', 'documents': ['test']}, 'parameters': {'top_n': 1},
         })
@@ -98,7 +99,8 @@ def build_plan(request: ProbeInput) -> ProbePlan:
         if kind == 'embed':
             if not urlsplit(request.url).path.rstrip('/').endswith('/v1/llm'):
                 raise UnsupportedProbe('unsupported_provider')
-            return ProbePlan('embeddings', 'sensenova_embedding', json={'model': request.model, 'input': 'test'})
+            return ProbePlan('embeddings', 'sensenova_embedding',
+                             json={'model': request.model, 'input': embedding_input})
         if kind not in {'text2image', 'image_editing'}:
             raise UnsupportedProbe('unsupported_provider')
         body = {'model': request.model, 'prompt': 'A blue square.', 'n': 1}
@@ -111,7 +113,7 @@ def build_plan(request: ProbeInput) -> ProbePlan:
         # Keep the same support boundary as LazyMind's current runtime adapter.
         raise UnsupportedProbe('unsupported_provider')
     if kind == 'embed':
-        return ProbePlan('embeddings', 'embedding', json={'model': request.model, 'input': 'test'})
+        return ProbePlan('embeddings', 'embedding', json={'model': request.model, 'input': embedding_input})
     if kind == 'multimodal_embedding':
         if source == 'siliconflow':
             return ProbePlan('embeddings', 'embedding',

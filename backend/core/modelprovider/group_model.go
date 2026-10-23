@@ -16,66 +16,70 @@ import (
 )
 
 type addGroupModelRequest struct {
-	Vision          bool    `json:"vision"`
-	Name            string  `json:"name"`
-	ModelType       string  `json:"model_type"`
-	MaxInputTokens  *string `json:"max_input_tokens"`
-	InputTokenLimit *string `json:"input_token_limit"`
-	MaxOutputTokens *string `json:"max_output_tokens"`
+	ModelSettings   *ModelSettings `json:"model_settings,omitempty"`
+	Vision          bool           `json:"vision"`
+	Name            string         `json:"name"`
+	ModelType       string         `json:"model_type"`
+	MaxInputTokens  *string        `json:"max_input_tokens"`
+	InputTokenLimit *string        `json:"input_token_limit"`
+	MaxOutputTokens *string        `json:"max_output_tokens"`
 }
 
 type addGroupModelResponse struct {
-	Vision                   bool    `json:"vision"`
-	ID                       string  `json:"id"`
-	UserModelProviderID      string  `json:"user_model_provider_id"`
-	UserModelProviderGroupID string  `json:"user_model_provider_group_id"`
-	Name                     string  `json:"name"`
-	ModelType                string  `json:"model_type"`
-	ProviderName             string  `json:"provider_name"`
-	GroupName                string  `json:"group_name"`
-	BaseURL                  string  `json:"base_url"`
-	IsDefault                bool    `json:"is_default"`
-	MaxInputTokens           *string `json:"max_input_tokens,omitempty"`
-	InputTokenLimit          *string `json:"input_token_limit"`
-	MaxOutputTokens          *string `json:"max_output_tokens"`
+	ModelSettings            *ModelSettings `json:"model_settings,omitempty"`
+	Vision                   bool           `json:"vision"`
+	ID                       string         `json:"id"`
+	UserModelProviderID      string         `json:"user_model_provider_id"`
+	UserModelProviderGroupID string         `json:"user_model_provider_group_id"`
+	Name                     string         `json:"name"`
+	ModelType                string         `json:"model_type"`
+	ProviderName             string         `json:"provider_name"`
+	GroupName                string         `json:"group_name"`
+	BaseURL                  string         `json:"base_url"`
+	IsDefault                bool           `json:"is_default"`
+	MaxInputTokens           *string        `json:"max_input_tokens,omitempty"`
+	InputTokenLimit          *string        `json:"input_token_limit"`
+	MaxOutputTokens          *string        `json:"max_output_tokens"`
 }
 
 type updateGroupModelRequest struct {
-	Name            *string `json:"name"`
-	ModelType       *string `json:"model_type"`
-	Vision          *bool   `json:"vision"`
-	MaxInputTokens  *string `json:"max_input_tokens"`
-	InputTokenLimit *string `json:"input_token_limit"`
-	MaxOutputTokens *string `json:"max_output_tokens"`
-	Customize       bool    `json:"customize"`
+	ModelSettings   *ModelSettings `json:"model_settings,omitempty"`
+	Name            *string        `json:"name"`
+	ModelType       *string        `json:"model_type"`
+	Vision          *bool          `json:"vision"`
+	MaxInputTokens  *string        `json:"max_input_tokens"`
+	InputTokenLimit *string        `json:"input_token_limit"`
+	MaxOutputTokens *string        `json:"max_output_tokens"`
+	Customize       bool           `json:"customize"`
 }
 
 type groupModelListItem struct {
-	LogoDataURL              string   `json:"logo_data_url,omitempty"`
-	Vision                   bool     `json:"vision"`
-	ID                       string   `json:"id"`
-	Source                   string   `json:"source"`
-	ProviderID               string   `json:"provider_id"`
-	ProviderGroupID          string   `json:"provider_group_id,omitempty"`
-	UserModelProviderID      string   `json:"user_model_provider_id,omitempty"`
-	UserModelProviderGroupID string   `json:"user_model_provider_group_id,omitempty"`
-	Name                     string   `json:"name"`
-	ModelType                string   `json:"model_type"`
-	ProviderName             string   `json:"provider_name"`
-	BrandKey                 string   `json:"brand_key,omitempty"`
-	ServiceKey               string   `json:"service_key,omitempty"`
-	IsCustom                 bool     `json:"is_custom"`
-	GroupName                string   `json:"group_name,omitempty"`
-	BaseURL                  string   `json:"base_url,omitempty"`
-	IsDefault                bool     `json:"is_default"`
-	IsEditable               bool     `json:"is_editable"`
-	MaxInputTokens           *string  `json:"max_input_tokens"`
-	InputTokenLimit          *string  `json:"input_token_limit"`
-	MaxOutputTokens          *string  `json:"max_output_tokens"`
-	Availability             string   `json:"availability"`
-	Lifecycle                string   `json:"lifecycle"`
-	ReadOnly                 bool     `json:"read_only"`
-	Capabilities             []string `json:"capabilities"`
+	ModelSettings            *ModelSettings `json:"model_settings,omitempty"`
+	LogoDataURL              string         `json:"logo_data_url,omitempty"`
+	Vision                   bool           `json:"vision"`
+	ID                       string         `json:"id"`
+	Source                   string         `json:"source"`
+	ProviderID               string         `json:"provider_id"`
+	ProviderGroupID          string         `json:"provider_group_id,omitempty"`
+	UserModelProviderID      string         `json:"user_model_provider_id,omitempty"`
+	UserModelProviderGroupID string         `json:"user_model_provider_group_id,omitempty"`
+	Name                     string         `json:"name"`
+	ModelType                string         `json:"model_type"`
+	ProviderName             string         `json:"provider_name"`
+	BrandKey                 string         `json:"brand_key,omitempty"`
+	ServiceKey               string         `json:"service_key,omitempty"`
+	IsCustom                 bool           `json:"is_custom"`
+	GroupName                string         `json:"group_name,omitempty"`
+	BaseURL                  string         `json:"base_url,omitempty"`
+	IsDefault                bool           `json:"is_default"`
+	IsEditable               bool           `json:"is_editable"`
+	MaxInputTokens           *string        `json:"max_input_tokens"`
+	InputTokenLimit          *string        `json:"input_token_limit"`
+	MaxOutputTokens          *string        `json:"max_output_tokens"`
+	Availability             string         `json:"availability"`
+	Lifecycle                string         `json:"lifecycle"`
+	ReadOnly                 bool           `json:"read_only"`
+	Capabilities             []string       `json:"capabilities"`
 }
 
 type groupModelListResponse struct {
@@ -170,7 +174,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			row = orm.UserModelProviderGroupModel{
 				ID: common.GenerateID(), UserModelProviderID: parent.ID, UserModelProviderGroupID: group.ID,
-				ProviderName: RuntimeProviderName(parent), Name: name, ModelType: modelType, Vision: req.Vision && isChatTechnicalType(modelType),
+				ProviderName: RuntimeProviderName(parent), Name: name, ModelType: modelType, Vision: candidate.Vision, ModelSettings: candidate.ModelSettings,
 				MaxInputTokens: maxInputTokens, InputTokenLimit: inputTokenLimit, MaxOutputTokens: maxOutputTokens, IsDefault: false,
 				BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now},
 			}
@@ -178,7 +182,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		result := tx.Model(&orm.UserModelProviderGroupModel{}).Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", row.ID, userID).Updates(map[string]interface{}{
 			"user_model_provider_id": parent.ID, "provider_name": RuntimeProviderName(parent), "model_type": modelType,
-			"vision": req.Vision && isChatTechnicalType(modelType), "max_input_tokens": maxInputTokens, "input_token_limit": inputTokenLimit, "max_output_tokens": maxOutputTokens, "is_default": false, "updated_at": now, "deleted_at": nil,
+			"vision": candidate.Vision, "model_settings": candidate.ModelSettings, "max_input_tokens": maxInputTokens, "input_token_limit": inputTokenLimit, "max_output_tokens": maxOutputTokens, "is_default": false, "updated_at": now, "deleted_at": nil,
 		})
 		if result.Error != nil {
 			return result.Error
@@ -187,7 +191,8 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 			return errModelAlreadyExists
 		}
 		row.UserModelProviderID, row.ProviderName, row.ModelType = parent.ID, RuntimeProviderName(parent), modelType
-		row.Vision, row.MaxInputTokens, row.IsDefault, row.UpdatedAt, row.DeletedAt = req.Vision && isChatTechnicalType(modelType), maxInputTokens, false, now, nil
+		row.ModelSettings = candidate.ModelSettings
+		row.Vision, row.MaxInputTokens, row.IsDefault, row.UpdatedAt, row.DeletedAt = candidate.Vision, maxInputTokens, false, now, nil
 		row.InputTokenLimit, row.MaxOutputTokens = inputTokenLimit, maxOutputTokens
 		return nil
 	})
@@ -280,7 +285,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == nil && req.ModelType == nil && req.Vision == nil && req.MaxInputTokens == nil && req.InputTokenLimit == nil && req.MaxOutputTokens == nil && !req.Customize {
+	if req.Name == nil && req.ModelType == nil && req.Vision == nil && req.MaxInputTokens == nil && req.InputTokenLimit == nil && req.MaxOutputTokens == nil && req.ModelSettings == nil && !req.Customize {
 		common.ReplyErr(w, "max_input_tokens is required", http.StatusBadRequest)
 		return
 	}
@@ -314,6 +319,24 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		if !isChatTechnicalType(next.ModelType) {
 			next.Vision = false
+		}
+		settings := modelSettingsResponse(next.ModelSettings)
+		if req.ModelSettings != nil {
+			settings = req.ModelSettings
+		} else if equivalentTechnicalType(next.ModelType) != equivalentTechnicalType(before.ModelType) && settings != nil {
+			copy := *settings
+			settings = &copy
+			if !isChatTechnicalType(next.ModelType) {
+				settings.FeatureSupport, settings.FeatureEnabled = nil, nil
+			}
+			if !isTextEmbeddingModelType(next.ModelType) {
+				settings.Embedding = nil
+			}
+		}
+		if req.ModelSettings != nil || equivalentTechnicalType(next.ModelType) != equivalentTechnicalType(before.ModelType) {
+			if err := normalizeSavedModelSettings(&next, settings); err != nil {
+				return modelMetadataValidationError{err}
+			}
 		}
 		if next.ModelType == "" {
 			if req.MaxInputTokens != nil {
@@ -373,7 +396,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		if next.MaxInputTokens != nil {
 			nextTokens = *next.MaxInputTokens
 		}
-		changed := next.Name != before.Name || next.ModelType != before.ModelType || next.Vision != before.Vision || nextTokens != beforeTokens || tokenLimitString(next.InputTokenLimit) != tokenLimitString(before.InputTokenLimit) || tokenLimitString(next.MaxOutputTokens) != tokenLimitString(before.MaxOutputTokens)
+		changed := next.ModelSettings != before.ModelSettings || next.Name != before.Name || next.ModelType != before.ModelType || next.Vision != before.Vision || nextTokens != beforeTokens || tokenLimitString(next.InputTokenLimit) != tokenLimitString(before.InputTokenLimit) || tokenLimitString(next.MaxOutputTokens) != tokenLimitString(before.MaxOutputTokens)
 		if !changed {
 			return nil
 		}
@@ -389,7 +412,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		if err := ensureEditedModelNameAvailable(tx, before, next.Name); err != nil {
 			return err
 		}
-		updates := map[string]any{"name": next.Name, "model_type": next.ModelType, "vision": next.Vision, "max_input_tokens": next.MaxInputTokens, "input_token_limit": next.InputTokenLimit, "max_output_tokens": next.MaxOutputTokens, "is_default": next.IsDefault, "updated_at": now}
+		updates := map[string]any{"model_settings": next.ModelSettings, "name": next.Name, "model_type": next.ModelType, "vision": next.Vision, "max_input_tokens": next.MaxInputTokens, "input_token_limit": next.InputTokenLimit, "max_output_tokens": next.MaxOutputTokens, "is_default": next.IsDefault, "updated_at": now}
 		if before.IsDefault && !next.IsDefault {
 			updates["free_auto_select_priority"] = 0
 			updates["free_auto_select_base_urls"] = ""
@@ -434,7 +457,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		LogoDataURL: identity.LogoDataURL,
 		BrandKey:    identity.BrandKey, ServiceKey: identity.ServiceKey, IsCustom: identity.IsCustom,
 		UserModelProviderID: row.UserModelProviderID, UserModelProviderGroupID: row.UserModelProviderGroupID,
-		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ProviderName: row.ProviderName, GroupName: group.Name,
+		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ModelSettings: modelSettingsResponse(row.ModelSettings), ProviderName: row.ProviderName, GroupName: group.Name,
 		BaseURL: connectionBaseURL(parent, group.BaseURL), IsDefault: row.IsDefault, IsEditable: strings.EqualFold(row.ModelType, "image_editing"), MaxInputTokens: row.MaxInputTokens, InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens, Availability: availability, Lifecycle: "active", Capabilities: []string{},
 	})
 }
@@ -522,6 +545,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			LogoDataURL:              identity.LogoDataURL,
 			ModelType:                m.ModelType,
 			Vision:                   m.Vision,
+			ModelSettings:            modelSettingsResponse(m.ModelSettings),
 			ProviderName:             m.ProviderName,
 			BrandKey:                 identity.BrandKey,
 			ServiceKey:               identity.ServiceKey,
@@ -656,6 +680,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			LogoDataURL:              identity.LogoDataURL,
 			ModelType:                m.ModelType,
 			Vision:                   m.Vision,
+			ModelSettings:            modelSettingsResponse(m.ModelSettings),
 			ProviderName:             m.ProviderName,
 			BrandKey:                 identity.BrandKey,
 			ServiceKey:               identity.ServiceKey,

@@ -183,6 +183,43 @@ afterEach(() => {
 });
 
 describe("model provider asynchronous state", () => {
+  it("sends explicit model feature settings from the custom-model form and retains the response", async () => {
+    mocks.addModel.mockImplementationOnce(async (request) => ({ data: { ...createdModel, ...request.addModelProviderGroupModelOpenAPIRequest } }));
+    draw();
+    const open = await screen.findByRole("button", { name: "Add custom model" });
+    await waitFor(() => expect(open).toBeEnabled());
+    fireEvent.click(open);
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("modelProvider.modelNamePlaceholder"), { target: { value: "manual-with-tools-off" } });
+    fireEvent.click(dialog.getByRole("switch", { name: "modelProvider.editor.featureEnabled.tool_calling" }));
+    fireEvent.click(dialog.getByRole("switch", { name: "modelProvider.vision" }));
+    fireEvent.click(dialog.getByRole("button", { name: "modelProvider.add" }));
+    await waitFor(() => expect(mocks.addModel).toHaveBeenCalledWith(expect.objectContaining({ addModelProviderGroupModelOpenAPIRequest: {
+      name: "manual-with-tools-off", model_type: "llm", vision: true,
+      model_settings: { feature_enabled: { vision: true, tool_calling: false } },
+    } })));
+    await waitFor(() => expect(currentGroup().models[0]).toMatchObject({ modelSettings: { feature_enabled: { vision: true, tool_calling: false } } }));
+  });
+
+  it("sends exact embedding prefixes and batch size from the custom-model form", async () => {
+    mocks.addModel.mockImplementationOnce(async (request) => ({ data: { ...createdModel, ...request.addModelProviderGroupModelOpenAPIRequest } }));
+    draw();
+    const open = await screen.findByRole("button", { name: "Add custom model" });
+    await waitFor(() => expect(open).toBeEnabled());
+    fireEvent.click(open);
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByPlaceholderText("modelProvider.modelNamePlaceholder"), { target: { value: "manual-embedding" } });
+    fireEvent.mouseDown(dialog.getByRole("combobox", { name: "modelProvider.modelType" }));
+    fireEvent.click(await screen.findByText("modelProvider.capability.embedding", { selector: ".provider-model-task-option" }));
+    fireEvent.change(dialog.getByRole("textbox", { name: "modelProvider.editor.embeddingQueryPrefix" }), { target: { value: "query: " } });
+    fireEvent.change(dialog.getByRole("textbox", { name: "modelProvider.editor.embeddingPassagePrefix" }), { target: { value: "passage:\n" } });
+    fireEvent.change(dialog.getByRole("spinbutton", { name: "modelProvider.editor.embeddingBatchSize" }), { target: { value: "16" } });
+    fireEvent.click(dialog.getByRole("button", { name: "modelProvider.add" }));
+    await waitFor(() => expect(mocks.addModel).toHaveBeenCalledWith(expect.objectContaining({ addModelProviderGroupModelOpenAPIRequest: {
+      name: "manual-embedding", model_type: "embed", vision: false,
+      model_settings: { embedding: { query_prefix: "query: ", passage_prefix: "passage:\n", batch_size: 16 } },
+    } })));
+  });
   it.each(["success", "failure"] as const)("ignores an older supplier reload's %s after newer metadata is saved", async (completion) => {
     draw();
     await loadInitialModels();

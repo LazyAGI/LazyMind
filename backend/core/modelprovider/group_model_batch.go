@@ -152,7 +152,7 @@ func BatchAddGroupModels(w http.ResponseWriter, r *http.Request) {
 		if len(restored) > 0 {
 			result := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "id"}},
-				DoUpdates: clause.AssignmentColumns([]string{"provider_name", "model_type", "vision", "max_input_tokens", "input_token_limit", "max_output_tokens", "is_default", "updated_at", "deleted_at"}),
+				DoUpdates: clause.AssignmentColumns([]string{"provider_name", "model_type", "vision", "model_settings", "max_input_tokens", "input_token_limit", "max_output_tokens", "is_default", "updated_at", "deleted_at"}),
 				Where: clause.Where{Exprs: []clause.Expression{
 					clause.Neq{Column: clause.Column{Table: clause.CurrentTable, Name: "deleted_at"}, Value: nil},
 					clause.Eq{Column: clause.Column{Table: clause.CurrentTable, Name: "create_user_id"}, Value: userID},

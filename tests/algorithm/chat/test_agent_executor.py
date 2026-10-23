@@ -568,3 +568,25 @@ def test_actual_agent_recovers_evidence_after_compaction_and_reaches_new_documen
     assert calls == sequence
     assert compressions == [1]
     assert result == 'Final answer including D'
+
+
+def test_executor_omits_tools_skills_and_live_retrieval_when_disabled(monkeypatch):
+    constructor = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(executor_mod, '_ChatWithoutTools', constructor)
+    plan = _plan(llm_config={'llm': {'features': {'tool_calling': False}}},
+                 skills=True, enable_builtin_tools=True)
+    plan.tools.append(lambda: 'should not be advertised')
+    AgentExecutor().create_agent('llm', plan)
+    kwargs = constructor.call_args.kwargs
+    assert kwargs['tools'] == []
+    assert kwargs['skills'] is False
+    assert kwargs['enable_builtin_tools'] is False
+
+
+def test_plain_chat_builds_with_the_pinned_empty_tool_manager():
+    from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
+    model = OnlineChatModule(source='dynamic', name='llm', dynamic_auth=True)
+    agent = executor_mod._ChatWithoutTools(llm=model, tools=[], skills=False, enable_builtin_tools=False)
+    assert not agent._tools_manager.all_tools
+    agent.build_agent()
+    assert not agent._fc._tools_manager.all_tools

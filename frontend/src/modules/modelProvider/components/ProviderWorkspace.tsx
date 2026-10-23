@@ -148,6 +148,7 @@ export function ProviderWorkspace(props: Props) {
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
   const [requestConfigOpen, setRequestConfigOpen] = useState(false);
+  const [requestConfigRevision, setRequestConfigRevision] = useState(0);
   const [informationOpen, setInformationOpen] = useState(false);
   const informationTrigger = useRef<HTMLButtonElement>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
@@ -1076,7 +1077,7 @@ export function ProviderWorkspace(props: Props) {
                     probe={group ? {
                       providerId: provider.id,
                       groupId: group.id,
-                      configurationKey: JSON.stringify([provider.protocolName || provider.source, endpointBaseline, group.baseUrl, group.keys.map((key) => [key.id, key.enabled])]),
+                      configurationKey: JSON.stringify([provider.protocolName || provider.source, endpointBaseline, group.baseUrl, group.keys.map((key) => [key.id, key.enabled]), requestConfigRevision]),
                       disabledReason: endpointDirty || endpointSaving ? t("modelProvider.probe.saveAddressFirst") : hasSavedKeys && !hasEnabledKey ? t("modelProvider.probe.reason.key_disabled") : undefined,
                     } : undefined}
                     capabilityLabel={props.capabilityLabel}
@@ -1117,7 +1118,10 @@ export function ProviderWorkspace(props: Props) {
           providerName={providerDisplayName}
           open={requestConfigOpen}
           onClose={() => setRequestConfigOpen(false)}
-          onSaved={props.onReload}
+          onSaved={async () => {
+            await props.onReload();
+            setRequestConfigRevision((current) => current + 1);
+          }}
         />
       ) : null}
       <Drawer

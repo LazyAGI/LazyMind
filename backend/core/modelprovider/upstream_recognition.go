@@ -4,14 +4,18 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+
+	"lazymind/core/modelsettings"
 )
 
 type upstreamRecognitionCandidate struct {
-	modelType   string
-	conflict    bool
-	input       []string
-	output      []string
-	outputKnown bool
+	modelType        string
+	conflict         bool
+	input            []string
+	output           []string
+	outputKnown      bool
+	featureSupport   modelsettings.FeatureFlags
+	featureConflicts [3]bool
 }
 
 // Every map is immutable after construction. Existing unknown candidates and
@@ -65,6 +69,26 @@ func newUpstreamModelRecognitionIndex(catalog upstreamCatalogFile) *upstreamMode
 				candidate.output = recognitionModalities(output)
 				candidate.outputKnown = true
 			}
+			if isChatTechnicalType(modelType) && model.FeatureSupport != nil {
+				for i, pair := range []struct {
+					target **bool
+					source *bool
+				}{
+					{&candidate.featureSupport.Vision, model.FeatureSupport.Vision},
+					{&candidate.featureSupport.ToolCalling, model.FeatureSupport.ToolCalling},
+					{&candidate.featureSupport.Reasoning, model.FeatureSupport.Reasoning},
+				} {
+					if pair.source == nil || candidate.featureConflicts[i] {
+						continue
+					}
+					if *pair.target != nil && **pair.target != *pair.source {
+						candidate.featureConflicts[i] = true
+						*pair.target = nil
+					} else {
+						*pair.target = pair.source
+					}
+				}
+			}
 		}
 		models[key] = candidate
 	}
@@ -95,6 +119,31 @@ func newUpstreamModelRecognitionIndex(catalog upstreamCatalogFile) *upstreamMode
 		addModel("", model)
 	}
 	return index
+}
+
+// featureSupport uses exactly the same identity and ambiguity rules as types.
+// Returning a copy keeps the published recognition index immutable.
+func (index *upstreamModelRecognitionIndex) featureSupport(providerName, modelID string) *modelsettings.FeatureFlags {
+	candidate, found := index.lookupExact(providerName, modelID)
+	if !found {
+		candidate, _ = index.lookupFuzzy(modelID)
+	}
+	if !isChatTechnicalType(candidate.resolvedType()) {
+		return nil
+	}
+	flags := candidate.featureSupport
+	if flags.Vision == nil && flags.ToolCalling == nil && flags.Reasoning == nil {
+		return nil
+	}
+	clone := func(value *bool) *bool {
+		if value == nil {
+			return nil
+		}
+		copied := *value
+		return &copied
+	}
+	flags.Vision, flags.ToolCalling, flags.Reasoning = clone(flags.Vision), clone(flags.ToolCalling), clone(flags.Reasoning)
+	return &flags
 }
 
 func (index *upstreamModelRecognitionIndex) modelType(providerName, modelID string) string {

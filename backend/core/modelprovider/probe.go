@@ -16,30 +16,36 @@ import (
 	"gorm.io/gorm/clause"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/modelsettings"
 	"lazymind/core/store"
 )
 
 const modelProbeTimeout = 45 * time.Second
 const modelProbeResponseLimit = 16 * 1024
+const maxModelProbeEmbeddingDimensions int64 = 1<<53 - 1 // JavaScript safe integer range.
 
 // ModelProbeResponse contains public diagnostics only, never provider text,
 // generated media, credentials, endpoint addresses or inference output.
 type ModelProbeResponse struct {
-	Status     string `json:"status" enum:"passed,failed,unsupported,accepted"`
-	Code       string `json:"code" enum:"ok,accepted,unsupported_type,unsupported_provider,unknown_type,authentication_failed,permission_denied,model_not_found,rate_limited,quota_exceeded,invalid_request,timeout,connection_error,invalid_response,empty_response,upstream_error,configuration_changed,key_disabled,key_required,probe_in_progress"`
-	ModelType  string `json:"model_type"`
-	ElapsedMS  int64  `json:"elapsed_ms"`
-	HTTPStatus int    `json:"http_status,omitempty"`
+	Status              string `json:"status" enum:"passed,failed,unsupported,accepted"`
+	Code                string `json:"code" enum:"ok,accepted,unsupported_type,unsupported_provider,unknown_type,authentication_failed,permission_denied,model_not_found,rate_limited,quota_exceeded,invalid_request,timeout,connection_error,invalid_response,empty_response,upstream_error,configuration_changed,key_disabled,key_required,probe_in_progress"`
+	ModelType           string `json:"model_type"`
+	ElapsedMS           int64  `json:"elapsed_ms"`
+	HTTPStatus          int    `json:"http_status,omitempty"`
+	EmbeddingDimensions int64  `json:"embedding_dimensions,omitempty"`
 }
 
 type modelProbeSnapshot struct {
-	Model     string `json:"model"`
-	ModelType string `json:"model_type"`
-	Source    string `json:"source"`
-	URL       string `json:"url"`
-	APIKey    string `json:"api_key"`
-	SkipAuth  bool   `json:"skip_auth"`
-	Vision    bool   `json:"vision"`
+	Model           string `json:"model"`
+	ModelType       string `json:"model_type"`
+	Source          string `json:"source"`
+	URL             string `json:"url"`
+	APIKey          string `json:"api_key"`
+	SkipAuth        bool   `json:"skip_auth"`
+	Vision          bool   `json:"vision"`
+	RequestAdvanced string `json:"-"`
+	ModelSettings   string `json:"-"`
+	Features        string `json:"-"`
 }
 
 var runningModelProbes sync.Map
@@ -144,7 +150,32 @@ func loadProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID, gro
 			reject("unsupported", "unsupported_type")
 			return nil
 		}
-		snapshot = modelProbeSnapshot{Model: model.Name, ModelType: modelType, Source: RuntimeProviderName(parent), URL: connectionBaseURL(parent, group.BaseURL), Vision: model.Vision || modelType == "vlm"}
+		settings, err := modelsettings.Decode(model.ModelSettings)
+		if err != nil {
+			reject("failed", "configuration_changed")
+			return nil
+		}
+		features := modelsettings.Effective(settings, model.Vision, modelType)
+		snapshot = modelProbeSnapshot{Model: model.Name, ModelType: modelType, Source: RuntimeProviderName(parent), URL: connectionBaseURL(parent, group.BaseURL), Vision: features.Vision != nil && *features.Vision, ModelSettings: model.ModelSettings}
+		if modelType == "llm" || modelType == "vlm" {
+			encoded, err := json.Marshal(features)
+			if err != nil {
+				return err
+			}
+			snapshot.Features = string(encoded)
+		}
+		advanced, err := ResolveProviderRequestAdvanced(parent)
+		if err != nil {
+			reject("failed", "configuration_changed")
+			return nil
+		}
+		if !advanced.Empty() {
+			encoded, err := json.Marshal(advanced)
+			if err != nil {
+				return err
+			}
+			snapshot.RequestAdvanced = string(encoded)
+		}
 		if isVLLMSupplier(ctx, tx, parent) && (normalizeProviderName(snapshot.Source) == "openai" || normalizeProviderName(snapshot.Source) == "vllm") {
 			snapshot.Source = "VLLM"
 		}
@@ -223,7 +254,17 @@ func readProbeKeyPool(group orm.UserModelProviderGroup) (string, error) {
 // upstream response/error text. The algorithm owns task-specific minimal input.
 func executeModelProbe(ctx context.Context, snapshot modelProbeSnapshot, timeout time.Duration) ModelProbeResponse {
 	result := ModelProbeResponse{Status: "failed", Code: "connection_error", ModelType: snapshot.ModelType}
-	body, err := json.Marshal(snapshot)
+	settings, err := modelsettings.Decode(snapshot.ModelSettings)
+	if err != nil {
+		result.Code = "invalid_request"
+		return result
+	}
+	body, err := json.Marshal(struct {
+		modelProbeSnapshot
+		RequestAdvanced json.RawMessage                 `json:"request_advanced,omitempty"`
+		Embedding       *modelsettings.EmbeddingOptions `json:"embedding,omitempty"`
+		Features        json.RawMessage                 `json:"features,omitempty"`
+	}{snapshot, json.RawMessage(snapshot.RequestAdvanced), settings.Embedding, json.RawMessage(snapshot.Features)})
 	if err != nil {
 		result.Code = "invalid_request"
 		return result
@@ -266,6 +307,9 @@ func executeModelProbe(ctx context.Context, snapshot modelProbeSnapshot, timeout
 	result.Status, result.Code = upstream.Status, upstream.Code
 	if upstream.HTTPStatus >= 100 && upstream.HTTPStatus <= 599 {
 		result.HTTPStatus = upstream.HTTPStatus
+	}
+	if upstream.Status == "passed" && (snapshot.ModelType == "embed" || snapshot.ModelType == "multimodal_embedding") && upstream.EmbeddingDimensions > 0 && upstream.EmbeddingDimensions <= maxModelProbeEmbeddingDimensions {
+		result.EmbeddingDimensions = upstream.EmbeddingDimensions
 	}
 	return result
 }

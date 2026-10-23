@@ -1,4 +1,5 @@
 import { normalizeRuntimeModelType } from "./modelCapabilities";
+import { modelFeatures, type ModelFeatureFlags } from "./modelSettings";
 
 export const modelModalities = ["text", "image", "audio", "video", "file", "embeddings", "speech", "transcription", "rerank", "decisions"] as const;
 
@@ -11,6 +12,7 @@ export interface UpstreamModelRecord {
   output: ModelModality[];
   context: number;
   max_output: number;
+  feature_support?: ModelFeatureFlags;
 }
 
 export interface UpstreamCatalogFile {
@@ -48,8 +50,18 @@ export function createUpstreamCatalogIndex(catalog?: UpstreamCatalogFile) {
     const typed = matches.filter((model) => model.model_type?.trim());
     const types = new Set(typed.map((model) => normalizeRuntimeModelType(model.model_type!)));
     if (types.size > 1) return undefined;
-    if (typed.length) return typed[0];
-    return matches.length === 1 ? matches[0] : undefined;
+    const chosen = typed[0] || (matches.length === 1 ? matches[0] : undefined);
+    if (!chosen) return undefined;
+    const support: ModelFeatureFlags = {};
+    for (const feature of modelFeatures) {
+      const values = new Set((typed.length ? typed : matches).map((model) => model.feature_support?.[feature]).filter((value) => typeof value === "boolean"));
+      if (values.size === 1) support[feature] = [...values][0];
+    }
+    if (JSON.stringify(support) === JSON.stringify(chosen.feature_support || {})) return chosen;
+    const resolved = { ...chosen };
+    if (Object.keys(support).length) resolved.feature_support = support;
+    else delete resolved.feature_support;
+    return resolved;
   };
   const separatorMatch = (matches: UpstreamModelRecord[]) => {
     const match = unambiguous(matches);
@@ -61,7 +73,7 @@ export function createUpstreamCatalogIndex(catalog?: UpstreamCatalogFile) {
     const outputs = typed.map((model) => modalities(model.output)).filter((values) => values.length);
     const output = [...new Set(outputs[0] || [])].filter((value) => outputs.every((values) => values.includes(value))).sort();
     // Separator aliases establish a type, not the deployment's token limits.
-    return { name: match.name, model_type: modelType, input, output, context: 0, max_output: 0 };
+    return { name: match.name, model_type: modelType, input, output, context: 0, max_output: 0, ...(match.feature_support ? { feature_support: match.feature_support } : {}) };
   };
 
   for (const [providerName, models] of Object.entries(catalog?.providers ?? {})) {

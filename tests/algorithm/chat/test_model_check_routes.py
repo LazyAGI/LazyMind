@@ -99,3 +99,24 @@ def test_route_forwards_only_configuration_and_never_constructs_a_default_model(
     ))
     assert result['reason'] == 'model_list_unavailable'
     assert called[0]['model'] == 'named-model'
+
+
+def test_check_applies_gateway_headers_and_query_without_inference_body():
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, json={'data': []})
+
+    async def invoke():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            return await check_provider_connection(
+                source='Claude', url='https://example.test/proxy', api_key='saved-key', client=client,
+                request_advanced={'headers': {'X-Gateway-Token': 'private'}, 'query': {'tenant': 'two'},
+                                  'extra_body': {'metadata': {'p': 1}}},
+            )
+    assert asyncio.run(invoke())['success']
+    assert calls[0].headers['x-api-key'] == 'saved-key'
+    assert calls[0].headers['x-gateway-token'] == 'private'
+    assert calls[0].url.params['tenant'] == 'two'
+    assert calls[0].content == b''

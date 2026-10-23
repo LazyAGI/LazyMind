@@ -12,6 +12,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
+	"lazymind/core/modelsettings"
 )
 
 // HardcodedModelCatalogEnabled reports whether startup should keep seeding the
@@ -29,13 +30,14 @@ type upstreamCatalogFile struct {
 }
 
 type upstreamCatalogModel struct {
-	Name      string   `json:"name"`
-	ModelType string   `json:"model_type"`
-	Input     []string `json:"input"`
-	Output    []string `json:"output"`
-	Context   int      `json:"context"`
-	MaxInput  int      `json:"max_input"`
-	MaxOutput int      `json:"max_output"`
+	Name           string                      `json:"name"`
+	ModelType      string                      `json:"model_type"`
+	Input          []string                    `json:"input"`
+	Output         []string                    `json:"output"`
+	Context        int                         `json:"context"`
+	MaxInput       int                         `json:"max_input"`
+	MaxOutput      int                         `json:"max_output"`
+	FeatureSupport *modelsettings.FeatureFlags `json:"feature_support,omitempty"`
 }
 
 func loadUpstreamCatalog(path string) (upstreamCatalogFile, error) {
@@ -76,6 +78,10 @@ func inferUpstreamCatalogModel(item upstreamCatalogModel) catalogModel {
 	input := modalitySet(item.Input)
 	model := catalogModel{Name: name, Vision: input["image"] || input["video"]}
 	model.Type = classifyUpstreamModel(item.ModelType, item.Input, item.Output)
+	if isChatTechnicalType(model.Type) && item.FeatureSupport != nil {
+		encoded, _ := json.Marshal(ModelSettings{FeatureSupport: item.FeatureSupport})
+		model.ModelSettings = string(encoded)
+	}
 	if formatted := formatContextTokens(item.MaxInput); formatted != "" {
 		model.MaxInputTokensOverride = formatted
 	} else if model.Type == "llm" || model.Type == "vlm" || model.Type == "embed" || model.Type == "multimodal_embedding" || model.Type == "rerank" {

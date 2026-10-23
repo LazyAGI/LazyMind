@@ -21,10 +21,11 @@ func ValidProviderRequestConfig(raw string) bool {
 	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.DisallowUnknownFields()
 	var config struct {
-		DefaultsVersion int               `json:"defaults_version,omitempty"`
-		DefaultProtocol string            `json:"default_protocol"`
-		Endpoints       map[string]string `json:"endpoints"`
-		Defaults        map[string]string `json:"defaults"`
+		DefaultsVersion int                      `json:"defaults_version,omitempty"`
+		DefaultProtocol string                   `json:"default_protocol"`
+		Endpoints       map[string]string        `json:"endpoints"`
+		Defaults        map[string]string        `json:"defaults"`
+		Advanced        *ProviderRequestAdvanced `json:"advanced,omitempty"`
 	}
 	if decoder.Decode(&config) != nil {
 		return false
@@ -37,6 +38,9 @@ func ValidProviderRequestConfig(raw string) bool {
 		return false
 	}
 	if config.DefaultsVersion < 0 || config.DefaultsVersion > 1 {
+		return false
+	}
+	if config.Advanced != nil && ValidateProviderRequestAdvanced(*config.Advanced) != nil {
 		return false
 	}
 	for _, pair := range []struct {

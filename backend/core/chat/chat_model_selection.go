@@ -16,6 +16,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
@@ -70,6 +71,7 @@ type chatModelSnapshot struct {
 type availableChatModel struct {
 	LogoDataURL         string   `gorm:"column:logo_data_url"`
 	Vision              bool     `gorm:"column:vision"`
+	ModelSettings       string   `gorm:"column:model_settings"`
 	ID                  string   `gorm:"column:model_id"`
 	ProviderID          string   `gorm:"column:provider_id"`
 	ProviderGroupID     string   `gorm:"column:provider_group_id"`
@@ -226,7 +228,7 @@ func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 				"m.user_model_provider_group_id AS provider_group_id, "+
 				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, p.logo_data_url, "+
 				"p.name AS provider_display_name, p.is_custom AS provider_is_custom, "+
-				"m.model_type, m.vision, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.name AS group_name, g.base_url, "+
+				"m.model_type, m.vision, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.name AS group_name, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext",
 		).
 		Joins(
@@ -1350,9 +1352,12 @@ func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatMo
 		return fixedLLM, nil
 	}
 	baseURL, apiKey := model.BaseURL, model.APIKey
+	var advanced credentialvault.ProviderRequestAdvanced
 	var err error
 	if model.ProviderGroupID != "" {
-		baseURL, apiKey, err = modelprovider.ResolveProviderRuntimeCredential(ctx, db, model.ProviderGroupID)
+		var runtimeConfig modelprovider.RuntimeProviderConfiguration
+		runtimeConfig, err = modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, model.ProviderGroupID)
+		baseURL, apiKey, advanced = runtimeConfig.BaseURL, runtimeConfig.APIKey, runtimeConfig.Advanced
 	} else {
 		apiKey, err = modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
 	}
@@ -1360,8 +1365,8 @@ func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatMo
 		return nil, errChatModelUnavailable
 	}
 	fixed := modelconfig.BuildLLMConfig([]modelconfig.SelectedRuntimeModel{{
-		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ProviderName: model.ProviderName, ModelName: model.ModelName,
-		BaseURL: baseURL, APIKey: apiKey, MaxInputTokens: model.MaxInputTokens, InputTokenLimit: model.InputTokenLimit, MaxOutputTokens: model.MaxOutputTokens,
+		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ModelSettings: model.ModelSettings, RequestAdvanced: advanced, ProviderName: model.ProviderName, ModelName: model.ModelName,
+		BaseURL: baseURL, APIKey: apiKey, SkipAuth: strings.TrimSpace(apiKey) == "" && strings.TrimSpace(baseURL) != "", MaxInputTokens: model.MaxInputTokens, InputTokenLimit: model.InputTokenLimit, MaxOutputTokens: model.MaxOutputTokens,
 	}})
 	fixedLLM, _ := fixed["llm"]
 	if fixedLLM == nil {

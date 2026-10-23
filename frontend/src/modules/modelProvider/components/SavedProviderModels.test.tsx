@@ -78,6 +78,14 @@ function groupLabels(container: HTMLElement) {
 }
 
 describe("saved supplier models", () => {
+  it("clears an old probe result after per-model settings change", async () => {
+    upstream.probe.mockResolvedValueOnce({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 12 });
+    const { props, rerender } = setup({ models: [models[1]], providerName: "OpenAI", probe: { providerId: "supplier", groupId: "group", configurationKey: "same-endpoint-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.probe.action:gpt-4o" }));
+    expect(await screen.findByRole("button", { name: "modelProvider.probe.passed:gpt-4o" })).toHaveAttribute("data-probe-status", "passed");
+    rerender(<ConfigProvider theme={{ token: { motion: false } }}><SavedProviderModels {...props} models={[{ ...models[1], modelSettings: { feature_enabled: { tool_calling: false } } }]} /></ConfigProvider>);
+    await waitFor(() => expect(screen.getByRole("button", { name: "modelProvider.probe.action:gpt-4o" })).not.toHaveAttribute("data-probe-status"));
+  });
   it("inherits supplier artwork while retaining the saved UUID and edit contract", () => {
     const logoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
     const saved = models[1];

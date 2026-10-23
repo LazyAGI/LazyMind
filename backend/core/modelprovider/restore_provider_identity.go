@@ -65,7 +65,7 @@ func restoredServiceAdapter(source orm.UserModelProvider, payload credentialvaul
 
 // A remote record has its own supplier identity. Without a local binding it
 // must never append a second credential group to a supplier already in use.
-func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.ProviderCredential, resolution credentialvault.ConflictResolution, now time.Time) (orm.UserModelProvider, error) {
+func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.ProviderCredential, resolution credentialvault.ConflictResolution, now time.Time, managers ...*credentialvault.LocalKeyManager) (orm.UserModelProvider, error) {
 	payload = resolveRestoredService(payload)
 	source, err := restoreCatalogSupplier(tx, userID, payload.ProviderCatalogKey)
 	if err != nil {
@@ -88,7 +88,10 @@ func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.Provid
 	if count == 0 && resolution != credentialvault.ConflictSaveCopy && strings.EqualFold(name, source.Name) && normalizeBaseURLForCompare(payload.BaseURL) == normalizeBaseURLForCompare(source.BaseURL) {
 		updates := map[string]any{}
 		if payload.RequestConfig != "" {
-			source.RequestConfig = payload.RequestConfig
+			source.RequestConfig, err = encryptRestoredRequestConfig(source, payload.RequestConfig, managers...)
+			if err != nil {
+				return source, err
+			}
 			updates["request_config"] = source.RequestConfig
 		}
 		if _, service := ProviderServiceIdentity(source); service != "" && service != "standard" {
@@ -104,11 +107,14 @@ func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.Provid
 	}
 	row := source
 	row.ID, row.Name, row.IsCustom, row.ProtocolName = common.GenerateID(), name, true, restoredServiceAdapter(source, payload)
-	row.RequestConfig = payload.RequestConfig
 	row.BaseURL = LazyLLMBaseURL(row.ProtocolName, payload.BaseURL)
 	row.Capabilities = strings.Join(modelSupplierCapabilities(row.Capabilities), ",")
 	row.ActiveKeyGroupID, row.ActiveKeyID, row.ActiveKeyInitialized, row.ActiveKeyRevision = "", "", false, 0
 	row.BaseModel = orm.BaseModel{CreateUserID: userID, CreatedAt: now, UpdatedAt: now}
+	row.RequestConfig, err = encryptRestoredRequestConfig(row, payload.RequestConfig, managers...)
+	if err != nil {
+		return row, err
+	}
 	return row, tx.Create(&row).Error
 }
 

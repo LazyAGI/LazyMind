@@ -3,6 +3,7 @@ package modelprovider
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,10 +18,12 @@ import (
 )
 
 type savedProviderRequestConfig struct {
-	DefaultsVersion int               `json:"defaults_version,omitempty"`
-	DefaultProtocol string            `json:"default_protocol"`
-	Endpoints       map[string]string `json:"endpoints"`
-	Defaults        map[string]string `json:"defaults"`
+	DefaultsVersion    int                                      `json:"defaults_version,omitempty"`
+	DefaultProtocol    string                                   `json:"default_protocol"`
+	Endpoints          map[string]string                        `json:"endpoints"`
+	Defaults           map[string]string                        `json:"defaults"`
+	Advanced           *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty"`
+	AdvancedCiphertext string                                   `json:"advanced_ciphertext,omitempty"`
 }
 
 type providerRequestProtocol struct {
@@ -32,13 +35,15 @@ type providerRequestProtocol struct {
 }
 
 type providerRequestConfigResponse struct {
-	DefaultProtocol string                    `json:"default_protocol"`
-	Protocols       []providerRequestProtocol `json:"protocols"`
+	DefaultProtocol string                                  `json:"default_protocol"`
+	Protocols       []providerRequestProtocol               `json:"protocols"`
+	Advanced        credentialvault.ProviderRequestAdvanced `json:"advanced"`
 }
 
 type updateProviderRequestConfigRequest struct {
-	DefaultProtocol string            `json:"default_protocol"`
-	Endpoints       map[string]string `json:"endpoints"`
+	DefaultProtocol string                                   `json:"default_protocol"`
+	Endpoints       map[string]string                        `json:"endpoints"`
+	Advanced        *credentialvault.ProviderRequestAdvanced `json:"advanced,omitempty"`
 }
 
 func defaultRequestProtocol(provider orm.UserModelProvider) string {
@@ -90,6 +95,7 @@ func savedRequestConfig(db *gorm.DB, parent orm.UserModelProvider) savedProvider
 	config := savedProviderRequestConfig{DefaultsVersion: 1, DefaultProtocol: defaultRequestProtocol(parent), Endpoints: map[string]string{}, Defaults: providerRequestDefaults(db, parent)}
 	var stored savedProviderRequestConfig
 	if parent.RequestConfig != "" && json.Unmarshal([]byte(parent.RequestConfig), &stored) == nil {
+		config.Advanced, config.AdvancedCiphertext = stored.Advanced, stored.AdvancedCiphertext
 		if stored.DefaultProtocol == "openai" || stored.DefaultProtocol == "anthropic" {
 			config.DefaultProtocol = stored.DefaultProtocol
 		}
@@ -195,26 +201,46 @@ func requestConfigSupplier(w http.ResponseWriter, r *http.Request) (*gorm.DB, or
 }
 
 func GetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	db, parent, ok := requestConfigSupplier(w, r)
 	if !ok {
 		return
 	}
-	common.ReplyOK(w, requestConfigResponse(db.WithContext(r.Context()), parent))
+	advanced, err := ResolveProviderRequestAdvanced(parent)
+	if err != nil {
+		common.ReplyErr(w, "read advanced request configuration failed", 500)
+		return
+	}
+	response := requestConfigResponse(db.WithContext(r.Context()), parent)
+	response.Advanced = advanced
+	common.ReplyOK(w, response)
 }
 
 var errUnsupportedRequestModels = errors.New("Anthropic currently supports chat and vision models only; remove incompatible models before changing the default protocol")
 
 func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	db, parent, ok := requestConfigSupplier(w, r)
 	if !ok {
 		return
 	}
 	var req updateProviderRequestConfigRequest
-	decoder := json.NewDecoder(r.Body)
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 24*1024))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&req) != nil {
 		common.ReplyErr(w, "invalid request configuration", 400)
 		return
+	}
+	var trailing any
+	if !errors.Is(decoder.Decode(&trailing), io.EOF) {
+		common.ReplyErr(w, "invalid request configuration", 400)
+		return
+	}
+	if req.Advanced != nil {
+		if err := credentialvault.ValidateProviderRequestAdvanced(*req.Advanced); err != nil {
+			common.ReplyErr(w, err.Error(), 400)
+			return
+		}
 	}
 	if !serviceSupportsRequestProtocol(parent, req.DefaultProtocol) {
 		common.ReplyErr(w, "request protocol is not supported by the current runtime", 400)
@@ -242,6 +268,23 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		current := savedRequestConfig(tx, parent)
+		previousAdvanced, err := ResolveProviderRequestAdvanced(parent)
+		if err != nil {
+			return err
+		}
+		advancedChanged := false
+		if req.Advanced != nil {
+			previousJSON, _ := json.Marshal(previousAdvanced)
+			nextJSON, _ := json.Marshal(*req.Advanced)
+			advancedChanged = string(previousJSON) != string(nextJSON)
+			if advancedChanged {
+				current.AdvancedCiphertext, err = encryptRequestAdvanced(parent, *req.Advanced)
+				if err != nil {
+					return err
+				}
+				current.Advanced = nil
+			}
+		}
 		before := requestConfigResponse(tx, parent)
 		for _, entry := range before.Protocols {
 			// Preserve the currently active address while switching protocols, but
@@ -293,12 +336,9 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if len(encoded) > 8192 {
-			return credentialvault.ErrInvalidContract
-		}
 		// Saving an unchanged drawer must not change native provider adapters or
 		// invalidate credentials. Persist metadata only when an endpoint changed.
-		unchanged := !protocolChanged
+		unchanged := !protocolChanged && !advancedChanged
 		for _, entry := range before.Protocols {
 			if entry.Supported {
 				next := current.Endpoints[entry.Protocol]
@@ -317,9 +357,14 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		parent.RequestConfig = string(encoded)
+		if _, err := portableProviderRequestConfig(parent); err != nil {
+			return err
+		}
+		if protocolChanged || advancedChanged {
+			parent.ActiveKeyRevision++
+		}
 		if protocolChanged {
 			parent.ProtocolName = protocol
-			parent.ActiveKeyRevision++
 		}
 		if err := tx.Model(&parent).Updates(map[string]any{"request_config": parent.RequestConfig, "protocol_name": parent.ProtocolName, "active_key_revision": parent.ActiveKeyRevision, "updated_at": now}).Error; err != nil {
 			return err
@@ -329,15 +374,23 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return updateProviderEndpointLocked(tx, &parent, effective, now, true, protocolChanged)
+		return updateProviderEndpointLocked(tx, &parent, effective, now, true, protocolChanged || advancedChanged)
 	})
 	if err != nil {
-		if errors.Is(err, errUnsupportedRequestModels) || errors.Is(err, credentialvault.ErrInvalidContract) {
+		if errors.Is(err, credentialvault.ErrInvalidContract) {
+			common.ReplyErr(w, "request configuration exceeds credential limits", 400)
+		} else if errors.Is(err, errUnsupportedRequestModels) {
 			common.ReplyErr(w, err.Error(), 400)
 		} else {
 			common.ReplyErr(w, "save request configuration failed", 500)
 		}
 		return
 	}
-	common.ReplyOK(w, requestConfigResponse(db.WithContext(r.Context()), parent))
+	response := requestConfigResponse(db.WithContext(r.Context()), parent)
+	response.Advanced, err = ResolveProviderRequestAdvanced(parent)
+	if err != nil {
+		common.ReplyErr(w, "read advanced request configuration failed", 500)
+		return
+	}
+	common.ReplyOK(w, response)
 }

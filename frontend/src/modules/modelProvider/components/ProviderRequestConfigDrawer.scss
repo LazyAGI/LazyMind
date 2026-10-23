@@ -44,6 +44,16 @@
 }
 .provider-request-config-default-address { margin-top: 3px; font-size: 11px; }
 .provider-request-config-footer { display: flex; justify-content: flex-end; gap: 8px; }
+.provider-request-advanced-fields {
+  border-top: 1px solid #edf0f4;
+  padding-top: 14px;
+  summary { color: #202735; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .provider-request-config-hint { margin-bottom: 14px; }
+  .ant-form-item { margin-bottom: 16px; }
+  .ant-form-item-label > label { font-size: 12px; }
+  textarea.ant-input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .ant-form-item-extra { padding-top: 5px; font-size: 11px; }
+}
 @media (max-width: 480px) {
   .provider-request-config-drawer {
     &.ant-drawer-content { border-radius: 12px 0 0 12px; }

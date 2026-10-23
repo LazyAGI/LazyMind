@@ -139,7 +139,7 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                 groupId={props.probe.groupId}
                 modelId={model.id}
                 modelName={model.name}
-                configurationKey={JSON.stringify([props.probe.configurationKey, model.capability, model.vision, model.maxInputTokens, model.inputTokenLimit, model.maxOutputTokens])}
+                configurationKey={JSON.stringify([props.probe.configurationKey, model.capability, model.vision, model.maxInputTokens, model.inputTokenLimit, model.maxOutputTokens, model.modelSettings])}
                 disabled={removing.has(model.id)}
                 disabledReason={props.probe.disabledReason || (type === "unknown" ? t("modelProvider.probe.reason.unknown_type") : unsupported ? t("modelProvider.probe.reason.unsupported_type") : undefined)}
                 onPendingChange={(value) => {
