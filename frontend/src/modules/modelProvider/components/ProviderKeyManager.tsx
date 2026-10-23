@@ -5,7 +5,6 @@ import {
   EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
-  KeyOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
 import {
@@ -320,7 +319,23 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
             type="text"
             className="provider-workspace-icon-button"
             aria-label={text("manage")}
-            icon={<KeyOutlined aria-hidden="true" />}
+            icon={
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                focusable="false"
+              >
+                <circle cx="7" cy="12" r="4.5" />
+                <path d="M11.5 12H22m-5 0v5m4-5v5" />
+              </svg>
+            }
             onClick={() => {
               const supplier = props.providerId;
               void saveInline().then((saved) => {

@@ -1,12 +1,14 @@
 import { useId, type ReactNode } from "react";
 import { HolderOutlined } from "@ant-design/icons";
-import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type CollisionDetection, type DragEndEvent } from "@dnd-kit/core";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type Modifier } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import { getProviderDisplayName } from "../providerDisplayNames";
 import { supplierOrderGroup, type OrderedSupplier } from "../supplierOrdering";
 import "./SortableSupplierList.scss";
+
+const restrictToVerticalAxis: Modifier = ({ transform }) => ({ ...transform, x: 0 });
 
 function SortableSupplierRow({ item, disabled, children }: {
   item: OrderedSupplier; disabled: boolean; children: ReactNode;
@@ -19,7 +21,6 @@ function SortableSupplierRow({ item, disabled, children }: {
     data-provider-id={item.id}
     style={{ transform: CSS.Transform.toString(transform), transition }}
   >
-    {children}
     {!disabled ? <button
       ref={setActivatorNodeRef}
       {...attributes}
@@ -30,6 +31,7 @@ function SortableSupplierRow({ item, disabled, children }: {
       title={t("modelProvider.workspace.reorderSupplierHint")}
       onClick={(event) => event.stopPropagation()}
     ><HolderOutlined aria-hidden="true" /></button> : null}
+    {children}
   </div>;
 }
 
@@ -58,7 +60,7 @@ export function SortableSupplierList<T extends OrderedSupplier>({ items, disable
   const dragEnd = ({ active, over }: DragEndEvent) => {
     if (!disabled && over) onReorder(ids, String(active.id), String(over.id));
   };
-  return <DndContext id={contextId} sensors={sensors} collisionDetection={sameSection} onDragEnd={dragEnd}
+  return <DndContext id={contextId} sensors={sensors} modifiers={[restrictToVerticalAxis]} collisionDetection={sameSection} onDragEnd={dragEnd}
     accessibility={{
       screenReaderInstructions: { draggable: t("modelProvider.workspace.reorderSupplierHint") },
       announcements: {

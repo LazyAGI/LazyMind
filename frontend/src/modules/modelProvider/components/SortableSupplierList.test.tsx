@@ -1,14 +1,15 @@
 import type { ComponentProps } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { DragEndEvent } from "@dnd-kit/core";
+import { applyModifiers, type DragEndEvent, type Modifiers } from "@dnd-kit/core";
 import { SortableSupplierList } from "./SortableSupplierList";
 
-const state = vi.hoisted(() => ({ end: undefined as ((event: DragEndEvent) => void) | undefined }));
+const state = vi.hoisted(() => ({ end: undefined as ((event: DragEndEvent) => void) | undefined, modifiers: undefined as Modifiers | undefined }));
 vi.mock("@dnd-kit/core", async (original) => {
   const actual = await original<typeof import("@dnd-kit/core")>();
   return { ...actual, DndContext: (props: ComponentProps<typeof actual.DndContext>) => {
     state.end = props.onDragEnd;
+    state.modifiers = props.modifiers;
     return <actual.DndContext {...props} />;
   } };
 });
@@ -33,6 +34,7 @@ describe("supplier drag handles", () => {
     const handle = screen.getByRole("button", { name: "Move OpenAI" });
     expect(handle).toHaveAttribute("tabindex", "0");
     expect(handle).toHaveAttribute("aria-describedby");
+    expect(handle.parentElement?.firstElementChild).toBe(handle);
     expect(handle.querySelector("button")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "OpenAI" }));
     expect(select).toHaveBeenCalledWith("openai");
@@ -41,6 +43,18 @@ describe("supplier drag handles", () => {
     expect(select).toHaveBeenCalledTimes(1);
     act(() => state.end?.({ active: { id: "openai" }, over: { id: "claude" } } as DragEndEvent));
     expect(reorder).toHaveBeenCalledWith(["sense", "claude", "openai"], "openai", "claude");
+  });
+
+  it.each([100, -100])("locks horizontal drag movement at %s while retaining vertical movement", (x) => {
+    render(<SortableSupplierList items={items} disabled={false} onReorder={vi.fn()}>
+      {(item) => <button>{item.name}</button>}
+    </SortableSupplierList>);
+    expect(applyModifiers(state.modifiers, {
+      activatorEvent: null, active: null, activeNodeRect: null,
+      draggingNodeRect: null, containerNodeRect: null, over: null,
+      overlayNodeRect: null, scrollableAncestors: [], scrollableAncestorRects: [],
+      windowRect: null, transform: { x, y: 72, scaleX: 1, scaleY: 1 },
+    })).toEqual({ x: 0, y: 72, scaleX: 1, scaleY: 1 });
   });
 
   it("does not reorder suppliers while actions are disabled", () => {
