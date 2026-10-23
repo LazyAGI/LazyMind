@@ -17,7 +17,7 @@
   padding: 3px 6px;
   border-radius: 6px;
   color: var(--model-task-ink);
-  background: var(--model-task-bg);
+  background: color-mix(in srgb, var(--model-task-bg) 65%, transparent);
   font-size: 11px;
   line-height: 18px;
   white-space: nowrap;
@@ -101,5 +101,5 @@
 [data-theme="dark"] .model-type-badge,
 .dark .model-type-badge {
   color: var(--model-task-dark-ink);
-  background: var(--model-task-dark-bg);
+  background: color-mix(in srgb, var(--model-task-dark-bg) 65%, transparent);
 }
