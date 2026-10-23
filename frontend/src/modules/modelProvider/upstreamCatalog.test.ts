@@ -81,6 +81,32 @@ describe("upstream model catalog", () => {
       expect(index.lookupModel("Custom", name)).toBeUndefined();
   });
 
+  it("recognizes separator variants after exact IDs without borrowing catalog token limits", () => {
+    const index = createUpstreamCatalogIndex({
+      generated_at: "fixture", providers: {},
+      recognition_models: [record("Qwen/Qwen3.8-27B"), record("vendor/bge_reranker-v2.m3", "rerank")],
+    });
+    const model = index.lookupModel("vLLM", "deployment/qwen38_27b");
+    expect(model?.model_type).toBe("llm");
+    expect(model?.context).toBe(0);
+    expect(model?.max_output).toBe(0);
+    expect(index.lookupModel("Custom", "BGE-RERANKER_v2m3")?.model_type).toBe("rerank");
+    for (const name of ["qwen38-8b", "qwen36-27b", "prefix-qwen38-27b", "qwen38-27b:free"])
+      expect(index.lookupModel("Custom", name)).toBeUndefined();
+  });
+
+  it("keeps explicit unknowns and conflicting separator matches unresolved", () => {
+    const index = createUpstreamCatalogIndex({
+      generated_at: "fixture", providers: { Local: [record("Qwen38-27B", "")] },
+      recognition_models: [
+        record("Qwen/Qwen3.8-27B"),
+        record("vendor/ranker-v2", "rerank"), record("other/ranker_v2", "embed"),
+      ],
+    });
+    expect(index.lookupModel("Local", "Qwen38-27B")?.model_type).toBe("");
+    expect(index.lookupModel("Custom", "rankerv2")).toBeUndefined();
+  });
+
   it("leaves models unmarked when no generated snapshot is available", () => {
     const index = createUpstreamCatalogIndex();
 

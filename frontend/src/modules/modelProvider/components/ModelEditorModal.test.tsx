@@ -61,16 +61,41 @@ async function chooseCapability(capability: string) {
 }
 
 describe("model editor", () => {
-  it("requires an explicit supported type when editing an unclassified model", async () => {
-    const options = props({ ...model, capability: "UNKNOWN" });
+  it("retains an unclassified model and its exact discovered context when saved", async () => {
+    const options = props({ ...model, capability: "UNKNOWN", maxInputTokens: "262144" });
     setup(options);
+    expect(screen.getByRole("textbox", { name: "modelProvider.maxInputTokensLabel" })).toHaveValue("262144");
     fireEvent.change(nameInput(), { target: { value: "unknown-renamed" } });
     fireEvent.click(saveButton());
-    await visibleText("modelProvider.catalog.unclassifiedType");
-    expect(options.onSave).not.toHaveBeenCalled();
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({ capability: "UNKNOWN", name: "unknown-renamed", maxInputTokens: "262144" }));
+  });
+
+  it("preserves exact discovered context when an unclassified model becomes dialogue", async () => {
+    const options = props({ ...model, capability: "UNKNOWN", maxInputTokens: "262144" });
+    setup(options);
     await chooseCapability("LLM_CHAT");
+    expect(screen.getByRole("textbox", { name: "modelProvider.maxInputTokensLabel" })).toHaveValue("262144");
     fireEvent.click(saveButton());
-    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({ capability: "LLM_CHAT", name: "unknown-renamed" })));
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({ capability: "LLM_CHAT", maxInputTokens: "262144" })));
+  });
+
+  it("leaves an unclassified model's missing context blank and permits explicit edits", async () => {
+    const options = props({ ...model, capability: "UNKNOWN", maxInputTokens: undefined });
+    setup(options);
+    const context = screen.getByRole("textbox", { name: "modelProvider.maxInputTokensLabel" });
+    expect(context).toHaveValue("");
+    fireEvent.change(context, { target: { value: "262144" } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({ capability: "UNKNOWN", name: model.name, maxInputTokens: "262144" }));
+  });
+
+  it("does not invent context while renaming an unclassified model without a discovered limit", async () => {
+    const options = props({ ...model, capability: "UNKNOWN", maxInputTokens: undefined });
+    setup(options);
+    expect(screen.getByRole("textbox", { name: "modelProvider.maxInputTokensLabel" })).toHaveValue("");
+    fireEvent.change(nameInput(), { target: { value: "private-renamed" } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({ capability: "UNKNOWN", name: "private-renamed", maxInputTokens: "" }));
   });
   it("requires an OpenRouter type with an implemented adapter", async () => {
     const options = { ...props({ ...model, capability: "RERANK" }), protocolName: "OpenRouter" };

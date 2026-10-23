@@ -60,13 +60,16 @@ export interface AddModelProviderGroupModelOpenAPIRequest {
      */
     'input_token_limit'?: string | null;
     /**
-     * Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+     * Optional context window. Explicit discovered values are preserved for unclassified models. When omitted for LLM/VLM models, resolves from config/model_context_windows.yaml with a 128K fallback; unclassified models have no inferred default.
      */
     'max_input_tokens'?: string;
     /**
      * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
      */
     'max_output_tokens'?: string | null;
+    /**
+     * Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use.
+     */
     'model_type': string;
     'name': string;
     /**
@@ -84,7 +87,7 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
     'input_token_limit'?: string | null;
     'is_default': boolean;
     /**
-     * Stored LLM input context window, for example 512, 128K, or 1M
+     * Stored context window, including an explicit discovered value on an unclassified model; for example 262144, 128K, or 1M
      */
     'max_input_tokens'?: string | null;
     /**
@@ -4509,7 +4512,7 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
     'is_editable': boolean;
     'lifecycle': ListModelProviderGroupModelsOpenAPIItemLifecycleEnum;
     /**
-     * Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
+     * Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported
      */
     'max_input_tokens'?: string | null;
     /**
@@ -7230,7 +7233,7 @@ export interface UpdateModelProviderGroupModelOpenAPIRequest {
      */
     'input_token_limit'?: string | null;
     /**
-     * Optional LLM/VLM input context window, for example 512, 128K, or 1M. Omitted fields remain unchanged.
+     * Optional stored context window for LLM/VLM or unclassified models, for example 262144, 128K, or 1M. Empty clears an unclassified model\'s value; omitted fields remain unchanged.
      */
     'max_input_tokens'?: string;
     /**
@@ -7238,7 +7241,7 @@ export interface UpdateModelProviderGroupModelOpenAPIRequest {
      */
     'max_output_tokens'?: string | null;
     /**
-     * Optional supported technical model type. Must be compatible with the supplier runtime protocol and existing references.
+     * Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references.
      */
     'model_type'?: string;
     /**
@@ -47746,7 +47749,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47826,7 +47829,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47915,7 +47918,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48001,7 +48004,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48706,7 +48709,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48735,7 +48738,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48766,7 +48769,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48796,7 +48799,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -49105,7 +49108,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49125,7 +49128,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49145,7 +49148,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49165,7 +49168,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.updateModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -49693,7 +49696,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+     * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
      * @summary List models under a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49715,7 +49718,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and LLM/VLM context window. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
+     * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
      * @summary Update a connection group model
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49737,7 +49740,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+     * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
      * @summary Add custom model under a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49759,7 +49762,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
+     * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
      * @summary List models advertised by a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

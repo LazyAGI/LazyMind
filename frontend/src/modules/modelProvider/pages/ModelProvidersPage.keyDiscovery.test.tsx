@@ -154,7 +154,7 @@ describe("model discovery after verified key save", () => {
 
   it("adds catalog-recognized ID-only models using their recognized types", async () => {
     mocks.remote.mockResolvedValue({ models: [
-      { id: "gateway/vector", name: "gateway/vector", model_type: "" },
+      { id: "gateway/vector", name: "gateway/vector" },
       { id: "gateway/speech", name: "gateway/speech" },
     ] });
     mocks.lookup.mockImplementation((_protocol: string, name: string) => ({
@@ -183,6 +183,15 @@ describe("model discovery after verified key save", () => {
     expect(JSON.parse(screen.getByTestId("group-models").textContent || "[]")).toEqual([
       expect.objectContaining({ id: "manual", name: "manual", capability: "TTS", builtIn: false }),
     ]);
+  });
+
+  it("opens manual discovery for Core's explicit unclassified result without filling it from the catalog", async () => {
+    mocks.remote.mockResolvedValue({ models: [{ id: "qwen38-27b", name: "qwen38-27b", model_type: "", added: false }] });
+    mocks.lookup.mockReturnValue({ name: "qwen/qwen3.8-27b", model_type: "llm", input: ["text", "image", "video"], output: ["text"], context: 128000, max_output: 0 });
+    await discoverAfterKeySave();
+    expect(mocks.add).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:qwen38-27b" })).toBeEnabled();
   });
 
   it("adds models after the first key creates a group that is not yet present in the rendered state", async () => {

@@ -28,6 +28,7 @@ export function createUpstreamCatalogIndex(catalog?: UpstreamCatalogFile) {
   const modelsByProvider = new Map<string, Map<string, UpstreamModelRecord[]>>();
   const modelsByName = new Map<string, UpstreamModelRecord[]>();
   const modelsByBasename = new Map<string, UpstreamModelRecord[]>();
+  const modelsBySeparatedName = new Map<string, UpstreamModelRecord[]>();
 
   const add = (index: Map<string, UpstreamModelRecord[]>, name: string, model: UpstreamModelRecord) => {
     if (!name) return;
@@ -36,10 +37,12 @@ export function createUpstreamCatalogIndex(catalog?: UpstreamCatalogFile) {
     index.set(name, bucket);
   };
   const basename = (name: string) => name.slice(name.lastIndexOf("/") + 1);
+  const separatedName = (name: string) => basename(name).replace(/[._-]/g, "");
   const addGlobal = (model: UpstreamModelRecord) => {
     const name = normalizeKey(model.name);
     add(modelsByName, name, model);
     add(modelsByBasename, basename(name), model);
+    add(modelsBySeparatedName, separatedName(name), model);
   };
   const unambiguous = (matches: UpstreamModelRecord[]) => {
     const typed = matches.filter((model) => model.model_type?.trim());
@@ -47,6 +50,18 @@ export function createUpstreamCatalogIndex(catalog?: UpstreamCatalogFile) {
     if (types.size > 1) return undefined;
     if (typed.length) return typed[0];
     return matches.length === 1 ? matches[0] : undefined;
+  };
+  const separatorMatch = (matches: UpstreamModelRecord[]) => {
+    const match = unambiguous(matches);
+    const modelType = normalizeRuntimeModelType(match?.model_type || "");
+    if (!match || !modelType) return undefined;
+    const typed = matches.filter((model) => normalizeRuntimeModelType(model.model_type || "") === modelType);
+    const modalities = (values: string[]) => values.map(normalizeKey).filter(Boolean);
+    const input = [...new Set(typed.flatMap((model) => modalities(model.input)))].sort();
+    const outputs = typed.map((model) => modalities(model.output)).filter((values) => values.length);
+    const output = [...new Set(outputs[0] || [])].filter((value) => outputs.every((values) => values.includes(value))).sort();
+    // Separator aliases establish a type, not the deployment's token limits.
+    return { name: match.name, model_type: modelType, input, output, context: 0, max_output: 0 };
   };
 
   for (const [providerName, models] of Object.entries(catalog?.providers ?? {})) {
@@ -70,7 +85,9 @@ export function createUpstreamCatalogIndex(catalog?: UpstreamCatalogFile) {
       }
       const exact = modelsByName.get(name);
       if (exact) return unambiguous(exact);
-      return unambiguous(modelsByBasename.get(basename(name)) || []);
+      const named = modelsByBasename.get(basename(name));
+      if (named) return unambiguous(named);
+      return separatorMatch(modelsBySeparatedName.get(separatedName(name)) || []);
     },
   };
 }

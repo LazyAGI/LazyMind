@@ -1,14 +1,18 @@
 import type { RemoteGroupModel } from "./api";
-import { normalizeRuntimeModelType } from "./modelCapabilities";
+import { isKnownRuntimeModelType, normalizeRuntimeModelType } from "./modelCapabilities";
 import { lookupUpstreamModel } from "./upstreamCatalog";
 
-/** Fill ID-only discovery responses without overriding explicit upstream metadata. */
+/** Legacy ID-only responses may use the catalog; Core's explicit type is authoritative. */
 export function resolveRemoteModelMetadata(protocolName: string, model: RemoteGroupModel) {
   const upstream = lookupUpstreamModel(protocolName, model.name);
-  const declaredType = normalizeRuntimeModelType(model.model_type || "");
+  const hasCoreType = Object.prototype.hasOwnProperty.call(model, "model_type");
+  const declared = model.model_type?.trim() || "";
+  const declaredType = isKnownRuntimeModelType(declared) ? normalizeRuntimeModelType(declared) : "";
   const hasRawOutput = model.output?.some((value) => value.trim().length > 0) === true;
   const hasOfficialTypes = model.sub_types?.some((value) => value.trim().length > 0) === true;
-  const modelType = declaredType || (hasRawOutput || hasOfficialTypes ? "" : normalizeRuntimeModelType(upstream?.model_type || ""));
+  const catalogType = upstream?.model_type || "";
+  const fallbackType = isKnownRuntimeModelType(catalogType) ? normalizeRuntimeModelType(catalogType) : "";
+  const modelType = declaredType || (!hasCoreType && !hasRawOutput && !hasOfficialTypes ? fallbackType : "");
   return {
     modelType,
     vision: modelType === "llm" && (model.input ?? upstream?.input ?? []).some((value) => value === "image" || value === "video"),

@@ -21,7 +21,19 @@ describe("official model discovery evidence", () => {
 
   it("still fills an ID-only discovery response without official classification evidence", () => {
     expect(resolveRemoteModelMetadata("SiliconFlow", {
-      id: "plain", name: "plain", model_type: "", added: false,
+      id: "plain", name: "plain", added: false,
     }).modelType).toBe("llm");
+  });
+
+  it("preserves Core's explicit unclassified result even when the catalog recognizes the ID", () => {
+    expect(resolveRemoteModelMetadata("vLLM", {
+      id: "qwen38-27b", name: "qwen38-27b", model_type: "", added: false,
+    }).modelType).toBe("");
+  });
+
+  it.each(["unknown", "future-task", "audio"])("stores unsupported declared task %s as unclassified without borrowing a catalog type", (modelType) => {
+    expect(resolveRemoteModelMetadata("vLLM", {
+      id: "private", name: "private", model_type: modelType, added: false,
+    }).modelType).toBe("");
   });
 });

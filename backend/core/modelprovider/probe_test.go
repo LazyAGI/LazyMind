@@ -306,8 +306,8 @@ func TestVLLMDiscoveryUsesExactMaxModelLenOnlyForVLLM(t *testing.T) {
 		t.Fatal("vLLM unknown alias lost explicit context or guessed a type")
 	}
 	entries[0].ContextLength = 128000
-	if got := remoteModelItem(entries[0], "VLLM", nil); got.MaxInputTokens == nil || *got.MaxInputTokens != "128000" {
-		t.Fatal("explicit context length did not take priority")
+	if got := remoteModelItem(entries[0], "VLLM", nil); got.MaxInputTokens == nil || *got.MaxInputTokens != "262144" {
+		t.Fatal("vLLM serving limit did not take priority")
 	}
 }
 

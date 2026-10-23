@@ -120,17 +120,18 @@ type openaiModelListResponse struct {
 }
 
 type openaiModelListEntry struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	Model            string   `json:"model"`
-	ModelType        string   `json:"model_type"`
-	TaskType         string   `json:"task_type"`
-	Task             string   `json:"task"`
-	Type             string   `json:"type"`
-	ContextLength    int      `json:"context_length"`
-	MaxModelLen      int      `json:"max_model_len"`
-	InputModalities  []string `json:"input_modalities"`
-	OutputModalities []string `json:"output_modalities"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	Model            string          `json:"model"`
+	Root             json.RawMessage `json:"root"`
+	ModelType        string          `json:"model_type"`
+	TaskType         string          `json:"task_type"`
+	Task             string          `json:"task"`
+	Type             string          `json:"type"`
+	ContextLength    int             `json:"context_length"`
+	MaxModelLen      int             `json:"max_model_len"`
+	InputModalities  []string        `json:"input_modalities"`
+	OutputModalities []string        `json:"output_modalities"`
 	// DiscoverySubTypes is supplied by trusted category-specific requests, never
 	// accepted from an arbitrary compatible endpoint's response body.
 	DiscoverySubTypes []string `json:"-"`
@@ -448,23 +449,46 @@ func remoteModelItem(entry openaiModelListEntry, providerName string, recognitio
 	if len(output) == 0 {
 		output = entry.OutputModalities
 	}
-	modelType := classifyUpstreamModel("", input, output)
-	if len(output) == 0 {
-		declared := ""
-		for _, value := range []string{entry.ModelType, entry.TaskType, entry.Task, entry.Type} {
-			if declared = strings.TrimSpace(value); declared != "" {
-				break
+	isVLLM := normalizeProviderName(providerName) == "vllm"
+	declared := ""
+	for _, value := range []string{entry.ModelType, entry.TaskType, entry.Task, entry.Type} {
+		if declared = strings.TrimSpace(value); declared != "" {
+			break
+		}
+	}
+	catalogType := ""
+	if declared == "" && len(output) == 0 {
+		candidate, found := recognition.lookupExact(providerName, entry.ID)
+		root := ""
+		if !found && isVLLM {
+			root = vllmLoadedModelIdentity(entry.Root)
+			if root != "" {
+				candidate, found = recognition.lookupExact(providerName, root)
 			}
 		}
-		if declared != "" {
-			modelType = classifyUpstreamModel(declared, input, output)
-			if modelType == "" {
-				// Preserve explicit unknown tasks so downstream consumers do not
-				// mistake them for ID-only entries and reclassify from the catalog.
-				modelType = normalizedDeclaredModelType(declared)
+		fuzzy := !found
+		if !found && root != "" {
+			// Loaded weights are stronger evidence than a normalized served alias.
+			candidate, found = recognition.lookupFuzzy(root)
+		}
+		if !found {
+			candidate, _ = recognition.lookupFuzzy(entry.ID)
+		}
+		catalogType = candidate.resolvedType()
+		if catalogType != "" && len(entry.DiscoverySubTypes) == 0 && (isVLLM || fuzzy) {
+			if len(input) == 0 {
+				input = candidate.input
 			}
-		} else {
-			modelType = classifyUpstreamModel(recognition.modelType(providerName, entry.ID), input, nil)
+			output = candidate.output
+		}
+	}
+	modelType := classifyUpstreamModel(catalogType, input, output)
+	if len(output) == 0 && declared != "" {
+		modelType = classifyUpstreamModel(declared, input, output)
+		if modelType == "" {
+			// Preserve explicit unknown tasks so downstream consumers do not
+			// mistake them for ID-only entries and reclassify from the catalog.
+			modelType = normalizedDeclaredModelType(declared)
 		}
 	}
 	item := remoteGroupModelItem{
@@ -478,10 +502,10 @@ func remoteModelItem(entry openaiModelListEntry, providerName string, recognitio
 	}
 	hasInputLimit := modelType == "llm" || modelType == "vlm" || modelType == "embed" || modelType == "multimodal_embedding" || modelType == "rerank"
 	contextLength := entry.ContextLength
-	if contextLength <= 0 && normalizeProviderName(providerName) == "vllm" {
+	if isVLLM && entry.MaxModelLen > 0 {
 		contextLength = entry.MaxModelLen
 	}
-	if contextLength > 0 && (hasInputLimit || normalizeProviderName(providerName) == "vllm") {
+	if contextLength > 0 && (hasInputLimit || isVLLM) {
 		tokens := formatContextTokens(contextLength)
 		item.MaxInputTokens = &tokens
 	} else if hasInputLimit {
@@ -490,4 +514,18 @@ func remoteModelItem(entry openaiModelListEntry, providerName string, recognitio
 		}
 	}
 	return item
+}
+
+// vLLM's root is the loaded model path, not its public served-model alias.
+// Treat it only as identity text: never open it, fetch it, or return it to clients.
+func vllmLoadedModelIdentity(raw json.RawMessage) string {
+	var root string
+	if json.Unmarshal(raw, &root) != nil {
+		return ""
+	}
+	root = strings.TrimSpace(root)
+	if strings.ContainsAny(root, "?#\x00\r\n\\") || strings.Contains(root, "://") {
+		return ""
+	}
+	return strings.TrimRight(root, "/")
 }

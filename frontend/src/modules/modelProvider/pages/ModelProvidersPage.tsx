@@ -67,7 +67,7 @@ import { ProviderModelCatalogDrawer, type CatalogModelChoice } from "../componen
 import { sortCustomModelsFirst } from "../modelOrdering";
 import { getModelTaskType } from "../modelTaskTypes";
 import { ModelTypeIcon } from "../components/ModelTypeBadge";
-import { getSelectableCapabilities, isModelTypeSupportedByProtocol, normalizeRuntimeModelType, supportsModelContext } from "../modelCapabilities";
+import { getSelectableCapabilities, isModelTypeSupportedByProtocol, normalizeRuntimeModelType, supportsModelContext, supportsStoredModelContext } from "../modelCapabilities";
 import { resolveRemoteModelMetadata } from "../remoteModelMetadata";
 import { canDiscoverWithoutApiKey } from "../providerAuthentication";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
@@ -1204,8 +1204,8 @@ export default function ModelProviderPage({
     const currentProvider = addedProviderListRef.current.find((provider) => provider.id === providerId);
     const currentGroup = currentProvider?.groups.find((group) => group.id === groupId);
     if (!currentGroup) throw new Error(t("modelProvider.workspace.savedRefreshFailed"));
-    if (!isModelTypeSupportedByProtocol(choice.model_type, currentProvider?.protocolName || currentProvider?.source))
-      throw new Error(t(choice.model_type ? "modelProvider.catalog.unsupportedType" : "modelProvider.catalog.unclassifiedType"));
+    if (choice.model_type && !isModelTypeSupportedByProtocol(choice.model_type, currentProvider?.protocolName || currentProvider?.source))
+      throw new Error(t("modelProvider.catalog.unsupportedType"));
     if (currentGroup.models.some((model) => normalizeModelName(model.name) === normalizeModelName(choice.name))) return;
     const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
       modelProviderId: providerId,
@@ -1214,7 +1214,7 @@ export default function ModelProviderPage({
         name: choice.name.trim(),
         model_type: choice.model_type,
         vision: choice.model_type === "llm" && choice.vision === true,
-        ...(choice.max_input_tokens && supportsModelContext(choice.model_type) ? { max_input_tokens: choice.max_input_tokens } : {}),
+        ...(choice.max_input_tokens && supportsStoredModelContext(choice.model_type) ? { max_input_tokens: choice.max_input_tokens } : {}),
       },
     });
     const created = unwrapModelProviderData<ApiModel>(response.data);
@@ -1343,13 +1343,13 @@ export default function ModelProviderPage({
   const saveEditedModel = async (values: ModelEditorValues) => {
     const target = editModelWindowModal;
     if (!target) return;
-    if (!isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), target.provider.protocolName || target.provider.source))
+    if (!(values.capability === "UNKNOWN" && target.model.capability === "UNKNOWN") && !isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), target.provider.protocolName || target.provider.source))
       throw new Error(t(values.capability === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType"));
     const updated = await updateGroupModel(target.provider.id, target.group.id, target.model.id, {
       name: values.name.trim(),
       model_type: getModelTypeForCapability(values.capability),
       vision: values.capability === "LLM_CHAT" && values.vision === true,
-      ...(supportsModelContext(values.capability) ? { max_input_tokens: values.maxInputTokens, input_token_limit: values.inputTokenLimit, max_output_tokens: values.maxOutputTokens } : {}),
+      ...(supportsStoredModelContext(values.capability) ? { max_input_tokens: values.maxInputTokens, input_token_limit: values.inputTokenLimit, max_output_tokens: values.maxOutputTokens } : {}),
       ...(target.model.builtIn ? { customize: true } : {}),
     });
     const key = `${target.provider.id}:${target.group.id}`;

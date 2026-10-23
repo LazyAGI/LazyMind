@@ -127,9 +127,9 @@ describe("provider model catalog drawer", () => {
     expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" })).toBeDisabled();
     expect(screen.getByText("modelProvider.catalog.unsupportedType")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
-    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
     expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "deepseek-v3", model_type: "llm" }));
-    expect(props.onAdd).not.toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown" }));
+    expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown", model_type: "" }));
     expect(props.onAdd).not.toHaveBeenCalledWith(expect.objectContaining({ name: "BAAI/bge-large" }));
   });
   it("shows only populated task tabs, retains counts while searching, and keeps pinned models free of custom labels", async () => {
@@ -176,7 +176,7 @@ describe("provider model catalog drawer", () => {
     const props = fixture([]);
     const view = draw(props);
     fireEvent.click(await screen.findByRole("tab", { name: /modelProvider.taskType.unknown/ }));
-    expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:custom/unknown" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:custom/unknown" })).toBeEnabled();
     expect(props.onAdd).not.toHaveBeenCalled();
     view.rerender(
       <ConfigProvider theme={{ token: { motion: false } }}>
@@ -412,7 +412,7 @@ describe("provider model catalog drawer", () => {
     ).toBeEnabled();
   });
 
-  it("adds only classified missing models without reimporting saved models", async () => {
+  it("adds missing models including unclassified entries without reimporting saved models", async () => {
     const props = fixture([
       {
         id: "deepseek",
@@ -427,40 +427,42 @@ describe("provider model catalog drawer", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "modelProvider.catalog.addAll" }),
     );
-    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
     expect(props.onAdd.mock.calls.map(([model]) => model.name)).toEqual([
       "BAAI/bge-large",
+      "custom/unknown",
     ]);
-    expect(props.onAdd).not.toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown" }));
+    expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown", model_type: "" }));
     expect(props.onRemove).not.toHaveBeenCalled();
   });
 
-  it("requires an explicit type in custom model settings before adding an unclassified model", async () => {
+  it("adds an unclassified model without requiring a type picker", async () => {
     const props = fixture();
     draw(props);
     const add = await screen.findByRole("button", {
       name: "modelProvider.catalog.addModel:custom/unknown",
     });
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(add).toBeDisabled();
+    expect(add).toBeEnabled();
     fireEvent.click(add);
-    expect(props.onAdd).not.toHaveBeenCalled();
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown", model_type: "" })));
     expect(screen.queryByText("modelProvider.catalog.unclassifiedType")).not.toBeInTheDocument();
-    expect(add).toHaveAttribute("title", "modelProvider.catalog.unclassifiedType");
+    expect(add).not.toHaveAttribute("title");
   });
 
-  it("does not bulk add an unclassified group", async () => {
+  it("adds an unclassified group while retaining exact remote context", async () => {
     mocks.remote.mockResolvedValueOnce({ models: [remote[2], {
-      id: "another-unknown", name: "another-unknown", model_type: "", added: false,
+      id: "another-unknown", name: "another-unknown", model_type: "", added: false, max_input_tokens: "262144",
     }] });
     const props = fixture([]);
     draw(props);
     const add = await screen.findByRole("button", {
       name: "modelProvider.catalog.addGroup:modelProvider.taskType.unknown",
     });
-    expect(add).toBeDisabled();
+    expect(add).toBeEnabled();
     fireEvent.click(add);
-    expect(props.onAdd).not.toHaveBeenCalled();
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
+    expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "another-unknown", model_type: "", max_input_tokens: "262144" }));
   });
 
   it("keeps distinct task groups for rerank, embedding, speech recognition and speech synthesis", async () => {
@@ -556,7 +558,7 @@ describe("provider model catalog drawer", () => {
     expect(document.querySelectorAll(".provider-model-catalog-row")[8]).toHaveTextContent("unknown");
   });
 
-  it("keeps missing and unsupported types unselectable rather than guessing chat from modalities", async () => {
+  it("adds missing and future task types as unclassified without guessing chat from modalities", async () => {
     mocks.remote.mockResolvedValueOnce({
       models: [
         { id: "omni", name: "omni", model_type: "", output: ["text", "audio"] },
@@ -578,18 +580,19 @@ describe("provider model catalog drawer", () => {
       screen.getByRole("button", {
         name: "modelProvider.catalog.addModel:omni",
       }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
       screen.getByRole("button", {
         name: "modelProvider.catalog.addModel:unsupported",
       }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
-    expect(props.onAdd).not.toHaveBeenCalled();
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
+    expect(props.onAdd.mock.calls.map(([item]) => item.model_type)).toEqual(["", ""]);
   });
 
   it("fills an ID-only remote model from the catalog and passes its exact type when clicked", async () => {
-    mocks.remote.mockResolvedValueOnce({ models: [{ id: "gateway/vector-v2", name: "gateway/vector-v2", model_type: "" }] });
+    mocks.remote.mockResolvedValueOnce({ models: [{ id: "gateway/vector-v2", name: "gateway/vector-v2" }] });
     mocks.lookup.mockReturnValue({ name: "vendor/vector-v2", model_type: "embed", input: ["text"], output: ["embeddings"], context: 1000, max_output: 0 });
     const props = fixture([]);
     draw(props);
@@ -610,9 +613,11 @@ describe("provider model catalog drawer", () => {
     draw(props);
     await screen.findByText("raw-unknown");
     for (const name of ["raw-unknown", "declared-unknown", "future"])
-      expect(screen.getByRole("button", { name: `modelProvider.catalog.addModel:${name}` })).toBeDisabled();
+      expect(screen.getByRole("button", { name: `modelProvider.catalog.addModel:${name}` })).toBeEnabled();
     expect(screen.queryByText("modelProvider.catalog.unclassifiedType")).not.toBeInTheDocument();
-    expect(props.onAdd).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(3));
+    expect(props.onAdd.mock.calls.map(([item]) => item.model_type)).toEqual(["", "", ""]);
   });
 
   it("retains a saved manual type when both discovery and recognition disagree", async () => {

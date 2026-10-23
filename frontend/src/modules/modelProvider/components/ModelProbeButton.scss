@@ -6,9 +6,12 @@
     outline-offset: 2px;
     border-radius: 6px;
   }
-  .ant-btn[data-probe-status="passed"] { color: var(--ant-color-success, #16865a); }
-  .ant-btn[data-probe-status="failed"] { color: var(--ant-color-error, #d04747); }
-  .ant-btn[data-probe-status="accepted"] { color: var(--ant-color-warning, #ad7d23); }
+  button.ant-btn:not(:disabled):not(.ant-btn-disabled) {
+    &[data-probe-status="passed"] { color: var(--ant-color-success, #16865a); }
+    &[data-probe-status="passed"][data-probe-latency="slow"] { color: var(--ant-color-warning, #ad7d23); }
+    &[data-probe-status="failed"] { color: var(--ant-color-error, #d04747); }
+    &[data-probe-status="accepted"] { color: var(--ant-color-warning, #ad7d23); }
+  }
 }
 .model-probe-result {
   display: flex;

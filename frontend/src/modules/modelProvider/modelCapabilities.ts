@@ -17,6 +17,10 @@ export function normalizeRuntimeModelType(value: string): string {
   return Object.prototype.hasOwnProperty.call(aliases, normalized) ? aliases[normalized] : normalized;
 }
 
+export function isKnownRuntimeModelType(value: string): boolean {
+  return runtimeModelTypes.has(normalizeRuntimeModelType(value));
+}
+
 function isAnthropicProtocol(protocol?: string) {
   return /^(claude|anthropic)$/i.test(protocol?.trim() || "");
 }
@@ -53,4 +57,9 @@ export function getSelectableCapabilities(
 
 export function supportsModelContext(capability?: string) {
   return capability === "LLM_CHAT" || capability === "VLM" || capability === "llm" || capability === "vlm";
+}
+
+/** Discovered context may be retained before a model has an executable type. */
+export function supportsStoredModelContext(capability?: string) {
+  return capability === "UNKNOWN" || capability === "" || supportsModelContext(capability);
 }

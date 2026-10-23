@@ -18,6 +18,25 @@ function setup(configurationKey = "config-1", disabledReason?: string) {
 beforeEach(() => { vi.clearAllMocks(); mocks.probe.mockResolvedValue({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 24 }); });
 
 describe("model inference probe", () => {
+  it.each([[2999, "normal"], [3000, "slow"], [3001, "slow"]] as const)("shows passed probes at %i ms with %s latency tone", async (elapsed, tone) => {
+    mocks.probe.mockResolvedValueOnce({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: elapsed });
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.probe.action:qwen-test" }));
+    const button = await screen.findByRole("button", { name: "modelProvider.probe.passed:qwen-test" });
+    expect(button).toHaveAttribute("data-probe-status", "passed");
+    expect(button).toHaveAttribute("data-probe-latency", tone);
+    expect(button.querySelector(".anticon-check-circle")).toBeInTheDocument();
+  });
+
+  it.each(["failed", "unsupported", "accepted"] as const)("retains %s semantics beyond the slow-probe threshold", async (status) => {
+    mocks.probe.mockResolvedValueOnce({ status, code: status === "failed" ? "quota_exceeded" : status === "unsupported" ? "unsupported_type" : "accepted", model_type: "llm", elapsed_ms: 3001 });
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.probe.action:qwen-test" }));
+    const button = await screen.findByRole("button", { name: `modelProvider.probe.${status}:qwen-test` });
+    expect(button).toHaveAttribute("data-probe-status", status);
+    expect(button).not.toHaveAttribute("data-probe-latency");
+  });
+
   it("runs one request per model, shows a result and does not expose raw data", async () => {
     let resolve!: (value: unknown) => void;
     mocks.probe.mockReturnValueOnce(new Promise((done) => { resolve = done; }));

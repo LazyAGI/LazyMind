@@ -1559,7 +1559,7 @@
 }
 @media (min-width: 801px) {
   .settings-integrated-surface.is-models .provider-workspace-body {
-    grid-template-columns: 184px minmax(0, 1fr);
+    grid-template-columns: var(--provider-sidebar-width, 240px) minmax(0, 1fr);
   }
 }
 .settings-reference.is-default-model-workspace .settings-reference-scroll {

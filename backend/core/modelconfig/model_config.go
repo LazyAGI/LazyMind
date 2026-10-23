@@ -904,6 +904,11 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 func runtimeModelAdapterAvailable(row SelectedRuntimeModel) bool {
 	technical := strings.TrimSpace(row.TechnicalModelType)
 	if technical == "" {
+		// Stored selections carry a group ID and their actual technical type.
+		// A role binding must never classify an unclassified saved model.
+		if strings.TrimSpace(row.RuntimeGroupID) != "" {
+			return false
+		}
 		technical = row.ModelType
 	}
 	return modelprovider.RuntimeSupportsModelType(row.ProviderName, technical)

@@ -36,6 +36,9 @@ func validateModelName(name string) error {
 
 func validateSupplierModelType(parent orm.UserModelProvider, modelType string) error {
 	modelType = normalizeGroupModelType(modelType)
+	if modelType == "" {
+		return nil // An unclassified inventory entry has no runtime capability.
+	}
 	switch modelType {
 	case "llm", "vlm", "embed", "rerank", "stt", "tts", "text2image", "text2video", "image_editing", "multimodal_embedding", "cross_modal_embed", "embed_image":
 	default:

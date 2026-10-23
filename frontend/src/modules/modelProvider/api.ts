@@ -286,7 +286,7 @@ export async function cancelCredentialRestore(
 export interface RemoteGroupModel {
   id: string;
   name: string;
-  model_type: string;
+  model_type?: string;
   input?: string[];
   output?: string[];
   sub_types?: string[];

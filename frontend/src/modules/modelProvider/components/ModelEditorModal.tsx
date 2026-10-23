@@ -12,7 +12,7 @@ import {
   resolveLlmMaxInputTokens,
   tokenLimitCount,
 } from "../maxInputTokens";
-import { getRuntimeModelTypeForCapability, isModelTypeSupportedByProtocol, supportsModelContext } from "../modelCapabilities";
+import { getRuntimeModelTypeForCapability, isModelTypeSupportedByProtocol, supportsModelContext, supportsStoredModelContext } from "../modelCapabilities";
 import { getModelTaskType } from "../modelTaskTypes";
 import { ModelTypeIcon } from "./ModelTypeBadge";
 import "./ModelEditorModal.scss";
@@ -64,11 +64,11 @@ function normalizeValues(values: ModelEditorValues): ModelEditorValues {
     ...(isLlmChatCapability(values.capability)
       ? { vision: values.vision === true }
       : {}),
-    ...(supportsModelContext(values.capability)
+    ...(supportsStoredModelContext(values.capability)
       ? {
         maxInputTokens: values.maxInputTokens?.trim().toUpperCase() || "",
-        ...(values.inputTokenLimit !== undefined ? { inputTokenLimit: values.inputTokenLimit.trim().toUpperCase() } : {}),
-        ...(values.maxOutputTokens !== undefined ? { maxOutputTokens: values.maxOutputTokens.trim().toUpperCase() } : {}),
+        ...(supportsModelContext(values.capability) && values.inputTokenLimit !== undefined ? { inputTokenLimit: values.inputTokenLimit.trim().toUpperCase() } : {}),
+        ...(supportsModelContext(values.capability) && values.maxOutputTokens !== undefined ? { maxOutputTokens: values.maxOutputTokens.trim().toUpperCase() } : {}),
       }
       : {}),
   };
@@ -107,7 +107,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
         name: model.name,
         capability: model.capability,
         vision: model.vision === true,
-        maxInputTokens: resolveLlmMaxInputTokens(model.maxInputTokens),
+        maxInputTokens: model.capability === "UNKNOWN" ? model.maxInputTokens?.trim().toUpperCase() || "" : resolveLlmMaxInputTokens(model.maxInputTokens),
         inputTokenLimit: model.inputTokenLimit || undefined,
         maxOutputTokens: model.maxOutputTokens || undefined,
       };
@@ -132,7 +132,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
     ...(props.model ? [props.model.capability] : []),
   ])].map((option) => ({
     value: option,
-    disabled: !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(option), props.protocolName),
+    disabled: option !== "UNKNOWN" && !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(option), props.protocolName),
     label: (
       <span className="model-editor-type-option">
         <ModelTypeIcon type={getModelTaskType(option)} size={18} />
@@ -231,19 +231,19 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
           name="capability"
           rules={[
             { required: true, message: t("modelProvider.validation.modelTypeRequired") },
-            { validator: (_, value?: ModelCapability) => value && isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(value), props.protocolName)
+            { validator: (_, value?: ModelCapability) => value && ((value === "UNKNOWN" && props.model?.capability === "UNKNOWN") || isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(value), props.protocolName))
               ? Promise.resolve() : Promise.reject(new Error(t(value === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType"))) },
           ]}
         >
           <Select aria-label={t("modelProvider.modelType")} options={options} />
         </Form.Item>
-        {supportsModelContext(capability) ? (
+        {supportsStoredModelContext(capability) ? (
           <>
           <Form.Item
             label={t("modelProvider.maxInputTokensLabel")}
             name="maxInputTokens"
             rules={[
-              { required: true, whitespace: true, message: t("modelProvider.validation.maxInputTokensRequired") },
+              { required: capability !== "UNKNOWN", whitespace: true, message: t("modelProvider.validation.maxInputTokensRequired") },
               {
                 validator: (_, value?: string) =>
                   !value?.trim() || parseLlmMaxInputTokens(value)
@@ -255,7 +255,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
             <TokenLimitInput label={t("modelProvider.maxInputTokensLabel")} presets={["128K", "200K", "256K", "400K", "512K", "1M"]}
               placeholder={t("modelProvider.maxInputTokensPlaceholder")} disabled={saving} />
           </Form.Item>
-          {(["inputTokenLimit", "maxOutputTokens"] as const).map((field) => <Form.Item
+          {supportsModelContext(capability) ? (["inputTokenLimit", "maxOutputTokens"] as const).map((field) => <Form.Item
             key={field} name={field} label={text(field)} dependencies={["maxInputTokens"]}
             rules={[{ validator: (_, value?: string) => {
               if (!value?.trim()) return Promise.resolve();
@@ -269,7 +269,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
             <TokenLimitInput label={text(field)} disabled={saving}
               presets={field === "inputTokenLimit" ? ["128K", "200K", "256K", "512K", "1M"] : ["16K", "32K", "64K", "128K", "256K"]}
               placeholder={text(field === "inputTokenLimit" ? "inputTokenPlaceholder" : "outputTokenPlaceholder")} />
-          </Form.Item>)}
+          </Form.Item>) : null}
           </>
         ) : null}
         {isLlmChatCapability(capability) ? (

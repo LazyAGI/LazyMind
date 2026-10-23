@@ -3826,6 +3826,7 @@
 /* Supplier-first compact workspace; auxiliary service pages retain their layout. */
 .provider-workspace {
   --provider-control-size: 32px;
+  --provider-sidebar-width: 240px;
   --provider-ink: #202735;
   --provider-text: #465365;
   --provider-muted: #697586;
@@ -3938,7 +3939,7 @@
 }
 .provider-workspace-body {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: var(--provider-sidebar-width) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
 }
@@ -4312,8 +4313,8 @@
   font-size: 12px;
 }
 @media (max-width: 1100px) {
-  .provider-workspace-body {
-    grid-template-columns: 176px minmax(0, 1fr);
+  .provider-workspace {
+    --provider-sidebar-width: 224px;
   }
   .provider-workspace-scroll {
     padding-inline: 18px;

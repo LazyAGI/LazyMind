@@ -90,6 +90,9 @@ func classifyUpstreamModel(declared string, inputValues, outputValues []string) 
 // lacks rerank, image-editing and multimodal-embedding adapters. Other providers
 // retain their existing validation and supported integrations.
 func RuntimeSupportsModelType(providerName, modelType string) bool {
+	if strings.TrimSpace(modelType) == "" {
+		return false
+	}
 	if LazyLLMSource(providerName) != "openrouter" {
 		return true
 	}

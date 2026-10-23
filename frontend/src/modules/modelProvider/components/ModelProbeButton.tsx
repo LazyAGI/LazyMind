@@ -61,6 +61,7 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
     }
   };
   const status = result?.status;
+  const latency = result?.status === "passed" ? result.elapsed_ms >= 3000 ? "slow" : "normal" : undefined;
   const Icon = status === "passed" ? CheckCircleOutlined : status === "failed" ? CloseCircleOutlined : status === "accepted" ? ClockCircleOutlined : status === "unsupported" ? MinusCircleOutlined : ApiOutlined;
   const name = t(`modelProvider.probe.${pending ? "running" : status || "action"}`, { name: props.modelName });
   const title = props.disabledReason || (pending ? t("modelProvider.probe.running", { name: props.modelName }) : result ? (
@@ -72,7 +73,7 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
   ) : t("modelProvider.probe.hint"));
   return <Tooltip title={title} trigger={["hover", "focus"]}>
     <span className="model-probe-control" tabIndex={props.disabledReason ? 0 : undefined} aria-label={props.disabledReason ? `${name} · ${props.disabledReason}` : undefined}>
-      <Button type="text" aria-label={name} aria-busy={pending} data-probe-status={status}
+      <Button type="text" aria-label={name} aria-busy={pending} data-probe-status={status} data-probe-latency={latency}
         icon={<Icon aria-hidden="true" />} loading={pending} disabled={pending || props.disabled || Boolean(props.disabledReason)} onClick={() => void run()} />
       <span className="model-probe-announcement" role="status" aria-live="polite">{status ? name : ""}</span>
     </span>

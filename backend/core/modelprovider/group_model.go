@@ -134,8 +134,8 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(req.Name)
 	modelType := normalizeGroupModelType(strings.TrimSpace(req.ModelType))
-	if name == "" || modelType == "" {
-		common.ReplyErr(w, "name and model_type are required", http.StatusBadRequest)
+	if name == "" {
+		common.ReplyErr(w, "name is required", http.StatusBadRequest)
 		return
 	}
 	if err := validateModelName(name); err != nil {
@@ -365,7 +365,15 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		if !isChatTechnicalType(next.ModelType) {
 			next.Vision = false
 		}
-		if supportsUserMaxInputTokens(next.ModelType) {
+		if next.ModelType == "" {
+			if req.MaxInputTokens != nil {
+				value, err := resolveAddModelMaxInputTokens("", next.Name, req.MaxInputTokens)
+				if err != nil {
+					return modelMetadataValidationError{err}
+				}
+				next.MaxInputTokens = value
+			}
+		} else if supportsUserMaxInputTokens(next.ModelType) {
 			if req.MaxInputTokens != nil {
 				value, err := resolveRequiredUserMaxInputTokens(next.ModelType, req.MaxInputTokens)
 				if err != nil {
@@ -466,11 +474,15 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	availability := "available"
+	if !RuntimeSupportsModelType(RuntimeProviderName(parent), row.ModelType) {
+		availability = "unavailable"
+	}
 	common.ReplyOK(w, groupModelListItem{
 		ID: row.ID, Source: "own", ProviderID: row.UserModelProviderID, ProviderGroupID: row.UserModelProviderGroupID,
 		UserModelProviderID: row.UserModelProviderID, UserModelProviderGroupID: row.UserModelProviderGroupID,
 		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ProviderName: row.ProviderName, GroupName: group.Name,
-		BaseURL: connectionBaseURL(parent, group.BaseURL), IsDefault: row.IsDefault, IsEditable: strings.EqualFold(row.ModelType, "image_editing"), MaxInputTokens: row.MaxInputTokens, InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens, Availability: "available", Lifecycle: "active", Capabilities: []string{},
+		BaseURL: connectionBaseURL(parent, group.BaseURL), IsDefault: row.IsDefault, IsEditable: strings.EqualFold(row.ModelType, "image_editing"), MaxInputTokens: row.MaxInputTokens, InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens, Availability: availability, Lifecycle: "active", Capabilities: []string{},
 	})
 }
 
