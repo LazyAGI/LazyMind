@@ -119,7 +119,9 @@ UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences
-    ADD COLUMN IF NOT EXISTS document_directories_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+    ADD COLUMN IF NOT EXISTS document_directories_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+-- Preserve the enabled preference assigned to existing users by the dev upgrade.
+UPDATE user_ui_preferences SET document_directories_enabled = TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN IF NOT EXISTS document_directories_generation BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
@@ -149,7 +151,9 @@ ALTER TABLE user_ui_preferences ADD COLUMN mcp_enabled BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE user_ui_preferences ADD COLUMN workflows_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences ADD COLUMN document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
-ALTER TABLE user_ui_preferences ADD COLUMN document_directories_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences ADD COLUMN document_directories_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+-- Preserve the enabled preference assigned to existing users by the dev upgrade.
+UPDATE user_ui_preferences SET document_directories_enabled = TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN document_directories_generation BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE user_ui_preferences ADD COLUMN sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_ui_preferences ADD COLUMN performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;

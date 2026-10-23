@@ -599,8 +599,8 @@ describe("MainLayout document directory feature control", () => {
     act(() => window.dispatchEvent(new CustomEvent("lazymind:user-ui-preferences-changed", { detail: { document_directories_enabled: true } })));
     expect(await screen.findByText("directories.title")).toBeInTheDocument();
   });
-  it("does not load directory content or batches for an initially disabled user", async () => {
-    mocks.fetchPreferences.mockResolvedValueOnce({ document_directories_enabled: false });
+  it.each([undefined, false])("does not load directory content or batches when the preference is %s", async (enabled) => {
+    mocks.fetchPreferences.mockResolvedValueOnce({ document_directories_enabled: enabled });
     mocks.listDirectoryBatches.mockClear();
     render(<MemoryRouter initialEntries={["/document-directories/example"]}>
       <Routes><Route element={<MainLayout />}>

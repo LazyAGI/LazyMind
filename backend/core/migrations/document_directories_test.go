@@ -79,7 +79,7 @@ func TestDirectoryAggregateMatchesDevAndRollsBack(t *testing.T) {
 				if _, err := db.Exec("UPDATE user_ui_preferences SET document_directories_enabled=FALSE WHERE user_id='existing'; INSERT INTO user_ui_preferences (user_id, created_at, updated_at) VALUES ('new', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
 					t.Fatal(err)
 				}
-				if err := db.QueryRow("SELECT document_directories_enabled FROM user_ui_preferences WHERE user_id='new'").Scan(&enabled); err != nil || !enabled {
+				if err := db.QueryRow("SELECT document_directories_enabled FROM user_ui_preferences WHERE user_id='new'").Scan(&enabled); err != nil || enabled {
 					t.Fatalf("new user default: %v %v", enabled, err)
 				}
 				if err := db.QueryRow("SELECT document_directories_enabled FROM user_ui_preferences WHERE user_id='existing'").Scan(&enabled); err != nil || enabled {
@@ -111,6 +111,48 @@ func TestDirectoryAggregateMatchesDevAndRollsBack(t *testing.T) {
 				var title string
 				if err := db.QueryRow("SELECT title FROM directory_migration_existing WHERE id=1").Scan(&title); err != nil || title != "keep" {
 					t.Fatalf("existing data changed after upgrade and rollback: title=%q err=%v", title, err)
+				}
+			}
+		})
+	}
+}
+
+func TestDirectoryControlDefaultMigrationPreservesPreferences(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			db := openDatabase(t, dialect)
+			if _, err := db.Exec(`CREATE TABLE user_ui_preferences (
+				user_id VARCHAR(255) PRIMARY KEY,
+				document_directories_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+				document_directories_generation BIGINT NOT NULL DEFAULT 0,
+				performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE
+			);
+			INSERT INTO user_ui_preferences VALUES ('on', TRUE, 7, TRUE), ('off', FALSE, 9, FALSE);`); err != nil {
+				t.Fatal(err)
+			}
+			for _, direction := range []string{"up", "down"} {
+				applySQL(t, db, migrationPath(t, "dev_mode/v0_3/*_default_document_directories_off."+direction+".sql"), dialect)
+				for _, saved := range []struct {
+					userID     string
+					enabled    bool
+					generation int64
+				}{{"on", true, 7}, {"off", false, 9}} {
+					var enabled, performance bool
+					var generation int64
+					query := "SELECT document_directories_enabled, document_directories_generation, performance_stats_enabled FROM user_ui_preferences WHERE user_id='" + saved.userID + "'"
+					if err := db.QueryRow(query).Scan(&enabled, &generation, &performance); err != nil || enabled != saved.enabled || performance != saved.enabled || generation != saved.generation {
+						t.Fatalf("%s lost %s preferences: enabled=%v generation=%d performance=%v err=%v", direction, saved.userID, enabled, generation, performance, err)
+					}
+				}
+				if _, err := db.Exec("INSERT INTO user_ui_preferences (user_id) VALUES ('new')"); err != nil {
+					t.Fatal(err)
+				}
+				var enabled bool
+				if err := db.QueryRow("SELECT document_directories_enabled FROM user_ui_preferences WHERE user_id='new'").Scan(&enabled); err != nil || enabled != (direction == "down") {
+					t.Fatalf("%s default: enabled=%v err=%v", direction, enabled, err)
+				}
+				if _, err := db.Exec("DELETE FROM user_ui_preferences WHERE user_id='new'"); err != nil {
+					t.Fatal(err)
 				}
 			}
 		})
