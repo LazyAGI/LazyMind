@@ -153,11 +153,10 @@ LAZYMIND_FILE_WATCHER_CONSOLE_LOG := $(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/logs
 # Internal service URLs, version pins, and fixed paths are hardcoded in docker-compose.yml.
 # ---------------------------------------------------------------------------
 
-# Auth — credentials and secrets (change in production)
+# Auth — Compose deployments require explicit secrets; local runtime settings
+# are loaded from local/config.env.
 export LAZYMIND_DATABASE_URL ?= postgresql+psycopg://app:app@db:5432/app
-export LAZYMIND_JWT_SECRET ?= dev-secret-change-me
 export LAZYMIND_BOOTSTRAP_ADMIN_USERNAME ?= admin
-export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD ?= admin
 export LAZYMIND_RESET_ALGO_ON_STARTUP ?= false
 export LAZYMIND_RESET_ALL_ON_STARTUP ?= false
 export LAZYLLM_ALGO_REGISTER_POLICY ?= none
