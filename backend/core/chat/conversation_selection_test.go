@@ -12,7 +12,7 @@ import (
 )
 
 func TestConversationSelectionSnapshotIsCompleteAndScoped(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC()
@@ -140,7 +140,7 @@ func TestConversationSelectionSnapshotIsCompleteAndScoped(t *testing.T) {
 }
 
 func TestConversationSelectionSnapshotAggregatesActiveFamilyLocks(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	rootID := "root"
@@ -208,7 +208,7 @@ func TestConversationSelectionSnapshotAggregatesActiveFamilyLocks(t *testing.T) 
 }
 
 func TestConversationArchiveReturnsAffectedFamilyIDs(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newChatExecutionTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	root := sidechatTestConversation(t, db, "parent", "u1", "Parent")

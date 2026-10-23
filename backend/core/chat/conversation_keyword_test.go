@@ -82,7 +82,7 @@ func keywordGroupIDs(t *testing.T, query url.Values) []string {
 }
 
 func TestConversationKeywordSurvivesGroupingMovingAndPinning(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	conversation := orm.Conversation{ID: "matching", DisplayName: "TitleNeedle Änderung", SourceDisplayName: "SourceNeedle ÖQuelle", SourceDocumentID: "DocumentNeedle ΩDocument", BaseModel: orm.BaseModel{CreateUserID: "u1"}}
@@ -144,7 +144,7 @@ func TestConversationKeywordSurvivesGroupingMovingAndPinning(t *testing.T) {
 }
 
 func TestConversationGroupKeywordIncludesPinnedMembersWithinVisibilityScope(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	now := time.Now().UTC()
