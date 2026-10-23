@@ -3,6 +3,7 @@ package academic
 import (
 	"context"
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -78,6 +79,7 @@ func citationTitle(citation string) string {
 }
 
 type arxivFeed struct {
+	XMLName xml.Name `xml:"feed"`
 	Entries []struct {
 		ID        string `xml:"id"`
 		Title     string `xml:"title"`
@@ -107,8 +109,8 @@ func tokenCoverage(reference, title string) float64 {
 }
 
 // resolveWithArxiv provides the deterministic domain adapter used by imports.
-// Failure is intentionally soft because arXiv is a fallback, not a dependency.
-func resolveWithArxiv(ctx context.Context, citation string) (WorkInput, bool) {
+// Provider failures are returned separately from a successful search with no match.
+func resolveWithArxiv(ctx context.Context, citation string) (WorkInput, bool, error) {
 	query := citationTitle(citation)
 	searchField := "ti:"
 	if query == "" {
@@ -119,36 +121,36 @@ func resolveWithArxiv(ctx context.Context, citation string) (WorkInput, bool) {
 		query = query[:300]
 	}
 	if strings.TrimSpace(query) == "" {
-		return WorkInput{}, false
+		return WorkInput{}, false, nil
 	}
 	u := "https://export.arxiv.org/api/query?search_query=" + searchField + url.QueryEscape(`"`+query+`"`) + "&start=0&max_results=3&sortBy=relevance"
 	var feed arxivFeed
 	client := &http.Client{Timeout: 10 * time.Second}
-	resolved := false
-	for attempt := 0; attempt < 2; attempt++ {
-		if !waitForArxiv(ctx) {
-			return WorkInput{}, false
-		}
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		req.Header.Set("User-Agent", "LazyMind academic resolver/1.0 (opensource@lazyagi.org)")
-		resp, err := client.Do(req)
-		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			decodeErr := xml.NewDecoder(resp.Body).Decode(&feed)
-			_ = resp.Body.Close()
-			if decodeErr == nil {
-				resolved = true
-				break
-			}
-		} else if resp != nil {
-			_ = resp.Body.Close()
-		}
+	if !waitForArxiv(ctx) {
+		return WorkInput{}, false, ctx.Err()
 	}
-	if !resolved {
-		return WorkInput{}, false
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return WorkInput{}, false, fmt.Errorf("arXiv request failed: %w", err)
+	}
+	req.Header.Set("User-Agent", "LazyMind academic resolver/1.0 (opensource@lazyagi.org)")
+	resp, err := client.Do(req)
+	if err != nil {
+		return WorkInput{}, false, fmt.Errorf("arXiv lookup failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return WorkInput{}, false, fmt.Errorf("arXiv lookup returned HTTP %d", resp.StatusCode)
+	}
+	if err := xml.NewDecoder(resp.Body).Decode(&feed); err != nil {
+		return WorkInput{}, false, fmt.Errorf("arXiv response is invalid: %w", err)
 	}
 	bestScore := 0.0
 	var best WorkInput
 	for _, entry := range feed.Entries {
+		if strings.Contains(entry.ID, "arxiv.org/api/errors") {
+			return WorkInput{}, false, fmt.Errorf("arXiv lookup failed: %s (%s)", strings.TrimSpace(entry.Title), entry.ID)
+		}
 		title := strings.Join(strings.Fields(entry.Title), " ")
 		score := tokenCoverage(citation, title)
 		if score < 0.65 || score <= bestScore {
@@ -171,5 +173,5 @@ func resolveWithArxiv(ctx context.Context, citation string) (WorkInput, bool) {
 		bestScore = score
 		best = WorkInput{Title: title, Authors: authors, Year: year, ArxivID: base, Provider: "arxiv", ProviderWorkID: base, Provenance: map[string]any{"match": "citation_search", "score": score}}
 	}
-	return best, bestScore > 0
+	return best, bestScore > 0, nil
 }

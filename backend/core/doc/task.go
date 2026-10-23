@@ -1413,6 +1413,7 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 				var ext taskExt
 				_ = json.Unmarshal(taskRow.Ext, &ext)
 				ext.TaskState = string(TaskStateSucceeded)
+				ext.ErrorMessage = ""
 				ext.MarketSubmission = "submitted"
 				ext.MarketPreviousTaskID = ""
 				if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).Where("id = ? AND dataset_id = ?", taskID, datasetID).Update("ext", mustJSON(ext)).Error; err != nil {

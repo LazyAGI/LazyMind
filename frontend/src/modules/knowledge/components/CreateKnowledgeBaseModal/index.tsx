@@ -29,6 +29,7 @@ import {
 import "@/modules/dataSource/index.scss";
 import "./index.scss";
 import { createCapabilityProfile, getLearningCatalog, listCapabilityProfiles, saveKnowledgeBaseCapabilities, type CustomCapabilityProfile, type LearningCatalog } from "@/modules/learning/api";
+import { markPaperLibrary } from "@/modules/knowledge/paper/store";
 import CapabilitySettings, { capabilityRefsFromForm } from "@/modules/learning/CapabilitySettings";
 
 const { TextArea } = Input;
@@ -225,6 +226,8 @@ const CreateKnowledgeBaseModal = forwardRef<
 
       setLoading(true);
       try {
+        const libraryKind = params.learning_profile_key === "academic_papers" ? "paper" : "document";
+        params.library_kind = libraryKind;
         const capabilityKeys = params.learning_capability_keys || [];
         if (!capabilityKeys.length) {
           message.error(t("learning.selectCapabilities"));
@@ -241,6 +244,7 @@ const CreateKnowledgeBaseModal = forwardRef<
         const created = await onCreate(params);
         const datasetId = created?.dataset_id;
         if (datasetId) await saveKnowledgeBaseCapabilities(datasetId, capabilityRefsFromForm(capabilityKeys,capabilitySettings,learningCatalog?.capabilities));
+        if (datasetId && libraryKind === "paper") markPaperLibrary(datasetId);
         message.success(t("knowledge.createSuccess"));
         onCancel();
       } catch (error) {

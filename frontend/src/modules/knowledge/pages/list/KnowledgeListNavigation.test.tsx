@@ -4,7 +4,10 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, desktopTestTranslation as t, installDesktopTestDOM } from "@/test/desktopResourceFixtures";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ ragAvailability: "ready", list: vi.fn(), catalog: vi.fn(), scan: vi.fn(), cloudCreate: vi.fn() }));
+vi.mock("@/modules/modelProvider/contexts/RAGComponentContext", () => ({
+  useRAGComponent: () => ({ availability: mocks.ragAvailability }),
+}));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("@/modules/knowledge/api/knowledgeMarket", () => ({
   listKnowledgeMarket: mocks.catalog,
@@ -58,6 +61,7 @@ async function mount(search: string) {
 beforeAll(installDesktopTestDOM);
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.ragAvailability = "ready";
   mocks.list.mockResolvedValue(localResponse);
   mocks.catalog.mockResolvedValue([{
     id: "official", name: "官方手册", category: "industry", domain: "团队", description: "官方说明",
@@ -69,6 +73,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("knowledge list URL and data restoration", () => {
+  it("settles cloud archive loading without RAG and refreshes when it becomes ready", async () => {
+    mocks.ragAvailability = "checking";
+    const router = await mount("?source=cloudArchive&page=3");
+    expect(mocks.scan).not.toHaveBeenCalled();
+    expect(screen.getByText("第 3 页")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "重试" })).not.toBeInTheDocument();
+
+    mocks.ragAvailability = "ready";
+    await act(async () => { await router.navigate("/lib/knowledge/list?source=cloudArchive&page=3&from=readiness"); });
+    await waitFor(() => expect(mocks.scan).toHaveBeenCalled());
+  });
+
   it("returns from an installed official knowledge base with the original filters", async () => {
     const router = await mount("?source=official&keyword=手册&officialTag=团队&sort=most_used");
     fireEvent.click(await screen.findByRole("button", { name: "官方手册" }));

@@ -287,8 +287,17 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
+	handleAPI(r, "POST", "/academic/arxiv:lookup", []string{"document.read"}, academic.LookupArxiv)
+	handleAPI(r, "POST", "/academic/arxiv:import", []string{"document.write"}, academic.ImportArxiv)
+	handleAPI(r, "GET", "/academic/arxiv/library", []string{"document.read"}, academic.ListArxivLibrary)
+	handleAPI(r, "GET", "/academic/library", []string{"document.read"}, academic.GetPaperLibrary)
+	handleAPI(r, "PUT", "/academic/library", []string{"document.write"}, academic.PutPaperLibrary)
+	handleAPI(r, "POST", "/academic/zotero/preview", []string{"document.write"}, academic.PreviewZoteroLibrary)
+	handleAPI(r, "POST", "/academic/zotero/attachment", []string{"document.write"}, academic.DownloadZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/attachment/store", []string{"document.write"}, academic.StoreZoteroAttachment)
 	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, systemdeps.RequireRAG(academic.ListReferences))
 	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, systemdeps.RequireRAG(academic.ExtractReferences))
+
 	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)
 	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, systemdeps.RequireRAG(academic.CheckPresence))
 	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, systemdeps.RequireRAG(academic.PreviewImport))
