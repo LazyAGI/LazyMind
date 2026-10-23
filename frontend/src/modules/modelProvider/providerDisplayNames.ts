@@ -41,6 +41,7 @@ const providerNames: readonly ProviderBrandName[] = [
     aliases: ["sensenova", "商汤日日新", "日日新"],
   },
   { en: "SiliconFlow", zh: "硅基流动", aliases: ["siliconflow", "硅基流动"] },
+  { en: "vLLM", zh: "vLLM", aliases: ["vllm"] },
 ];
 
 const brandByAlias = new Map(

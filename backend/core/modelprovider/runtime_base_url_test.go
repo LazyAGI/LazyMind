@@ -11,6 +11,7 @@ func TestLazyLLMBaseURLNormalizesOpenAIAndOfficialOpenRouter(t *testing.T) {
 		{"classic SenseNova", "SenseNova", "https://api.sensenova.cn/compatible-mode/v1/", "https://api.sensenova.cn/compatible-mode/v1/"},
 		{"SenseNova proxy", "SenseNova", "https://proxy.example/v1/", "https://proxy.example/v1/"},
 		{"host and port get v1", "OpenAI", "http://127.0.0.1:8000", "http://127.0.0.1:8000/v1/"},
+		{"vllm root gets v1", "vLLM", "http://inference.test:8000", "http://inference.test:8000/v1/"},
 		{"unversioned chat request uses default root", "OpenAI", "http://127.0.0.1:8000/chat/completions", "http://127.0.0.1:8000/v1/"},
 		{"request suffix is cropped", "OpenAI", "http://model.test:8000/v1/chat/completions", "http://model.test:8000/v1/"},
 		{"prefixed v1 is preserved", "OpenAI", "https://model.test/api/v1/models?debug=1#result", "https://model.test/api/v1/"},
@@ -42,6 +43,7 @@ func TestHasOpenAIRequestPath(t *testing.T) {
 		want                    bool
 	}{
 		{"official chat completions endpoint", "OpenAI", "https://api.openai.com/v1/chat/completions", true},
+		{"vllm requires API root", "vLLM", "http://inference.test:8000/v1/chat/completions", true},
 		{"proxy responses endpoint", "OpenAI", "https://proxy.example.com/openai/v1/responses", true},
 		{"prefixed API root", "OpenAI", "https://proxy.example.com/openai/v1/", false},
 		{"host without version", "OpenAI", "http://127.0.0.1:8000", false},

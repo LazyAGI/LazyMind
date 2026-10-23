@@ -7228,6 +7228,51 @@ components:
                 - image_embed_enabled
                 - image_embed_required
             type: object
+        ModelProbeResponse:
+            properties:
+                code:
+                    enum:
+                        - ok
+                        - accepted
+                        - unsupported_type
+                        - unsupported_provider
+                        - unknown_type
+                        - authentication_failed
+                        - permission_denied
+                        - model_not_found
+                        - rate_limited
+                        - quota_exceeded
+                        - invalid_request
+                        - timeout
+                        - connection_error
+                        - invalid_response
+                        - empty_response
+                        - upstream_error
+                        - configuration_changed
+                        - key_disabled
+                        - key_required
+                        - probe_in_progress
+                    type: string
+                elapsed_ms:
+                    format: int64
+                    type: integer
+                http_status:
+                    type: integer
+                model_type:
+                    type: string
+                status:
+                    enum:
+                        - passed
+                        - failed
+                        - unsupported
+                        - accepted
+                    type: string
+            required:
+                - code
+                - elapsed_ms
+                - model_type
+                - status
+            type: object
         NotificationClaim:
             additionalProperties: false
             properties:
@@ -26312,6 +26357,35 @@ paths:
                                 $ref: '#/components/schemas/listModelProviderGroupModelsOpenAPIItem'
                     description: Updated group model
             summary: Update a connection group model
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe:
+        post:
+            description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: model_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ModelProbeResponse'
+                    description: Bounded model availability result without provider text or secrets
+            summary: Test one saved model with a minimal inference request
             tags:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/remote_models:

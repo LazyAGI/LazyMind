@@ -14,12 +14,13 @@ import {
   type SavedProviderModelsProps,
 } from "./SavedProviderModels";
 
-const upstream = vi.hoisted(() => ({ lookup: vi.fn() }));
+const upstream = vi.hoisted(() => ({ lookup: vi.fn(), probe: vi.fn() }));
+vi.mock("../modelProbe", () => ({ probeModel: upstream.probe, probeFailureCode: () => "connection_error" }));
 vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: upstream.lookup }));
 vi.mock("@/components/request", () => ({
   getLocalizedErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
 }));
-beforeEach(() => upstream.lookup.mockReturnValue(undefined));
+beforeEach(() => { vi.clearAllMocks(); upstream.lookup.mockReturnValue(undefined); });
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -77,6 +78,42 @@ function groupLabels(container: HTMLElement) {
 }
 
 describe("saved supplier models", () => {
+  it("probes the selected saved identity and locks only that row while in flight", async () => {
+    let finish!: (result: unknown) => void;
+    upstream.probe.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const { props } = setup({ providerName: "OpenAI", probe: { providerId: "supplier", groupId: "group", configurationKey: "endpoint:key" } });
+    const row = screen.getByRole("listitem", { name: "gpt-4o" });
+    const probe = within(row).getByRole("button", { name: "modelProvider.probe.action:gpt-4o" });
+    fireEvent.click(probe);
+    expect(upstream.probe).toHaveBeenCalledWith({ providerId: "supplier", groupId: "group", modelId: "custom" }, expect.any(AbortSignal));
+    expect(within(row).getByRole("button", { name: "modelProvider.editModelAria:gpt-4o" })).toBeDisabled();
+    const remove = within(row).getByRole("button", { name: "modelProvider.deleteModelAria:gpt-4o" });
+    expect(remove).toBeDisabled();
+    fireEvent.click(remove);
+    expect(props.onRemove).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "modelProvider.editModelAria:BAAI/bge-large" })).toBeEnabled();
+    await act(async () => finish({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 12 }));
+    await waitFor(() => expect(remove).toBeEnabled());
+  });
+
+  it("keeps unknown and runtime-unsupported models from firing a probe", () => {
+    setup({ providerName: "OpenRouter", models: [
+      { ...models[1], id: "unknown", name: "unknown", capability: "UNKNOWN" },
+      { ...models[1], id: "rerank", name: "rerank", capability: "RERANK" },
+    ], probe: { providerId: "supplier", groupId: "group", configurationKey: "config" } });
+    for (const model of ["unknown", "rerank"]) {
+      const button = screen.getByRole("button", { name: `modelProvider.probe.action:${model}` });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
+    expect(upstream.probe).not.toHaveBeenCalled();
+  });
+
+  it("names the minus tooltip as remove model", async () => {
+    setup();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "modelProvider.deleteModelAria:gpt-4o" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("modelProvider.removeModelHint");
+  });
   it("honors disabled visual input instead of reviving the catalog default", async () => {
     upstream.lookup.mockReturnValue({ input: ["text", "image"], output: ["text"] });
     setup({ providerName: "OpenAI", models: [{ ...models[1], vision: false }] });

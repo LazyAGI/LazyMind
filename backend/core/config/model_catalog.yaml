@@ -1298,6 +1298,17 @@ model_providers:
         - name: TeleAI/TeleSpeechASR
           type: stt
 
+    - name: VLLM
+      description:
+        zh-CN: |
+          连接自行部署的 vLLM OpenAI 兼容服务。填写服务的 API地址；未开启认证时可留空 API秘钥。
+          通过模型列表发现已部署模型，并读取 max_model_len 作为上下文窗口。
+        en-US: |
+          Connect to your self-hosted vLLM OpenAI-compatible server. Set its API address; leave the API key empty when authentication is disabled.
+          Discover deployed models and read max_model_len as their context window.
+      base_url: "http://localhost:8000/v1/"
+      models: []
+
 ocr_providers:
   capabilities: [custom_base_url]
   suppliers:

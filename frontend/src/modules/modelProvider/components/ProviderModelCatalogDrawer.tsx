@@ -15,7 +15,6 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
-  DeleteOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
@@ -258,9 +257,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     byTask.set(key, group);
   }
   const groups = [...byTask.values()];
-  const unavailable = candidates.filter(
-    (model) => model.missing && model.existing,
-  );
+  const removable = candidates.filter((model) => Boolean(model.existing));
   const addable = candidates.filter(
     (model) => !model.existing && !model.missing && !model.unsupportedType,
   );
@@ -351,16 +348,6 @@ export function ProviderModelCatalogDrawer(props: Props) {
       }
       extra={
         <div className="provider-model-catalog-toolbar">
-          <Tooltip title={copy("clearUnavailableHint")}>
-            <Button
-              type="text"
-              icon={<DeleteOutlined aria-hidden="true" />}
-              disabled={working || !unavailable.length || !loaded}
-              onClick={() => void runChanges(unavailable, true)}
-            >
-              {copy("clearUnavailable")}
-            </Button>
-          </Tooltip>
           <Tooltip title={copy("addAll")}>
             <Button
               type="text"
@@ -369,6 +356,16 @@ export function ProviderModelCatalogDrawer(props: Props) {
               onClick={() => void runChanges(addable, false)}
             >
               {copy("addAll")}
+            </Button>
+          </Tooltip>
+          <Tooltip title={copy("removeAllHint")}>
+            <Button
+              type="text"
+              icon={<MinusOutlined aria-hidden="true" />}
+              disabled={working || !removable.length}
+              onClick={() => void runChanges(removable, true)}
+            >
+              {copy("removeAll")}
             </Button>
           </Tooltip>
         </div>

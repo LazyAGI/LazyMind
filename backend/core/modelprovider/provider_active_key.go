@@ -335,7 +335,7 @@ func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 			if err := tx.Where("id = ? AND deleted_at IS NULL", requested.ID).Take(&requested).Error; err != nil {
 				return err
 			}
-			if !requested.IsVerified && !(allowUnverifiedKeylessCustom && parent.IsCustom) {
+			if !requested.IsVerified && !(allowUnverifiedKeylessCustom && (parent.IsCustom || isVLLMSupplier(ctx, tx, parent))) {
 				unavailable = ErrProviderKeyUnverified
 				return nil
 			}

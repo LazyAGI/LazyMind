@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getGroups: vi.fn(),
   getModels: vi.fn(),
   addModel: vi.fn(),
+  remote: vi.fn(),
   editModel: vi.fn(),
   deleteModel: vi.fn(),
   translate: (key: string, options?: { name?: string }) =>
@@ -37,6 +38,7 @@ vi.mock("../api", () => ({
     apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete: mocks.deleteModel,
   },
   modelProvidersDefaultApi: {},
+  listRemoteGroupModels: mocks.remote,
   updateGroupModel: mocks.editModel,
   unwrapModelProviderData: (data: unknown) => data,
   withModelProviderJsonOptions: (options: unknown) => options,
@@ -102,10 +104,10 @@ vi.mock("../components/ModelEditorModal", () => ({
     model: ProviderModel | null;
     onSave: (values: typeof editedValues) => Promise<void>;
     onClose: () => void;
-  }) => props.model ? <button onClick={async () => {
+  }) => props.model ? <><output data-testid="editor-model">{JSON.stringify(props.model)}</output><button onClick={async () => {
     await props.onSave(editedValues);
     props.onClose();
-  }}>Save model edits</button> : null,
+  }}>Save model edits</button></> : null,
 }));
 
 const supplier = { id: "supplier", name: "OpenAI", protocol_name: "OpenAI", base_url: "https://example.test/v1" };
@@ -151,6 +153,7 @@ beforeEach(() => {
   mocks.getGroups.mockResolvedValue({ data: { groups: [initialGroup] } });
   mocks.getModels.mockResolvedValue({ data: { models: originalModels } });
   mocks.addModel.mockResolvedValue({ data: createdModel });
+  mocks.remote.mockResolvedValue({ models: [] });
   mocks.editModel.mockResolvedValue({
     id: "chat", name: editedValues.name, model_type: "vlm", is_default: false,
     vision: true, max_input_tokens: editedValues.maxInputTokens,
@@ -164,6 +167,48 @@ afterEach(() => {
 });
 
 describe("model provider asynchronous state", () => {
+  it("lets an unverified keyless vLLM service fetch custom-model metadata", async () => {
+    const local = { ...supplier, name: "vLLM", protocol_name: "VLLM", base_url: "http://localhost:8000/v1/" };
+    mocks.getProviders.mockResolvedValue({ data: { providers: [local] } });
+    mocks.getProvidersWithGroups.mockResolvedValue({ data: { providers: [local] } });
+    mocks.getGroups.mockResolvedValue({ data: { groups: [{ ...initialGroup, base_url: local.base_url, has_api_key: false, is_verified: false, keys: [] }] } });
+    draw();
+    const open = await screen.findByRole("button", { name: "Add custom model" });
+    await waitFor(() => expect(open).toBeEnabled());
+    fireEvent.click(open);
+    const fetch = within(await screen.findByRole("dialog")).getByRole("button", { name: "modelProvider.fetchAvailableModels" });
+    expect(fetch).toBeEnabled();
+    fireEvent.click(fetch);
+    await waitFor(() => expect(mocks.remote).toHaveBeenCalledWith("supplier", "group"));
+  });
+  it.each(["auto", "manual"] as const)("preserves discovered vLLM context when adding an alias in %s mode", async (mode) => {
+    const local = { ...supplier, name: "vLLM", protocol_name: "VLLM", base_url: "http://localhost:8000/v1/" };
+    mocks.getProviders.mockResolvedValue({ data: { providers: [local] } });
+    mocks.getProvidersWithGroups.mockResolvedValue({ data: { providers: [local] } });
+    mocks.getGroups.mockResolvedValue({ data: { groups: [{ ...initialGroup, base_url: local.base_url }] } });
+    mocks.getModels.mockResolvedValue({ data: { models: [] } });
+    mocks.remote.mockResolvedValue({ models: [{ id: "qwen38-27b", name: "qwen38-27b", model_type: "", max_input_tokens: "262144" }] });
+    mocks.addModel.mockImplementationOnce(async (request) => ({ data: { ...createdModel, ...request.addModelProviderGroupModelOpenAPIRequest } }));
+    draw();
+    const open = await screen.findByRole("button", { name: "Add custom model" });
+    await waitFor(() => expect(open).toBeEnabled());
+    fireEvent.click(open);
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "modelProvider.fetchAvailableModels" }));
+    await waitFor(() => expect(mocks.remote).toHaveBeenCalledOnce());
+    fireEvent.change(dialog.getByPlaceholderText("modelProvider.modelNamePlaceholder"), { target: { value: "qwen38-27b" } });
+    if (mode === "manual") {
+      fireEvent.click(dialog.getByRole("button", { name: "modelProvider.maxInputTokensExpand" }));
+      fireEvent.change(dialog.getByPlaceholderText("modelProvider.maxInputTokensAutoPlaceholder"), { target: { value: "128K" } });
+    }
+    fireEvent.click(dialog.getByRole("button", { name: "modelProvider.add" }));
+    const expected = mode === "auto" ? "262144" : "128K";
+    await waitFor(() => expect(mocks.addModel).toHaveBeenCalledWith(expect.objectContaining({ addModelProviderGroupModelOpenAPIRequest: expect.objectContaining({ name: "qwen38-27b", model_type: "llm", max_input_tokens: expected }) })));
+    await waitFor(() => expect(currentGroup().models[0]).toMatchObject({ name: "qwen38-27b", maxInputTokens: expected }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit first model" }));
+    expect(JSON.parse(screen.getByTestId("editor-model").textContent || "{}").maxInputTokens).toBe(expected);
+  });
+
   it("retains cached models on a localized load error and clears the error after retry", async () => {
     draw();
     await loadInitialModels();

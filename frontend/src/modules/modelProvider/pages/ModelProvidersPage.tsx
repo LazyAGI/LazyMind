@@ -1451,6 +1451,9 @@ export default function ModelProviderPage({
           ]);
           return;
         }
+      } else if (supportsModelContext(values.capability)) {
+        const discoveredContext = remoteModels.find((model) => model.name.trim() === values.name.trim())?.max_input_tokens;
+        if (discoveredContext?.trim()) maxInputTokens = parseLlmMaxInputTokens(discoveredContext) || undefined;
       }
       const createdModel = unwrapModelProviderData<ApiModel>(
         (
@@ -1736,8 +1739,8 @@ export default function ModelProviderPage({
                   <Button
                     aria-label={t("modelProvider.fetchAvailableModels")}
                     loading={remoteModelsLoading}
-                    disabled={!customModelModal?.group.verified}
-                    title={!customModelModal?.group.verified ? t("modelProvider.catalog.verifyBeforeSync") : undefined}
+                    disabled={!customModelModal || (!customModelModal.group.verified && !canDiscoverWithoutApiKey(customModelModal.provider, customModelModal.group))}
+                    title={!customModelModal || (!customModelModal.group.verified && !canDiscoverWithoutApiKey(customModelModal.provider, customModelModal.group)) ? t("modelProvider.catalog.verifyBeforeSync") : undefined}
                     size="small"
                     type="text"
                     icon={<SearchOutlined />}

@@ -4924,6 +4924,47 @@ export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
 }
+export interface ModelProbeResponse {
+    'code': ModelProbeResponseCodeEnum;
+    'elapsed_ms': number;
+    'http_status'?: number;
+    'model_type': string;
+    'status': ModelProbeResponseStatusEnum;
+}
+
+export const ModelProbeResponseCodeEnum = {
+    Ok: 'ok',
+    Accepted: 'accepted',
+    UnsupportedType: 'unsupported_type',
+    UnsupportedProvider: 'unsupported_provider',
+    UnknownType: 'unknown_type',
+    AuthenticationFailed: 'authentication_failed',
+    PermissionDenied: 'permission_denied',
+    ModelNotFound: 'model_not_found',
+    RateLimited: 'rate_limited',
+    QuotaExceeded: 'quota_exceeded',
+    InvalidRequest: 'invalid_request',
+    Timeout: 'timeout',
+    ConnectionError: 'connection_error',
+    InvalidResponse: 'invalid_response',
+    EmptyResponse: 'empty_response',
+    UpstreamError: 'upstream_error',
+    ConfigurationChanged: 'configuration_changed',
+    KeyDisabled: 'key_disabled',
+    KeyRequired: 'key_required',
+    ProbeInProgress: 'probe_in_progress'
+} as const;
+
+export type ModelProbeResponseCodeEnum = typeof ModelProbeResponseCodeEnum[keyof typeof ModelProbeResponseCodeEnum];
+export const ModelProbeResponseStatusEnum = {
+    Passed: 'passed',
+    Failed: 'failed',
+    Unsupported: 'unsupported',
+    Accepted: 'accepted'
+} as const;
+
+export type ModelProbeResponseStatusEnum = typeof ModelProbeResponseStatusEnum[keyof typeof ModelProbeResponseStatusEnum];
+
 export interface ModelProviderBaseURLPresetItem {
     'api_key_required'?: boolean;
     'key': string;
@@ -47821,6 +47862,48 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost: async (modelProviderId: string, groupId: string, modelId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'groupId', groupId)
+            // verify required parameter 'modelId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'modelId', modelId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
@@ -48657,6 +48740,21 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId: string, groupId: string, modelId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelProbeResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId, groupId, modelId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
@@ -49026,6 +49124,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.updateModelProviderGroupModelOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ModelProbeResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
@@ -49328,6 +49436,17 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly modelId: string
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest {
@@ -49593,6 +49712,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.updateModelProviderGroupModelOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+     * @summary Test one saved model with a minimal inference request
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

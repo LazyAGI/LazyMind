@@ -919,6 +919,12 @@ export function ProviderWorkspace(props: Props) {
                       provider.protocolName || provider.source || provider.name
                     }
                     supplierName={provider.name}
+                    probe={group ? {
+                      providerId: provider.id,
+                      groupId: group.id,
+                      configurationKey: JSON.stringify([provider.protocolName || provider.source, endpointBaseline, group.baseUrl, group.keys.map((key) => [key.id, key.enabled])]),
+                      disabledReason: endpointDirty || endpointSaving ? t("modelProvider.probe.saveAddressFirst") : hasSavedKeys && !hasEnabledKey ? t("modelProvider.probe.reason.key_disabled") : undefined,
+                    } : undefined}
                     capabilityLabel={props.capabilityLabel}
                     onEdit={(model) => {
                       if (group) props.onEditModel(provider, group, model);

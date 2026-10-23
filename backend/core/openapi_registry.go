@@ -4661,6 +4661,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Created group model", addModelProviderGroupModelOpenAPIResponse{})},
 		},
 		{
+			Method:      "POST",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe",
+			Summary:     "Test one saved model with a minimal inference request",
+			Description: "Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupModelPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Bounded model availability result without provider text or secrets", modelprovider.ModelProbeResponse{})},
+		},
+		{
 			Method:      "PATCH",
 			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}",
 			Summary:     "Update a connection group model",

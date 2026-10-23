@@ -87,6 +87,21 @@ beforeEach(() => {
 });
 
 describe("provider model catalog drawer", () => {
+  it("places bulk add before bulk removal and removes all saved models across filters without confirmation", async () => {
+    const saved = [selected[0], { ...selected[0], id: "remote-saved", name: "deepseek-v3", builtIn: true }];
+    const props = fixture(saved);
+    draw(props);
+    await screen.findByText("deepseek-v3");
+    const add = screen.getByRole("button", { name: "modelProvider.catalog.addAll" });
+    const remove = screen.getByRole("button", { name: "modelProvider.catalog.removeAll" });
+    expect(add.compareDocumentPosition(remove) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.catalog.search" }), { target: { value: "BAAI" } });
+    fireEvent.click(remove);
+    await waitFor(() => expect(props.onRemove).toHaveBeenCalledTimes(2));
+    expect(props.onRemove.mock.calls.map(([model]) => model.name).sort()).toEqual(["deepseek-v3", "qwen-private"]);
+    expect(screen.queryByRole("button", { name: "common.delete" })).not.toBeInTheDocument();
+  });
+
   it("shows unsupported OpenRouter types without allowing them to be imported", async () => {
     mocks.remote.mockResolvedValueOnce({ models: [
       { id: "text-vector", name: "text-vector", model_type: "embed" },
@@ -378,12 +393,12 @@ describe("provider model catalog drawer", () => {
     expect(props.onRemove).toHaveBeenCalledWith(selected[0]);
     expect(screen.queryByRole("button", { name: "common.delete" })).not.toBeInTheDocument();
     await waitFor(() => expect(group).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.clearUnavailable" }));
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.removeAll" }));
     await waitFor(() => expect(props.onRemove).toHaveBeenCalledTimes(2));
     expect(props.onRemove).toHaveBeenLastCalledWith(selected[0]);
   });
 
-  it("does not mark saved models unlisted when discovery fails", async () => {
+  it("allows removing saved models without mislabeling them when discovery fails", async () => {
     mocks.remote.mockRejectedValue(new Error("discovery offline"));
     draw(fixture());
     expect(await screen.findByText("discovery offline")).toBeInTheDocument();
@@ -392,9 +407,9 @@ describe("provider model catalog drawer", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "modelProvider.catalog.clearUnavailable",
+        name: "modelProvider.catalog.removeAll",
       }),
-    ).toBeDisabled();
+    ).toBeEnabled();
   });
 
   it("adds only classified missing models without reimporting saved models", async () => {

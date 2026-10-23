@@ -129,6 +129,7 @@ type openaiModelListEntry struct {
 	Task             string   `json:"task"`
 	Type             string   `json:"type"`
 	ContextLength    int      `json:"context_length"`
+	MaxModelLen      int      `json:"max_model_len"`
 	InputModalities  []string `json:"input_modalities"`
 	OutputModalities []string `json:"output_modalities"`
 	Architecture     struct {
@@ -433,9 +434,13 @@ func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *
 		added[strings.ToLower(strings.TrimSpace(row.Name))] = struct{}{}
 	}
 
+	metadataProvider := RuntimeProviderName(parent)
+	if isVLLMSupplier(r.Context(), db, parent) {
+		metadataProvider = "VLLM"
+	}
 	models := make([]remoteGroupModelItem, 0, len(entries))
 	for _, entry := range entries {
-		item := remoteModelItem(entry, RuntimeProviderName(parent), recognition)
+		item := remoteModelItem(entry, metadataProvider, recognition)
 		if _, ok := added[strings.ToLower(item.ID)]; ok {
 			item.Added = true
 		}
@@ -477,8 +482,12 @@ func remoteModelItem(entry openaiModelListEntry, providerName string, recognitio
 		Input: append([]string{}, input...), Output: append([]string{}, output...),
 	}
 	hasInputLimit := modelType == "llm" || modelType == "vlm" || modelType == "embed" || modelType == "multimodal_embedding" || modelType == "rerank"
-	if entry.ContextLength > 0 && hasInputLimit {
-		tokens := formatContextTokens(entry.ContextLength)
+	contextLength := entry.ContextLength
+	if contextLength <= 0 && normalizeProviderName(providerName) == "vllm" {
+		contextLength = entry.MaxModelLen
+	}
+	if contextLength > 0 && (hasInputLimit || normalizeProviderName(providerName) == "vllm") {
+		tokens := formatContextTokens(contextLength)
 		item.MaxInputTokens = &tokens
 	} else if hasInputLimit {
 		if tokens, ok := lookupMaxInputTokens(entry.ID, modelType); ok {

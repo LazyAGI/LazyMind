@@ -62,7 +62,7 @@
 }
 .saved-provider-model-actions {
   display: inline-flex;
-  flex: 0 0 56px;
+  flex: 0 0 84px;
   align-items: center;
   justify-content: flex-end;
   gap: 0;
@@ -94,7 +94,7 @@
     gap: 7px;
   }
   .saved-provider-model-actions {
-    flex-basis: 52px;
+    flex-basis: 78px;
     .ant-btn {
       width: 26px;
       min-width: 26px;
@@ -104,7 +104,7 @@
 }
 @media (pointer: coarse) {
   .saved-provider-model-actions {
-    flex-basis: 88px;
+    flex-basis: 132px;
     .ant-btn {
       flex-basis: 44px;
       min-width: 44px;

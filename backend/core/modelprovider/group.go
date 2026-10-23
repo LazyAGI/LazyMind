@@ -907,11 +907,30 @@ func providerAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, parent o
 	if strings.TrimSpace(baseURL) == "" {
 		return true
 	}
+	if isVLLMSupplier(ctx, db, parent) && hasSharedProviderEndpoint(parent) {
+		return !validCustomProviderURL(RuntimeProviderName(parent), baseURL)
+	}
 	defaultURL, known := defaultBaseURL(ctx, db, parent.DefaultModelProviderID)
 	if !known {
 		return !parent.IsCustom || !hasSharedProviderEndpoint(parent) || !validCustomProviderURL(RuntimeProviderName(parent), baseURL)
 	}
 	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(LazyLLMBaseURL(RuntimeProviderName(parent), defaultURL))
+}
+
+// isVLLMSupplier retains the supplier identity after its active request protocol
+// has been saved as OpenAI. Custom suppliers inherit identity from their template.
+func isVLLMSupplier(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider) bool {
+	if normalizeProviderName(RuntimeProviderName(parent)) == "vllm" || (!parent.IsCustom && normalizeProviderName(parent.Name) == "vllm") {
+		return true
+	}
+	if db == nil || parent.DefaultModelProviderID == "" || !db.Migrator().HasTable(&orm.DefaultModelProvider{}) {
+		return false
+	}
+	var template orm.DefaultModelProvider
+	if db.WithContext(ctx).Select("name").Where("id = ? AND deleted_at IS NULL", parent.DefaultModelProviderID).Take(&template).Error != nil {
+		return false
+	}
+	return normalizeProviderName(template.Name) == "vllm"
 }
 
 // sensenovaNewPlatformBaseURL is the alternative SenseNova base URL.

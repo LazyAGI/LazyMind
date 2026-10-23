@@ -23,6 +23,8 @@ import {
 } from "../maxInputTokens";
 import { ModelIdentityIcon } from "./ModelIdentityIcon";
 import { ModelTypeBadge } from "./ModelTypeBadge";
+import { ModelProbeButton } from "./ModelProbeButton";
+import type { ModelProbeContext } from "../modelProbe";
 import "./SavedProviderModels.scss";
 
 export interface SavedProviderModelsProps {
@@ -32,6 +34,7 @@ export interface SavedProviderModelsProps {
   providerName: string;
   supplierName?: string;
   capabilityLabel: (capability: ModelCapability) => string;
+  probe?: ModelProbeContext;
   onEdit: (model: ProviderModel) => void;
   onRemove: (model: ProviderModel) => void | boolean | Promise<void | boolean>;
 }
@@ -39,9 +42,11 @@ export interface SavedProviderModelsProps {
 export function SavedProviderModels(props: SavedProviderModelsProps) {
   const { t } = useTranslation();
   const pending = useRef(new Set<string>());
+  const activeProbes = useRef(new Set<string>());
+  const [probing, setProbing] = useState<Set<string>>(new Set());
   const [removing, setRemoving] = useState<Set<string>>(new Set());
   const remove = async (model: ProviderModel) => {
-    if (pending.current.has(model.id)) return;
+    if (pending.current.has(model.id) || activeProbes.current.has(model.id)) return;
     pending.current.add(model.id);
     setRemoving(new Set(pending.current));
     try {
@@ -127,6 +132,20 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
               {unsupported ? <small title={t("modelProvider.catalog.unsupportedType")}>{t("modelProvider.catalog.notSupportedYet")}</small> : null}
             </span>
             <span className="saved-provider-model-actions">
+              {props.probe ? <ModelProbeButton
+                providerId={props.probe.providerId}
+                groupId={props.probe.groupId}
+                modelId={model.id}
+                modelName={model.name}
+                configurationKey={JSON.stringify([props.probe.configurationKey, model.capability, model.vision, model.maxInputTokens, model.inputTokenLimit, model.maxOutputTokens])}
+                disabled={removing.has(model.id)}
+                disabledReason={props.probe.disabledReason || (type === "unknown" ? t("modelProvider.probe.reason.unknown_type") : unsupported ? t("modelProvider.probe.reason.unsupported_type") : undefined)}
+                onPendingChange={(value) => {
+                  if (value) activeProbes.current.add(model.id);
+                  else activeProbes.current.delete(model.id);
+                  setProbing(new Set(activeProbes.current));
+                }}
+              /> : null}
               <Tooltip
                 title={t("modelProvider.editModelAria", {
                   name: model.name,
@@ -138,14 +157,12 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                     name: model.name,
                   })}
                   icon={<SettingOutlined aria-hidden="true" />}
-                  disabled={removing.has(model.id)}
+                  disabled={removing.has(model.id) || probing.has(model.id)}
                   onClick={() => props.onEdit(model)}
                 />
               </Tooltip>
               <Tooltip
-                title={t("modelProvider.deleteModelAria", {
-                  name: model.name,
-                })}
+                title={t("modelProvider.removeModelHint")}
               >
                 <Button
                   type="text"
@@ -154,7 +171,7 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                   })}
                   icon={<MinusOutlined aria-hidden="true" />}
                   loading={removing.has(model.id)}
-                  disabled={removing.has(model.id)}
+                  disabled={removing.has(model.id) || probing.has(model.id)}
                   onClick={() => void remove(model)}
                 />
               </Tooltip>

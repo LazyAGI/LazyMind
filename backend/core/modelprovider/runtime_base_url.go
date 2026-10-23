@@ -14,7 +14,7 @@ func LazyLLMBaseURL(providerName, baseURL string) string {
 	if providerName == "openrouter" {
 		return canonicalOpenRouterBaseURL(baseURL)
 	}
-	if providerName != "openai" {
+	if LazyLLMSource(providerName) != "openai" {
 		return baseURL
 	}
 
@@ -51,7 +51,7 @@ func LazyLLMBaseURL(providerName, baseURL string) string {
 }
 
 func hasOpenAIRequestPath(providerName, baseURL string) bool {
-	if normalizeProviderName(providerName) != "openai" {
+	if LazyLLMSource(providerName) != "openai" {
 		return false
 	}
 

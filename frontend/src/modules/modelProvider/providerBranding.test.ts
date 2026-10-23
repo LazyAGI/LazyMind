@@ -14,6 +14,7 @@ describe("model provider branding", () => {
     ["Kimi", "/provider-icons/kimi.svg"],
     ["MiniMax", "/provider-icons/minimax.svg"],
     ["OpenRouter", "/provider-icons/openrouter.svg"],
+    ["vLLM", "/provider-icons/vllm.svg"],
   ])("maps %s to a bundled provider icon", (provider, expected) => {
     expect(getProviderLogoUrl(provider)).toBe(expected);
   });
