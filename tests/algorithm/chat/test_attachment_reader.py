@@ -6,6 +6,49 @@ import pytest
 ar = import_module('lazymind.chat.engine.attachment_reader')
 
 
+def test_pptx_upload_is_not_preprocessed(monkeypatch, tmp_path):
+    path = tmp_path / 'template.PPTX'
+    path.write_bytes(b'not parsed on upload')
+    def forbidden(*args, **kwargs):
+        raise AssertionError('No parser or OCR should run on upload')
+    monkeypatch.setattr(ar, 'parse_attachment_content', forbidden)
+    prompt = ar.build_attachment_reference_prompt([str(path)])
+    assert 'content NOT read' in prompt
+    assert 'pptx_analyzer' in prompt
+
+
+def test_pptx_generic_reader_never_falls_back_to_ocr(monkeypatch):
+    import pytest
+    monkeypatch.setattr(ar, '_get_document_reader', lambda: pytest.fail('OCR must not run'))
+    with pytest.raises(ValueError, match='pptx_analyzer'):
+        ar.read_chat_document_text('template.pptx')
+
+
+def test_pptx_analyzer_reads_native_pages(monkeypatch, tmp_path):
+    from pptx import Presentation
+    from lazymind.chat.engine.subagent import tools
+    source = tmp_path / 'template.pptx'
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[0])
+    slide.shapes.title.text = 'Internship contribution'
+    prs.slides.add_slide(prs.slide_layouts[6])
+    prs.save(source)
+    original = source.read_bytes()
+    monkeypatch.setattr(tools, '_resolve_attachment', lambda filename, turn: (str(source), None))
+    result = tools.pptx_analyzer('template.pptx')
+    assert result['slide_count'] == 2 and result['next_page'] == 2
+    assert any(slot['text'] == 'Internship contribution' for slot in result['slots'])
+    assert tools.pptx_analyzer('template.pptx', page=2)['next_page'] is None
+    assert source.read_bytes() == original
+
+
+def test_pptx_analyzer_registered_for_chat_and_subagents():
+    from lazyllm.tools.agent import ToolManager
+    from lazymind.chat.service.component.tool_registry import USER_ATTACHMENT_TOOL_CONFIGS
+    cfg = next(item for item in USER_ATTACHMENT_TOOL_CONFIGS if item.name == 'pptx_analyzer')
+    assert ToolManager([cfg.tool]) is not None
+
+
 def test_filter_chat_document_files():
     files = [
         '/data/a.png',

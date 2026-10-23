@@ -3,22 +3,35 @@ name: AI PPT Planner
 preflight_disabled: true
 description: >
   Plan a presentation from a user request, collect useful source material,
-  then generate free-form HTML slides via the workflow runtime (SenseNova-derived
-  subset under runtime/). Preview shows HTML pages in a flippable composite
-  workspace with speaker notes below. PPTX export is UI-only (Export button).
+  then generate HTML slides or fill uploaded PPTX templates in place into a new
+  native PPTX. Native files are downloaded for viewing in PowerPoint or WPS.
 
 when_to_use: >
   Trigger this workflow when the user explicitly asks to use the PPT workflow, or
   when the user wants to create, plan, draft, or revise a multi-slide
   presentation/deck/PPT. Use it for requests such as "make a PPT", "generate a
   presentation", "帮我做一个路演 PPT", or "做一份汇报幻灯片".
-  Uploaded materials are optional: text-only requests must start immediately
-  from the user's prompt and must never ask for an upload unless the user
-  explicitly asks to base the deck on a source file that is not available.
-  Before starting, collect only any missing presentation topic, slide count,
-  target customer/audience, visual style, and whether AI-generated per-slide
-  background images should be enabled, as declared by runtime policy.
+  Uploaded source materials are optional: text-only requests must start from
+  the user's prompt. The startup card may offer the declared optional PPTX
+  template choice; show its upload control only after the user selects upload,
+  and never ask for a source document merely because uploads are supported.
+  Before starting, collect only missing declared fields: presentation topic,
+  slide count, target customer/audience, visual style, AI-generated per-slide
+  backgrounds, optional template mode, and generation mode.
+  When a supplied PPTX is identified as the template, it already determines
+  visual style: never ask about style, palette, typography, decorative images
+  or AI backgrounds, even via a custom question. Reuse supplied facts and ask
+  only missing content/scope fields. Ask page count when unknown unless the
+  user explicitly asks to fill all existing pages or preserve template length.
+  For an uploaded PPTX template, preserve the original file and inspect it
+  through the native template tools. Never invoke Office-to-PDF, HTML conversion
+  or an OCR conversion tool merely to read or fill the template.
+  After successful native PPTX publication, generation is complete. Do not
+  launch additional parent-chat inspection, academic analysis or rendering.
+  A reported visual-validation limitation is a disclosure, not a new task.
   Do not trigger for simple one-off explanations, ordinary image generation,
+  edits to dates/text or adding speaker notes on an already generated native PPTX
+  (use edit_presentation inspect_content/edit_content on native_pptx directly),
   ordinary long-form writing, or requests that only ask to preview an uploaded
   PowerPoint file.
 
@@ -32,7 +45,57 @@ runtime:
     - background_images
     - preview_html
     - preview_notes
+    - native_pptx
   collects_knowledge: true
+  completed_actions:
+  - name: edit_current_pptx
+    requires_slot: native_pptx
+    description: |-
+      Delegate current native PPTX edits to a dedicated SubAgent.
+
+      Pass the user's complete edit instruction, including preservation constraints.
+      The SubAgent inspects current content, writes text/notes and publishes a new
+      artifact revision. Do not write speeches or edit files in main Chat, and do
+      not rewind any Workflow step. Report the task result and stop.
+    agent_type: pptx_edit
+    title: PPTX 内容、字体与讲稿编辑
+    session_params:
+    - _pptx_edit_session_id
+    - session_id
+    params:
+      tools_only: true
+      terminal_tools:
+      - publish_pptx_edit
+      output_slot_types:
+        pptx_edit_receipt: json
+      instruction: >-
+        Edit the selected native PPTX only. Inspect it first. Reuse saved material_summary and requirement_analysis
+        when needed; never search or regenerate. Preserve all unspecified slide content and formatting.
+        For font requests pass target_font to publish_pptx_edit: omit pages for the entire deck, pages=[1]
+        for the first slide, exact inspected slot_ids for a specific part or custom title. Never rewrite
+        text to change fonts. For size, bold, italic, underline or text color use style_edits on publish_pptx_edit:
+        each object has pages/slot_ids/text_scope and font_size_pt/bold/italic/underline/text_color. Omitted
+        fields stay unchanged, false cancels that style. Use multiple entries for different ranges, publish
+        once. Sizes are pt. Report overflow errors instead of silently shrinking fonts or resizing boxes.
+        Only set allow_font_download when the user explicitly requests download. Report font_notice and
+        any unmodified_complex_text_parts from the result; never claim chart/SmartArt text was changed when
+        it was not. Write requested detailed page-specific speeches in speaker notes, not visible slide
+        text; do not invent facts. For every-page notes set require_all_notes=true. Publish exactly once
+        then stop. If the requested edit is unsupported or overflows, report the limitation.
+    output_slots:
+    - pptx_edit_receipt
+    tools:
+    - inspect_current_pptx
+    - read_pptx_edit_material
+    - publish_pptx_edit
+    routing: >-
+      For date, title, slide text, typography (font/size/bold/italic/underline/text color on whole deck/page/selected
+      text), or speaker-note changes on the selected native_pptx, including every-page detailed speeches,
+      MUST delegate to edit_current_pptx with the complete user instruction. Its dedicated SubAgent performs
+      inspection, writing and publication; main Chat must not write speeches or edit the file itself. Do
+      NOT call advance_step, rewind, generate_ppt or another Workflow for these edits. Publish once and
+      stop; the Session remains completed. If unsupported or overflowing, report the limitation. Only an
+      explicit user request to regenerate/restructure the deck uses the ordinary completed-edit step routing.
   completed_edit_step: generate_ppt
   completed_edit_routing: |
     For an explicit request to revise a completed deck, infer the earliest
@@ -46,10 +109,12 @@ runtime:
     new explicit request.
 
     Route changes to presentation goal, audience, tone, slide count, global
-    constraints, deck-wide visual direction, or whether AI backgrounds are
+    constraints affecting content, or whether AI backgrounds are
     enabled to analyze_requirements.
     Route requests to add, replace, refresh, research, or cite source material
-    to collect_materials. Route requests to rewrite the deck-wide or selected
+    to collect_materials. Route requests to revise academic interpretation or
+    cross-paper comparison to analyze_academic_sources when available.
+    Route requests to rewrite the deck-wide or selected
     AI-background prompt plan to plan_background_prompts. Route requests to
     regenerate existing AI background images without changing their approved
     prompts to generate_backgrounds. Route changes to deck structure, section
@@ -58,6 +123,10 @@ runtime:
     plan_page_prompts. Route slide rendering, page content, layout, element,
     foreground image, ordinary background, and page-scoped visual changes to
     generate_ppt.
+    Pure palette/color, typography, spacing, whitespace and visual restyling
+    requests on an existing deck go directly to generate_ppt, even deck-wide.
+    Preserve approved content and page count; do not restart requirement analysis
+    or material collection for these visual-only changes.
 
     For a request to insert or add a whole slide into an already generated deck,
     first call read_artifact(artifact_ref='ppt_capability_requirements') to inspect
@@ -74,14 +143,57 @@ runtime:
         capability_requirements: ppt_capability_requirements
         style_flow: style_flow
         generate_background_images: generate_background_images
+        template_mode: template_mode
   clarification_fields:
+    - id: contribution_scope
+      label: 个人贡献范围
+      ask_when: >
+        Only when the user requests personal work/contribution analysis from
+        GitHub, Git or PR descriptions and author identity or repository is missing,
+        or a requested bounded internship/reporting period has no dates.
+        Extract author/repository/state from a supplied GitHub /pulls?q= URL;
+        these count as supplied. A filter URL without dates means all matching
+        dates unless the user additionally requests a specific reporting period.
+        Public repositories do not require a connection or token.
+        Reuse explicit information already supplied. Do not infer that a connected
+        account is the contribution author. Branch is optional, not a substitute
+        for author identity. Ask only for missing fields in one question.
+      question: 请补充尚未提供的 GitHub 用户名、仓库及实习起止日期（按 PR 创建日期筛选）；如需限定分支，请注明来源分支或目标分支。
+      type: text
+    - id: academic_materials
+      label: 科研材料
+      ask_when: >
+        Only for research reports, paper reviews, thesis defenses or reading-note
+        presentations when no relevant source attachments, substantive research
+        text or reading notes have already been supplied in this conversation.
+        Reuse existing materials without asking again. A PPTX visual template
+        is not a research source. Do not ask this question for general PPT tasks.
+      question: 请提供科研材料，可上传单篇或多篇论文，也可以直接输入研究内容或阅读心得。
+      type: single
+      choice_policy: seed
+      allow_other: true
+      choices:
+        - 上传论文或研究材料
+      attachment:
+        when_choice: 上传论文或研究材料
+        material_id: uploaded_materials
+        accept: [.pdf, .doc, .docx, .txt, .md]
+        max_files: -1
+        required: true
     - id: topic
       label: 主题
+      ask_when: Only when the presentation purpose/topic is not already clear from the request. A probation defense is a supplied topic.
       question: 这份 PPT 的主题是什么？
       type: text
     - id: slide_count
       label: 页数
-      question: 希望生成多少页？请输入任意正整数；下列常用页数仅供快速选择。
+      ask_when: >
+        Only when the desired page count is unknown AND the user has not explicitly
+        requested filling all existing template pages, filling the template completely
+        (填满/补全模板全部页面), or preserving its original page count.
+        Uploading a template alone does not settle page count: it may contain only
+        opening/closing pages. Reuse an explicit count; never ask it again.
+      question: 希望最终多少页？可以填写页数，或选择沿用模板全部页面；模板只有收尾页时，也请说明期望的总页数。
       type: single
       choice_policy: seed
       choices:
@@ -89,17 +201,41 @@ runtime:
         - 5 页
         - 8 页
         - 10 页
+        - 沿用模板全部页面（已上传模板时）
     - id: target_customer
       label: 对应客户
+      ask_when: Only when the audience is unknown and cannot be inferred from the stated purpose. A company probation defense already implies its reviewers/managers; do not ask for a customer.
       question: 这份 PPT 面向哪位客户或哪类受众？
       type: text
+    - id: template_mode
+      label: PPT 模板
+      ask_when: Only when template use has not been specified and no attachment has already been identified by the user as the template. Reuse the provided PPTX, do not ask for another upload.
+      question: 是否使用现有 PPTX 作为模板？选择上传后可直接添加文件，将沿用模板风格并跳过 AI 底图。
+      type: single
+      choice_policy: fixed
+      allow_other: false
+      choices:
+        - 不使用模板｜按需求生成新的视觉风格
+        - 上传 PPTX 模板｜分析母版、字体、配色和版式后生成
+      attachment:
+        when_choice: 上传 PPTX 模板｜分析母版、字体、配色和版式后生成
+        material_id: template_pptx
+        accept: [.pptx]
+        max_files: 1
+        required: true
     - id: visual_style
       label: 风格
+      ask_when: >
+        Only when no PPTX template is uploaded, selected or identified in the
+        request AND the user has supplied no
+        visual direction. Any explicit colors, typography, layout/density,
+        references, prohibitions or qualified style description satisfies this
+        field, even if it is not a catalog style. Preserve all qualifiers verbatim.
       question: >
-        希望采用什么视觉风格？请基于当前主题，从下面的可导出风格配方中
-        推荐并展示最匹配的 2-4 项；不要改写“｜”前的标准风格名。
+        希望采用什么视觉风格？仅在尚未提供视觉要求时询问；根据主题提供
+        2-4 个相关建议，也支持自定义描述。已提供的配色、布局和禁用元素不会被建议覆盖。
       type: single
-      choice_policy: subset
+      choice_policy: seed
       choices:
         - 赛博朋克｜霓虹暗底、电影式非对称大图、HUD 信息轨道
         - 科技感｜深色数据界面、蓝青信号线、专业克制
@@ -119,6 +255,7 @@ runtime:
         - 卡通可爱｜圆润造型、活泼色彩、友好叙事
     - id: generate_background_images
       label: AI 底图
+      ask_when: Only when no PPTX template has been uploaded or selected. Uploaded templates always disable AI backgrounds.
       question: 是否为每一页启用 AI 生成底图？启用后会根据需求和素材先生成一组相互关联、可编辑的底图提示词，再生成 16:9 无文字背景并应用到幻灯片背景层。
       type: single
       choice_policy: fixed
@@ -126,19 +263,22 @@ runtime:
       choices:
         - 启用｜为每页生成独立 AI 底图
         - 不启用｜使用纯色、渐变和矢量装饰
-    - id: style_flow
-      label: 风格确定方式
-      question: 整体风格希望怎么确定？
+    - id: generation_mode
+      label: 生成方式
+      question: 请选择生成方式。两种方式都会自动执行到最终 PPT，不需要分步确认。
       type: single
       choice_policy: fixed
       allow_other: false
       choices:
-        - 直接生成一套｜AI 根据需求确定一套整体风格并继续
-        - 先看三套方案｜先生成三套风格预览，由我选择后继续
+        - 快速生成
+        - 完整生成，耗时较长
 
 tool_scripts:
   - path: scripts/tools.py
     functions:
+      - ppt_source_connections
+      - ppt_collect_github_prs
+      - ppt_read_pr_description
       - ppt_search_web_images
       - ppt_register_material_images
       - ppt_generate_material_images
@@ -147,6 +287,9 @@ tool_scripts:
       - ppt_prepare_style
       - ppt_generate_background_images
       - check_ppt_workflow_capabilities
+      - ppt_analyze_template
+      - ppt_cache_academic_sources
+      - ppt_read_academic_source
       - ppt_attach_material_images
       - ppt_replace_page_material_image
       - ppt_replace_page_background
@@ -154,12 +297,18 @@ tool_scripts:
       - ppt_insert_outline_page
       - ppt_publish_deck_outline
       - ppt_generate_pages
+      - ppt_generate_native_pptx
+      - ppt_restyle_pages
+      - ppt_inspect_template_page
+      - pptx_analyzer
+      - ppt_fill_template
       - ppt_init_deck
       - ppt_find_deck
       - ppt_run_stage
       - ppt_list_pages
       - ppt_publish_outline
       - ppt_publish_pages
+      - ppt_replace_deck_fonts
       - ppt_read_page_html
       - ppt_read_page_outline
       - ppt_patch_page_outline
@@ -181,6 +330,8 @@ steps:
     label: Analyze Requirements
   - id: collect_materials
     label: Collect Materials
+  - id: analyze_academic_sources
+    label: Analyze Academic Sources
   - id: choose_style
     label: Choose Style
   - id: plan_background_prompts
@@ -195,13 +346,32 @@ steps:
     label: Generate PPT
 
 slots:
+  - id: native_pptx
+    user_visible: true
+    label: PPTX 文件
+    type: file
+    cardinality: single
+  - id: presentation_scenario
+    user_visible: false
+    label: Presentation Scenario
+    type: text
+    cardinality: single
+    exposed: false
+  - id: academic_brief
+    user_visible: true
+    label: 科研内容分析
+    type: text
+    cardinality: single
+    summary_max_chars: 2000
   - id: requirement_analysis
+    user_visible: true
     label: Requirement Analysis
     type: text
     cardinality: single
     summary_max_chars: 600
 
   - id: ppt_capability_requirements
+    user_visible: false
     label: PPT Capability Requirements
     type: text
     cardinality: single
@@ -209,13 +379,56 @@ slots:
     summary_max_chars: 80
 
   - id: style_flow
+    user_visible: false
     label: Style Flow
     type: text
     cardinality: single
     exposed: false
     summary_max_chars: 40
 
+  - id: generation_mode
+    user_visible: false
+    label: Generation Mode
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 40
+
+  - id: template_mode
+    user_visible: false
+    label: Template Mode
+    type: text
+    cardinality: single
+    exposed: false
+    summary_max_chars: 80
+
+  - id: template_pptx
+    user_visible: false
+    label: PPTX Template
+    exposed: false
+    type: file
+    cardinality: single
+    external: true
+    required: false
+    allow_manual_add: true
+
+  - id: template_profile
+    user_visible: false
+    label: Template Profile
+    type: json
+    cardinality: single
+    exposed: false
+    summary_max_chars: 1200
+
+  - id: template_content_brief
+    user_visible: false
+    label: Template Content Requirements
+    type: json
+    cardinality: single
+    exposed: true
+
   - id: generate_background_images
+    user_visible: false
     label: Generate Background Images
     type: text
     cardinality: single
@@ -223,6 +436,7 @@ slots:
     summary_max_chars: 40
 
   - id: skip_style_choices
+    user_visible: false
     label: Skip Style Choices
     type: text
     cardinality: single
@@ -230,6 +444,7 @@ slots:
     summary_max_chars: 40
 
   - id: skip_background_images
+    user_visible: false
     label: Skip AI Backgrounds
     type: text
     cardinality: single
@@ -237,6 +452,7 @@ slots:
     summary_max_chars: 40
 
   - id: skip_material_collection
+    user_visible: false
     label: Skip Material Collection
     type: text
     cardinality: single
@@ -244,7 +460,9 @@ slots:
     summary_max_chars: 40
 
   - id: uploaded_materials
+    user_visible: false
     label: Uploaded Materials
+    exposed: false
     type: file
     cardinality: list
     ordered: true
@@ -253,36 +471,43 @@ slots:
     allow_manual_add: true
 
   - id: material_summary
+    user_visible: true
     label: Material Summary
     type: text
     cardinality: single
     summary_max_chars: 700
 
   - id: material_images
+    user_visible: false
     label: Material Images
+    exposed: false
     type: image
     cardinality: list
     ordered: true
 
   - id: style_previews
+    user_visible: true
     label: Style Previews
     type: text
     cardinality: single
     summary_max_chars: 500
 
   - id: style_selection
+    user_visible: true
     label: Selected Style
     type: text
     cardinality: single
     summary_max_chars: 80
 
   - id: background_images
+    user_visible: false
     label: AI Background Images
     type: image
     cardinality: list
     ordered: true
 
   - id: background_prompts
+    user_visible: false
     label: AI Background Prompts
     type: text
     cardinality: list
@@ -290,6 +515,7 @@ slots:
     summary_max_chars: 1200
 
   - id: slide_outline
+    user_visible: false
     label: Page Prompt
     type: text
     cardinality: list
@@ -297,12 +523,14 @@ slots:
     summary_max_chars: 900
 
   - id: deck_outline
+    user_visible: true
     label: Deck Outline
     type: text
     cardinality: single
     summary_max_chars: 1600
 
   - id: preview_html
+    user_visible: true
     label: Slide
     type: text
     cardinality: list
@@ -310,6 +538,7 @@ slots:
     summary_max_chars: 500
 
   - id: preview_notes
+    user_visible: true
     label: Speaker Notes
     type: text
     cardinality: list
@@ -355,6 +584,7 @@ ui:
       layout: list
       slots:
         - id: requirement_analysis
+        - id: template_content_brief
 
     - id: materials
       step_id: collect_materials
@@ -362,9 +592,7 @@ ui:
       hide_when_material: skip_material_collection
       layout: list
       slots:
-        - id: uploaded_materials
         - id: material_summary
-        - id: material_images
 
     - id: style
       step_id: choose_style
@@ -450,15 +678,21 @@ ui:
             - editable-pptx
           alignment: sort_order
       slots:
+        - id: native_pptx
         - id: preview_html
         - id: preview_notes
       composite_layout:
         direction: column
         children:
+          - slot: native_pptx
+            weight: 1
           - slot: preview_html
             weight: 3
           - slot: preview_notes
             weight: 1
+      composite_behavior:
+        hide_empty_columns: true
+        empty_column_scope: selected
 
 i18n:
   zh-CN:

@@ -557,7 +557,8 @@ func getOrdinarySessionProjection(w http.ResponseWriter, r *http.Request) {
 }
 
 // ordinaryHiddenSlots honors explicit visibility declarations from the Session's
-// immutable package. Omitted exposed fields retain the existing visible default.
+// immutable package. user_visible only controls presentation; it never removes
+// persisted outputs or runtime inputs. Omitted fields retain the visible default.
 func ordinaryHiddenSlots(ctx context.Context, db *gorm.DB, revisionID string) (map[string]bool, error) {
 	var row struct{ Content []byte }
 	result := db.WithContext(ctx).Table(orm.WorkflowRevisionEntry{}.TableName()+" AS entries").
@@ -571,8 +572,9 @@ func ordinaryHiddenSlots(ctx context.Context, db *gorm.DB, revisionID string) (m
 	}
 	var manifest struct {
 		Slots []struct {
-			ID      string `yaml:"id"`
-			Exposed *bool  `yaml:"exposed"`
+			ID          string `yaml:"id"`
+			Exposed     *bool  `yaml:"exposed"`
+			UserVisible *bool  `yaml:"user_visible"`
 		} `yaml:"slots"`
 	}
 	if err := yaml.Unmarshal(row.Content, &manifest); err != nil {
@@ -580,7 +582,7 @@ func ordinaryHiddenSlots(ctx context.Context, db *gorm.DB, revisionID string) (m
 	}
 	hidden := map[string]bool{}
 	for _, slot := range manifest.Slots {
-		if slot.Exposed != nil && !*slot.Exposed {
+		if (slot.Exposed != nil && !*slot.Exposed) || (slot.UserVisible != nil && !*slot.UserVisible) {
 			hidden[slot.ID] = true
 		}
 	}

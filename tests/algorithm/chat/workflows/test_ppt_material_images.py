@@ -37,6 +37,7 @@ def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
     materials_tab = next(tab for tab in ppt['ui']['tabs'] if tab['id'] == 'materials')
     assert materials_tab['layout'] == 'list'
     assert materials_tab['slots'] == [
+        {'id': 'template_pptx'},
         {'id': 'uploaded_materials'},
         {'id': 'material_summary'},
         {'id': 'material_images'},

@@ -95,6 +95,9 @@ from .context import (
 from .db import MemorySubAgentStore
 
 WORKFLOW_TOOL_FAILURE_LIMITS = {
+    'inspect_current_pptx': 2,
+    'read_pptx_edit_material': 2,
+    'publish_pptx_edit': 2,
     'get_artifact': 2,
     'save_artifacts': 2,
     'validate_and_allocate_outline': 1,
@@ -102,6 +105,8 @@ WORKFLOW_TOOL_FAILURE_LIMITS = {
     'validate_proposal_from_inputs': 1,
 }
 WORKFLOW_TOOL_CALL_LIMITS = {
+    'read_pptx_edit_material': 4,
+    'publish_pptx_edit': 3,
     'get_artifact': 6,
     'save_artifacts': 8,
     'validate_and_allocate_outline': 1,
@@ -398,6 +403,9 @@ def _resolve_runtime_tools(
     publisher-owned output slots.
     Names of base tools in the explicit list are silently ignored.
     """
+    if (params or {}).get('_pptx_edit_session_id'):
+        from .pptx_edit import edit_tools
+        return edit_tools()
     disabled = set((lazyllm.globals.get('agentic_config') or {}).get('disabled_tools') or [])
     if explicit is not None:
         core_tool_names = set(SUBAGENT_CORE_TOOL_NAMES)
@@ -854,7 +862,14 @@ def _build_subagent_plan(
     publisher_owned_outputs = _publisher_owns_outputs(ctx)
     _, required_keys = resolve_output_contract(ctx.agent_type, ctx.output_slots, ctx.params)
     output_lines = []
-    if publisher_owned_outputs:
+    if ctx.agent_type == 'pptx_edit':
+        output_lines.append(
+            'publish_pptx_edit publishes the Workflow file revision and automatically '
+            'records the required pptx_edit_receipt. Inspect first, then publish once. '
+            'Do not call save_artifacts or produce a replacement file in chat. '
+            'Without a successful publication receipt the task cannot complete.'
+        )
+    elif publisher_owned_outputs:
         output_lines.append(
             'The declared output slots are publisher-owned. The Workflow package tool '
             'writes them at the correct list_index and revision automatically. Do not call '
@@ -932,7 +947,7 @@ def _build_subagent_plan(
         str(getattr(tool, '__name__', '') or '') for tool in tools
     }
     inherited_skills = (
-        [] if str(ctx.agent_type or '') == 'workflow_step'
+        [] if str(ctx.agent_type or '') in {'workflow_step', 'pptx_edit'}
         else _coerce_str_list(ctx.params.get(SUBAGENT_SKILLS_CONTEXT_KEY))
     )
     inherited_prompt_skills = (
@@ -971,8 +986,10 @@ def _build_subagent_plan(
             tool_state_scope=f'subagent:{ctx.task_id}',
             preload_all_tools=str(ctx.agent_type or '') == 'workflow_step',
             enable_builtin_tools=False if (
-                str(ctx.agent_type or '') == 'workflow_step'
-                and (lazyllm.globals.get('agentic_config') or {}).get('enable_tool_retrieval')
+                ctx.params.get('tools_only') or (
+                    str(ctx.agent_type or '') == 'workflow_step'
+                    and (lazyllm.globals.get('agentic_config') or {}).get('enable_tool_retrieval')
+                )
             ) else None,
             required_tool_groups=('KBToolkit',) if ctx.params.get('filters', {}).get('kb_id') else (),
             workspace_permission=workspace_permission,
@@ -1385,7 +1402,9 @@ async def run_subagent_stream(
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
         from lazymind.chat.service.knowledge_management import build_knowledge_runtime, BUILTIN_ID
-        knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
+        knowledge_management = None
+        if not ctx.params.get('tools_only') or 'knowledge_management' in (tools or []):
+            knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
         if knowledge_management is not None:
             from lazymind.chat.service.chat_service import _load_mcp_server_tools
             server = next(item for item in agentic_config.get('system_mcp_config') or []
@@ -1393,7 +1412,8 @@ async def run_subagent_stream(
             subagent_tools_all.extend(await asyncio.to_thread(
                 _load_mcp_server_tools, knowledge_management.server_config(server), 'system'))
         host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or bool(agentic_config.get('_core_workspace_context'))
-        if host_filesystem_enabled and effective_agent_type != 'workflow_step':
+        if (host_filesystem_enabled and effective_agent_type != 'workflow_step'
+                and not ctx.params.get('tools_only')):
             from lazyllm.tools.agent import FileSystemToolkit
             subagent_tools_all.append(FileSystemToolkit())
             from lazymind.chat.engine.tools.native_search import native_search, native_search_available
@@ -1499,6 +1519,7 @@ async def run_subagent_stream(
         merged_events = merge_agent_and_stream_events(
             executor.stream(llm, plan), stream_events,
         )
+        pptx_edit_failures = {}
         async with aclosing(merged_events):
             async for source, merged_payload in merged_events:
                 if source == 'stream':
@@ -1548,6 +1569,9 @@ async def run_subagent_stream(
                             _pending_text = ''
                         durable_step = _persist_step(ctx, step_seq, item)
                         step_seq += 1
+                        if effective_agent_type == 'pptx_edit' and tag == 'tool_results':
+                            from .pptx_edit import enforce_failure_budget
+                            enforce_failure_budget(item, pptx_edit_failures)
                         if effective_agent_type == 'workflow_step' and tag == 'tool_results':
                             terminal_error = _terminal_tool_failure(
                                 item, terminal_workflow_tools,
@@ -1703,11 +1727,14 @@ async def run_subagent_stream(
             return
 
         summary = _result_summary(final_result, required_output_keys)
-        # Uncontracted ordinary tasks and final reports of trouble need review.
-        # Otherwise satisfied contracts, including Workflow rules, are sufficient.
+        # Uncontracted ordinary tasks still require model-based completion review.
+        # TODO(completion-review): Restore keyword-triggered review only after handling
+        # negation/context. "不视为检索失败" matched "失败" and falsely failed a
+        # collect_materials task whose required material_summary was already saved.
+        # Keep required-artifact validation and model verdict handling unchanged.
         if (
             (effective_agent_type != 'workflow_step' and not required_output_keys)
-            or _COMPLETION_CONCERN.search(str(final_result or ''))
+            # or _COMPLETION_CONCERN.search(str(final_result or ''))
         ):
             is_ok, summary, failure_phase = await _evaluate_completion_async(
                 llm=llm,

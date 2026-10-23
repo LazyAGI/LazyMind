@@ -1247,6 +1247,22 @@ func LoadOrganizerChatLLMConfig(ctx context.Context, db *gorm.DB, userID, conver
 	return map[string]any{"llm": role}, nil
 }
 
+// LoadConversationLLMConfig resolves fresh credentials and applies the same
+// owned/shared/cloud selection policy used by Chat. Only llm is overridden;
+// image/embedding and other independent roles retain their configuration.
+func LoadConversationLLMConfig(ctx context.Context, db *gorm.DB, userID, conversationID string) (map[string]any, error) {
+	config, err := modelconfig.LoadLLMConfig(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]any{"conversation_id": conversationID, "llm_config": config}
+	if err := applyConversationChatModelConfig(ctx, db, userID, body); err != nil {
+		return nil, err
+	}
+	resolved, _ := body["llm_config"].(map[string]any)
+	return resolved, nil
+}
+
 // LoadDefaultChatLLMConfig returns the same llm role that chat would use when
 // no conversation overlay is available: the user's current default chat model.
 func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {

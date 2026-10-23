@@ -15,6 +15,7 @@ from lazymind.model_config import inject_model_config
 # These groups require context/approval that a stateless external call does not own.
 # They remain visible, but cannot execute until that context has an explicit adapter.
 _CONTEXT_REQUIREMENTS = {
+    'github_prs': 'conversation-scoped PR source cache',
     'kb': 'knowledge base access context', 'temp_kb': 'conversation attachments',
     'data_sources': 'user data-source context', 'external_db': 'user database context',
     'writer_create': 'artifact workspace', 'writer_revision': 'artifact workspace',

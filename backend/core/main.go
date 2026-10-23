@@ -43,6 +43,7 @@ import (
 	"lazymind/core/localworkspace"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
+	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	coreproviderconnection "lazymind/core/providerconnection"
 	"lazymind/core/recovery"
@@ -770,6 +771,7 @@ func (e *startupError) Unwrap() error { return e.err }
 // ordered shutdown completes. It returns an error only when initialization or
 // the HTTP listener fails; a signal-triggered shutdown is a nil return.
 func run(ctx context.Context) error {
+	modelconfig.SetConversationResolver(chat.LoadConversationLLMConfig)
 	// textInitialize ACL text（text：postgres/sqlite/mysql）。
 	// textSet ACL_DB_DRIVER textDefaulttext sqlite，text ./acl.db。
 	driver := os.Getenv("ACL_DB_DRIVER")

@@ -1,3 +1,5 @@
+import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developerMode';
+import { hiddenUserSlots, workflowUIForAudience } from './workflowAudience';
 import { WorkflowExtensions } from '../../extensions/WorkflowExtensions';
 import { groupDownloadActions } from './groupDownloadActions';
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
@@ -1706,7 +1708,15 @@ export function WorkflowPanel({
   // reset the user's current tab.
   const focusedTabByConversation = useWorkflowStore((s) => s.focusedTabByConversation);
   const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
-  const [ui, setUI] = useState<WorkflowUI>({});
+  const [rawUI, setUI] = useState<WorkflowUI>();
+  const [developerMode, setDeveloperMode] = useState(isDeveloperModeActive);
+  useEffect(() => {
+    const update = () => setDeveloperMode(isDeveloperModeActive());
+    window.addEventListener(DEVELOPER_ACTIVE_EVENT, update);
+    return () => window.removeEventListener(DEVELOPER_ACTIVE_EVENT, update);
+  }, []);
+  const ui = useMemo(() => workflowUIForAudience(rawUI ?? {}, developerMode), [rawUI, developerMode]);
+  const hiddenSlots = useMemo(() => developerMode ? new Set<string>() : hiddenUserSlots(rawUI ?? {}), [rawUI, developerMode]);
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
   const [expanded, setExpanded] = useState(() => readPersistedExpanded(conversationId));
@@ -2347,7 +2357,7 @@ export function WorkflowPanel({
             })
           ) : (
             <AutoSlotGrid
-              session={session}
+              session={{ ...session, slots: rawUI || developerMode ? session.slots?.filter(slot => !hiddenSlots.has(slot.slot_id || slot.slot)) : [] }}
               onRefresh={refresh}
               onReference={onReference}
             />

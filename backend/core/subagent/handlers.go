@@ -89,7 +89,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid execution parameters", http.StatusServiceUnavailable)
 		return
 	}
-	config, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), task.CreateUserID)
+	config, err := modelconfig.LoadConversationLLMConfig(r.Context(), store.DB(), task.CreateUserID, task.ConversationID)
 	if err != nil {
 		common.ReplyErr(w, "model config unavailable", http.StatusServiceUnavailable)
 		return

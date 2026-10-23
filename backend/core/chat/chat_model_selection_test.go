@@ -219,6 +219,40 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	}
 }
 
+func TestWorkflowConversationConfigReloadsSelectedModel(t *testing.T) {
+	db := newChatModelTestDB(t).DB
+	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-default", "llm", true, "secret-a")
+	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "DeepSeek", "B", "deepseek-chat", "llm", true, "secret-b")
+	seedSelectedChatModel(t, db, "user-1", "model-a", false)
+	conversation := orm.Conversation{ID: "workflow-model-switch", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}}
+	for _, selection := range []struct{ id, model string }{{"model-b", "deepseek-chat"}, {"model-a", "gpt-default"}} {
+		binding, err := resolveInitialChatModelBinding(context.Background(), db, "user-1", &initialChatModelSelection{Mode: chatModelModeFixed, ModelID: selection.id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		applyResolvedChatModelBinding(&conversation, binding)
+		if err := db.Save(&conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+		config, err := LoadConversationLLMConfig(context.Background(), db, "user-1", conversation.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := config["llm"].(map[string]any)["model"]; got != selection.model {
+			t.Fatalf("model = %v, want %s", got, selection.model)
+		}
+	}
+	if _, err := LoadConversationLLMConfig(context.Background(), db, "another-user", conversation.ID); err == nil {
+		t.Fatal("must reject a conversation owned by another user")
+	}
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-a").Update("deleted_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConversationLLMConfig(context.Background(), db, "user-1", conversation.ID); !errors.Is(err, errChatModelUnavailable) {
+		t.Fatalf("unavailable fixed model must fail: %v", err)
+	}
+}
+
 func TestAutoChatModelStaysWithSuccessfulModelAndRoutingIsReadOnly(t *testing.T) {
 	database := newChatModelTestDB(t)
 	db := database.DB

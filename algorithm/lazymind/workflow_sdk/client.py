@@ -380,7 +380,7 @@ class WorkflowClient:
 
     def patch_artifact(self, artifact_id: str, base_revision: int, value: Any,
                        content_type: str = 'json', caption: str = '',
-                       command_id: str = '') -> WorkflowResponse:
+                       command_id: str = '', base_draft_version: Optional[int] = None) -> WorkflowResponse:
         command_id = command_id or str(uuid.uuid4())
         payload: Dict[str, Any] = {
             'base_revision': base_revision, 'value': value,
@@ -388,6 +388,8 @@ class WorkflowClient:
         }
         if caption:
             payload['caption'] = caption
+        if base_draft_version is not None:
+            payload['base_draft_version'] = base_draft_version
         return self._decode(self.transport.patch(
             f'{self.base_url}/workflow-artifacts/{quote(artifact_id, safe="")}', json=payload,
             headers=self._headers(command_id), timeout=self.timeout,

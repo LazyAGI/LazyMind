@@ -572,7 +572,7 @@ func LoadToolConfigForCapabilities(
 		config = merge(config, entry)
 	}
 	for _, provider := range cloudToolProviders {
-		if !has("cloud_files") && !has(provider) {
+		if !has("cloud_files") && !has(provider) && !(provider == "github" && has("github_prs")) {
 			continue
 		}
 		tokens, err := LoadCloudProviderTokens(ctx, provider, userID)
