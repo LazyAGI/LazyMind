@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   MinusOutlined,
   SettingOutlined,
@@ -27,6 +27,7 @@ import "./SavedProviderModels.scss";
 export interface SavedProviderModelsProps {
   models: ProviderModel[];
   loading: boolean;
+  emptyDescription?: ReactNode;
   providerName: string;
   supplierName?: string;
   capabilityLabel: (capability: ModelCapability) => string;
@@ -64,7 +65,7 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
   if (!props.models.length)
     return (
       <div className="saved-provider-models-state">
-        {t("modelProvider.noModels")}
+        {props.emptyDescription ?? t("modelProvider.noModels")}
       </div>
     );
 

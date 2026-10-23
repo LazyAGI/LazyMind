@@ -451,6 +451,11 @@ const enUS = {
       "retry": "Retry",
       "savedRefreshFailed": "Changes were saved, but reloading failed. Please reload again.",
       "syncModels": "Sync models",
+      getModelList: "Get model list",
+      refreshSavedModels: "Refresh added models",
+      moreModelActions: "More model actions",
+      syncModelsEmpty: "Click Sync models to fetch the model list",
+      noMatchingModels: "No matching models",
 
       "title": "Model services",
       "back": "Back to settings",

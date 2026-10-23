@@ -449,6 +449,11 @@ const zhCN = {
       "retry": "重试",
       "savedRefreshFailed": "更改已保存，但刷新失败，请重试加载。",
       "syncModels": "同步模型",
+      getModelList: "获取模型列表",
+      refreshSavedModels: "刷新已添加模型",
+      moreModelActions: "更多模型操作",
+      syncModelsEmpty: "点击同步模型以获取模型列表",
+      noMatchingModels: "没有符合条件的模型",
 
       "title": "模型服务",
       "back": "返回设置",

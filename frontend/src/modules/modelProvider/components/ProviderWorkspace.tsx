@@ -5,6 +5,7 @@ import {
   CloudOutlined,
   DeleteOutlined,
   EditOutlined,
+  MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -14,6 +15,7 @@ import {
   Alert,
   Button,
   Drawer,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -89,6 +91,11 @@ interface Props {
   onCheck: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
   checking: Record<string, boolean>;
   onReload: () => Promise<void>;
+  onKeySaved?: (
+    provider: AddedProvider,
+    groupId: string,
+    isCurrent: () => boolean,
+  ) => Promise<void>;
   cloudContent: ReactNode;
 }
 
@@ -170,8 +177,12 @@ export function ProviderWorkspace(props: Props) {
   const { providers, reorder: reorderSuppliers } = useSupplierOrder(mergedProviders);
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
-  const activeSupplierId = useRef(provider?.id);
+  const activeSupplierId = useRef<string | undefined>(provider?.id);
   activeSupplierId.current = provider?.id;
+  useEffect(() => {
+    activeSupplierId.current = provider?.id;
+    return () => { activeSupplierId.current = undefined; };
+  }, [provider?.id]);
   const providerDisplayName = provider
     ? getProviderDisplayName(provider, language)
     : "";
@@ -242,6 +253,8 @@ export function ProviderWorkspace(props: Props) {
     addKeyRequestPending.current = true;
     setKeySaving(true);
     let saved = false;
+    let savedGroupId = group?.id || "";
+    let verified = Boolean(group);
     try {
       if (group) {
         await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
@@ -252,7 +265,7 @@ export function ProviderWorkspace(props: Props) {
           }),
         );
       } else {
-        await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost(
+        const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost(
           {
             modelProviderId: provider.id,
             createModelProviderGroupOpenAPIRequest: {
@@ -263,6 +276,9 @@ export function ProviderWorkspace(props: Props) {
           },
           { timeout: 180000 },
         );
+        const created = unwrapModelProviderData<{ id: string; is_verified?: boolean }>(response.data);
+        savedGroupId = created.id;
+        verified = created.is_verified === true;
       }
       saved = true;
       if (activeSupplierId.current === supplierId) {
@@ -272,6 +288,9 @@ export function ProviderWorkspace(props: Props) {
       }
       await props.onReload();
       if (activeSupplierId.current === supplierId) message.success(label("keyAdded"));
+      if (verified && savedGroupId && activeSupplierId.current === supplierId) {
+        await props.onKeySaved?.(provider, savedGroupId, () => activeSupplierId.current === supplierId);
+      }
       return true;
     } catch (error) {
       const errorMessage = saved ? label("savedRefreshFailed") : getLocalizedErrorMessage(error);
@@ -665,7 +684,13 @@ export function ProviderWorkspace(props: Props) {
                     onCreate={(apiKey) => addKey({ apiKey })}
                     onDelete={deleteKey}
                     onToggle={changeActiveKey}
-                    onReload={props.onReload}
+                    onReload={async () => {
+                      const supplierId = provider.id;
+                      await props.onReload();
+                      if (group && activeSupplierId.current === supplierId) {
+                        await props.onKeySaved?.(provider, group.id, () => activeSupplierId.current === supplierId);
+                      }
+                    }}
                     checkAction={
                       <Button
                         type="text"
@@ -778,26 +803,35 @@ export function ProviderWorkspace(props: Props) {
                   className="provider-workspace-models"
                   aria-label={label("models")}
                 >
-                  <div className="provider-workspace-section-heading">
+                  <div className="provider-workspace-section-heading provider-workspace-model-heading">
                     <h3>
                       {label("models")}{" "}
                       <span className="provider-workspace-count">
                         {group?.modelCount ?? group?.models.length ?? 0}
                       </span>
                     </h3>
-                    <div>
+                    <div className="provider-workspace-model-toolbar">
+                      <Input
+                        allowClear
+                        prefix={<SearchOutlined aria-hidden="true" />}
+                        aria-label={label("searchModel")}
+                        placeholder={label("searchModel")}
+                        value={modelSearch}
+                        onChange={(event) => setModelSearch(event.target.value)}
+                      />
                       <Tooltip title={label("syncModels")}>
                         <Button
-                          type="text"
-                          className="provider-workspace-icon-button"
-                          aria-label={label("syncModels")}
+                          className="provider-workspace-fetch-models"
+                          aria-label={label("getModelList")}
                           icon={<ReloadOutlined aria-hidden="true" />}
                           loading={props.modelsLoading[groupKey]}
                           disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
                           onClick={() =>
                             void withProviderModels(props.onSyncModels)
                           }
-                        />
+                        >
+                          {label("getModelList")}
+                        </Button>
                       </Tooltip>
                       <Tooltip title={t("modelProvider.customModel")}>
                         <Button
@@ -811,17 +845,39 @@ export function ProviderWorkspace(props: Props) {
                           }
                         />
                       </Tooltip>
+                      <Tooltip title={label("moreModelActions")}>
+                        <Dropdown
+                          trigger={["click"]}
+                          menu={{
+                            items: [
+                              {
+                                key: "refresh",
+                                label: label("refreshSavedModels"),
+                                icon: <ReloadOutlined aria-hidden="true" />,
+                                disabled: !group || initializing || props.modelsLoading[groupKey],
+                                onClick: () => {
+                                  if (group) props.onLoadModels(provider, group);
+                                },
+                              },
+                              {
+                                key: "request-config",
+                                label: t("modelProvider.requestConfig.title"),
+                                icon: <SettingOutlined aria-hidden="true" />,
+                                disabled: endpointSaving || Boolean(changingActiveKey),
+                                onClick: () => confirmEndpointLeave(() => setRequestConfigOpen(true)),
+                              },
+                            ],
+                          }}
+                        >
+                          <Button
+                            type="text"
+                            className="provider-workspace-icon-button"
+                            aria-label={label("moreModelActions")}
+                            icon={<MoreOutlined aria-hidden="true" />}
+                          />
+                        </Dropdown>
+                      </Tooltip>
                     </div>
-                  </div>
-                  <div className="provider-workspace-model-toolbar">
-                    <Input
-                      allowClear
-                      prefix={<SearchOutlined aria-hidden="true" />}
-                      aria-label={label("searchModel")}
-                      placeholder={label("searchModel")}
-                      value={modelSearch}
-                      onChange={(event) => setModelSearch(event.target.value)}
-                    />
                   </div>
                   <ModelTaskTabs models={searchedModels} value={modelType} onChange={setModelType} />
                   {modelsError ? (
@@ -844,23 +900,26 @@ export function ProviderWorkspace(props: Props) {
                       }
                     />
                   ) : null}
-                  {!modelsError || Boolean(group?.models.length) ? (
-                    <SavedProviderModels
-                      models={models}
-                      loading={Boolean(props.modelsLoading[groupKey])}
-                      providerName={
-                        provider.protocolName || provider.source || provider.name
-                      }
-                      supplierName={provider.name}
-                      capabilityLabel={props.capabilityLabel}
-                      onEdit={(model) => {
-                        if (group) props.onEditModel(provider, group, model);
-                      }}
-                      onRemove={(model) => {
-                        if (group) return props.onDeleteModel(provider, group, model);
-                      }}
-                    />
-                  ) : null}
+                  <SavedProviderModels
+                    models={models}
+                    emptyDescription={
+                      modelType === "all" && !modelSearch.trim()
+                        ? label("syncModelsEmpty")
+                        : label("noMatchingModels")
+                    }
+                    loading={Boolean(props.modelsLoading[groupKey])}
+                    providerName={
+                      provider.protocolName || provider.source || provider.name
+                    }
+                    supplierName={provider.name}
+                    capabilityLabel={props.capabilityLabel}
+                    onEdit={(model) => {
+                      if (group) props.onEditModel(provider, group, model);
+                    }}
+                    onRemove={(model) => {
+                      if (group) return props.onDeleteModel(provider, group, model);
+                    }}
+                  />
                 </section>
               </div>
             </>

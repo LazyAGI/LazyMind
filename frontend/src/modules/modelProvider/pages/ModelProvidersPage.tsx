@@ -67,7 +67,8 @@ import { ProviderModelCatalogDrawer, type CatalogModelChoice } from "../componen
 import { sortCustomModelsFirst } from "../modelOrdering";
 import { getModelTaskType } from "../modelTaskTypes";
 import { ModelTypeIcon } from "../components/ModelTypeBadge";
-import { getSelectableCapabilities, supportsModelContext } from "../modelCapabilities";
+import { getSelectableCapabilities, isModelTypeSupportedByProtocol, normalizeRuntimeModelType, supportsModelContext } from "../modelCapabilities";
+import { lookupUpstreamModel } from "../upstreamCatalog";
 import { getProviderDisplayName } from "../providerDisplayNames";
 import { ModelEditorModal, type ModelEditorValues } from "../components/ModelEditorModal";
 import "../index.scss";
@@ -522,7 +523,9 @@ export default function ModelProviderPage({
   const [modelsError, setModelsError] = useState<Record<string, string>>({});
   const [remoteModels, setRemoteModels] = useState<RemoteGroupModel[]>([]);
   const [remoteModelsLoading, setRemoteModelsLoading] = useState(false);
-  const [catalogTarget, setCatalogTarget] = useState<{ providerId: string; groupId: string } | null>(null);
+  const [catalogTarget, setCatalogTarget] = useState<{ providerId: string; groupId: string; remoteModels?: RemoteGroupModel[] } | null>(null);
+  const keyDiscoveryRequests = useRef(new Set<string>());
+  const [discoveringGroupIds, setDiscoveringGroupIds] = useState<Record<string, boolean>>({});
   const [contextWindowMode, setContextWindowMode] = useState<"auto" | "manual">(
     "auto",
   );
@@ -1258,6 +1261,91 @@ export default function ModelProviderPage({
     });
   };
 
+  const discoverModelsAfterKeySaved = async (
+    provider: AddedProvider,
+    groupId: string,
+    isCurrent: () => boolean,
+  ) => {
+    const key = `${provider.id}:${groupId}`;
+    if (!isCurrent() || keyDiscoveryRequests.current.has(key)) return;
+    keyDiscoveryRequests.current.add(key);
+    setDiscoveringGroupIds((current) => ({ ...current, [key]: true }));
+    let discovered: RemoteGroupModel[] | undefined;
+    let added = false;
+    const openCatalog = () => {
+      if (isCurrent()) setCatalogTarget({ providerId: provider.id, groupId, remoteModels: discovered });
+    };
+    try {
+      // Read the saved selection: adding a second key must not enable it or
+      // bypass a deliberately disabled supplier's current key.
+      const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGet({ modelProviderId: provider.id });
+      const savedGroup = unwrapModelProviderData<{ groups?: ApiGroup[] }>(response.data).groups?.find((group) => group.id === groupId);
+      if (!isCurrent() || !savedGroup?.is_verified || !(savedGroup.keys?.length ? savedGroup.keys.some((key) => key.enabled) : savedGroup.has_api_key)) return;
+      const version = groupModelVersions.current[key] || 0;
+      const savedResponse = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet({ modelProviderId: provider.id, groupId });
+      if (!isCurrent() || version !== (groupModelVersions.current[key] || 0)) return;
+      const snapshot = mapApiGroup(provider, savedGroup, unwrapModelProviderData<{ models?: ApiModel[] }>(savedResponse.data).models || []);
+      const mergeProvider = (item: AddedProvider): AddedProvider => ({
+        ...item,
+        groups: item.groups.some((group) => group.id === groupId)
+          ? item.groups.map((group) => group.id === groupId ? snapshot : group)
+          : [...item.groups, snapshot],
+      });
+      const mergeSnapshot = (current: AddedProvider[]) => current.some((item) => item.id === provider.id)
+        ? current.map((item) => item.id === provider.id ? mergeProvider(item) : item)
+        : [...current, mergeProvider(provider)];
+      addedProviderListRef.current = mergeSnapshot(addedProviderListRef.current);
+      setAddedProviderList(mergeSnapshot);
+
+      const remote = await listRemoteGroupModels(provider.id, groupId);
+      if (!isCurrent()) return;
+      const unique = new Map<string, RemoteGroupModel>();
+      for (const model of remote.models || []) {
+        const name = normalizeModelName(model.name);
+        if (name && !unique.has(name)) unique.set(name, model);
+      }
+      discovered = [...unique.values()];
+      const currentSelection = () => {
+        const current = addedProviderListRef.current.find((item) => item.id === provider.id)?.groups.find((group) => group.id === groupId);
+        return isCurrent() && current?.verified && current.baseUrl === snapshot.baseUrl &&
+          current.keys.find((key) => key.enabled)?.id === snapshot.keys.find((key) => key.enabled)?.id;
+      };
+      if (!currentSelection()) return;
+      if (discovered.length >= 5) {
+        openCatalog();
+        return;
+      }
+      const protocol = provider.protocolName || provider.source;
+      for (const model of discovered) {
+        const current = addedProviderListRef.current.find((item) => item.id === provider.id)?.groups.find((group) => group.id === groupId);
+        if (!current || !currentSelection()) return;
+        if (current.models.some((saved) => normalizeModelName(saved.name) === normalizeModelName(model.name))) continue;
+        const upstream = lookupUpstreamModel(protocol, model.name);
+        const modelType = normalizeRuntimeModelType(model.model_type?.trim() || upstream?.model_type || "llm");
+        if (!isModelTypeSupportedByProtocol(modelType, protocol)) {
+          openCatalog();
+          continue;
+        }
+        await addCatalogModel(provider.id, groupId, {
+          name: model.name,
+          model_type: modelType,
+          max_input_tokens: model.max_input_tokens,
+          vision: modelType === "llm" && upstream?.input.includes("image"),
+        });
+        added = true;
+      }
+    } catch (error) {
+      if (isCurrent()) {
+        if (discovered) openCatalog();
+        message.error(getLocalizedErrorMessage(error));
+      }
+    } finally {
+      if (added) void onConfigurationChanged?.();
+      keyDiscoveryRequests.current.delete(key);
+      setDiscoveringGroupIds((current) => { const next = { ...current }; delete next[key]; return next; });
+    }
+  };
+
   const closeCustomModelModal = () => {
     remoteModelRequest.current += 1;
     setRemoteModelsLoading(false);
@@ -1470,7 +1558,7 @@ export default function ModelProviderPage({
         onLoadModels={(provider, group) =>
           void loadGroupModels(provider.id, group.id)
         }
-        modelsLoading={loadingGroupModelIds}
+        modelsLoading={{ ...loadingGroupModelIds, ...discoveringGroupIds }}
         modelsError={modelsError}
         onAddModel={openCustomModelModal}
         onSyncModels={(provider, group) =>
@@ -1487,6 +1575,7 @@ export default function ModelProviderPage({
           void verifyProviderGroup(provider, group, "")
         }
         checking={verifyingGroupIds}
+        onKeySaved={discoverModelsAfterKeySaved}
         onReload={async () => {
           const refreshed = await loadModelProviders();
           void onConfigurationChanged?.();
@@ -1529,7 +1618,8 @@ export default function ModelProviderPage({
         protocolName={catalogProvider.protocolName || catalogProvider.source}
         groupId={catalogGroup.id}
         models={catalogGroup.models}
-        modelsLoading={loadingGroupModelIds[`${catalogProvider.id}:${catalogGroup.id}`]}
+        initialRemoteModels={catalogTarget?.remoteModels}
+        modelsLoading={loadingGroupModelIds[`${catalogProvider.id}:${catalogGroup.id}`] || discoveringGroupIds[`${catalogProvider.id}:${catalogGroup.id}`]}
         requiresVerification={!catalogGroup.verified}
         onCheckConnection={() => {
           setCatalogTarget(null);

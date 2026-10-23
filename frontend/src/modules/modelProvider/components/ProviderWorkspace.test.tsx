@@ -201,16 +201,18 @@ describe("compact provider workspace", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     expect(filters.getByRole("button", { name: /modelProvider.taskTab.video/ })).toHaveTextContent("0");
   });
-  it("uses one icon-only sync action and an icon-only custom model action", () => {
+  it("puts search, the labeled model fetch action, custom model and working overflow actions together", async () => {
     const onSyncModels = vi.fn();
     const onAddModel = vi.fn();
-    setup({ onSyncModels, onAddModel });
-    expect(
-      screen.queryByRole("button", { name: "modelProvider.workspace.refreshModels" }),
-    ).not.toBeInTheDocument();
-    const sync = screen.getByRole("button", { name: "modelProvider.workspace.syncModels" });
+    const onLoadModels = vi.fn();
+    setup({ onSyncModels, onAddModel, onLoadModels });
+    const toolbar = document.querySelector(".provider-workspace-model-toolbar")!;
+    const sync = screen.getByRole("button", { name: "modelProvider.workspace.getModelList" });
     const add = screen.getByRole("button", { name: "modelProvider.customModel" });
-    expect(sync).toHaveTextContent(/^$/);
+    expect(toolbar).toContainElement(screen.getByRole("textbox", { name: "modelProvider.workspace.searchModel" }));
+    expect(toolbar).toContainElement(sync);
+    expect(toolbar).toContainElement(add);
+    expect(sync).toHaveTextContent("modelProvider.workspace.getModelList");
     expect(add).toHaveTextContent(/^$/);
     fireEvent.click(sync);
     expect(onSyncModels).toHaveBeenCalledTimes(1);
@@ -218,6 +220,10 @@ describe("compact provider workspace", () => {
     fireEvent.click(add);
     expect(onAddModel).toHaveBeenCalledTimes(1);
     expect(onAddModel).toHaveBeenCalledWith(provider, provider.groups[0]);
+    onLoadModels.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.moreModelActions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "modelProvider.workspace.refreshSavedModels" }));
+    expect(onLoadModels).toHaveBeenCalledWith(provider, provider.groups[0]);
   });
   it("keeps a supplier logo when its request protocol changes", () => {
     const supplier = { ...provider, name: "DeepSeek", protocolName: "Claude", source: "Claude" };
@@ -239,7 +245,7 @@ describe("compact provider workspace", () => {
     expect(onLoadModels).toHaveBeenCalledWith(provider, provider.groups[0]);
   });
 
-  it("does not present a failed initial model request as an empty supplier", () => {
+  it("keeps load errors actionable and explains how to fetch an empty all-model list", () => {
     const empty = { ...provider, groups: [{ ...provider.groups[0], models: [] }] };
     setup({
       providers: [empty],
@@ -248,6 +254,10 @@ describe("compact provider workspace", () => {
     });
     expect(screen.getByRole("alert")).toHaveTextContent("modelProvider.workspace.modelsLoadFailed");
     expect(screen.queryByText("modelProvider.noModels")).not.toBeInTheDocument();
+    expect(screen.getByText("modelProvider.workspace.syncModelsEmpty")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.workspace.searchModel" }), { target: { value: "missing" } });
+    expect(screen.queryByText("modelProvider.workspace.syncModelsEmpty")).not.toBeInTheDocument();
+    expect(screen.getByText("modelProvider.workspace.noMatchingModels")).toBeInTheDocument();
   });
 
   it("protects endpoint edits when returning to the mobile supplier list", async () => {
@@ -552,7 +562,8 @@ describe("compact provider workspace", () => {
     expect(callbacks.onReload).not.toHaveBeenCalled();
   });
   it("adds a supplier key and clears the secret after success", async () => {
-    const callbacks = setup();
+    const onKeySaved = vi.fn().mockResolvedValue(undefined);
+    const callbacks = setup({ onKeySaved });
     const dialog = await openAddKeyDialog();
     fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
       target: { value: "secret-new-5678" },
@@ -572,13 +583,16 @@ describe("compact provider workspace", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
     );
     expect(callbacks.onReload).toHaveBeenCalled();
+    await waitFor(() => expect(onKeySaved).toHaveBeenCalledWith(provider, "primary", expect.any(Function)));
+    expect(onKeySaved.mock.calls[0][2]()).toBe(true);
     expect(mocks.setActiveKey).not.toHaveBeenCalled();
     expect(
       screen.queryByDisplayValue("secret-new-5678"),
     ).not.toBeInTheDocument();
   });
   it("creates the first private credential storage directly from the empty key field", async () => {
-    const callbacks = setup();
+    const onKeySaved = vi.fn().mockResolvedValue(undefined);
+    const callbacks = setup({ onKeySaved });
     await act(async () => callbacks.setProvider({ ...provider, groups: [] }));
     const input = screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" });
     fireEvent.change(input, { target: { value: "  fixture-first-key  " } });
@@ -592,10 +606,12 @@ describe("compact provider workspace", () => {
     await waitFor(() => expect(input).toHaveValue(""));
     expect(mocks.addKey).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(onKeySaved).toHaveBeenCalledWith(expect.objectContaining({ id: "openai" }), "new-private-record", expect.any(Function)));
   });
   it("clears a persisted inline key when refreshing fails instead of allowing a duplicate retry", async () => {
     const onReload = vi.fn().mockRejectedValue(new Error("Refresh unavailable"));
-    const callbacks = setup({ onReload });
+    const onKeySaved = vi.fn().mockResolvedValue(undefined);
+    const callbacks = setup({ onReload, onKeySaved });
     await act(async () => callbacks.setProvider({ ...provider, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false }] }));
     const input = screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" });
     fireEvent.change(input, { target: { value: "fixture-first-key" } });
@@ -605,12 +621,14 @@ describe("compact provider workspace", () => {
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
     fireEvent.blur(input);
     expect(mocks.addKey).toHaveBeenCalledTimes(1);
+    expect(onKeySaved).not.toHaveBeenCalled();
   });
   it("keeps an in-flight inline key attached to its original supplier after selection changes", async () => {
     let finish!: (value: unknown) => void;
     mocks.addKey.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
     const other = { ...provider, id: "other", name: "Other supplier", isCustom: true, groups: [] };
-    const callbacks = setup({ providers: [provider, other] });
+    const onKeySaved = vi.fn().mockResolvedValue(undefined);
+    const callbacks = setup({ providers: [provider, other], onKeySaved });
     await act(async () => callbacks.setProvider({ ...provider, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false }] }));
     const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
     fireEvent.click(navigation.getByRole("button", { name: /^OpenAI/ }));
@@ -623,6 +641,7 @@ describe("compact provider workspace", () => {
     expect(mocks.addKey).toHaveBeenCalledWith({ modelProviderId: "openai", groupId: "primary" }, { data: { api_key: "fixture-original-key" }, timeout: 180000 });
     expect(screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" })).toHaveValue("");
     expect(mocks.createGroup).not.toHaveBeenCalled();
+    expect(onKeySaved).not.toHaveBeenCalled();
   });
   it("reports a failed inline save for the original supplier after switching away", async () => {
     let fail!: (error: Error) => void;
@@ -876,5 +895,17 @@ describe("compact provider workspace", () => {
     );
     await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
     expect(mocks.addKey).not.toHaveBeenCalled();
+  });
+  it("does not start discovery when first-key creation was saved without verified status", async () => {
+    mocks.createGroup.mockResolvedValueOnce({ data: { id: "new-private-record", is_verified: false } });
+    const onKeySaved = vi.fn().mockResolvedValue(undefined);
+    const callbacks = setup({ onKeySaved });
+    await act(async () => callbacks.setProvider({ ...provider, groups: [] }));
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" });
+    fireEvent.change(input, { target: { value: "fixture-first-key" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(onKeySaved).not.toHaveBeenCalled();
   });
 });

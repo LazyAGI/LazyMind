@@ -927,9 +927,9 @@ func shouldSeedSenseNovaModel(modelName string, useNewPlatform bool) bool {
 	return sensenovaNewPlatformModelNames[modelName] == useNewPlatform
 }
 
-// seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's
-// base_url matches the catalog DefaultModelProvider.base_url for parent.DefaultModelProviderID.
-// Also handles the special case of SenseNova's new platform URL.
+// seedGroupModelsFromDefaults preserves catalog seeding for auxiliary services.
+// Model suppliers discover their available models only after key verification;
+// copying catalog rows here would bypass the user's choice for larger lists.
 func seedGroupModelsFromDefaults(
 	tx *gorm.DB,
 	ctx context.Context,
@@ -938,6 +938,9 @@ func seedGroupModelsFromDefaults(
 	requestBaseURL, userID, userName string,
 	now time.Time,
 ) ([]orm.UserModelProviderGroupModel, error) {
+	if hasSharedProviderEndpoint(*parent) {
+		return nil, nil
+	}
 	// Providers without has_models capability (e.g. OCR, search) have no model list.
 	if !parent.HasCapability("has_models") {
 		return nil, nil

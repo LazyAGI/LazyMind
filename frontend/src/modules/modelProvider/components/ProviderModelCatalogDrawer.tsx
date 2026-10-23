@@ -48,6 +48,7 @@ interface Props {
   protocolName: string;
   groupId: string;
   models: ProviderModel[];
+  initialRemoteModels?: RemoteGroupModel[];
   modelsLoading?: boolean;
   requiresVerification?: boolean;
   onCheckConnection?: () => void;
@@ -102,6 +103,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
   const busyRequest = useRef(false);
   const [messageApi, messageContext] = message.useMessage();
   const sequence = useRef(0);
+  const consumedRemoteModels = useRef<RemoteGroupModel[]>();
   const filterId = useId();
   const tabRefs = useRef(new Map<Category, HTMLButtonElement>());
 
@@ -120,6 +122,13 @@ export function ProviderModelCatalogDrawer(props: Props) {
       return () => {
         sequence.current += 1;
       };
+    }
+    if (props.initialRemoteModels && consumedRemoteModels.current !== props.initialRemoteModels) {
+      consumedRemoteModels.current = props.initialRemoteModels;
+      setRemote(props.initialRemoteModels);
+      setLoaded(true);
+      setLoading(false);
+      return () => { sequence.current += 1; };
     }
     void listRemoteGroupModels(props.providerId, props.groupId)
       .then((data) => {
@@ -142,6 +151,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     props.providerId,
     props.groupId,
     props.requiresVerification,
+    props.initialRemoteModels,
     refresh,
   ]);
 
