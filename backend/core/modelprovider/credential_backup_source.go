@@ -39,12 +39,15 @@ func (source CredentialBackupSource) LoadCredential(ctx context.Context, groupID
 		if err != nil {
 			return err
 		}
-		catalogKey := strings.TrimSpace(RuntimeProviderName(provider))
-		if catalogKey == "" {
-			catalogKey = strings.TrimSpace(provider.DefaultModelProviderID)
+		catalogKey := CatalogCredentialKey(provider)
+		displayName := group.Name
+		if _, service := ProviderServiceIdentity(provider); service != "" && service != "standard" {
+			// Legacy groups retain their original names during a service rebind.
+			// The portable identity must still identify the independent plan.
+			displayName = provider.Name
 		}
 		result = credentialvault.ProviderCredential{LocalProviderGroupID: group.ID, CredentialRevision: group.CredentialRevision,
-			ProviderCatalogKey: catalogKey, DisplayName: group.Name, BaseURL: group.BaseURL, APIKey: []byte(apiKey), RequestConfig: provider.RequestConfig}
+			ProviderCatalogKey: catalogKey, DisplayName: displayName, BaseURL: group.BaseURL, APIKey: []byte(apiKey), RequestConfig: provider.RequestConfig}
 		if hasSharedProviderEndpoint(provider) && provider.ActiveKeyInitialized {
 			index := -1
 			if provider.ActiveKeyGroupID == group.ID {

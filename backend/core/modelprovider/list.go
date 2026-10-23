@@ -3,6 +3,7 @@ package modelprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -20,6 +21,8 @@ type listItem struct {
 	ID                     string              `json:"id"`
 	DefaultModelProviderID string              `json:"default_model_provider_id"`
 	Name                   string              `json:"name"`
+	BrandKey               string              `json:"brand_key,omitempty"`
+	ServiceKey             string              `json:"service_key,omitempty"`
 	IsCustom               bool                `json:"is_custom"`
 	ProtocolName           string              `json:"protocol_name"`
 	Description            string              `json:"description"`
@@ -147,6 +150,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	out := make([]listItem, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
+		brandKey, serviceKey := ProviderServiceIdentity(row)
 		caps := splitCapabilities(row.Capabilities)
 		if hasSharedProviderEndpoint(row) {
 			caps = modelSupplierCapabilities(row.Capabilities)
@@ -155,6 +159,8 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			ID:                     row.ID,
 			DefaultModelProviderID: row.DefaultModelProviderID,
 			Name:                   row.Name,
+			BrandKey:               brandKey,
+			ServiceKey:             serviceKey,
 			IsCustom:               row.IsCustom,
 			ProtocolName:           RuntimeProviderName(row),
 			Description:            row.Description,
@@ -264,22 +270,34 @@ func selectLocalizedDescription(raw []byte, locale, fallback string) string {
 // user_model_providers for the given user (matched by default_model_provider_id).
 // It also syncs category and capabilities for already-existing rows.
 func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, userName string) error {
+	for attempt := 0; attempt < 2; attempt++ {
+		err := syncUserProvidersFromDefaultsOnce(ctx, db, userID, userName)
+		if !errors.Is(err, errServiceSyncConflict) || attempt == 1 {
+			return err
+		}
+	}
+	return nil
+}
+
+func syncUserProvidersFromDefaultsOnce(ctx context.Context, db *gorm.DB, userID, userName string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing []orm.UserModelProvider
 		if err := tx.Where("create_user_id = ? AND deleted_at IS NULL AND is_custom = ?", userID, false).Find(&existing).Error; err != nil {
 			return err
 		}
-		existingByDefault := make(map[string]*orm.UserModelProvider, len(existing))
-		for i := range existing {
-			existingByDefault[existing[i].DefaultModelProviderID] = &existing[i]
-		}
-
 		var defs []orm.DefaultModelProvider
 		if err := tx.Where("deleted_at IS NULL").Find(&defs).Error; err != nil {
 			return err
 		}
 
 		now := time.Now()
+		if err := rebindLegacyServiceProviders(tx, existing, defs, now); err != nil {
+			return err
+		}
+		existingByDefault := make(map[string]*orm.UserModelProvider, len(existing))
+		for i := range existing {
+			existingByDefault[existing[i].DefaultModelProviderID] = &existing[i]
+		}
 		var toCreate []orm.UserModelProvider
 		for i := range defs {
 			d := defs[i]
@@ -291,11 +309,13 @@ func syncUserProvidersFromDefaults(ctx context.Context, db *gorm.DB, userID, use
 				}
 				// Sync category / capabilities from defaults if changed.
 				if row.Category != d.Category || row.Capabilities != d.Capabilities {
-					_ = tx.Model(row).Updates(map[string]interface{}{
+					if err := tx.Model(row).Updates(map[string]interface{}{
 						"category":     d.Category,
 						"capabilities": d.Capabilities,
 						"updated_at":   now,
-					})
+					}).Error; err != nil {
+						return err
+					}
 				}
 			} else {
 				toCreate = append(toCreate, orm.UserModelProvider{
@@ -339,7 +359,7 @@ func splitCapabilities(caps string) []string {
 }
 
 func buildBaseURLPresets(row orm.UserModelProvider) []baseURLPresetItem {
-	if normalizeProviderName(RuntimeProviderName(row)) == "openai" {
+	if normalizeProviderName(RuntimeProviderName(row)) == "openai" && (row.IsCustom || normalizeProviderName(row.Name) == "openai") {
 		required := true
 		return []baseURLPresetItem{
 			{Key: "official", Value: row.BaseURL, Label: "OpenAI", APIKeyRequired: &required},

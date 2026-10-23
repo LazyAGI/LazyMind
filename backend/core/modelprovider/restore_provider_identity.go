@@ -2,6 +2,7 @@ package modelprovider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -14,13 +15,58 @@ import (
 
 func restoreCatalogSupplier(tx *gorm.DB, userID, catalogKey string) (orm.UserModelProvider, error) {
 	var provider orm.UserModelProvider
-	err := tx.Where("create_user_id = ? AND deleted_at IS NULL AND is_custom = ? AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?) OR LOWER(protocol_name) = LOWER(?))", userID, false, catalogKey, catalogKey, catalogKey).Order("id ASC").Take(&provider).Error
-	return provider, err
+	err := tx.Where("create_user_id = ? AND deleted_at IS NULL AND is_custom = ? AND (default_model_provider_id = ? OR LOWER(name) = LOWER(?))", userID, false, catalogKey, catalogKey).Order("id ASC").Take(&provider).Error
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return provider, err
+	}
+	// Historical custom backups carry a runtime protocol instead of a catalog
+	// name. A plan sharing that adapter must never capture another service's key.
+	var candidates []orm.UserModelProvider
+	if err := tx.Where("create_user_id = ? AND deleted_at IS NULL AND is_custom = ? AND LOWER(protocol_name) = LOWER(?)", userID, false, catalogKey).Order("id ASC").Find(&candidates).Error; err != nil {
+		return provider, err
+	}
+	for _, candidate := range candidates {
+		if _, service := ProviderServiceIdentity(candidate); service != "" && service != "standard" {
+			continue
+		}
+		return candidate, nil
+	}
+	return provider, gorm.ErrRecordNotFound
+}
+
+func resolveRestoredService(payload credentialvault.ProviderCredential) credentialvault.ProviderCredential {
+	key := ResolveServiceCatalogKey(payload.ProviderCatalogKey, payload.BaseURL)
+	if key != payload.ProviderCatalogKey {
+		if strings.EqualFold(strings.TrimSpace(payload.DisplayName), strings.TrimSpace(payload.ProviderCatalogKey)) {
+			payload.DisplayName = key
+		}
+		payload.ProviderCatalogKey = key
+	}
+	return payload
+}
+
+func restoredServiceAdapter(source orm.UserModelProvider, payload credentialvault.ProviderCredential) string {
+	if _, service := ProviderServiceIdentity(source); service != "" && service != "standard" {
+		var config savedProviderRequestConfig
+		if json.Unmarshal([]byte(payload.RequestConfig), &config) == nil {
+			if config.DefaultProtocol == "anthropic" {
+				return "Claude"
+			}
+			if config.DefaultProtocol == "openai" {
+				return "OpenAI"
+			}
+		}
+		if adapter := ServiceProtocolForBaseURL(source.Name, payload.BaseURL); adapter != "" {
+			return adapter
+		}
+	}
+	return RuntimeProviderName(source)
 }
 
 // A remote record has its own supplier identity. Without a local binding it
 // must never append a second credential group to a supplier already in use.
 func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.ProviderCredential, resolution credentialvault.ConflictResolution, now time.Time) (orm.UserModelProvider, error) {
+	payload = resolveRestoredService(payload)
 	source, err := restoreCatalogSupplier(tx, userID, payload.ProviderCatalogKey)
 	if err != nil {
 		return source, err
@@ -40,16 +86,24 @@ func restoredSupplier(tx *gorm.DB, userID string, payload credentialvault.Provid
 		return source, err
 	}
 	if count == 0 && resolution != credentialvault.ConflictSaveCopy && strings.EqualFold(name, source.Name) && normalizeBaseURLForCompare(payload.BaseURL) == normalizeBaseURLForCompare(source.BaseURL) {
+		updates := map[string]any{}
 		if payload.RequestConfig != "" {
 			source.RequestConfig = payload.RequestConfig
-			if err := tx.Model(&source).Update("request_config", source.RequestConfig).Error; err != nil {
+			updates["request_config"] = source.RequestConfig
+		}
+		if _, service := ProviderServiceIdentity(source); service != "" && service != "standard" {
+			source.ProtocolName = restoredServiceAdapter(source, payload)
+			updates["protocol_name"] = source.ProtocolName
+		}
+		if len(updates) > 0 {
+			if err := tx.Model(&source).Updates(updates).Error; err != nil {
 				return source, err
 			}
 		}
 		return source, nil
 	}
 	row := source
-	row.ID, row.Name, row.IsCustom, row.ProtocolName = common.GenerateID(), name, true, RuntimeProviderName(source)
+	row.ID, row.Name, row.IsCustom, row.ProtocolName = common.GenerateID(), name, true, restoredServiceAdapter(source, payload)
 	row.RequestConfig = payload.RequestConfig
 	row.BaseURL = LazyLLMBaseURL(row.ProtocolName, payload.BaseURL)
 	row.Capabilities = strings.Join(modelSupplierCapabilities(row.Capabilities), ",")
@@ -76,13 +130,16 @@ func (sink *CredentialRestoreSink) temporarySupplier(ctx context.Context, scope 
 			return orm.UserModelProvider{}, err
 		}
 	}
+	payload = resolveRestoredService(payload)
 	source, err := restoreCatalogSupplier(tx, sink.localUserID, payload.ProviderCatalogKey)
 	if err != nil {
 		return source, err
 	}
 	if hasSharedProviderEndpoint(source) && strings.TrimSpace(payload.BaseURL) != "" && (strings.TrimSpace(payload.DisplayName) != "" && !strings.EqualFold(payload.DisplayName, source.Name) || normalizeBaseURLForCompare(payload.BaseURL) != normalizeBaseURLForCompare(source.BaseURL)) {
-		source.ProtocolName, source.Name, source.IsCustom = RuntimeProviderName(source), payload.DisplayName, true
+		source.ProtocolName, source.Name, source.IsCustom = restoredServiceAdapter(source, payload), payload.DisplayName, true
 		source.BaseURL = LazyLLMBaseURL(source.ProtocolName, payload.BaseURL)
+	} else if _, service := ProviderServiceIdentity(source); service != "" && service != "standard" {
+		source.ProtocolName = restoredServiceAdapter(source, payload)
 	}
 	if hasSharedProviderEndpoint(source) {
 		source.RequestConfig = payload.RequestConfig

@@ -38,4 +38,14 @@ describe("supplier sidebar order", () => {
     expect(reorderSuppliers(ordered, ids(ordered), "sense", "claude")).toBe(ordered);
     expect(reorderSuppliers(ordered, ["claude"], "openai", "claude")).toBe(ordered);
   });
+
+  it("projects legacy leaf ranks onto a whole brand using its earliest saved member", () => {
+    const blocks = [
+      { id: "brand:Doubao", name: "Doubao", orderAliases: ["ark-standard", "ark-coding"] },
+      { id: "openai", name: "OpenAI", orderAliases: ["openai"] },
+      { id: "deepseek", name: "DeepSeek", orderAliases: ["deepseek"] },
+    ];
+    expect(orderSuppliers(blocks, ["openai", "ark-coding", "deepseek", "ark-standard"]).map((item) => item.id))
+      .toEqual(["openai", "brand:Doubao", "deepseek"]);
+  });
 });

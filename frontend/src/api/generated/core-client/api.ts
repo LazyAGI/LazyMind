@@ -4521,6 +4521,7 @@ export interface ListGrantPrincipalsResponse {
 export interface ListModelProviderGroupModelsOpenAPIItem {
     'availability': ListModelProviderGroupModelsOpenAPIItemAvailabilityEnum;
     'base_url'?: string;
+    'brand_key'?: string;
     'capabilities'?: Array<string>;
     'group_name'?: string;
     'id': string;
@@ -4528,6 +4529,7 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
      * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
      */
     'input_token_limit'?: string | null;
+    'is_custom': boolean;
     'is_default': boolean;
     /**
      * Whether this option supports image editing
@@ -4548,6 +4550,7 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
     'provider_id': string;
     'provider_name': string;
     'read_only': boolean;
+    'service_key'?: string;
     'source': ListModelProviderGroupModelsOpenAPIItemSourceEnum;
     'user_model_provider_group_id'?: string;
     'user_model_provider_id'?: string;
@@ -5864,7 +5867,9 @@ export interface SearchWordGroupsRequest {
 export interface SelectedModelOpenAPIItem {
     'availability': SelectedModelOpenAPIItemAvailabilityEnum;
     'base_url'?: string;
+    'brand_key'?: string;
     'group_name'?: string;
+    'is_custom': boolean;
     /**
      * True when the selection was copied from catalog YAML
      */
@@ -5888,6 +5893,7 @@ export interface SelectedModelOpenAPIItem {
     'provider_id': string;
     'provider_name': string;
     'read_only': boolean;
+    'service_key'?: string;
     'source': SelectedModelOpenAPIItemSourceEnum;
     'unavailable_reason'?: string;
     'user_model_provider_group_id'?: string;
@@ -7399,6 +7405,10 @@ export interface UserInfo {
 export interface UserModelProviderOpenAPIItem {
     'base_url': string;
     'base_url_presets'?: Array<ModelProviderBaseURLPresetItem>;
+    /**
+     * Stable built-in navigation brand; absent for custom providers. Independent of the runtime protocol.
+     */
+    'brand_key'?: string;
     'capabilities'?: Array<string>;
     'category': string;
     'default_model_provider_id': string;
@@ -7409,6 +7419,10 @@ export interface UserModelProviderOpenAPIItem {
     'model_types'?: Array<string>;
     'name': string;
     'protocol_name': string;
+    /**
+     * Stable configurable service within the brand. Each service owns independent credentials and models.
+     */
+    'service_key'?: string;
 }
 export interface UserUIPreferencesOpenAPIResponse {
     'accepted_user_agreement_version': string;

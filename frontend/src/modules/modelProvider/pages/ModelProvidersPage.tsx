@@ -112,6 +112,8 @@ export interface ProviderModel {
 export interface ProviderOption {
   id: string;
   name: string;
+  brandKey?: string;
+  serviceKey?: string;
   isCustom?: boolean;
   protocolName?: string;
   brand: string;
@@ -329,6 +331,8 @@ function getLocalizedProviderDescription(
 interface ApiProvider {
   id: string;
   name: string;
+  brand_key?: string;
+  service_key?: string;
   is_custom?: boolean;
   protocol_name?: string;
   description?: string;
@@ -382,10 +386,12 @@ function mapApiProvider(
   return {
     id: provider.id,
     name: provider.name,
+    brandKey: provider.brand_key,
+    serviceKey: provider.service_key,
     isCustom: provider.is_custom === true,
     protocolName: provider.protocol_name || provider.name,
-    brand: provider.is_custom ? "API" : getProviderBrand(provider.name || provider.protocol_name || ""),
-    logoUrl: getProviderLogoUrl(provider.name || provider.protocol_name || "", provider.is_custom),
+    brand: provider.is_custom ? "API" : getProviderBrand(provider.brand_key || provider.name || provider.protocol_name || ""),
+    logoUrl: getProviderLogoUrl(provider.brand_key || provider.name || provider.protocol_name || "", provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,

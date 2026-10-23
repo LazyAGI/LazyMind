@@ -478,10 +478,7 @@ func validateSavedKeyPool(parent orm.UserModelProvider, groupName, baseURL, pool
 	if strings.TrimSpace(pool) == "" {
 		return nil
 	}
-	catalogKey := strings.TrimSpace(RuntimeProviderName(parent))
-	if catalogKey == "" {
-		catalogKey = strings.TrimSpace(parent.DefaultModelProviderID)
-	}
+	catalogKey := CatalogCredentialKey(parent)
 	payload, err := credentialvault.EncodeProviderCredentialPayload(credentialvault.ProviderCredential{
 		ProviderCatalogKey: catalogKey, DisplayName: groupName, BaseURL: baseURL, APIKey: []byte(pool), RequestConfig: parent.RequestConfig,
 		ActiveKeyIndex: selectionMetadataCapacity(parent, pool),

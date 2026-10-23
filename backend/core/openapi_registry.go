@@ -1383,9 +1383,9 @@ type addModelProviderGroupModelsOpenAPIFailure struct {
 
 type addModelProviderGroupModelsOpenAPIResponse struct {
 	Models        []addModelProviderGroupModelOpenAPIResponse `json:"models"`
-	AddedCount    int                                        `json:"added_count"`
-	ExistingCount int                                        `json:"existing_count"`
-	TotalCount    int64                                      `json:"total_count" desc:"Total active saved models in this group after the batch, including models outside the request."`
+	AddedCount    int                                         `json:"added_count"`
+	ExistingCount int                                         `json:"existing_count"`
+	TotalCount    int64                                       `json:"total_count" desc:"Total active saved models in this group after the batch, including models outside the request."`
 	Failures      []addModelProviderGroupModelsOpenAPIFailure `json:"failures"`
 }
 
@@ -1410,6 +1410,9 @@ type listModelProviderGroupModelsOpenAPIItem struct {
 	Name                     string   `json:"name"`
 	ModelType                string   `json:"model_type"`
 	ProviderName             string   `json:"provider_name"`
+	BrandKey                 string   `json:"brand_key,omitempty"`
+	ServiceKey               string   `json:"service_key,omitempty"`
+	IsCustom                 bool     `json:"is_custom"`
 	GroupName                string   `json:"group_name,omitempty"`
 	BaseURL                  string   `json:"base_url,omitempty"`
 	IsDefault                bool     `json:"is_default"`
@@ -1443,6 +1446,9 @@ type selectedModelOpenAPIItem struct {
 	UserModelProviderGroupID string  `json:"user_model_provider_group_id,omitempty"`
 	Name                     string  `json:"name"`
 	ProviderName             string  `json:"provider_name"`
+	BrandKey                 string  `json:"brand_key,omitempty"`
+	ServiceKey               string  `json:"service_key,omitempty"`
+	IsCustom                 bool    `json:"is_custom"`
 	GroupName                string  `json:"group_name,omitempty"`
 	BaseURL                  string  `json:"base_url,omitempty"`
 	IsDefault                bool    `json:"is_default" desc:"True when the selection was copied from catalog YAML"`
@@ -1537,6 +1543,8 @@ type userModelProviderOpenAPIItem struct {
 	Name                   string                           `json:"name"`
 	IsCustom               bool                             `json:"is_custom"`
 	ProtocolName           string                           `json:"protocol_name"`
+	BrandKey               string                           `json:"brand_key,omitempty" desc:"Stable built-in navigation brand; absent for custom providers. Independent of the runtime protocol."`
+	ServiceKey             string                           `json:"service_key,omitempty" desc:"Stable configurable service within the brand. Each service owns independent credentials and models."`
 	Description            string                           `json:"description"`
 	BaseURL                string                           `json:"base_url"`
 	BaseURLPresets         []modelProviderBaseURLPresetItem `json:"base_url_presets,omitempty"`

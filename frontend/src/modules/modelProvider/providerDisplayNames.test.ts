@@ -1,22 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
+  getProviderBrandDisplayName,
+  getProviderBrandSearchText,
   getProviderDisplayName,
+  getProviderServiceDisplayName,
   getProviderSearchText,
 } from "./providerDisplayNames";
 
 describe("supplier display names", () => {
   it.each([
     ["DeepSeek", "深度求索", "DeepSeek"],
-    ["Doubao", "火山引擎", "Volcengine"],
-    ["GLM", "智谱", "GLM"],
-    ["Kimi", "月之暗面", "Kimi"],
-    ["Qwen", "通义千问", "Qwen"],
-    ["SenseNova", "商汤日日新", "SenseNova"],
+    ["Doubao", "火山引擎 · 标准API", "Volcengine · Standard API"],
+    ["GLM", "智谱 · 标准API", "GLM · Standard API"],
+    ["Kimi", "月之暗面 · Kimi开放平台", "Kimi · Kimi Open Platform"],
+    ["Qwen", "阿里云百炼 · 标准API", "Alibaba Cloud Model Studio · Standard API"],
+    ["SenseNova", "商汤日日新 · 经典API", "SenseNova · Classic API"],
     ["SiliconFlow", "硅基流动", "SiliconFlow"],
     ["Claude", "Claude", "Claude"],
     ["OpenAI", "OpenAI", "OpenAI"],
     ["OpenRouter", "OpenRouter", "OpenRouter"],
-    ["Minimax", "MiniMax", "MiniMax"],
+    ["Minimax", "MiniMax · 标准API", "MiniMax · Standard API"],
     ["VLLM", "vLLM", "vLLM"],
     ["lmdeploy", "LMDeploy", "LMDeploy"],
   ])("localizes the built-in %s supplier without changing its identity", (name, chinese, english) => {
@@ -51,11 +54,11 @@ describe("supplier display names", () => {
     expect(getProviderDisplayName({ name: "DeepSeek", protocolName: "Claude", source: "OpenAI" }, "zh-CN")).toBe("深度求索");
   });
 
-  it("recognizes exact catalog aliases and uses a technical identity only when no name exists", () => {
+  it("recognizes exact catalog aliases and retains the brand-only fallback for an empty name", () => {
     expect(getProviderDisplayName({ name: "  deepseek  " }, "zh-CN")).toBe("深度求索");
     expect(getProviderDisplayName({ name: "Moonshot" }, "zh-CN")).toBe("月之暗面");
     expect(getProviderDisplayName({ name: "", protocol_name: "SiliconFlow" }, "zh-CN")).toBe("硅基流动");
-    expect(getProviderDisplayName({ name: "", source: "Qwen" }, "en-US")).toBe("Qwen");
+    expect(getProviderDisplayName({ name: "", source: "Qwen" }, "en-US")).toBe("Alibaba Cloud Model Studio");
     expect(getProviderDisplayName({ name: "", protocolName: "OpenAI", isCustom: true }, "zh-CN")).toBe("");
   });
 
@@ -82,5 +85,53 @@ describe("supplier display names", () => {
       for (const alias of ["doubao", "豆包", "volcengine", "火山方舟", "火山引擎"]) expect(text).toContain(alias);
     }
     expect(getProviderDisplayName({ name: "Doubao", isCustom: true }, "zh-CN")).toBe("Doubao");
+  });
+
+  it.each([
+    ["DoubaoCodingPlan", "火山引擎 · Coding Plan"],
+    ["DoubaoAgentPlan", "火山引擎 · Agent Plan"],
+    ["SenseNovaTokenPlan", "商汤日日新 · Token Plan"],
+    ["QwenCodingPlan", "阿里云百炼 · Coding Plan"],
+    ["QwenTokenPlan", "阿里云百炼 · Token Plan"],
+    ["QwenTokenPlanTeam", "阿里云百炼 · Token Plan团队版"],
+    ["GLMCodingPlan", "智谱 · Coding Plan"],
+    ["KimiCode", "月之暗面 · Kimi Code"],
+    ["MiniMaxMPlan", "MiniMax · M Plan"],
+  ])("resolves legacy builtin service %s by its exact stored name", (name, label) => {
+    expect(getProviderDisplayName({ name, protocolName: "OpenAI" }, "zh-CN")).toBe(label);
+  });
+
+  it("prefers explicit service metadata to a conflicting stored name and protocol", () => {
+    const supplier = { name: "Doubao", brandKey: "Qwen", serviceKey: "token_team", protocolName: "Claude" };
+    expect(getProviderBrandDisplayName(supplier, "zh-CN")).toBe("阿里云百炼");
+    expect(getProviderServiceDisplayName(supplier, "zh-CN")).toBe("Token Plan团队版");
+    expect(getProviderDisplayName(supplier, "en-US")).toBe("Alibaba Cloud Model Studio · Token Plan Team");
+  });
+
+  it("keeps custom identities independent even when explicit metadata and templates name builtin brands", () => {
+    for (const name of ["AIhubmix", "packyapi", "qwen自用", "QwenTokenPlan"]) {
+      const supplier = { name, isCustom: true, brandKey: "Doubao", serviceKey: "coding", protocolName: "Doubao" };
+      expect(getProviderDisplayName(supplier, "zh-CN")).toBe(name);
+      expect(getProviderBrandDisplayName(supplier, "zh-CN")).toBe(name);
+      expect(getProviderServiceDisplayName(supplier, "zh-CN")).toBe("");
+      expect(getProviderSearchText(supplier, "zh-CN")).toBe(name.toLowerCase());
+    }
+  });
+
+  it("searches both brand languages, previous aliases and only this service's names", () => {
+    const supplier = { name: "QwenTokenPlanTeam", brand_key: "Qwen", service_key: "token_team" };
+    const text = getProviderSearchText(supplier, "en-US");
+    for (const alias of ["阿里云百炼", "通义千问", "qwen", "alibaba cloud model studio", "token plan团队版", "token plan team"]) expect(text).toContain(alias);
+    expect(text).not.toContain("coding");
+    expect(text).not.toContain("openai");
+  });
+
+  it("separates brand search aliases from individual service search words", () => {
+    const supplier = { name: "DoubaoCodingPlan", brandKey: "Doubao", serviceKey: "coding" };
+    const text = getProviderBrandSearchText(supplier, "zh-CN");
+    for (const alias of ["火山引擎", "doubao", "volcengine", "火山方舟"]) expect(text).toContain(alias);
+    expect(text).not.toContain("coding");
+    expect(text).not.toContain("plan");
+    expect(getProviderSearchText(supplier, "zh-CN")).toContain("coding plan");
   });
 });

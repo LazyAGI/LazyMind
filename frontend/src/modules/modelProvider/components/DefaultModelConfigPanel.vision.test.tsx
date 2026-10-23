@@ -59,6 +59,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("compact default model options", () => {
+  it("retains explicit service identity when a selected shared supplier is absent from the local provider list", async () => {
+    mocks.providers.mockResolvedValue({ data: { providers: [] } });
+    mocks.selections.mockResolvedValue({ data: { selections: [{ ...selection, brand_key: "Qwen", service_key: "coding", is_custom: false, provider_name: "OpenAI", group_name: "QwenCodingPlan" }] } });
+    renderPanel();
+    expect(await screen.findByText("catalog-vision · Alibaba Cloud Model Studio · Coding Plan")).toBeInTheDocument();
+  });
+
+  it("keeps explicit custom supplier names independent of a shared catalog protocol and brand", async () => {
+    mocks.providers.mockResolvedValue({ data: { providers: [] } });
+    mocks.selections.mockResolvedValue({ data: { selections: [{ ...selection, brand_key: "Doubao", service_key: "coding", is_custom: true, provider_name: "Doubao", group_name: "AIhubmix" }] } });
+    renderPanel();
+    expect(await screen.findByText("catalog-vision · AIhubmix")).toBeInTheDocument();
+    expect(document.querySelector('img[src="/provider-icons/custom.svg"]')).toBeInTheDocument();
+  });
   it("keeps selected option identity without modality rows while refreshed options are pending", async () => {
     mocks.models.mockImplementation(() => new Promise(() => undefined));
     renderPanel();

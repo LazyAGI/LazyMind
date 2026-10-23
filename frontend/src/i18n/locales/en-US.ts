@@ -477,6 +477,11 @@ const enUS = {
       empty: "No matching models",
     },
     workspace: {
+      serviceScopeGeneric: "This plan has tool, client or usage restrictions. Check the official scope before using it for production applications.",
+      serviceScopeQwen: "Limited to supported AI coding tools and OpenClaw-style agents; arbitrary workflows and custom application backends are outside this plan’s scope.",
+      serviceScopeGlm: "Limited to tools and product environments on the official support list; this does not establish support for arbitrary LazyMind workflows.",
+      serviceScopeOfficialLink: "Official scope",
+
       reorderSupplier: "Reorder {{name}}",
       reorderSupplierHint: "Drag to reorder, or press Space, use the arrow keys, then press Space to confirm.",
       reorderSupplierStarted: "Picked up {{name}}. Use arrow keys to move, Space to confirm, or Escape to cancel.",

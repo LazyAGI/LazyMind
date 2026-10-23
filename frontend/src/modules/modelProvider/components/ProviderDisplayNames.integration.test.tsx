@@ -145,20 +145,20 @@ describe("localized supplier names in real configuration components", () => {
     renderWorkspace();
     const sidebar = screen.getByRole("navigation", { name: "供应商" });
     expect(within(sidebar).getByRole("button", { name: "深度求索" })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "月之暗面" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "月之暗面 · Kimi开放平台" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "OpenRouter" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: "DeepSeek" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "深度求索" })).toHaveAttribute("title", "深度求索");
 
     await act(async () => { await locale.changeLanguage("en-US"); });
     expect(screen.getByRole("heading", { name: "DeepSeek" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Kimi" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Kimi · Kimi Open Platform" })).toBeInTheDocument();
 
     await act(async () => { await locale.changeLanguage("zh-CN"); });
     fireEvent.click(screen.getByRole("button", { name: "添加供应商" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.mouseDown(within(dialog).getByRole("combobox"));
-    expect(await screen.findByText("月之暗面", { selector: ".ant-select-item-option-content" })).toBeInTheDocument();
+    expect(await screen.findByText("月之暗面 · Kimi开放平台", { selector: ".ant-select-item-option-content" })).toBeInTheDocument();
     expect(screen.getByText("深度求索", { selector: ".ant-select-item-option-content" })).toBeInTheDocument();
   });
 
@@ -170,9 +170,9 @@ describe("localized supplier names in real configuration components", () => {
     expect(within(sidebar).getAllByRole("button")).toHaveLength(1);
     expect(within(sidebar).getByRole("button", { name: "深度求索" })).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "moonshot" } });
-    expect(within(sidebar).getByRole("button", { name: "月之暗面" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("button", { name: "月之暗面 · Kimi开放平台" })).toBeInTheDocument();
     await act(async () => { await locale.changeLanguage("en-US"); });
-    expect(screen.getByRole("button", { name: "Kimi" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Kimi · Kimi Open Platform" })).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "深度求索" } });
     expect(within(sidebar).getAllByRole("button")).toHaveLength(1);
     expect(within(sidebar).getByRole("button", { name: "DeepSeek" })).toBeInTheDocument();
@@ -202,5 +202,38 @@ describe("localized supplier names in real configuration components", () => {
     await waitFor(() => expect(mocks.saveModels).toHaveBeenCalledWith({
       setSelectedModelsOpenAPIRequest: { selections: [{ model_key: "llm", model_id: "chat-2", source: "own" }] },
     }));
+  });
+
+  it.each([
+    { isCustom: false, groupName: "Existing migrated service", displayName: "阿里云百炼 · Token Plan团队版", serviceKey: "token_team", protocol: "OpenAI" },
+    { isCustom: true, groupName: "AIhubmix", displayName: "AIhubmix", serviceKey: "coding", protocol: "Doubao" },
+  ])("retains selected and refreshed supplier metadata without the supplier inventory: $displayName", async ({ isCustom, groupName, displayName, serviceKey, protocol }) => {
+    const identity = {
+      provider_name: protocol, group_name: groupName, is_custom: isCustom,
+      brand_key: "Qwen", service_key: serviceKey,
+      user_model_provider_id: "missing-supplier", user_model_provider_group_id: "private-keys",
+    };
+    mocks.providers.mockResolvedValue({ data: { providers: [] } });
+    mocks.selectedModels.mockResolvedValue({ data: { selections: [{
+      ...selection, ...identity, model_id: "saved-private", name: "saved-private",
+    }] } });
+    mocks.models.mockImplementation(({ modelType }: { modelType: string }) => Promise.resolve({ data: { models: modelType === "llm" ? [{
+      ...identity, id: "refreshed-private", name: "refreshed-private", model_type: "llm",
+    }] : [] } }));
+    renderTranslated(<DefaultModelConfigPanel
+      modelProviderSetupState="ready"
+      cloudServiceSetupStates={{ cloudParsing: "empty", searchEngine: "empty" }}
+      onConfigureCloudService={vi.fn()} onConfigureProviders={vi.fn()}
+      onModelSelectionChanged={vi.fn()} onRetrySetup={vi.fn()}
+    />);
+    expect(await screen.findByText(`saved-private · ${displayName}`)).toBeInTheDocument();
+    const llmRow = screen.getByRole("group", { name: zhCN.modelProvider.module.llmChatTitle });
+    fireEvent.mouseDown(within(llmRow).getByRole("combobox"));
+    const model = await screen.findByText("refreshed-private", { selector: ".model-provider-select-copy strong" });
+    expect(model.closest(".model-provider-select-copy")?.querySelector("small")).toHaveTextContent(displayName);
+    fireEvent.click(model);
+    await waitFor(() => expect(mocks.saveModels).toHaveBeenCalledWith({ setSelectedModelsOpenAPIRequest: {
+      selections: [{ model_key: "llm", model_id: "refreshed-private", source: "own" }],
+    } }));
   });
 });

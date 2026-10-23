@@ -57,6 +57,8 @@ interface ProviderModel {
 export interface ProviderOption {
   id: string;
   name: string;
+  brandKey?: string;
+  serviceKey?: string;
   isCustom?: boolean;
   protocolName?: string;
   brand: string;
@@ -90,6 +92,8 @@ interface ModuleConfig {
 interface ApiProvider {
   id: string;
   name: string;
+  brand_key?: string;
+  service_key?: string;
   is_custom?: boolean;
   protocol_name?: string;
   description?: string;
@@ -97,6 +101,9 @@ interface ApiProvider {
 }
 
 interface ApiModel {
+  brand_key?: string;
+  service_key?: string;
+  is_custom?: boolean;
   id: string;
   is_editable?: boolean;
   name: string;
@@ -119,6 +126,9 @@ interface ApiModel {
 }
 
 interface SelectedModelApiItem {
+  brand_key?: string;
+  service_key?: string;
+  is_custom?: boolean;
   base_url?: string;
   group_name: string;
   is_default?: boolean;
@@ -463,10 +473,12 @@ function mapApiProvider(
   return {
     id: provider.id,
     name: provider.name,
+    brandKey: provider.brand_key,
+    serviceKey: provider.service_key,
     isCustom: provider.is_custom === true,
     protocolName: provider.protocol_name || provider.name,
-    brand: provider.is_custom ? "API" : getProviderBrand(provider.name || provider.protocol_name || ""),
-    logoUrl: getProviderLogoUrl(provider.name || provider.protocol_name || "", provider.is_custom),
+    brand: provider.is_custom ? "API" : getProviderBrand(provider.brand_key || provider.name || provider.protocol_name || ""),
+    logoUrl: getProviderLogoUrl(provider.brand_key || provider.name || provider.protocol_name || "", provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,
@@ -661,9 +673,11 @@ export function useDefaultModelConfig({
           mapApiProvider(
             {
               id: providerId,
+              brand_key: selection.brand_key,
+              service_key: selection.service_key,
               name: source === "cloud" ? selection.provider_name : selection.group_name || selection.provider_name,
               protocol_name: selection.provider_name,
-              is_custom: source !== "cloud" && !!selection.group_name && selection.group_name !== selection.provider_name,
+              is_custom: source !== "cloud" && (selection.is_custom ?? (selection.brand_key ? false : !!selection.group_name && selection.group_name !== selection.provider_name)),
               base_url: selection.base_url,
             },
             localizedFallbacks,
@@ -872,9 +886,11 @@ export function useDefaultModelConfig({
               mapApiProvider(
                 {
                   id: providerId,
+                  brand_key: model.brand_key,
+                  service_key: model.service_key,
                   name: source === "cloud" ? model.provider_name || "LazyMind Cloud" : model.group_name || model.provider_name || "",
                   protocol_name: model.provider_name,
-                  is_custom: source !== "cloud" && !!model.group_name && model.group_name !== model.provider_name,
+                  is_custom: source !== "cloud" && (model.is_custom ?? (model.brand_key ? false : !!model.group_name && model.group_name !== model.provider_name)),
                   base_url: model.base_url,
                 },
                 localizedFallbacks,

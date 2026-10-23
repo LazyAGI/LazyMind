@@ -551,15 +551,22 @@ func TestReconcileCatalogPreservesCustomModelsAndEndpoints(t *testing.T) {
 	}
 }
 
-func TestUpgradeLegacyTokenPlanURLPreservesCustomURLs(t *testing.T) {
+func TestServiceProfileSeedPreservesSavedURLs(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}); err != nil {
+	if err := db.AutoMigrate(&orm.DefaultModelProvider{}, &orm.DefaultModel{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.UserModelProvider{ID: "nova", DefaultModelProviderID: "catalog-nova"}).Error; err != nil {
+	if err := db.Create(&orm.UserModelProvider{ID: "nova", DefaultModelProviderID: "catalog-nova", BaseURL: "https://token.sensenova.cn/v1/chat/completions"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.DefaultModelProvider{ID: "catalog-nova", Name: "SenseNova"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/catalog.yaml"
+	if err := os.WriteFile(path, []byte("model_providers:\n  suppliers:\n    - name: SenseNova\n      description: {zh-CN: '旧服务', en-US: 'Legacy service'}\n      base_url: https://api.sensenova.cn/compatible-mode/v1/\n      models: []\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	urls := []string{"https://token.sensenova.cn/v1/chat/completions/", "https://token.sensenova.cn/v1/chat/completions", "https://proxy.example/v2/", "https://api.sensenova.cn/compatible-mode/v1/"}
@@ -569,19 +576,16 @@ func TestUpgradeLegacyTokenPlanURLPreservesCustomURLs(t *testing.T) {
 		}
 	}
 	for range 2 {
-		if err := upgradeLegacyTokenPlanURL(db, "catalog-nova"); err != nil {
+		if err := SeedModelCatalog(t.Context(), db, path); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for i, u := range urls {
+	for _, u := range urls {
 		var row orm.UserModelProviderGroup
 		if err := db.Where("id = ?", u).Take(&row).Error; err != nil {
 			t.Fatal(err)
 		}
 		want := u
-		if i < 2 {
-			want = sensenovaNewPlatformBaseURL
-		}
 		if row.BaseURL != want {
 			t.Fatalf("URL = %q, want %q", row.BaseURL, want)
 		}

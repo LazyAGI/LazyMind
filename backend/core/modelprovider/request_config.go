@@ -79,7 +79,7 @@ func providerRequestDefaults(db *gorm.DB, parent orm.UserModelProvider) map[stri
 		openai = rootURL + "/v1/"
 	}
 	defaults := map[string]string{"openai": openai, "anthropic": rootURL, "gemini": rootURL + "/gemini/v1beta", "openai-responses": openai}
-	if known, ok := knownSupplierProtocolDefaults(base); ok {
+	if known, ok := supplierProtocolDefaults(parent, base); ok {
 		defaults["openai"], defaults["anthropic"] = known["openai"], known["anthropic"]
 		defaults["openai-responses"] = known["openai"]
 	}
@@ -102,7 +102,7 @@ func savedRequestConfig(db *gorm.DB, parent orm.UserModelProvider) savedProvider
 					config.Defaults[key] = value
 				}
 			}
-			repairInheritedProtocolDefaults(&config, stored)
+			repairInheritedProtocolDefaults(&config, stored, parent)
 		} else {
 			// Old saves derived defaults from the catalog/origin and copied those
 			// defaults into endpoints. The saved OpenAI address retains the original
@@ -141,10 +141,10 @@ func originalRequestProtocolIsAnthropic(db *gorm.DB, parent orm.UserModelProvide
 	if db != nil && parent.DefaultModelProviderID != "" && db.Migrator().HasTable(&orm.DefaultModelProvider{}) {
 		var template orm.DefaultModelProvider
 		if db.Where("id = ?", parent.DefaultModelProviderID).Take(&template).Error == nil {
-			return LazyLLMSource(template.Name) == "claude"
+			return LazyLLMSource(RuntimeProviderName(orm.UserModelProvider{Name: template.Name})) == "claude"
 		}
 	}
-	return parent.ProtocolName == "" && LazyLLMSource(parent.Name) == "claude"
+	return parent.ProtocolName == "" && LazyLLMSource(RuntimeProviderName(parent)) == "claude"
 }
 
 func sameRequestOrigin(left, right string) bool {
@@ -167,7 +167,7 @@ func requestConfigResponse(db *gorm.DB, parent orm.UserModelProvider) providerRe
 		if item.key == config.DefaultProtocol {
 			base = parent.BaseURL
 		}
-		response.Protocols = append(response.Protocols, providerRequestProtocol{Protocol: item.key, Name: item.name, BaseURL: base, DefaultBaseURL: config.Defaults[item.key], Supported: item.supported})
+		response.Protocols = append(response.Protocols, providerRequestProtocol{Protocol: item.key, Name: item.name, BaseURL: base, DefaultBaseURL: config.Defaults[item.key], Supported: item.supported && serviceSupportsRequestProtocol(parent, item.key)})
 	}
 	return response
 }
@@ -216,7 +216,7 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid request configuration", 400)
 		return
 	}
-	if req.DefaultProtocol != "openai" && req.DefaultProtocol != "anthropic" {
+	if !serviceSupportsRequestProtocol(parent, req.DefaultProtocol) {
 		common.ReplyErr(w, "request protocol is not supported by the current runtime", 400)
 		return
 	}

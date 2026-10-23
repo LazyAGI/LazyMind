@@ -109,8 +109,8 @@ func TestListUserProvidersReturnsCatalogDescriptionForRequestedLanguage(t *testi
 	if err := db.Model(&orm.DefaultModelProvider{}).Count(&providerCount).Error; err != nil {
 		t.Fatalf("count default providers: %v", err)
 	}
-	if providerCount != 22 {
-		t.Fatalf("expected 22 catalog providers, got %d", providerCount)
+	if providerCount != 31 {
+		t.Fatalf("expected 31 catalog providers, got %d", providerCount)
 	}
 	var freeModel orm.DefaultModel
 	if err := db.Where("provider_name = ? AND name = ?", "SiliconFlow", "deepseek-ai/DeepSeek-V4-Flash").
@@ -199,7 +199,13 @@ func TestListUserProvidersReturnsCatalogDescriptionForRequestedLanguage(t *testi
 		if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
-		if len(payload.Data.Providers) != 1 || payload.Data.Providers[0].Description != want {
+		var qwen *listItem
+		for i := range payload.Data.Providers {
+			if payload.Data.Providers[i].Name == "Qwen" {
+				qwen = &payload.Data.Providers[i]
+			}
+		}
+		if qwen == nil || qwen.Description != want {
 			t.Fatalf("expected description %q, got %#v", want, payload.Data.Providers)
 		}
 	}

@@ -12312,6 +12312,8 @@ components:
                     type: string
                 base_url:
                     type: string
+                brand_key:
+                    type: string
                 capabilities:
                     items:
                         type: string
@@ -12324,6 +12326,8 @@ components:
                     description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
                     nullable: true
                     type: string
+                is_custom:
+                    type: boolean
                 is_default:
                     type: boolean
                 is_editable:
@@ -12355,6 +12359,8 @@ components:
                     type: string
                 read_only:
                     type: boolean
+                service_key:
+                    type: string
                 source:
                     enum:
                         - own
@@ -12370,6 +12376,7 @@ components:
             required:
                 - availability
                 - id
+                - is_custom
                 - is_default
                 - is_editable
                 - lifecycle
@@ -13105,8 +13112,12 @@ components:
                     type: string
                 base_url:
                     type: string
+                brand_key:
+                    type: string
                 group_name:
                     type: string
+                is_custom:
+                    type: boolean
                 is_default:
                     description: True when the selection was copied from catalog YAML
                     type: boolean
@@ -13134,6 +13145,8 @@ components:
                     type: string
                 read_only:
                     type: boolean
+                service_key:
+                    type: string
                 source:
                     enum:
                         - own
@@ -13150,6 +13163,7 @@ components:
                     type: boolean
             required:
                 - availability
+                - is_custom
                 - is_default
                 - is_editable
                 - model_id
@@ -15108,6 +15122,9 @@ components:
                     items:
                         $ref: '#/components/schemas/modelProviderBaseURLPresetItem'
                     type: array
+                brand_key:
+                    description: Stable built-in navigation brand; absent for custom providers. Independent of the runtime protocol.
+                    type: string
                 capabilities:
                     items:
                         type: string
@@ -15131,6 +15148,9 @@ components:
                 name:
                     type: string
                 protocol_name:
+                    type: string
+                service_key:
+                    description: Stable configurable service within the brand. Each service owns independent credentials and models.
                     type: string
             required:
                 - base_url

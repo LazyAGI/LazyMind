@@ -72,6 +72,12 @@ func TestCredentialBackupIncludesPortableActiveKeySelection(t *testing.T) {
 			restored := customRestorePayload("00000000-0000-7000-8000-000000000401", payload.DisplayName, payload.BaseURL, payload.APIKey)
 			restored.Provider.ProviderCatalogKey, restored.Provider.ActiveKeyIndex = payload.CatalogKey, &index
 			sink, target, scope := newCredentialRestoreSinkFixture(t)
+			// A built-in backup now retains its catalog identity even after its
+			// request protocol changes. The second installation has that same
+			// built-in under a different local template ID.
+			if err := target.Model(&orm.UserModelProvider{}).Where("id = ?", "restore-provider").Update("name", parent.Name).Error; err != nil {
+				t.Fatal(err)
+			}
 			if err := sink.PersistTrusted(t.Context(), scope, []credentialvault.RestoredCredential{restored}, map[string]credentialvault.ConflictResolution{restored.RecordID: credentialvault.ConflictFail}, time.Now()); err != nil {
 				t.Fatal(err)
 			}

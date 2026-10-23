@@ -61,6 +61,9 @@ type groupModelListItem struct {
 	Name                     string   `json:"name"`
 	ModelType                string   `json:"model_type"`
 	ProviderName             string   `json:"provider_name"`
+	BrandKey                 string   `json:"brand_key,omitempty"`
+	ServiceKey               string   `json:"service_key,omitempty"`
+	IsCustom                 bool     `json:"is_custom"`
 	GroupName                string   `json:"group_name,omitempty"`
 	BaseURL                  string   `json:"base_url,omitempty"`
 	IsDefault                bool     `json:"is_default"`
@@ -424,8 +427,10 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 	if !RuntimeSupportsModelType(RuntimeProviderName(parent), row.ModelType) {
 		availability = "unavailable"
 	}
+	identity := identityForModelProvider(parent)
 	common.ReplyOK(w, groupModelListItem{
 		ID: row.ID, Source: "own", ProviderID: row.UserModelProviderID, ProviderGroupID: row.UserModelProviderGroupID,
+		BrandKey: identity.BrandKey, ServiceKey: identity.ServiceKey, IsCustom: identity.IsCustom,
 		UserModelProviderID: row.UserModelProviderID, UserModelProviderGroupID: row.UserModelProviderGroupID,
 		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ProviderName: row.ProviderName, GroupName: group.Name,
 		BaseURL: connectionBaseURL(parent, group.BaseURL), IsDefault: row.IsDefault, IsEditable: strings.EqualFold(row.ModelType, "image_editing"), MaxInputTokens: row.MaxInputTokens, InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens, Availability: availability, Lifecycle: "active", Capabilities: []string{},
@@ -496,6 +501,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	identity := identityForModelProvider(parent)
 	out := make([]groupModelListItem, 0, len(rows))
 	for i := range rows {
 		m := rows[i]
@@ -514,6 +520,9 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			ModelType:                m.ModelType,
 			Vision:                   m.Vision,
 			ProviderName:             m.ProviderName,
+			BrandKey:                 identity.BrandKey,
+			ServiceKey:               identity.ServiceKey,
+			IsCustom:                 identity.IsCustom,
 			GroupName:                group.Name,
 			BaseURL:                  group.BaseURL,
 			IsDefault:                m.IsDefault,
@@ -578,6 +587,15 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	providerIDs := make([]string, 0, len(rows))
+	for _, model := range rows {
+		providerIDs = append(providerIDs, model.UserModelProviderID)
+	}
+	identities, err := loadModelProviderIdentities(r.Context(), db, providerIDs)
+	if err != nil {
+		common.ReplyErr(w, "query model provider identities failed", http.StatusInternalServerError)
+		return
+	}
 	groupIDs := make([]string, 0)
 	seenGroup := make(map[string]struct{})
 	for i := range rows {
@@ -612,6 +630,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	for i := range rows {
 		m := rows[i]
 		grp, ok := groupByID[m.UserModelProviderGroupID]
+		identity := identities[m.UserModelProviderID]
 		if !ok || !grp.available {
 			continue
 		}
@@ -634,6 +653,9 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			ModelType:                m.ModelType,
 			Vision:                   m.Vision,
 			ProviderName:             m.ProviderName,
+			BrandKey:                 identity.BrandKey,
+			ServiceKey:               identity.ServiceKey,
+			IsCustom:                 identity.IsCustom,
 			GroupName:                grp.name,
 			BaseURL:                  grp.baseURL,
 			IsDefault:                m.IsDefault,

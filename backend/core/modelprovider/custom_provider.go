@@ -22,6 +22,11 @@ func RuntimeProviderName(provider orm.UserModelProvider) string {
 	if name := strings.TrimSpace(provider.ProtocolName); name != "" {
 		return name
 	}
+	if !provider.IsCustom {
+		if profile, ok := providerServiceProfiles[strings.TrimSpace(provider.Name)]; ok {
+			return profile.adapter
+		}
+	}
 	return provider.Name
 }
 

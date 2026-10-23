@@ -3995,6 +3995,7 @@
   color: var(--provider-text);
   text-align: left;
   font-size: 13px;
+  > .provider-workspace-provider-name,
   > span:nth-child(2) {
     flex: 1;
     min-width: 0;
@@ -4020,6 +4021,31 @@
       background: var(--provider-green);
     }
   }
+}
+.provider-workspace-brand-arrow {
+  flex: 0 0 auto;
+  font-size: 10px;
+  transform: rotate(-90deg);
+  &.is-expanded { transform: rotate(0); }
+}
+.provider-workspace-services {
+  margin: 0 0 5px 43px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--provider-line, #e3e8ef);
+  list-style: none;
+  &[hidden] { display: none; }
+  .provider-workspace-provider.is-service {
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+}
+.provider-workspace-service-scope {
+  margin: 4px 0 16px;
+  font-size: 12px;
+}
+@media (pointer: coarse) {
+  .provider-workspace-services .provider-workspace-provider.is-service { min-height: 44px; }
 }
 .provider-workspace-logo {
   display: inline-flex;

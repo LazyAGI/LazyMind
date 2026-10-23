@@ -63,6 +63,9 @@ type selectedModelItem struct {
 	Name                     string  `json:"name" gorm:"column:name"`
 	Vision                   *bool   `json:"vision,omitempty" gorm:"column:vision"`
 	ProviderName             string  `json:"provider_name" gorm:"column:provider_name"`
+	BrandKey                 string  `json:"brand_key,omitempty" gorm:"-"`
+	ServiceKey               string  `json:"service_key,omitempty" gorm:"-"`
+	IsCustom                 bool    `json:"is_custom" gorm:"-"`
 	GroupName                string  `json:"group_name,omitempty" gorm:"column:group_name"`
 	BaseURL                  string  `json:"base_url,omitempty" gorm:"column:base_url"`
 	Share                    bool    `json:"share" gorm:"column:share"`
@@ -565,8 +568,18 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 	if err != nil {
 		return nil, err
 	}
+	providerIDs := make([]string, 0, len(out))
+	for _, item := range out {
+		providerIDs = append(providerIDs, item.UserModelProviderID)
+	}
+	identities, err := loadModelProviderIdentities(ctx, db, providerIDs)
+	if err != nil {
+		return nil, err
+	}
 	eligible := out[:0]
 	for _, item := range out {
+		identity := identities[item.UserModelProviderID]
+		item.BrandKey, item.ServiceKey, item.IsCustom = identity.BrandKey, identity.ServiceKey, identity.IsCustom
 		item.Source = "own"
 		item.ProviderID = item.UserModelProviderID
 		item.ProviderGroupID = item.UserModelProviderGroupID

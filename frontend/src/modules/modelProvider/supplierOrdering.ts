@@ -1,24 +1,25 @@
-import { getProviderDisplayName, type ProviderDisplayIdentity } from "./providerDisplayNames";
+import { getProviderBrandDisplayName, type ProviderDisplayIdentity } from "./providerDisplayNames";
 
-export interface OrderedSupplier extends ProviderDisplayIdentity { id: string }
+export interface OrderedSupplier extends ProviderDisplayIdentity { id: string; orderAliases?: readonly string[]; isBrandGroup?: boolean }
 
 /** Custom identities stay first; SenseNova is the only pinned built-in brand. */
 export function supplierOrderGroup(provider: OrderedSupplier): number {
   if (provider.isCustom || provider.is_custom) return 0;
-  return getProviderDisplayName(provider, "en-US") === "SenseNova" ? 1 : 2;
+  return getProviderBrandDisplayName(provider, "en-US") === "SenseNova" ? 1 : 2;
 }
 
 export function orderSuppliers<T extends OrderedSupplier>(
   providers: readonly T[], savedOrder: readonly string[] = [],
 ): T[] {
   const rank = new Map(savedOrder.map((id, index) => [id, index]));
+  const positionOf = (provider: T) => Math.min(...[provider.id, ...(provider.orderAliases || [])].map((id) => rank.get(id) ?? Infinity));
   return [...providers].sort((left, right) => {
     const section = supplierOrderGroup(left) - supplierOrderGroup(right);
     if (section) return section;
-    const position = (rank.get(left.id) ?? Infinity) - (rank.get(right.id) ?? Infinity);
+    const position = positionOf(left) - positionOf(right);
     if (position && !Number.isNaN(position)) return position;
-    return getProviderDisplayName(left, "en-US").localeCompare(
-      getProviderDisplayName(right, "en-US"), "en", { sensitivity: "base", numeric: true },
+    return getProviderBrandDisplayName(left, "en-US").localeCompare(
+      getProviderBrandDisplayName(right, "en-US"), "en", { sensitivity: "base", numeric: true },
     ) || left.id.localeCompare(right.id);
   });
 }

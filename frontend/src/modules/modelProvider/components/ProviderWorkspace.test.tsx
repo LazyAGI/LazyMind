@@ -183,6 +183,69 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("expands a brand without selecting it and configures only an independent service leaf", () => {
+    const standard = { ...provider, id: "ark-standard", name: "Doubao", brandKey: "Doubao", serviceKey: "standard", groups: [] };
+    const coding = { ...provider, id: "ark-coding", name: "DoubaoCodingPlan", brandKey: "Doubao", serviceKey: "coding", groups: [] };
+    const onLoadModels = vi.fn();
+    setup({ providers: [provider, standard, coding], configuredProviders: [provider, standard, coding], onLoadModels, highlightProviderId: "openai" });
+    const nav = screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" });
+    const brand = within(nav).getByRole("button", { name: "Volcengine" });
+    expect(brand).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(brand);
+    expect(brand).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("heading", { name: "OpenAI" })).toBeInTheDocument();
+    fireEvent.click(within(nav).getByRole("button", { name: "Coding Plan" }));
+    expect(screen.getByRole("heading", { name: "Volcengine · Coding Plan" })).toBeInTheDocument();
+    expect(within(nav).getByRole("button", { name: "Coding Plan" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("searches services under their parent and never groups custom protocol-compatible suppliers", () => {
+    const standard = { ...provider, id: "ark-standard", name: "Doubao", brandKey: "Doubao", serviceKey: "standard", groups: [] };
+    const coding = { ...provider, id: "ark-coding", name: "DoubaoCodingPlan", brandKey: "Doubao", serviceKey: "coding", groups: [] };
+    const custom = { ...provider, id: "aihubmix", name: "AIhubmix", isCustom: true, protocolName: "Doubao", source: "Doubao", groups: [] };
+    setup({ providers: [standard, coding, custom], configuredProviders: [standard, coding, custom] });
+    const nav = screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" });
+    expect(within(nav).getByRole("button", { name: "AIhubmix" })).not.toHaveAttribute("aria-expanded");
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.searchAria" }), { target: { value: "Coding Plan" } });
+    expect(within(nav).getByRole("button", { name: "Volcengine" })).toHaveAttribute("aria-expanded", "true");
+    expect(within(nav).getByRole("button", { name: "Coding Plan" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("button", { name: "Standard API" })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("button", { name: "AIhubmix" })).not.toBeInTheDocument();
+  });
+
+  it("opens the selected service ancestor and filters configured services at the leaf", () => {
+    const standard = { ...provider, id: "ark-standard", name: "Doubao", brandKey: "Doubao", serviceKey: "standard", groups: [] };
+    const coding = { ...provider, id: "ark-coding", name: "DoubaoCodingPlan", brandKey: "Doubao", serviceKey: "coding" };
+    setup({ providers: [standard, coding], configuredProviders: [standard, coding], highlightProviderId: "ark-coding" });
+    const nav = screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" });
+    expect(within(nav).getByRole("button", { name: "Volcengine" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: /modelProvider.workspace.configured/ }));
+    expect(within(nav).getByRole("button", { name: "Coding Plan" })).toBeInTheDocument();
+    expect(within(nav).queryByRole("button", { name: "Standard API" })).not.toBeInTheDocument();
+  });
+
+  it("keeps mobile navigation on the brand list until a service is chosen", () => {
+    const standard = { ...provider, id: "ark-standard", name: "Doubao", brandKey: "Doubao", serviceKey: "standard", groups: [] };
+    const coding = { ...provider, id: "ark-coding", name: "DoubaoCodingPlan", brandKey: "Doubao", serviceKey: "coding", groups: [] };
+    setup({ providers: [provider, standard, coding], configuredProviders: [provider, standard, coding] });
+    const workspace = document.querySelector(".provider-workspace");
+    const nav = screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" });
+    fireEvent.click(within(nav).getByRole("button", { name: "Volcengine" }));
+    expect(workspace).not.toHaveClass("is-mobile-detail");
+    fireEvent.click(within(nav).getByRole("button", { name: "Coding Plan" }));
+    expect(workspace).toHaveClass("is-mobile-detail");
+  });
+
+  it("shows a plan's official usage scope without blocking an empty model inventory", () => {
+    const coding = { ...provider, id: "qwen-coding", name: "QwenCodingPlan", brandKey: "Qwen", serviceKey: "coding", groups: [] };
+    setup({ providers: [coding], configuredProviders: [coding] });
+    const notice = screen.getByRole("alert");
+    expect(notice).toHaveTextContent("modelProvider.workspace.serviceScopeQwen");
+    expect(within(notice).getByRole("link")).toHaveAttribute("href", "https://help.aliyun.com/zh/model-studio/more-tools");
+    expect(screen.getByRole("button", { name: "modelProvider.workspace.getModelList" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "modelProvider.customModel" })).toBeEnabled();
+  });
+
   it("renders an empty supplier list before loading without treating it as a saved endpoint", () => {
     setup({ providers: [], configuredProviders: [] });
     expect(screen.getAllByText("modelProvider.noMatchedProviders").length).toBeGreaterThan(0);

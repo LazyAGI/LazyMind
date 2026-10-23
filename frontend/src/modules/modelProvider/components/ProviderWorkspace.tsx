@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeftOutlined,
   CheckCircleFilled,
   CloudOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
   MoreOutlined,
   PlusOutlined,
@@ -43,7 +44,9 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
-import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
+import { getProviderBrandDisplayName, getProviderDisplayName, getProviderServiceDisplayName } from "../providerDisplayNames";
+import { filterSupplierNavigation, hasProgrammingScopeNotice, programmingScopeLink, projectSupplierNavigation } from "../supplierNavigation";
+import { getSupplierBrandKey } from "../supplierServices";
 import { useSupplierOrder } from "../hooks/useSupplierOrder";
 import { useFocusModality } from "../hooks/useFocusModality";
 import { canDiscoverWithoutApiKey } from "../providerAuthentication";
@@ -104,7 +107,7 @@ interface Props {
 
 function Logo({ provider }: { provider: ProviderOption }) {
   const logo = getProviderLogoUrl(
-    provider.name || provider.protocolName || provider.source,
+    provider.brandKey || provider.name || provider.protocolName || provider.source,
     provider.isCustom,
   );
   return (
@@ -127,6 +130,8 @@ export function ProviderWorkspace(props: Props) {
   const label = (key: string, options?: Record<string, unknown>) =>
     t(`modelProvider.workspace.${key}`, options);
   const [selectedId, setSelectedId] = useState(props.highlightProviderId || "");
+  const [expandedBrands, setExpandedBrands] = useState<Set<string>>(new Set());
+  const navigationId = useId();
   const [search, setSearch] = useState("");
   const [modelSearch, setModelSearch] = useState("");
   const [modelType, setModelType] = useState<ModelTaskFilter>("all");
@@ -179,9 +184,12 @@ export function ProviderWorkspace(props: Props) {
         ),
     [props.providers, props.configuredProviders],
   );
-  const { providers, reorder: reorderSuppliers } = useSupplierOrder(mergedProviders);
+  const projectedNavigation = useMemo(() => projectSupplierNavigation(mergedProviders), [mergedProviders]);
+  const { providers: navigation, reorder: reorderSuppliers } = useSupplierOrder(projectedNavigation);
+  const providers = useMemo(() => navigation.flatMap((node) => node.children), [navigation]);
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
+  const selectedAncestorId = navigation.find((node) => node.isBrandGroup && node.children.some((child) => child.id === provider?.id))?.id;
   const activeSupplierId = useRef<string | undefined>(provider?.id);
   activeSupplierId.current = provider?.id;
   useEffect(() => {
@@ -217,6 +225,9 @@ export function ProviderWorkspace(props: Props) {
       setMobileDetail(true);
     }
   }, [props.highlightProviderId]);
+  useEffect(() => {
+    if (selectedAncestorId) setExpandedBrands((current) => current.has(selectedAncestorId) ? current : new Set(current).add(selectedAncestorId));
+  }, [provider?.id, selectedAncestorId]);
   useEffect(() => {
     if (!provider) return;
     setSelectedId(provider.id);
@@ -500,10 +511,24 @@ export function ProviderWorkspace(props: Props) {
       setInitializing(false);
     }
   };
-  const visibleProviders = providers.filter(
-    (item) =>
-      (!configuredOnly || hasProviderConfiguration(item)) &&
-      getProviderSearchText(item, language).includes(search.toLowerCase().trim()),
+  const visibleNavigation = filterSupplierNavigation(navigation, search, configuredOnly, hasProviderConfiguration, language);
+  const configuredCount = filterSupplierNavigation(navigation, search, true, hasProviderConfiguration, language).length;
+  const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) => candidate.apiKeyConfigured || candidate.keys.length > 0)) ? (
+    <i className={items.some((item) => item.groups.some((candidate) => candidate.verified &&
+      (candidate.keys.some((key) => key.enabled) || (!candidate.keys.length && candidate.apiKeyConfigured) || canDiscoverWithoutApiKey(item, candidate)))) ? "is-ready" : ""}
+      aria-label={label("configured")} />
+  ) : null;
+  const leafButton = (item: AddedProvider, nested = false) => (
+    <button type="button" key={item.id} data-provider-id={item.id}
+      aria-label={nested ? getProviderServiceDisplayName(item, language) : getProviderDisplayName(item, language)}
+      className={`provider-workspace-provider${nested ? " is-service" : ""}${provider?.id === item.id ? " is-active" : ""}`}
+      aria-current={provider?.id === item.id ? "page" : undefined}
+      disabled={initializing || providerSaving || providerDeleting}
+      onClick={() => changeProvider(item.id)} title={getProviderDisplayName(item, language)}>
+      {!nested ? <Logo provider={item} /> : null}
+      <span className="provider-workspace-provider-name">{nested ? getProviderServiceDisplayName(item, language) : getProviderDisplayName(item, language)}</span>
+      {statusMark([item])}
+    </button>
   );
   const searchedModels = (group?.models || []).filter((model) =>
     model.name.toLowerCase().includes(modelSearch.toLowerCase().trim()),
@@ -552,57 +577,55 @@ export function ProviderWorkspace(props: Props) {
           />
           <div className="provider-workspace-filters">
             <button
+              aria-label={label("all")}
               className={!configuredOnly ? "is-active" : ""}
               type="button"
               onClick={() => setConfiguredOnly(false)}
             >
-              {label("all")} <span>{providers.length}</span>
+              {label("all")} <span>{navigation.length}</span>
             </button>
             <button
+              aria-label={label("configured")}
               className={configuredOnly ? "is-active" : ""}
               type="button"
               onClick={() => setConfiguredOnly(true)}
             >
-              {label("configured")}
+              {label("configured")} <span>{configuredCount}</span>
             </button>
           </div>
           <nav
             className="provider-workspace-provider-list"
             aria-label={label("suppliers")}
           >
-            <SortableSupplierList items={visibleProviders}
+            <SortableSupplierList items={visibleNavigation}
               disabled={initializing || providerSaving || providerDeleting}
               onReorder={reorderSuppliers}>
-            {(item) => (
-              <button
-                type="button"
-                key={item.id}
-                className={`provider-workspace-provider${provider?.id === item.id ? " is-active" : ""}`}
-                aria-current={provider?.id === item.id ? "page" : undefined}
-                disabled={initializing || providerSaving || providerDeleting}
-                onClick={() => changeProvider(item.id)}
-                title={getProviderDisplayName(item, language)}
-              >
-                <Logo provider={item} />
-                <span>{getProviderDisplayName(item, language)}</span>
-                {item.groups.some((candidate) => candidate.apiKeyConfigured || candidate.keys.length > 0) ? (
-                  <i
-                    className={
-                      item.groups.some((candidate) => candidate.verified)
-                        ? "is-ready"
-                        : ""
-                    }
-                    aria-label={
-                      item.groups.some((candidate) => candidate.verified)
-                        ? t("modelProvider.verified")
-                        : label("configured")
-                    }
-                  />
-                ) : null}
-              </button>
-            )}
+            {(node) => {
+              if (!node.isBrandGroup) return leafButton(node.children[0]);
+              const expanded = Boolean(search.trim()) || expandedBrands.has(node.id);
+              const listId = `${navigationId}-${node.id}`;
+              return <>
+                <button type="button" className="provider-workspace-provider is-brand"
+                  aria-label={getProviderBrandDisplayName(node, language)} aria-expanded={expanded} aria-controls={listId}
+                  disabled={initializing || providerSaving || providerDeleting}
+                  title={getProviderBrandDisplayName(node, language)}
+                  onClick={() => setExpandedBrands((current) => {
+                    const next = new Set(current);
+                    if (next.has(node.id)) next.delete(node.id); else next.add(node.id);
+                    return next;
+                  })}>
+                  <Logo provider={node.children[0]} />
+                  <span className="provider-workspace-provider-name">{getProviderBrandDisplayName(node, language)}</span>
+                  {statusMark(node.children, true)}
+                  <DownOutlined className={`provider-workspace-brand-arrow${expanded ? " is-expanded" : ""}`} aria-hidden="true" />
+                </button>
+                <ul id={listId} className="provider-workspace-services" hidden={!expanded}>
+                  {node.children.map((child) => <li key={child.id}>{leafButton(child, true)}</li>)}
+                </ul>
+              </>;
+            }}
             </SortableSupplierList>
-            {!visibleProviders.length ? (
+            {!visibleNavigation.length ? (
               <div className="provider-workspace-empty">
                 {props.loading ? (
                   <Spin size="small" />
@@ -683,6 +706,11 @@ export function ProviderWorkspace(props: Props) {
                 </div>
               </header>
               <div className="provider-workspace-scroll">
+                {hasProgrammingScopeNotice(provider) ? <Alert
+                  className="provider-workspace-service-scope" type="info" showIcon
+                  message={<span>{label(getSupplierBrandKey(provider) === "GLM" ? "serviceScopeGlm" : getSupplierBrandKey(provider) === "Qwen" ? "serviceScopeQwen" : "serviceScopeGeneric")} {" "}
+                    <a href={programmingScopeLink(provider)} target="_blank" rel="noopener noreferrer">{label("serviceScopeOfficialLink")}</a></span>}
+                /> : null}
                 <section
                   className="provider-workspace-api-keys"
                   aria-label={t("modelProvider.apiKeyLabel")}

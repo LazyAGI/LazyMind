@@ -475,6 +475,11 @@ const zhCN = {
       empty: "没有匹配的模型",
     },
     workspace: {
+      serviceScopeGeneric: "此套餐有工具、客户端或使用场景限制，生产应用请按官方适用范围选择服务。",
+      serviceScopeQwen: "仅限受支持的 AI 编程工具和 OpenClaw 类 Agent，不适用于任意工作流或自定义应用后端。",
+      serviceScopeGlm: "仅适用于官方支持列表内的工具和产品环境，不代表支持 LazyMind 的任意工作流。",
+      serviceScopeOfficialLink: "查看官方适用范围",
+
       reorderSupplier: "拖动排序：{{name}}",
       reorderSupplierHint: "拖动调整顺序；也可按空格开始，用方向键移动，再按空格确认。",
       reorderSupplierStarted: "已选中{{name}}，使用方向键调整位置，空格键确认，Esc 取消。",

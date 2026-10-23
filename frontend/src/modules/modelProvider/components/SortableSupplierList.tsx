@@ -4,7 +4,7 @@ import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, us
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
-import { getProviderDisplayName } from "../providerDisplayNames";
+import { getProviderBrandDisplayName, getProviderDisplayName } from "../providerDisplayNames";
 import { supplierOrderGroup, type OrderedSupplier } from "../supplierOrdering";
 import "./SortableSupplierList.scss";
 
@@ -27,7 +27,7 @@ function SortableSupplierRow({ item, disabled, children }: {
       {...listeners}
       type="button"
       className="provider-workspace-drag-handle"
-      aria-label={t("modelProvider.workspace.reorderSupplier", { name: getProviderDisplayName(item, i18n?.resolvedLanguage || i18n?.language) })}
+      aria-label={t("modelProvider.workspace.reorderSupplier", { name: (item.isBrandGroup ? getProviderBrandDisplayName : getProviderDisplayName)(item, i18n?.resolvedLanguage || i18n?.language) })}
       title={t("modelProvider.workspace.reorderSupplierHint")}
       onClick={(event) => event.stopPropagation()}
     ><HolderOutlined aria-hidden="true" /></button> : null}
@@ -55,7 +55,7 @@ export function SortableSupplierList<T extends OrderedSupplier>({ items, disable
   });
   const displayName = (id: string | number) => {
     const item = items.find((candidate) => candidate.id === id);
-    return item ? getProviderDisplayName(item, i18n?.resolvedLanguage || i18n?.language) : "";
+    return item ? (item.isBrandGroup ? getProviderBrandDisplayName : getProviderDisplayName)(item, i18n?.resolvedLanguage || i18n?.language) : "";
   };
   const dragEnd = ({ active, over }: DragEndEvent) => {
     if (!disabled && over) onReorder(ids, String(active.id), String(over.id));
