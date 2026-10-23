@@ -236,14 +236,6 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
         </h3>
         <div className="provider-workspace-key-actions">
           {props.checkAction}
-          <Button
-            type="link"
-            icon={<PlusOutlined aria-hidden="true" />}
-            disabled={busy}
-            onClick={props.onAdd}
-          >
-            {workspace("addKey")}
-          </Button>
           <Tooltip title={text("manage")}>
             <Button
               type="text"

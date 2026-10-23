@@ -52,6 +52,21 @@ beforeEach(() => {
 });
 
 describe("provider key controls", () => {
+  it("adds keys through a single management entry, including an empty supplier", async () => {
+    const current = { ...props(), keys: [] };
+    render(<ProviderKeyManager {...current} />);
+    expect(
+      screen.queryByRole("button", { name: "modelProvider.workspace.addKey" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.keyManager.manage" }),
+    );
+    const drawer = within(await screen.findByRole("dialog"));
+    fireEvent.click(
+      drawer.getByRole("button", { name: "modelProvider.workspace.addKey" }),
+    );
+    expect(current.onAdd).toHaveBeenCalledTimes(1);
+  });
   it("only reveals on explicit action and hides on a supplier change", async () => {
     const initial = props();
     const view = render(<ProviderKeyManager {...initial} />);

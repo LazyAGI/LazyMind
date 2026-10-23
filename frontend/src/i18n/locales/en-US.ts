@@ -468,8 +468,6 @@ const enUS = {
       "keyRemoved": "Key deleted",
       "noKeys": "No keys saved yet.",
       "models": "Models",
-      "refreshModels": "Refresh models",
-      "refreshHint": "Refresh the model list",
       "searchModel": "Search model ID",
       "modelType": "Model type",
       "allTypes": "All types",

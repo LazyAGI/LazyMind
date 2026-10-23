@@ -466,8 +466,6 @@ const zhCN = {
       "keyRemoved": "秘钥已删除",
       "noKeys": "尚未添加秘钥。",
       "models": "模型",
-      "refreshModels": "刷新模型",
-      "refreshHint": "刷新模型列表",
       "searchModel": "搜索模型 ID",
       "modelType": "模型类型",
       "allTypes": "全部类型",

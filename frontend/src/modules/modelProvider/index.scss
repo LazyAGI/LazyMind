@@ -4042,7 +4042,6 @@
 }
 .provider-workspace-key-actions { margin-left: auto; }
 .provider-workspace-api-keys { padding-block: 12px 8px; }
-.provider-workspace-key-heading > h3 { margin: 0; color: var(--provider-text); font-size: 12px; font-weight: 600; }
 .provider-workspace-detail {
   display: flex;
   flex-direction: column;
@@ -4123,9 +4122,6 @@
   min-height: 42px;
   gap: 10px;
   h3 {
-    color: var(--provider-ink);
-    font-size: 13px;
-    font-weight: 600;
     display: inline-flex;
     align-items: center;
     gap: 7px;
@@ -4150,8 +4146,6 @@
   .ant-form-item-label {
     padding-bottom: 6px;
     > label {
-      font-size: 12px;
-      color: var(--provider-text);
       height: auto;
     }
   }
@@ -4161,6 +4155,15 @@
     font-size: 11px;
     line-height: 1.6;
   }
+}
+.provider-workspace-key-heading > h3,
+.provider-workspace-section-heading > h3,
+.provider-workspace-endpoint .ant-form-item-label > label {
+  margin: 0;
+  color: var(--provider-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
 }
 .provider-workspace-endpoint-row {
   display: flex;

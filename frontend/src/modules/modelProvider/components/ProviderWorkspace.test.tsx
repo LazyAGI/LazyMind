@@ -152,6 +152,16 @@ function setup(
     );
   return callbacks;
 }
+async function openAddKeyDialog() {
+  fireEvent.click(
+    screen.getByRole("button", { name: "modelProvider.keyManager.manage" }),
+  );
+  const manager = within(await screen.findByRole("dialog"));
+  fireEvent.click(
+    manager.getByRole("button", { name: "modelProvider.workspace.addKey" }),
+  );
+  return within(await screen.findByRole("dialog"));
+}
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.addKey.mockResolvedValue({ data: { success: true } });
@@ -173,6 +183,24 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("uses one icon-only sync action and an icon-only custom model action", () => {
+    const onSyncModels = vi.fn();
+    const onAddModel = vi.fn();
+    setup({ onSyncModels, onAddModel });
+    expect(
+      screen.queryByRole("button", { name: "modelProvider.workspace.refreshModels" }),
+    ).not.toBeInTheDocument();
+    const sync = screen.getByRole("button", { name: "modelProvider.workspace.syncModels" });
+    const add = screen.getByRole("button", { name: "modelProvider.customModel" });
+    expect(sync).toHaveTextContent(/^$/);
+    expect(add).toHaveTextContent(/^$/);
+    fireEvent.click(sync);
+    expect(onSyncModels).toHaveBeenCalledTimes(1);
+    expect(onSyncModels).toHaveBeenCalledWith(provider, provider.groups[0]);
+    fireEvent.click(add);
+    expect(onAddModel).toHaveBeenCalledTimes(1);
+    expect(onAddModel).toHaveBeenCalledWith(provider, provider.groups[0]);
+  });
   it("keeps a supplier logo when its request protocol changes", () => {
     const supplier = { ...provider, name: "DeepSeek", protocolName: "Claude", source: "Claude" };
     setup({ providers: [supplier], configuredProviders: [supplier] });
@@ -519,10 +547,7 @@ describe("compact provider workspace", () => {
   });
   it("adds a supplier key and clears the secret after success", async () => {
     const callbacks = setup();
-    fireEvent.click(
-      screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
-    );
-    const dialog = within(await screen.findByRole("dialog"));
+    const dialog = await openAddKeyDialog();
     fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
       target: { value: "secret-new-5678" },
     });
@@ -553,10 +578,7 @@ describe("compact provider workspace", () => {
     ["x".repeat(513), "apiKeyMax"],
   ])("blocks an invalid supplier key before submitting: %s", async (apiKey, error) => {
     setup();
-    fireEvent.click(
-      screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
-    );
-    const dialog = within(await screen.findByRole("dialog"));
+    const dialog = await openAddKeyDialog();
     fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
       target: { value: apiKey },
     });
@@ -756,12 +778,9 @@ describe("compact provider workspace", () => {
       expect(mocks.deleteProvider).toHaveBeenCalledWith("custom", true),
     );
   });
-  it("configures the first key directly for an unconfigured supplier", async () => {
+  it("configures the first key through management for an unconfigured supplier", async () => {
     const callbacks = setup({ configuredProviders: [] });
-    fireEvent.click(
-      screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
-    );
-    const dialog = within(await screen.findByRole("dialog"));
+    const dialog = await openAddKeyDialog();
     expect(
       dialog.queryByLabelText("modelProvider.groupName"),
     ).not.toBeInTheDocument();

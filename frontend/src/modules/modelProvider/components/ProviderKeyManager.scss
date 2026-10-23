@@ -20,6 +20,23 @@
     color: var(--provider-muted, #697586);
   }
 }
+@media (hover: hover) and (pointer: fine) {
+  .provider-key-row .provider-key-row-actions {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  .provider-key-row:hover .provider-key-row-actions,
+  .provider-key-row:focus-within .provider-key-row-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .provider-key-row .provider-key-row-actions {
+    transition: none;
+  }
+}
 .provider-key-manager-drawer {
   .ant-drawer-header {
     padding: 20px 24px;

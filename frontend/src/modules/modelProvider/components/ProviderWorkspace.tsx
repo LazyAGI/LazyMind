@@ -671,6 +671,7 @@ export function ProviderWorkspace(props: Props) {
                   name="supplier-endpoint"
                   form={endpointForm}
                   layout="vertical"
+                  requiredMark={false}
                   onFinish={saveEndpoint}
                   className="provider-workspace-endpoint"
                 >
@@ -768,36 +769,29 @@ export function ProviderWorkspace(props: Props) {
                       </span>
                     </h3>
                     <div>
-                      <Tooltip title={label("refreshHint")}>
+                      <Tooltip title={label("syncModels")}>
                         <Button
                           type="text"
-                          aria-label={label("refreshModels")}
+                          aria-label={label("syncModels")}
                           icon={<ReloadOutlined aria-hidden="true" />}
                           loading={props.modelsLoading[groupKey]}
-                          disabled={initializing}
+                          disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
                           onClick={() =>
-                            void withProviderModels(props.onLoadModels)
+                            void withProviderModels(props.onSyncModels)
                           }
                         />
                       </Tooltip>
-                      <Button
-                        icon={<ReloadOutlined aria-hidden="true" />}
-                        disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
-                        onClick={() =>
-                          void withProviderModels(props.onSyncModels)
-                        }
-                      >
-                        {label("syncModels")}
-                      </Button>
-                      <Button
-                        icon={<PlusOutlined aria-hidden="true" />}
-                        disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
-                        onClick={() =>
-                          void withProviderModels(props.onAddModel)
-                        }
-                      >
-                        {t("modelProvider.customModel")}
-                      </Button>
+                      <Tooltip title={t("modelProvider.customModel")}>
+                        <Button
+                          type="text"
+                          aria-label={t("modelProvider.customModel")}
+                          icon={<PlusOutlined aria-hidden="true" />}
+                          disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
+                          onClick={() =>
+                            void withProviderModels(props.onAddModel)
+                          }
+                        />
+                      </Tooltip>
                     </div>
                   </div>
                   <div className="provider-workspace-model-toolbar">
