@@ -1,0 +1,151 @@
+schema_version: 2
+id: photo-to-gongbi
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: LazyMind
+
+skill:
+  source_url: featured/photo-to-gongbi/skill
+  category: design
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 31
+
+classification:
+  category: 设计创意
+  tags:
+    - 照片转绘
+    - 工笔画
+    - 人像
+    - 宠物
+    - 风景
+    - 图像编辑
+
+assets:
+  cover:
+    file: assets/cover.jpg
+    role: cover
+  style_preview:
+    file: assets/cover.jpg
+    role: result
+  garden_source:
+    file: assets/garden-source.jpg
+    role: result
+  garden_preview:
+    file: assets/garden-preview.html
+    role: result
+  garden_preview_en:
+    file: assets/garden-preview.en.html
+    role: result
+  cat_source:
+    file: assets/cat-source.jpg
+    role: result
+  cat_gongbi:
+    file: assets/cat-gongbi.jpg
+    role: result
+  cat_preview:
+    file: assets/cat-preview.html
+    role: result
+  cat_preview_en:
+    file: assets/cat-preview.en.html
+    role: result
+  landscape_source:
+    file: assets/landscape-source.jpg
+    role: result
+  landscape_gongbi:
+    file: assets/landscape-gongbi.jpg
+    role: result
+  landscape_preview:
+    file: assets/landscape-preview.html
+    role: result
+  landscape_preview_en:
+    file: assets/landscape-preview.en.html
+    role: result
+
+presentation:
+  card:
+    title: 实景照片转工笔画
+    description: 将人物、动物或风景实景照片转绘为中国工笔画，保留主体特征与原有构图
+    output_type: images
+    output_label: 工笔画成图
+    cover_asset: cover
+    result_summary: 查看人物、猫咪与风景原图和工笔成图的前后对照
+  detail:
+    title: 实景照片转工笔画
+    description: 查看园林人物、窗边猫咪与湖畔风景的原图和工笔成图；实际编辑以用户上传的照片为原图，保留主体特征与场景构图，用细墨线勾勒、淡彩薄染并柔和明暗。案例图片仅供预览。
+    attachment_hint: 请上传待转换的实景照片；可补充希望保留的细节或指定工笔画法与色彩
+
+tasks:
+  - id: photo-gongbi
+    selector:
+      title: 照片工笔转绘
+      description: 上传实景照片，保留主体及原有场景构图
+      output_label: 工笔画成图
+    launch:
+      prompt_short: 请把我上传的实景照片转成传统中国工笔画。
+      prompt: 请使用“实景照片转工笔画”Skill 编辑我上传的照片。若还没有收到原图，请先请我上传，不要无图文生图。保留原图的主体、面部或外形特征、姿势与视线、服饰与物件、前后景位置和画幅构图。用精细且有节奏的墨线勾勒，以薄层矿物色和淡墨渲染，沿用原图配色并柔和明暗，形成温润绢纸质感。若上传的是截图，先裁掉手机界面。直接交付编辑后的图片。
+    replay:
+      steps:
+        - title: 确认原图
+          description: 识别实际照片区域，记录主体、姿势、物件和场景布局
+        - title: 保留原图关系
+          description: 保留主体特征、物件数量和前后景位置
+        - title: 工笔转绘
+          description: 用细墨线、薄层矿物色与淡墨重绘整张照片
+        - title: 检查成画
+          description: 检查主体一致性、构图、手部与衣饰以及界面残留
+    result:
+      template: html_preview_v1
+      eyebrow: 照片工笔转绘示例
+      title: 园林人像 · 原图与工笔画
+      summary: 以虚构人物的园林照片为输入，保留坐姿、团扇、荷塘与石桥，转绘为淡彩工笔画。
+      html_asset: garden_preview
+  - id: cat-portrait
+    selector:
+      title: 窗边猫咪
+      description: 查看宠物照片的原图与工笔画对照
+      output_label: 工笔画成图
+    launch:
+      prompt_short: 请把我上传的猫咪照片转成传统中国工笔画。
+      prompt: 请使用“实景照片转工笔画”Skill 编辑我上传的猫咪照片。若未收到原图，请先请我上传；预览案例不能代替我的照片。保留猫咪的数量、毛色花纹、眼睛颜色、姿势和神态，以及窗格、花瓶等场景物件的位置。用细墨线描绘毛发与胡须，以薄层淡彩柔和摄影明暗，直接交付编辑后的图片。
+    replay:
+      steps:
+        - title: 确认猫咪原图
+          description: 识别毛色花纹、眼睛、姿势及周围物件
+        - title: 工笔转绘
+          description: 以原图为内容参照，用细线描绘毛发与环境结构
+        - title: 检查与交付
+          description: 检查猫咪特征、物件数量和画幅构图
+    result:
+      template: html_preview_v1
+      eyebrow: 宠物照片转绘示例
+      title: 窗边猫咪 · 原图与工笔画
+      summary: 以 AI 生成的猫咪照片为输入，保留银灰虎斑、坐姿、窗格与花瓶，转绘为淡彩工笔画。
+      html_asset: cat_preview
+  - id: landscape-scene
+    selector:
+      title: 湖畔风景
+      description: 查看无人物风景照的原图与工笔画对照
+      output_label: 工笔画成图
+    launch:
+      prompt_short: 请把我上传的风景照片转成传统中国工笔画。
+      prompt: 请使用“实景照片转工笔画”Skill 编辑我上传的风景照片。若未收到原图，请先请我上传；预览案例不能代替我的照片。保留原图中山峦、树木、建筑、水面和桥梁的数量、轮廓、位置及横幅构图。以细墨线勾勒叶脉、石桥和屋檐，用薄层矿物色与淡墨重绘远近层次，直接交付编辑后的图片，不添加人物或新建筑。
+    replay:
+      steps:
+        - title: 确认风景原图
+          description: 识别山峦、树木、石桥、房屋及水面的相对位置
+        - title: 工笔转绘
+          description: 以原图为内容参照，细线描绘建筑和植物并淡彩分染
+        - title: 检查与交付
+          description: 检查桥拱数量、建筑布局和横幅构图
+    result:
+      template: html_preview_v1
+      eyebrow: 风景照片转绘示例
+      title: 湖畔村落 · 原图与工笔画
+      summary: 以 AI 生成的湖畔风景照片为输入，保留三孔石桥、垂柳、白墙黛瓦与远山，转绘为工笔山水。
+      html_asset: landscape_preview

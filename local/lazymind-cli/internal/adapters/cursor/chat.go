@@ -13,6 +13,7 @@ import (
 	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/chatagent"
+	"lazymind/agentconnector/internal/connectorconfig"
 )
 
 const maxEventBytes = 4 << 20
@@ -51,7 +52,7 @@ func findBinary(configured string) (string, error) {
 		configured, "LAZYMIND_CURSOR_AGENT_BIN", agentexec.CursorCLI, []string{"cursor-agent"},
 	)
 	if err != nil {
-		if strings.TrimSpace(configured) != "" || strings.TrimSpace(os.Getenv("LAZYMIND_CURSOR_AGENT_BIN")) != "" {
+		if strings.TrimSpace(configured) != "" || strings.TrimSpace(connectorconfig.Value("LAZYMIND_CURSOR_AGENT_BIN")) != "" {
 			return "", fmt.Errorf("resolve configured Cursor Agent CLI: %w", err)
 		}
 		return "", errors.New("Cursor Agent CLI is not installed; install it from https://cursor.com/docs/cli/installation")

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/localfile"
 )
 
@@ -141,11 +142,14 @@ func ClearExecutableBinding(target BindingTarget) error {
 }
 
 func configuredExecutable(explicit, environment string, target BindingTarget) (string, error) {
+	if _, err := connectorconfig.Current(); err != nil {
+		return "", err
+	}
 	if value := strings.TrimSpace(explicit); value != "" {
 		return value, nil
 	}
 	if environment != "" {
-		if value := strings.TrimSpace(os.Getenv(environment)); value != "" {
+		if value := strings.TrimSpace(connectorconfig.Value(environment)); value != "" {
 			return value, nil
 		}
 	}

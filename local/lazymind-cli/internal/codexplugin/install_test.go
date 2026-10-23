@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
 )
@@ -90,7 +91,11 @@ func TestInstallPairsConfiguresAndReinstallsWithoutDuplicates(t *testing.T) {
 	_ = json.Unmarshal(data, &document)
 	server := document["mcpServers"].(map[string]any)["lazymind"].(map[string]any)
 	env := server["env"].(map[string]any)
-	if server["command"] != self || server["args"].([]any)[1] != "codex-workflow" || env["LAZYMIND_WORKFLOW_PAIRING_FILE"] != first.PairingFile || env["LAZYMIND_WEB_URL"] != "https://panel.example.test" {
+	connection, loadErr := connectorconfig.Load(env[connectorconfig.EnvironmentKey].(string))
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if server["command"] != self || server["args"].([]any)[1] != "codex-workflow" || connection.PairingFile != first.PairingFile || len(env) != 1 || len(connection.Overrides) != 0 {
 		t.Fatal("incomplete plugin configuration")
 	}
 	store, _ := credentials.NewStore(home, "")

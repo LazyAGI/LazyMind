@@ -14607,6 +14607,15 @@ components:
                 - name
                 - verify
             type: object
+        updateSidechatSourceOpenAPIRequest:
+            properties:
+                selected_text:
+                    type: string
+                source_history_id:
+                    type: string
+                source_seq:
+                    type: integer
+            type: object
         userChatSettingsOpenAPIResponse:
             properties:
                 default_permission_mode:
@@ -18575,6 +18584,30 @@ paths:
                 "204":
                     description: Side conversation discarded
             summary: Discard an ephemeral side conversation
+            tags:
+                - conversations
+        patch:
+            description: Freezes the selected parent history boundary as the existing side conversation's read-only model context. Preserves its messages, identity, settings, and retained status. Rejects updates while the conversation is busy.
+            parameters:
+                - in: path
+                  name: child_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateSidechatSourceOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/sidechatConversationOpenAPIResponse'
+                    description: Updated side conversation source
+            summary: Update a side conversation's source
             tags:
                 - conversations
     /api/core/conversations/{conversation_id}/artifact-projection:

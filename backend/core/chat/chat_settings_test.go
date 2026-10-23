@@ -18,14 +18,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// setupChatSettingsTest creates a SQLite store with UserChatSettings and Conversation tables migrated.
+// setupChatSettingsTest initializes settings and their downstream conversation dependencies.
 func setupChatSettingsTest(t *testing.T) {
 	t.Helper()
-	db := newPromptTestDB(t)
-	// Also migrate Conversation table for PatchConversationSettings.
-	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ExternalChatHost{}); err != nil {
-		t.Fatalf("migrate conversation: %v", err)
-	}
+	db := newChatModelTestDB(t)
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 }

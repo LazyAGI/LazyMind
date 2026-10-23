@@ -1,0 +1,94 @@
+locale: en-US
+classification:
+  category: Creative design
+  tags:
+    - photo transformation
+    - gongbi painting
+    - portrait
+    - pets
+    - landscape
+    - image editing
+presentation:
+  card:
+    title: Photo to Gongbi painting
+    description: Turn portraits, pets, or landscape photos into Chinese Gongbi paintings while preserving their subjects and composition
+    output_type: images
+    output_label: Gongbi painting
+    cover_asset: cover
+    result_summary: Compare source photos and Gongbi results for a portrait, cat, and landscape
+  detail:
+    title: Photo to Gongbi painting
+    description: Explore before-and-after examples of a garden portrait, a cat by a window, and a lakeside landscape. Your uploaded photo remains the source for the actual edit. Preserve its subject and composition with fine ink outlines, translucent color washes, and softer photographic contrast. Example images are previews only.
+    attachment_hint: Upload the photo to transform; optionally specify details to preserve, a Gongbi style, or a color palette
+tasks:
+  - id: photo-gongbi
+    selector:
+      title: Transform a portrait
+      description: Upload a photo and preserve its subject and original composition
+      output_label: Gongbi painting
+    launch:
+      prompt_short: Turn my uploaded photo into a traditional Chinese Gongbi painting.
+      prompt: >-
+        Use the Photo to Gongbi painting Skill to edit the photo I uploaded. If I have not provided a source photo, ask me to upload one first; do not generate an image from text alone. Preserve the original subjects, facial or physical features, pose and gaze, clothing and objects, foreground and background positions, and aspect ratio. Redraw the scene with fine, varied ink outlines and thin layers of mineral color and pale ink. Follow the source palette while softening its photographic contrast and giving the result a warm silk-paper texture. If the upload is a screenshot, crop away the phone interface first. Deliver the edited image directly.
+    replay:
+      steps:
+        - title: Identify the source photo
+          description: Find the actual photo area and note subjects, poses, objects, and scene layout
+        - title: Preserve the source relationships
+          description: Keep identifying features, object counts, and foreground and background positions
+        - title: Paint in the Gongbi style
+          description: Redraw the photo with fine ink lines, thin mineral-color washes, and pale ink
+        - title: Check the result
+          description: Verify identity, composition, hands, clothing, and any remaining interface elements
+    result:
+      template: html_preview_v1
+      eyebrow: Photo transformation example
+      title: Garden portrait · Before and after
+      summary: A fictional garden portrait becomes a lightly colored Gongbi painting while preserving the seated pose, round fan, lotus pond, and stone bridge.
+      html_asset: garden_preview_en
+  - id: cat-portrait
+    selector:
+      title: Cat by the window
+      description: Compare a pet photo with its Gongbi transformation
+      output_label: Gongbi painting
+    launch:
+      prompt_short: Turn my uploaded cat photo into a traditional Chinese Gongbi painting.
+      prompt: >-
+        Use the Photo to Gongbi painting Skill to edit the cat photo I uploaded. If no source photo is available, ask me to upload one; the preview must not replace my photo. Preserve the number of cats, fur pattern, eye color, pose, and expression, together with the positions of the window frame, vase, and other visible objects. Draw fur and whiskers with fine ink lines, soften photographic contrast with translucent color washes, and deliver the edited image directly.
+    replay:
+      steps:
+        - title: Identify the cat photo
+          description: Note the fur pattern, eyes, pose, and surrounding objects
+        - title: Paint in the Gongbi style
+          description: Use the photo as the content reference and draw fur and scene details with fine lines
+        - title: Check and deliver
+          description: Verify the cat's features, object count, and composition
+    result:
+      template: html_preview_v1
+      eyebrow: Pet photo transformation example
+      title: Cat by the window · Before and after
+      summary: An AI-generated photo of a silver-gray tabby becomes a lightly colored Gongbi painting, preserving its seated pose, window frame, and vase.
+      html_asset: cat_preview_en
+  - id: landscape-scene
+    selector:
+      title: Lakeside landscape
+      description: Compare a landscape photo without people with its Gongbi transformation
+      output_label: Gongbi painting
+    launch:
+      prompt_short: Turn my uploaded landscape photo into a traditional Chinese Gongbi painting.
+      prompt: >-
+        Use the Photo to Gongbi painting Skill to edit the landscape photo I uploaded. If no source photo is available, ask me to upload one; the preview must not replace my photo. Preserve the number, outlines, and positions of the mountains, trees, buildings, water, and bridge, along with the landscape composition. Draw leaves, bridge masonry, and rooflines with fine ink lines, and use thin mineral-color and pale-ink washes to convey depth. Deliver the edited image directly without adding people or new buildings.
+    replay:
+      steps:
+        - title: Identify the landscape photo
+          description: Note the relative positions of mountains, trees, bridge, buildings, and water
+        - title: Paint in the Gongbi style
+          description: Use the photo as the content reference, with fine architectural and botanical lines and translucent color washes
+        - title: Check and deliver
+          description: Verify the bridge's three arches, building layout, and landscape composition
+    result:
+      template: html_preview_v1
+      eyebrow: Landscape photo transformation example
+      title: Lakeside village · Before and after
+      summary: An AI-generated lakeside photo becomes a Gongbi landscape while preserving the three-arch stone bridge, willow trees, white-walled houses, and distant mountains.
+      html_asset: landscape_preview_en
