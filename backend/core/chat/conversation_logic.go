@@ -2491,6 +2491,7 @@ func streamSingleAnswer(
 				Str("run_id", runID).Msg("failed to project active external chat run to cache")
 		}
 	}
+	isExternalRun := strings.HasPrefix(algorithmID, "external:")
 	var fullText string
 	var pendingThink string
 	var fullResult string
@@ -2560,10 +2561,12 @@ func streamSingleAnswer(
 		lastProgressResultSize = len(partialResult)
 		return nil
 	}
-	// Persist the run owner as soon as the upstream stream is established. The
-	// steering endpoint must be able to route guidance before the first model
-	// token or tool event arrives.
-	persistStreamProgress(true)
+	// Persist the run owner as soon as a steerable upstream stream is established.
+	// External runs do not support steering and may be terminal replays; writing
+	// progress here would incorrectly reopen them and change their terminal time.
+	if !isExternalRun {
+		persistStreamProgress(true)
+	}
 	initialChunk := &ChatChunkResponse{
 		ConversationID:    convID,
 		Seq:               int32(seq),
@@ -2821,7 +2824,9 @@ func streamSingleAnswer(
 		}
 		fullText += d.Text
 		fullResult += d.Text
-		persistStreamProgress(false)
+		if !isExternalRun {
+			persistStreamProgress(false)
+		}
 		if len(d.Sources) > 0 {
 			sources = d.Sources
 		}
@@ -2898,7 +2903,7 @@ func streamSingleAnswer(
 	persistCtx, persistCancel := terminalWriteContext(chatCtx)
 	defer persistCancel()
 	persisted := false
-	externalFinalized := strings.HasPrefix(algorithmID, "external:")
+	externalFinalized := isExternalRun
 	if externalFinalized {
 		var persistedHistory orm.ChatHistory
 		persisted = db.Where("id = ? AND conversation_id = ? AND run_id = ?", historyID, convID, runID).

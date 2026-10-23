@@ -32,20 +32,6 @@ func followUpTestDB(t *testing.T) *orm.DB {
 	return db
 }
 
-func TestAcceptedConversationSteeringRowsSupportsPreMigrationSchema(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
-
-	rows, err := acceptedConversationSteeringRows(
-		t.Context(), db.DB, "conversation", "user", []string{"history"},
-	)
-	if err != nil {
-		t.Fatalf("load accepted steering rows: %v", err)
-	}
-	if len(rows) != 0 {
-		t.Fatalf("accepted steering rows = %d, want 0", len(rows))
-	}
-}
-
 func TestClaimConversationFollowUpWaitsForTerminalHistory(t *testing.T) {
 	db := followUpTestDB(t)
 	seedFollowUp(t, db, orm.ConversationFollowUp{

@@ -197,6 +197,54 @@ func init() {
 	registerAdditionalErrorAlias("conversation model selection changed", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("conversation order changed", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("conversation is busy", "Conflict", http.StatusConflict, 2000107)
+	for _, source := range []string{
+		"follow-up text is required",
+		"ordered_ids contains an empty id",
+		"ordered_ids contains a duplicate id",
+	} {
+		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
+	}
+	registerAdditionalErrorAlias("follow-up not found", "Resource not found", http.StatusNotFound, 2000106)
+	for _, source := range []string{
+		"follow-up state conflict",
+		"stream run no longer owns history",
+		"follow-up is no longer editable",
+		"follow-up is no longer removable",
+		"follow-up queue changed; reload before reordering",
+		"follow-up is already being processed",
+		"follow-up state changed",
+		"follow-up is no longer dispatching",
+		"follow-up is not retryable",
+	} {
+		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
+	}
+	for _, source := range []string{
+		"failed to inspect active run",
+		"failed to confirm conversation history",
+		"failed to confirm the queue is idle",
+	} {
+		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusServiceUnavailable, 2000110)
+	}
+	for _, source := range []string{
+		"failed to maintain follow-up queue",
+		"failed to list follow-ups",
+		"failed to reorder follow-ups",
+		"failed to queue guidance after the active run ended",
+		"failed to reload queued guidance",
+		"failed to persist unsupported steering state",
+		"failed to reload unsupported guidance",
+		"failed to begin guidance delivery",
+		"failed to persist steering delivery failure",
+		"failed to reload failed guidance",
+		"guidance was accepted but its acknowledgement could not be persisted",
+		"failed to reload accepted guidance",
+		"failed to claim follow-up",
+		"failed to release follow-up claim",
+		"failed to reload retried follow-up",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
+	registerAdditionalErrorAlias("failed to create follow-up", "Conflict", http.StatusConflict, 2000107)
 	registerAdditionalErrorAlias("save conversation model failed", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("%w; fallback parser chunks failed", "Primary and fallback document parsing failed", http.StatusInternalServerError, 2001601)
 	registerAdditionalError("acl_db_dsn is empty", http.StatusInternalServerError, 2001602)
