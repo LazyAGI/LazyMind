@@ -32,6 +32,7 @@ import {
 } from "@/modules/chat/utils/message";
 import type { ExternalExecutionProjection } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
+import { copyMessage } from "@/modules/chat/utils/copyMessage";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
 import MultiAnswerDisplay, { type PreferenceType } from "../MultiAnswerDisplay";
@@ -247,45 +248,6 @@ function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollection })
     );
   }
 
-
-async function copyTextToClipboard(text: string) {
-  const normalizedText = text.trim();
-  if (!normalizedText) {
-    return;
-  }
-
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(normalizedText);
-      return;
-    }
-  } catch {}
-
-  const textarea = document.createElement("textarea");
-  textarea.value = normalizedText;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.top = "0";
-  textarea.style.left = "0";
-  textarea.style.width = "1px";
-  textarea.style.height = "1px";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
-
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-  textarea.setSelectionRange(0, normalizedText.length);
-
-  try {
-    const copied = document.execCommand("copy");
-    if (!copied) {
-      throw new Error();
-    }
-  } finally {
-    document.body.removeChild(textarea);
-  }
-}
 
 interface FeedbackState {
   showModal: boolean;
@@ -567,12 +529,7 @@ const AssistantMessage = (props: any) => {
   }, [item?.feed_back, item?.history_id]);
 
   const handleCopy = async (text?: string) => {
-    try {
-      await copyTextToClipboard(text || "");
-      message.success(t("chat.copySuccess"));
-    } catch {
-      message.error(t("chat.copyFailedManual"));
-    }
+    await copyMessage(text || "", t);
   };
 
   const hideCiteButton = useCallback(() => {

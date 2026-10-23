@@ -91,6 +91,12 @@ from lazymind.chat.engine.agent_runtime.summary_range import (
     AUTHORITATIVE_TASK_KIND,
     is_runtime_summary_message,
 )
+from lazymind.chat.engine.agent_runtime.steering import (
+    continue_in_workspace,
+    SteeringInterruptedError,
+    install_stream_interrupt_hook,
+    steering_registry,
+)
 from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
 from lazymind.chat.service.local_observation import LocalObservationWriter
 from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
@@ -961,36 +967,42 @@ async def _run_chat_with_parse_status(
     started = time.time()
     translator = AgentEventFrameTranslator(query=query, run_id='parse-uploads')
 
+    early_run_id = _register_steering_before_stream(request)
+
     async def gen():
-        think = (
-            f'正在解析上传文档：{"、".join(names[:5])}'
-            if any('\u4e00' <= ch <= '\u9fff' for ch in query)
-            else f'Parsing uploaded documents: {", ".join(names[:5])}'
-        )
-        if len(names) > 5:
-            think = f'{think} (+{len(names) - 5})'
-        yield log_and_emit_frame(
-            {'think': think, 'text': None, 'sources': []},
-            round(time.time() - started, 3),
-            query,
-            session_id,
-            tag='PARSE_UPLOAD',
-        )
-        for frame in _parse_upload_event_frames(translator, names, phase='start'):
-            yield log_and_emit_frame(
-                frame, round(time.time() - started, 3), query, session_id, tag='PARSE_UPLOAD',
+        try:
+            think = (
+                f'正在解析上传文档：{"、".join(names[:5])}'
+                if any('\u4e00' <= ch <= '\u9fff' for ch in query)
+                else f'Parsing uploaded documents: {", ".join(names[:5])}'
             )
-        response = await _handle_chat_impl(request, **kwargs)
-        for frame in _parse_upload_event_frames(translator, names, phase='done'):
+            if len(names) > 5:
+                think = f'{think} (+{len(names) - 5})'
             yield log_and_emit_frame(
-                frame, round(time.time() - started, 3), query, session_id, tag='PARSE_UPLOAD',
+                {'think': think, 'text': None, 'sources': []},
+                round(time.time() - started, 3),
+                query,
+                session_id,
+                tag='PARSE_UPLOAD',
             )
-        if isinstance(response, StreamingResponse):
-            async with aclosing(response.body_iterator):
-                async for chunk in response.body_iterator:
-                    yield chunk
-            return
-        yield sse_line(response_payload(200, 'success', response, time.time() - started))
+            for frame in _parse_upload_event_frames(translator, names, phase='start'):
+                yield log_and_emit_frame(
+                    frame, round(time.time() - started, 3), query, session_id, tag='PARSE_UPLOAD',
+                )
+            response = await _handle_chat_impl(request, **kwargs)
+            for frame in _parse_upload_event_frames(translator, names, phase='done'):
+                yield log_and_emit_frame(
+                    frame, round(time.time() - started, 3), query, session_id, tag='PARSE_UPLOAD',
+                )
+            if isinstance(response, StreamingResponse):
+                async with aclosing(response.body_iterator):
+                    async for chunk in response.body_iterator:
+                        yield chunk
+                return
+            yield sse_line(response_payload(200, 'success', response, time.time() - started))
+        finally:
+            if early_run_id:
+                steering_registry.unregister(early_run_id)
 
     return StreamingResponse(gen(), media_type='text/event-stream')
 
@@ -1035,38 +1047,44 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
 
     inject_model_config(request.runtime.llm_config)
 
+    early_run_id = _register_steering_before_stream(request)
+
     async def resolve_and_continue():
-        started = time.time()
-        routing_task = asyncio.create_task(asyncio.to_thread(
-            _resolve_task_profile_with_model, inputs,
-            trace_id=(
-                request.conversation.conversation_id
-                or request.conversation.session_id
-                or ''
-            ).strip(),
-            session_id=request.conversation.session_id,
-        ))
-        for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
-            yield log_and_emit_frame(
-                {'think': status_delta, 'text': None, 'sources': []},
-                round(time.time() - started, 3),
-                raw_query,
-                request.conversation.session_id,
-                tag='TASK_PROFILE',
+        try:
+            started = time.time()
+            routing_task = asyncio.create_task(asyncio.to_thread(
+                _resolve_task_profile_with_model, inputs,
+                trace_id=(
+                    request.conversation.conversation_id
+                    or request.conversation.session_id
+                    or ''
+                ).strip(),
+                session_id=request.conversation.session_id,
+            ))
+            for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
+                yield log_and_emit_frame(
+                    {'think': status_delta, 'text': None, 'sources': []},
+                    round(time.time() - started, 3),
+                    raw_query,
+                    request.conversation.session_id,
+                    tag='TASK_PROFILE',
+                )
+                await asyncio.sleep(0.08)
+            profile = await routing_task
+            response = await _run_chat_with_parse_status(
+                request,
+                task_profile_override=profile,
+                sensitive_match_override=sensitive_match,
             )
-            await asyncio.sleep(0.08)
-        profile = await routing_task
-        response = await _run_chat_with_parse_status(
-            request,
-            task_profile_override=profile,
-            sensitive_match_override=sensitive_match,
-        )
-        if isinstance(response, StreamingResponse):
-            async with aclosing(response.body_iterator):
-                async for chunk in response.body_iterator:
-                    yield chunk
-            return
-        yield sse_line(response_payload(200, 'success', response, time.time() - started))
+            if isinstance(response, StreamingResponse):
+                async with aclosing(response.body_iterator):
+                    async for chunk in response.body_iterator:
+                        yield chunk
+                return
+            yield sse_line(response_payload(200, 'success', response, time.time() - started))
+        finally:
+            if early_run_id:
+                steering_registry.unregister(early_run_id)
 
     if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
         profile = provisional
@@ -1086,6 +1104,19 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             sensitive_match_override=sensitive_match,
         )
     return StreamingResponse(resolve_and_continue(), media_type='text/event-stream')
+
+
+def _register_steering_before_stream(request: ChatRequest) -> str:
+    """Open the steering inbox before an outer progress stream sends headers."""
+    if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
+        return ''
+    run_id = str(request.conversation.run_id or '').strip()
+    conversation_id = str(request.conversation.conversation_id or '').strip()
+    session_id = str(request.conversation.session_id or '').strip()
+    if not run_id or not conversation_id:
+        return ''
+    steering_registry.register(run_id, conversation_id, session_id)
+    return run_id
 
 
 async def _handle_chat_impl(
@@ -1330,6 +1361,7 @@ async def _handle_chat_impl(
     is_context_inspection = runtime.context_usage_preview or runtime.context_prompt_export
     if _conv_id_key and not is_context_inspection:
         _active_sessions[_conv_id_key] = conversation.session_id
+        steering_registry.register(run_id, _conv_id_key, conversation.session_id)
     lazyllm_session_id = conversation.session_id
     if is_context_inspection:
         lazyllm_session_id = (
@@ -2326,36 +2358,113 @@ async def _handle_chat_impl(
                     round(time.time() - start_time, 3), query, conversation.session_id, tag='MCP_STATUS',
                 )
             async with rag_sem:
-                initial_agent_stream = lazyllm.enable_trace(
-                    AgentInvocation(executor, react_agent, plan),
-                    # A trace represents one invocation.  Keep the stable
-                    # conversation identifier as semantic correlation data.
-                    trace_id=translator.run.run_id,
-                    session_id=conversation.session_id,
-                    request_tags=['handle_chat', 'agent'],
-                    debug_capture_payload=False,
-                )
-                guarded_agent_stream = guard_workflow_agent_stream(
-                    initial_agent_stream,
-                    all_tools=all_tools,
-                    query=query,
-                    runtime_prompt=prompt_bundle.system_prompt,
-                    agent=agent,
-                    runtime_config=_cfg,
-                    fs=FS,
-                    stop_tools=stop_tools,
-                    history=agent_history,
-                )
-                async with aclosing(guarded_agent_stream):
-                    async for kind, payload in guarded_agent_stream:
-                        if kind == 'event':
-                            for frame in translator.feed(payload):
-                                cost = round(time.time() - start_time, 3)
-                                yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FEED')
-                        else:
-                            # 'final' -- payload is already the resolved result value;
-                            # AgentExecutor propagates future exceptions before yielding final.
-                            final_result = payload
+                current_plan = plan
+                current_query = query
+                while True:
+                    # runtime_llm builds ReactAgent's FunctionCall first, then
+                    # returns the configured model copy carrying this agent's
+                    # prompt, formatter, tools, and complete chat history.
+                    install_stream_interrupt_hook(executor.runtime_llm(react_agent))
+                    invocation_result: Any = None
+                    response_text: list[str] = []
+                    steering_interrupted = False
+                    initial_agent_stream = lazyllm.enable_trace(
+                        AgentInvocation(executor, react_agent, current_plan),
+                        # Continuations share the stable outer run correlation ID.
+                        trace_id=translator.run.run_id,
+                        session_id=conversation.session_id,
+                        request_tags=['handle_chat', 'agent'],
+                        debug_capture_payload=False,
+                    )
+                    guarded_agent_stream = guard_workflow_agent_stream(
+                        initial_agent_stream,
+                        all_tools=all_tools,
+                        query=current_query,
+                        runtime_prompt=prompt_bundle.system_prompt,
+                        agent=agent,
+                        runtime_config=_cfg,
+                        fs=FS,
+                        stop_tools=stop_tools,
+                        history=current_plan.history,
+                    )
+                    try:
+                        async with aclosing(guarded_agent_stream):
+                            async for kind, payload in guarded_agent_stream:
+                                if kind == 'event':
+                                    if (isinstance(payload, dict)
+                                            and payload.get('tag') == 'runtime_event'
+                                            and (payload.get('runtime_event') or {}).get('type')
+                                            == 'model_call_started'):
+                                        # Earlier model rounds already live in the workspace
+                                        # tool history; only append this unfinished reply.
+                                        response_text.clear()
+                                    if isinstance(payload, dict) and payload.get('tag') == 'text':
+                                        delta = str(payload.get('delta') or '')
+                                        if delta:
+                                            response_text.append(delta)
+                                    for frame in translator.feed(payload):
+                                        cost = round(time.time() - start_time, 3)
+                                        yield log_and_emit_frame(
+                                            frame, cost, query, conversation.session_id, tag='FEED',
+                                        )
+                                else:
+                                    # The resolved result is retained as assistant context if a
+                                    # late steering message needs an automatic continuation.
+                                    invocation_result = payload
+                    except SteeringInterruptedError:
+                        steering_interrupted = True
+                        LOG.info(
+                            f'[ChatServer] model stream steered '
+                            f'[conversation_id={conversation_id}] [run_id={translator.run.run_id}]'
+                        )
+
+                    if steering_interrupted:
+                        # Do not leave a citation/tag fragment buffered when the
+                        # provider stream is cut between tokens.
+                        for frame in translator.flush():
+                            cost = round(time.time() - start_time, 3)
+                            yield log_and_emit_frame(
+                                frame, cost, query, conversation.session_id, tag='STEER_FLUSH',
+                            )
+                    else:
+                        final_result = invocation_result
+
+                    late_guidance = steering_registry.drain_or_close(run_id)
+                    if not late_guidance:
+                        break
+                    if not steering_interrupted:
+                        # A completed call may have returned non-streamed text
+                        # just as guidance arrived. Commit that visible answer
+                        # before starting the next segment as well.
+                        for frame in translator.finish(invocation_result):
+                            yield log_and_emit_frame(
+                                frame, round(time.time() - start_time, 3), query,
+                                conversation.session_id, tag='STEER_FINISH',
+                            )
+                    assistant_context = (
+                        ''.join(response_text) if steering_interrupted else str(invocation_result or '')
+                    )
+                    current_plan = continue_in_workspace(
+                        current_plan, late_guidance, assistant_context,
+                    )
+                    current_query = current_plan.prompt.current_input
+                    for frame in translator.begin_steering_segment():
+                        yield log_and_emit_frame(
+                            frame, round(time.time() - start_time, 3), query,
+                            conversation.session_id, tag='STEER_SEGMENT',
+                        )
+                    # This ordered frame follows all output from the joined call
+                    # and precedes the next call. The server persists this exact
+                    # boundary, rather than guessing from HTTP acceptance time.
+                    yield log_and_emit_frame(
+                        {'steering_applied': [
+                            {'id': item.steer_id, 'text': item.content,
+                             'accepted_at': item.accepted_at}
+                            for item in late_guidance
+                        ]},
+                        round(time.time() - start_time, 3), query,
+                        conversation.session_id, tag='STEER_BOUNDARY',
+                    )
 
             for frame in translator.finish(final_result):
                 cost = round(time.time() - start_time, 3)
@@ -2394,6 +2503,7 @@ async def _handle_chat_impl(
             # Unregister the active session so the cancel endpoint no longer targets it.
             if _conv_id_key:
                 _unregister_active_session(_conv_id_key, conversation.session_id)
+                steering_registry.unregister(run_id)
 
         cost = round(time.time() - start_time, 3)
         terminal_frame = translator.finish_run(

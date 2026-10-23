@@ -334,5 +334,5 @@ func hasBusinessStreamPayload(chunk UpstreamStreamChunk) bool {
 		chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
 		chunk.ToolLimitPending != nil || chunk.IntentUpdated != nil || chunk.WorkflowPreflightUpdated != nil ||
 		chunk.CapabilityDependency != nil || chunk.ToolConfiguration != nil ||
-		chunk.Heartbeat
+		len(chunk.SteeringApplied) > 0 || chunk.Heartbeat
 }

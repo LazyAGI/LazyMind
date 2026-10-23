@@ -451,6 +451,80 @@ describe("ChatInput model switch save lock", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("queues keyboard input while a response is streaming", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    render(
+      <ChatInput
+        value="adjust the direction"
+        onChange={vi.fn()}
+        onSend={onSend}
+        onStopGeneration={vi.fn()}
+        isChatContent
+        isStreaming
+        sessionId="conversation-1"
+        showConversationConfig={false}
+        showHistoryButton={false}
+        showPromptSuggestions={false}
+        showSkillDeposit={false}
+        showThinkingDepth={false}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "message editor" }), { key: "Enter" });
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "adjust the direction" }),
+    ));
+    expect(screen.getByRole("button", { name: "chat.send" })).toBeInTheDocument();
+  });
+
+  it("switches the streaming action between stop and send with the draft", () => {
+    const props = {
+      onChange: vi.fn(),
+      onSend: vi.fn(),
+      onStopGeneration: vi.fn(),
+      isChatContent: true,
+      isStreaming: true,
+      sessionId: "conversation-1",
+      showConversationConfig: false,
+      showHistoryButton: false,
+      showPromptSuggestions: false,
+      showSkillDeposit: false,
+      showThinkingDepth: false,
+    };
+    const { rerender } = render(<ChatInput {...props} value="" />);
+
+    expect(screen.getByRole("button", { name: "chat.stopGenerate" })).toBeInTheDocument();
+
+    rerender(<ChatInput {...props} value="guide this answer" />);
+    expect(screen.getByRole("button", { name: "chat.send" })).toBeInTheDocument();
+
+    rerender(<ChatInput {...props} value="" />);
+    expect(screen.getByRole("button", { name: "chat.stopGenerate" })).toBeInTheDocument();
+  });
+
+  it("keeps the draft when queue submission is refused", async () => {
+    const onChange = vi.fn();
+    render(
+      <ChatInput
+        value="keep this draft"
+        onChange={onChange}
+        onSend={vi.fn().mockResolvedValue(false)}
+        isChatContent
+        isStreaming
+        sessionId="conversation-1"
+        showConversationConfig={false}
+        showHistoryButton={false}
+        showPromptSuggestions={false}
+        showSkillDeposit={false}
+        showThinkingDepth={false}
+      />,
+    );
+    onChange.mockClear();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "message editor" }), { key: "Enter" });
+    await act(async () => { await Promise.resolve(); });
+    expect(onChange).not.toHaveBeenCalledWith("");
+  });
+
   it("hides workspace selection and omits its fields in quick question mode", async () => {
     const onSend = vi.fn();
     const baseProps = {

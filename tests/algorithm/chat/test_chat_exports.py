@@ -70,3 +70,16 @@ def test_export_offsets_only_include_answer_after_tool_previews():
     snapshot = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['export_snapshot']
     assert snapshot['content'] == '# 完整报告'
     assert snapshot['exports'][0]['start'] == 0
+
+
+def test_steering_resets_only_reply_local_export_and_completion_state():
+    translator = AgentEventFrameTranslator(query='报告', enable_exports=True)
+    translator.feed({'tag': 'text', 'delta': '之前的部分回复'})
+    translator.feed({'tag': 'text', 'delta': '\n```'})
+    frames = translator.begin_steering_segment()
+    assert ''.join(frame.get('text') or '' for frame in frames).endswith('```')
+    # A non-streamed final after a streamed interrupted reply must still render.
+    final = translator.finish(OPEN + '新报告\n:::\n')
+    assert '新报告' in ''.join(frame.get('text') or '' for frame in final)
+    snapshot = translator.finish_run(outcome=RunOutcome.SUCCEEDED)['export_snapshot']
+    assert snapshot['content'] == '新报告'

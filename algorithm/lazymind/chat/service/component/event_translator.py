@@ -378,6 +378,23 @@ class AgentEventFrameTranslator:
     def _collect_sources(self) -> Any:
         return self.citation_plugin.collect()
 
+    def begin_steering_segment(self) -> list[dict[str, Any]]:
+        """Settle buffered text before the durable boundary, then start a reply.
+
+        Export parsing is per reply, so a later final snapshot cannot rewrite
+        text belonging to an earlier (interrupted) reply.
+        """
+        frames = self.flush()
+        if self.export_stream is not None:
+            tail = self.export_stream.pending[self.export_stream.emitted:]
+            if tail:
+                frames.append(_stream_frame(text=tail))
+            self.export_stream = ChatExportStream()
+        self.streamed_text = False
+        self.ask_pending_emitted = False
+        self.capability_dependency_emitted = False
+        return frames
+
     def finish(self, final_result: Any) -> list[dict[str, Any]]:
         frames = self.flush()
         # ask_user is a stop tool. Its return value is an internal execution

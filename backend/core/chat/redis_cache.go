@@ -63,6 +63,8 @@ const (
 )
 
 type ChatChunkResponse struct {
+	SteeringReplay        []steeringReplayItem         `json:"steering_replay,omitempty"`
+	SteeringApplied       []steeringApplied            `json:"steering_applied,omitempty"`
 	Exports               *[]ChatExport                `json:"exports,omitempty"`
 	ConversationID        string                       `json:"conversation_id"`
 	Seq                   int32                        `json:"seq"`
