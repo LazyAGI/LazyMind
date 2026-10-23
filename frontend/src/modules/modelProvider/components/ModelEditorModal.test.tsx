@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -61,6 +61,27 @@ async function chooseCapability(capability: string) {
 }
 
 describe("model editor", () => {
+  it("uses separate context, input and output presets and preserves their values", async () => {
+    const options = props();
+    setup(options);
+    fireEvent.click(within(screen.getByRole("group", { name: "modelProvider.maxInputTokensLabel" })).getByRole("button", { name: "512K" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "modelProvider.editor.inputTokenLimit" })).getByRole("button", { name: "200K" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "modelProvider.editor.maxOutputTokens" })).getByRole("button", { name: "32K" }));
+    expect(screen.getByRole("textbox", { name: "modelProvider.maxInputTokensLabel" })).toHaveValue("512K");
+    expect(screen.getByRole("textbox", { name: "modelProvider.editor.inputTokenLimit" })).toHaveValue("200K");
+    expect(screen.getByRole("textbox", { name: "modelProvider.editor.maxOutputTokens" })).toHaveValue("32K");
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({ maxInputTokens: "512K", inputTokenLimit: "200K", maxOutputTokens: "32K" })));
+  });
+
+  it("rejects directional limits larger than the context window", async () => {
+    const options = props();
+    setup(options);
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.editor.inputTokenLimit" }), { target: { value: "1M" } });
+    fireEvent.click(saveButton());
+    await visibleText("modelProvider.editor.tokenLimitExceedsContext");
+    expect(options.onSave).not.toHaveBeenCalled();
+  });
   it("edits a non-dialogue model without sending hidden chat parameters", async () => {
     const options = props({ ...model, capability: "RERANK" });
     setup(options);

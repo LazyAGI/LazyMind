@@ -148,6 +148,9 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	db := database.DB
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-default", "llm", true, "secret-a")
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "DeepSeek", "B", "deepseek-chat", "llm", true, "secret-b")
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-b").Updates(map[string]any{"input_token_limit": "64K", "max_output_tokens": "32K"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	seedSelectedChatModel(t, db, "user-1", "model-a", false)
 
 	binding, err := resolveInitialChatModelBinding(context.Background(), db, "user-1", &initialChatModelSelection{Mode: chatModelModeFixed, ModelID: "model-b"})
@@ -175,6 +178,9 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	llm := config["llm"].(map[string]any)
 	if llm["model"] != "deepseek-chat" || llm["api_key"] != "secret-b" {
 		t.Fatalf("fixed llm config=%#v", llm)
+	}
+	if llm["input_token_limit"] != "64K" || llm["max_output_tokens"] != "32K" {
+		t.Fatal("fixed model lost its token limits")
 	}
 	if config["embed_main"].(map[string]any)["model"] != "embedding-model" {
 		t.Fatalf("non-chat role changed: %#v", config)

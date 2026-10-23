@@ -1345,10 +1345,12 @@ type listRemoteGroupModelsOpenAPIResponse struct {
 }
 
 type addModelProviderGroupModelOpenAPIRequest struct {
-	Vision         bool    `json:"vision,omitempty" desc:"Whether this LLM accepts image input"`
-	Name           string  `json:"name"`
-	ModelType      string  `json:"model_type"`
-	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K."`
+	Vision          bool    `json:"vision,omitempty" desc:"Whether this LLM accepts image input"`
+	Name            string  `json:"name"`
+	ModelType       string  `json:"model_type"`
+	MaxInputTokens  *string `json:"max_input_tokens,omitempty" desc:"Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K."`
+	InputTokenLimit *string `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens *string `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 }
 
 type addModelProviderGroupModelOpenAPIResponse struct {
@@ -1363,14 +1365,18 @@ type addModelProviderGroupModelOpenAPIResponse struct {
 	BaseURL                  string  `json:"base_url"`
 	IsDefault                bool    `json:"is_default"`
 	MaxInputTokens           *string `json:"max_input_tokens,omitempty" desc:"Stored LLM input context window, for example 512, 128K, or 1M" nullable:"true"`
+	InputTokenLimit          *string `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens          *string `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 }
 
 type updateModelProviderGroupModelOpenAPIRequest struct {
-	Name           *string `json:"name,omitempty" desc:"Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID."`
-	ModelType      *string `json:"model_type,omitempty" desc:"Optional supported technical model type. Must be compatible with the supplier runtime protocol and existing references."`
-	Vision         *bool   `json:"vision,omitempty" desc:"Optional image-input support for chat models."`
-	MaxInputTokens *string `json:"max_input_tokens,omitempty" desc:"Optional LLM/VLM input context window, for example 512, 128K, or 1M. Omitted fields remain unchanged."`
-	Customize      bool    `json:"customize,omitempty" desc:"Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it."`
+	Name            *string `json:"name,omitempty" desc:"Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID."`
+	ModelType       *string `json:"model_type,omitempty" desc:"Optional supported technical model type. Must be compatible with the supplier runtime protocol and existing references."`
+	Vision          *bool   `json:"vision,omitempty" desc:"Optional image-input support for chat models."`
+	MaxInputTokens  *string `json:"max_input_tokens,omitempty" desc:"Optional LLM/VLM input context window, for example 512, 128K, or 1M. Omitted fields remain unchanged."`
+	InputTokenLimit *string `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens *string `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	Customize       bool    `json:"customize,omitempty" desc:"Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it."`
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
@@ -1389,6 +1395,8 @@ type listModelProviderGroupModelsOpenAPIItem struct {
 	IsDefault                bool     `json:"is_default"`
 	IsEditable               bool     `json:"is_editable" desc:"Whether this option supports image editing"`
 	MaxInputTokens           *string  `json:"max_input_tokens" desc:"Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models" nullable:"true"`
+	InputTokenLimit          *string  `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
+	MaxOutputTokens          *string  `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 	Availability             string   `json:"availability" enum:"available,degraded,unavailable"`
 	Lifecycle                string   `json:"lifecycle" enum:"active,deprecated,retired"`
 	ReadOnly                 bool     `json:"read_only"`

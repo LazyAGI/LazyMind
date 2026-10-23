@@ -228,6 +228,8 @@ type SelectedRuntimeModel struct {
 	APIKey             string
 	APIKeyCiphertext   string
 	MaxInputTokens     *string
+	InputTokenLimit    *string
+	MaxOutputTokens    *string
 }
 
 // LoadMaxInputTokens returns the configured context window for a runtime model role.
@@ -308,7 +310,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.name AS model_name, "+
 				"g.id AS runtime_group_id, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
-				"m.max_input_tokens",
+				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
@@ -387,7 +389,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.name AS model_name, "+
 				"g.id AS runtime_group_id, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
-				"m.max_input_tokens",
+				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
 		).
 		Joins(
 			"JOIN user_model_provider_group_models m ON "+
@@ -837,6 +839,12 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 		cfg["vision"] = row.Vision || strings.EqualFold(strings.TrimSpace(row.TechnicalModelType), "vlm")
 		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {
 			cfg["max_input_tokens"] = *tokens
+		}
+		if row.InputTokenLimit != nil && strings.TrimSpace(*row.InputTokenLimit) != "" {
+			cfg["input_token_limit"] = *row.InputTokenLimit
+		}
+		if row.MaxOutputTokens != nil && strings.TrimSpace(*row.MaxOutputTokens) != "" {
+			cfg["max_output_tokens"] = *row.MaxOutputTokens
 		}
 		if role == modelprovider.EvoModelKey {
 			descriptor, ok := openCodeDescriptor(row)

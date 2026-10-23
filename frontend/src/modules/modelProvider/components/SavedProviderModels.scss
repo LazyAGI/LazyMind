@@ -2,63 +2,12 @@
   container-type: inline-size;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: clamp(240px, calc(100dvh - 470px), 580px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-gutter: stable;
-  padding: 1px 3px 3px 1px;
-}
-.saved-provider-model-group {
-  flex: 0 0 auto;
-  min-width: 0;
-  border: 1px solid var(--provider-line, #e6e9ef);
-  border-radius: 9px;
-  overflow: hidden;
-  background: var(--ant-color-bg-container, #fff);
-}
-.saved-provider-model-group-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 36px;
-  padding: 7px 12px;
-  border: 0;
-  color: var(--provider-text, #465365);
-  background: var(--ant-color-fill-quaternary, #fafbfc);
-  text-align: left;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  .anticon {
-    font-size: 10px;
-    color: var(--provider-muted, #697586);
-    transition: transform 0.15s ease;
-  }
-  .is-collapsed {
-    transform: rotate(-90deg);
-  }
-  small {
-    padding: 1px 6px;
-    border-radius: 5px;
-    background: var(--ant-color-fill-tertiary, #eef0f3);
-    color: var(--provider-muted, #697586);
-    font-size: 10px;
-    font-weight: 500;
-  }
-}
-.saved-provider-model-list {
   margin: 0;
   padding: 4px 6px;
   list-style: none;
-}
-.saved-provider-model-group-kind {
-  margin-left: auto;
-  color: var(--provider-muted, #697586);
-  font-size: 10px;
-  font-weight: 400;
+  border: 1px solid var(--provider-line, #e6e9ef);
+  border-radius: 8px;
+  background: var(--ant-color-bg-container, #fff);
 }
 .saved-provider-model-row {
   display: flex;
@@ -147,13 +96,6 @@
     }
   }
 }
-@media (max-width: 600px) {
-  .saved-provider-models {
-    max-height: none;
-    overflow: visible;
-    scrollbar-gutter: auto;
-  }
-}
 @media (pointer: coarse) {
   .saved-provider-model-actions {
     flex-basis: 88px;
@@ -166,10 +108,5 @@
   }
   .saved-provider-model-row {
     min-height: 56px;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .saved-provider-model-group-toggle .anticon {
-    transition: none;
   }
 }

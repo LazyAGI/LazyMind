@@ -10452,8 +10452,16 @@ components:
             type: object
         addModelProviderGroupModelOpenAPIRequest:
             properties:
+                input_token_limit:
+                    description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
                 max_input_tokens:
                     description: Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+                    type: string
+                max_output_tokens:
+                    description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
                     type: string
                 model_type:
                     type: string
@@ -10474,10 +10482,18 @@ components:
                     type: string
                 id:
                     type: string
+                input_token_limit:
+                    description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
                 is_default:
                     type: boolean
                 max_input_tokens:
                     description: Stored LLM input context window, for example 512, 128K, or 1M
+                    nullable: true
+                    type: string
+                max_output_tokens:
+                    description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
                     nullable: true
                     type: string
                 model_type:
@@ -12213,6 +12229,10 @@ components:
                     type: string
                 id:
                     type: string
+                input_token_limit:
+                    description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
                 is_default:
                     type: boolean
                 is_editable:
@@ -12226,6 +12246,10 @@ components:
                     type: string
                 max_input_tokens:
                     description: Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
+                    nullable: true
+                    type: string
+                max_output_tokens:
+                    description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
                     nullable: true
                     type: string
                 model_type:
@@ -14852,8 +14876,16 @@ components:
                 customize:
                     description: Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it.
                     type: boolean
+                input_token_limit:
+                    description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
                 max_input_tokens:
                     description: Optional LLM/VLM input context window, for example 512, 128K, or 1M. Omitted fields remain unchanged.
+                    type: string
+                max_output_tokens:
+                    description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
                     type: string
                 model_type:
                     description: Optional supported technical model type. Must be compatible with the supplier runtime protocol and existing references.

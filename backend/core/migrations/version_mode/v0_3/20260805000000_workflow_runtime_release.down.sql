@@ -203,6 +203,8 @@ DROP INDEX IF EXISTS idx_vocabulary_review_sessions_active;
 -- These columns are introduced by the current mainline release and must be
 -- removed when rolling the aggregate back to the previous release.
 -- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_provider_group_models DROP COLUMN max_output_tokens;
+ALTER TABLE user_model_provider_group_models DROP COLUMN input_token_limit;
 ALTER TABLE user_model_provider_group_models DROP COLUMN vision;
 ALTER TABLE default_models DROP COLUMN vision;
 

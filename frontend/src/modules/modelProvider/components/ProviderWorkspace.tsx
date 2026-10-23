@@ -42,8 +42,7 @@ import {
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
 import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
-import { getModelTaskLabelKey, getModelTaskType } from "../modelTaskTypes";
-import { ModelTypeIcon } from "./ModelTypeBadge";
+import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./ModelTaskTabs";
 import { SavedProviderModels } from "./SavedProviderModels";
 import { ProviderKeyManager } from "./ProviderKeyManager";
 import { ProviderRequestConfigDrawer } from "./ProviderRequestConfigDrawer";
@@ -117,7 +116,7 @@ export function ProviderWorkspace(props: Props) {
   const [selectedId, setSelectedId] = useState(props.highlightProviderId || "");
   const [search, setSearch] = useState("");
   const [modelSearch, setModelSearch] = useState("");
-  const [modelType, setModelType] = useState<string>("all");
+  const [modelType, setModelType] = useState<ModelTaskFilter>("all");
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
   const [requestConfigOpen, setRequestConfigOpen] = useState(false);
@@ -454,16 +453,10 @@ export function ProviderWorkspace(props: Props) {
       (!configuredOnly || hasProviderConfiguration(item)) &&
       getProviderSearchText(item, language).includes(search.toLowerCase().trim()),
   );
-  const models = (group?.models || []).filter(
-    (model) =>
-      model.name.toLowerCase().includes(modelSearch.toLowerCase().trim()) &&
-      (modelType === "all" || getModelTaskType(model.capability) === modelType),
+  const searchedModels = (group?.models || []).filter((model) =>
+    model.name.toLowerCase().includes(modelSearch.toLowerCase().trim()),
   );
-  const modelTypes = Array.from(
-    new Set(
-      (group?.models || []).map((model) => getModelTaskType(model.capability)),
-    ),
-  );
+  const models = searchedModels.filter((model) => matchesModelTaskFilter(model, modelType));
 
   return (
     <section
@@ -746,8 +739,9 @@ export function ProviderWorkspace(props: Props) {
                     <Tooltip title={t("modelProvider.requestConfig.title")}>
                       <Button
                         type="text"
+                        className="provider-workspace-icon-button"
                         aria-label={t("modelProvider.requestConfig.title")}
-                        icon={<SettingOutlined />}
+                        icon={<SettingOutlined aria-hidden="true" />}
                         disabled={endpointSaving || Boolean(changingActiveKey)}
                         onClick={() =>
                           confirmEndpointLeave(() => setRequestConfigOpen(true))
@@ -772,6 +766,7 @@ export function ProviderWorkspace(props: Props) {
                       <Tooltip title={label("syncModels")}>
                         <Button
                           type="text"
+                          className="provider-workspace-icon-button"
                           aria-label={label("syncModels")}
                           icon={<ReloadOutlined aria-hidden="true" />}
                           loading={props.modelsLoading[groupKey]}
@@ -784,6 +779,7 @@ export function ProviderWorkspace(props: Props) {
                       <Tooltip title={t("modelProvider.customModel")}>
                         <Button
                           type="text"
+                          className="provider-workspace-icon-button"
                           aria-label={t("modelProvider.customModel")}
                           icon={<PlusOutlined aria-hidden="true" />}
                           disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
@@ -803,24 +799,8 @@ export function ProviderWorkspace(props: Props) {
                       value={modelSearch}
                       onChange={(event) => setModelSearch(event.target.value)}
                     />
-                    <Select
-                      aria-label={label("modelType")}
-                      value={modelType}
-                      onChange={setModelType}
-                      options={[
-                        { value: "all", label: label("allTypes") },
-                        ...modelTypes.map((type) => ({
-                          value: type,
-                          label: (
-                            <span className="provider-model-task-option">
-                              <ModelTypeIcon type={type} size={16} />
-                              {t(getModelTaskLabelKey(type))}
-                            </span>
-                          ),
-                        })),
-                      ]}
-                    />
                   </div>
+                  <ModelTaskTabs models={searchedModels} value={modelType} onChange={setModelType} />
                   {modelsError ? (
                     <Alert
                       className="provider-workspace-models-error"

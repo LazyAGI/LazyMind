@@ -144,7 +144,7 @@ describe("supplier endpoints and direct setup", () => {
     expect(screen.getAllByRole("textbox", { name: "modelProvider.apiAddressLabel" })).toHaveLength(
       1,
     );
-    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(screen.getByText("****1234")).toBeInTheDocument();
     expect(
       screen.queryByRole("combobox", {
         name: "modelProvider.workspace.selectConnection",
@@ -170,11 +170,11 @@ describe("supplier endpoints and direct setup", () => {
         name: "modelProvider.workspace.checkConnection",
       }),
     ).toBeDisabled();
-    expect(
-      screen.getByRole("button", {
-        name: "modelProvider.workspace.addKey",
-      }),
-    ).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.keyManager.manage" }));
+    const manager = within(await screen.findByRole("dialog"));
+    expect(manager.getByRole("button", { name: "modelProvider.workspace.addKey" })).toBeDisabled();
+    fireEvent.click(manager.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(
       screen.getByRole("button", {
         name: "modelProvider.workspace.saveEndpoint",

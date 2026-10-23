@@ -135,6 +135,8 @@ type UserModelProviderGroupModel struct {
 	ModelType                string  `gorm:"column:model_type;type:varchar(64);not null"`
 	Vision                   bool    `gorm:"column:vision;type:boolean;not null;default:false"`
 	MaxInputTokens           *string `gorm:"column:max_input_tokens;type:varchar(16)"`
+	InputTokenLimit          *string `gorm:"column:input_token_limit;type:varchar(16)"`
+	MaxOutputTokens          *string `gorm:"column:max_output_tokens;type:varchar(16)"`
 	FreeAutoSelectPriority   int     `gorm:"column:free_auto_select_priority;type:integer;not null;default:0"`
 	FreeAutoSelectBaseURLs   string  `gorm:"column:free_auto_select_base_urls;type:text;not null;default:''"`
 	IsDefault                bool    `gorm:"column:is_default;type:boolean;not null;default:false"`

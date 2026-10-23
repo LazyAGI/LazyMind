@@ -52,6 +52,16 @@ beforeEach(() => {
 });
 
 describe("provider key controls", () => {
+  it.each([
+    ["********...ABCD", "****ABCD"],
+    ["********1234", "****1234"],
+    ["********", "****"],
+  ])("shows a compact masked preview without a numbered row label: %s", (masked, preview) => {
+    render(<ProviderKeyManager {...props()} keys={[{ id: "key", masked, enabled: true }]} />);
+    expect(screen.getByText(preview)).toBeVisible();
+    expect(screen.queryByText("modelProvider.workspace.keyNumber")).not.toBeInTheDocument();
+    expect(mocks.reveal).not.toHaveBeenCalled();
+  });
   it("adds keys through a single management entry, including an empty supplier", async () => {
     const current = { ...props(), keys: [] };
     render(<ProviderKeyManager {...current} />);
@@ -70,7 +80,7 @@ describe("provider key controls", () => {
   it("only reveals on explicit action and hides on a supplier change", async () => {
     const initial = props();
     const view = render(<ProviderKeyManager {...initial} />);
-    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(screen.getByText("****1234")).toBeInTheDocument();
     expect(mocks.reveal).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole("button", { name: "modelProvider.keyManager.reveal" }),

@@ -17,6 +17,7 @@ import (
 )
 
 type savedProviderRequestConfig struct {
+	DefaultsVersion int               `json:"defaults_version,omitempty"`
 	DefaultProtocol string            `json:"default_protocol"`
 	Endpoints       map[string]string `json:"endpoints"`
 	Defaults        map[string]string `json:"defaults"`
@@ -48,8 +49,10 @@ func defaultRequestProtocol(provider orm.UserModelProvider) string {
 }
 
 func providerRequestDefaults(db *gorm.DB, parent orm.UserModelProvider) map[string]string {
-	base := parent.BaseURL
-	if !parent.IsCustom && db.Migrator().HasTable(&orm.DefaultModelProvider{}) {
+	base := strings.TrimSpace(parent.BaseURL)
+	// A catalog entry is a fallback for an unconfigured supplier, never a reason
+	// to send a proxy supplier's credentials to a different host.
+	if base == "" && db != nil && db.Migrator().HasTable(&orm.DefaultModelProvider{}) {
 		var catalog orm.DefaultModelProvider
 		if db.Where("id = ? AND deleted_at IS NULL", parent.DefaultModelProviderID).Take(&catalog).Error == nil && strings.TrimSpace(catalog.BaseURL) != "" {
 			base = catalog.BaseURL
@@ -59,16 +62,27 @@ func providerRequestDefaults(db *gorm.DB, parent orm.UserModelProvider) map[stri
 	if err != nil || parsed.Host == "" {
 		return map[string]string{"openai": base, "anthropic": base}
 	}
-	origin := parsed.Scheme + "://" + parsed.Host
+	root := *parsed
+	rawPath := strings.TrimRight(root.EscapedPath(), "/")
+	lastSlash := strings.LastIndex(rawPath, "/")
+	lastSegment, _ := url.PathUnescape(rawPath[lastSlash+1:])
+	if strings.EqualFold(lastSegment, "v1") {
+		rawPath = rawPath[:lastSlash]
+	}
+	root.Path, _ = url.PathUnescape(rawPath)
+	root.RawPath = rawPath
+	// Both adapters append request paths. Only the version suffix belongs to
+	// the protocol; tenant/reverse-proxy prefixes still belong to the supplier.
+	rootURL := root.String()
 	openai := base
 	if defaultRequestProtocol(parent) == "anthropic" {
-		openai = origin + "/v1/"
+		openai = rootURL + "/v1/"
 	}
-	return map[string]string{"openai": openai, "anthropic": origin, "gemini": origin + "/gemini/v1beta", "openai-responses": openai}
+	return map[string]string{"openai": openai, "anthropic": rootURL, "gemini": rootURL + "/gemini/v1beta", "openai-responses": openai}
 }
 
 func savedRequestConfig(db *gorm.DB, parent orm.UserModelProvider) savedProviderRequestConfig {
-	config := savedProviderRequestConfig{DefaultProtocol: defaultRequestProtocol(parent), Endpoints: map[string]string{}, Defaults: providerRequestDefaults(db, parent)}
+	config := savedProviderRequestConfig{DefaultsVersion: 1, DefaultProtocol: defaultRequestProtocol(parent), Endpoints: map[string]string{}, Defaults: providerRequestDefaults(db, parent)}
 	var stored savedProviderRequestConfig
 	if parent.RequestConfig != "" && json.Unmarshal([]byte(parent.RequestConfig), &stored) == nil {
 		if stored.DefaultProtocol == "openai" || stored.DefaultProtocol == "anthropic" {
@@ -77,13 +91,60 @@ func savedRequestConfig(db *gorm.DB, parent orm.UserModelProvider) savedProvider
 		for key, value := range stored.Endpoints {
 			config.Endpoints[key] = value
 		}
-		for key, value := range stored.Defaults {
-			if value != "" {
-				config.Defaults[key] = value
+		if stored.DefaultsVersion == 1 {
+			for key, value := range stored.Defaults {
+				if value != "" {
+					config.Defaults[key] = value
+				}
+			}
+		} else {
+			// Old saves derived defaults from the catalog/origin and copied those
+			// defaults into endpoints. The saved OpenAI address retains the original
+			// supplier when an explicit Anthropic override uses a different path/host.
+			anchor := stored.Endpoints["openai"]
+			if anchor == "" {
+				anchor = stored.Defaults["openai"]
+			}
+			anchorProvider := parent
+			if anchor != "" {
+				anchorProvider.BaseURL, anchorProvider.ProtocolName = anchor, "OpenAI"
+			}
+			if config.DefaultProtocol == "openai" || originalRequestProtocolIsAnthropic(db, parent) && sameRequestOrigin(anchor, parent.BaseURL) {
+				anchorProvider = parent
+			}
+			config.Defaults = providerRequestDefaults(db, anchorProvider)
+			for protocol, endpoint := range config.Endpoints {
+				if endpoint != "" && normalizeBaseURLForCompare(endpoint) == normalizeBaseURLForCompare(stored.Defaults[protocol]) {
+					config.Endpoints[protocol] = ""
+				}
 			}
 		}
 	}
+	for protocol, endpoint := range config.Endpoints {
+		if endpoint != "" && normalizeBaseURLForCompare(endpoint) == normalizeBaseURLForCompare(config.Defaults[protocol]) {
+			config.Endpoints[protocol] = ""
+		}
+	}
 	return config
+}
+
+func originalRequestProtocolIsAnthropic(db *gorm.DB, parent orm.UserModelProvider) bool {
+	// ProtocolName changes when users select a default. The immutable template
+	// identifies a genuinely native Anthropic root without mistaking an explicit
+	// /anthropic proxy override for the original supplier's API prefix.
+	if db != nil && parent.DefaultModelProviderID != "" && db.Migrator().HasTable(&orm.DefaultModelProvider{}) {
+		var template orm.DefaultModelProvider
+		if db.Where("id = ?", parent.DefaultModelProviderID).Take(&template).Error == nil {
+			return LazyLLMSource(template.Name) == "claude"
+		}
+	}
+	return parent.ProtocolName == "" && LazyLLMSource(parent.Name) == "claude"
+}
+
+func sameRequestOrigin(left, right string) bool {
+	a, errA := url.Parse(left)
+	b, errB := url.Parse(right)
+	return errA == nil && errB == nil && a.Host != "" && b.Host != "" && strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
 }
 
 func requestConfigResponse(db *gorm.DB, parent orm.UserModelProvider) providerRequestConfigResponse {
@@ -177,11 +238,16 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 		current := savedRequestConfig(tx, parent)
 		before := requestConfigResponse(tx, parent)
 		for _, entry := range before.Protocols {
-			if entry.Supported && current.Endpoints[entry.Protocol] == "" {
+			// Preserve the currently active address while switching protocols, but
+			// do not freeze an inactive protocol's derived default into an override.
+			if entry.Protocol == current.DefaultProtocol && current.Endpoints[entry.Protocol] == "" {
 				current.Endpoints[entry.Protocol] = entry.BaseURL
 			}
 		}
 		for key, value := range req.Endpoints {
+			if normalizeBaseURLForCompare(value) == normalizeBaseURLForCompare(current.Defaults[key]) {
+				value = ""
+			}
 			current.Endpoints[key] = value
 		}
 		protocolChanged := before.DefaultProtocol != req.DefaultProtocol
@@ -214,6 +280,9 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 			effective = parent.BaseURL
 		}
 		current.Endpoints[current.DefaultProtocol] = effective
+		if normalizeBaseURLForCompare(effective) == normalizeBaseURLForCompare(current.Defaults[current.DefaultProtocol]) {
+			current.Endpoints[current.DefaultProtocol] = ""
+		}
 		encoded, err := json.Marshal(current)
 		if err != nil {
 			return err

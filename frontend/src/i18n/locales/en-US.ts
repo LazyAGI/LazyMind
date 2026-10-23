@@ -326,6 +326,17 @@ const enUS = {
     invalidEmail: "Invalid email format",
   },
   modelProvider: {
+    taskTab: {
+      all: "All",
+      chat: "Chat",
+      image: "Images",
+      video: "Video",
+      embedding: "Embedding",
+      rerank: "Rerank",
+      tts: "Speech",
+      asr: "Transcription",
+      unknown: "Unclassified",
+    },
     taskType: {
       "chat": "Chat",
       "embedding": "Embedding",
@@ -358,6 +369,11 @@ const enUS = {
     apiKeyLabel: "API Key",
     editModelAria: "Edit model settings for {{name}}",
     editor: {
+      inputTokenLimit: "Maximum input tokens",
+      maxOutputTokens: "Maximum output tokens",
+      inputTokenPlaceholder: "For example 128000",
+      outputTokenPlaceholder: "For example 65536",
+      tokenLimitExceedsContext: "Input and output token limits cannot exceed the context window",
       title: "Edit model · {{name}}",
       apiModelId: "Model ID",
       idHint: "Use the model identifier expected by the supplier API. Existing references are retained.",
@@ -423,7 +439,6 @@ const enUS = {
     workspace: {
       notConfigured: "No API key",
       disabled: "Disabled",
-      customGroup: "Custom",
       modelsLoadFailed: "Unable to load models",
       supplierNameBytes: "Supplier name cannot exceed 255 UTF-8 bytes.",
       "loadFailed": "Could not load supplier settings. Please retry.",
@@ -460,7 +475,6 @@ const enUS = {
       "keysDisabled": "Supplier key disabled",
       "addKey": "Add key",
       "addAndCheckKey": "Verify and add",
-      "keyNumber": "Key {{number}}",
       "deleteKey": "Delete API key",
       "deleteKeyNumber": "Delete key {{number}}",
       "deleteKeyHint": "This cannot be undone. If this is the enabled key, enable another saved key manually afterward.",
@@ -470,7 +484,6 @@ const enUS = {
       "models": "Models",
       "searchModel": "Search model ID",
       "modelType": "Model type",
-      "allTypes": "All types",
       "context": "Context",
       "checkConnection": "Check connection"
     },

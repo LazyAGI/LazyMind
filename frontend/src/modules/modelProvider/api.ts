@@ -312,6 +312,8 @@ export interface UpdateGroupModelInput {
   model_type: string;
   vision?: boolean;
   max_input_tokens?: string;
+  input_token_limit?: string;
+  max_output_tokens?: string;
   customize?: boolean;
 }
 
@@ -334,6 +336,8 @@ export async function updateGroupModel(
     vision?: boolean;
     is_default?: boolean;
     max_input_tokens?: string;
+    input_token_limit?: string | null;
+    max_output_tokens?: string | null;
   }>(response.data);
 }
 

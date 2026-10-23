@@ -48,6 +48,15 @@ func TestProviderRequestConfigMigrationRoundTripAndAggregate(t *testing.T) {
 			if err := dev.QueryRow("SELECT request_config,protocol_name,base_url FROM user_model_providers WHERE id='p'").Scan(&cfg, &protocol, &url); err != nil || cfg != "" || protocol != "OpenAI" || url != "https://proxy.example/v1" {
 				t.Fatal("upgrade changed active configuration", err)
 			}
+			// Compare both paths at the current release state, including later
+			// independent migrations, rather than against a partial dev schema.
+			for _, mode := range catalog.Modes {
+				for _, migration := range mode.Dev {
+					if migration.FileVersion > 20261022092432 {
+						execMigrationFileForDriver(t, dev, migration.UpPath, driver)
+					}
+				}
+			}
 			if driver == "sqlite" {
 				// Older unrelated aggregate tables have textually different DDL;
 				// this migration only alters the supplier table, whose complete

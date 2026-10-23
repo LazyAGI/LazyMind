@@ -14,6 +14,24 @@
   .ant-form-item:last-child {
     margin-bottom: 8px;
   }
+  .model-editor-token-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 7px;
+    .ant-btn {
+      height: 28px;
+      padding-inline: 10px;
+      font-size: 12px;
+      box-shadow: none;
+      color: var(--ant-color-text-secondary, #465365);
+    }
+    .ant-btn[aria-pressed="true"] {
+      color: var(--ant-color-primary, #2f6df6);
+      border-color: var(--ant-color-primary-border, #91b5ff);
+      background: var(--ant-color-primary-bg, #f0f5ff);
+    }
+  }
 }
 .model-editor-type-option {
   display: inline-flex;

@@ -56,9 +56,17 @@ export interface AddACLRequest {
 }
 export interface AddModelProviderGroupModelOpenAPIRequest {
     /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
+    /**
      * Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
      */
     'max_input_tokens'?: string;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
     'model_type': string;
     'name': string;
     /**
@@ -70,11 +78,19 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
     'base_url': string;
     'group_name': string;
     'id': string;
+    /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
     'is_default': boolean;
     /**
      * Stored LLM input context window, for example 512, 128K, or 1M
      */
     'max_input_tokens'?: string | null;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
     'model_type': string;
     'name': string;
     'provider_name': string;
@@ -4478,6 +4494,10 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
     'capabilities'?: Array<string>;
     'group_name'?: string;
     'id': string;
+    /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
     'is_default': boolean;
     /**
      * Whether this option supports image editing
@@ -4488,6 +4508,10 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
      * Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
      */
     'max_input_tokens'?: string | null;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
     'model_type': string;
     'name': string;
     'provider_group_id'?: string;
@@ -7151,9 +7175,17 @@ export interface UpdateModelProviderGroupModelOpenAPIRequest {
      */
     'customize'?: boolean;
     /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
+    /**
      * Optional LLM/VLM input context window, for example 512, 128K, or 1M. Omitted fields remain unchanged.
      */
     'max_input_tokens'?: string;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
     /**
      * Optional supported technical model type. Must be compatible with the supplier runtime protocol and existing references.
      */

@@ -100,6 +100,8 @@ export interface ProviderModel {
   builtIn: boolean;
   enabled: boolean;
   maxInputTokens?: string;
+  inputTokenLimit?: string;
+  maxOutputTokens?: string;
 }
 
 export interface ProviderOption {
@@ -381,6 +383,8 @@ interface ApiModel {
   model_type?: string;
   is_default?: boolean;
   max_input_tokens?: string;
+  input_token_limit?: string | null;
+  max_output_tokens?: string | null;
 }
 
 function mapApiProvider(
@@ -450,6 +454,8 @@ function mapApiGroup(
       builtIn: Boolean(model.is_default),
       enabled: true,
       maxInputTokens: model.max_input_tokens,
+      inputTokenLimit: model.input_token_limit || undefined,
+      maxOutputTokens: model.max_output_tokens || undefined,
     }))),
   });
 }
@@ -1274,7 +1280,7 @@ export default function ModelProviderPage({
       name: values.name.trim(),
       model_type: getModelTypeForCapability(values.capability),
       vision: values.capability === "LLM_CHAT" && values.vision === true,
-      ...(supportsModelContext(values.capability) ? { max_input_tokens: values.maxInputTokens } : {}),
+      ...(supportsModelContext(values.capability) ? { max_input_tokens: values.maxInputTokens, input_token_limit: values.inputTokenLimit, max_output_tokens: values.maxOutputTokens } : {}),
       ...(target.model.builtIn ? { customize: true } : {}),
     });
     const key = `${target.provider.id}:${target.group.id}`;
@@ -1289,6 +1295,8 @@ export default function ModelProviderPage({
           capability: mapModelTypeToCapability(updated.model_type),
           vision: updated.vision,
           maxInputTokens: updated.max_input_tokens,
+          inputTokenLimit: updated.input_token_limit || undefined,
+          maxOutputTokens: updated.max_output_tokens || undefined,
           builtIn: Boolean(updated.is_default),
         } : model),
       } : group),

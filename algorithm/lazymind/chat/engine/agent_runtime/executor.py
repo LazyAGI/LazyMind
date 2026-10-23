@@ -15,6 +15,7 @@ from lazyllm.tools.agent.toolsManager import ToolGroup
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 from lazymind.chat.engine.tools.skill_listing import restore_loaded_skill_runtime
 from lazymind.config import config as _cfg
+from lazymind.model_token_limits import bounded_model_for_role
 
 from .context_estimator import estimate_non_history_tokens
 from .cancellation import request_cancel
@@ -135,6 +136,7 @@ class AgentExecutor:
         from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
         options = plan.execution_options
+        llm = bounded_model_for_role(llm, options.llm_config)
         keep_full_turns = options.keep_full_turns
         if keep_full_turns is None:
             keep_full_turns = int(_cfg['agentic_keep_full_turns'])

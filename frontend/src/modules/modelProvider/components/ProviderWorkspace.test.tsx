@@ -183,6 +183,24 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("keeps all task filters visible and combines image tasks while searching a flat list", () => {
+    const imageModels = [
+      { ...provider.groups[0].models[0], id: "paint", name: "paint-model", capability: "TEXT_TO_IMAGE" as const },
+      { ...provider.groups[0].models[0], id: "edit", name: "edit-model", capability: "IMAGE_EDITING" as const },
+    ];
+    const mixed = { ...provider, groups: [{ ...provider.groups[0], models: [...provider.groups[0].models, ...imageModels] }] };
+    setup({ providers: [mixed], configuredProviders: [mixed] });
+    const filters = within(screen.getByRole("group", { name: "modelProvider.workspace.modelType" }));
+    const images = filters.getByRole("button", { name: /modelProvider.taskTab.image/ });
+    expect(filters.getAllByRole("button")).toHaveLength(9);
+    expect(images).toHaveTextContent("2");
+    fireEvent.click(images);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.workspace.searchModel" }), { target: { value: "paint" } });
+    expect(images).toHaveTextContent("1");
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(filters.getByRole("button", { name: /modelProvider.taskTab.video/ })).toHaveTextContent("0");
+  });
   it("uses one icon-only sync action and an icon-only custom model action", () => {
     const onSyncModels = vi.fn();
     const onAddModel = vi.fn();
@@ -328,24 +346,12 @@ describe("compact provider workspace", () => {
       groups: [{ ...provider.groups[0], models }],
     };
     setup({ providers: [mixed], configuredProviders: [mixed] });
-    fireEvent.mouseDown(
-      screen.getByRole("combobox", {
-        name: "modelProvider.workspace.modelType",
-      }),
-    );
-    const options = [
-      ...document.querySelectorAll(".ant-select-item-option-content"),
-    ];
-    expect(
-      options.filter(
-        (option) => option.textContent === "modelProvider.taskType.chat",
-      ),
-    ).toHaveLength(1);
-    const vectors = options.find(
-      (option) => option.textContent === "modelProvider.taskType.embedding",
-    );
-    expect(vectors).toBeDefined();
-    fireEvent.click(vectors!);
+    const filters = within(screen.getByRole("group", { name: "modelProvider.workspace.modelType" }));
+    const vectors = filters.getByRole("button", { name: /modelProvider.taskTab.embedding/ });
+    expect(vectors).toHaveTextContent("2");
+    expect(filters.getByRole("button", { name: /modelProvider.taskTab.image/ })).toHaveTextContent("0");
+    fireEvent.click(vectors);
+    expect(vectors).toHaveAttribute("aria-pressed", "true");
     await waitFor(() =>
       expect(
         document.querySelectorAll(".saved-provider-model-row"),
@@ -418,7 +424,7 @@ describe("compact provider workspace", () => {
   });
   it("shows supplier settings directly without instance controls or explanatory clutter", () => {
     setup();
-    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(screen.getByText("****1234")).toBeInTheDocument();
     for (const key of [
       "selectConnection",
       "addConnection",
@@ -486,8 +492,8 @@ describe("compact provider workspace", () => {
     );
     expect(screen.getAllByRole("switch")[0]).not.toBeChecked();
     expect(screen.getAllByRole("switch")[1]).toBeChecked();
-    expect(screen.getByText("********1234")).toBeInTheDocument();
-    expect(screen.getByText("********5678")).toBeInTheDocument();
+    expect(screen.getByText("****1234")).toBeInTheDocument();
+    expect(screen.getByText("****5678")).toBeInTheDocument();
   });
   it("allows disabling the only active key while retaining all saved keys", async () => {
     const callbacks = setup();
@@ -514,7 +520,7 @@ describe("compact provider workspace", () => {
         name: "modelProvider.workspace.useKeyNumber",
       }),
     ).not.toBeChecked();
-    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(screen.getByText("****1234")).toBeInTheDocument();
     expect(mocks.deleteKey).not.toHaveBeenCalled();
   });
 

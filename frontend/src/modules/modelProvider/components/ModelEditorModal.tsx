@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Form, Input, Modal, Select, Switch } from "antd";
+import { Alert, Button, Form, Input, Modal, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useSettingsFormDraft } from "@/modules/settings/SettingsNavigationGuard";
@@ -9,6 +9,7 @@ import {
   isLlmChatCapability,
   parseLlmMaxInputTokens,
   resolveLlmMaxInputTokens,
+  tokenLimitCount,
 } from "../maxInputTokens";
 import { supportsModelContext } from "../modelCapabilities";
 import { getModelTaskType } from "../modelTaskTypes";
@@ -20,6 +21,28 @@ export interface ModelEditorValues {
   capability: ModelCapability;
   vision?: boolean;
   maxInputTokens?: string;
+  inputTokenLimit?: string;
+  maxOutputTokens?: string;
+}
+
+function TokenLimitInput({ id, value, onChange, label, presets, placeholder, disabled }: {
+  id?: string;
+  value?: string;
+  onChange?: (value: string) => void;
+  label: string;
+  presets: readonly string[];
+  placeholder: string;
+  disabled: boolean;
+}) {
+  return <div className="model-editor-token-control" role="group" aria-label={label}>
+    <div className="model-editor-token-presets">
+      {presets.map((preset) => <Button key={preset} size="small" shape="round"
+        aria-pressed={Boolean(value && tokenLimitCount(value) === tokenLimitCount(preset))}
+        disabled={disabled} onClick={() => onChange?.(preset)}>{preset}</Button>)}
+    </div>
+    <Input id={id} aria-label={label} value={value || ""} onChange={(event) => onChange?.(event.target.value)}
+      maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH} autoComplete="off" placeholder={placeholder} disabled={disabled} />
+  </div>;
 }
 
 interface ModelEditorModalProps {
@@ -40,7 +63,11 @@ function normalizeValues(values: ModelEditorValues): ModelEditorValues {
       ? { vision: values.vision === true }
       : {}),
     ...(supportsModelContext(values.capability)
-      ? { maxInputTokens: values.maxInputTokens?.trim().toUpperCase() || "" }
+      ? {
+        maxInputTokens: values.maxInputTokens?.trim().toUpperCase() || "",
+        ...(values.inputTokenLimit !== undefined ? { inputTokenLimit: values.inputTokenLimit.trim().toUpperCase() } : {}),
+        ...(values.maxOutputTokens !== undefined ? { maxOutputTokens: values.maxOutputTokens.trim().toUpperCase() } : {}),
+      }
       : {}),
   };
 }
@@ -78,6 +105,8 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
         capability: model.capability,
         vision: model.vision === true,
         maxInputTokens: resolveLlmMaxInputTokens(model.maxInputTokens),
+        inputTokenLimit: model.inputTokenLimit || undefined,
+        maxOutputTokens: model.maxOutputTokens || undefined,
       };
       form.resetFields();
       form.setFieldsValue(values);
@@ -165,6 +194,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
         form={form}
         name="edit-provider-model"
         layout="vertical"
+        requiredMark={false}
         disabled={saving}
         onFinish={(submitted) => void save(submitted)}
         onValuesChange={() => setError("")}
@@ -199,6 +229,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
           <Select aria-label={t("modelProvider.modelType")} options={options} />
         </Form.Item>
         {supportsModelContext(capability) ? (
+          <>
           <Form.Item
             label={t("modelProvider.maxInputTokensLabel")}
             name="maxInputTokens"
@@ -212,8 +243,25 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
               },
             ]}
           >
-            <Input aria-label={t("modelProvider.maxInputTokensLabel")} maxLength={LLM_MAX_INPUT_TOKENS_MAX_LENGTH} autoComplete="off" placeholder={t("modelProvider.maxInputTokensPlaceholder")} />
+            <TokenLimitInput label={t("modelProvider.maxInputTokensLabel")} presets={["128K", "200K", "256K", "400K", "512K", "1M"]}
+              placeholder={t("modelProvider.maxInputTokensPlaceholder")} disabled={saving} />
           </Form.Item>
+          {(["inputTokenLimit", "maxOutputTokens"] as const).map((field) => <Form.Item
+            key={field} name={field} label={text(field)} dependencies={["maxInputTokens"]}
+            rules={[{ validator: (_, value?: string) => {
+              if (!value?.trim()) return Promise.resolve();
+              const limit = tokenLimitCount(value);
+              if (!limit) return Promise.reject(new Error(t("modelProvider.validation.maxInputTokensInvalid")));
+              const window = tokenLimitCount(form.getFieldValue("maxInputTokens"));
+              return window && limit > window
+                ? Promise.reject(new Error(text("tokenLimitExceedsContext"))) : Promise.resolve();
+            } }]}
+          >
+            <TokenLimitInput label={text(field)} disabled={saving}
+              presets={field === "inputTokenLimit" ? ["128K", "200K", "256K", "512K", "1M"] : ["16K", "32K", "64K", "128K", "256K"]}
+              placeholder={text(field === "inputTokenLimit" ? "inputTokenPlaceholder" : "outputTokenPlaceholder")} />
+          </Form.Item>)}
+          </>
         ) : null}
         {isLlmChatCapability(capability) ? (
           <Form.Item label={t("modelProvider.vision")} name="vision" valuePropName="checked">

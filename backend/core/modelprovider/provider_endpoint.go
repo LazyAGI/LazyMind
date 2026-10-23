@@ -101,6 +101,17 @@ func setProviderEndpoint(ctx context.Context, db *gorm.DB, parent *orm.UserModel
 		}
 		if parent.RequestConfig != "" {
 			config := savedRequestConfig(tx, *parent)
+			if normalizeBaseURLForCompare(parent.BaseURL) != normalizeBaseURLForCompare(baseURL) {
+				previousDefaults := config.Defaults
+				updated := *parent
+				updated.BaseURL = baseURL
+				config.Defaults = providerRequestDefaults(tx, updated)
+				for protocol, value := range config.Endpoints {
+					if protocol != config.DefaultProtocol && normalizeBaseURLForCompare(value) == normalizeBaseURLForCompare(previousDefaults[protocol]) {
+						config.Endpoints[protocol] = ""
+					}
+				}
+			}
 			config.Endpoints[config.DefaultProtocol] = baseURL
 			encoded, err := json.Marshal(config)
 			if err != nil {

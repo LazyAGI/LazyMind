@@ -21,6 +21,7 @@ func ValidProviderRequestConfig(raw string) bool {
 	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.DisallowUnknownFields()
 	var config struct {
+		DefaultsVersion int               `json:"defaults_version,omitempty"`
 		DefaultProtocol string            `json:"default_protocol"`
 		Endpoints       map[string]string `json:"endpoints"`
 		Defaults        map[string]string `json:"defaults"`
@@ -33,6 +34,9 @@ func ValidProviderRequestConfig(raw string) bool {
 		return false
 	}
 	if config.DefaultProtocol != "openai" && config.DefaultProtocol != "anthropic" {
+		return false
+	}
+	if config.DefaultsVersion < 0 || config.DefaultsVersion > 1 {
 		return false
 	}
 	for _, pair := range []struct {

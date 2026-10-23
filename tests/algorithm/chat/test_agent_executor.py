@@ -94,6 +94,21 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     agent.set_stop_tools.assert_called_once_with(['stop'])
 
 
+@pytest.mark.parametrize(('configured', 'expected'), [(65536, 32768), (8192, 8192)])
+def test_executor_applies_the_named_models_output_limit_to_a_private_copy(monkeypatch, configured, expected):
+    from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
+
+    constructor = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    original = OnlineChatModule(source='dynamic', name='llm', dynamic_auth=True,
+                                static_params={'max_tokens': configured})
+    AgentExecutor().create_agent(original, _plan(llm_config={'llm': {'max_output_tokens': '32K'}}))
+    selected = constructor.call_args.kwargs['llm']
+    assert selected is not original
+    assert selected._static_params['max_tokens'] == expected
+    assert original._static_params['max_tokens'] == configured
+
+
 def test_executor_passes_authorization_gate_to_middleware(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)

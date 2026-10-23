@@ -2825,6 +2825,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_recordings_active_user ON skill_reco
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE default_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_model_provider_group_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_model_provider_group_models ADD COLUMN input_token_limit VARCHAR(16);
+ALTER TABLE user_model_provider_group_models ADD COLUMN max_output_tokens VARCHAR(16);
 
 ALTER TABLE user_chat_settings ADD COLUMN default_permission_mode VARCHAR(32) NOT NULL DEFAULT 'always_ask';
 ALTER TABLE user_chat_settings ADD COLUMN permission_version BIGINT NOT NULL DEFAULT 1;

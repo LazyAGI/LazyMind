@@ -153,21 +153,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
         className={`provider-workspace-key provider-key-row${inDrawer ? " in-drawer" : ""}`}
         key={key.id}
       >
-        <span>{workspace("keyNumber", index + 1)}</span>
-        <code>{visibleSecrets[key.id] || key.masked}</code>
-        <span
-          className={`provider-workspace-key-state${key.enabled ? " is-enabled" : ""}`}
-        >
-          {workspace(key.enabled ? "keyEnabled" : "keyDisabled")}
-        </span>
-        <Switch
-          size="small"
-          aria-label={workspace("useKeyNumber", index + 1)}
-          checked={key.enabled === true}
-          disabled={busy}
-          loading={props.changingKey === key.id}
-          onChange={(enabled) => void props.onToggle(key.id, enabled)}
-        />
+        <code>{visibleSecrets[key.id] || `****${key.masked.replace(/^\*+(?:\.\.\.)?/, "").slice(-4)}`}</code>
         <div className="provider-key-row-actions">
           <Tooltip title={text("copy", index + 1)}>
             <Button
@@ -208,6 +194,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
           >
             <Button
               type="text"
+              className="provider-key-row-reveal"
               aria-label={text(
                 visibleSecrets[key.id] ? "hide" : "reveal",
                 index + 1,
@@ -225,6 +212,21 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
             />
           </Tooltip>
         </div>
+        <div className="provider-key-row-usage">
+          <Switch
+            size="small"
+            aria-label={workspace("useKeyNumber", index + 1)}
+            checked={key.enabled === true}
+            disabled={busy}
+            loading={props.changingKey === key.id}
+            onChange={(enabled) => void props.onToggle(key.id, enabled)}
+          />
+          <span
+            className={`provider-workspace-key-state${key.enabled ? " is-enabled" : ""}`}
+          >
+            {workspace(key.enabled ? "keyEnabled" : "keyDisabled")}
+          </span>
+        </div>
       </div>
     ));
   return (
@@ -236,22 +238,25 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
         </h3>
         <div className="provider-workspace-key-actions">
           {props.checkAction}
-          <Tooltip title={text("manage")}>
-            <Button
-              type="text"
-              aria-label={text("manage")}
-              icon={<KeyOutlined aria-hidden="true" />}
-              onClick={() => setOpen(true)}
-            />
-          </Tooltip>
         </div>
       </div>
-      <div className="provider-workspace-keys">
-        {props.keys.length ? (
-          rows()
-        ) : (
-          <p className="provider-workspace-key-empty">{workspace("noKeys")}</p>
-        )}
+      <div className="provider-key-field-row">
+        <div className="provider-workspace-keys">
+          {props.keys.length ? (
+            rows()
+          ) : (
+            <p className="provider-workspace-key-empty">{workspace("noKeys")}</p>
+          )}
+        </div>
+        <Tooltip title={text("manage")}>
+          <Button
+            type="text"
+            className="provider-workspace-icon-button"
+            aria-label={text("manage")}
+            icon={<KeyOutlined aria-hidden="true" />}
+            onClick={() => setOpen(true)}
+          />
+        </Tooltip>
       </div>
       <Drawer
         title={`${props.providerName} · ${text("manage")}`}

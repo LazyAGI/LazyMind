@@ -1,3 +1,13 @@
+.provider-key-field-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--provider-control-size, 32px);
+  align-items: center;
+  gap: 8px;
+  .provider-workspace-keys {
+    container-type: inline-size;
+    min-width: 0;
+  }
+}
 .provider-key-row {
   gap: 10px;
   code {
@@ -9,6 +19,7 @@
   }
   .provider-key-row-actions {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
     gap: 0;
   }
@@ -19,21 +30,35 @@
     height: 28px;
     color: var(--provider-muted, #697586);
   }
+  .provider-key-row-usage {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .provider-workspace-key-state {
+    color: var(--provider-muted, #697586);
+    font-size: 10px;
+    &.is-enabled {
+      color: var(--provider-green, #168057);
+    }
+  }
 }
 @media (hover: hover) and (pointer: fine) {
-  .provider-key-row .provider-key-row-actions {
+  .provider-key-row-actions .ant-btn:not(.provider-key-row-reveal) {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s ease;
   }
-  .provider-key-row:hover .provider-key-row-actions,
-  .provider-key-row:focus-within .provider-key-row-actions {
+  .provider-key-row-actions:hover .ant-btn,
+  .provider-key-row-actions:focus-within .ant-btn {
     opacity: 1;
     pointer-events: auto;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .provider-key-row .provider-key-row-actions {
+  .provider-key-row-actions .ant-btn:not(.provider-key-row-reveal) {
     transition: none;
   }
 }
@@ -46,25 +71,12 @@
   }
   .provider-key-row {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
     padding: 12px;
     margin-bottom: 10px;
     border: 1px solid #e6e9ef;
     border-radius: 8px;
     font-size: 12px;
-  }
-  .provider-key-row code {
-    flex-basis: 55%;
-  }
-  .provider-key-row-actions {
-    margin-left: auto;
-  }
-  .provider-workspace-key-state {
-    color: #697586;
-  }
-  .provider-workspace-key-state.is-enabled {
-    color: #168057;
   }
   button:focus-visible {
     outline: 2px solid #2f6df6;
@@ -76,23 +88,39 @@
   font-size: 12px;
   margin: 0 0 20px;
 }
-@media (max-width: 1050px) {
-  .provider-workspace .provider-key-row {
-    flex-wrap: wrap;
-  }
-  .provider-workspace .provider-key-row code {
-    flex-basis: 50%;
-  }
-  .provider-workspace .provider-key-row-actions {
-    margin-left: auto;
-  }
-}
-
 @media (pointer: coarse) {
+  .provider-key-row {
+    flex-wrap: wrap;
+    code {
+      flex-basis: calc(100% - 84px);
+    }
+    .provider-key-row-usage {
+      order: 1;
+    }
+    .provider-key-row-actions {
+      order: 2;
+      margin-left: auto;
+    }
+  }
   .provider-key-row .provider-key-row-actions .ant-btn {
     min-width: 44px;
     width: 44px;
     min-height: 44px;
     height: 44px;
+  }
+}
+@container (max-width: 300px) {
+  .provider-key-row {
+    flex-wrap: wrap;
+    code {
+      flex-basis: calc(100% - 84px);
+    }
+    .provider-key-row-usage {
+      order: 1;
+    }
+    .provider-key-row-actions {
+      order: 2;
+      margin-left: auto;
+    }
   }
 }

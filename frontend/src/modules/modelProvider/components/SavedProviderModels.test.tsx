@@ -104,7 +104,7 @@ describe("saved supplier models", () => {
       }),
     ).toBeInTheDocument();
   });
-  it("keeps all custom task groups above built-ins and collapses repeated task groups independently", () => {
+  it("keeps custom models above built-ins in one flat list without collapsible task headings", () => {
     const customChat = { ...models[1], name: "gpt-4o-custom" };
     const builtInChat = { ...models[0], name: "gpt-4o-builtin" };
     const { container } = setup({
@@ -115,32 +115,11 @@ describe("saved supplier models", () => {
         .getAllByRole("listitem")
         .map((row) => row.getAttribute("aria-label")),
     ).toEqual(["gpt-4o-custom", "BAAI/bge-large", "gpt-4o-builtin"]);
-    expect(groupLabels(container)).toEqual([
-      "modelProvider.workspace.customGroup · modelProvider.taskType.chat",
-      "modelProvider.workspace.customGroup · modelProvider.taskType.embedding",
-      "modelProvider.taskType.chat",
-    ]);
-    const customGroup = screen.getByRole("region", {
-      name: "modelProvider.workspace.customGroup · modelProvider.taskType.chat",
-    });
-    expect(within(customGroup).getByText("modelProvider.workspace.customGroup")).toBeVisible();
-    const toggle = within(customGroup).getByRole("button", {
-      name: /modelProvider.taskType.chat/,
-    });
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(
-      screen.queryByRole("listitem", { name: customChat.name }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("listitem", { name: builtInChat.name }),
-    ).toBeVisible();
-    fireEvent.click(toggle);
-    expect(
-      screen.getByRole("listitem", { name: customChat.name }),
-    ).toBeVisible();
+    expect(groupLabels(container)).toEqual([]);
+    expect(screen.getAllByRole("list")).toHaveLength(1);
+    expect(container.querySelector("[aria-expanded]")).toBeNull();
   });
-  it("groups LLM, VLM, and self-evolution together while keeping embedding and rerank separate", () => {
+  it("flattens mixed tasks while preserving model logos, types and settings", () => {
     const vlm: ProviderModel = {
       ...models[1],
       id: "vlm",
@@ -162,16 +141,8 @@ describe("saved supplier models", () => {
     const { container } = setup({
       models: [models[1], vlm, evolution, models[2], rerank],
     });
-    expect(groupLabels(container)).toEqual([
-      "modelProvider.workspace.customGroup · modelProvider.taskType.chat",
-      "modelProvider.workspace.customGroup · modelProvider.taskType.embedding",
-      "modelProvider.workspace.customGroup · modelProvider.taskType.rerank",
-    ]);
-    expect(
-      within(
-        screen.getByRole("region", { name: "modelProvider.workspace.customGroup · modelProvider.taskType.chat" }),
-      ).getAllByRole("listitem"),
-    ).toHaveLength(3);
+    expect(groupLabels(container)).toEqual([]);
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
     const gpt = screen.getByRole("listitem", { name: "gpt-4o" });
     expect(gpt.querySelector("img")).toHaveAttribute(
       "src",
@@ -296,7 +267,7 @@ describe("saved supplier models", () => {
       expect(props.onRemove).toHaveBeenCalledTimes(1);
     },
   );
-  it("retains VLM's underlying capability when confirming removal from the chat group", async () => {
+  it("retains VLM's underlying capability when confirming removal from the flat list", async () => {
     const vlm: ProviderModel = {
       ...models[1],
       id: "vlm",
@@ -304,9 +275,7 @@ describe("saved supplier models", () => {
       capability: "VLM",
     };
     const { props } = setup({ models: [vlm] });
-    expect(
-      screen.getByRole("region", { name: "modelProvider.workspace.customGroup · modelProvider.taskType.chat" }),
-    ).toBeVisible();
+    expect(screen.getByRole("listitem", { name: vlm.name })).toBeVisible();
     fireEvent.click(
       screen.getByRole("button", {
         name: `modelProvider.deleteModelAria:${vlm.name}`,

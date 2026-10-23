@@ -1,6 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
 import {
-  DownOutlined,
   MinusOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -14,9 +12,7 @@ import { sortCustomModelsFirst } from "../modelOrdering";
 import { lookupUpstreamModel } from "../upstreamCatalog";
 import {
   getModelTaskType,
-  getModelTaskLabelKey,
   getModelTaskDescriptionKey,
-  type ModelTaskType,
 } from "../modelTaskTypes";
 import {
   isLlmChatCapability,
@@ -38,26 +34,6 @@ export interface SavedProviderModelsProps {
 
 export function SavedProviderModels(props: SavedProviderModelsProps) {
   const { t } = useTranslation();
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const groupPrefix = useId();
-  useEffect(() => {
-    setCollapsed(new Set());
-  }, [props.providerName, props.supplierName]);
-  const groups = useMemo(() => {
-    const result = new Map<
-      string,
-      { key: string; type: ModelTaskType; entries: ProviderModel[] }
-    >();
-    for (const model of sortCustomModelsFirst(props.models)) {
-      const type = getModelTaskType(model.capability);
-      const key = JSON.stringify([model.builtIn, type]);
-      const group = result.get(key) || { key, type, entries: [] };
-      group.entries.push(model);
-      result.set(key, group);
-    }
-    return [...result.values()];
-  }, [props.models]);
-
   if (props.loading)
     return (
       <div
@@ -76,153 +52,106 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
     );
 
   return (
-    <div className="saved-provider-models">
-      {groups.map(({ key, type, entries }, index) => {
-        const listId = `${groupPrefix}-${index}`;
-        const expanded = !collapsed.has(key);
-        const custom = !entries[0].builtIn;
-        const taskLabel = t(getModelTaskLabelKey(type));
-        const groupLabel = custom
-          ? `${t("modelProvider.workspace.customGroup")} · ${taskLabel}`
-          : taskLabel;
+    <ul className="saved-provider-models saved-provider-model-list">
+      {sortCustomModelsFirst(props.models).map((model) => {
+        const type = getModelTaskType(model.capability);
+        const chat = isLlmChatCapability(model.capability);
+        const showContext =
+          chat ||
+          (type === "chat" && Boolean(model.maxInputTokens?.trim()));
+        const vision = model.capability === "VLM" || (
+          model.vision !== undefined ? model.vision :
+            lookupUpstreamModel(props.providerName, model.name)?.input.includes("image")
+        );
         return (
-          <section
-            className="saved-provider-model-group"
-            aria-label={groupLabel}
-            key={key}
+          <li
+            key={model.id}
+            className="saved-provider-model-row"
+            aria-label={model.name}
           >
-            <button
-              type="button"
-              className="saved-provider-model-group-toggle"
-              aria-label={groupLabel}
-              aria-expanded={expanded}
-              aria-controls={listId}
-              onClick={() =>
-                setCollapsed((current) => {
-                  const next = new Set(current);
-                  if (next.has(key)) next.delete(key);
-                  else next.add(key);
-                  return next;
-                })
+            <ModelIdentityIcon
+              modelName={model.name}
+              fallbackVendor={props.supplierName}
+              size={24}
+            />
+            <Tooltip
+              trigger={["hover", "focus", "click"]}
+              title={
+                <div className="saved-provider-model-detail">
+                  <strong>{model.name}</strong>
+                  <span>
+                    {props.capabilityLabel(model.capability)}
+                  </span>
+                  <span>{t(getModelTaskDescriptionKey(type))}</span>
+                  {vision ? (
+                    <span>{t("modelProvider.visionSupported")}</span>
+                  ) : null}
+                  {showContext ? (
+                    <span>
+                      {t("modelProvider.workspace.context")}:{" "}
+                      {resolveLlmMaxInputTokens(model.maxInputTokens)}
+                    </span>
+                  ) : null}
+                </div>
               }
             >
-              <DownOutlined
-                aria-hidden="true"
-                className={expanded ? "" : "is-collapsed"}
-              />
-              <span>{taskLabel}</span>
-              <small>{entries.length}</small>
-              {custom ? (
-                <span className="saved-provider-model-group-kind">
-                  {t("modelProvider.workspace.customGroup")}
-                </span>
-              ) : null}
-            </button>
-            {expanded ? (
-              <ul id={listId} className="saved-provider-model-list">
-                {entries.map((model) => {
-                  const chat = isLlmChatCapability(model.capability);
-                  const showContext =
-                    chat ||
-                    (type === "chat" && Boolean(model.maxInputTokens?.trim()));
-                  const vision = model.capability === "VLM" || (
-                    model.vision !== undefined ? model.vision :
-                      lookupUpstreamModel(props.providerName, model.name)?.input.includes("image")
-                  );
-                  return (
-                    <li
-                      key={model.id}
-                      className="saved-provider-model-row"
-                      aria-label={model.name}
-                    >
-                      <ModelIdentityIcon
-                        modelName={model.name}
-                        fallbackVendor={props.supplierName}
-                        size={24}
-                      />
-                      <Tooltip
-                        trigger={["hover", "focus", "click"]}
-                        title={
-                          <div className="saved-provider-model-detail">
-                            <strong>{model.name}</strong>
-                            <span>
-                              {props.capabilityLabel(model.capability)}
-                            </span>
-                            <span>{t(getModelTaskDescriptionKey(type))}</span>
-                            {vision ? (
-                              <span>{t("modelProvider.visionSupported")}</span>
-                            ) : null}
-                            {showContext ? (
-                              <span>
-                                {t("modelProvider.workspace.context")}:{" "}
-                                {resolveLlmMaxInputTokens(model.maxInputTokens)}
-                              </span>
-                            ) : null}
-                          </div>
-                        }
-                      >
-                        <button
-                          type="button"
-                          className="saved-provider-model-name"
-                        >
-                          {model.name}
-                        </button>
-                      </Tooltip>
-                      <span className="saved-provider-model-task">
-                        <ModelTypeBadge type={type} compact />
-                      </span>
-                      <span className="saved-provider-model-actions">
-                        <Tooltip
-                          title={t("modelProvider.editModelAria", {
-                            name: model.name,
-                          })}
-                        >
-                          <Button
-                            type="text"
-                            aria-label={t("modelProvider.editModelAria", {
-                              name: model.name,
-                            })}
-                            icon={<SettingOutlined aria-hidden="true" />}
-                            onClick={() => props.onEdit(model)}
-                          />
-                        </Tooltip>
-                        <Popconfirm
-                          title={t("modelProvider.confirmDeleteModel", {
-                            name: model.name,
-                          })}
-                          description={t(
-                            model.capability === "EMBEDDING"
-                              ? "modelProvider.confirmDeleteEmbeddingDesc"
-                              : "modelProvider.confirmDeleteModelDesc",
-                          )}
-                          okText={t("common.delete")}
-                          cancelText={t("common.cancel")}
-                          okButtonProps={{ danger: true }}
-                          onConfirm={() => props.onRemove(model)}
-                        >
-                          <Tooltip
-                            title={t("modelProvider.deleteModelAria", {
-                              name: model.name,
-                            })}
-                          >
-                            <Button
-                              type="text"
-                              aria-label={t("modelProvider.deleteModelAria", {
-                                name: model.name,
-                              })}
-                              icon={<MinusOutlined aria-hidden="true" />}
-                            />
-                          </Tooltip>
-                        </Popconfirm>
-                      </span>
-                    </li>
-                  );
+              <button
+                type="button"
+                className="saved-provider-model-name"
+              >
+                {model.name}
+              </button>
+            </Tooltip>
+            <span className="saved-provider-model-task">
+              <ModelTypeBadge type={type} compact />
+            </span>
+            <span className="saved-provider-model-actions">
+              <Tooltip
+                title={t("modelProvider.editModelAria", {
+                  name: model.name,
                 })}
-              </ul>
-            ) : null}
-          </section>
+              >
+                <Button
+                  type="text"
+                  aria-label={t("modelProvider.editModelAria", {
+                    name: model.name,
+                  })}
+                  icon={<SettingOutlined aria-hidden="true" />}
+                  onClick={() => props.onEdit(model)}
+                />
+              </Tooltip>
+              <Popconfirm
+                title={t("modelProvider.confirmDeleteModel", {
+                  name: model.name,
+                })}
+                description={t(
+                  model.capability === "EMBEDDING"
+                    ? "modelProvider.confirmDeleteEmbeddingDesc"
+                    : "modelProvider.confirmDeleteModelDesc",
+                )}
+                okText={t("common.delete")}
+                cancelText={t("common.cancel")}
+                okButtonProps={{ danger: true }}
+                onConfirm={() => props.onRemove(model)}
+              >
+                <Tooltip
+                  title={t("modelProvider.deleteModelAria", {
+                    name: model.name,
+                  })}
+                >
+                  <Button
+                    type="text"
+                    aria-label={t("modelProvider.deleteModelAria", {
+                      name: model.name,
+                    })}
+                    icon={<MinusOutlined aria-hidden="true" />}
+                  />
+                </Tooltip>
+              </Popconfirm>
+            </span>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }

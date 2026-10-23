@@ -3822,6 +3822,7 @@
 
 /* Supplier-first compact workspace; auxiliary service pages retain their layout. */
 .provider-workspace {
+  --provider-control-size: 32px;
   --provider-ink: #202735;
   --provider-text: #465365;
   --provider-muted: #697586;
@@ -3894,6 +3895,13 @@
   p {
     margin: 0;
   }
+}
+.provider-workspace .provider-workspace-icon-button.ant-btn {
+  flex: 0 0 var(--provider-control-size);
+  width: var(--provider-control-size);
+  min-width: var(--provider-control-size);
+  height: var(--provider-control-size);
+  padding: 0;
 }
 .provider-workspace-topbar {
   min-height: 52px;
@@ -4170,7 +4178,7 @@
   gap: 8px;
   align-items: flex-start;
   > .ant-btn {
-    margin-top: 25px;
+    margin-top: 26px;
     height: 32px;
   }
   .ant-input {
@@ -4217,11 +4225,6 @@
   &:not(:last-child) {
     border-bottom: 1px solid var(--provider-line);
   }
-  > span {
-    font-size: 11px;
-    color: var(--provider-muted);
-    min-width: 42px;
-  }
   code {
     flex: 1;
     min-width: 0;
@@ -4264,10 +4267,6 @@
   margin: 0 0 12px;
   .ant-input-affix-wrapper {
     flex: 1;
-  }
-  .ant-select {
-    width: 142px;
-    flex-shrink: 0;
   }
 }
 .provider-workspace-models-error {
@@ -4349,9 +4348,6 @@
   .provider-workspace-section-heading > span {
     display: none;
   }
-  .provider-workspace-model-toolbar .ant-select {
-    width: 112px;
-  }
   .provider-workspace-key-heading > span {
     font-size: 10px;
   }
@@ -4379,15 +4375,12 @@
   font-size: 12px;
 }
 
-.provider-workspace-key > .provider-workspace-key-state {
-  min-width: auto;
-  flex-shrink: 0;
-  font-size: 10px;
-  &.is-enabled { color: var(--provider-green); }
-}
 .provider-workspace-key .ant-switch {
   flex-shrink: 0;
   min-width: 28px;
+}
+@media (pointer: coarse) {
+  .provider-workspace { --provider-control-size: 44px; }
 }
 @media (max-width: 800px) {
   .provider-workspace-key { gap: 8px; }

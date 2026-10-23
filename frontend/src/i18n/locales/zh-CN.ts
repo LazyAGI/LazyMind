@@ -324,6 +324,17 @@ const zhCN = {
     invalidEmail: "邮箱格式不正确",
   },
   modelProvider: {
+    taskTab: {
+      all: "全部",
+      chat: "对话",
+      image: "图片",
+      video: "视频",
+      embedding: "向量",
+      rerank: "重排",
+      tts: "语音合成",
+      asr: "语音识别",
+      unknown: "待分类",
+    },
     taskType: {
       "chat": "对话模型",
       "embedding": "向量化",
@@ -356,6 +367,11 @@ const zhCN = {
     apiKeyLabel: "API 秘钥",
     editModelAria: "编辑 {{name}} 的模型配置",
     editor: {
+      inputTokenLimit: "最大输入 Token",
+      maxOutputTokens: "最大输出 Token",
+      inputTokenPlaceholder: "例如 128000",
+      outputTokenPlaceholder: "例如 65536",
+      tokenLimitExceedsContext: "最大输入或输出 Token 不能超过上下文窗口",
       title: "编辑模型 · {{name}}",
       apiModelId: "模型 ID",
       idHint: "填写供应商 API 使用的模型标识。修改后保留当前模型引用。",
@@ -421,7 +437,6 @@ const zhCN = {
     workspace: {
       notConfigured: "未配置秘钥",
       disabled: "已停用",
-      customGroup: "自定义",
       modelsLoadFailed: "模型加载失败",
       supplierNameBytes: "供应商名称不能超过 255 字节（中文约占 3 字节）。",
       "loadFailed": "供应商配置加载失败，请重试。",
@@ -458,7 +473,6 @@ const zhCN = {
       "keysDisabled": "已停用当前供应商的秘钥",
       "addKey": "添加秘钥",
       "addAndCheckKey": "验证并添加",
-      "keyNumber": "秘钥 {{number}}",
       "deleteKey": "删除 API 秘钥",
       "deleteKeyNumber": "删除秘钥 {{number}}",
       "deleteKeyHint": "删除后无法恢复；删除当前启用项后，需手动启用其他秘钥。",
@@ -468,7 +482,6 @@ const zhCN = {
       "models": "模型",
       "searchModel": "搜索模型 ID",
       "modelType": "模型类型",
-      "allTypes": "全部类型",
       "context": "上下文",
       "checkConnection": "检查连接"
     },
