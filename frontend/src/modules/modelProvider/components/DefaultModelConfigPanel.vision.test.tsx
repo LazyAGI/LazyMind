@@ -58,17 +58,21 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("default model configured vision", () => {
-  it("uses the stored selected model's actual false flag while its refreshed options are pending", async () => {
+describe("compact default model options", () => {
+  it("keeps selected option identity without modality rows while refreshed options are pending", async () => {
     mocks.models.mockImplementation(() => new Promise(() => undefined));
     renderPanel();
     await screen.findByText("catalog-vision · Private gateway");
     await openLlm();
-    const input = within(optionElement("catalog-vision")).getByLabelText("modelProvider.modality.inputAria");
-    expect(within(input).queryByLabelText("modelProvider.modality.image")).not.toBeInTheDocument();
+    const option = optionElement("catalog-vision");
+    expect(within(option).queryByLabelText("modelProvider.modality.inputAria")).not.toBeInTheDocument();
+    expect(within(option).queryByLabelText("modelProvider.modality.outputAria")).not.toBeInTheDocument();
+    expect(option.querySelector(".model-provider-logo img")).toBeInTheDocument();
+    expect(option.querySelector("small")).toHaveTextContent("Private gateway");
+    expect(option.querySelector("small")).toHaveTextContent("modelProvider.customModelSuffix");
   });
 
-  it("uses refreshed actual capabilities and saves UUID identity without display metadata", async () => {
+  it("keeps refreshed options compact and saves UUID identity without display metadata", async () => {
     mocks.models.mockResolvedValue({ data: { models: [
       { ...identity, id: "saved-uuid", name: "catalog-vision", model_type: "llm", vision: false },
       { ...identity, id: "vision-uuid", name: "custom-vision", model_type: "llm", vision: true },
@@ -77,24 +81,28 @@ describe("default model configured vision", () => {
     await screen.findByText("catalog-vision · Private gateway");
     await openLlm();
     await screen.findByText("custom-vision", { selector: ".model-provider-select-copy strong" });
-    const plainInput = within(optionElement("catalog-vision")).getByLabelText("modelProvider.modality.inputAria");
-    expect(within(plainInput).queryByLabelText("modelProvider.modality.image")).not.toBeInTheDocument();
-    const visionInput = within(optionElement("custom-vision")).getByLabelText("modelProvider.modality.inputAria");
-    expect(within(visionInput).getByLabelText("modelProvider.modality.image")).toBeInTheDocument();
+    for (const name of ["catalog-vision", "custom-vision"]) {
+      expect(within(optionElement(name)).queryByLabelText("modelProvider.modality.inputAria")).not.toBeInTheDocument();
+      expect(within(optionElement(name)).queryByLabelText("modelProvider.modality.outputAria")).not.toBeInTheDocument();
+    }
     fireEvent.click(screen.getByText("custom-vision", { selector: ".model-provider-select-copy strong" }));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ setSelectedModelsOpenAPIRequest: {
       selections: [{ model_key: "llm", model_id: "vision-uuid", source: "own" }],
     } }));
   });
 
-  it("retains VLM image understanding when the separate stored vision boolean is false", async () => {
+  it("retains VLM selection when its modality row is hidden", async () => {
     mocks.models.mockResolvedValue({ data: { models: [{ ...identity, id: "vlm-uuid", name: "private-vlm", model_type: "vlm", vision: false }] } });
     renderPanel();
     await screen.findByText("catalog-vision · Private gateway");
     fireEvent.click(screen.getByRole("button", { name: /modelProvider.defaults.visualTitle/ }));
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "modelProvider.module.vlmTitle" }));
     await screen.findByText("private-vlm", { selector: ".model-provider-select-copy strong" });
-    const input = within(optionElement("private-vlm")).getByLabelText("modelProvider.modality.inputAria");
-    expect(within(input).getByLabelText("modelProvider.modality.image")).toBeInTheDocument();
+    expect(within(optionElement("private-vlm")).queryByLabelText("modelProvider.modality.inputAria")).not.toBeInTheDocument();
+    expect(within(optionElement("private-vlm")).queryByLabelText("modelProvider.modality.outputAria")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("private-vlm", { selector: ".model-provider-select-copy strong" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ setSelectedModelsOpenAPIRequest: {
+      selections: [{ model_key: "vlm", model_id: "vlm-uuid", source: "own" }],
+    } }));
   });
 });

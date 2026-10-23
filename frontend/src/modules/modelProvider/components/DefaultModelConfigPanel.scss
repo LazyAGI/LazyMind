@@ -47,7 +47,7 @@
 
   .model-provider-default-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) min(52%, 440px);
+    grid-template-columns: minmax(0, 1fr) min(62%, 532px);
     align-items: center;
     gap: 12px;
     min-height: 64px;
@@ -67,11 +67,23 @@
       background: var(--defaults-subtle);
       animation: none;
     }
-    > .ant-alert { grid-column: 1 / -1; }
     > * { min-width: 0; }
   }
 
   .model-provider-default-meta { min-height: 32px; flex-wrap: wrap; gap: 4px 6px; }
+  .model-provider-default-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+  .model-provider-default-input {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
   .model-provider-default-title { min-width: 0; flex: 0 1 auto; color: var(--defaults-text); font-size: 13px; font-weight: 500; line-height: 1.6; }
   .model-provider-default-title-text { overflow-wrap: anywhere; }
   .model-provider-max-input-tokens { order: 1; flex-basis: 100%; margin: 0; color: var(--defaults-muted); font-size: 12px; line-height: 1.5; }
@@ -85,7 +97,9 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-left: auto;
+    flex: 0 0 auto;
+    align-self: center;
+    margin-left: 0;
     color: var(--defaults-muted);
     font-size: 11px;
     white-space: nowrap;
@@ -95,6 +109,7 @@
   .model-provider-pending-description { display: none; }
   .model-provider-configure-capability.ant-btn {
     justify-self: end;
+    align-self: flex-end;
     min-height: 32px;
     height: auto;
     max-width: 100%;
@@ -187,7 +202,7 @@
     .model-provider-default-row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block: 12px; }
     .model-provider-default-meta { min-height: 28px; }
     .model-provider-max-input-tokens { white-space: normal; overflow-wrap: anywhere; }
-    .model-provider-default-row:has(> .model-provider-configure-capability) { grid-template-columns: minmax(0, 1fr) auto; }
+    .model-provider-default-row:has(.model-provider-configure-capability) { grid-template-columns: minmax(0, 1fr) auto; }
     .model-provider-configure-capability.ant-btn { min-height: 44px; }
     .model-provider-model-select { --defaults-control-height: 44px; }
   }

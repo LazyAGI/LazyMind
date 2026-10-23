@@ -18,7 +18,6 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
-import { ModelModalityMarks } from "./ModelModalityMarks";
 import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
 import { useFocusModality } from "../hooks/useFocusModality";
 import {
@@ -374,31 +373,6 @@ export default function DefaultModelConfigPanel({
               </span>
             </Tooltip>
           ) : null}
-          {configured && isAdmin && !runtimeFeatures.hideUserGroupSurfaces && !selectedIsCloud ? (
-            <Tooltip
-              title={
-                shareStatus[module.key]
-                  ? t("modelProvider.shareOn")
-                  : t("modelProvider.shareOff")
-              }
-            >
-              <span className="model-provider-share-control">
-                <span aria-hidden="true">{t(shareStatus[module.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
-                <Switch
-                  aria-label={t("modelProvider.shareToggleAria", {
-                    title: moduleTitle,
-                  })}
-                  checked={!!shareStatus[module.key]}
-                  disabled={saving}
-                  className="model-provider-share-switch"
-                  size="small"
-                  onChange={(checked) =>
-                    void toggleShareModel(module.key, checked)
-                  }
-                />
-              </span>
-            </Tooltip>
-          ) : null}
           {!isAdmin && capabilityReadyStates[module.key] === "ready" ? (
             <Tooltip
               title={getModelReadyTooltip(t, modelReadyStatus[module.key])}
@@ -419,6 +393,8 @@ export default function DefaultModelConfigPanel({
           ) : null}
         </div>
 
+        <div className="model-provider-default-controls">
+        <div className="model-provider-default-input">
         {!configured && <p className="model-provider-pending-description">{moduleSubtitle}</p>}
         {!isAdmin && (capabilityReadyStates[module.key] === "error" || capabilityReadyStates[module.key] === "loading") ? (
           <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
@@ -525,13 +501,6 @@ export default function DefaultModelConfigPanel({
                     <ProviderLogo provider={provider} compact />
                     <span className="model-provider-select-copy">
                       <strong>{displayName}</strong>
-                      <ModelModalityMarks
-                        compact
-                        providerName={provider.source || provider.name}
-                        modelName={model.name}
-                        modelType={model.modelType}
-                        vision={model.vision}
-                      />
                       <small>
                         {option.source === "cloud"
                           ? t("modelProvider.cloudSystemReadOnly")
@@ -549,6 +518,23 @@ export default function DefaultModelConfigPanel({
             );
           })}
         </Select>}
+        </div>
+        {configured && isAdmin && !runtimeFeatures.hideUserGroupSurfaces && !selectedIsCloud ? (
+          <Tooltip title={t(shareStatus[module.key] ? "modelProvider.shareOn" : "modelProvider.shareOff")}>
+            <span className="model-provider-share-control">
+              <span aria-hidden="true">{t(shareStatus[module.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
+              <Switch
+                aria-label={t("modelProvider.shareToggleAria", { title: moduleTitle })}
+                checked={!!shareStatus[module.key]}
+                disabled={saving}
+                className="model-provider-share-switch"
+                size="small"
+                onChange={(checked) => void toggleShareModel(module.key, checked)}
+              />
+            </span>
+          </Tooltip>
+        ) : null}
+        </div>
       </div>
     ) };
   });
@@ -594,31 +580,6 @@ export default function DefaultModelConfigPanel({
               <QuestionCircleOutlined />
             </button>
           </Tooltip>
-          {configured && setupState === "ready" && isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
-            <Tooltip
-              title={
-                cloudServiceShareStatus[service.key]
-                  ? t("modelProvider.shareOn")
-                  : t("modelProvider.shareOff")
-              }
-            >
-              <span className="model-provider-share-control">
-                <span aria-hidden="true">{t(cloudServiceShareStatus[service.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
-                <Switch
-                  aria-label={t("modelProvider.shareToggleAria", {
-                    title: serviceTitle,
-                  })}
-                  checked={!!cloudServiceShareStatus[service.key]}
-                  disabled={saving}
-                  className="model-provider-share-switch"
-                  size="small"
-                  onChange={(checked) =>
-                    toggleShareCloudService(service.key, checked)
-                  }
-                />
-              </span>
-            </Tooltip>
-          ) : null}
           {setupState === "ready" && !isAdmin && capabilityReadyStates[service.key] === "ready" ? (
             <Tooltip
               title={getCloudServiceReadyTooltip(t, cloudReady)}
@@ -639,6 +600,8 @@ export default function DefaultModelConfigPanel({
           ) : null}
         </div>
 
+        <div className="model-provider-default-controls">
+        <div className="model-provider-default-input">
         {!configured && <p className="model-provider-pending-description">{t(service.setupDescriptionKey)}</p>}
         {!isAdmin && (capabilityReadyStates[service.key] === "error" || capabilityReadyStates[service.key] === "loading") ? (
           <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
@@ -737,6 +700,23 @@ export default function DefaultModelConfigPanel({
             </Select.Option>
           ))}
         </Select>}
+        </div>
+        {configured && setupState === "ready" && isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
+          <Tooltip title={t(cloudServiceShareStatus[service.key] ? "modelProvider.shareOn" : "modelProvider.shareOff")}>
+            <span className="model-provider-share-control">
+              <span aria-hidden="true">{t(cloudServiceShareStatus[service.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
+              <Switch
+                aria-label={t("modelProvider.shareToggleAria", { title: serviceTitle })}
+                checked={!!cloudServiceShareStatus[service.key]}
+                disabled={saving}
+                className="model-provider-share-switch"
+                size="small"
+                onChange={(checked) => toggleShareCloudService(service.key, checked)}
+              />
+            </span>
+          </Tooltip>
+        ) : null}
+        </div>
       </div>
     ) };
   });

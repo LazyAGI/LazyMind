@@ -33,6 +33,7 @@ import {
 import { RightOutlined, SearchOutlined } from "@ant-design/icons";
 import {
   cancelCredentialRestore,
+  addGroupModels,
   getCredentialBackupStatus,
   getCredentialRestoreDiscovery,
   getCredentialRestoreOperation,
@@ -1157,11 +1158,13 @@ export default function ModelProviderPage({
     }
   };
 
-  const appendGroupModel = (
+  const appendGroupModels = (
     providerId: string,
     groupId: string,
-    nextModel: ProviderModel,
+    nextModels: ProviderModel[],
+    totalCount?: number,
   ) => {
+    if (!nextModels.length) return;
     const key = `${providerId}:${groupId}`;
     groupModelVersions.current[key] = (groupModelVersions.current[key] || 0) + 1;
     setAddedProviderList((current) =>
@@ -1169,16 +1172,20 @@ export default function ModelProviderPage({
         item.id === providerId
           ? {
               ...item,
-              groups: item.groups.map((candidate) =>
-                candidate.id === groupId
-                  ? { ...candidate, models: [...candidate.models, nextModel], modelCount: Math.max(candidate.modelCount || 0, candidate.models.length) + 1 }
-                  : candidate,
-              ),
+                groups: item.groups.map((candidate) => {
+                  if (candidate.id !== groupId) return candidate;
+                  const models = new Map(candidate.models.map((model) => [model.id, model]));
+                  const before = models.size;
+                  for (const model of nextModels) models.set(model.id, model);
+                  return { ...candidate, models: [...models.values()], modelCount: totalCount ?? Math.max(candidate.modelCount || 0, candidate.models.length) + models.size - before };
+                }),
             }
           : item,
       ),
     );
   };
+
+  const appendGroupModel = (providerId: string, groupId: string, model: ProviderModel) => appendGroupModels(providerId, groupId, [model]);
 
   const openCustomModelModal = (
     provider: AddedProvider,
@@ -1227,6 +1234,39 @@ export default function ModelProviderPage({
       enabled: true,
       maxInputTokens: created.max_input_tokens || choice.max_input_tokens,
     });
+  };
+
+  const addCatalogModels = async (providerId: string, groupId: string, choices: CatalogModelChoice[]) => {
+    let succeeded = 0;
+    let failed = 0;
+    for (let offset = 0; offset < choices.length; offset += 200) {
+      const batch = choices.slice(offset, offset + 200);
+      try {
+        const result = await addGroupModels(providerId, groupId, batch.map((choice) => ({
+          name: choice.name.trim(),
+          model_type: choice.model_type,
+          vision: choice.model_type === "llm" && choice.vision === true,
+          ...(choice.max_input_tokens && supportsStoredModelContext(choice.model_type) ? { max_input_tokens: choice.max_input_tokens } : {}),
+        })));
+        const saved = result.models || [];
+        appendGroupModels(providerId, groupId, saved.map((model) => ({
+          id: model.id,
+          name: model.name,
+          capability: mapModelTypeToCapability(model.model_type),
+          builtIn: model.is_default,
+          vision: model.vision,
+          enabled: true,
+          maxInputTokens: model.max_input_tokens || undefined,
+          inputTokenLimit: model.input_token_limit || undefined,
+          maxOutputTokens: model.max_output_tokens || undefined,
+        })), result.total_count);
+        succeeded += saved.length;
+        failed += result.failures?.length || 0;
+      } catch {
+        failed += batch.length;
+      }
+    }
+    return { succeeded, failed };
   };
 
   const discoverModelsAfterKeySaved = async (
@@ -1616,6 +1656,7 @@ export default function ModelProviderPage({
         onClose={() => setCatalogTarget(null)}
         onRefreshModels={() => void loadGroupModels(catalogProvider.id, catalogGroup.id)}
         onAdd={(model) => addCatalogModel(catalogProvider.id, catalogGroup.id, model)}
+        onAddMany={(models) => addCatalogModels(catalogProvider.id, catalogGroup.id, models)}
         onRemove={(model) => deleteCustomModel(catalogProvider.id, catalogGroup.id, model, false)}
         onChanged={() => void onConfigurationChanged?.()}
       /> : null}

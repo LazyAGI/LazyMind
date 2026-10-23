@@ -132,56 +132,15 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	name := strings.TrimSpace(req.Name)
-	modelType := normalizeGroupModelType(strings.TrimSpace(req.ModelType))
-	if name == "" {
-		common.ReplyErr(w, "name is required", http.StatusBadRequest)
-		return
-	}
-	if err := validateModelName(name); err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	maxInputTokens, err := resolveAddModelMaxInputTokens(modelType, name, req.MaxInputTokens)
+	candidate, err := prepareGroupModelAddition(req)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	inputTokenLimit, maxOutputTokens, err := resolveModelTokenLimits(modelType, maxInputTokens, req.InputTokenLimit, req.MaxOutputTokens)
-	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	var parent orm.UserModelProvider
-	err = db.WithContext(r.Context()).
-		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
-		Take(&parent).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.ReplyErr(w, "model provider not found", http.StatusNotFound)
-			return
-		}
-		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
-		return
-	}
-
-	if !parent.HasCapability("has_models") {
-		common.ReplyErr(w, "this provider does not support models", http.StatusBadRequest)
-		return
-	}
-
-	var group orm.UserModelProviderGroup
-	err = db.WithContext(r.Context()).
-		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
-		Take(&group).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			common.ReplyErr(w, "group not found", http.StatusNotFound)
-			return
-		}
-		common.ReplyErr(w, "query group failed", http.StatusInternalServerError)
+	name, modelType := candidate.Name, candidate.ModelType
+	maxInputTokens, inputTokenLimit, maxOutputTokens := candidate.MaxInputTokens, candidate.InputTokenLimit, candidate.MaxOutputTokens
+	parent, group, ok := loadModelWriteGroup(w, r, db, userID, parentID, groupID)
+	if !ok {
 		return
 	}
 
@@ -241,20 +200,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	common.ReplyOK(w, addGroupModelResponse{
-		ID:                       row.ID,
-		UserModelProviderID:      row.UserModelProviderID,
-		UserModelProviderGroupID: row.UserModelProviderGroupID,
-		Name:                     row.Name,
-		ModelType:                row.ModelType,
-		Vision:                   row.Vision,
-		ProviderName:             row.ProviderName,
-		GroupName:                group.Name,
-		BaseURL:                  group.BaseURL,
-		IsDefault:                row.IsDefault,
-		MaxInputTokens:           row.MaxInputTokens,
-		InputTokenLimit:          row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens,
-	})
+	common.ReplyOK(w, groupModelAdditionResponse(row, group))
 }
 
 // UpdateGroupModel patches model metadata while keeping its referenced UUID.

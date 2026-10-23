@@ -87,6 +87,28 @@ beforeEach(() => {
 });
 
 describe("provider model catalog drawer", () => {
+  it("uses one bulk callback for multi-model additions and keeps partial failures retryable", async () => {
+    let finish!: (result: { succeeded: number; failed: number }) => void;
+    const props = { ...fixture([]), onAddMany: vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; })) };
+    draw(props);
+    await screen.findByText("deepseek-v3");
+    const add = screen.getByRole("button", { name: "modelProvider.catalog.addAll" });
+    fireEvent.click(add);
+    fireEvent.click(add);
+    await waitFor(() => expect(props.onAddMany).toHaveBeenCalledTimes(1));
+    expect(props.onAddMany).toHaveBeenCalledWith([
+      { name: "deepseek-v3", model_type: "llm", max_input_tokens: "128K", vision: false },
+      { name: "BAAI/bge-large", model_type: "embed", max_input_tokens: undefined, vision: false },
+      { name: "custom/unknown", model_type: "", max_input_tokens: undefined, vision: false },
+    ]);
+    expect(props.onAdd).not.toHaveBeenCalled();
+    expect(add).toBeDisabled();
+    await act(async () => { finish({ succeeded: 2, failed: 1 }); });
+    expect(await screen.findByText("modelProvider.catalog.partialFailure")).toBeInTheDocument();
+    await waitFor(() => expect(add).toBeEnabled());
+    expect(props.onChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("places bulk add before bulk removal and removes all saved models across filters without confirmation", async () => {
     const saved = [selected[0], { ...selected[0], id: "remote-saved", name: "deepseek-v3", builtIn: true }];
     const props = fixture(saved);

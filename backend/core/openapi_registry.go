@@ -1372,6 +1372,23 @@ type addModelProviderGroupModelOpenAPIResponse struct {
 	MaxOutputTokens          *string `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 }
 
+type addModelProviderGroupModelsOpenAPIRequest struct {
+	Models []addModelProviderGroupModelOpenAPIRequest `json:"models" desc:"One to 1000 models. Existing active names are returned without overwriting saved metadata; deleted models are restored with their original UUID."`
+}
+
+type addModelProviderGroupModelsOpenAPIFailure struct {
+	Name    string `json:"name"`
+	Message string `json:"message" desc:"Safe per-model validation failure."`
+}
+
+type addModelProviderGroupModelsOpenAPIResponse struct {
+	Models        []addModelProviderGroupModelOpenAPIResponse `json:"models"`
+	AddedCount    int                                        `json:"added_count"`
+	ExistingCount int                                        `json:"existing_count"`
+	TotalCount    int64                                      `json:"total_count" desc:"Total active saved models in this group after the batch, including models outside the request."`
+	Failures      []addModelProviderGroupModelsOpenAPIFailure `json:"failures"`
+}
+
 type updateModelProviderGroupModelOpenAPIRequest struct {
 	Name            *string `json:"name,omitempty" desc:"Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID."`
 	ModelType       *string `json:"model_type,omitempty" desc:"Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references."`
@@ -4660,6 +4677,16 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  modelProviderGroupByIDPathParams{},
 			RequestBody: jsonBodyOf(addModelProviderGroupModelOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Created group model", addModelProviderGroupModelOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/model_providers/{model_provider_id}/groups/{group_id}/models:batch",
+			Summary:     "Add multiple models under a connection group",
+			Description: "Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupByIDPathParams{},
+			RequestBody: jsonBodyOf(addModelProviderGroupModelsOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Saved and existing models with per-item failures", addModelProviderGroupModelsOpenAPIResponse{})},
 		},
 		{
 			Method:      "POST",

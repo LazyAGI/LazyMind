@@ -43,14 +43,15 @@ type rewriteFixture struct {
 func newRewriteFixture(t *testing.T, representation string) rewriteFixture {
 	t.Helper()
 	f := rewriteFixture{descriptorFixture: newDescriptorFixture(t), representation: representation}
-	if err := f.db.AutoMigrate(&orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
+	if err := f.db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 	base := orm.BaseModel{CreateUserID: "descriptor-owner", CreatedAt: now, UpdatedAt: now}
-	group := orm.UserModelProviderGroup{ID: "rewrite-group", UserModelProviderID: "rewrite-provider", Name: "test", BaseURL: "https://models.invalid/v1", APIKey: rewriteTestKey, IsVerified: true, BaseModel: base}
+	provider := orm.UserModelProvider{ID: "rewrite-provider", Name: "OpenAI", BaseURL: "https://models.invalid/v1", Category: "model", Capabilities: "has_models", BaseModel: base}
+	group := orm.UserModelProviderGroup{ID: "rewrite-group", UserModelProviderID: provider.ID, Name: "test", BaseURL: provider.BaseURL, APIKey: rewriteTestKey, IsVerified: true, BaseModel: base}
 	model := orm.UserModelProviderGroupModel{ID: "rewrite-model", UserModelProviderID: group.UserModelProviderID, UserModelProviderGroupID: group.ID, ProviderName: "OpenAI", Name: "rewrite-test-model", ModelType: "llm", BaseModel: base}
-	for _, row := range []any{&group, &model, &orm.UserSelectedModel{UserID: "descriptor-owner", ModelKey: "llm", UserModelProviderGroupModelID: model.ID, CreatedAt: now, UpdatedAt: now}} {
+	for _, row := range []any{&provider, &group, &model, &orm.UserSelectedModel{UserID: "descriptor-owner", ModelKey: "llm", UserModelProviderGroupModelID: model.ID, CreatedAt: now, UpdatedAt: now}} {
 		if err := f.db.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}

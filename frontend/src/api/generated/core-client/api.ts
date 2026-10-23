@@ -104,6 +104,29 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
      */
     'vision': boolean;
 }
+export interface AddModelProviderGroupModelsOpenAPIFailure {
+    /**
+     * Safe per-model validation failure.
+     */
+    'message': string;
+    'name': string;
+}
+export interface AddModelProviderGroupModelsOpenAPIRequest {
+    /**
+     * One to 1000 models. Existing active names are returned without overwriting saved metadata; deleted models are restored with their original UUID.
+     */
+    'models'?: Array<AddModelProviderGroupModelOpenAPIRequest>;
+}
+export interface AddModelProviderGroupModelsOpenAPIResponse {
+    'added_count': number;
+    'existing_count': number;
+    'failures'?: Array<AddModelProviderGroupModelsOpenAPIFailure>;
+    'models'?: Array<AddModelProviderGroupModelOpenAPIResponse>;
+    /**
+     * Total active saved models in this group after the batch, including models outside the request.
+     */
+    'total_count': number;
+}
 export interface AddWordGroupConflictToGroupsRequest {
     'group_ids'?: Array<string>;
     'id': string;
@@ -47749,6 +47772,49 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {AddModelProviderGroupModelsOpenAPIRequest} addModelProviderGroupModelsOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost: async (modelProviderId: string, groupId: string, addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'groupId', groupId)
+            // verify required parameter 'addModelProviderGroupModelsOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'addModelProviderGroupModelsOpenAPIRequest', addModelProviderGroupModelsOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models:batch`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(addModelProviderGroupModelsOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {string} modelProviderId
@@ -48709,6 +48775,21 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {AddModelProviderGroupModelsOpenAPIRequest} addModelProviderGroupModelsOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(modelProviderId: string, groupId: string, addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AddModelProviderGroupModelsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(modelProviderId, groupId, addModelProviderGroupModelsOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {string} modelProviderId
@@ -49108,6 +49189,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, options).then((request) => request(axios, basePath));
         },
         /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AddModelProviderGroupModelsOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.addModelProviderGroupModelsOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGetRequest} requestParameters Request parameters.
@@ -49417,6 +49508,17 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGetRequest {
@@ -49693,6 +49795,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+     * @summary Add multiple models under a connection group
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.addModelProviderGroupModelsOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

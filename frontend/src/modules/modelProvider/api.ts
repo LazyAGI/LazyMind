@@ -2,6 +2,8 @@ import {
   Configuration,
   DefaultApiFactory,
   ModelProvidersApiFactory,
+  type AddModelProviderGroupModelOpenAPIRequest,
+  type AddModelProviderGroupModelsOpenAPIResponse,
 } from "@/api/generated/core-client";
 import { BASE_URL, axiosInstance } from "@/components/request";
 import type { CredentialBackupStatus } from "./credentialBackupModel";
@@ -343,6 +345,19 @@ export async function updateGroupModel(
     input_token_limit?: string | null;
     max_output_tokens?: string | null;
   }>(response.data);
+}
+
+export async function addGroupModels(
+  providerId: string,
+  groupId: string,
+  models: AddModelProviderGroupModelOpenAPIRequest[],
+): Promise<AddModelProviderGroupModelsOpenAPIResponse> {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost({
+    modelProviderId: providerId,
+    groupId,
+    addModelProviderGroupModelsOpenAPIRequest: { models },
+  }, withModelProviderJsonOptions({ silentError: true }));
+  return unwrapModelProviderData(response.data);
 }
 
 export interface StoredProviderKey {

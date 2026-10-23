@@ -17,7 +17,6 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { getLocalizedErrorMessage } from "@/components/request";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
 import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
 import { listRemoteGroupModels, type RemoteGroupModel } from "../api";
@@ -57,6 +56,7 @@ interface Props {
   onClose: () => void;
   onRefreshModels: () => void;
   onAdd: (model: CatalogModelChoice) => Promise<void>;
+  onAddMany?: (models: CatalogModelChoice[]) => Promise<{ succeeded: number; failed: number }>;
   onRemove: (model: ProviderModel) => Promise<boolean>;
   onChanged?: () => void;
 }
@@ -270,7 +270,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     setBusy(true);
     let index = 0;
     let succeeded = 0;
-    const failures: string[] = [];
+    let failed = 0;
     const worker = async () => {
       while (index < items.length) {
         const model = items[index++];
@@ -289,8 +289,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
             });
           }
           succeeded += 1;
-        } catch (cause) {
-          failures.push(getLocalizedErrorMessage(cause));
+        } catch {
+          failed += 1;
         } finally {
           setPending((current) => {
             const next = new Set(current);
@@ -301,15 +301,28 @@ export function ProviderModelCatalogDrawer(props: Props) {
       }
     };
     try {
-      await Promise.all(
-        Array.from({ length: Math.min(items.length, 4) }, worker),
-      );
+      if (!remove && props.onAddMany && items.length > 1) {
+        setPending(new Set(items.map((model) => normalizedName(model.name))));
+        try {
+          const result = await props.onAddMany(items.map(({ name, model_type, max_input_tokens, vision }) => ({ name, model_type, max_input_tokens, vision })));
+          succeeded = result.succeeded;
+          failed = result.failed;
+        } catch {
+          failed = items.length;
+        } finally {
+          setPending(new Set());
+        }
+      } else {
+        await Promise.all(
+          Array.from({ length: Math.min(items.length, 4) }, worker),
+        );
+      }
       if (succeeded) props.onChanged?.();
-      if (failures.length) {
+      if (failed) {
         messageApi.error(
           copy("partialFailure", {
             success: succeeded,
-            failed: failures.length,
+            failed,
           }),
         );
       } else {
