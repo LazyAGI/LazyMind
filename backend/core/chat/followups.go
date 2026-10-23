@@ -236,7 +236,24 @@ func acceptedConversationSteeringRows(
 		"conversation_id = ? AND create_user_id = ? AND target_history_id IN ? AND mode = ? AND status = ? AND deleted_at IS NULL",
 		conversationID, userID, historyIDs, followUpModeSteer, followUpAccepted,
 	).Order("accepted_at ASC, created_at ASC, id ASC").Find(&rows).Error
+	if isMissingConversationFollowUpsTableError(err) {
+		// History reads must remain compatible while an older database is still
+		// waiting for the follow-up migration. There cannot be steering rows in
+		// that schema, so treating it as an empty result preserves legacy chats.
+		return nil, nil
+	}
 	return rows, err
+}
+
+func isMissingConversationFollowUpsTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "no such table: conversation_followups") {
+		return true
+	}
+	var sqlStateErr interface{ SQLState() string }
+	return errors.As(err, &sqlStateErr) && sqlStateErr.SQLState() == "42P01"
 }
 
 func followUpAssistantSnapshot(content json.RawMessage) string {
