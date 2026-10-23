@@ -28,7 +28,7 @@ func TestResolveNotificationTargetReturnsProviderSpecificGuidance(t *testing.T) 
 }
 
 func TestInitializeScheduleNotificationsPreservesEnabledExternalDefaultsWithoutTargets(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	defaults := DefaultNotificationConfig()
 	for _, provider := range []string{"feishu", "wecom", "wechat"} {
 		defaults.Channels[provider] = NotificationChannelRule{Enabled: true}
@@ -78,7 +78,7 @@ func TestSaveScheduleNotificationUpdateUsesAccountDefaultRecipient(t *testing.T)
 	defer server.Close()
 	t.Setenv("LAZYMIND_CHANNEL_GATEWAY_BASE_URL", server.URL)
 
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	schedule := orm.UserSchedule{ID: "schedule", UserID: "owner", NotificationRevision: 1}
 	if err := db.Create(&schedule).Error; err != nil {
 		t.Fatal(err)
@@ -103,7 +103,7 @@ func TestSaveScheduleNotificationUpdateUsesAccountDefaultRecipient(t *testing.T)
 }
 
 func TestDispatchNotificationsSkipsExternalRowsWithoutTargets(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	defaults, err := json.Marshal(DefaultNotificationConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestInitializeScheduleNotificationsIgnoresLegacyGlobalTarget(t *testing.T) 
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_CHANNEL_GATEWAY_BASE_URL", server.URL)
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	config := DefaultNotificationConfig()
 	config.Channels["wechat"] = NotificationChannelRule{Enabled: true, AccountID: "account"}
 	raw, _ := json.Marshal(config)
@@ -166,7 +166,7 @@ func TestInitializeScheduleNotificationsIgnoresLegacyGlobalTarget(t *testing.T) 
 }
 
 func TestReadNotificationPreferencesDoesNotCreateRows(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	prefs, err := ReadNotificationPreferences(t.Context(), db, "missing")
 	if err != nil || !prefs.Enabled {
 		t.Fatalf("preferences=%+v error=%v", prefs, err)
