@@ -187,9 +187,6 @@ type arxivDocumentExt struct {
 func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, userID, userName string) (ArxivImportResult, error) {
 	return s.importPaperWithMetadata(ctx, input, datasetID, userID, userName, nil)
 }
-func (s *arxivImportService) importResolvedPaper(ctx context.Context, paper arxivsource.Metadata, datasetID, userID, userName string) (ArxivImportResult, error) {
-	return s.importPaperWithMetadata(ctx, paper.BaseID+paper.Version, datasetID, userID, userName, &paper)
-}
 func (s *arxivImportService) importPaperWithMetadata(ctx context.Context, input, datasetID, userID, userName string, trusted *arxivsource.Metadata) (result ArxivImportResult, err error) {
 	identifier, err := arxivsource.Parse(input)
 	if err != nil {

@@ -15858,27 +15858,6 @@ paths:
             summary: Read owned academic Chat progress and handoff navigation
             tags:
                 - AcademicWorkflows
-    /api/core/academic/demo-papers:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    mock:
-                                        type: boolean
-                                    papers:
-                                        items:
-                                            $ref: '#/components/schemas/AcademicPaperRef'
-                                        type: array
-                                    warning:
-                                        type: string
-                                type: object
-                    description: Get explicitly mocked recommendations with real paper identities
-            summary: Get explicitly mocked recommendations with real paper identities
-            tags:
-                - AcademicWorkflows
     /api/core/academic/document-states:
         get:
             parameters:

@@ -163,10 +163,6 @@ export function requestArxivMetadata(input: string): Promise<ArxivMetadata> {
   return request(() => axiosInstance.post(`${endpoint}/arxiv:lookup`, { input }, requestOptions(60_000)), (body) => metadata(body.paper));
 }
 
-export function importArxivPaper(input: string, datasetId: string): Promise<ArxivImportResult> {
-  return request(() => axiosInstance.post(`${endpoint}/arxiv:import`, { input, target_dataset_id: datasetId }, requestOptions(200_000)), importResult);
-}
-
 export function listImportedArxivPapers(datasetId: string): Promise<ArxivImportResult[]> {
   return request(() => axiosInstance.get(`${endpoint}/arxiv/library`, { ...requestOptions(30_000), params: { target_dataset_id: datasetId } }), (body) => {
     if (!Array.isArray(body.items)) return invalidResponse();

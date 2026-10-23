@@ -653,11 +653,6 @@ export interface ApiCoreAcademicChatContextGet200Response {
     'status'?: string;
     'version'?: number;
 }
-export interface ApiCoreAcademicDemoPapersGet200Response {
-    'mock'?: boolean;
-    'papers'?: Array<AcademicPaperRef>;
-    'warning'?: string;
-}
 export interface ApiCoreAcademicDocumentStatesGet200Response {
     'items'?: Array<AcademicDocumentStatus>;
 }
@@ -8023,36 +8018,6 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Get explicitly mocked recommendations with real paper identities
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicDemoPapersGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/demo-papers`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary Read document scholarly identity and current user\'s importance
          * @param {string} datasetId
          * @param {string} [documentIds]
@@ -8668,18 +8633,6 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Get explicitly mocked recommendations with real paper identities
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicDemoPapersGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicDemoPapersGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicDemoPapersGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicDemoPapersGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary Read document scholarly identity and current user\'s importance
          * @param {string} datasetId
          * @param {string} [documentIds]
@@ -8911,15 +8864,6 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
          */
         apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicChatContextGet200Response> {
             return localVarFp.apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Get explicitly mocked recommendations with real paper identities
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicDemoPapersGet(options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicDemoPapersGet200Response> {
-            return localVarFp.apiCoreAcademicDemoPapersGet(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -9230,16 +9174,6 @@ export class AcademicWorkflowsApi extends BaseAPI {
      */
     public apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Get explicitly mocked recommendations with real paper identities
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicDemoPapersGet(options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicDemoPapersGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

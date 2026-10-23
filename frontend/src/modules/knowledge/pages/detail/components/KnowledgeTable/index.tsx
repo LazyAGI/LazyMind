@@ -72,11 +72,6 @@ import BatchEditTags from "../batchEditTags";
 import BatchMoveModal from "../batchMoveModal";
 import { previewDocumentReferencesImport, startReferenceImport } from "@/modules/knowledge/api/academicReferences";
 
-import PaperTasks from '@/modules/knowledge/components/PaperTasks';
-import PaperImportanceButton from '@/modules/knowledge/components/PaperTasks/PaperImportanceButton';
-import IdentityCell from '@/modules/knowledge/components/PaperTasks/IdentityCell';
-import {documentAcademicStates,type DocumentAcademic,type PaperTask} from '@/modules/knowledge/api/paperWorkflows';
-
 export interface TreeNode extends Doc {
   retained_only?: boolean;
   key: string;
@@ -118,7 +113,6 @@ export interface BatchMoveDocument {
 
 interface Props {
   detail: Dataset & {
-    scenario_key?: string;
     processing_level?: "stored" | "parsed" | "chunked" | "indexed";
   };
   documentParsingEnabled: boolean | null;
@@ -181,32 +175,10 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
   const { availability: ragAvailability } = useRAGComponent();
   const navigate = useNavigate();
   const [tableData, setTableData] = useState<TreeNode[]>([]);
-  const [generalSelectedKeys, setGeneralSelectedKeys] = useState<string[]>([]);
-  const [paperSelectedKeys,setPaperSelectedKeys] = useState<string[]>([]);
-  const [paperTask,setPaperTask] = useState<PaperTask>();
-  const selectedRowKeys = paperTask ? paperSelectedKeys : generalSelectedKeys;
-  const setSelectedRowKeys = paperTask ? setPaperSelectedKeys : setGeneralSelectedKeys;
-  const isAcademic = detail.scenario_key === 'academic_papers';
-  const [academicStates,setAcademicStates] = useState<Record<string,DocumentAcademic>>({});
-  const academicRequest = useRef(0);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   useEffect(() => {
-    academicRequest.current += 1;
-    setPaperTask(undefined);
-    setPaperSelectedKeys([]);
-    setGeneralSelectedKeys([]);
-    setAcademicStates({});
+    setSelectedRowKeys([]);
   }, [detail.dataset_id]);
-  const refreshAcademic = async () => {
-    if(!isAcademic || !detail.dataset_id) return;
-    const request = ++academicRequest.current;
-    const ids:string[]=[]; const visit=(nodes:TreeNode[])=>nodes.forEach(node=>{if(node.document_id&&node.type!==DocTypeEnum.Folder) ids.push(node.document_id);if(node.children)visit(node.children)});visit(tableData);
-    const items=await documentAcademicStates(detail.dataset_id,ids);
-    if (request === academicRequest.current) {
-      setAcademicStates(Object.fromEntries(items.map(item=>[item.state.document_id,item])));
-    }
-  };
-  useEffect(()=>{if(!isAcademic)return;void refreshAcademic().catch(()=>{});const timer=window.setInterval(()=>{void refreshAcademic().catch(()=>{})},5000);return()=>window.clearInterval(timer)},[isAcademic,detail.dataset_id,tableData]);
-  const changePaperTask=(next:PaperTask|undefined)=>{setPaperSelectedKeys([]);setPaperTask(next)};
   const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
   const [currentNode, setCurrentNode] = useState<TreeNode | null>(null);
   const knowledgeRenameRef = useRef<RenameModalRef>(null);
@@ -325,13 +297,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     return keys;
   };
 
-  const isPaperSelectable = (record: TreeNode) => {
-    const state = academicStates[record.document_id || '']?.state;
-    return record.type === DocTypeEnum.Folder || (state?.kind === 'paper' && !!state.paper_id);
-  };
-  const selectableKeys = paperTask
-    ? (TreeUtils.flattenTree(tableData) as TreeNode[]).filter(isPaperSelectable).map(node => node.document_id!).filter(Boolean)
-    : getAllKeys(tableData);
+  const selectableKeys = getAllKeys(tableData);
   const selectedVisibleCount = selectableKeys.filter(id => selectedRowKeys.includes(id)).length;
 
   const handleSelectAll = (checked: boolean) => {
@@ -346,16 +312,14 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     if (!record.document_id) return;
 
     let keys = [...selectedRowKeys];
-    const selfAndChildren = paperTask ? [record.document_id] : [record.document_id, ...getAllChildrenKeys(record)];
+    const selfAndChildren = [record.document_id, ...getAllChildrenKeys(record)];
 
     if (selected) {
       keys = [...new Set([...keys, ...selfAndChildren])];
     } else {
       keys = keys.filter((k) => !selfAndChildren.includes(k));
-      if (!paperTask) {
-        const ancestorIds = TreeUtils.findAncestorFolderIds(tableData, record.document_id!);
-        keys = keys.filter((k) => !ancestorIds.includes(k));
-      }
+      const ancestorIds = TreeUtils.findAncestorFolderIds(tableData, record.document_id!);
+      keys = keys.filter((k) => !ancestorIds.includes(k));
     }
     setSelectedRowKeys(keys);
   };
@@ -797,9 +761,8 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
               }}
             />
             <Checkbox
-              disabled={!!paperTask && !isPaperSelectable(record)}
               checked={
-                isFolder && !paperTask
+                isFolder
                   ? isFolderFullySelected(record)
                   : selectedRowKeys.includes(record.document_id || "")
               }
@@ -853,13 +816,6 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
         );
       },
     },
-    ...(isAcademic ? [
-      { title: t('paperTasks.importance'), key: 'academic_importance', width: 80, render: (_: unknown, record: TreeNode) => {
-        const state = academicStates[record.document_id!];
-        return state?.state.kind === 'paper' && state.paper ? <PaperImportanceButton paperID={state.paper.paper_id} important={state.is_important} onChange={() => refreshAcademic()} /> : null;
-      } },
-      { title: t('paperTasks.paperInfo'), key: 'academic_identity', width: 150, render: (_: unknown, record: TreeNode) => record.type === DocTypeEnum.Folder ? null : <IdentityCell id={record.document_id!} name={record.display_name || ''} value={academicStates[record.document_id!]} writable={hasWritePermission} refresh={() => void refreshAcademic()} /> },
-    ] : []),
     {
       title: t("knowledge.tags"),
       dataIndex: "tags",
@@ -1519,7 +1475,6 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
 
   return (
     <div style={{ width: "100%", minWidth: 0 }}>
-      {isAcademic && <PaperTasks key={detail.dataset_id} dataset={detail.dataset_id!} mode={paperTask} setMode={changePaperTask} selected={paperSelectedKeys} canImport={hasUploadPermission || hasWritePermission} onImportSubmitted={() => { getDetail(); getImportingTotal(); tableDataRefresh(); }}/>}
       <Table<TreeNode>
         columns={columns as ColumnType<TreeNode>[]}
         dataSource={tableData}

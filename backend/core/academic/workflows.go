@@ -994,24 +994,6 @@ func DeleteExpansion(w http.ResponseWriter, r *http.Request) {
 	common.ReplyJSON(w, map[string]bool{"deleted": true})
 }
 
-// Demo discovery creates real identities and registered, safe PDF candidates.
-func DemoPapers(w http.ResponseWriter, r *http.Request) {
-	_, ok := requireUser(w, r)
-	if !ok {
-		return
-	}
-	items := []PaperRef{}
-	for _, v := range []WorkInput{{Title: "ReAct: Synergizing Reasoning and Acting in Language Models", ArxivID: "2210.03629", Year: 2022}, {Title: "Toolformer: Language Models Can Teach Themselves to Use Tools", ArxivID: "2302.04761", Year: 2023}, {Title: "Reflexion: Language Agents with Verbal Reinforcement Learning", ArxivID: "2303.11366", Year: 2023}} {
-		work, _, err := findOrCreateWork(r.Context(), store.DB(), v)
-		if err != nil {
-			replyError(w, 500, "REGISTER_FAILED", err.Error())
-			return
-		}
-		items = append(items, paperRef(work))
-	}
-	common.ReplyJSON(w, map[string]any{"mock": true, "papers": items, "warning": "固定真实论文用于接口联调，推荐与关系为 Mock；全文下载解析为真实服务"})
-}
-
 var _ io.Writer = (*discardChatResponse)(nil)
 
 // RecoverPaperExpansions reconciles committed Workflow state after a Core restart.

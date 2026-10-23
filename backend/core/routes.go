@@ -301,7 +301,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/academic/expansions/{expansion_id}", []string{"qa.read"}, academic.GetExpansion)
 	handleAPI(r, "POST", "/academic/expansions/{expansion_id}/papers:resolve", []string{"qa.read"}, academic.ResolveExpansionPapers)
 	handleAPI(r, "DELETE", "/academic/expansions/{expansion_id}", []string{"qa.write"}, academic.DeleteExpansion)
-	handleAPI(r, "GET", "/academic/demo-papers", []string{"document.read"}, academic.DemoPapers)
 
 	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, systemdeps.RequireRAG(academic.ListReferences))
 	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, systemdeps.RequireRAG(academic.ExtractReferences))

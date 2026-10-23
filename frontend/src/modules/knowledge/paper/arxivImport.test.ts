@@ -1,7 +1,7 @@
 import { AxiosError, type AxiosRequestConfig } from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  importArxivPaper, isArxivInput, listImportedArxivPapers, requestArxivMetadata,
+  isArxivInput, listImportedArxivPapers, requestArxivMetadata,
   type ArxivImportResult, type ArxivMetadata,
 } from "./arxivImport";
 
@@ -53,21 +53,6 @@ describe("arXiv import API contract", () => {
     expect(JSON.parse(String(config.data))).toEqual({ input });
   });
 
-  it("imports the exact input into the requested dataset and preserves the stored file identity", async () => {
-    const input = "arXiv:2404.06654v3 [cs.CL]";
-    respond({ data: imported });
-    await expect(importArxivPaper(input, "dataset / 论文")).resolves.toEqual(imported);
-    const config = requestConfig();
-    expect(config).toMatchObject({ method: "post", url: "https://api.example.test/base/api/core/academic/arxiv:import", timeout: 200_000, silentError: true });
-    expect(JSON.parse(String(config.data))).toEqual({ input, target_dataset_id: "dataset / 论文" });
-  });
-
-  it("accepts a direct success body and an already-present document without a new task", async () => {
-    const result = { ...imported, status: "already_present", document_task_id: "", processing_status: "ready" };
-    respond(result);
-    await expect(importArxivPaper("2404.06654", "dataset-1")).resolves.toEqual(result);
-  });
-
   it("lists backend-persisted papers scoped to the requested dataset", async () => {
     respond({ code: 0, data: { items: [imported] } });
     await expect(listImportedArxivPapers("dataset / 论文")).resolves.toEqual([imported]);
@@ -91,18 +76,18 @@ describe("arXiv import API contract", () => {
     [413, "ARXIV_PDF_TOO_LARGE", "PDF 超出大小限制"],
   ])("preserves HTTP %i server message and code", async (status, code, message) => {
     fail(status, { code, message, data: null });
-    await expect(importArxivPaper("2404.06654", "dataset-1")).rejects.toMatchObject({ message, code, status });
+    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({ message, code, status });
   });
 
   it("preserves a structured nested HTTP error", async () => {
     fail(403, { error: { code: "DATASET_WRITE_FORBIDDEN", message: "没有写入论文库的权限" } });
-    await expect(importArxivPaper("2404.06654", "dataset-1")).rejects.toMatchObject({ code: "DATASET_WRITE_FORBIDDEN", message: "没有写入论文库的权限", status: 403 });
+    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({ code: "DATASET_WRITE_FORBIDDEN", message: "没有写入论文库的权限", status: 403 });
   });
 
   it("retains stored document identities in a processing-start error", async () => {
     const detail = { document_id: "document-1", document_task_id: "task-1" };
     fail(502, { code: 2000725, message: "PDF 已保存，文档解析启动失败，请重试任务", detail });
-    await expect(importArxivPaper("2404.06654", "dataset-1")).rejects.toMatchObject({
+    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({
       code: 2000725, message: "PDF 已保存，文档解析启动失败，请重试任务", status: 502, detail,
     });
   });
@@ -119,7 +104,6 @@ describe("arXiv import API contract", () => {
 
   it.each([
     ["lookup", () => requestArxivMetadata("2404.06654")],
-    ["import", () => importArxivPaper("2404.06654", "dataset-1")],
     ["library", () => listImportedArxivPapers("dataset-1")],
   ])("rejects HTTP 200 HTML on the %s endpoint", async (_name, request) => {
     respond("<!doctype html><html><title>LazyMind</title></html>");
@@ -147,9 +131,9 @@ describe("arXiv import API contract", () => {
     { ...imported, status: "failed" },
     { ...imported, source_version: undefined },
     { ...imported, processing_status: undefined },
-  ])("requires an actual persisted PDF result before reporting import success", async (body) => {
-    respond({ data: body });
-    await expect(importArxivPaper("2404.06654", "dataset-1")).rejects.toMatchObject({ code: "ARXIV_INVALID_RESPONSE" });
+  ])("requires a persisted PDF identity when restoring the library", async (body) => {
+    respond({ data: { items: [body] } });
+    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({ code: "ARXIV_INVALID_RESPONSE" });
   });
 
   it.each([{ data: {} }, { data: { items: null } }, { data: { items: [imported, { paper: metadata }] } }])("rejects an incomplete library instead of silently dropping records", async (body) => {

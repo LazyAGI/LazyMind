@@ -15,7 +15,7 @@ import type { PaperItem } from "./model";
 import { loadPreviewPaperLibrary, savePreviewPaperLibrary, loadPersistedPaperLibrary, savePersistedPaperLibrary } from "./store";
 import { paperFromPdf } from "./pdfMeta";
 import { lookupIdentifier } from "./scholar";
-import { importArxivPaper, listImportedArxivPapers, type ArxivImportResult } from "./arxivImport";
+import { listImportedArxivPapers, type ArxivImportResult } from "./arxivImport";
 import * as paperModel from "./model";
 
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: { get: vi.fn(), post: vi.fn() } }));
@@ -26,7 +26,6 @@ vi.mock("./store", async (importOriginal) => ({
 }));
 vi.mock("./arxivImport", async (importOriginal) => ({
   ...await importOriginal<typeof import("./arxivImport")>(),
-  importArxivPaper: vi.fn(),
   listImportedArxivPapers: vi.fn(),
 }));
 vi.mock("./pdfMeta", () => ({ paperFromPdf: vi.fn() }));
@@ -142,7 +141,6 @@ async function closePopover(name: string) {
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
-  vi.mocked(importArxivPaper).mockReset();
   vi.mocked(listImportedArxivPapers).mockReset().mockResolvedValue([]);
   vi.mocked(listAcademicImportQueue).mockReset().mockResolvedValue([]);
   vi.mocked(importPaperLink).mockReset().mockResolvedValue({ batch_id: 'link-batch' });
@@ -998,7 +996,6 @@ describe("paper library backend arXiv import", () => {
     const dialog = await lookupArxivCandidate();
     expect(within(dialog).getByRole("button", { name: "导入文献与 PDF" })).toBeEnabled();
     expect(within(dialog).queryByRole("button", { name: "加入论文库" })).not.toBeInTheDocument();
-    expect(importArxivPaper).not.toHaveBeenCalled();
     expect(loadPreviewPaperLibrary(datasetId)).toEqual(before);
     expect(success).not.toHaveBeenCalled();
   });
@@ -1016,7 +1013,6 @@ describe("paper library backend arXiv import", () => {
     const saved = loadPreviewPaperLibrary(datasetId);
     expect(saved.papers.find(paper => paper.arxiv === '2404.06654')).toMatchObject({ title: result.paper.title, parse: 'parsing' });
     expect(saved.attachments.some(attachment => attachment.contentRef === result.document_id)).toBe(false);
-    expect(importArxivPaper).not.toHaveBeenCalled();
   });
 
   it('preserves the candidate and reuses the request key when queue submission fails', async () => {
