@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import json
 
+import pytest
+
 from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
 
 from lazymind.chat.engine.agent_runtime.pruner import make_history_compactor
@@ -176,6 +178,26 @@ def test_new_oversized_result_spills_before_first_exposure(tmp_path) -> None:
     assert state['entries'][0]['model_visible'] is True
     assert 'offloaded to workspace' in projected[0]['content']
     assert len(list((tmp_path / 'tool_spills').glob('*.txt'))) == 1
+
+
+def test_first_exposure_spill_write_failure_keeps_original_projection(tmp_path) -> None:
+    state = {}
+    history = [{'role': 'tool', 'name': 'read_user_attachment', 'content': 'X' * 20_000}]
+    original = copy.deepcopy(history)
+    (tmp_path / 'tool_spills').write_text('blocked directory', encoding='utf-8')
+    compact = make_history_compactor(max_input_tokens=100_000, workspace=str(tmp_path))
+    with config.temp('context_compression_enabled', True), \
+            config.temp('context_summary_compression_enabled', False), \
+            config.temp('context_compression_spill_bytes', 1024):
+        compact([], runtime_state=state)
+        with pytest.raises(OSError):
+            compact(history, runtime_state=state)
+
+    assert history == original
+    assert state['entries'][0]['message'] == original[0]
+    assert state['entries'][0]['kind'] == 'full'
+    assert state['entries'][0]['model_visible'] is False
+    assert (tmp_path / 'tool_spills').read_text(encoding='utf-8') == 'blocked directory'
 
 
 def test_cache_unjustified_old_prune_is_rolled_back_when_summary_fails() -> None:

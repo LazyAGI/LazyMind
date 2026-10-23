@@ -119,53 +119,53 @@ def _validate_summary(
     non_history_tokens: int,
     profile: Optional[str] = None,
     runtime_state: Optional[dict[str, Any]] = None,
-) -> tuple[bool, str, int, int]:
+) -> tuple[bool, str, int]:
     if not (summary_markdown or '').strip():
-        return False, 'empty_summary', 0, 0
+        return False, 'empty_summary', 0
 
     if not has_required_profile_blocks(summary_markdown, profile, runtime_state):
-        return False, 'missing_required_sections', 0, 0
+        return False, 'missing_required_sections', 0
 
     summary_tokens = estimate_tokens(summary_markdown)
     replaced_tokens = _estimate_history_tokens(replaced_span)
     if summary_tokens >= replaced_tokens:
-        return False, 'summary_not_shorter', summary_tokens, replaced_tokens
+        return False, 'summary_not_shorter', summary_tokens
 
     if projected[:len(expected_prefix)] != expected_prefix:
-        return False, 'prefix_modified', summary_tokens, replaced_tokens
+        return False, 'prefix_modified', summary_tokens
 
     if expected_tail:
         actual_tail = projected[len(projected) - len(expected_tail):]
         if actual_tail != expected_tail:
-            return False, 'tail_modified', summary_tokens, replaced_tokens
+            return False, 'tail_modified', summary_tokens
     elif len(projected) != len(expected_prefix) + 1:
-        return False, 'tail_modified', summary_tokens, replaced_tokens
+        return False, 'tail_modified', summary_tokens
 
     ok, reason = validate_tool_pairing(projected)
     if not ok:
-        return False, f'tool_pairing_{reason}', summary_tokens, replaced_tokens
+        return False, f'tool_pairing_{reason}', summary_tokens
 
     if after_total <= budget.target_tokens:
-        return True, 'ok', summary_tokens, replaced_tokens
+        return True, 'ok', summary_tokens
 
     tail_tokens = _estimate_history_tokens(expected_tail)
     prefix_tokens = _estimate_history_tokens(expected_prefix)
     fixed_tokens = non_history_tokens + prefix_tokens + tail_tokens
     target_unreachable = fixed_tokens >= budget.target_tokens
     if not target_unreachable:
-        return False, 'target_not_reached', summary_tokens, replaced_tokens
+        return False, 'target_not_reached', summary_tokens
 
     # Recovery is measured against the reachable floor, excluding immutable context.
     overshoot = max(1, before_total - max(budget.target_tokens, fixed_tokens))
     reclaimed = max(0, before_total - after_total)
     required_recovery = float(config['context_summary_required_overshoot_reclaim_ratio'])
     if reclaimed < overshoot * required_recovery:
-        return False, 'insufficient_overshoot_recovery', summary_tokens, replaced_tokens
+        return False, 'insufficient_overshoot_recovery', summary_tokens
     max_output_ratio = float(config['context_summary_max_output_to_replaced_ratio'])
     if replaced_tokens <= 0 or summary_tokens / replaced_tokens > max_output_ratio:
-        return False, 'summary_compression_ratio_too_weak', summary_tokens, replaced_tokens
+        return False, 'summary_compression_ratio_too_weak', summary_tokens
 
-    return True, 'ok', summary_tokens, replaced_tokens
+    return True, 'ok', summary_tokens
 
 
 def prepare_summary_compression(
@@ -177,8 +177,6 @@ def prepare_summary_compression(
     summarizer: Optional[Callable[[str, str], str]] = None,
     force: bool = False,
     estimated_total_tokens: Optional[int] = None,
-    runtime_state: Optional[dict[str, Any]] = None,
-    raise_llm_errors: bool = True,
     selected: Optional[SummaryRange] = None,
 ) -> tuple[list[dict[str, Any]], SummaryEvent, Optional[SummaryRange]]:
     """Plan a validated summary without publishing events or model context."""
@@ -210,7 +208,7 @@ def prepare_summary_compression(
     if selected is None:
         return _abandon(original, budget, trigger, before_total, ratio_before, 'no_summary_range')
 
-    runtime_state = collect_summary_runtime_state() if runtime_state is None else runtime_state
+    runtime_state = collect_summary_runtime_state()
     profile = resolve_summary_profile(runtime_state)
     if (
         profile == 'workflow'
@@ -234,8 +232,6 @@ def prepare_summary_compression(
         else:
             summary_markdown = _call_summarizer_llm(llm, system_prompt, user_prompt)
     except Exception as exc:  # noqa: BLE001 - never fail the agent path
-        if raise_llm_errors:
-            raise
         lazyllm.LOG.warning(f'[ContextSummary] summary_llm_failed err={exc}')
         return _abandon(
             original, budget, trigger, before_total, ratio_before, 'llm_failed',
@@ -257,7 +253,7 @@ def prepare_summary_compression(
     projected = prefix + [summary_message] + tail
 
     after_total = non_history_tokens + _estimate_history_tokens(projected)
-    ok, reason, summary_tokens, _replaced_tokens = _validate_summary(
+    ok, reason, summary_tokens = _validate_summary(
         summary_markdown,
         replaced_span=replaced_span,
         projected=projected,
@@ -313,7 +309,7 @@ def apply_summary_compression(
 ) -> tuple[list[dict[str, Any]], SummaryEvent]:
     projected, event, selected = prepare_summary_compression(
         history, budget=budget, trigger=trigger, llm=llm, summarizer=summarizer,
-        force=force, estimated_total_tokens=estimated_total_tokens, raise_llm_errors=False, selected=selected,
+        force=force, estimated_total_tokens=estimated_total_tokens, selected=selected,
     )
     _log_summary_event(event)
     if event.decision == 'summarized':
@@ -344,8 +340,7 @@ def _max_history_seq(messages: list[dict[str, Any]]) -> int:
     return max_seq
 
 
-def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int, *,
-                                runtime_state: Optional[dict[str, Any]] = None) -> None:
+def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int) -> None:
     if covered_through_seq <= 0 or not summary_markdown.strip():
         return
     if _write_agent_data is None:
@@ -361,7 +356,7 @@ def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int,
     if covered_through_seq <= prior_covered:
         return
     try:
-        fields = sidecar_fields(runtime_state)
+        fields = sidecar_fields()
         _write_agent_data(
             'model_context_updated',
             summary_text=summary_markdown.strip(),

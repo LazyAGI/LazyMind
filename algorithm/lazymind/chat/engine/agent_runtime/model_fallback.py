@@ -5,20 +5,16 @@ import copy
 import json
 import math
 import random
-import socket
 import time
 from asyncio import CancelledError
 from typing import Any
 
 import lazyllm
-import requests
 from lazyllm.common import HandledException
 from lazyllm.module import ModuleBase
 from lazyllm.module.module import ModuleExecutionError
 from lazyllm.module.servermodule import LLMBase
-from lazyllm.module.llms.onlinemodule.base.model_outcome import (
-    ModelCallError, ModelFailure, ModelFailureCode, ModelFailureOrigin,
-)
+from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError
 
 from .budget import build_context_budget, parse_token_limit
 from .model_calls import ContextCapacityError, UnsupportedModelInput, request_tokens
@@ -127,27 +123,6 @@ def _make_llm(candidate: ModelCandidate):
         static_params=copy.deepcopy(config.get('static_params') or {}),
         stream=False,
     )
-
-
-def _failure_from_error(error: Exception):
-    seen = set()
-    network_failure = None
-    while error is not None and id(error) not in seen:
-        seen.add(id(error))
-        if isinstance(error, UnsupportedModelInput):
-            return ModelFailure(ModelFailureOrigin.PROTOCOL, ModelFailureCode.PROVIDER_REJECTED)
-        if isinstance(error, ModelCallError):
-            return error.terminal.failure
-        failure = getattr(error, 'failure', None)
-        if isinstance(failure, ModelFailure):
-            return failure
-        if isinstance(error, (requests.exceptions.Timeout, socket.timeout)):
-            network_failure = ModelFailure(ModelFailureOrigin.TRANSPORT, ModelFailureCode.REQUEST_TIMEOUT)
-        elif isinstance(error, (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError,
-                                ConnectionResetError, ConnectionAbortedError, BrokenPipeError, socket.gaierror)):
-            network_failure = ModelFailure(ModelFailureOrigin.TRANSPORT, ModelFailureCode.TRANSPORT_ERROR)
-        error = error.__cause__ or error.__context__
-    return network_failure
 
 
 def _request_timeout(candidate):
@@ -343,7 +318,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                     raise
                 capacity_rejection = isinstance(exc, ContextCapacityError)
                 input_rejection = capacity_rejection or isinstance(exc, UnsupportedModelInput)
-                failure = _failure_from_error(exc)
+                failure = exc.terminal.failure if isinstance(exc, ModelCallError) else None
                 unsupported_call = isinstance(exc, UnsupportedModelInput) or failure is not None and str(
                     failure.provider_error_code or '',
                 ).lower() in _UNSUPPORTED_CALL_CODES

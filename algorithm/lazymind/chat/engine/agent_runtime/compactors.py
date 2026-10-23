@@ -30,8 +30,6 @@ class ToolCompactionPlan:
     after_tokens: int
     spill_path: str = ''
     spill_bytes: int = 0
-    tool_name: str = ''
-    original_content: Any = None
     spill_text: str = ''
 
 
@@ -656,13 +654,6 @@ def compact_or_spill_tool_result(
         if rel_path:
             notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes, workspace)
             return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
-    if _file_result_details(tool_name, content, observation):
-        compacted, compactor, before_tokens, after_tokens = compact_tool_result(
-            tool_name,
-            content,
-            observation,
-        )
-        return compacted, compactor, before_tokens, after_tokens, '', 0
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
         content,
@@ -699,20 +690,8 @@ def plan_tool_result_compaction(
                 after,
                 spill_path=rel_path,
                 spill_bytes=spill_bytes,
-                tool_name=tool_name,
-                original_content=content,
                 spill_text=spill_text,
             )
-    if _file_result_details(tool_name, content, observation):
-        compacted, compactor, before_tokens, after_tokens = compact_tool_result(
-            tool_name,
-            content,
-            observation,
-        )
-        return ToolCompactionPlan(
-            compacted, compactor, before_tokens, after_tokens,
-            tool_name=tool_name, original_content=content,
-        )
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
         content,
@@ -720,7 +699,6 @@ def plan_tool_result_compaction(
     )
     return ToolCompactionPlan(
         compacted, compactor, before_tokens, after_tokens,
-        tool_name=tool_name, original_content=content,
     )
 
 

@@ -314,8 +314,12 @@ def stage_one_boundary_history():
     return history
 
 
-def test_normal_compactor_keeps_optional_summary_and_stage_one_fallback(provider, tmp_path):
-    provider.script['model-b'] = [{'message': {'role': 'assistant', 'content': 'B GENERATED'}}]
+@pytest.mark.parametrize('summary_error', [False, True])
+def test_normal_compactor_keeps_optional_summary_and_stage_one_fallback(provider, tmp_path, summary_error):
+    provider.script['model-b'] = [
+        {'error': 'service_unavailable', 'status': 503} if summary_error else
+        {'message': {'role': 'assistant', 'content': 'B GENERATED'}}
+    ]
     raw = lazyllm.OnlineChatModule(source='openai', model='model-b', type='llm', url=provider.url,
                                   api_key='fake-fallback-key', stream=False)
     with compression_settings():

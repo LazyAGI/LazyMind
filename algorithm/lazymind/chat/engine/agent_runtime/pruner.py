@@ -265,26 +265,19 @@ def _commit_surviving_spills(
     plans: list[tuple[int, ToolCompactionPlan]],
     *,
     workspace: Optional[str],
-) -> list[dict[str, Any]]:
+) -> None:
     if not workspace:
-        return entries
-    committed = clone_entries(entries)
+        return
     by_content = {
         plan.content: plan
         for _index, plan in plans
         if plan.compactor == 'spill'
     }
-    for entry in committed:
+    for entry in entries:
         plan = by_content.get(entry['message'].get('content'))
         if plan is None:
             continue
-        written = commit_tool_result_plan(plan, workspace=workspace)
-        if written.compactor == 'noop':
-            entry['message']['content'] = written.content
-            entry['kind'] = 'full'
-        else:
-            entry['message']['content'] = written.content
-    return committed
+        commit_tool_result_plan(plan, workspace=workspace)
 
 
 def _detail(index: int, entry: dict[str, Any], plan: ToolCompactionPlan) -> ToolPruneDetail:
@@ -422,7 +415,7 @@ def make_history_compactor(
 
 def _finish_projection(state, prior_len):
     mark_projection_sent(state)
-    return split_projection(state['entries'], prior_len, model_facing=True)
+    return split_projection(state['entries'], prior_len)
 
 
 def _compact_history(history, keep_full_turns=None, *, budget, default_keep, trigger,
@@ -443,11 +436,6 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
     )
     state, _rebuilt = reconcile_projection(combined, kwargs.get('runtime_state'))
     stable = state['entries']
-    # A direct model history supplies its sent prefix without retaining another projection.
-    visible_prefix = kwargs.get('model_visible_prefix')
-    if visible_prefix is not None:
-        for entry in stable:
-            entry['model_visible'] = entry['source_end'] <= visible_prefix
     before_total = non_history_tokens + projection_tokens(stable)
 
     mandatory_plans: list[tuple[int, ToolCompactionPlan]] = []
@@ -465,7 +453,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
 
     if mandatory_plans:
         candidate = _apply_entry_plans(stable, mandatory_plans)
-        candidate = _commit_surviving_spills(
+        _commit_surviving_spills(
             candidate,
             mandatory_plans,
             workspace=workspace,
@@ -646,7 +634,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
                 summary_succeeded = True
 
     if summary_succeeded and final_entries is not None:
-        final_entries = _commit_surviving_spills(
+        _commit_surviving_spills(
             final_entries,
             planned,
             workspace=workspace,
@@ -658,18 +646,12 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
             next_pressure_tokens=_pressure_rearm_tokens(final_total, budget),
         )
     elif accepted_entries is not None and accepted_metrics is not None:
-        accepted_entries = _commit_surviving_spills(
+        _commit_surviving_spills(
             accepted_entries,
             accepted_plans,
             workspace=workspace,
         )
-        accepted_total = non_history_tokens + projection_tokens(accepted_entries)
-        committed_metrics = transition_metrics(
-            stable,
-            accepted_entries,
-            before_total=before_total,
-            after_total=accepted_total,
-        )
+        accepted_total = accepted_metrics['estimated_after']
         event = PruneEvent(
             trigger=trigger,
             decision=(
@@ -680,7 +662,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
             reason=accepted_reason,
             estimated_before=before_total,
             estimated_after=accepted_total,
-            reclaimed_tokens=committed_metrics['reclaimed_tokens'],
+            reclaimed_tokens=accepted_metrics['reclaimed_tokens'],
             budget=budget,
             usage_ratio_before=usage_ratio(before_total, budget),
             usage_ratio_after=usage_ratio(accepted_total, budget),
@@ -689,7 +671,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
                 for index, plan in accepted_plans
             ),
         )
-        _log_event(_event_with_metrics(event, committed_metrics))
+        _log_event(_event_with_metrics(event, accepted_metrics))
         commit_entries(
             state,
             accepted_entries,
