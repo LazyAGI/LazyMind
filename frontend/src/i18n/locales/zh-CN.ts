@@ -3091,6 +3091,15 @@ const zhCN = {
         unknown: "暂时无法完成本次回复，请稍后重试或切换模型。",
       },
     },
+    writerImageGroups: {
+      title: "图片展示方式",
+      setSliding: "设为滑动图组",
+      restoreVertical: "恢复纵向排列",
+      hint: "左右滑动查看 · 共 {{count}} 张",
+      reminder: "正文中有 {{count}} 组连续图片包含三张及以上图片，可以设为横向滑动图组。",
+      keepVertical: "保持纵向继续发布",
+      returnToDocument: "返回正文设置",
+    },
     writerIR: {
       referenceTargetMissing: "引用目标不存在，可能是生成内容格式有误，请检查对应标题或段落。",
       documentRegion: "结构化文档",

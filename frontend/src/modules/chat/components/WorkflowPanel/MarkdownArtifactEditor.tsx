@@ -1,4 +1,6 @@
 import { writerOutlineDescription } from './writerOutlineDescription';
+import { writerImageGroupPlugin } from './writerImageGroupPlugin';
+import { documentImageGroups, imageGroupMarkdown, stripImageGroupMarkdown } from './writerImageGroups';
 import {
   BlockTypeSelect,
   BoldItalicUnderlineToggles,
@@ -827,12 +829,12 @@ export function MarkdownArtifactEditor({
       }
     };
 
-    editor.setMarkdown(nextMarkdown);
+    editor.setMarkdown(stripImageGroupMarkdown(nextMarkdown));
     // Lexical commits this import in its queued update before the next browser
     // input event. Capture the export then, including muted normalization.
     if (establishBaseline) queueMicrotask(() => {
       if (rootRef.current === root && editorRef.current && draftMarkdownRef.current === nextMarkdown) {
-        serializedBaselineRef.current = editorRef.current.getMarkdown();
+        serializedBaselineRef.current = imageGroupMarkdown(editorRef.current.getMarkdown(), documentImageGroups(nextMarkdown));
       }
     });
     restoreView();
@@ -1329,7 +1331,12 @@ export function MarkdownArtifactEditor({
     void persistMarkdown(draftMarkdownRef.current, pendingSource.revision);
   };
 
-  const handleMarkdownChange = useCallback((nextDraft: string, initialMarkdownNormalize = false) => {
+  const handleMarkdownChange = useCallback((
+    nextDraft: string,
+    initialMarkdownNormalize = false,
+    groups = documentImageGroups(draftMarkdownRef.current),
+  ) => {
+    nextDraft = imageGroupMarkdown(nextDraft, groups);
     if (initialMarkdownNormalize) {
       if (!dirtyRef.current) serializedBaselineRef.current = nextDraft;
       return;
@@ -1521,7 +1528,7 @@ export function MarkdownArtifactEditor({
     const restorePoint = root
       ? markdownSelectionRestorePoint(root, selectionToRestore)
       : null;
-    editor.setMarkdown(nextDraft);
+    editor.setMarkdown(stripImageGroupMarkdown(nextDraft));
     window.requestAnimationFrame(() => {
       if (root && restorePoint) restoreMarkdownSelection(root, restorePoint);
       if (surface && scrollTop !== undefined) surface.scrollTop = scrollTop;
@@ -1542,7 +1549,7 @@ export function MarkdownArtifactEditor({
       || conflictRef.current
       || readOnly
     ) return;
-    const currentMarkdown = normalizeMarkdownForMdxEditor(editor.getMarkdown());
+    const currentMarkdown = imageGroupMarkdown(normalizeMarkdownForMdxEditor(editor.getMarkdown()), documentImageGroups(draftMarkdownRef.current));
     const paragraphText = referenceSelection.paragraph?.textContent ?? '';
     const nextDraft = applyWriterMarkdownInternalReference(
       currentMarkdown,
@@ -1567,7 +1574,7 @@ export function MarkdownArtifactEditor({
       || conflictRef.current
       || readOnly
     ) return;
-    const currentMarkdown = normalizeMarkdownForMdxEditor(editor.getMarkdown());
+    const currentMarkdown = imageGroupMarkdown(normalizeMarkdownForMdxEditor(editor.getMarkdown()), documentImageGroups(draftMarkdownRef.current));
     const nextDraft = removeWriterMarkdownInternalReference(
       currentMarkdown,
       referenceSelection.paragraph?.textContent ?? '',
@@ -2073,7 +2080,7 @@ export function MarkdownArtifactEditor({
             ref={editorRef}
             className='writer-markdown-editor__surface'
             contentEditableClassName='writer-markdown-editor__content'
-            markdown={normalizeMarkdownForMdxEditor(draftMarkdown)}
+            markdown={stripImageGroupMarkdown(normalizeMarkdownForMdxEditor(draftMarkdown))}
             translation={editorTranslation}
             readOnly={readOnly}
             onChange={handleMarkdownChange}
@@ -2093,6 +2100,10 @@ export function MarkdownArtifactEditor({
               linkDialogPlugin(),
               tablePlugin(),
               frontmatterPlugin(),
+              writerImageGroupPlugin({
+                getGroups: () => documentImageGroups(draftMarkdownRef.current),
+                onChange: groups => handleMarkdownChange(editorRef.current!.getMarkdown(), false, groups),
+              }),
               jsxPlugin({
                 jsxComponentDescriptors: [{
                   name: 'a',

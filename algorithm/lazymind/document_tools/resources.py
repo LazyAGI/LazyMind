@@ -112,7 +112,8 @@ def sync_writer_documents(
     library = MediaAssetLibrary.model_validate(media_assets) if media_assets else None
     root = Path(artifact_store) if artifact_store else _temp_root()
     root.mkdir(parents=True, exist_ok=True)
-    if source.title == revised.title and source.blocks == revised.blocks:
+    if source.title == revised.title and source.blocks == revised.blocks \
+            and source.metadata.get('image_groups', []) == revised.metadata.get('image_groups', []):
         patch = PatchSet(
             patch_id=f'patch-{source.document_id}',
             target_doc_id=source.document_id,
@@ -124,7 +125,7 @@ def sync_writer_documents(
                 revision.build_patch_set_from_documents(source, revised, library),
             )
         )
-    changed = bool(patch.hunks or patch.new_title is not None)
+    changed = bool(patch.hunks or patch.new_title is not None or patch.image_groups is not None)
     if changed:
         output = WriterResourceTools(
             llm=None,
