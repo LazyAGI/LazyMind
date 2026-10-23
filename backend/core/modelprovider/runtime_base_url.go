@@ -23,20 +23,27 @@ func LazyLLMBaseURL(providerName, baseURL string) string {
 		return baseURL
 	}
 
-	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	rawPath := parsed.EscapedPath()
+	segments := strings.Split(strings.Trim(rawPath, "/"), "/")
 	v1Index := -1
 	for index, segment := range segments {
-		if strings.EqualFold(segment, "v1") {
+		decoded, _ := url.PathUnescape(segment)
+		if strings.EqualFold(decoded, "v1") {
 			v1Index = index
 			break
 		}
 	}
 	if v1Index >= 0 {
-		parsed.Path = "/" + strings.Join(segments[:v1Index+1], "/") + "/"
+		rawPath = "/" + strings.Join(segments[:v1Index+1], "/") + "/"
+	} else if strings.Trim(rawPath, "/") == "" {
+		rawPath = "/v1/"
 	} else {
-		parsed.Path = "/v1/"
+		// OpenAI-compatible suppliers may version their API differently or put
+		// it behind a proxy prefix. urljoin needs a trailing slash to retain it.
+		rawPath = strings.TrimRight(rawPath, "/") + "/"
 	}
-	parsed.RawPath = ""
+	parsed.Path, _ = url.PathUnescape(rawPath)
+	parsed.RawPath = rawPath
 	parsed.RawQuery = ""
 	parsed.ForceQuery = false
 	parsed.Fragment = ""

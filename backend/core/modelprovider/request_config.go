@@ -78,7 +78,12 @@ func providerRequestDefaults(db *gorm.DB, parent orm.UserModelProvider) map[stri
 	if defaultRequestProtocol(parent) == "anthropic" {
 		openai = rootURL + "/v1/"
 	}
-	return map[string]string{"openai": openai, "anthropic": rootURL, "gemini": rootURL + "/gemini/v1beta", "openai-responses": openai}
+	defaults := map[string]string{"openai": openai, "anthropic": rootURL, "gemini": rootURL + "/gemini/v1beta", "openai-responses": openai}
+	if known, ok := knownSupplierProtocolDefaults(base); ok {
+		defaults["openai"], defaults["anthropic"] = known["openai"], known["anthropic"]
+		defaults["openai-responses"] = known["openai"]
+	}
+	return defaults
 }
 
 func savedRequestConfig(db *gorm.DB, parent orm.UserModelProvider) savedProviderRequestConfig {
@@ -97,6 +102,7 @@ func savedRequestConfig(db *gorm.DB, parent orm.UserModelProvider) savedProvider
 					config.Defaults[key] = value
 				}
 			}
+			repairInheritedProtocolDefaults(&config, stored)
 		} else {
 			// Old saves derived defaults from the catalog/origin and copied those
 			// defaults into endpoints. The saved OpenAI address retains the original
