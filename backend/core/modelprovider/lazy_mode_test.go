@@ -2,7 +2,7 @@ package modelprovider
 
 import "testing"
 
-// TestIsMultimodalEmbeddingModelType returns true only for "embed_image".
+// All persisted multimodal aliases must trigger the same lazy-mode transition.
 func TestIsMultimodalEmbeddingModelType(t *testing.T) {
 	tests := []struct {
 		modelType string
@@ -13,7 +13,10 @@ func TestIsMultimodalEmbeddingModelType(t *testing.T) {
 		{"llm", false},
 		{"image", false},
 		{"", false},
-		{"EMBED_IMAGE", false}, // case-sensitive
+		{"EMBED_IMAGE", true},
+		{"multimodal_embedding", true},
+		{"cross_modal_embed", true},
+		{" MULTIMODAL_EMBEDDING ", true},
 	}
 	for _, tt := range tests {
 		got := isMultimodalEmbeddingModelType(tt.modelType)

@@ -575,19 +575,22 @@ func verifyCheckCacheKey(groupID, baseURL, apiKey string) string {
 // CheckGroup proxies to the algorithm service for connectivity validation.
 // Supports dry_run=true (test only, no DB write) and dry_run=false (test + persist the result).
 func CheckGroup(w http.ResponseWriter, r *http.Request) {
-	var req checkModelProviderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var payload struct {
+		checkModelProviderRequest
+		APIKey *string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
+	}
+	req := payload.checkModelProviderRequest
+	if payload.APIKey != nil {
+		req.APIKey = *payload.APIKey
 	}
 	urlStr := strings.TrimSpace(req.BaseURL)
 	submittedURL := urlStr
 	apiKey := strings.TrimSpace(req.APIKey)
 	model := strings.TrimSpace(req.Model)
-	if urlStr == "" {
-		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
-		return
-	}
 
 	userID := strings.TrimSpace(store.UserID(r))
 	if userID == "" {
@@ -616,8 +619,8 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	// The provider in the path is authoritative. A custom Base URL may be an
 	// official API reverse proxy, so it must not change the provider source.
-	source := parent.Name
-	urlStr = LazyLLMBaseURL(parent.Name, urlStr)
+	source := RuntimeProviderName(parent)
+	urlStr = LazyLLMBaseURL(RuntimeProviderName(parent), urlStr)
 	var group orm.UserModelProviderGroup
 	if err := db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
@@ -625,9 +628,31 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "group not found", http.StatusNotFound)
 		return
 	}
+	if hasSharedProviderEndpoint(parent) {
+		checkSharedProviderGroup(w, r, db, parent, group, req, payload.APIKey != nil)
+		return
+	}
+	urlStr = connectionBaseURL(parent, urlStr)
+	if urlStr == "" {
+		urlStr = connectionBaseURL(parent, group.BaseURL)
+	}
+	if urlStr == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
+		return
+	}
+	if payload.APIKey == nil {
+		storedKey, err := apiKeyForGroup(db.WithContext(r.Context()), &group)
+		if err != nil {
+			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+			return
+		}
+		if keys := splitAPIKeys(storedKey); len(keys) > 0 {
+			apiKey = keys[0]
+		}
+	}
 	// Official hosted endpoints require credentials. Self-hosted/custom
 	// endpoints may deliberately run without authentication.
-	if apiKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, group.BaseURL) {
+	if apiKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, urlStr) {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
@@ -644,20 +669,26 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		// The check request normally echoes the group's stored URL. When the
 		// official provider URL was canonicalized for verification, persist the
 		// same canonical value so runtime selection and UI display stay aligned.
-		if verified && normalizeBaseURLForCompare(group.BaseURL) == normalizeBaseURLForCompare(submittedURL) &&
+		if !hasSharedProviderEndpoint(parent) && verified && normalizeBaseURLForCompare(group.BaseURL) == normalizeBaseURLForCompare(submittedURL) &&
 			normalizeBaseURLForCompare(group.BaseURL) != normalizeBaseURLForCompare(urlStr) {
 			updates["base_url"] = urlStr
 		}
 		tx := db.WithContext(r.Context()).
 			Model(&orm.UserModelProviderGroup{}).
-			Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
+			Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL AND base_url = ? AND credential_revision = ?", groupID, parentID, userID, group.BaseURL, group.CredentialRevision).
 			Updates(updates)
 		if tx.Error != nil {
 			common.ReplyErr(w, "update group verify status failed", http.StatusInternalServerError)
 			return
 		}
 		if tx.RowsAffected == 0 {
-			common.ReplyErr(w, "group not found", http.StatusNotFound)
+			var count int64
+			db.WithContext(r.Context()).Model(&orm.UserModelProviderGroup{}).Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).Count(&count)
+			if count > 0 {
+				common.ReplyErr(w, errConnectionChanged.Error(), http.StatusConflict)
+			} else {
+				common.ReplyErr(w, "group not found", http.StatusNotFound)
+			}
 			return
 		}
 	}

@@ -791,7 +791,12 @@ func run(ctx context.Context) error {
 	}
 	modelprovider.MustLoadContextWindows(filepath.Join(".", "config", "model_context_windows.yaml"))
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
-	modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
+	if modelprovider.HardcodedModelCatalogEnabled() {
+		// Legacy path. The YAML model lists and SeedModelCatalog stay in the tree.
+		modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
+	} else {
+		modelprovider.MustSeedUpstreamModelCatalog(ctx, db.DB, catalogPath, filepath.Join(".", "config", "upstream_model_catalog.json"))
+	}
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
 	modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath)
 

@@ -24,6 +24,8 @@ type catalogModel struct {
 	Type                   string   `yaml:"type"`
 	FreeAutoSelectPriority int      `yaml:"free_auto_select_priority"`
 	FreeAutoSelectBaseURLs []string `yaml:"free_auto_select_base_urls"`
+	// MaxInputTokensOverride is set by the upstream catalog seeder. YAML leaves it empty.
+	MaxInputTokensOverride string `yaml:"-"`
 }
 
 type catalogSupplier struct {
@@ -136,9 +138,15 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	if name == "" || modelType == "" {
 		return errors.New("model name and type are required")
 	}
-	maxInputTokens, err := resolveSeededMaxInputTokens(modelType, name)
-	if err != nil {
-		return err
+	var maxInputTokens *string
+	var err error
+	if override := strings.TrimSpace(item.MaxInputTokensOverride); override != "" {
+		maxInputTokens = &override
+	} else {
+		maxInputTokens, err = resolveSeededMaxInputTokens(modelType, name)
+		if err != nil {
+			return err
+		}
 	}
 	if item.FreeAutoSelectPriority < 0 {
 		return errors.New("model free_auto_select_priority must not be negative")
@@ -296,7 +304,8 @@ func syncDefaultModelToUserGroups(
 		}
 		var count int64
 		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
-			Where("user_model_provider_group_id = ? AND name = ? AND deleted_at IS NULL", group.GroupID, modelName).
+			// A deleted model is a user decision, not a missing catalog entry.
+			Where("user_model_provider_group_id = ? AND name = ?", group.GroupID, modelName).
 			Count(&count).Error; err != nil {
 			return err
 		}
@@ -400,16 +409,23 @@ func reconcileCatalogScope(
 // SeedModelCatalog upserts default_model_providers and default_models from the YAML catalog file.
 // Section keys ending with "_providers" derive their category by trimming that suffix.
 func SeedModelCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
-	return seedCatalog(ctx, db, yamlPath, "_providers", "")
+	return seedCatalog(ctx, db, yamlPath, "_providers", "", nil)
+}
+
+// SeedProviderCatalog upserts providers from YAML. Model suppliers listed in
+// skipModelSuppliers keep their provider row, but their hardcoded model list is
+// left for the upstream catalog seeder.
+func SeedProviderCatalog(ctx context.Context, db *gorm.DB, yamlPath string, skipModelSuppliers map[string]struct{}) error {
+	return seedCatalog(ctx, db, yamlPath, "_providers", "", skipModelSuppliers)
 }
 
 // SeedDatasourceCatalog upserts default_model_providers from the datasource YAML catalog file.
 // All suppliers are seeded with category "datasource" regardless of section key.
 func SeedDatasourceCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
-	return seedCatalog(ctx, db, yamlPath, "_sources", "datasource")
+	return seedCatalog(ctx, db, yamlPath, "_sources", "datasource", nil)
 }
 
-func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, forceCategory string) error {
+func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, forceCategory string, skipModelSuppliers map[string]struct{}) error {
 	yamlPath = strings.TrimSpace(yamlPath)
 	if yamlPath == "" {
 		return errors.New("catalog yaml path is required")
@@ -441,6 +457,9 @@ func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, for
 					if err := upgradeLegacyTokenPlanURL(tx, providerID); err != nil {
 						return err
 					}
+				}
+				if _, skipModels := skipModelSuppliers[supplier.Name]; skipModels {
+					continue
 				}
 				for _, model := range supplier.Models {
 					if err := upsertDefaultModel(tx, now, providerID, supplier.Name, model); err != nil {
@@ -474,6 +493,10 @@ func MustSeedDatasourceCatalog(ctx context.Context, db *gorm.DB, yamlPath string
 
 // upgradeLegacyTokenPlanURL updates only the former official Token Plan preset.
 func upgradeLegacyTokenPlanURL(tx *gorm.DB, defaultProviderID string) error {
+	legacyURLs := []string{"https://token.sensenova.cn/v1/chat/completions/", "https://token.sensenova.cn/v1/chat/completions"}
+	if err := tx.Model(&orm.UserModelProvider{}).Where("default_model_provider_id = ? AND base_url IN ?", defaultProviderID, legacyURLs).Update("base_url", sensenovaNewPlatformBaseURL).Error; err != nil {
+		return err
+	}
 	providerIDs := tx.Model(&orm.UserModelProvider{}).Select("id").Where("default_model_provider_id = ?", defaultProviderID)
 	return tx.Model(&orm.UserModelProviderGroup{}).
 		Where("user_model_provider_id IN (?) AND base_url IN ?", providerIDs, []string{

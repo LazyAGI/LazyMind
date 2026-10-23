@@ -373,7 +373,7 @@ func (s *Service) InvokeExternalModel(ctx context.Context, call capability.Invoc
 	if available, reason := modelAvailability(row); !available {
 		return result, capability.NewError(capability.Unavailable, op, reason+"; verify the model connection in Settings", false, nil)
 	}
-	apiKey, err := modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	baseURL, apiKey, err := modelprovider.ResolveProviderRuntimeCredential(ctx, s.db, row.GroupID)
 	if err != nil {
 		return result, capability.NewError(capability.Unavailable, op, "model credentials cannot be loaded; save the connection again", false, err)
 	}
@@ -385,7 +385,7 @@ func (s *Service) InvokeExternalModel(ctx context.Context, call capability.Invoc
 		payload["max_tokens"] = input.MaxTokens
 	}
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatCompletionsURL(row.BaseURL), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, chatCompletionsURL(baseURL), bytes.NewReader(body))
 	if err != nil {
 		return result, capability.NewError(capability.Internal, op, "cannot prepare model request", false, err)
 	}

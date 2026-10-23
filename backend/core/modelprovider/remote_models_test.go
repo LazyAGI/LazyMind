@@ -179,6 +179,33 @@ func TestListRemoteGroupModels(t *testing.T) {
 	}
 }
 
+func TestListRemoteGroupModelsUsesAnthropicRequestAuthentication(t *testing.T) {
+	remoteModelsAllowPrivateHosts = true
+	t.Cleanup(func() { remoteModelsAllowPrivateHosts = false; store.Init(nil, nil, nil) })
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "anthropic-secret" || r.Header.Get("anthropic-version") != "2023-06-01" || r.Header.Get("Authorization") != "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Write([]byte(`{"data":[{"id":"claude-sonnet"}]}`))
+	}))
+	defer upstream.Close()
+	db, parent, group := setupEncryptedGroupKeyTest(t, "anthropic-secret")
+	if err := db.AutoMigrate(&orm.UserModelProviderGroupModel{}); err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&parent).Updates(map[string]any{"protocol_name": "Claude", "base_url": upstream.URL})
+	db.Model(&group).Update("base_url", upstream.URL)
+	req := httptest.NewRequest(http.MethodGet, "/remote_models", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"model_provider_id": parent.ID, "group_id": group.ID})
+	rec := httptest.NewRecorder()
+	ListRemoteGroupModels(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Anthropic model discovery failed: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestListRemoteGroupModelsKeepsPathPrefix(t *testing.T) {
 	remoteModelsAllowPrivateHosts = true
 	t.Cleanup(func() { remoteModelsAllowPrivateHosts = false })

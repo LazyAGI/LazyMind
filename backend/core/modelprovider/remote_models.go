@@ -316,17 +316,16 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apiKey, err := apiKeyForGroup(db.WithContext(r.Context()), &group)
+	baseURL, apiKey, err := ResolveProviderRuntimeCredential(r.Context(), db, group.ID)
 	if err != nil {
-		common.ReplyErr(w, "decode api key failed", http.StatusInternalServerError)
+		if errors.Is(err, ErrProviderKeyDisabled) || errors.Is(err, ErrProviderKeyUnverified) {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		} else {
+			common.ReplyErr(w, "resolve enabled api key failed", http.StatusInternalServerError)
+		}
 		return
 	}
-	keys := splitAPIKeys(apiKey)
-	if len(keys) > 0 {
-		apiKey = keys[0]
-	}
-
-	listURL, err := modelsListURL(group.BaseURL)
+	listURL, err := modelsListURL(baseURL)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
@@ -343,7 +342,12 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Header.Set("Accept", "application/json")
-	if apiKey != "" {
+	if LazyLLMSource(RuntimeProviderName(parent)) == "claude" {
+		req.Header.Set("anthropic-version", "2023-06-01")
+		if apiKey != "" {
+			req.Header.Set("x-api-key", apiKey)
+		}
+	} else if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 

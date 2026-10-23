@@ -1,0 +1,23 @@
+.model-editor-modal {
+  .model-editor-info,
+  .model-editor-error {
+    margin-bottom: 16px;
+  }
+  .model-editor-id {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .ant-form-item-extra {
+    margin-top: 5px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .ant-form-item:last-child {
+    margin-bottom: 8px;
+  }
+}
+.model-editor-type-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}

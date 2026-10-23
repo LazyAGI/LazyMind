@@ -68,24 +68,26 @@ type chatModelSnapshot struct {
 }
 
 type availableChatModel struct {
-	Vision           bool     `gorm:"column:vision"`
-	ID               string   `gorm:"column:model_id"`
-	ProviderID       string   `gorm:"column:provider_id"`
-	ProviderGroupID  string   `gorm:"column:provider_group_id"`
-	OwnerUserID      string   `gorm:"column:owner_user_id"`
-	ProviderName     string   `gorm:"column:provider_name"`
-	GroupName        string   `gorm:"column:group_name"`
-	ModelName        string   `gorm:"column:model_name"`
-	ModelType        string   `gorm:"column:model_type"`
-	BaseURL          string   `gorm:"column:base_url"`
-	APIKey           string   `gorm:"column:api_key"`
-	APIKeyCiphertext string   `gorm:"column:api_key_ciphertext"`
-	MaxInputTokens   *string  `gorm:"column:max_input_tokens"`
-	Source           string   `gorm:"-"`
-	Availability     string   `gorm:"-"`
-	Lifecycle        string   `gorm:"-"`
-	Capabilities     []string `gorm:"-"`
-	DefaultForType   bool     `gorm:"-"`
+	Vision              bool     `gorm:"column:vision"`
+	ID                  string   `gorm:"column:model_id"`
+	ProviderID          string   `gorm:"column:provider_id"`
+	ProviderGroupID     string   `gorm:"column:provider_group_id"`
+	OwnerUserID         string   `gorm:"column:owner_user_id"`
+	ProviderName        string   `gorm:"column:provider_name"`
+	ProviderDisplayName string   `gorm:"column:provider_display_name"`
+	ProviderIsCustom    bool     `gorm:"column:provider_is_custom"`
+	GroupName           string   `gorm:"column:group_name"`
+	ModelName           string   `gorm:"column:model_name"`
+	ModelType           string   `gorm:"column:model_type"`
+	BaseURL             string   `gorm:"column:base_url"`
+	APIKey              string   `gorm:"column:api_key"`
+	APIKeyCiphertext    string   `gorm:"column:api_key_ciphertext"`
+	MaxInputTokens      *string  `gorm:"column:max_input_tokens"`
+	Source              string   `gorm:"-"`
+	Availability        string   `gorm:"-"`
+	Lifecycle           string   `gorm:"-"`
+	Capabilities        []string `gorm:"-"`
+	DefaultForType      bool     `gorm:"-"`
 }
 
 type chatModelRoute struct {
@@ -131,10 +133,11 @@ type chatModelListItem struct {
 }
 
 type chatModelProviderItem struct {
-	ID     string              `json:"id"`
-	Name   string              `json:"name"`
-	Source string              `json:"source"`
-	Models []chatModelListItem `json:"models"`
+	ID       string              `json:"id"`
+	Name     string              `json:"name"`
+	IsCustom bool                `json:"is_custom"`
+	Source   string              `json:"source"`
+	Models   []chatModelListItem `json:"models"`
 }
 
 type chatModelsResponse struct {
@@ -216,6 +219,7 @@ func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 			"m.id AS model_id, m.user_model_provider_id AS provider_id, "+
 				"m.user_model_provider_group_id AS provider_group_id, "+
 				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, "+
+				"p.name AS provider_display_name, p.is_custom AS provider_is_custom, "+
 				"m.model_type, m.vision, m.max_input_tokens, g.name AS group_name, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext",
 		).
@@ -592,6 +596,30 @@ func snapshotForChatModel(model *availableChatModel) (json.RawMessage, error) {
 	return json.Marshal(chatModelSnapshotForModel(model))
 }
 
+// lockAndReloadSelectableChatModel keeps every durable fixed binding in the
+// same supplier lock order as metadata edits. The caller owns the transaction
+// and must hold it until the conversation reference has been persisted.
+func lockAndReloadSelectableChatModel(ctx context.Context, db *gorm.DB, userID string, model *availableChatModel) (*availableChatModel, error) {
+	if !chatModelSelectable(model) {
+		return nil, errChatModelUnavailable
+	}
+	if model.Source == "cloud" {
+		return model, nil
+	}
+	if err := modelprovider.LockModelSupplierForConfiguration(db, model.ID); err != nil {
+		return nil, errChatModelUnavailable
+	}
+	models, err := loadAvailableChatModels(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	current := findAvailableChatModelBySource(models, model.ID, model.Source)
+	if !chatModelSelectable(current) {
+		return nil, errChatModelUnavailable
+	}
+	return current, nil
+}
+
 func resolveInitialChatModelBinding(ctx context.Context, db *gorm.DB, userID string, requested *initialChatModelSelection) (*resolvedChatModelBinding, error) {
 	models, err := loadAvailableChatModels(ctx, db, userID)
 	if err != nil {
@@ -618,6 +646,10 @@ func resolveInitialChatModelBinding(ctx context.Context, db *gorm.DB, userID str
 		return &resolvedChatModelBinding{
 			Mode: chatModelModeFixed, ModelID: &modelID, Source: &source, Version: 1,
 		}, nil
+	}
+	model, err = lockAndReloadSelectableChatModel(ctx, db, userID, model)
+	if err != nil {
+		return nil, err
 	}
 	snapshot, err := snapshotForChatModel(model)
 	if err != nil {
@@ -815,8 +847,12 @@ func buildChatModelsResponse(ctx context.Context, db *gorm.DB, userID string, co
 		key := model.ProviderID + "\x00" + model.Source
 		provider := providerByKey[key]
 		if provider == nil {
+			displayName := strings.TrimSpace(model.ProviderDisplayName)
+			if displayName == "" {
+				displayName = model.ProviderName
+			}
 			provider = &chatModelProviderItem{
-				ID: model.ProviderID, Name: model.ProviderName, Source: model.Source, Models: []chatModelListItem{},
+				ID: model.ProviderID, Name: displayName, IsCustom: model.ProviderIsCustom, Source: model.Source, Models: []chatModelListItem{},
 			}
 			providerByKey[key] = provider
 			providerKeys = append(providerKeys, key)
@@ -998,8 +1034,9 @@ func PatchConversationModel(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			model := findAvailableChatModelBySource(models, request.ModelID, request.Source)
-			if !chatModelSelectable(model) {
-				return errChatModelUnavailable
+			model, err = lockAndReloadSelectableChatModel(r.Context(), tx, userID, model)
+			if err != nil {
+				return err
 			}
 			snapshot, err := snapshotForChatModel(model)
 			if err != nil {
@@ -1168,7 +1205,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	if model == nil {
 		return errChatModelUnavailable
 	}
-	fixedLLM, err := buildChatLLMConfig(ctx, model)
+	fixedLLM, err := buildChatLLMConfig(ctx, db, model)
 	if err != nil {
 		return err
 	}
@@ -1264,7 +1301,7 @@ func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (
 	if !chatModelUsable(model) {
 		return nil, errChatModelUnavailable
 	}
-	fixed, err := buildChatLLMConfig(ctx, model)
+	fixed, err := buildChatLLMConfig(ctx, db, model)
 	if err != nil {
 		return nil, err
 	}
@@ -1275,7 +1312,7 @@ func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (
 	return cfg, nil
 }
 
-func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, error) {
+func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatModel) (any, error) {
 	if model == nil {
 		return nil, errChatModelUnavailable
 	}
@@ -1291,13 +1328,19 @@ func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, er
 		}
 		return fixedLLM, nil
 	}
-	apiKey, err := modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
+	baseURL, apiKey := model.BaseURL, model.APIKey
+	var err error
+	if model.ProviderGroupID != "" {
+		baseURL, apiKey, err = modelprovider.ResolveProviderRuntimeCredential(ctx, db, model.ProviderGroupID)
+	} else {
+		apiKey, err = modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
+	}
 	if err != nil {
 		return nil, errChatModelUnavailable
 	}
 	fixed := modelconfig.BuildLLMConfig([]modelconfig.SelectedRuntimeModel{{
 		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ProviderName: model.ProviderName, ModelName: model.ModelName,
-		BaseURL: model.BaseURL, APIKey: apiKey, MaxInputTokens: model.MaxInputTokens,
+		BaseURL: baseURL, APIKey: apiKey, MaxInputTokens: model.MaxInputTokens,
 	}})
 	fixedLLM, _ := fixed["llm"]
 	if fixedLLM == nil {

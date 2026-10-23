@@ -12,7 +12,8 @@ const providerLogoAssets: Array<[RegExp, string]> = [
   [/siliconflow/, "siliconflow.svg"],
 ];
 
-export function getProviderLogoUrl(name: string) {
+export function getProviderLogoUrl(name: string, isCustom = false) {
+  if (isCustom) return "/provider-icons/custom.svg";
   const normalized = name.trim().toLowerCase();
   const match = providerLogoAssets.find(([pattern]) => pattern.test(normalized));
   return match ? `/provider-icons/${match[1]}` : undefined;

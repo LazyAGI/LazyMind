@@ -5,9 +5,10 @@
   "packageManager": "pnpm@10.0.0",
   "type": "module",
   "scripts": {
-    "predev": "bash scripts/openapi/generate-auth.sh",
+    "predev": "bash scripts/openapi/generate-auth.sh && node scripts/generate-upstream-model-catalog.mjs",
     "dev": "vite --clearScreen false",
-    "prebuild": "node scripts/openapi/check-stale.mjs",
+    "prebuild": "node scripts/openapi/check-stale.mjs && node scripts/generate-upstream-model-catalog.mjs",
+    "gen:model-catalog": "node scripts/generate-upstream-model-catalog.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "gen:openapi": "node scripts/openapi/generate-api.mjs",

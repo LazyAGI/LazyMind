@@ -587,3 +587,43 @@ func TestUpgradeLegacyTokenPlanURLPreservesCustomURLs(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogSeedPreservesDeletedModelTombstone(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.DefaultModelProvider{}, &orm.DefaultModel{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	catalog := orm.DefaultModelProvider{ID: "catalog", Name: "OpenAI", BaseURL: "https://api.openai.com/v1/"}
+	provider := orm.UserModelProvider{ID: "provider", DefaultModelProviderID: catalog.ID, Name: catalog.Name, BaseURL: catalog.BaseURL, Category: "model", BaseModel: orm.BaseModel{CreateUserID: "user"}}
+	group := orm.UserModelProviderGroup{ID: "group", UserModelProviderID: provider.ID, Name: "connection", BaseURL: catalog.BaseURL, BaseModel: orm.BaseModel{CreateUserID: "user"}}
+	for _, row := range []any{&catalog, &provider, &group} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	models := []orm.UserModelProviderGroupModel{
+		{ID: "keep", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, ProviderName: catalog.Name, Name: "keep", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user"}},
+		{ID: "deleted", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, ProviderName: catalog.Name, Name: "deleted", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", DeletedAt: &now}},
+	}
+	if err := db.Create(&models).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := upsertDefaultModel(db, now, catalog.ID, catalog.Name, catalogModel{Name: "deleted", Type: "llm"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int64
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("user_model_provider_group_id = ? AND name = ?", group.ID, "deleted").Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("deleted catalog model resurrected: %d %v", count, err)
+	}
+	var deleted orm.UserModelProviderGroupModel
+	db.First(&deleted, "id = ?", "deleted")
+	if deleted.DeletedAt == nil {
+		t.Fatal("catalog seed cleared user tombstone")
+	}
+}

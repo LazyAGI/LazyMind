@@ -46,33 +46,116 @@ export function unwrapModelProviderData<T>(payload: unknown): T {
   return payload as T;
 }
 
-export async function getCredentialBackupStatus(): Promise<CredentialBackupStatus & { available: boolean; reasonCode?: string }> {
-  const response = await modelProvidersDefaultApi.apiCoreCredentialVaultBackupGet(silentCloudRequest);
+export async function updateProviderEndpoint(
+  providerId: string,
+  baseUrl: string,
+): Promise<{ id: string; base_url: string }> {
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdEndpointPut({
+      modelProviderId: providerId,
+      updateModelProviderEndpointOpenAPIRequest: { base_url: baseUrl },
+    });
+  return unwrapModelProviderData(response.data);
+}
+
+export async function createCustomProvider(input: {
+  name: string;
+  source_provider_id: string;
+  base_url: string;
+}): Promise<{ id: string; group_id: string }> {
+  const response = await modelProvidersApi.apiCoreModelProvidersPost({
+    createCustomModelProviderOpenAPIRequest: input,
+  });
+  return unwrapModelProviderData(response.data);
+}
+
+export async function updateCustomProviderName(
+  providerId: string,
+  name: string,
+): Promise<{ id: string }> {
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdPatch({
+      modelProviderId: providerId,
+      updateCustomModelProviderOpenAPIRequest: { name },
+    });
+  return unwrapModelProviderData(response.data);
+}
+
+export async function deleteCustomProvider(
+  providerId: string,
+  confirmIndexedDowngrade = false,
+): Promise<{ id: string; downgraded_knowledge_bases: number }> {
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdDelete({
+      modelProviderId: providerId,
+      confirmIndexedDowngrade: confirmIndexedDowngrade || undefined,
+    });
+  return unwrapModelProviderData(response.data);
+}
+
+export async function setProviderActiveKey(
+  providerId: string,
+  groupId: string,
+  keyId: string,
+): Promise<{ group_id: string; key_id: string }> {
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdKeysActivePut(
+      {
+        modelProviderId: providerId,
+        setActiveModelProviderKeyOpenAPIRequest: {
+          group_id: groupId,
+          key_id: keyId,
+        },
+      },
+      { timeout: 180000 },
+    );
+  return unwrapModelProviderData(response.data);
+}
+
+export async function getCredentialBackupStatus(): Promise<
+  CredentialBackupStatus & { available: boolean; reasonCode?: string }
+> {
+  const response =
+    await modelProvidersDefaultApi.apiCoreCredentialVaultBackupGet(
+      silentCloudRequest,
+    );
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);
   return {
     available: Boolean(data.available),
-    reasonCode: typeof data.reason_code === "string" ? data.reason_code : undefined,
+    reasonCode:
+      typeof data.reason_code === "string" ? data.reason_code : undefined,
     enabled: Boolean(data.enabled),
     backedUp: Number(data.backed_up || 0),
     pending: Number(data.pending || 0),
     failed: Number(data.failed || 0),
-    lastSucceededAt: typeof data.last_succeeded_at === "string" ? data.last_succeeded_at : undefined,
+    lastSucceededAt:
+      typeof data.last_succeeded_at === "string"
+        ? data.last_succeeded_at
+        : undefined,
   };
 }
 
-export async function setCredentialBackupEnabled(enabled: boolean): Promise<CredentialBackupStatus & { available: boolean; reasonCode?: string }> {
+export async function setCredentialBackupEnabled(
+  enabled: boolean,
+): Promise<
+  CredentialBackupStatus & { available: boolean; reasonCode?: string }
+> {
   const response = enabled
     ? await modelProvidersDefaultApi.apiCoreCredentialVaultBackupEnablePost()
     : await modelProvidersDefaultApi.apiCoreCredentialVaultBackupDisablePost();
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);
   return {
     available: Boolean(data.available),
-    reasonCode: typeof data.reason_code === "string" ? data.reason_code : undefined,
+    reasonCode:
+      typeof data.reason_code === "string" ? data.reason_code : undefined,
     enabled: Boolean(data.enabled),
     backedUp: Number(data.backed_up || 0),
     pending: Number(data.pending || 0),
     failed: Number(data.failed || 0),
-    lastSucceededAt: typeof data.last_succeeded_at === "string" ? data.last_succeeded_at : undefined,
+    lastSucceededAt:
+      typeof data.last_succeeded_at === "string"
+        ? data.last_succeeded_at
+        : undefined,
   };
 }
 
@@ -91,7 +174,13 @@ export type CredentialRestoreDiscovery = {
 
 export type CredentialRestoreOperation = {
   operationId: string;
-  status: "pending" | "running" | "succeeded" | "failed" | "expired" | "canceled";
+  status:
+    | "pending"
+    | "running"
+    | "succeeded"
+    | "failed"
+    | "expired"
+    | "canceled";
   mode: CredentialRestoreMode;
   totalRecords: number;
   completedRecords: number;
@@ -101,40 +190,59 @@ export type CredentialRestoreOperation = {
 };
 
 export async function getCredentialRestoreDiscovery(): Promise<CredentialRestoreDiscovery> {
-  const response = await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresGet(silentCloudRequest);
+  const response =
+    await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresGet(
+      silentCloudRequest,
+    );
   const data = unwrapModelProviderData<Record<string, unknown>>(response.data);
   const records = Array.isArray(data.records) ? data.records : [];
-  const activeOperation = data.active_operation && typeof data.active_operation === "object"
-    ? normalizeRestoreOperation(data.active_operation)
-    : undefined;
+  const activeOperation =
+    data.active_operation && typeof data.active_operation === "object"
+      ? normalizeRestoreOperation(data.active_operation)
+      : undefined;
   return {
     available: Boolean(data.available),
     requiresExplicitAction: data.requires_explicit_action !== false,
     records: records.flatMap((record) => {
       if (!record || typeof record !== "object") return [];
       const value = record as Record<string, unknown>;
-      if (typeof value.record_id !== "string" || !Number.isFinite(Number(value.revision))) return [];
-      return [{
-        recordId: value.record_id,
-        revision: Number(value.revision),
-        updatedAt: typeof value.updated_at === "string" ? value.updated_at : "",
-      }];
+      if (
+        typeof value.record_id !== "string" ||
+        !Number.isFinite(Number(value.revision))
+      )
+        return [];
+      return [
+        {
+          recordId: value.record_id,
+          revision: Number(value.revision),
+          updatedAt:
+            typeof value.updated_at === "string" ? value.updated_at : "",
+        },
+      ];
     }),
     activeOperation,
   };
 }
 
-function normalizeRestoreOperation(payload: unknown): CredentialRestoreOperation {
+function normalizeRestoreOperation(
+  payload: unknown,
+): CredentialRestoreOperation {
   const data = unwrapModelProviderData<Record<string, unknown>>(payload);
   return {
     operationId: String(data.operation_id || ""),
-    status: String(data.status || "failed") as CredentialRestoreOperation["status"],
+    status: String(
+      data.status || "failed",
+    ) as CredentialRestoreOperation["status"],
     mode: String(data.mode || "trusted_device") as CredentialRestoreMode,
     totalRecords: Math.max(0, Number(data.total_records || 0)),
     completedRecords: Math.max(0, Number(data.completed_records || 0)),
     expiresAt: String(data.expires_at || ""),
-    temporaryExpiresAt: typeof data.temporary_expires_at === "string" ? data.temporary_expires_at : undefined,
-    failureCode: typeof data.failure_code === "string" ? data.failure_code : undefined,
+    temporaryExpiresAt:
+      typeof data.temporary_expires_at === "string"
+        ? data.temporary_expires_at
+        : undefined,
+    failureCode:
+      typeof data.failure_code === "string" ? data.failure_code : undefined,
   };
 }
 
@@ -143,22 +251,36 @@ export async function startCredentialRestore(
   records: CredentialRestoreRecord[],
   resolution: "fail" | "replace_local" | "save_copy" = "fail",
 ): Promise<CredentialRestoreOperation> {
-  const response = await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresPost({
-    credentialRestoreRequest: {
-      mode,
-      records: records.map((record) => ({ record_id: record.recordId, revision: record.revision, resolution })),
-    },
-  });
+  const response =
+    await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresPost({
+      credentialRestoreRequest: {
+        mode,
+        records: records.map((record) => ({
+          record_id: record.recordId,
+          revision: record.revision,
+          resolution,
+        })),
+      },
+    });
   return normalizeRestoreOperation(response.data);
 }
 
-export async function getCredentialRestoreOperation(operationId: string): Promise<CredentialRestoreOperation> {
-  const response = await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresOperationIdGet({ operationId });
+export async function getCredentialRestoreOperation(
+  operationId: string,
+): Promise<CredentialRestoreOperation> {
+  const response =
+    await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresOperationIdGet(
+      { operationId },
+    );
   return normalizeRestoreOperation(response.data);
 }
 
-export async function cancelCredentialRestore(operationId: string): Promise<void> {
-  await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresOperationIdDelete({ operationId });
+export async function cancelCredentialRestore(
+  operationId: string,
+): Promise<void> {
+  await modelProvidersDefaultApi.apiCoreCredentialVaultRestoresOperationIdDelete(
+    { operationId },
+  );
 }
 
 export interface RemoteGroupModel {
@@ -169,30 +291,138 @@ export interface RemoteGroupModel {
   added: boolean;
 }
 
-export async function listRemoteGroupModels(providerId: string, groupId: string) {
-  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet({
-    modelProviderId: providerId,
-    groupId,
-  });
-  return unwrapModelProviderData<{ url?: string; models?: RemoteGroupModel[] }>(response.data);
+export async function listRemoteGroupModels(
+  providerId: string,
+  groupId: string,
+) {
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(
+      {
+        modelProviderId: providerId,
+        groupId,
+      },
+    );
+  return unwrapModelProviderData<{ url?: string; models?: RemoteGroupModel[] }>(
+    response.data,
+  );
 }
 
-export async function updateGroupModelMaxInputTokens(
+export interface UpdateGroupModelInput {
+  name: string;
+  model_type: string;
+  vision?: boolean;
+  max_input_tokens?: string;
+  customize?: boolean;
+}
+
+export async function updateGroupModel(
   providerId: string,
   groupId: string,
   modelId: string,
-  maxInputTokens: string,
+  input: UpdateGroupModelInput,
 ) {
   const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch({
     modelProviderId: providerId,
     groupId,
     modelId,
-    updateModelProviderGroupModelOpenAPIRequest: { max_input_tokens: maxInputTokens },
+    updateModelProviderGroupModelOpenAPIRequest: input,
   });
-  return unwrapModelProviderData<{ max_input_tokens?: string }>(response.data);
+  return unwrapModelProviderData<{
+    id: string;
+    name: string;
+    model_type: string;
+    vision?: boolean;
+    is_default?: boolean;
+    max_input_tokens?: string;
+  }>(response.data);
 }
 
 export interface StoredProviderKey {
   id: string;
   masked: string;
+}
+
+export type RequestProtocol =
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "openai-responses";
+
+export interface ProviderRequestConfig {
+  default_protocol: RequestProtocol;
+  protocols: Array<{
+    protocol: RequestProtocol;
+    name: string;
+    base_url: string;
+    default_base_url: string;
+    supported: boolean;
+  }>;
+}
+
+export interface ProviderRequestConfigInput {
+  default_protocol: RequestProtocol;
+  endpoints: { openai?: string; anthropic?: string };
+}
+
+export async function getProviderRequestConfig(
+  providerId: string,
+): Promise<ProviderRequestConfig> {
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdRequestConfigGet(
+      { modelProviderId: providerId },
+    );
+  return unwrapModelProviderData(response.data);
+}
+
+export async function updateProviderRequestConfig(
+  providerId: string,
+  input: ProviderRequestConfigInput,
+): Promise<ProviderRequestConfig> {
+  if (
+    input.default_protocol !== "openai" &&
+    input.default_protocol !== "anthropic"
+  )
+    throw new Error("Unsupported request protocol");
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdRequestConfigPut(
+      {
+        modelProviderId: providerId,
+        updateProviderRequestConfigOpenAPIRequest: {
+          ...input,
+          default_protocol: input.default_protocol,
+        },
+      },
+    );
+  return unwrapModelProviderData(response.data);
+}
+
+export async function revealProviderKey(
+  providerId: string,
+  groupId: string,
+  keyId: string,
+): Promise<string> {
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(
+      { modelProviderId: providerId, groupId, keyId },
+    );
+  return unwrapModelProviderData<{ api_key: string }>(response.data).api_key;
+}
+
+export async function replaceProviderKey(
+  providerId: string,
+  groupId: string,
+  keyId: string,
+  apiKey: string,
+): Promise<{ key_id: string; enabled: boolean }> {
+  const response =
+    await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(
+      {
+        modelProviderId: providerId,
+        groupId,
+        keyId,
+        replaceModelProviderKeyOpenAPIRequest: { api_key: apiKey },
+      },
+      { timeout: 180000 },
+    );
+  return unwrapModelProviderData(response.data);
 }

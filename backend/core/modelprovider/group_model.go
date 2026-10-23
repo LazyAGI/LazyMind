@@ -37,7 +37,11 @@ type addGroupModelResponse struct {
 }
 
 type updateGroupModelRequest struct {
+	Name           *string `json:"name"`
+	ModelType      *string `json:"model_type"`
+	Vision         *bool   `json:"vision"`
 	MaxInputTokens *string `json:"max_input_tokens"`
+	Customize      bool    `json:"customize"`
 }
 
 type groupModelListItem struct {
@@ -82,17 +86,19 @@ func compatibleDBModelTypes(modelType string) []string {
 }
 
 func normalizeGroupModelType(modelType string) string {
-	switch modelType {
+	switch strings.ToLower(strings.TrimSpace(modelType)) {
 	case "embedding", "embed_main":
 		return "embed"
-	case "VLM":
+	case "vlm":
 		return "vlm"
 	default:
-		return modelType
+		return strings.ToLower(strings.TrimSpace(modelType))
 	}
 }
 
 // AddGroupModel inserts a user-defined model row under a connection group (custom model name and model_type).
+var errModelAlreadyExists = errors.New("model name already exists in this supplier")
+
 func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -122,6 +128,10 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 	modelType := normalizeGroupModelType(strings.TrimSpace(req.ModelType))
 	if name == "" || modelType == "" {
 		common.ReplyErr(w, "name and model_type are required", http.StatusBadRequest)
+		return
+	}
+	if err := validateModelName(name); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	maxInputTokens, err := resolveAddModelMaxInputTokens(modelType, name, req.MaxInputTokens)
@@ -162,74 +172,58 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var row orm.UserModelProviderGroupModel
-	err = db.WithContext(r.Context()).
-		Where(
-			"user_model_provider_group_id = ? AND create_user_id = ? AND name = ?",
-			group.ID, userID, name,
-		).
-		Take(&row).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		common.ReplyErr(w, "check existing model failed", http.StatusInternalServerError)
-		return
-	}
-	if err == nil && row.DeletedAt == nil {
-		common.ReplyErr(w, "model name already exists in this group", http.StatusConflict)
-		return
-	}
-
-	now := time.Now()
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		row = orm.UserModelProviderGroupModel{
-			ID:                       common.GenerateID(),
-			UserModelProviderID:      parent.ID,
-			UserModelProviderGroupID: group.ID,
-			ProviderName:             parent.Name,
-			Name:                     name,
-			ModelType:                modelType,
-			Vision:                   req.Vision && modelType == "llm",
-			MaxInputTokens:           maxInputTokens,
-			IsDefault:                false,
-			BaseModel: orm.BaseModel{
-				CreateUserID:   userID,
-				CreateUserName: userName,
-				CreatedAt:      now,
-				UpdatedAt:      now,
-				DeletedAt:      nil,
-			},
+	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := lockProvider(tx, &parent); err != nil {
+			return errConnectionChanged
 		}
-		if err := db.WithContext(r.Context()).Create(&row).Error; err != nil {
-			common.ReplyErr(w, "create model failed", http.StatusInternalServerError)
-			return
+		if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, parent.ID, userID).Take(&group).Error; err != nil {
+			return errConnectionChanged
 		}
-	} else {
-		result := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", row.ID, userID).
-			Updates(map[string]interface{}{
-				"user_model_provider_id": parent.ID,
-				"provider_name":          parent.Name,
-				"model_type":             modelType,
-				"vision":                 req.Vision && modelType == "llm",
-				"max_input_tokens":       maxInputTokens,
-				"is_default":             false,
-				"updated_at":             now,
-				"deleted_at":             nil,
-			})
+		if err := validateSupplierModelType(parent, modelType); err != nil {
+			return err
+		}
+		err := tx.Where("user_model_provider_group_id = ? AND create_user_id = ? AND name = ?", group.ID, userID, name).Take(&row).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil && row.DeletedAt == nil {
+			return errModelAlreadyExists
+		}
+		now := time.Now()
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			row = orm.UserModelProviderGroupModel{
+				ID: common.GenerateID(), UserModelProviderID: parent.ID, UserModelProviderGroupID: group.ID,
+				ProviderName: RuntimeProviderName(parent), Name: name, ModelType: modelType, Vision: req.Vision && isChatTechnicalType(modelType),
+				MaxInputTokens: maxInputTokens, IsDefault: false,
+				BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now},
+			}
+			return tx.Create(&row).Error
+		}
+		result := tx.Model(&orm.UserModelProviderGroupModel{}).Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", row.ID, userID).Updates(map[string]interface{}{
+			"user_model_provider_id": parent.ID, "provider_name": RuntimeProviderName(parent), "model_type": modelType,
+			"vision": req.Vision && isChatTechnicalType(modelType), "max_input_tokens": maxInputTokens, "is_default": false, "updated_at": now, "deleted_at": nil,
+		})
 		if result.Error != nil {
-			common.ReplyErr(w, "restore model failed", http.StatusInternalServerError)
-			return
+			return result.Error
 		}
 		if result.RowsAffected != 1 {
-			common.ReplyErr(w, "model name already exists in this group", http.StatusConflict)
+			return errModelAlreadyExists
+		}
+		row.UserModelProviderID, row.ProviderName, row.ModelType = parent.ID, RuntimeProviderName(parent), modelType
+		row.Vision, row.MaxInputTokens, row.IsDefault, row.UpdatedAt, row.DeletedAt = req.Vision && isChatTechnicalType(modelType), maxInputTokens, false, now, nil
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, errUnsupportedModelType) || errors.Is(err, errSupplierModelType) {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		row.UserModelProviderID = parent.ID
-		row.ProviderName = parent.Name
-		row.ModelType = modelType
-		row.Vision = req.Vision && modelType == "llm"
-		row.MaxInputTokens = maxInputTokens
-		row.IsDefault = false
-		row.UpdatedAt = now
-		row.DeletedAt = nil
+		if errors.Is(err, errConnectionChanged) || errors.Is(err, errModelAlreadyExists) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
+		common.ReplyErr(w, "save model failed", http.StatusInternalServerError)
+		return
 	}
 
 	common.ReplyOK(w, addGroupModelResponse{
@@ -247,7 +241,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// UpdateGroupModel updates user-editable fields on a group model, currently max_input_tokens for LLMs.
+// UpdateGroupModel patches model metadata while keeping its referenced UUID.
 func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -320,43 +314,130 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if row.IsDefault {
-		common.ReplyErr(w, "catalog model max_input_tokens cannot be updated", http.StatusBadRequest)
+	if req.Name == nil && req.ModelType == nil && req.Vision == nil && req.MaxInputTokens == nil && !req.Customize {
+		common.ReplyErr(w, "max_input_tokens is required", http.StatusBadRequest)
 		return
 	}
-
-	maxInputTokens, err := resolveRequiredUserMaxInputTokens(row.ModelType, req.MaxInputTokens)
+	now := time.Now().UTC()
+	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := lockProvider(tx, &parent); err != nil {
+			return errConnectionChanged
+		}
+		if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, parent.ID, userID).Take(&group).Error; err != nil {
+			return errConnectionChanged
+		}
+		if err := tx.Where("id = ? AND user_model_provider_group_id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, group.ID, parent.ID, userID).Take(&row).Error; err != nil {
+			return errConnectionChanged
+		}
+		before := row
+		next := row
+		if req.Name != nil {
+			next.Name = strings.TrimSpace(*req.Name)
+		}
+		if req.ModelType != nil {
+			next.ModelType = normalizeGroupModelType(*req.ModelType)
+		}
+		if err := validateModelName(next.Name); err != nil {
+			return err
+		}
+		if err := validateSupplierModelType(parent, next.ModelType); err != nil {
+			return err
+		}
+		if req.Vision != nil {
+			next.Vision = *req.Vision
+		}
+		if !isChatTechnicalType(next.ModelType) {
+			next.Vision = false
+		}
+		if supportsUserMaxInputTokens(next.ModelType) {
+			if req.MaxInputTokens != nil {
+				value, err := resolveRequiredUserMaxInputTokens(next.ModelType, req.MaxInputTokens)
+				if err != nil {
+					return modelMetadataValidationError{err}
+				}
+				next.MaxInputTokens = value
+			} else if (next.MaxInputTokens == nil || strings.TrimSpace(*next.MaxInputTokens) == "") && (next.Name != before.Name || equivalentTechnicalType(next.ModelType) != equivalentTechnicalType(before.ModelType)) {
+				value, err := resolveAddModelMaxInputTokens(next.ModelType, next.Name, nil)
+				if err != nil {
+					return err
+				}
+				next.MaxInputTokens = value
+			}
+		} else {
+			if req.MaxInputTokens != nil && strings.TrimSpace(*req.MaxInputTokens) != "" {
+				return modelMetadataValidationError{errors.New("model max_input_tokens is only supported for llm or vlm models")}
+			}
+			if next.Name != before.Name || equivalentTechnicalType(next.ModelType) != equivalentTechnicalType(before.ModelType) {
+				value, err := resolveSeededMaxInputTokens(next.ModelType, next.Name)
+				if err != nil {
+					return err
+				}
+				next.MaxInputTokens = value
+			}
+		}
+		beforeTokens, nextTokens := "", ""
+		if before.MaxInputTokens != nil {
+			beforeTokens = *before.MaxInputTokens
+		}
+		if next.MaxInputTokens != nil {
+			nextTokens = *next.MaxInputTokens
+		}
+		changed := next.Name != before.Name || next.ModelType != before.ModelType || next.Vision != before.Vision || nextTokens != beforeTokens
+		if !changed {
+			return nil
+		}
+		if row.IsDefault && !req.Customize {
+			return modelMetadataValidationError{errors.New("catalog model max_input_tokens cannot be updated")}
+		}
+		if req.Customize {
+			next.IsDefault = false
+		}
+		if err := validateModelEditReferences(tx, before, next, connectionBaseURL(parent, group.BaseURL)); err != nil {
+			return err
+		}
+		if err := ensureEditedModelNameAvailable(tx, before, next.Name); err != nil {
+			return err
+		}
+		updates := map[string]any{"name": next.Name, "model_type": next.ModelType, "vision": next.Vision, "max_input_tokens": next.MaxInputTokens, "is_default": next.IsDefault, "updated_at": now}
+		if before.IsDefault && !next.IsDefault {
+			updates["free_auto_select_priority"] = 0
+			updates["free_auto_select_base_urls"] = ""
+		}
+		result := tx.Model(&orm.UserModelProviderGroupModel{}).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", before.ID, userID).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errConnectionChanged
+		}
+		if err := retainRenamedCatalogTombstone(tx, parent, before, next, now); err != nil {
+			return err
+		}
+		next.UpdatedAt = now
+		row = next
+		return nil
+	})
 	if err != nil {
-		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		switch {
+		case errors.Is(err, errModelAlreadyExists), errors.Is(err, errConnectionChanged), errors.Is(err, errModelDefaultReference), errors.Is(err, errModelConversationReference), errors.Is(err, errEmbeddingIdentityInUse):
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, errUnsupportedModelType), errors.Is(err, errSupplierModelType), errors.Is(err, errInvalidModelName):
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		default:
+			var invalid modelMetadataValidationError
+			if errors.As(err, &invalid) {
+				common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			} else {
+				common.ReplyErr(w, "update model failed", http.StatusInternalServerError)
+			}
+		}
 		return
 	}
-
-	now := time.Now()
-	if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
-		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
-		Updates(map[string]interface{}{
-			"max_input_tokens": *maxInputTokens,
-			"updated_at":       now,
-		}).Error; err != nil {
-		common.ReplyErr(w, "update model failed", http.StatusInternalServerError)
-		return
-	}
-	row.MaxInputTokens = maxInputTokens
-	row.UpdatedAt = now
-
 	common.ReplyOK(w, groupModelListItem{
-		ID:                       row.ID,
-		UserModelProviderID:      row.UserModelProviderID,
-		UserModelProviderGroupID: row.UserModelProviderGroupID,
-		Name:                     row.Name,
-		ModelType:                row.ModelType,
-		Vision:                   row.Vision,
-		ProviderName:             row.ProviderName,
-		GroupName:                group.Name,
-		BaseURL:                  group.BaseURL,
-		IsDefault:                row.IsDefault,
-		IsEditable:               strings.EqualFold(strings.TrimSpace(row.ModelType), "image_editing"),
-		MaxInputTokens:           row.MaxInputTokens,
+		ID: row.ID, Source: "own", ProviderID: row.UserModelProviderID, ProviderGroupID: row.UserModelProviderGroupID,
+		UserModelProviderID: row.UserModelProviderID, UserModelProviderGroupID: row.UserModelProviderGroupID,
+		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ProviderName: row.ProviderName, GroupName: group.Name,
+		BaseURL: connectionBaseURL(parent, group.BaseURL), IsDefault: row.IsDefault, IsEditable: strings.EqualFold(row.ModelType, "image_editing"), MaxInputTokens: row.MaxInputTokens, Availability: "available", Lifecycle: "active", Capabilities: []string{},
 	})
 }
 
@@ -478,7 +559,11 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		if modelType != EvoModelKey {
 			dbModelType = resolveModelType(r.Context(), modelType)
 		}
-		q = q.Where("user_model_provider_group_models.model_type IN ?", compatibleDBModelTypes(dbModelType))
+		if strings.EqualFold(dbModelType, "vlm") {
+			q = q.Where("(user_model_provider_group_models.model_type IN ? OR (user_model_provider_group_models.model_type = ? AND user_model_provider_group_models.vision = ?))", compatibleDBModelTypes(dbModelType), "llm", true)
+		} else {
+			q = q.Where("user_model_provider_group_models.model_type IN ?", compatibleDBModelTypes(dbModelType))
+		}
 	}
 	if keyword != "" {
 		like := "%" + keyword + "%"
@@ -654,15 +739,30 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clearMultimodalSelection := isMultimodalEmbeddingModelType(row.ModelType)
-	removeTextEmbedding := isTextEmbeddingModelType(row.ModelType)
-	if removeTextEmbedding && !indexedDowngradeConfirmed(r) {
-		common.ReplyErr(w, "removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked", http.StatusConflict)
-		return
-	}
+	var clearMultimodalSelection bool
+	confirmationRequired := errors.New("removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked")
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		// Model editing and durable reference changes serialize on the supplier.
+		// Re-read all configuration before choosing destructive type-specific work.
+		if err := lockProvider(tx, &parent); err != nil {
+			return errConnectionChanged
+		}
+		if !parent.HasCapability("has_models") {
+			return errConnectionChanged
+		}
+		if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, parent.ID, userID).Take(&group).Error; err != nil {
+			return errConnectionChanged
+		}
+		if err := tx.Where("id = ? AND user_model_provider_group_id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, group.ID, parent.ID, userID).Take(&row).Error; err != nil {
+			return errConnectionChanged
+		}
+		clearMultimodalSelection = isMultimodalEmbeddingModelType(row.ModelType)
+		removeTextEmbedding := isTextEmbeddingModelType(row.ModelType)
+		if removeTextEmbedding && !indexedDowngradeConfirmed(r) {
+			return confirmationRequired
+		}
 		if removeTextEmbedding {
 			count, err := downgradeIndexedDatasets(tx, userID, now)
 			if err != nil {
@@ -670,13 +770,17 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 			}
 			downgradedKnowledgeBases = count
 		}
-		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
+		deleted := tx.Model(&orm.UserModelProviderGroupModel{}).
 			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
 			Updates(map[string]interface{}{
 				"deleted_at": now,
 				"updated_at": now,
-			}).Error; err != nil {
-			return err
+			})
+		if deleted.Error != nil {
+			return deleted.Error
+		}
+		if deleted.RowsAffected != 1 {
+			return errConnectionChanged
 		}
 		// Drop any default-model rows pointing at this model (avoids stale share=true).
 		if err := tx.Where("user_model_provider_group_model_id = ?", row.ID).
@@ -685,7 +789,11 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		common.ReplyErr(w, "delete model failed", http.StatusInternalServerError)
+		if errors.Is(err, confirmationRequired) || errors.Is(err, errConnectionChanged) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+		} else {
+			common.ReplyErr(w, "delete model failed", http.StatusInternalServerError)
+		}
 		return
 	}
 

@@ -1076,7 +1076,7 @@ func TestConversationModelHandlersPersistVersionAndBlockActiveRuns(t *testing.T)
 
 func TestBuildChatLLMConfigKeepsDeclaredVision(t *testing.T) {
 	for _, vision := range []bool{false, true} {
-		config, err := buildChatLLMConfig(context.Background(), &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
+		config, err := buildChatLLMConfig(context.Background(), nil, &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
 		if err != nil {
 			t.Fatal(err)
 		}

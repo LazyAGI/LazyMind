@@ -42,6 +42,8 @@ export type ModelCapability =
 interface ProviderModel {
   id: string;
   name: string;
+  modelType?: string;
+  vision?: boolean;
   capability: ModelCapability;
   builtIn: boolean;
   enabled: boolean;
@@ -54,6 +56,8 @@ interface ProviderModel {
 export interface ProviderOption {
   id: string;
   name: string;
+  isCustom?: boolean;
+  protocolName?: string;
   brand: string;
   logoUrl?: string;
   headline: string;
@@ -85,6 +89,8 @@ interface ModuleConfig {
 interface ApiProvider {
   id: string;
   name: string;
+  is_custom?: boolean;
+  protocol_name?: string;
   description?: string;
   base_url?: string;
 }
@@ -94,6 +100,7 @@ interface ApiModel {
   is_editable?: boolean;
   name: string;
   model_type?: string;
+  vision?: boolean;
   is_default?: boolean;
   max_input_tokens?: string;
   source?: "own" | "cloud";
@@ -117,6 +124,8 @@ interface SelectedModelApiItem {
   is_editable?: boolean;
   model_id: string;
   model_key: string;
+  model_type?: string;
+  vision?: boolean;
   name: string;
   provider_name: string;
   share?: boolean;
@@ -453,15 +462,17 @@ function mapApiProvider(
   return {
     id: provider.id,
     name: provider.name,
-    brand: getProviderBrand(provider.name),
-    logoUrl: getProviderLogoUrl(provider.name),
+    isCustom: provider.is_custom === true,
+    protocolName: provider.protocol_name || provider.name,
+    brand: provider.is_custom ? "API" : getProviderBrand(provider.name || provider.protocol_name || ""),
+    logoUrl: getProviderLogoUrl(provider.name || provider.protocol_name || "", provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,
       fallbacks,
     ),
     backendDescription,
-    source: provider.name,
+    source: provider.protocol_name || provider.name,
     baseUrl: provider.base_url || "",
     capabilities: [],
     models: [],
@@ -649,7 +660,9 @@ export function useDefaultModelConfig({
           mapApiProvider(
             {
               id: providerId,
-              name: selection.provider_name,
+              name: source === "cloud" ? selection.provider_name : selection.group_name || selection.provider_name,
+              protocol_name: selection.provider_name,
+              is_custom: source !== "cloud" && !!selection.group_name && selection.group_name !== selection.provider_name,
               base_url: selection.base_url,
             },
             localizedFallbacks,
@@ -664,6 +677,8 @@ export function useDefaultModelConfig({
         const model: ProviderModel = {
           id: selection.model_id,
           name: selection.name,
+          modelType: selection.model_type,
+          vision: selection.vision,
           capability,
           builtIn: Boolean(selection.is_default),
           enabled: true,
@@ -855,7 +870,9 @@ export function useDefaultModelConfig({
               mapApiProvider(
                 {
                   id: providerId,
-                  name: model.provider_name || "LazyMind Cloud",
+                  name: source === "cloud" ? model.provider_name || "LazyMind Cloud" : model.group_name || model.provider_name || "",
+                  protocol_name: model.provider_name,
+                  is_custom: source !== "cloud" && !!model.group_name && model.group_name !== model.provider_name,
                   base_url: model.base_url,
                 },
                 localizedFallbacks,
@@ -869,6 +886,8 @@ export function useDefaultModelConfig({
             const providerModel: ProviderModel = {
               id: model.id,
               name: model.name,
+              modelType: model.model_type,
+              vision: model.vision,
               capability,
               builtIn: Boolean(model.is_default),
               enabled: true,

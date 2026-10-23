@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type ReactElement } from "react";
 import { Alert, Button, Select, Skeleton, Switch, Tag, Tooltip } from "antd";
 import {
   CheckCircleOutlined,
+  AudioOutlined,
   CloudServerOutlined,
   CompassOutlined,
   DownOutlined,
@@ -9,11 +10,15 @@ import {
   GoogleOutlined,
   MinusCircleOutlined,
   QuestionCircleOutlined,
+  PictureOutlined,
+  RocketOutlined,
   ScanOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
+import { ModelModalityMarks } from "./ModelModalityMarks";
+import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
 import {
   cloudServiceConfigs,
   normalizeProviderKey,
@@ -26,6 +31,7 @@ import {
   type UseDefaultModelConfigOptions,
   type VerifiedCloudServiceResponse,
 } from "../hooks/useDefaultModelConfig";
+import "./DefaultModelConfigPanel.scss";
 
 export type {
   CloudServiceSlotKey,
@@ -34,6 +40,19 @@ export type {
 } from "../hooks/useDefaultModelConfig";
 
 const LAZYMIND_CLOUD_PROVIDER_KEY = "lazymind_cloud";
+
+const defaultCapabilityGroups = [
+  { key: "visual", icon: PictureOutlined, capabilities: ["vlm", "image_generator", "video_generator"] },
+  { key: "voice", icon: AudioOutlined, capabilities: ["speech_to_text", "tts"] },
+  { key: "retrieval", icon: SearchOutlined, capabilities: ["embed_image", "reranker", "cloudParsing", "searchEngine"] },
+  { key: "evolution", icon: RocketOutlined, capabilities: ["evo_llm"] },
+] as const;
+
+function getDefaultCapabilityGroup(target?: ModelCapability) {
+  return defaultCapabilityGroups.find((group) =>
+    group.capabilities.some((capability) => capability === target),
+  )?.key;
+}
 
 interface DefaultModelConfigPanelProps extends UseDefaultModelConfigOptions {
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
@@ -156,7 +175,7 @@ function ProviderLogo({
   return (
     <span
       aria-hidden="true"
-      className={`model-provider-logo is-${normalizeProviderKey(provider.name)}${compact ? " is-compact" : ""}`}
+      className={`model-provider-logo is-${provider.isCustom ? "custom" : normalizeProviderKey(provider.source || provider.name)}${compact ? " is-compact" : ""}`}
     >
       <span className="model-provider-logo-fallback">{provider.brand}</span>
       {provider.logoUrl ? (
@@ -183,7 +202,8 @@ export default function DefaultModelConfigPanel({
   highlightTarget,
   onHighlightResolved,
 }: DefaultModelConfigPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const language = i18n?.resolvedLanguage || i18n?.language;
   const {
     visibleModuleConfigs,
     isAdmin,
@@ -226,6 +246,18 @@ export default function DefaultModelConfigPanel({
     Partial<Record<CloudServiceSlotKey, string>>
   >({});
   const [keyboardNavigation, setKeyboardNavigation] = useState(false);
+  const groupId = useId();
+  const highlightedGroup = getDefaultCapabilityGroup(highlightTarget);
+  const [expandedGroups, setExpandedGroups] = useState<string[]>(() =>
+    highlightedGroup ? [highlightedGroup] : [],
+  );
+
+  useEffect(() => {
+    if (highlightedGroup) {
+      setExpandedGroups((current) => current.includes(highlightedGroup)
+        ? current : [...current, highlightedGroup]);
+    }
+  }, [highlightedGroup, highlightTarget]);
   const selectInteractionProps = {
     popupClassName: `model-provider-select-dropdown${keyboardNavigation ? " is-keyboard-navigation" : ""}`,
     onMouseDown: () => setKeyboardNavigation(false),
@@ -240,6 +272,7 @@ export default function DefaultModelConfigPanel({
   const focusedHighlightRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!highlightTarget) focusedHighlightRef.current = null;
     if (
       !highlightTarget ||
       !highlightedRowRef.current ||
@@ -247,16 +280,17 @@ export default function DefaultModelConfigPanel({
     ) {
       return;
     }
-    focusedHighlightRef.current = highlightTarget;
     const frame = window.requestAnimationFrame(() => {
+      if (!highlightedRowRef.current) return;
+      focusedHighlightRef.current = highlightTarget;
       highlightedRowRef.current?.scrollIntoView({
-        behavior: "smooth",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
         block: "center",
       });
       highlightedRowRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [highlightTarget, modelProviderSetupState, moduleModelOptions, defaultLoadState]);
+  }, [highlightTarget, modelProviderSetupState, moduleModelOptions, defaultLoadState, expandedGroups]);
 
   const modelCards = visibleModuleConfigs.map((module) => {
     const options = (moduleModelOptions[module.key] || []).filter(
@@ -270,7 +304,7 @@ export default function DefaultModelConfigPanel({
     );
     const keyword = (moduleModelSearchKeywords[module.key] || "").trim().toLowerCase();
     const visibleOptions = options.filter((option) =>
-      !keyword || `${option.model.name} ${option.provider.name} ${option.group.name}`.toLowerCase().includes(keyword),
+      !keyword || `${option.model.name} ${getProviderSearchText(option.provider, language)}`.toLowerCase().includes(keyword),
     );
     const moduleTitle = t(module.titleKey);
     const moduleSubtitle = t(module.subtitleKey);
@@ -449,7 +483,8 @@ export default function DefaultModelConfigPanel({
           }
         >
           {visibleOptions.map((option) => {
-            const { provider, group, model, value } = option;
+            const { provider, model, value } = option;
+            const supplierDisplayName = getProviderDisplayName(provider, language);
             const displayName =
               module.key === "image_generator"
                 ? formatUnifiedImageDisplayName(
@@ -460,7 +495,7 @@ export default function DefaultModelConfigPanel({
             return (
               <Select.Option
                 key={value}
-                title={`${displayName} · ${group.name || provider.name}`}
+                title={`${displayName} · ${supplierDisplayName}`}
                 disabled={
                   model.availability === "unavailable" ||
                   model.lifecycle === "deprecated" ||
@@ -470,14 +505,14 @@ export default function DefaultModelConfigPanel({
                   <span className="model-provider-select-value">
                     <ProviderLogo provider={provider} compact />
                     <span className="model-provider-select-value-text">
-                      {displayName} · {group.name || provider.name}
+                      {displayName} · {supplierDisplayName}
                     </span>
                   </span>
                 }
                 value={value}
               >
                 <Tooltip
-                  title={`${displayName} · ${group.name || provider.name}`}
+                  title={`${displayName} · ${supplierDisplayName}`}
                   placement="right"
                   overlayClassName="model-provider-option-tooltip"
                 >
@@ -485,10 +520,17 @@ export default function DefaultModelConfigPanel({
                     <ProviderLogo provider={provider} compact />
                     <span className="model-provider-select-copy">
                       <strong>{displayName}</strong>
+                      <ModelModalityMarks
+                        compact
+                        providerName={provider.source || provider.name}
+                        modelName={model.name}
+                        modelType={model.modelType}
+                        vision={model.vision}
+                      />
                       <small>
                         {option.source === "cloud"
                           ? t("modelProvider.cloudSystemReadOnly")
-                          : `${provider.name} / ${group.name}`}
+                          : supplierDisplayName}
                         {option.source === "cloud"
                           ? ""
                           : model.builtIn
@@ -693,12 +735,11 @@ export default function DefaultModelConfigPanel({
   });
 
   const cards = [...modelCards, ...cloudCards];
-  const configuredCards = cards.filter((card) => card.configured);
-  const pendingCards = cards.filter((card) => !card.configured);
+  const basicCards = cards.filter((card) => card.key === "llm" || card.key === "embed_main");
 
   return (
     <section
-      className="model-provider-config-panel"
+      className="model-provider-config-panel model-defaults-panel"
       aria-label={t("modelProvider.defaultConfigAria")}
     >
       <div className="model-provider-panel-title-row">
@@ -706,8 +747,8 @@ export default function DefaultModelConfigPanel({
           <h2 className="model-provider-section-title">
             {t("modelProvider.defaultTitle")}
           </h2>
-          <p className="model-provider-section-subtitle">
-            {t("modelProvider.defaultSubtitle")}
+          <p className="model-provider-section-subtitle model-defaults-intro">
+            {t("modelProvider.defaults.intro")}
           </p>
         </div>
       </div>
@@ -732,23 +773,50 @@ export default function DefaultModelConfigPanel({
           action={<Button onClick={retryDefaultModelState}>{t("common.retry")}</Button>} />
       ) : (
         <>
-          <section className="model-provider-capability-section" aria-label={t("modelProvider.configuredCapabilities")}>
-            <div className="model-provider-capability-heading">
-              <h3>{t("modelProvider.configuredCapabilities")} <span>{configuredCards.length}</span></h3>
+          <section className="model-defaults-basic" aria-label={t("modelProvider.defaults.basicTitle")}>
+            <div className="model-defaults-section-heading">
+              <h3>{t("modelProvider.defaults.basicTitle")}</h3>
+              <span className="model-defaults-save-note">{t("modelProvider.defaults.autoSave")}</span>
             </div>
-            {configuredCards.length ? (
-              <div className="model-provider-default-list">{configuredCards.map((card) => card.node)}</div>
-            ) : <p className="model-provider-capability-empty">{t("modelProvider.configuredCapabilitiesEmpty")}</p>}
+            <div className="model-defaults-rows">{basicCards.map((card) => card.node)}</div>
           </section>
-          <section className="model-provider-capability-section model-provider-pending-section" aria-label={t("modelProvider.pendingCapabilities")}>
-            <div className="model-provider-capability-heading">
-              <h3>{t("modelProvider.pendingCapabilities")} <span>{pendingCards.length}</span></h3>
-
-            </div>
-            {pendingCards.length ? (
-              <div className="model-provider-pending-list">{pendingCards.map((card) => card.node)}</div>
-            ) : <p className="model-provider-capability-empty">{t("modelProvider.pendingCapabilitiesEmpty")}</p>}
-          </section>
+          <div className="model-defaults-extensions-heading">
+            <h3>{t("modelProvider.defaults.extensionsTitle")}</h3>
+            <p>{t("modelProvider.defaults.extensionsDescription")}</p>
+          </div>
+          <div className="model-defaults-groups">
+            {defaultCapabilityGroups.map(({ key, icon: Icon, capabilities }) => {
+              const groupCards = capabilities.flatMap((capability) => cards.filter((card) => card.key === capability));
+              if (!groupCards.length) return null;
+              const expanded = expandedGroups.includes(key);
+              const title = t(`modelProvider.defaults.${key}Title`);
+              const contentId = `${groupId}-${key}`;
+              const count = groupCards.filter((card) => card.configured).length;
+              return (
+                <div className={`model-defaults-group${expanded ? " is-expanded" : ""}`} key={key}>
+                  <h3 className="model-defaults-group-heading">
+                    <button type="button" className="model-defaults-group-toggle"
+                      aria-expanded={expanded} aria-controls={contentId}
+                      onClick={() => setExpandedGroups((current) => expanded
+                        ? current.filter((item) => item !== key) : [...current, key])}>
+                      <span className="model-defaults-group-icon" aria-hidden="true"><Icon /></span>
+                      <span className="model-defaults-group-copy">
+                        <span className="model-defaults-group-title">{title}</span>
+                        <span className="model-defaults-group-description">{t(`modelProvider.defaults.${key}Description`)}</span>
+                      </span>
+                      <span className={`model-defaults-group-count${count ? " has-configured" : ""}`}>
+                        {t("modelProvider.defaults.configuredCount", { configured: count, total: groupCards.length })}
+                      </span>
+                      <DownOutlined className="model-defaults-group-caret" aria-hidden="true" />
+                    </button>
+                  </h3>
+                  <section id={contentId} aria-label={title} hidden={!expanded}>
+                    {expanded && <div className="model-defaults-rows">{groupCards.map((card) => card.node)}</div>}
+                  </section>
+                </div>
+              );
+            })}
+          </div>
         </>
       )}
     </section>

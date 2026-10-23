@@ -1,0 +1,100 @@
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { ConfigProvider } from "antd";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import DefaultModelConfigPanel from "./DefaultModelConfigPanel";
+
+const mocks = vi.hoisted(() => ({
+  providers: vi.fn(), selections: vi.fn(), services: vi.fn(), models: vi.fn(), save: vi.fn(),
+  translate: (key: string) => key,
+}));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: mocks.translate, i18n: { language: "en-US" } }) }));
+vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ role: "system-admin" }) } }));
+vi.mock("@/hooks/useModelFeatures", () => ({ useModelFeatures: () => ({ status: "ready", features: { image_embed_enabled: true } }) }));
+vi.mock("@/runtime/features", () => ({ runtimeFeatures: { hideUserGroupSurfaces: false } }));
+vi.mock("@/runtime/cloud/session", () => ({
+  LAZYMIND_CLOUD_SESSION_CHANGED_EVENT: "cloud-session-changed", getCloudSession: async () => ({}), isCloudBusinessAvailable: () => false,
+}));
+vi.mock("../api", () => ({
+  modelProvidersApi: {
+    apiCoreModelProvidersGet: mocks.providers,
+    apiCoreModelProvidersSelectedModelsGet: mocks.selections,
+    apiCoreModelProvidersSelectedProvidersGet: mocks.services,
+    apiCoreModelProvidersModelsGet: mocks.models,
+    apiCoreModelProvidersSelectedModelsPut: mocks.save,
+  }, modelProvidersDefaultApi: {},
+  unwrapModelProviderData: (value: unknown) => value,
+  withModelProviderJsonOptions: (value: unknown) => value,
+}));
+vi.mock("../upstreamCatalog", async () => {
+  const { createUpstreamCatalogIndex } = await import("../upstreamCatalogIndex");
+  return { lookupUpstreamModel: createUpstreamCatalogIndex({ generated_at: "fixture", providers: {
+    OpenAI: [{ name: "catalog-vision", model_type: "llm", input: ["text", "image"], output: ["text"], context: 128000, max_output: 16000 }],
+  } }).lookupModel };
+});
+
+const provider = { id: "supplier", name: "Private gateway", protocol_name: "OpenAI", is_custom: true };
+const identity = { user_model_provider_id: "supplier", user_model_provider_group_id: "group", provider_name: "OpenAI", group_name: "Private gateway" };
+const selection = { ...identity, model_key: "llm", model_id: "saved-uuid", name: "catalog-vision", model_type: "llm", vision: false, source: "own" };
+const renderPanel = () => render(<ConfigProvider theme={{ token: { motion: false } }}><DefaultModelConfigPanel
+  cloudServiceSetupStates={{ cloudParsing: "empty", searchEngine: "empty" }} modelProviderSetupState="ready"
+  onConfigureCloudService={vi.fn()} onConfigureProviders={vi.fn()} onModelSelectionChanged={vi.fn()} onRetrySetup={vi.fn()}
+/></ConfigProvider>);
+async function openLlm() {
+  const select = within(screen.getByRole("group", { name: "modelProvider.module.llmChatTitle" })).getByRole("combobox");
+  await waitFor(() => expect(select).toBeEnabled());
+  fireEvent.mouseDown(select);
+}
+function optionElement(name: string) {
+  const title = screen.getByText(name, { selector: ".model-provider-select-copy strong" });
+  return title.closest(".model-provider-select-option") as HTMLElement;
+}
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.providers.mockResolvedValue({ data: { providers: [provider] } });
+  mocks.selections.mockResolvedValue({ data: { selections: [selection] } });
+  mocks.services.mockResolvedValue({ data: { selections: [] } });
+  mocks.models.mockResolvedValue({ data: { models: [] } });
+  mocks.save.mockResolvedValue({ data: { selections: [] } });
+});
+afterEach(cleanup);
+
+describe("default model configured vision", () => {
+  it("uses the stored selected model's actual false flag while its refreshed options are pending", async () => {
+    mocks.models.mockImplementation(() => new Promise(() => undefined));
+    renderPanel();
+    await screen.findByText("catalog-vision · Private gateway");
+    await openLlm();
+    const input = within(optionElement("catalog-vision")).getByLabelText("modelProvider.modality.inputAria");
+    expect(within(input).queryByLabelText("modelProvider.modality.image")).not.toBeInTheDocument();
+  });
+
+  it("uses refreshed actual capabilities and saves UUID identity without display metadata", async () => {
+    mocks.models.mockResolvedValue({ data: { models: [
+      { ...identity, id: "saved-uuid", name: "catalog-vision", model_type: "llm", vision: false },
+      { ...identity, id: "vision-uuid", name: "custom-vision", model_type: "llm", vision: true },
+    ] } });
+    renderPanel();
+    await screen.findByText("catalog-vision · Private gateway");
+    await openLlm();
+    await screen.findByText("custom-vision", { selector: ".model-provider-select-copy strong" });
+    const plainInput = within(optionElement("catalog-vision")).getByLabelText("modelProvider.modality.inputAria");
+    expect(within(plainInput).queryByLabelText("modelProvider.modality.image")).not.toBeInTheDocument();
+    const visionInput = within(optionElement("custom-vision")).getByLabelText("modelProvider.modality.inputAria");
+    expect(within(visionInput).getByLabelText("modelProvider.modality.image")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("custom-vision", { selector: ".model-provider-select-copy strong" }));
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({ setSelectedModelsOpenAPIRequest: {
+      selections: [{ model_key: "llm", model_id: "vision-uuid", source: "own" }],
+    } }));
+  });
+
+  it("retains VLM image understanding when the separate stored vision boolean is false", async () => {
+    mocks.models.mockResolvedValue({ data: { models: [{ ...identity, id: "vlm-uuid", name: "private-vlm", model_type: "vlm", vision: false }] } });
+    renderPanel();
+    await screen.findByText("catalog-vision · Private gateway");
+    fireEvent.click(screen.getByRole("button", { name: /modelProvider.defaults.visualTitle/ }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "modelProvider.module.vlmTitle" }));
+    await screen.findByText("private-vlm", { selector: ".model-provider-select-copy strong" });
+    const input = within(optionElement("private-vlm")).getByLabelText("modelProvider.modality.inputAria");
+    expect(within(input).getByLabelText("modelProvider.modality.image")).toBeInTheDocument();
+  });
+});

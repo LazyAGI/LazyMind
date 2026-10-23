@@ -131,8 +131,8 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
         },
       }),
     );
-    const configured = screen.getByRole("region", { name: "modelProvider.configuredCapabilities" });
-    const llmRow = await within(configured).findByRole("group", { name: "modelProvider.module.llmChatTitle" });
+    const basic = screen.getByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const llmRow = await within(basic).findByRole("group", { name: "modelProvider.module.llmChatTitle" });
     expect(within(llmRow).queryByRole("switch")).not.toBeInTheDocument();
     expect(container.textContent).not.toContain("cloud-access-canary");
   });
@@ -144,6 +144,7 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
     }] } });
     renderPanel();
     await waitFor(() => expect(mocks.getSelectedModels).toHaveBeenCalled());
+    fireEvent.click(await screen.findByRole("button", { name: /modelProvider\.defaults\.voiceTitle/ }));
     expect(
       await screen.findByRole("combobox", { name: "modelProvider.module.ttsTitle" }),
     ).toBeInTheDocument();

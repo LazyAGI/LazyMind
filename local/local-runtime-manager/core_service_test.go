@@ -13,12 +13,23 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	runner := &fakeRunner{t: t}
+	uvPath := filepath.Join(repo, "catalog-uv")
+	if err := os.WriteFile(uvPath, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(authServiceUVEnvVar, uvPath)
 	manager := NewCoreServiceManager(runner)
 	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
 		t.Fatalf("runtime config: %v", err)
 	}
 	runner.handlers = append(runner.handlers, func(cmd Command) (CommandResult, error) {
+		assertCommand(t, cmd, uvPath, "run", "--no-project", "--python", cfg.AuthService.PythonVersion, "python",
+			filepath.Join(repo, "frontend", "scripts", "generate_upstream_model_catalog.py"),
+			"--backend-out", filepath.Join(repo, coreSourceDirName, "config", "upstream_model_catalog.json"),
+			"--frontend-out", filepath.Join(repo, "frontend", "src", "modules", "modelProvider", "upstreamModelCatalog.json"))
+		return CommandResult{}, nil
+	}, func(cmd Command) (CommandResult, error) {
 		assertCommand(t, cmd, "go", "build", "-buildvcs=false", "-o", paths.CoreBin, ".")
 		if cmd.Dir != filepath.Join(repo, coreSourceDirName) {
 			t.Fatalf("unexpected core build dir %q", cmd.Dir)
@@ -29,7 +40,7 @@ func TestCoreServiceBuildUsesBackendCore(t *testing.T) {
 	if err := manager.buildCore(context.Background(), cfg, paths); err != nil {
 		t.Fatalf("build core: %v", err)
 	}
-	runner.assertCommandCount(1)
+	runner.assertCommandCount(2)
 }
 
 func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {

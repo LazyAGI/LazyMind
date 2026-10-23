@@ -35,7 +35,7 @@ func TestLocalLLMConfigReadsExistingCiphertextWithoutCloudOrKeychain(t *testing.
 	runtimeProviderState.RUnlock()
 	SetRuntimeProvider(nil)
 	t.Cleanup(func() { SetRuntimeProvider(previous) })
-	db := orm.MigrateTestDB(t, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{})
+	db := orm.MigrateTestDB(t, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}, &orm.UserModelProvider{})
 	ciphertext, err := secretcrypto.EncodeAESGCM([]byte("personal-key"), "existing-local-key")
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestLocalLLMConfigReadsExistingCiphertextWithoutCloudOrKeychain(t *testing.
 	group := orm.UserModelProviderGroup{ID: "personal-group", UserModelProviderID: "personal-provider", Name: "Personal", BaseURL: "https://personal.example/v1", APIKeyCiphertext: string(ciphertext), CredentialVersion: 1, IsVerified: true, BaseModel: orm.BaseModel{CreateUserID: "local-user", CreatedAt: now, UpdatedAt: now}}
 	model := orm.UserModelProviderGroupModel{ID: "personal-model", UserModelProviderID: "personal-provider", UserModelProviderGroupID: group.ID, ProviderName: "OpenAI", Name: "personal-chat", ModelType: "llm", BaseModel: group.BaseModel}
 	selection := orm.UserSelectedModel{UserID: "local-user", ModelKey: "llm", UserModelProviderGroupModelID: model.ID, CreatedAt: now, UpdatedAt: now}
-	for _, row := range []any{&group, &model, &selection} {
+	for _, row := range []any{&orm.UserModelProvider{ID: "personal-provider", Name: "OpenAI", BaseURL: group.BaseURL, BaseModel: group.BaseModel}, &group, &model, &selection} {
 		if err := db.DB.Create(row).Error; err != nil {
 			t.Fatal(err)
 		}

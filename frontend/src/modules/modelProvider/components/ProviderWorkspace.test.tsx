@@ -1,0 +1,792 @@
+import { useState } from "react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { ConfigProvider } from "antd";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SettingsNavigationGuard } from "@/modules/settings/SettingsNavigationGuard";
+import { ProviderWorkspace } from "./ProviderWorkspace";
+import type { AddedProvider } from "../pages/ModelProvidersPage";
+
+const mocks = vi.hoisted(() => ({
+  addKey: vi.fn(),
+  deleteKey: vi.fn(),
+  updateEndpoint: vi.fn(),
+  setActiveKey: vi.fn(),
+  createGroup: vi.fn(),
+  createProvider: vi.fn(),
+  updateProvider: vi.fn(),
+  deleteProvider: vi.fn(),
+  getModels: vi.fn(),
+}));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string) => key,
+  }),
+}));
+vi.mock("@/components/request", () => ({
+  getLocalizedErrorMessage: (error: Error) => error.message,
+}));
+vi.mock("../api", () => ({
+  modelProvidersApi: {
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet: mocks.getModels,
+    apiCoreModelProvidersModelProviderIdGroupsPost: mocks.createGroup,
+  },
+  createCustomProvider: mocks.createProvider,
+  updateCustomProviderName: mocks.updateProvider,
+  deleteCustomProvider: mocks.deleteProvider,
+  unwrapModelProviderData: (data: unknown) => data,
+  modelProvidersDefaultApi: {
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost: mocks.addKey,
+    apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDelete:
+      mocks.deleteKey,
+  },
+  updateProviderEndpoint: mocks.updateEndpoint,
+  setProviderActiveKey: mocks.setActiveKey,
+  withModelProviderJsonOptions: (value: unknown) => value,
+}));
+const provider: AddedProvider = {
+  id: "openai",
+  name: "OpenAI",
+  source: "OpenAI",
+  brand: "OpenAI",
+  headline: "",
+  baseUrl: "https://api.example.test/v1",
+  capabilities: ["LLM_CHAT"],
+  models: [],
+  groups: [
+    {
+      id: "primary",
+      name: "Primary",
+      source: "OpenAI",
+      baseUrl: "https://api.example.test/v1",
+      apiKeyConfigured: true,
+      verified: true,
+      keys: [{ id: "opaque-primary", masked: "********1234", enabled: true }],
+      models: [
+        {
+          id: "model-id",
+          name: "fixture-model",
+          capability: "LLM_CHAT",
+          builtIn: true,
+          enabled: true,
+          maxInputTokens: "128K",
+        },
+      ],
+    },
+  ],
+};
+function setup(
+  overrides: Partial<React.ComponentProps<typeof ProviderWorkspace>> = {},
+  guarded = false,
+) {
+  let updateConfiguredProviders: (
+    providers: AddedProvider[],
+  ) => void = () => {};
+  const callbacks = {
+    setProvider: (next: AddedProvider) => updateConfiguredProviders([next]),
+    onReload: vi.fn().mockResolvedValue(undefined),
+    onDeleteModel: vi.fn(),
+    onRetry: vi.fn(),
+  };
+  function Harness() {
+    const [drawer, setDrawer] = useState(false);
+    const [configuredProviders, setConfiguredProviders] = useState([provider]);
+    updateConfiguredProviders = setConfiguredProviders;
+    return (
+      <>
+        <ProviderWorkspace
+          providers={[provider]}
+          configuredProviders={configuredProviders}
+          loading={false}
+          loadError={false}
+          onRetry={callbacks.onRetry}
+          capabilityLabel={(type) => type}
+          onLoadModels={vi.fn()}
+          modelsLoading={{}}
+          onAddModel={vi.fn()}
+          onSyncModels={vi.fn()}
+          onEditModel={vi.fn()}
+          onDeleteModel={callbacks.onDeleteModel}
+          onCheck={vi.fn()}
+          checking={{}}
+          onReload={callbacks.onReload}
+          cloudContent={<p>Cloud login</p>}
+          onBack={() => setDrawer(true)}
+          {...overrides}
+        />
+        {drawer ? <p>Settings overview open</p> : null}
+      </>
+    );
+  }
+  if (guarded) {
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/settings",
+          element: (
+            <SettingsNavigationGuard>
+              <Harness />
+            </SettingsNavigationGuard>
+          ),
+        },
+      ],
+      { initialEntries: ["/settings"] },
+    );
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <RouterProvider router={router} />
+      </ConfigProvider>,
+    );
+  } else
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <Harness />
+      </ConfigProvider>,
+    );
+  return callbacks;
+}
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.addKey.mockResolvedValue({ data: { success: true } });
+  mocks.deleteKey.mockResolvedValue({ data: { success: true } });
+  mocks.createGroup.mockResolvedValue({
+    data: { id: "new-private-record", is_verified: true },
+  });
+  mocks.createProvider.mockResolvedValue({
+    id: "created-supplier",
+    group_id: "created-private-record",
+  });
+  mocks.updateProvider.mockResolvedValue({ id: "custom" });
+  mocks.deleteProvider.mockResolvedValue({ id: "custom" });
+  mocks.getModels.mockResolvedValue({ data: { models: [] } });
+  mocks.setActiveKey.mockResolvedValue({
+    group_id: "backup",
+    key_id: "opaque-backup",
+  });
+});
+
+describe("compact provider workspace", () => {
+  it("keeps a supplier logo when its request protocol changes", () => {
+    const supplier = { ...provider, name: "DeepSeek", protocolName: "Claude", source: "Claude" };
+    setup({ providers: [supplier], configuredProviders: [supplier] });
+    expect(document.querySelector(".provider-workspace-supplier-title img")).toHaveAttribute("src", "/provider-icons/deepseek.svg");
+  });
+  it("shows a retryable model-load failure while retaining the last saved models", () => {
+    const onLoadModels = vi.fn();
+    setup({
+      onLoadModels,
+      modelsError: { "openai:primary": "Temporary model service error" },
+    });
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("modelProvider.workspace.modelsLoadFailed");
+    expect(alert).toHaveTextContent("Temporary model service error");
+    expect(screen.getByRole("listitem", { name: "fixture-model" })).toBeInTheDocument();
+    onLoadModels.mockClear();
+    fireEvent.click(within(alert).getByRole("button", { name: "modelProvider.workspace.retry" }));
+    expect(onLoadModels).toHaveBeenCalledWith(provider, provider.groups[0]);
+  });
+
+  it("does not present a failed initial model request as an empty supplier", () => {
+    const empty = { ...provider, groups: [{ ...provider.groups[0], models: [] }] };
+    setup({
+      providers: [empty],
+      configuredProviders: [empty],
+      modelsError: { "openai:primary": "Service unavailable" },
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("modelProvider.workspace.modelsLoadFailed");
+    expect(screen.queryByText("modelProvider.noModels")).not.toBeInTheDocument();
+  });
+
+  it("protects endpoint edits when returning to the mobile supplier list", async () => {
+    setup({}, true);
+    fireEvent.click(document.querySelector(".provider-workspace-provider")!);
+    const workspace = document.querySelector(".provider-workspace");
+    expect(workspace).toHaveClass("is-mobile-detail");
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    fireEvent.change(endpoint, { target: { value: "https://unsaved.example.test/v1" } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.suppliers" }));
+    expect(await screen.findByText("settingsPage.unsaved.title")).toBeInTheDocument();
+    expect(workspace).toHaveClass("is-mobile-detail");
+    fireEvent.click(screen.getByText("settingsPage.unsaved.stay"));
+    expect(endpoint).toHaveValue("https://unsaved.example.test/v1");
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.suppliers" }));
+    fireEvent.click(await screen.findByText("settingsPage.unsaved.discard"));
+    await waitFor(() => expect(workspace).not.toHaveClass("is-mobile-detail"));
+    expect(endpoint).toHaveValue(provider.baseUrl);
+  });
+
+  it("counts keys, models or configured credentials rather than empty compatibility groups", () => {
+    const variants = [
+      { id: "empty", name: "Empty supplier", keys: [], models: [], apiKeyConfigured: false },
+      { id: "keys", name: "Keys supplier", keys: provider.groups[0].keys, models: [], apiKeyConfigured: false },
+      { id: "models", name: "Models supplier", keys: [], models: provider.groups[0].models, apiKeyConfigured: false },
+      { id: "stored-models", name: "Stored-only supplier", keys: [], models: [], modelCount: 2, apiKeyConfigured: false },
+      { id: "credentials", name: "Credentials supplier", keys: [], models: [], apiKeyConfigured: true },
+    ].map(({ id, name, ...state }) => ({
+      ...provider,
+      id,
+      name,
+      groups: [{ ...provider.groups[0], ...state, id: `${id}-group`, verified: false }],
+    }));
+    setup({ providers: variants, configuredProviders: variants });
+    const emptyButton = screen.getByRole("button", { name: /Empty supplier/ });
+    expect(emptyButton.querySelector("i")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.configured" }));
+    expect(screen.queryByRole("button", { name: /Empty supplier/ })).not.toBeInTheDocument();
+    for (const name of ["Keys supplier", "Models supplier", "Stored-only supplier", "Credentials supplier"]) {
+      expect(screen.getByRole("button", { name: new RegExp(name) })).toBeInTheDocument();
+    }
+  });
+
+  it("validates custom supplier names against the backend UTF-8 byte limit", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    const name = dialog.getByLabelText("modelProvider.workspace.supplierName");
+    fireEvent.change(name, { target: { value: "中".repeat(86) } });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    expect(await screen.findByText("modelProvider.workspace.supplierNameBytes")).toBeInTheDocument();
+    expect(mocks.createProvider).not.toHaveBeenCalled();
+    fireEvent.change(name, { target: { value: ` ${"中".repeat(85)} ` } });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(mocks.createProvider).toHaveBeenCalledWith({
+      name: "中".repeat(85),
+      source_provider_id: "openai",
+      base_url: provider.baseUrl,
+    }));
+  });
+
+  it.each(["custom", "default", "empty"] as const)(
+    "keeps or updates a %s API address when changing supplier templates",
+    async (mode) => {
+      const deepseek = { ...provider, id: "deepseek", name: "DeepSeek", source: "DeepSeek", baseUrl: "https://api.deepseek.example/v1", groups: [] };
+      setup({ providers: [provider, deepseek], configuredProviders: [provider] });
+      fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+      const dialog = within(await screen.findByRole("dialog"));
+      const endpoint = dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+      if (mode !== "default") {
+        fireEvent.change(endpoint, { target: { value: mode === "custom" ? "https://private.example.test/v1" : "" } });
+      }
+      fireEvent.mouseDown(dialog.getByRole("combobox"));
+      fireEvent.click(await screen.findByText("DeepSeek", { selector: ".ant-select-item-option-content" }));
+      expect(endpoint).toHaveValue(mode === "custom" ? "https://private.example.test/v1" : deepseek.baseUrl);
+    },
+  );
+
+  it("filters task types without splitting dialogue or vector models by modality", async () => {
+    const capabilities = [
+      "LLM_CHAT",
+      "VLM",
+      "EMBEDDING",
+      "MULTIMODAL_EMBEDDING",
+      "RERANK",
+    ] as const;
+    const models = capabilities.map((capability) => ({
+      ...provider.groups[0].models[0],
+      id: capability,
+      name: `fixture-${capability}`,
+      capability,
+      builtIn: false,
+    }));
+    const mixed = {
+      ...provider,
+      groups: [{ ...provider.groups[0], models }],
+    };
+    setup({ providers: [mixed], configuredProviders: [mixed] });
+    fireEvent.mouseDown(
+      screen.getByRole("combobox", {
+        name: "modelProvider.workspace.modelType",
+      }),
+    );
+    const options = [
+      ...document.querySelectorAll(".ant-select-item-option-content"),
+    ];
+    expect(
+      options.filter(
+        (option) => option.textContent === "modelProvider.taskType.chat",
+      ),
+    ).toHaveLength(1);
+    const vectors = options.find(
+      (option) => option.textContent === "modelProvider.taskType.embedding",
+    );
+    expect(vectors).toBeDefined();
+    fireEvent.click(vectors!);
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll(".saved-provider-model-row"),
+      ).toHaveLength(2),
+    );
+    expect(
+      screen.getByRole("listitem", { name: "fixture-EMBEDDING" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("listitem", { name: "fixture-MULTIMODAL_EMBEDDING" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("listitem", { name: "fixture-RERANK" }),
+    ).not.toBeInTheDocument();
+  });
+  it("places key controls before the API address and only shows save for an address draft", () => {
+    setup();
+    const keys = document.querySelector(".provider-workspace-api-keys")!;
+    const endpoint = document.querySelector(".provider-workspace-endpoint")!;
+    expect(
+      keys.compareDocumentPosition(endpoint) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", {
+        name: "modelProvider.workspace.saveEndpoint",
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }),
+      {
+        target: { value: "https://api.example.test/v2" },
+      },
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.saveEndpoint",
+      }),
+    ).toBeEnabled();
+  });
+  it("pins custom suppliers and their manually added models before catalog entries", () => {
+    const custom = {
+      ...provider,
+      id: "custom-supplier",
+      name: "Zulu Custom",
+      isCustom: true,
+      groups: [
+        {
+          ...provider.groups[0],
+          models: [
+            ...provider.groups[0].models,
+            {
+              id: "custom-model",
+              name: "zulu-custom-model",
+              capability: "LLM_CHAT" as const,
+              builtIn: false,
+              enabled: true,
+            },
+          ],
+        },
+      ],
+    };
+    setup({
+      providers: [provider, custom],
+      configuredProviders: [provider, custom],
+    });
+    const suppliers = document.querySelectorAll(".provider-workspace-provider");
+    expect(suppliers[0]).toHaveTextContent("Zulu Custom");
+    const rows = document.querySelectorAll(".saved-provider-model-row");
+    expect(rows[0]).toHaveTextContent("zulu-custom-model");
+  });
+  it("shows supplier settings directly without instance controls or explanatory clutter", () => {
+    setup();
+    expect(screen.getByText("********1234")).toBeInTheDocument();
+    for (const key of [
+      "selectConnection",
+      "addConnection",
+      "connections",
+      "supplierNote",
+      "endpointShared",
+      "activeKeyConnection",
+      "saved",
+    ]) {
+      expect(
+        screen.queryByText(`modelProvider.workspace.${key}`),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", {
+          name: `modelProvider.workspace.${key}`,
+        }),
+      ).not.toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.addSupplier",
+      }),
+    ).toBeInTheDocument();
+  });
+  it("switches the single enabled key while retaining other saved keys", async () => {
+    const callbacks = setup();
+    const next = {
+      ...provider,
+      groups: [
+        {
+          ...provider.groups[0],
+          keys: [
+            ...provider.groups[0].keys,
+            { id: "opaque-backup", masked: "********5678", enabled: false },
+          ],
+        },
+      ],
+    };
+    await act(async () => callbacks.setProvider(next));
+    const switches = screen.getAllByRole("switch");
+    expect(switches[0]).toBeChecked();
+    expect(switches[1]).not.toBeChecked();
+    fireEvent.click(switches[1]);
+    await waitFor(() =>
+      expect(mocks.setActiveKey).toHaveBeenCalledWith(
+        "openai",
+        "primary",
+        "opaque-backup",
+      ),
+    );
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
+    await act(async () =>
+      callbacks.setProvider({
+        ...next,
+        groups: [
+          {
+            ...next.groups[0],
+            keys: next.groups[0].keys.map((key) => ({
+              ...key,
+              enabled: key.id === "opaque-backup",
+            })),
+          },
+        ],
+      }),
+    );
+    expect(screen.getAllByRole("switch")[0]).not.toBeChecked();
+    expect(screen.getAllByRole("switch")[1]).toBeChecked();
+    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(screen.getByText("********5678")).toBeInTheDocument();
+  });
+  it("allows disabling the only active key while retaining all saved keys", async () => {
+    const callbacks = setup();
+    fireEvent.click(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.setActiveKey).toHaveBeenCalledWith("openai", "", ""),
+    );
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
+    await act(async () =>
+      callbacks.setProvider({
+        ...provider,
+        groups: provider.groups.map((connection) => ({
+          ...connection,
+          keys: connection.keys.map((key) => ({ ...key, enabled: false })),
+        })),
+      }),
+    );
+    expect(
+      screen.getByRole("switch", {
+        name: "modelProvider.workspace.useKeyNumber",
+      }),
+    ).not.toBeChecked();
+    expect(screen.getByText("********1234")).toBeInTheDocument();
+    expect(mocks.deleteKey).not.toHaveBeenCalled();
+  });
+
+  it("retains the previous selection when a new key fails verification", async () => {
+    const callbacks = setup();
+    await act(async () =>
+      callbacks.setProvider({
+        ...provider,
+        groups: [
+          {
+            ...provider.groups[0],
+            keys: [
+              ...provider.groups[0].keys,
+              { id: "opaque-backup", masked: "********5678", enabled: false },
+            ],
+          },
+        ],
+      }),
+    );
+    mocks.setActiveKey.mockRejectedValueOnce(
+      new Error("key verification failed"),
+    );
+    fireEvent.click(screen.getAllByRole("switch")[1]);
+    expect(
+      await screen.findByText("key verification failed"),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("switch")[0]).toBeChecked();
+    expect(screen.getAllByRole("switch")[1]).not.toBeChecked();
+    expect(callbacks.onReload).not.toHaveBeenCalled();
+  });
+  it("adds a supplier key and clears the secret after success", async () => {
+    const callbacks = setup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
+      target: { value: "secret-new-5678" },
+    });
+    fireEvent.click(
+      dialog.getByRole("button", {
+        name: "modelProvider.workspace.addAndCheckKey",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.addKey).toHaveBeenCalledWith(
+        { modelProviderId: "openai", groupId: "primary" },
+        { data: { api_key: "secret-new-5678" }, timeout: 180000 },
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(callbacks.onReload).toHaveBeenCalled();
+    expect(mocks.setActiveKey).not.toHaveBeenCalled();
+    expect(
+      screen.queryByDisplayValue("secret-new-5678"),
+    ).not.toBeInTheDocument();
+  });
+  it.each([
+    ["", "apiKeyRequired"],
+    ["   ", "apiKeyRequired"],
+    ["secret with spaces", "apiKeyNoSpaces"],
+    ["x".repeat(513), "apiKeyMax"],
+  ])("blocks an invalid supplier key before submitting: %s", async (apiKey, error) => {
+    setup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
+      target: { value: apiKey },
+    });
+    fireEvent.click(
+      dialog.getByRole("button", {
+        name: "modelProvider.workspace.addAndCheckKey",
+      }),
+    );
+    expect(
+      (await dialog.findAllByText(`modelProvider.validation.${error}`)).length,
+    ).toBeGreaterThan(0);
+    expect(mocks.addKey).not.toHaveBeenCalled();
+    expect(mocks.createGroup).not.toHaveBeenCalled();
+  });
+  it("deletes a saved key by opaque ID without submitting masked text", async () => {
+    setup();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.deleteKeyNumber",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "common.delete" }),
+    );
+    await waitFor(() =>
+      expect(mocks.deleteKey).toHaveBeenCalledWith(
+        { modelProviderId: "openai", groupId: "primary" },
+        { data: { key_id: "opaque-primary" } },
+      ),
+    );
+  });
+  it("resets a discarded endpoint before leaving supplier settings", async () => {
+    setup({}, true);
+    const endpoint = screen.getByRole("textbox", {
+      name: "modelProvider.apiAddressLabel",
+    });
+    fireEvent.change(endpoint, {
+      target: { value: "https://unsaved.example.test/v1" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.back" }),
+    );
+    fireEvent.click(await screen.findByText("settingsPage.unsaved.stay"));
+    expect(endpoint).toHaveValue("https://unsaved.example.test/v1");
+    expect(
+      screen.queryByText("Settings overview open"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.back" }),
+    );
+    fireEvent.click(await screen.findByText("settingsPage.unsaved.discard"));
+    expect(
+      await screen.findByText("Settings overview open"),
+    ).toBeInTheDocument();
+    expect(endpoint).toHaveValue(provider.baseUrl);
+    fireEvent.change(endpoint, {
+      target: { value: "https://second-unsaved.example.test" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.back" }),
+    );
+    expect(
+      await screen.findByText("settingsPage.unsaved.title"),
+    ).toBeInTheDocument();
+  });
+  it("offers loading retry and preserves access to signed-out cloud login", async () => {
+    const callbacks = setup({ loadError: true });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "modelProvider.workspace.loadFailed",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.retry" }),
+    );
+    expect(callbacks.onRetry).toHaveBeenCalledOnce();
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.cloud" }),
+    );
+    expect(await screen.findByText("Cloud login")).toBeInTheDocument();
+  });
+  it("allows removing a catalog model through the same confirmation flow", async () => {
+    const callbacks = setup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.deleteModelAria" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "common.delete" }),
+    );
+    expect(callbacks.onDeleteModel).toHaveBeenCalledWith(
+      provider,
+      provider.groups[0],
+      provider.groups[0].models[0],
+    );
+  });
+  it("creates a custom supplier using a built-in API protocol", async () => {
+    setup({
+      providers: [
+        provider,
+        { ...provider, id: "custom", name: "Private proxy", isCustom: true },
+      ],
+      configuredProviders: [provider],
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.addSupplier",
+      }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(
+      dialog.getByLabelText("modelProvider.workspace.supplierName"),
+      { target: { value: "My gateway" } },
+    );
+    fireEvent.change(
+      dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }),
+      {
+        target: { value: "https://custom.example.test/v1" },
+      },
+    );
+    fireEvent.mouseDown(dialog.getByRole("combobox"));
+    expect(
+      screen.queryByText("Private proxy", {
+        selector: ".ant-select-item-option-content",
+      }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByText("OpenAI", {
+        selector: ".ant-select-item-option-content",
+      }),
+    );
+    fireEvent.change(
+      dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" }),
+      {
+        target: { value: "https://custom.example.test/v1" },
+      },
+    );
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() =>
+      expect(mocks.createProvider).toHaveBeenCalledWith({
+        name: "My gateway",
+        source_provider_id: "openai",
+        base_url: "https://custom.example.test/v1",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+  });
+  it("edits a custom supplier's name without changing its protocol", async () => {
+    const custom = {
+      ...provider,
+      id: "custom",
+      name: "Private proxy",
+      isCustom: true,
+      protocolName: "OpenAI",
+    };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.editSupplier",
+      }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.queryByRole("combobox")).not.toBeInTheDocument();
+    fireEvent.change(
+      dialog.getByLabelText("modelProvider.workspace.supplierName"),
+      { target: { value: "Renamed gateway" } },
+    );
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() =>
+      expect(mocks.updateProvider).toHaveBeenCalledWith(
+        "custom",
+        "Renamed gateway",
+      ),
+    );
+  });
+  it("checks fresh embedding impact before confirming custom supplier deletion", async () => {
+    const custom = {
+      ...provider,
+      id: "custom",
+      name: "Private proxy",
+      isCustom: true,
+    };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    mocks.getModels.mockResolvedValue({
+      data: { models: [{ model_type: "embed" }] },
+    });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "modelProvider.workspace.deleteSupplier",
+      }),
+    );
+    expect(
+      await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
+    ).toBeInTheDocument();
+    expect(mocks.deleteProvider).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    await waitFor(() =>
+      expect(mocks.deleteProvider).toHaveBeenCalledWith("custom", true),
+    );
+  });
+  it("configures the first key directly for an unconfigured supplier", async () => {
+    const callbacks = setup({ configuredProviders: [] });
+    fireEvent.click(
+      screen.getByRole("button", { name: "modelProvider.workspace.addKey" }),
+    );
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(
+      dialog.queryByLabelText("modelProvider.groupName"),
+    ).not.toBeInTheDocument();
+    fireEvent.change(dialog.getByLabelText("modelProvider.apiKeyLabel"), {
+      target: { value: "first-key" },
+    });
+    fireEvent.click(
+      dialog.getByRole("button", {
+        name: "modelProvider.workspace.addAndCheckKey",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.createGroup).toHaveBeenCalledWith(
+        {
+          modelProviderId: "openai",
+          createModelProviderGroupOpenAPIRequest: {
+            name: "OpenAI",
+            api_key: "first-key",
+            verify: true,
+          },
+        },
+        { timeout: 180000 },
+      ),
+    );
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
+    expect(mocks.addKey).not.toHaveBeenCalled();
+  });
+});

@@ -87,6 +87,7 @@ func TestLoadLLMConfigSkipsStaleOwnEvoAndUsesEligibleSharedSelection(t *testing.
 		&orm.UserSelectedModel{},
 		&orm.UserModelProviderGroupModel{},
 		&orm.UserModelProviderGroup{},
+		&orm.UserModelProvider{},
 	)
 	now := time.Now().UTC()
 	seed := func(userID, suffix, provider, model, technicalType string, isDefault, shared bool) {
@@ -106,6 +107,9 @@ func TestLoadLLMConfigSkipsStaleOwnEvoAndUsesEligibleSharedSelection(t *testing.
 			UserID: userID, ModelKey: "evo_llm",
 			UserModelProviderGroupModelID: modelRow.ID, Share: shared,
 			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := db.DB.Create(&orm.UserModelProvider{ID: group.UserModelProviderID, Name: provider, BaseURL: group.BaseURL, BaseModel: group.BaseModel}).Error; err != nil {
+			t.Fatal(err)
 		}
 		if err := db.DB.Create(&group).Error; err != nil {
 			t.Fatal(err)

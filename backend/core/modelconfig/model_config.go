@@ -217,6 +217,7 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string, scope
 }
 
 type SelectedRuntimeModel struct {
+	RuntimeGroupID     string `gorm:"column:runtime_group_id"`
 	ModelType          string
 	TechnicalModelType string
 	Vision             bool
@@ -305,7 +306,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
-				"g.base_url, "+
+				"g.id AS runtime_group_id, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
 				"m.max_input_tokens",
 		).
@@ -328,7 +329,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		return nil, err
 	}
 	ownRows = eligibleRuntimeModels(ownRows)
-	if err := decryptRuntimeModels(ownRows); err != nil {
+	if err := decryptRuntimeModels(ctx, db, ownRows); err != nil {
 		return nil, err
 	}
 
@@ -384,7 +385,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
-				"g.base_url, "+
+				"g.id AS runtime_group_id, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
 				"m.max_input_tokens",
 		).
@@ -405,7 +406,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		return nil, err
 	}
 	sharedRows = eligibleRuntimeModels(sharedRows)
-	if err := decryptRuntimeModels(sharedRows); err != nil {
+	if err := decryptRuntimeModels(ctx, db, sharedRows); err != nil {
 		return nil, err
 	}
 
@@ -765,7 +766,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	var row SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_model_provider_group_models m").
-		Select("m.provider_name, m.name AS model_name, g.base_url, g.api_key, g.api_key_ciphertext").
+		Select("g.id AS runtime_group_id, m.provider_name, m.name AS model_name, g.base_url, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
@@ -781,7 +782,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	if row.ProviderName == "" && row.ModelName == "" {
 		return nil, nil
 	}
-	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	row.BaseURL, row.APIKey, err = modelprovider.ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -794,13 +795,13 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	return cfg, nil
 }
 
-func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
+func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) error {
 	for i := range rows {
-		apiKey, err := modelprovider.ResolveAPIKey(rows[i].APIKey, rows[i].APIKeyCiphertext)
+		baseURL, apiKey, err := modelprovider.ResolveProviderRuntimeCredential(ctx, db, rows[i].RuntimeGroupID)
 		if err != nil {
 			return err
 		}
-		rows[i].APIKey = apiKey
+		rows[i].BaseURL, rows[i].APIKey = baseURL, apiKey
 	}
 	return nil
 }

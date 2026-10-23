@@ -105,7 +105,7 @@ func TestRemoveKeyReadsAndWritesEncryptedCredentials(t *testing.T) {
 			storedKeys:   "key-one\nkey-two",
 			removeKey:    "key-one",
 			wantKeys:     "key-two",
-			wantVerified: true,
+			wantVerified: false,
 		},
 		{
 			name:         "clears ciphertext after removing last key",
@@ -191,7 +191,7 @@ func TestGroupKeyMetadataSupportsDeletionWithoutExposingSecrets(t *testing.T) {
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("delete status=%d: %s", recorder.Code, recorder.Body.String())
 			}
-			assertStoredEncryptedAPIKeys(t, db, group.ID, "fixture-secret-two", true)
+			assertStoredEncryptedAPIKeys(t, db, group.ID, "fixture-secret-two", false)
 		}
 	}
 }
