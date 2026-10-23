@@ -1,3 +1,4 @@
+import os
 import lazyllm
 from copy import deepcopy
 from typing import NamedTuple, Optional
@@ -321,7 +322,18 @@ def drop_lazyllm_tables() -> None:
         LOG.error(f'[build_document] Failed to drop lazyllm tables: {e}')
 
 
+def configure_algorithm_registration() -> str:
+    if _cfg['force_algo_register']:
+        # Fresh Python workers must observe the same policy as this process.
+        os.environ['LAZYLLM_ALGO_REGISTER_POLICY'] = 'force'
+        lazyllm.config['algo_register_policy'] = 'force'
+    policy = lazyllm.config['algo_register_policy']
+    lazyllm.LOG.info(f'[build_document] effective algorithm registration policy={policy}')
+    return policy
+
+
 def build_document(algo_id: str = ALGO_ID, *, serve: bool = True) -> Document:
+    configure_algorithm_registration()
     processor_url = _cfg['document_processor_url']
     server_port = get_algo_server_port()
     embed = {k: AutoModel(model=k) for k in EMBED_KEYS}

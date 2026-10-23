@@ -616,12 +616,8 @@ func (s *Service) requestBuiltinTools(ctx context.Context, userID, endpoint, nam
 			toolConfig[key] = value
 		}
 	}
-	var disabled []string
-	if err := s.db.WithContext(ctx).Table("user_disabled_tools").Where("create_user_id = ? AND deleted_at IS NULL", userID).Pluck("tool_name", &disabled).Error; err != nil {
-		return nil, err
-	}
 	payload, err := json.Marshal(map[string]any{
-		"tool_name": name, "arguments": arguments, "llm_config": llmConfig, "tool_config": toolConfig, "disabled_tools": disabled,
+		"tool_name": name, "arguments": arguments, "llm_config": llmConfig, "tool_config": toolConfig,
 	})
 	if err != nil {
 		return nil, errors.New("encode built-in tool request")

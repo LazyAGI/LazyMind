@@ -22,12 +22,14 @@ async def test_interrupted_subagent_cancels_attempt_without_failure_or_output_ch
     runtime.execution_spec.return_value = {
         'task': {'input_slots': [], 'output_slots': ['required-image']},
         'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+        'system_mcp_config': [{'id': 'lazymind-knowledge', 'allowed_tools': []}],
     }
     worker.runtime = runtime
     checks = AsyncMock()
     monkeypatch.setattr(worker, '_run_post_step_checks', checks)
 
     async def stream(**_kwargs):
+        assert _kwargs['system_mcp_config'] == [{'id': 'lazymind-knowledge', 'allowed_tools': []}]
         yield 'data: ' + json.dumps({'type': 'done', 'status': status, 'summary': 'stopped by user'}) + '\n\n'
 
     monkeypatch.setattr(runner, 'run_subagent_stream', stream)

@@ -1,3 +1,4 @@
+import { mergeKnowledgeOperations } from "../../../utils/knowledgeOperations";
 import { emitConversationGroupsChanged } from "../../../conversationOrganizer/api";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -17,6 +18,8 @@ import type {
 import { RoleTypes } from "@/modules/chat/constants/common";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
+  CHAT_KNOWLEDGE_CONFIRMATION_EVENT,
+  type ChatKnowledgeConfirmationDetail,
   CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
   CHAT_MEDIA_CAPABILITY_MISSING_EVENT,
   CHAT_WORKFLOW_STEP_FEEDBACK_EVENT,
@@ -1128,9 +1131,16 @@ export function useChatConversation({
         assistantMessage.reasoning_content || "",
       );
 
+      const questionChanged = result.ask_pending?.ask_id &&
+        result.ask_pending.ask_id !== assistantMessage.ask_pending?.ask_id;
       assistantMessage = {
         ...assistantMessage,
         ...result,
+        ...(questionChanged ? {
+          ask_answered: false,
+          ask_saved_answers: undefined,
+          env_input_result: undefined,
+        } : {}),
         seq: result.seq ?? assistantMessage.seq,
         // Raw upstream/provider diagnostics must remain server-side only.
         errMessage: undefined,
@@ -1156,6 +1166,7 @@ export function useChatConversation({
           result.sources && result.sources.length > 0
             ? result.sources
             : assistantMessage.sources,
+        knowledge_operations: mergeKnowledgeOperations(assistantMessage.knowledge_operations, (result as any).knowledge_operation_result),
         ask_pending: mergeAskPending(
           assistantMessage.ask_pending,
           result.ask_pending,
@@ -1562,6 +1573,61 @@ export function useChatConversation({
       }
     };
     window.addEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
+    const confirmationsLoading = new Map<string, Promise<void>>();
+    const handleKnowledgeConfirmation = (event: Event) => {
+      const detail = (event as CustomEvent<ChatKnowledgeConfirmationDetail>).detail;
+      if (!detail?.conversationId || !detail.historyId || !detail.confirmationId) return;
+      const key = JSON.stringify([detail.conversationId, detail.historyId]);
+      // Serialize refreshes for one history; an older response cannot replace a
+      // later confirmation or a decision returned by the next authoritative read.
+      const previous = confirmationsLoading.get(key) ?? Promise.resolve();
+      const loading = previous.then(async () => {
+        try {
+          const response = await ChatServiceApi().conversationServiceGetConversationHistory({
+            name: detail.conversationId, anchorHistoryId: detail.historyId,
+          });
+          if (disposed) return;
+          const history = response.data.history?.find(row => row.id === detail.historyId);
+          if (!history) return;
+          const restored = buildChatMessageListFromHistory([history]);
+          const authoritative = restored.find(row => row.role === RoleTypes.ASSISTANT);
+          if (!authoritative?.ask_pending?.knowledge_management) return;
+          const base = currentConversationIdRef.current === detail.conversationId
+            ? messageListRef.current : conversationMessagesCache.current.get(detail.conversationId);
+          if (!base) return;
+          const found = base.some(row => row.role === RoleTypes.ASSISTANT && row.history_id === detail.historyId);
+          let merged: any[];
+          if (found) {
+            merged = base.map(row => {
+              if (row.role !== RoleTypes.ASSISTANT || row.history_id !== detail.historyId) return row;
+              const same = row.ask_pending?.ask_id === authoritative.ask_pending.ask_id;
+              return { ...row, ask_pending: authoritative.ask_pending,
+                ask_answered: Boolean(authoritative.ask_answered || (same && row.ask_answered)),
+                ask_saved_answers: same && row.ask_answered ? row.ask_saved_answers
+                  : authoritative.ask_saved_answers ?? (same ? row.ask_saved_answers : undefined),
+              };
+            });
+          } else {
+            // The target turn may be outside the loaded history window. Insert
+            // only that turn, preserving every current (possibly streaming) row.
+            merged = [...base, ...restored.filter(row => !base.some(old =>
+              old.history_id === row.history_id && old.role === row.role))];
+            merged.sort((a, b) => (a.seq ?? Infinity) - (b.seq ?? Infinity));
+          }
+          conversationMessagesCache.current.set(detail.conversationId, merged);
+          streamManager.saveMessageList(detail.conversationId, merged);
+          if (currentConversationIdRef.current === detail.conversationId) {
+            messageListRef.current = merged;
+            setMessageList(merged);
+          }
+        } catch {
+          // Keep the current stream and any submitted answer. Reconnect/history
+          // restoration can retry this same authoritative read.
+        }
+      }).finally(() => { if (confirmationsLoading.get(key) === loading) confirmationsLoading.delete(key); });
+      confirmationsLoading.set(key, loading);
+    };
+    window.addEventListener(CHAT_KNOWLEDGE_CONFIRMATION_EVENT, handleKnowledgeConfirmation);
     const handleWorkflowStepFeedback = async (event: Event) => {
       const detail = (
         event as CustomEvent<ChatWorkflowStepFeedbackDetail>
@@ -1604,6 +1670,7 @@ export function useChatConversation({
     return () => {
       disposed = true;
       window.removeEventListener(CHAT_AUTO_ADVANCE_EVENT, handleAutoAdvance);
+      window.removeEventListener(CHAT_KNOWLEDGE_CONFIRMATION_EVENT, handleKnowledgeConfirmation);
       window.removeEventListener(
         CHAT_WORKFLOW_STEP_FEEDBACK_EVENT,
         handleWorkflowStepFeedback,

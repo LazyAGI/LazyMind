@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
 
@@ -767,7 +768,10 @@ def test_spill_stays_internal_and_uses_stable_content_path(tmp_path, monkeypatch
     assert len(list((tmp_path / 'tool_spills').glob('*.txt'))) == 1
 
 
-def test_browser_spill_exposes_metadata_and_writes_searchable_json(tmp_path) -> None:
+@pytest.mark.parametrize('tool_name', [
+    'browser_open', 'browser.snapshot', 'browser_snapshot_mcp_1219d1082aac', 'mcp_browser_snapshot',
+])
+def test_browser_spill_exposes_metadata_and_writes_searchable_json(tmp_path, tool_name) -> None:
     from lazymind.chat.engine.agent_runtime.compactors import compact_or_spill_tool_result
     from lazymind.config import config
 
@@ -794,7 +798,7 @@ def test_browser_spill_exposes_metadata_and_writes_searchable_json(tmp_path) -> 
 
     with config.temp('context_compression_spill_bytes', 128):
         notice, compactor, _before, _after, path, _size = compact_or_spill_tool_result(
-            'browser_open', content, workspace=str(tmp_path),
+            tool_name, content, workspace=str(tmp_path),
         )
 
     assert compactor == 'spill'

@@ -12,8 +12,8 @@ import (
 	"lazymind/core/common/orm"
 )
 
-// FeatureControls are non-destructive per-user pause layers. A missing
-// preference row is intentionally treated as fully enabled for upgrade safety.
+// FeatureControls are non-destructive per-user pause layers. Missing preferences
+// keep established features enabled; document directories require opting in.
 type FeatureControls struct {
 	DocumentDirectoriesGeneration int64 `json:"-"`
 	TaskCenterEnabled             bool  `json:"task_center_enabled"`
@@ -33,7 +33,7 @@ func DefaultFeatureControls() FeatureControls {
 		WorkflowsEnabled:           true,
 		MCPEnabled:                 true,
 		DocumentParsingEnabled:     true,
-		DocumentDirectoriesEnabled: true,
+		DocumentDirectoriesEnabled: false,
 	}
 }
 

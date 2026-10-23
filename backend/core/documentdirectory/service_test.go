@@ -17,7 +17,11 @@ import (
 )
 
 func testDB(t *testing.T) *gorm.DB {
-	return orm.MigrateTestDB(t, &orm.UserUIPreferences{}, &orm.DocumentFolderInventory{}, &orm.DocumentFolderNode{}, &orm.DocumentDirectory{}, &orm.DocumentDirectoryGroup{}, &orm.DocumentDirectoryEntry{}, &orm.DocumentObservation{}, &orm.DocumentDirectoryBatch{}, &orm.AsyncJob{}, &orm.ConversationIdleEvent{}).DB
+	db := orm.MigrateTestDB(t, &orm.UserUIPreferences{}, &orm.DocumentFolderInventory{}, &orm.DocumentFolderNode{}, &orm.DocumentDirectory{}, &orm.DocumentDirectoryGroup{}, &orm.DocumentDirectoryEntry{}, &orm.DocumentObservation{}, &orm.DocumentDirectoryBatch{}, &orm.AsyncJob{}, &orm.ConversationIdleEvent{}).DB
+	for _, userID := range []string{"u", "other"} {
+		must(t, db.Create(&orm.UserUIPreferences{UserID: userID, DocumentDirectoriesEnabled: true, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}).Error)
+	}
+	return db
 }
 func must(t *testing.T, err error) {
 	t.Helper()
@@ -259,6 +263,7 @@ func TestMigrationUpgradeRollbackPreservesExistingData(t *testing.T) {
 		t.Fatal("unrelated data lost")
 	}
 	must(t, db.AutoMigrate(&orm.UserUIPreferences{}, &orm.DocumentFolderInventory{}, &orm.DocumentFolderNode{}))
+	must(t, db.Create(&orm.UserUIPreferences{UserID: "u", DocumentDirectoriesEnabled: true, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}).Error)
 	d := create(t, db, "migration")
 	_, err := Get(context.Background(), db, "u", d.ID) // async_jobs is external to this migration
 	if err != nil && !strings.Contains(err.Error(), "async_jobs") {
@@ -616,6 +621,21 @@ func TestRestoreChecksOriginalGroupAndPreservesReading(t *testing.T) {
 	}
 }
 
+func TestDirectoriesRequireOptIn(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	if _, err := Execute(ctx, db, "new", Command{Operation: "create", Name: "new", Intent: "new"}); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("default directory creation: %v", err)
+	}
+	if err := SaveObservations(ctx, db, "new", "c", "h", "r", "", []Observation{{CallID: "capture"}}); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("default collection: %v", err)
+	}
+	must(t, db.Create(&orm.UserUIPreferences{UserID: "new", DocumentDirectoriesEnabled: true, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}).Error)
+	if _, err := Execute(ctx, db, "new", Command{Operation: "create", Name: "new", Intent: "new"}); err != nil {
+		t.Fatalf("opted-in directory creation: %v", err)
+	}
+}
+
 func TestFeaturePauseStopsWritesAndPreservesDirectories(t *testing.T) {
 	db := testDB(t)
 	ctx := context.Background()
@@ -623,7 +643,7 @@ func TestFeaturePauseStopsWritesAndPreservesDirectories(t *testing.T) {
 	b, j := batch(t, db, d, Input{})
 	must(t, SaveObservations(ctx, db, "u", "c", "h", "r", "query", []Observation{{CallID: "capture", Candidates: []Candidate{sample("/a")}}}))
 	must(t, db.Model(&orm.DocumentDirectory{}).Where("id=?", d.ID).Update("last_used_at", time.Now().Add(-8*24*time.Hour)).Error)
-	must(t, db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "u", "document_directories_enabled": false, "created_at": time.Now().UTC(), "updated_at": time.Now().UTC()}).Error)
+	must(t, db.Model(&orm.UserUIPreferences{}).Where("user_id = ?", "u").Update("document_directories_enabled", false).Error)
 	must(t, db.Transaction(func(tx *gorm.DB) error { return Pause(tx, "u") }))
 	if _, err := Execute(ctx, db, "u", Command{Operation: "organize", DirectoryID: d.ID}); !errors.Is(err, ErrDisabled) {
 		t.Fatalf("manual: %v", err)

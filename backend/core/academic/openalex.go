@@ -124,7 +124,7 @@ func resolveWithOpenAlex(ctx context.Context, citation string) (WorkInput, bool)
 			provenance["pdf_version"] = version
 		}
 		bestScore = rank
-		best = WorkInput{Title: entry.Title, Year: entry.PublicationYear, DOI: doi, ArxivID: arxivID,
+		best = WorkInput{TrustedFulltext: true, Title: entry.Title, Year: entry.PublicationYear, DOI: doi, ArxivID: arxivID,
 			Provider: "openalex", ProviderWorkID: strings.TrimPrefix(entry.ID, "https://openalex.org/"), Provenance: provenance}
 	}
 	return best, bestScore > 0

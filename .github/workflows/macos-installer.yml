@@ -957,15 +957,16 @@ jobs:
         run: |
           set -euo pipefail
           runtime="${INSTALLED_APP}/Contents/Resources/runtime"
-          signature_args=()
+          verification_args=(
+            --runtime "${runtime}"
+            --bundle-dir rag-under-test/darwin-arm64
+            --report "${RUNNER_TEMP}/installed-rag-verification/report.json"
+          )
           if [[ "${{ needs.build-macos-installer.outputs.official_release }}" == "true" ]]; then
-            signature_args+=(--require-macos-team-id)
+            verification_args+=(--require-macos-team-id)
           fi
           "${runtime}/deps/python/algorithm/bin/python" -I -B desktop/scripts/verify-python-components.py \
-            --runtime "${runtime}" \
-            --bundle-dir rag-under-test/darwin-arm64 \
-            "${signature_args[@]}" \
-            --report "${RUNNER_TEMP}/installed-rag-verification/report.json"
+            "${verification_args[@]}"
 
       - name: Upload installed RAG verification reports
         if: always()

@@ -458,7 +458,7 @@ def _spill_filename(tool_name: str, content: str) -> str:
 
 def _is_browser_tool(tool_name: str) -> bool:
     normalized = str(tool_name or '').strip().lower()
-    return normalized.startswith('browser_') or normalized.startswith('browser.')
+    return normalized.startswith(('mcp_browser_', 'browser_', 'browser.'))
 
 
 def _browser_json_envelope(text: str) -> tuple[str, Any, str] | None:

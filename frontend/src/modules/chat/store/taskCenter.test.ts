@@ -771,4 +771,17 @@ describe("task center workflow events", () => {
     ]);
     expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(1);
   });
+
+  it("hydrates public Work confirmation identity on live events and replay", () => {
+    const received: CustomEvent[] = [];
+    const listener = (event: Event) => received.push(event as CustomEvent);
+    window.addEventListener("lazymind:chat-knowledge-confirmation", listener);
+    useTaskCenterStore.setState({ viewMode: "ordinary" });
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+    const event = { type: "ask_pending", payload: { conversation_id: "conversation-1", history_id: "history", confirmation_id: "confirm" } };
+    emitConversationEvent(event);
+    emitConversationEvent({ ...event, replayed: true });
+    expect(received.map(item => item.detail)).toEqual(Array(2).fill({ conversationId: "conversation-1", historyId: "history", confirmationId: "confirm" }));
+    window.removeEventListener("lazymind:chat-knowledge-confirmation", listener);
+  });
 });

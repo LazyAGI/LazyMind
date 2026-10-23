@@ -154,6 +154,20 @@ components:
                     items:
                         type: string
                     type: array
+                match:
+                    type: string
+                name:
+                    type: string
+                parent_id:
+                    type: string
+                path:
+                    type: string
+                recursive:
+                    type: boolean
+                resource_ids:
+                    items:
+                        type: string
+                    type: array
                 tags:
                     items:
                         type: string
@@ -704,6 +718,27 @@ components:
                 - missing
                 - required
                 - status
+            type: object
+        CapabilityRef:
+            properties:
+                display_order:
+                    type: integer
+                enabled:
+                    type: boolean
+                key:
+                    type: string
+                settings:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                version:
+                    type: integer
+            required:
+                - display_order
+                - enabled
+                - key
+                - version
             type: object
         ChatChunkResponse:
             properties:
@@ -3808,6 +3843,12 @@ components:
                     type: array
                 algo:
                     $ref: '#/components/schemas/Algo'
+                algo_id:
+                    type: string
+                allowed_actions:
+                    items:
+                        type: string
+                    type: array
                 capabilities:
                     $ref: '#/components/schemas/DatasetCapabilities'
                 cover_image:
@@ -3839,6 +3880,8 @@ components:
                     type: boolean
                 name:
                     type: string
+                operation_result:
+                    $ref: '#/components/schemas/ResourceOperationResult'
                 parsers:
                     items:
                         $ref: '#/components/schemas/ParserConfig'
@@ -3848,8 +3891,19 @@ components:
                 processing_revision:
                     format: int64
                     type: integer
+                profile_id:
+                    type: string
                 reader_fallback_accepted:
                     type: boolean
+                reading_capabilities:
+                    items:
+                        $ref: '#/components/schemas/CapabilityRef'
+                    type: array
+                resource_version:
+                    format: int64
+                    type: integer
+                scene:
+                    type: string
                 segment_count:
                     format: int64
                     type: integer
@@ -4204,6 +4258,10 @@ components:
                 p_id:
                     type: string
                 pdf_convert_result:
+                    type: string
+                processing_error:
+                    $ref: '#/components/schemas/ProcessingDiagnostic'
+                processing_status:
                     type: string
                 recursive_document_count:
                     format: int64
@@ -6561,6 +6619,45 @@ components:
                 visibility:
                     type: string
             type: object
+        KnowledgeOperation:
+            properties:
+                action:
+                    type: string
+                call_id:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/ResourceOperationItem'
+                    type: array
+                processing_summary:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                status:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/ResourceOperationSummary'
+            required:
+                - action
+                - call_id
+                - status
+                - summary
+            type: object
+        KnowledgeOperationError:
+            properties:
+                code:
+                    type: string
+                details:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         LearningBookRequest:
             properties:
                 capability_key:
@@ -7569,6 +7666,10 @@ components:
                     type: string
                 execution_id:
                     type: string
+                knowledge_operations:
+                    items:
+                        $ref: '#/components/schemas/KnowledgeOperation'
+                    type: array
                 order:
                     type: integer
                 pages:
@@ -7651,6 +7752,8 @@ components:
             type: object
         Pages:
             properties:
+                knowledge_operations:
+                    $ref: '#/components/schemas/CollectionPage'
                 process_steps:
                     $ref: '#/components/schemas/CollectionPage'
                 sources:
@@ -7658,6 +7761,7 @@ components:
                 stage_artifacts:
                     $ref: '#/components/schemas/CollectionPage'
             required:
+                - knowledge_operations
                 - process_steps
                 - sources
                 - stage_artifacts
@@ -7927,6 +8031,24 @@ components:
                 - code
                 - message
                 - data
+            type: object
+        ProcessingDiagnostic:
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                recovery:
+                    type: string
+                stage:
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - code
+                - message
+                - recovery
+                - stage
             type: object
         ProjectionError:
             properties:
@@ -8360,6 +8482,123 @@ components:
             properties:
                 deleted_count:
                     type: integer
+            type: object
+        ResourceError:
+            properties:
+                code:
+                    type: string
+                details:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
+        ResourceOperationItem:
+            properties:
+                after:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                before:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                cleanup_status:
+                    type: string
+                document_count:
+                    type: integer
+                error:
+                    $ref: '#/components/schemas/ResourceError'
+                folder_count:
+                    type: integer
+                id_mapping:
+                    additionalProperties:
+                        type: string
+                    type: object
+                input_index:
+                    type: integer
+                name:
+                    type: string
+                parent_id:
+                    type: string
+                previous_ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                processing_error:
+                    $ref: '#/components/schemas/ProcessingDiagnostic'
+                processing_status:
+                    type: string
+                resource_ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                resource_status:
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - name
+                - parent_id
+                - resource_ref
+                - resource_status
+            type: object
+        ResourceOperationResult:
+            properties:
+                action:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/ResourceOperationItem'
+                    type: array
+                processing_summary:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                status:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/ResourceOperationSummary'
+            required:
+                - action
+                - status
+                - summary
+            type: object
+        ResourceOperationSummary:
+            properties:
+                failed:
+                    type: integer
+                skipped:
+                    type: integer
+                succeeded:
+                    type: integer
+                total:
+                    type: integer
+                unconfirmed:
+                    type: integer
+            required:
+                - failed
+                - skipped
+                - succeeded
+                - total
+                - unconfirmed
+            type: object
+        ResourceRef:
+            properties:
+                document_id:
+                    type: string
+                folder_id:
+                    type: string
+                kind:
+                    type: string
+                knowledge_base_id:
+                    type: string
+            required:
+                - kind
+                - knowledge_base_id
             type: object
         Result:
             properties:
@@ -15771,6 +16010,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/references:resolve
+    /api/core/academic/source-targets:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /academic/source-targets
+    /api/core/academic/sources:inspect:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/sources:inspect
     /api/core/academic/works:presence:
         post:
             responses:
@@ -21466,6 +21717,23 @@ paths:
                 "200":
                     description: OK
             summary: GET /datasets/{dataset}/documents/{document}:read
+    /api/core/datasets/{dataset}/documents/{document}:reparse:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}:reparse
     /api/core/datasets/{dataset}/documents:batchUpdateTags:
         post:
             parameters:
@@ -23956,6 +24224,19 @@ paths:
             summary: One-click update of all installed official knowledge bases
             tags:
                 - knowledge-market
+    /api/core/knowledge/options:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Knowledge options
+            summary: Available knowledge configuration and upload limits
+            tags:
+                - datasets
     /api/core/learning/books:
         get:
             responses:

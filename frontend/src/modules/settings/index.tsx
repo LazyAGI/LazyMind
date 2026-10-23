@@ -792,7 +792,7 @@ function SettingsPageContent() {
         <KnowledgeDataSettings
         routeParams={searchParams}
           controlsDisabled={saving !== null}
-          documentDirectoriesEnabled={overview?.controls.document_directories_enabled ?? true}
+          documentDirectoriesEnabled={overview?.controls.document_directories_enabled ?? false}
           documentDirectoriesSaving={saving === "document_directories_enabled"}
           onDocumentDirectoriesChange={(enabled) => requestMasterChange("document_directories_enabled", enabled)}
           documentParsingEnabled={Boolean(overview?.controls.document_parsing_enabled)}

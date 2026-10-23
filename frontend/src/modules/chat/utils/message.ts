@@ -140,8 +140,10 @@ export function mergeAskPending(previous: any, incoming: any) {
     merged.set(draftId, mergeMailDraftRecord(merged.get(draftId), draft));
   }
   const drafts = [...merged.values()];
+  // Mail receipts span questions; business metadata and labels belong to one ask ID.
+  const sameQuestion = !incoming.ask_id || incoming.ask_id === previous.ask_id;
   return {
-    ...previous,
+    ...(sameQuestion ? previous : {}),
     ...incoming,
     mail_draft_only: incoming.mail_draft_only ?? (mailDraftsFromAskPending(incoming).length > 0),
     mail_draft: drafts[drafts.length - 1] || incoming.mail_draft || previous.mail_draft,
@@ -427,6 +429,7 @@ export function buildChatMessageListFromHistory(
       performance_metrics: (record as any).performance_metrics,
       model_route: record.model_route,
       fork_read_only: (record as any).fork_read_only,
+      knowledge_operations: (record as any).knowledge_operations,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

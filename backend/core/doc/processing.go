@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -172,26 +173,26 @@ func UpdateProcessingLevel(w http.ResponseWriter, r *http.Request) {
 	if systemdeps.PythonComponentActive("rag") && level == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
 		return
 	}
-	if systemdeps.PythonComponentActive("rag") && level != ProcessingLevelStored && (effectiveProcessingLevel(ds.ProcessingLevel) == ProcessingLevelStored || parseDatasetAlgo(ds.Ext).AlgoID == "") {
-		if err := ensureDatasetRAG(r, ds); err != nil {
-			common.ReplyErr(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-	}
-	updates := map[string]any{"processing_level": level, "processing_revision": ds.ProcessingRevision + 1, "transition_status": TransitionIdle, "updated_at": time.Now().UTC(), "ext": ds.Ext}
-	if req.ReaderFallbackAccepted != nil {
-		updates["reader_fallback_accepted"] = *req.ReaderFallbackAccepted
-	}
-	if err := store.DB().WithContext(r.Context()).Model(&orm.Dataset{}).Where("id = ?", datasetID).Updates(updates).Error; err != nil {
-		common.ReplyErr(w, "update processing level failed", http.StatusInternalServerError)
+	service, op, err := resourcePageService(r)
+	if err != nil {
+		replyResourceError(w, err)
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision + 1, "transition_status": TransitionIdle, "capabilities": capabilitiesForProcessingLevel(level)})
+	_, err = service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: datasetID}, Changes: ResourceMetadataChanges{ProcessingLevel: &level, ReaderFallbackAccepted: req.ReaderFallbackAccepted}}}})
+	if err != nil {
+		replyResourceError(w, err)
+		return
+	}
+	if err = store.DB().WithContext(r.Context()).Where("id = ?", datasetID).First(ds).Error; err != nil {
+		replyResourceError(w, err)
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": ds.ProcessingLevel, "processing_revision": ds.ProcessingRevision, "transition_status": ds.TransitionStatus, "capabilities": capabilitiesForProcessingLevel(ds.ProcessingLevel)})
 }
 
 // Storage-only datasets may have been created before the optional RAG service
 // was installed. Provision their remote counterpart before enabling processing.
-func ensureDatasetRAG(r *http.Request, ds *orm.Dataset) error {
+func ensureDatasetRAG(ctx context.Context, ds *orm.Dataset) error {
 	kbID := strings.TrimSpace(ds.KbID)
 	if kbID == "" {
 		kbID = ds.ID
@@ -211,7 +212,7 @@ func ensureDatasetRAG(r *http.Request, ds *orm.Dataset) error {
 		ext["algo_id"] = id
 		ds.Ext = mustJSON(ext)
 	}
-	err := common.ApiGet(r.Context(), endpoint+"/"+url.PathEscape(kbID), nil, &remote, 10*time.Second)
+	err := common.ApiGet(ctx, endpoint+"/"+url.PathEscape(kbID), nil, &remote, 10*time.Second)
 	if err == nil {
 		if parseDatasetAlgo(ds.Ext).AlgoID == "" && len(remote.Data.AlgoIDs) == 1 {
 			setAlgo(remote.Data.AlgoIDs[0])
@@ -225,7 +226,7 @@ func ensureDatasetRAG(r *http.Request, ds *orm.Dataset) error {
 	req := kbCreateRequest{KbID: kbID, DisplayName: algoDatasetDisplayName(ds.CreateUserID, ds.DisplayName), OwnerID: ds.CreateUserID, AlgoID: parseDatasetAlgo(ds.Ext).AlgoID}
 	if req.AlgoID == "" {
 		var algorithms algoListResp
-		if err := common.ApiGet(r.Context(), common.JoinURL(common.AlgoServiceEndpoint(), "/v1/algo/list"), nil, &algorithms, 10*time.Second); err != nil {
+		if err := common.ApiGet(ctx, common.JoinURL(common.AlgoServiceEndpoint(), "/v1/algo/list"), nil, &algorithms, 10*time.Second); err != nil {
 			return err
 		}
 		for _, algo := range algorithms.Data.Items {
@@ -238,10 +239,10 @@ func ensureDatasetRAG(r *http.Request, ds *orm.Dataset) error {
 			return fmt.Errorf("algorithm_id required")
 		}
 	}
-	if err = common.ApiPost(r.Context(), endpoint, req, nil, nil, 10*time.Second); err != nil {
+	if err = common.ApiPost(ctx, endpoint, req, nil, nil, 10*time.Second); err != nil {
 		// Another request can provision the same KB concurrently.
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict {
-			if err := common.ApiGet(r.Context(), endpoint+"/"+url.PathEscape(kbID), nil, &remote, 10*time.Second); err != nil {
+			if err := common.ApiGet(ctx, endpoint+"/"+url.PathEscape(kbID), nil, &remote, 10*time.Second); err != nil {
 				return err
 			}
 			if len(remote.Data.AlgoIDs) == 1 {
@@ -268,20 +269,13 @@ func GetProcessingStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	syncProcessingTaskStates(r, datasetID)
-	var total, failed, processing, available int64
-	db := store.DB().WithContext(r.Context())
-	_ = db.Model(&orm.Document{}).Where("dataset_id = ? AND deleted_at IS NULL", datasetID).Count(&total).Error
-	_ = db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND (parse_status = 'failed' OR chunk_status = 'failed' OR index_status = 'failed')", datasetID).Count(&failed).Error
-	_ = db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND (parse_status = 'running' OR chunk_status = 'running' OR index_status = 'running')", datasetID).Count(&processing).Error
-	level := effectiveProcessingLevel(ds.ProcessingLevel)
-	statusColumn := map[string]string{ProcessingLevelParsed: "parse_status", ProcessingLevelChunked: "chunk_status", ProcessingLevelIndexed: "index_status"}[level]
-	if level == ProcessingLevelStored {
-		available = total
-	} else if statusColumn != "" {
-		_ = db.Model(&orm.DocumentProcessingState{}).Where("dataset_id = ? AND "+statusColumn+" = 'succeeded'", datasetID).Count(&available).Error
+	coverage, err := datasetProcessingCoverage(r.Context(), store.DB(), store.LazyLLMDB(), *ds)
+	if err != nil {
+		common.ReplyErr(w, "query documents failed", http.StatusBadGateway)
+		return
 	}
-	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesForProcessingLevel(level), "coverage": ProcessingCoverage{Available: available, Total: total, Failed: failed, Processing: processing}})
+	level := effectiveProcessingLevel(ds.ProcessingLevel)
+	common.ReplyJSON(w, map[string]any{"dataset_id": datasetID, "processing_level": level, "processing_revision": ds.ProcessingRevision, "transition_status": effectiveTransitionStatus(ds.TransitionStatus), "capabilities": capabilitiesForProcessingLevel(level), "coverage": coverage})
 }
 
 // Reconcile only tasks with a recorded submission level. A successful reader
@@ -368,9 +362,14 @@ func EnsureParsed(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	result, err := service.EnsureDocumentParsed(r, EnsureDocumentParsedRequest{
 		UserID: userID, DatasetID: datasetID, DocumentID: documentID,
-		Caller: DatasetCatalogCaller{UserID: userID, Authorization: r.Header.Get("Authorization"), TenantID: r.Header.Get("X-Tenant-Id"), UserRole: r.Header.Get("X-User-Role")},
+		Caller: caller,
 	})
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusBadGateway)
@@ -402,9 +401,14 @@ func ReadDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	result, err := service.GetDocument(r.Context(), DocumentReadRequest{
 		UserID: userID, DatasetID: datasetID, DocumentID: documentID, IncludeContent: true,
-		Caller: DatasetCatalogCaller{UserID: userID, Authorization: r.Header.Get("Authorization"), TenantID: r.Header.Get("X-Tenant-Id"), UserRole: r.Header.Get("X-User-Role")},
+		Caller: caller,
 	})
 	if err != nil {
 		status := http.StatusInternalServerError

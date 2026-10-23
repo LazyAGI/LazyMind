@@ -54,7 +54,7 @@ func checkpointProxyDB(t *testing.T) *gorm.DB {
 			server.Env = append(server.Env, entry)
 		}
 	}
-	server.Env = append(server.Env, "LAZYMIND_LOCAL_SQLITE_SERVER_PORT="+port)
+	server.Env = append(server.Env, "LAZYMIND_LOCAL_SQLITE_SERVER_PORT="+port, "LAZYMIND_HOST_HOME="+filepath.Join(root, "host-home"))
 	logFile, err := os.Create(filepath.Join(root, "server.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -99,6 +99,9 @@ func checkpointProxyDB(t *testing.T) *gorm.DB {
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := db.Exec("CREATE TABLE checkpoint_probe (id TEXT PRIMARY KEY)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.Document{}, &orm.ResourceOperationReceipt{}); err != nil {
 		t.Fatal(err)
 	}
 	return db.DB
@@ -147,7 +150,13 @@ func TestConversationCheckpointSQLiteProxy(t *testing.T) {
 			background, ordinary := make(chan error, 1), make(chan error, 1)
 			go func() {
 				background <- db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-					return tx.Exec("INSERT INTO checkpoint_probe VALUES (?)", name+"-background").Error
+					if err := tx.Exec("INSERT INTO checkpoint_probe VALUES (?)", name+"-background").Error; err != nil {
+						return err
+					}
+					if err := tx.Create(&orm.Document{ID: name + "-resource", DatasetID: "isolated", DisplayName: "resource"}).Error; err != nil {
+						return err
+					}
+					return tx.Create(&orm.ResourceOperationReceipt{TenantID: "default", UserID: "owner", OperationKey: name, Action: "knowledge.document.upload", ParameterHash: "fixture", Result: []byte(`{"status":"succeeded"}`), CreatedAt: time.Now()}).Error
 				})
 			}()
 			go func() {
@@ -178,6 +187,18 @@ func TestConversationCheckpointSQLiteProxy(t *testing.T) {
 			for _, result := range []<-chan error{background, ordinary} {
 				if err := <-result; err != nil {
 					t.Errorf("peer failed after release: %v", err)
+				}
+			}
+			for _, model := range []any{&orm.Document{}, &orm.ResourceOperationReceipt{}} {
+				var count int64
+				query := db.Model(model)
+				if _, ok := model.(*orm.Document); ok {
+					query = query.Where("id = ?", name+"-resource")
+				} else {
+					query = query.Where("operation_key = ?", name)
+				}
+				if err := query.Count(&count).Error; err != nil || count != 1 {
+					t.Errorf("resource transaction not atomically retained after checkpoint: count=%d err=%v", count, err)
 				}
 			}
 			for suffix, want := range map[string]int64{"checkpoint": 1, "background": 1, "ordinary": 1, "canceled": 0} {
