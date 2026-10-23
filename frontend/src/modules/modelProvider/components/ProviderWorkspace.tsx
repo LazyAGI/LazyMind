@@ -563,7 +563,7 @@ export function ProviderWorkspace(props: Props) {
               >
                 <Logo provider={item} />
                 <span>{getProviderDisplayName(item, language)}</span>
-                {hasProviderConfiguration(item) ? (
+                {item.groups.some((candidate) => candidate.apiKeyConfigured || candidate.keys.length > 0) ? (
                   <i
                     className={
                       item.groups.some((candidate) => candidate.verified)
