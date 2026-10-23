@@ -1,4 +1,6 @@
 .provider-model-catalog-drawer {
+  --catalog-action-size: 30px;
+  --catalog-row-padding: 8px;
   border-radius: 18px 0 0 18px;
   overflow: hidden;
   color: var(--ant-color-text, #253046);
@@ -165,7 +167,8 @@
     align-items: center;
     gap: 8px;
     min-height: 40px;
-    padding: 4px 5px;
+    padding: 4px var(--catalog-row-padding);
+    border: 1px solid transparent;
   }
   .provider-model-catalog-group-header > button:first-child {
     flex: 1;
@@ -200,10 +203,14 @@
   .provider-model-catalog-group-header .is-collapsed {
     transform: rotate(-90deg);
   }
-  .provider-model-catalog-group-header > .ant-btn {
-    height: 28px;
-    width: 30px;
+  .provider-model-catalog-group-header > .ant-btn,
+  .provider-model-catalog-row > .ant-btn {
+    flex: 0 0 var(--catalog-action-size);
+    width: var(--catalog-action-size);
+    min-width: var(--catalog-action-size);
+    height: var(--catalog-action-size);
     padding: 0;
+    border-radius: 7px;
     color: var(--ant-color-text-secondary, #667085);
   }
 
@@ -212,7 +219,7 @@
     align-items: center;
     gap: 10px;
     min-height: 44px;
-    padding: 6px 8px;
+    padding: 6px var(--catalog-row-padding);
     margin: 4px 0;
     border: 1px solid transparent;
     border-radius: 8px;
@@ -264,22 +271,10 @@
     line-height: 15px;
   }
   .provider-model-catalog-row .model-type-badge { flex-shrink: 0; }
-  .provider-model-catalog-row > .ant-btn {
-    flex-shrink: 0;
-    height: 30px;
-    min-width: 30px;
-    padding: 0;
-    border-radius: 7px;
-    color: var(--ant-color-text-secondary, #667085);
-  }
+  .provider-model-catalog-group-header > .ant-btn:hover,
   .provider-model-catalog-row > .ant-btn:hover {
     color: var(--ant-color-primary, #2f6bff);
     background: var(--ant-color-bg-container, #fff);
-  }
-  .provider-model-catalog-type {
-    width: 140px;
-    flex-shrink: 0;
-    font-size: 11px;
   }
   button:focus-visible {
     outline: 2px solid var(--ant-color-primary, #2f6bff);
@@ -287,6 +282,7 @@
   }
 
   @media (max-width: 600px) {
+    --catalog-row-padding: 6px;
     .ant-drawer-header {
       padding: 16px 14px 12px;
       flex-wrap: wrap;
@@ -312,17 +308,10 @@
     }
     .provider-model-catalog-row {
       gap: 8px;
-      padding-inline: 6px;
-    }
-    .provider-model-catalog-type {
-      width: 112px;
     }
   }
   @media (pointer: coarse) {
-    .provider-model-catalog-row > .ant-btn {
-      min-width: 44px;
-      height: 44px;
-    }
+    --catalog-action-size: 44px;
     .provider-model-catalog-row {
       min-height: 48px;
     }

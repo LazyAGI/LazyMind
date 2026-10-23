@@ -951,7 +951,7 @@ function SettingsPageContent() {
     </section>;
   };
 
-  return <main className="settings-reference" aria-label={t("settingsPage.title")}>
+  return <main className={`settings-reference${section === "model_defaults" ? " is-default-model-workspace" : ""}`} aria-label={t("settingsPage.title")}>
     {settingsChange.dialog}
     <aside className="settings-reference-sidebar">
       <button className="settings-back-button" type="button" onClick={() => navigate(returnTo || CHAT_HOME_PATH)}>

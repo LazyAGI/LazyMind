@@ -111,6 +111,8 @@ describe("separate supplier and default model settings", () => {
       }),
     ).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("main", { name: "settingsPage.title" }))
+      .toHaveClass("is-default-model-workspace");
     expect(
       screen.queryByRole("navigation", { name: "suppliers" }),
     ).not.toBeInTheDocument();
@@ -120,6 +122,8 @@ describe("separate supplier and default model settings", () => {
     expect(
       await screen.findByRole("navigation", { name: "suppliers" }),
     ).toBeVisible();
+    expect(screen.getByRole("main", { name: "settingsPage.title" }))
+      .not.toHaveClass("is-default-model-workspace");
     await waitFor(() =>
       expect(
         screen.queryByText("Default model choices"),

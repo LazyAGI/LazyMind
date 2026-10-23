@@ -1556,51 +1556,40 @@
     grid-template-columns: 184px minmax(0, 1fr);
   }
 }
-.settings-model-defaults-page .model-provider-service-page { padding: 0; height: auto; min-height: 0; }
-.settings-model-defaults-page .default-services-grid { grid-template-columns: minmax(0, 1fr); }
-.settings-model-defaults-page .model-provider-config-panel {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: #fff;
-  box-shadow: none;
-  backdrop-filter: none;
-}
-.settings-model-defaults-page .model-provider-section-title { display: none; }
-.settings-model-defaults-page .model-provider-section-subtitle { margin-top: 0; }
-.settings-model-defaults-page .model-provider-pending-list,
-.settings-model-defaults-page .model-provider-default-list {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-}
-.settings-model-defaults-page .model-provider-default-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(140px, 1fr);
-  align-items: center;
-  gap: 8px;
-  min-height: 64px;
-  padding: 10px 0;
-  border: 0;
-  border-bottom: 1px solid #e6e9ef;
-  border-radius: 0;
-  background: transparent;
-}
-.settings-model-defaults-page .model-provider-default-meta { min-height: 32px; flex-wrap: wrap; row-gap: 4px; }
-.settings-model-defaults-page .model-provider-default-title { min-width: 100px; flex: 1; font-size: 13px; font-weight: 600; }
-.settings-model-defaults-page .model-provider-max-input-tokens { order: 1; flex-basis: 100%; white-space: nowrap; font-size: 11px; }
-.settings-model-defaults-page .model-provider-pending-description { display: none; }
-.settings-model-defaults-page .model-provider-configure-capability {
-  justify-self: end;
-  align-self: center;
-  min-height: 32px;
-  height: 32px;
-  font-size: 12px;
-}
-.settings-model-defaults-page .model-provider-model-select { min-width: 0; width: 100%; }
 @media (max-width: 800px) {
   .settings-integrated-page.is-models-page { padding: 12px; }
 }
 
-.settings-model-defaults-page { max-width: 900px; margin-inline: auto; }
-.settings-model-defaults-page .settings-integrated-surface.is-default-models { border: 0; padding: 0; margin-top: 20px; }
+.settings-reference.is-default-model-workspace .settings-reference-content {
+  background: var(--color-bg-container, #fff);
+}
+.settings-reference.is-default-model-workspace .settings-reference-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-padding-block: 24px;
+}
+.settings-model-defaults-page {
+  width: 100%;
+  max-width: 960px;
+  min-height: 100%;
+  margin-inline: auto;
+  padding: 28px 36px 56px;
+
+  .settings-detail-header { margin-bottom: 24px; }
+  .settings-integrated-surface.is-default-models { margin: 0; padding: 0; border: 0; overflow: visible; }
+  .model-provider-service-page { height: auto; min-height: 0; padding: 0; overflow: visible; }
+  .model-provider-config-panel.model-defaults-panel {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+  .model-provider-section-title { display: none; }
+  .model-provider-section-subtitle { margin-top: 0; }
+
+  @media (max-width: 800px) { padding: 20px 20px 40px; }
+  @media (max-width: 480px) { padding-inline: 16px; }
+}

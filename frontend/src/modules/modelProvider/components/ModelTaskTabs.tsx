@@ -1,6 +1,6 @@
 import {
   AudioOutlined,
-  ClusterOutlined,
+  DotChartOutlined,
   MessageOutlined,
   OrderedListOutlined,
   PictureOutlined,
@@ -18,7 +18,7 @@ const filters = [
   { id: "chat", icon: MessageOutlined },
   { id: "image", icon: PictureOutlined },
   { id: "video", icon: VideoCameraOutlined },
-  { id: "embedding", icon: ClusterOutlined },
+  { id: "embedding", icon: DotChartOutlined },
   { id: "rerank", icon: OrderedListOutlined },
   { id: "tts", icon: SoundOutlined },
   { id: "asr", icon: AudioOutlined },

@@ -6,6 +6,8 @@
   --defaults-subtle: var(--color-bg-layout, #f7f8fa);
   --defaults-accent: var(--color-primary, #1677ff);
 
+  container: model-defaults / inline-size;
+  min-width: 0;
   color: var(--defaults-text);
   background: var(--defaults-surface);
 
@@ -31,6 +33,11 @@
   }
 
   .model-defaults-save-note { color: var(--defaults-muted); font-size: 12px; }
+
+  .model-defaults-basic,
+  .model-defaults-rows {
+    min-width: 0;
+  }
 
   .model-defaults-rows {
     display: grid;
@@ -60,6 +67,7 @@
       animation: none;
     }
     > .ant-alert { grid-column: 1 / -1; }
+    > * { min-width: 0; }
   }
 
   .model-provider-default-meta { min-height: 36px; flex-wrap: wrap; gap: 4px 6px; }
@@ -82,8 +90,8 @@
     p { margin: 5px 0 0; color: var(--defaults-muted); font-size: 12px; line-height: 1.6; }
   }
 
-  .model-defaults-groups { display: grid; gap: 10px; }
-  .model-defaults-group { min-width: 0; border: 1px solid var(--defaults-line); border-radius: 10px; background: var(--defaults-surface); overflow: clip; }
+  .model-defaults-groups { display: grid; border-top: 1px solid var(--defaults-line); }
+  .model-defaults-group { min-width: 0; border-bottom: 1px solid var(--defaults-line); background: transparent; overflow: visible; }
   .model-defaults-group-heading { margin: 0; font-size: inherit; }
   .model-defaults-group-toggle {
     display: flex;
@@ -91,7 +99,7 @@
     gap: 12px;
     width: 100%;
     min-height: 72px;
-    padding: 14px 16px;
+    padding: 16px 0;
     border: 0;
     background: transparent;
     color: var(--defaults-text);
@@ -100,11 +108,11 @@
     cursor: pointer;
     transition: background-color 150ms ease;
 
-    &:hover { background: var(--defaults-subtle); }
-    &:focus-visible { outline: 2px solid var(--defaults-accent); outline-offset: -3px; border-radius: 10px; }
+    &:hover .model-defaults-group-title { color: var(--defaults-accent); }
+    &:focus-visible { outline: 2px solid var(--defaults-accent); outline-offset: 3px; border-radius: 4px; }
   }
 
-  .model-defaults-group-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; border: 1px solid var(--defaults-line); border-radius: 8px; color: var(--defaults-muted); font-size: 17px; }
+  .model-defaults-group-icon { display: grid; place-items: center; flex: 0 0 22px; height: 24px; color: var(--defaults-muted); font-size: 17px; }
   .model-defaults-group-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
   .model-defaults-group-title { font-size: 14px; font-weight: 500; line-height: 1.5; }
   .model-defaults-group-description { color: var(--defaults-muted); font-size: 12px; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
@@ -112,19 +120,18 @@
   .model-defaults-group-count.has-configured { color: var(--defaults-accent); }
   .model-defaults-group-caret { flex-shrink: 0; color: var(--defaults-muted); font-size: 10px; transition: transform 150ms ease; }
   .is-expanded .model-defaults-group-caret { transform: rotate(180deg); }
-  .model-defaults-group > section > .model-defaults-rows { margin: 0 16px; border-top: 1px solid var(--defaults-line); }
+  .model-defaults-group > section > .model-defaults-rows { margin: 0 0 12px 34px; border-top: 1px solid var(--defaults-line); }
 
   > .ant-alert { margin-bottom: 16px; }
 
-  @media (max-width: 480px) {
-    .model-defaults-group-toggle { flex-wrap: wrap; column-gap: 10px; padding: 14px 12px; }
-    .model-defaults-group-icon { flex-basis: 30px; height: 30px; }
+  @container model-defaults (max-width: 560px) {
+    .model-defaults-group-toggle { flex-wrap: wrap; column-gap: 10px; padding-block: 16px; }
     .model-defaults-group-description { font-size: 12px; }
-    .model-defaults-group-count { margin-left: 40px; order: 1; flex-basis: calc(100% - 40px); }
-    .model-defaults-group > section > .model-defaults-rows { margin-inline: 12px; }
+    .model-defaults-group-count { margin-left: 32px; order: 1; flex-basis: calc(100% - 32px); }
+    .model-defaults-group > section > .model-defaults-rows { margin-inline: 0; }
     .model-provider-default-row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block: 12px; }
     .model-provider-default-meta { min-height: 28px; }
-    .model-provider-max-input-tokens { order: 0; flex-basis: auto; margin-left: auto; }
+    .model-provider-max-input-tokens { white-space: normal; overflow-wrap: anywhere; }
     .model-provider-configure-capability { justify-self: stretch; min-height: 44px; }
     .model-provider-model-select, .model-provider-model-select .ant-select-selector { min-height: 44px; }
   }

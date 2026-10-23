@@ -6,7 +6,6 @@ import {
   Empty,
   Input,
   Modal,
-  Select,
   Spin,
   Tooltip,
   message,
@@ -84,8 +83,6 @@ interface Candidate extends CatalogModelChoice {
   existing?: ProviderModel;
   missing: boolean;
   vendor: string;
-  unknownType: boolean;
-  requiresTypeSelection: boolean;
   unsupportedType: boolean;
 }
 
@@ -101,9 +98,6 @@ export function ProviderModelCatalogDrawer(props: Props) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<Category>("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [typeOverrides, setTypeOverrides] = useState<Record<string, string>>(
-    {},
-  );
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [modal, modalContext] = Modal.useModal();
@@ -118,7 +112,6 @@ export function ProviderModelCatalogDrawer(props: Props) {
     setSearch("");
     setCategory("all");
     setCollapsed(new Set());
-    setTypeOverrides({});
     setRemote([]);
     setLoaded(false);
     setLoading(true);
@@ -166,18 +159,16 @@ export function ProviderModelCatalogDrawer(props: Props) {
       const declaredType = normalizeRuntimeModelType(model.model_type?.trim() || upstream?.model_type?.trim() || "");
       const modelType = existing
         ? savedModelType(existing)
-        : typeOverrides[key] || declaredType;
+        : declaredType;
       unique.set(key, {
         name: existing?.name || model.name,
         model_type: modelType,
         max_input_tokens: existing?.maxInputTokens || model.max_input_tokens,
-        vision: existing ? existing.vision : upstream?.input.includes("image"),
+        vision: existing ? existing.vision : modelType === "llm" && upstream?.input.includes("image"),
         existing,
         missing: false,
         vendor: getModelIdentity(model.name, props.providerName).vendor,
-        unknownType: getModelTaskType(modelType) === "unknown",
-        unsupportedType: getModelTaskType(modelType) !== "unknown" && !isModelTypeSupportedByProtocol(modelType, props.protocolName),
-        requiresTypeSelection: !existing && getModelTaskType(declaredType) === "unknown",
+        unsupportedType: Boolean(modelType) && !isModelTypeSupportedByProtocol(modelType, props.protocolName),
       });
     }
     for (const model of props.models) {
@@ -191,9 +182,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
           existing: model,
           missing: loaded,
           vendor: getModelIdentity(model.name, props.providerName).vendor,
-          unknownType: getModelTaskType(savedModelType(model)) === "unknown",
           unsupportedType: !isModelTypeSupportedByProtocol(savedModelType(model), props.protocolName),
-          requiresTypeSelection: false,
         });
     }
     return [...unique.values()].sort(
@@ -207,7 +196,6 @@ export function ProviderModelCatalogDrawer(props: Props) {
     props.protocolName,
     props.providerName,
     loaded,
-    typeOverrides,
   ]);
 
   const matchesCategory = (model: Candidate, target: Category) =>
@@ -262,11 +250,11 @@ export function ProviderModelCatalogDrawer(props: Props) {
     (model) => model.missing && model.existing,
   );
   const addable = candidates.filter(
-    (model) => !model.existing && !model.missing && !model.unknownType && !model.unsupportedType,
+    (model) => !model.existing && !model.missing && !model.unsupportedType,
   );
 
   const runChanges = async (requested: Candidate[], remove: boolean) => {
-    const items = remove ? requested : requested.filter((model) => !model.unknownType && !model.unsupportedType);
+    const items = remove ? requested : requested.filter((model) => !model.unsupportedType);
     if (busy || props.modelsLoading || !items.length) return;
     setBusy(true);
     let index = 0;
@@ -284,7 +272,9 @@ export function ProviderModelCatalogDrawer(props: Props) {
           } else {
             await props.onAdd({
               name: model.name,
-              model_type: model.model_type,
+              // The API requires an executable type; unclassified models start as
+              // editable chat models until the user sets their type in model settings.
+              model_type: model.model_type || "llm",
               max_input_tokens: model.max_input_tokens,
               vision: model.vision,
             });
@@ -339,21 +329,6 @@ export function ProviderModelCatalogDrawer(props: Props) {
     });
   };
 
-  const typeOptions = [
-    ["llm", "llmChat"],
-    ["embed", "embedding"],
-    ["vlm", "vlm"],
-    ["multimodal_embedding", "multimodalEmbedding"],
-    ["rerank", "rerank"],
-    ["text2image", "textToImage"],
-    ["image_editing", "imageEditing"],
-    ["text2video", "textToVideo"],
-    ["stt", "asr"],
-    ["tts", "tts"],
-  ].filter(([value]) => isModelTypeSupportedByProtocol(value, props.protocolName)).map(([value, key]) => ({
-    value,
-    label: t(`modelProvider.capability.${key}`),
-  }));
   const working = busy || loading || props.modelsLoading === true;
 
   return (
@@ -520,7 +495,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
               ? `${copy("customGroup")} · ${taskLabel}`
               : taskLabel;
             const missing = models.filter(
-              (model) => !model.existing && !model.missing && !model.unknownType && !model.unsupportedType,
+              (model) => !model.existing && !model.missing && !model.unsupportedType,
             );
             const selected = models.filter((model) => model.existing);
             const removing = !missing.length && selected.length > 0;
@@ -606,20 +581,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
                               <small>{copy("unsupportedType")}</small>
                             ) : null}
                           </div>
-                          {model.requiresTypeSelection ? (
-                            <Select
-                              size="small"
-                              className="provider-model-catalog-type"
-                              aria-label={copy("modelType", { name: model.name })}
-                              placeholder={t(getModelTaskLabelKey("unknown"))}
-                              value={model.unknownType ? undefined : model.model_type}
-                              options={typeOptions}
-                              disabled={busy}
-                              onChange={(value) => setTypeOverrides((current) => ({ ...current, [key]: value }))}
-                            />
-                          ) : (
-                            <ModelTypeBadge type={getModelTaskType(model.model_type)} compact />
-                          )}
+                          <ModelTypeBadge type={getModelTaskType(model.model_type)} compact />
                           <Button
                             type="text"
                             aria-label={copy(
@@ -627,7 +589,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
                               { name: model.name },
                             )}
                             loading={pending.has(key)}
-                            disabled={working || (!model.existing && (model.unknownType || model.unsupportedType))}
+                            disabled={working || (!model.existing && model.unsupportedType)}
                             icon={
                               model.existing ? (
                                 <MinusOutlined aria-hidden="true" />
