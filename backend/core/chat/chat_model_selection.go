@@ -68,6 +68,7 @@ type chatModelSnapshot struct {
 }
 
 type availableChatModel struct {
+	LogoDataURL         string   `gorm:"column:logo_data_url"`
 	Vision              bool     `gorm:"column:vision"`
 	ID                  string   `gorm:"column:model_id"`
 	ProviderID          string   `gorm:"column:provider_id"`
@@ -107,6 +108,7 @@ type chatModelRoute struct {
 }
 
 type chatModelSelectionResponse struct {
+	LogoDataURL  string `json:"logo_data_url,omitempty"`
 	Mode         string `json:"mode"`
 	ModelID      string `json:"model_id,omitempty"`
 	ProviderID   string `json:"provider_id,omitempty"`
@@ -120,6 +122,7 @@ type chatModelSelectionResponse struct {
 }
 
 type chatModelListItem struct {
+	LogoDataURL  string   `json:"logo_data_url,omitempty"`
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	GroupID      string   `json:"group_id"`
@@ -135,11 +138,12 @@ type chatModelListItem struct {
 }
 
 type chatModelProviderItem struct {
-	ID       string              `json:"id"`
-	Name     string              `json:"name"`
-	IsCustom bool                `json:"is_custom"`
-	Source   string              `json:"source"`
-	Models   []chatModelListItem `json:"models"`
+	LogoDataURL string              `json:"logo_data_url,omitempty"`
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	IsCustom    bool                `json:"is_custom"`
+	Source      string              `json:"source"`
+	Models      []chatModelListItem `json:"models"`
 }
 
 type chatModelsResponse struct {
@@ -220,7 +224,7 @@ func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 		Select(
 			"m.id AS model_id, m.user_model_provider_id AS provider_id, "+
 				"m.user_model_provider_group_id AS provider_group_id, "+
-				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, "+
+				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, p.logo_data_url, "+
 				"p.name AS provider_display_name, p.is_custom AS provider_is_custom, "+
 				"m.model_type, m.vision, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.name AS group_name, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext",
@@ -693,6 +697,7 @@ func selectionFromModel(mode string, model *availableChatModel, version int64) c
 	selection.GroupID = model.ProviderGroupID
 	selection.GroupName = model.GroupName
 	selection.ModelName = model.ModelName
+	selection.LogoDataURL = model.LogoDataURL
 	selection.Source = model.Source
 	if chatModelUsable(model) {
 		selection.Availability = chatModelAvailabilityAvailable
@@ -854,7 +859,7 @@ func buildChatModelsResponse(ctx context.Context, db *gorm.DB, userID string, co
 				displayName = model.ProviderName
 			}
 			provider = &chatModelProviderItem{
-				ID: model.ProviderID, Name: displayName, IsCustom: model.ProviderIsCustom, Source: model.Source, Models: []chatModelListItem{},
+				ID: model.ProviderID, Name: displayName, IsCustom: model.ProviderIsCustom, LogoDataURL: model.LogoDataURL, Source: model.Source, Models: []chatModelListItem{},
 			}
 			providerByKey[key] = provider
 			providerKeys = append(providerKeys, key)
@@ -878,7 +883,7 @@ func buildChatModelsResponse(ctx context.Context, db *gorm.DB, userID string, co
 			badges = append(badges, "degraded")
 		}
 		provider.Models = append(provider.Models, chatModelListItem{
-			ID: model.ID, Name: model.ModelName, GroupID: model.ProviderGroupID, GroupName: model.GroupName,
+			ID: model.ID, Name: model.ModelName, LogoDataURL: model.LogoDataURL, GroupID: model.ProviderGroupID, GroupName: model.GroupName,
 			Source: model.Source, Capabilities: append([]string(nil), model.Capabilities...), Badges: badges,
 			Availability: model.Availability, Lifecycle: model.Lifecycle,
 			Current: current, Default: isDefault, Shared: model.Source == "shared",

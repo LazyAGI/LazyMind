@@ -11136,6 +11136,9 @@ components:
                         - deprecated
                         - retired
                     type: string
+                logo_data_url:
+                    description: Optional normalized PNG supplier logo data URL. Display metadata only.
+                    type: string
                 name:
                     type: string
                 shared:
@@ -11164,6 +11167,8 @@ components:
                     type: string
                 is_custom:
                     type: boolean
+                logo_data_url:
+                    type: string
                 models:
                     items:
                         $ref: '#/components/schemas/chatModelListOpenAPIItem'
@@ -11192,6 +11197,9 @@ components:
                 group_id:
                     type: string
                 group_name:
+                    type: string
+                logo_data_url:
+                    description: Optional normalized PNG logo inherited from the selected supplier, including a shared model.
                     type: string
                 mode:
                     enum:
@@ -11294,6 +11302,9 @@ components:
             properties:
                 base_url:
                     type: string
+                logo_data_url:
+                    description: Optional PNG data URL, at most 128 by 128 pixels and 96 KiB decoded. Empty uses the default custom supplier icon.
+                    type: string
                 name:
                     type: string
                 source_provider_id:
@@ -11310,6 +11321,8 @@ components:
                     description: Private credential/model storage ID retained for API compatibility.
                     type: string
                 id:
+                    type: string
+                logo_data_url:
                     type: string
             required:
                 - group_id
@@ -11370,6 +11383,8 @@ components:
         customModelProviderMutationOpenAPIResponse:
             properties:
                 id:
+                    type: string
+                logo_data_url:
                     type: string
             required:
                 - id
@@ -12339,6 +12354,8 @@ components:
                         - deprecated
                         - retired
                     type: string
+                logo_data_url:
+                    type: string
                 max_input_tokens:
                     description: Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported
                     nullable: true
@@ -13124,6 +13141,8 @@ components:
                 is_editable:
                     description: Whether the selected model supports image editing
                     type: boolean
+                logo_data_url:
+                    type: string
                 max_input_tokens:
                     description: Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
@@ -14967,10 +14986,12 @@ components:
             type: object
         updateCustomModelProviderOpenAPIRequest:
             properties:
-                name:
+                logo_data_url:
+                    description: Optional normalized PNG supplier logo. Omit to preserve; empty restores the default icon.
                     type: string
-            required:
-                - name
+                name:
+                    description: Optional custom supplier display name. Omit for a logo-only edit.
+                    type: string
             type: object
         updateModelProviderEndpointOpenAPIRequest:
             properties:
@@ -15141,6 +15162,8 @@ components:
                     type: boolean
                 is_custom:
                     type: boolean
+                logo_data_url:
+                    type: string
                 model_types:
                     items:
                         type: string

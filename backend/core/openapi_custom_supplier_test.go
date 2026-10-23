@@ -16,8 +16,8 @@ func TestOpenAPICustomSupplierContract(t *testing.T) {
 	}
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	create := schemas["createCustomModelProviderOpenAPIRequest"].(map[string]any)["properties"].(map[string]any)
-	if len(create) != 3 || create["name"] == nil || create["source_provider_id"] == nil || create["base_url"] == nil {
-		t.Fatal("supplier creation must separate display name, protocol source and endpoint")
+	if len(create) != 4 || create["name"] == nil || create["source_provider_id"] == nil || create["base_url"] == nil || create["logo_data_url"] == nil {
+		t.Fatal("supplier creation must separate display name, protocol source, endpoint and optional artwork")
 	}
 	provider := schemas["userModelProviderOpenAPIItem"].(map[string]any)["properties"].(map[string]any)
 	if provider["is_custom"] == nil || provider["protocol_name"] == nil {

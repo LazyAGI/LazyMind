@@ -64,7 +64,8 @@ export async function createCustomProvider(input: {
   name: string;
   source_provider_id: string;
   base_url: string;
-}): Promise<{ id: string; group_id: string }> {
+  logo_data_url?: string;
+}): Promise<{ id: string; group_id: string; logo_data_url?: string }> {
   const response = await modelProvidersApi.apiCoreModelProvidersPost({
     createCustomModelProviderOpenAPIRequest: input,
   });
@@ -74,11 +75,12 @@ export async function createCustomProvider(input: {
 export async function updateCustomProviderName(
   providerId: string,
   name: string,
-): Promise<{ id: string }> {
+  logoDataUrl?: string,
+): Promise<{ id: string; logo_data_url?: string }> {
   const response =
     await modelProvidersApi.apiCoreModelProvidersModelProviderIdPatch({
       modelProviderId: providerId,
-      updateCustomModelProviderOpenAPIRequest: { name },
+      updateCustomModelProviderOpenAPIRequest: { name, ...(logoDataUrl !== undefined ? { logo_data_url: logoDataUrl } : {}) },
     });
   return unwrapModelProviderData(response.data);
 }

@@ -324,6 +324,21 @@ const zhCN = {
     invalidEmail: "邮箱格式不正确",
   },
   modelProvider: {
+    logoUpload: {
+      "label": "自定义图标",
+      "upload": "上传图标",
+      "replace": "替换图标",
+      "reset": "恢复默认",
+      "hint": "支持 PNG、JPEG 或 WebP，最大 2 MB；图片会保持原比例。",
+      "errors": {
+        "empty": "请选择图片文件。",
+        "type": "请选择 PNG、JPEG 或 WebP 图片。",
+        "size": "图片文件不能超过 2 MB。",
+        "decode": "图片解码失败，请选择有效的图片文件。",
+        "output": "图片处理失败，请尝试其他图片。"
+      }
+    },
+
     taskTab: {
       all: "全部",
       chat: "对话",

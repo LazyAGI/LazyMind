@@ -8,14 +8,15 @@ import (
 )
 
 type modelProviderIdentity struct {
-	BrandKey   string
-	ServiceKey string
-	IsCustom   bool
+	LogoDataURL string
+	BrandKey    string
+	ServiceKey  string
+	IsCustom    bool
 }
 
 func identityForModelProvider(provider orm.UserModelProvider) modelProviderIdentity {
 	brand, service := ProviderServiceIdentity(provider)
-	return modelProviderIdentity{BrandKey: brand, ServiceKey: service, IsCustom: provider.IsCustom}
+	return modelProviderIdentity{BrandKey: brand, ServiceKey: service, IsCustom: provider.IsCustom, LogoDataURL: provider.LogoDataURL}
 }
 
 // Model option responses need the real supplier identity even when the provider
@@ -37,7 +38,7 @@ func loadModelProviderIdentities(ctx context.Context, db *gorm.DB, ids []string)
 		return result, nil
 	}
 	var providers []orm.UserModelProvider
-	if err := db.WithContext(ctx).Select("id, name, is_custom, category, protocol_name, default_model_provider_id").Where("id IN ? AND deleted_at IS NULL", unique).Find(&providers).Error; err != nil {
+	if err := db.WithContext(ctx).Select("id, name, is_custom, category, protocol_name, default_model_provider_id, logo_data_url").Where("id IN ? AND deleted_at IS NULL", unique).Find(&providers).Error; err != nil {
 		return nil, err
 	}
 	for _, provider := range providers {

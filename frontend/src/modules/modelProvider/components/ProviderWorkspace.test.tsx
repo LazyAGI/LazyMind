@@ -24,6 +24,13 @@ const mocks = vi.hoisted(() => ({
   updateProvider: vi.fn(),
   deleteProvider: vi.fn(),
   getModels: vi.fn(),
+  logoObservers: [] as Array<(busy: boolean) => void>,
+}));
+vi.mock("./CustomLogoPicker", () => ({
+  CustomLogoPicker: ({ value, onChange, onBusyChange }: { value?: string; onChange: (value: string) => void; onBusyChange: (busy: boolean) => void }) => {
+    mocks.logoObservers.push(onBusyChange);
+    return <input aria-label="Test supplier logo" value={value || ""} onChange={(event) => onChange(event.target.value)} />;
+  },
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -164,6 +171,7 @@ async function openAddKeyDialog() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.logoObservers = [];
   mocks.addKey.mockResolvedValue({ data: { success: true } });
   mocks.deleteKey.mockResolvedValue({ data: { success: true } });
   mocks.createGroup.mockResolvedValue({
@@ -183,6 +191,99 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("keeps uploaded supplier artwork in a failed create draft and retries it", async () => {
+    mocks.createProvider.mockRejectedValueOnce(new Error("Create failed"));
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByLabelText("modelProvider.workspace.supplierName"), { target: { value: "My gateway" } });
+    fireEvent.change(dialog.getByRole("textbox", { name: "Test supplier logo" }), { target: { value: "supplier-logo" } });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(mocks.createProvider).toHaveBeenCalledTimes(1));
+    expect(mocks.createProvider).toHaveBeenLastCalledWith({ name: "My gateway", source_provider_id: "openai", base_url: provider.baseUrl, logo_data_url: "supplier-logo" });
+    expect(dialog.getByRole("textbox", { name: "Test supplier logo" })).toHaveValue("supplier-logo");
+    await waitFor(() => expect(dialog.getByRole("button", { name: "common.save" })).toBeEnabled());
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(mocks.createProvider).toHaveBeenCalledTimes(2));
+    expect(mocks.createProvider.mock.calls[1][0].logo_data_url).toBe("supplier-logo");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it.each(["preserve", "reset", "replace"])("%s supplier artwork when saving its edit", async (mode) => {
+    const custom = { ...provider, id: "custom", name: "Private proxy", isCustom: true, logoDataUrl: "saved-logo" };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.editSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByRole("textbox", { name: "Test supplier logo" })).toHaveValue("saved-logo");
+    if (mode !== "preserve") fireEvent.change(dialog.getByRole("textbox", { name: "Test supplier logo" }), { target: { value: mode === "reset" ? "" : "new-logo" } });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(mocks.updateProvider).toHaveBeenCalledTimes(1));
+    expect(mocks.updateProvider.mock.calls[0]).toEqual(mode === "preserve" ? ["custom", "Private proxy"] : ["custom", "Private proxy", mode === "reset" ? "" : "new-logo"]);
+  });
+
+  it("locks supplier submission and dismissal during image reads and ignores an older session observer", async () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const first = await screen.findByRole("dialog");
+    const oldObserver = mocks.logoObservers[mocks.logoObservers.length - 1]!;
+    act(() => oldObserver(true));
+    expect(within(first).getByRole("button", { name: "common.save" })).toBeDisabled();
+    expect(within(first).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    fireEvent.submit(first.querySelector("form")!);
+    expect(mocks.createProvider).not.toHaveBeenCalled();
+    act(() => oldObserver(false));
+    fireEvent.click(within(first).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const second = within(await screen.findByRole("dialog"));
+    const current = mocks.logoObservers[mocks.logoObservers.length - 1]!;
+    act(() => current(true));
+    act(() => oldObserver(false));
+    expect(second.getByRole("button", { name: "common.save" })).toBeDisabled();
+    act(() => current(false));
+    expect(second.getByRole("button", { name: "common.save" })).toBeEnabled();
+  });
+
+  it("inherits supplier artwork in its sidebar, heading and saved models", () => {
+    const logoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+    const custom = { ...provider, id: "custom", name: "Private proxy", isCustom: true, logoDataUrl };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    for (const selector of [".provider-workspace-provider img", ".provider-workspace-supplier-title img", ".saved-provider-model-row img"]) {
+      expect(document.querySelector(selector)).toHaveAttribute("src", logoDataUrl);
+    }
+  });
+
+  it("allows only one supplier save while its request is pending", async () => {
+    let finish!: (value: { id: string; group_id: string }) => void;
+    mocks.createProvider.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const dialogElement = await screen.findByRole("dialog");
+    const dialog = within(dialogElement);
+    fireEvent.change(dialog.getByLabelText("modelProvider.workspace.supplierName"), { target: { value: "My gateway" } });
+    fireEvent.change(dialog.getByRole("textbox", { name: "Test supplier logo" }), { target: { value: "supplier-logo" } });
+    fireEvent.submit(dialogElement.querySelector("form")!);
+    fireEvent.submit(dialogElement.querySelector("form")!);
+    await waitFor(() => expect(mocks.createProvider).toHaveBeenCalledTimes(1));
+    expect(dialog.getByRole("button", { name: /common.save/ })).toBeDisabled();
+    expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await act(async () => finish({ id: "created-supplier", group_id: "created-group" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(mocks.createProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an edit bound to its original supplier when selection changes", async () => {
+    const original = { ...provider, id: "custom-a", name: "Gateway A", isCustom: true, logoDataUrl: "logo-a" };
+    const other = { ...provider, id: "custom-b", name: "Gateway B", isCustom: true, logoDataUrl: "logo-b" };
+    setup({ providers: [original, other], configuredProviders: [original, other] });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.editSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.change(dialog.getByRole("textbox", { name: "Test supplier logo" }), { target: { value: "replacement-a" } });
+    fireEvent.click(screen.getByRole("button", { name: "Gateway B" }));
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(mocks.updateProvider).toHaveBeenCalledWith("custom-a", "Gateway A", "replacement-a"));
+  });
+
   it("expands a brand without selecting it and configures only an independent service leaf", () => {
     const standard = { ...provider, id: "ark-standard", name: "Doubao", brandKey: "Doubao", serviceKey: "standard", groups: [] };
     const coding = { ...provider, id: "ark-coding", name: "DoubaoCodingPlan", brandKey: "Doubao", serviceKey: "coding", groups: [] };

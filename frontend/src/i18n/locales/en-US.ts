@@ -326,6 +326,21 @@ const enUS = {
     invalidEmail: "Invalid email format",
   },
   modelProvider: {
+    logoUpload: {
+      "label": "Custom logo",
+      "upload": "Upload logo",
+      "replace": "Replace logo",
+      "reset": "Restore default",
+      "hint": "PNG, JPEG or WebP, up to 2 MB. The image keeps its original proportions.",
+      "errors": {
+        "empty": "Choose an image file.",
+        "type": "Choose a PNG, JPEG or WebP image.",
+        "size": "The image must be 2 MB or smaller.",
+        "decode": "Unable to decode this image. Choose a valid image file.",
+        "output": "Unable to process this image. Try another image."
+      }
+    },
+
     taskTab: {
       all: "All",
       chat: "Chat",

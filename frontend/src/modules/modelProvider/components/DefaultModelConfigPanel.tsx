@@ -168,9 +168,11 @@ function getCloudServiceReadyTooltip(
 
 function ProviderLogo({
   provider,
+  logoUrl,
   compact = false,
 }: {
   provider: ProviderOption;
+  logoUrl?: string;
   compact?: boolean;
 }) {
   return (
@@ -179,11 +181,12 @@ function ProviderLogo({
       className={`model-provider-logo is-${provider.isCustom ? "custom" : normalizeProviderKey(provider.source || provider.name)}${compact ? " is-compact" : ""}`}
     >
       <span className="model-provider-logo-fallback">{provider.brand}</span>
-      {provider.logoUrl ? (
+      {logoUrl || provider.logoUrl ? (
         <img
           alt=""
           loading="lazy"
-          src={provider.logoUrl}
+          src={logoUrl || provider.logoUrl}
+          onLoad={(event) => { event.currentTarget.style.display = ""; }}
           onError={(event) => {
             event.currentTarget.style.display = "none";
           }}
@@ -427,7 +430,16 @@ export default function DefaultModelConfigPanel({
           listHeight={340}
           optionLabelProp="label"
           placeholder={
-            modelReadyStatus[module.key]?.model_name || (module.restricted && !isAdmin
+            (modelReadyStatus[module.key]?.model_name && modelReadyStatus[module.key]?.logo_data_url
+              ? <span className="model-provider-select-value">
+                  <span className="model-provider-logo is-custom is-compact" aria-hidden="true">
+                    <img src={modelReadyStatus[module.key]?.logo_data_url} alt="" />
+                  </span>
+                  <span className="model-provider-select-value-text">
+                    {modelReadyStatus[module.key]?.model_name}
+                  </span>
+                </span>
+              : modelReadyStatus[module.key]?.model_name) || (module.restricted && !isAdmin
               ? t("modelProvider.restrictedPlaceholder")
               : module.required
                 ? t("modelProvider.requiredModelPlaceholder")
@@ -484,7 +496,7 @@ export default function DefaultModelConfigPanel({
                 }
                 label={
                   <span className="model-provider-select-value">
-                    <ProviderLogo provider={provider} compact />
+                    <ProviderLogo provider={provider} logoUrl={model.logoDataUrl} compact />
                     <span className="model-provider-select-value-text">
                       {displayName} · {supplierDisplayName}
                     </span>
@@ -498,7 +510,7 @@ export default function DefaultModelConfigPanel({
                   overlayClassName="model-provider-option-tooltip"
                 >
                   <span className="model-provider-select-option" title="">
-                    <ProviderLogo provider={provider} compact />
+                    <ProviderLogo provider={provider} logoUrl={model.logoDataUrl} compact />
                     <span className="model-provider-select-copy">
                       <strong>{displayName}</strong>
                       <small>

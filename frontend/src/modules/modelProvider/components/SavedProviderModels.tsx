@@ -33,6 +33,7 @@ export interface SavedProviderModelsProps {
   emptyDescription?: ReactNode;
   providerName: string;
   supplierName?: string;
+  providerLogoDataUrl?: string;
   capabilityLabel: (capability: ModelCapability) => string;
   probe?: ModelProbeContext;
   onEdit: (model: ProviderModel) => void;
@@ -96,6 +97,7 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
           >
             <ModelIdentityIcon
               modelName={model.name}
+              logoUrl={props.providerLogoDataUrl}
               fallbackVendor={props.supplierName}
               size={24}
             />

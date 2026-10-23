@@ -80,6 +80,7 @@ type UserModelProvider struct {
 	ID                     string `gorm:"column:id;type:varchar(64);primaryKey"`
 	DefaultModelProviderID string `gorm:"column:default_model_provider_id;type:varchar(64);not null"`
 	Name                   string `gorm:"column:name;type:varchar(255);not null"`
+	LogoDataURL            string `gorm:"column:logo_data_url;type:text;not null;default:''"`
 	IsCustom               bool   `gorm:"column:is_custom;not null;default:false"`
 	ProtocolName           string `gorm:"column:protocol_name;type:varchar(255);not null;default:''"`
 	RequestConfig          string `gorm:"column:request_config;type:text;not null;default:''"`

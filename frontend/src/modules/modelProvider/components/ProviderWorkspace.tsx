@@ -56,6 +56,9 @@ import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./M
 import { SavedProviderModels } from "./SavedProviderModels";
 import { ProviderKeyManager } from "./ProviderKeyManager";
 import { ProviderRequestConfigDrawer } from "./ProviderRequestConfigDrawer";
+import { CustomLogoPicker } from "./CustomLogoPicker";
+import { getCustomLogoCopy } from "../customLogoCopy";
+import { isCustomLogoDataUrl } from "../customLogo";
 import type {
   AddedProvider,
   ModelCapability,
@@ -106,13 +109,16 @@ interface Props {
 }
 
 function Logo({ provider }: { provider: ProviderOption }) {
-  const logo = getProviderLogoUrl(
+  const fallback = getProviderLogoUrl(
     provider.brandKey || provider.name || provider.protocolName || provider.source,
     provider.isCustom,
-  );
+  ) || "/provider-icons/custom.svg";
+  const logo = isCustomLogoDataUrl(provider.logoDataUrl) ? provider.logoDataUrl : fallback;
   return (
     <span className="provider-workspace-logo" aria-hidden="true">
-      {logo ? <img src={logo} alt="" /> : provider.name.slice(0, 2)}
+      {logo ? <img src={logo} alt="" onError={(event) => {
+        if (event.currentTarget.getAttribute("src") !== fallback) event.currentTarget.src = fallback;
+      }} /> : provider.name.slice(0, 2)}
     </span>
   );
 }
@@ -149,6 +155,12 @@ export function ProviderWorkspace(props: Props) {
     null,
   );
   const [providerSaving, setProviderSaving] = useState(false);
+  const providerSavePending = useRef(false);
+  const [providerLogoBusy, setProviderLogoBusy] = useState(false);
+  const providerLogoBusyRef = useRef(false);
+  const providerModalGeneration = useRef(0);
+  const logoGeneration = providerModalGeneration.current;
+  const providerModalTarget = useRef<AddedProvider>();
   const [providerDeleting, setProviderDeleting] = useState(false);
   const [deleteModal, deleteModalContext] = Modal.useModal();
   const [initializing, setInitializing] = useState(false);
@@ -156,11 +168,12 @@ export function ProviderWorkspace(props: Props) {
     name: string;
     sourceProviderId: string;
     baseUrl: string;
+    logoDataUrl?: string;
   }>();
   const providerDraft = useSettingsFormDraft(
     providerForm,
     Boolean(providerModal),
-    providerSaving,
+    providerSaving || providerLogoBusy,
   );
   const activeKeyRequestPending = useRef(false);
   const addKeyRequestPending = useRef(false);
@@ -367,44 +380,67 @@ export function ProviderWorkspace(props: Props) {
       setChangingActiveKey("");
     }
   };
-  const openProviderModal = (mode: "create" | "edit") =>
+  const resetProviderModal = () => {
+    providerModalGeneration.current += 1;
+    providerLogoBusyRef.current = false;
+    setProviderLogoBusy(false);
+    providerModalTarget.current = undefined;
+    setProviderModal(null);
+    providerForm.resetFields();
+  };
+  const openProviderModal = (mode: "create" | "edit") => {
+    if (providerSavePending.current || providerLogoBusyRef.current) return;
     confirmEndpointLeave(() => {
+      providerModalGeneration.current += 1;
+      providerLogoBusyRef.current = false;
+      setProviderLogoBusy(false);
+      providerModalTarget.current = mode === "edit" ? provider : undefined;
       const source =
         providers.find(
           (item) => !item.isCustom && item.source.toLowerCase() === "openai",
         ) ||
         providers.find((item) => !item.isCustom) ||
         provider;
+      providerForm.resetFields();
       providerForm.setFieldsValue({
         name: mode === "edit" ? provider?.name || "" : "",
         sourceProviderId: source?.id || "",
         baseUrl: source?.baseUrl || "",
+        logoDataUrl: mode === "edit" ? provider?.logoDataUrl || undefined : undefined,
       });
       setProviderModal(mode);
       providerDraft.captureSavedValues();
     });
+  };
   const saveProvider = async (values: {
     name: string;
     sourceProviderId: string;
     baseUrl: string;
+    logoDataUrl?: string;
   }) => {
-    if (providerSaving || !providerModal) return;
+    if (providerSavePending.current || providerLogoBusyRef.current || !providerModal) return;
+    const target = providerModalTarget.current;
+    providerSavePending.current = true;
     setProviderSaving(true);
     try {
-      let nextId = provider?.id;
+      let nextId = target?.id;
       if (providerModal === "create") {
         const created = await createCustomProvider({
           name: values.name.trim(),
           source_provider_id: values.sourceProviderId,
           base_url: values.baseUrl.trim(),
+          ...(values.logoDataUrl ? { logo_data_url: values.logoDataUrl } : {}),
         });
         nextId = created.id;
-      } else if (provider) {
-        await updateCustomProviderName(provider.id, values.name.trim());
+      } else if (target) {
+        if ((values.logoDataUrl || "") !== (target.logoDataUrl || "")) {
+          await updateCustomProviderName(target.id, values.name.trim(), values.logoDataUrl || "");
+        } else {
+          await updateCustomProviderName(target.id, values.name.trim());
+        }
       }
       providerDraft.acceptSaved();
-      setProviderModal(null);
-      providerForm.resetFields();
+      resetProviderModal();
       await props.onReload();
       if (nextId) {
         setSelectedId(nextId);
@@ -414,6 +450,7 @@ export function ProviderWorkspace(props: Props) {
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
+      providerSavePending.current = false;
       setProviderSaving(false);
     }
   };
@@ -955,6 +992,7 @@ export function ProviderWorkspace(props: Props) {
                       provider.protocolName || provider.source || provider.name
                     }
                     supplierName={provider.name}
+                    providerLogoDataUrl={provider.logoDataUrl}
                     probe={group ? {
                       providerId: provider.id,
                       groupId: group.id,
@@ -1007,15 +1045,19 @@ export function ProviderWorkspace(props: Props) {
         open={Boolean(providerModal)}
         centered
         confirmLoading={providerSaving}
-        maskClosable={!providerSaving}
+        closable={!providerSaving && !providerLogoBusy}
+        maskClosable={!providerSaving && !providerLogoBusy}
+        keyboard={!providerSaving && !providerLogoBusy}
+        cancelButtonProps={{ disabled: providerSaving || providerLogoBusy }}
+        okButtonProps={{ disabled: providerSaving || providerLogoBusy }}
         okText={t("common.save")}
-        onCancel={() =>
+        onCancel={() => {
+          if (providerSavePending.current || providerLogoBusyRef.current) return;
           providerDraft.confirmClose(() => {
-            setProviderModal(null);
-            providerForm.resetFields();
-          })
-        }
-        onOk={() => providerForm.submit()}
+            resetProviderModal();
+          });
+        }}
+        onOk={() => { if (!providerLogoBusyRef.current) providerForm.submit(); }}
         destroyOnHidden
       >
         <Form
@@ -1023,7 +1065,16 @@ export function ProviderWorkspace(props: Props) {
           form={providerForm}
           layout="vertical"
           onFinish={saveProvider}
+          disabled={providerSaving || providerLogoBusy}
         >
+          <Form.Item name="logoDataUrl" normalize={(value?: string) => value || undefined}>
+            {providerModal ? <CustomLogoPicker key={logoGeneration} copy={getCustomLogoCopy(t)} disabled={providerSaving}
+              onBusyChange={(busy) => {
+                if (providerModalGeneration.current !== logoGeneration) return;
+                providerLogoBusyRef.current = busy;
+                setProviderLogoBusy(busy);
+              }} /> : <span />}
+          </Form.Item>
           <Form.Item
             label={label("supplierName")}
             name="name"

@@ -51,6 +51,7 @@ type updateGroupModelRequest struct {
 }
 
 type groupModelListItem struct {
+	LogoDataURL              string   `json:"logo_data_url,omitempty"`
 	Vision                   bool     `json:"vision"`
 	ID                       string   `json:"id"`
 	Source                   string   `json:"source"`
@@ -430,7 +431,8 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 	identity := identityForModelProvider(parent)
 	common.ReplyOK(w, groupModelListItem{
 		ID: row.ID, Source: "own", ProviderID: row.UserModelProviderID, ProviderGroupID: row.UserModelProviderGroupID,
-		BrandKey: identity.BrandKey, ServiceKey: identity.ServiceKey, IsCustom: identity.IsCustom,
+		LogoDataURL: identity.LogoDataURL,
+		BrandKey:    identity.BrandKey, ServiceKey: identity.ServiceKey, IsCustom: identity.IsCustom,
 		UserModelProviderID: row.UserModelProviderID, UserModelProviderGroupID: row.UserModelProviderGroupID,
 		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ProviderName: row.ProviderName, GroupName: group.Name,
 		BaseURL: connectionBaseURL(parent, group.BaseURL), IsDefault: row.IsDefault, IsEditable: strings.EqualFold(row.ModelType, "image_editing"), MaxInputTokens: row.MaxInputTokens, InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens, Availability: availability, Lifecycle: "active", Capabilities: []string{},
@@ -517,6 +519,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			UserModelProviderID:      m.UserModelProviderID,
 			UserModelProviderGroupID: m.UserModelProviderGroupID,
 			Name:                     m.Name,
+			LogoDataURL:              identity.LogoDataURL,
 			ModelType:                m.ModelType,
 			Vision:                   m.Vision,
 			ProviderName:             m.ProviderName,
@@ -650,6 +653,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			UserModelProviderID:      m.UserModelProviderID,
 			UserModelProviderGroupID: m.UserModelProviderGroupID,
 			Name:                     m.Name,
+			LogoDataURL:              identity.LogoDataURL,
 			ModelType:                m.ModelType,
 			Vision:                   m.Vision,
 			ProviderName:             m.ProviderName,

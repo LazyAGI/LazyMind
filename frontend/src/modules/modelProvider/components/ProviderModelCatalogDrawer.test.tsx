@@ -61,6 +61,7 @@ function fixture(models = selected, requiresVerification = false) {
     open: true,
     providerId: "supplier",
     providerName: "Gateway",
+    providerLogoDataUrl: undefined as string | undefined,
     protocolName: "OpenAI",
     groupId: "private-store",
     models,
@@ -87,6 +88,13 @@ beforeEach(() => {
 });
 
 describe("provider model catalog drawer", () => {
+  it("inherits supplier artwork in its catalog row", async () => {
+    const logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+    draw({ ...fixture(), providerLogoDataUrl: logo });
+    const name = await screen.findByRole("button", { name: "qwen-private" });
+    expect(name.closest(".provider-model-catalog-row")?.querySelector("img")).toHaveAttribute("src", logo);
+  });
+
   it("uses one bulk callback for multi-model additions and keeps partial failures retryable", async () => {
     let finish!: (result: { succeeded: number; failed: number }) => void;
     const props = { ...fixture([]), onAddMany: vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; })) };

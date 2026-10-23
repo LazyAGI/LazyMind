@@ -21,6 +21,7 @@ type listItem struct {
 	ID                     string              `json:"id"`
 	DefaultModelProviderID string              `json:"default_model_provider_id"`
 	Name                   string              `json:"name"`
+	LogoDataURL            string              `json:"logo_data_url,omitempty"`
 	BrandKey               string              `json:"brand_key,omitempty"`
 	ServiceKey             string              `json:"service_key,omitempty"`
 	IsCustom               bool                `json:"is_custom"`
@@ -159,6 +160,7 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			ID:                     row.ID,
 			DefaultModelProviderID: row.DefaultModelProviderID,
 			Name:                   row.Name,
+			LogoDataURL:            row.LogoDataURL,
 			BrandKey:               brandKey,
 			ServiceKey:             serviceKey,
 			IsCustom:               row.IsCustom,

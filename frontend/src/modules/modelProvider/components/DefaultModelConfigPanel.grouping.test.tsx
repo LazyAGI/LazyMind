@@ -169,6 +169,18 @@ describe("default capability configuration groups", () => {
     expect(screen.queryByText("My gateway / My gateway")).not.toBeInTheDocument();
   });
 
+  it("inherits an uploaded custom supplier logo without per-model artwork", async () => {
+    const logo = "data:image/png;base64,supplier-logo";
+    mocks.providers.mockResolvedValue({data:{providers:[{id:"provider",name:"My gateway",protocol_name:"OpenAI",is_custom:true,logo_data_url:logo}]}});
+    renderPanel();
+    await screen.findByRole("region", {name:"modelProvider.defaults.basicTitle"});
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    const selected = await screen.findByText("Demo model · My gateway");
+    expect(selected.closest(".ant-select-selection-item")?.querySelector("img")).toHaveAttribute("src", logo);
+    fireEvent.mouseDown(select);
+    await waitFor(() => expect(document.querySelector(".model-provider-select-option img")).toHaveAttribute("src", logo));
+  });
+
   it("uses the canonical supplier identity for a shared model outside the personal catalog", async () => {
     mocks.providers.mockResolvedValue({data:{providers:[]}});
     mocks.selections.mockResolvedValue({data:{selections:[{...selectedLlm,provider_name:"OpenAI",group_name:"Team gateway"}]}});

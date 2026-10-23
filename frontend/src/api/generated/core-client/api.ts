@@ -941,6 +941,10 @@ export interface ChatModelListOpenAPIItem {
     'group_name': string;
     'id': string;
     'lifecycle': ChatModelListOpenAPIItemLifecycleEnum;
+    /**
+     * Optional normalized PNG supplier logo data URL. Display metadata only.
+     */
+    'logo_data_url'?: string;
     'name': string;
     'shared': boolean;
     'source': ChatModelListOpenAPIItemSourceEnum;
@@ -971,6 +975,7 @@ export type ChatModelListOpenAPIItemSourceEnum = typeof ChatModelListOpenAPIItem
 export interface ChatModelProviderOpenAPIItem {
     'id': string;
     'is_custom': boolean;
+    'logo_data_url'?: string;
     'models'?: Array<ChatModelListOpenAPIItem>;
     'name': string;
     'source': ChatModelProviderOpenAPIItemSourceEnum;
@@ -1038,6 +1043,10 @@ export interface ChatModelSelectionOpenAPI {
     'availability': ChatModelSelectionOpenAPIAvailabilityEnum;
     'group_id'?: string;
     'group_name'?: string;
+    /**
+     * Optional normalized PNG logo inherited from the selected supplier, including a shared model.
+     */
+    'logo_data_url'?: string;
     'mode': ChatModelSelectionOpenAPIModeEnum;
     'model_id'?: string;
     'model_name'?: string;
@@ -2203,6 +2212,10 @@ export type CreateChatExportRequestContentTypeEnum = typeof CreateChatExportRequ
 
 export interface CreateCustomModelProviderOpenAPIRequest {
     'base_url': string;
+    /**
+     * Optional PNG data URL, at most 128 by 128 pixels and 96 KiB decoded. Empty uses the default custom supplier icon.
+     */
+    'logo_data_url'?: string;
     'name': string;
     /**
      * An owned model provider whose technical protocol is used for this custom supplier.
@@ -2215,6 +2228,7 @@ export interface CreateCustomModelProviderOpenAPIResponse {
      */
     'group_id': string;
     'id': string;
+    'logo_data_url'?: string;
 }
 export interface CreateEvalSetByImportRequest {
     'dataset_ids'?: Array<string>;
@@ -2607,6 +2621,7 @@ export interface CurrentMemorySoulResponse {
 }
 export interface CustomModelProviderMutationOpenAPIResponse {
     'id': string;
+    'logo_data_url'?: string;
 }
 export interface DatabaseConnectionRequest {
     'database_name': string;
@@ -4536,6 +4551,7 @@ export interface ListModelProviderGroupModelsOpenAPIItem {
      */
     'is_editable': boolean;
     'lifecycle': ListModelProviderGroupModelsOpenAPIItemLifecycleEnum;
+    'logo_data_url'?: string;
     /**
      * Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported
      */
@@ -5878,6 +5894,7 @@ export interface SelectedModelOpenAPIItem {
      * Whether the selected model supports image editing
      */
     'is_editable': boolean;
+    'logo_data_url'?: string;
     /**
      * Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
      */
@@ -7206,7 +7223,14 @@ export interface UpdateACLRequest {
     'permission': string;
 }
 export interface UpdateCustomModelProviderOpenAPIRequest {
-    'name': string;
+    /**
+     * Optional normalized PNG supplier logo. Omit to preserve; empty restores the default icon.
+     */
+    'logo_data_url'?: string;
+    /**
+     * Optional custom supplier display name. Omit for a logo-only edit.
+     */
+    'name'?: string;
 }
 export interface UpdateDatabaseConnectionRequest {
     'database_name'?: string;
@@ -7416,6 +7440,7 @@ export interface UserModelProviderOpenAPIItem {
     'id': string;
     'is_configured': boolean;
     'is_custom': boolean;
+    'logo_data_url'?: string;
     'model_types'?: Array<string>;
     'name': string;
     'protocol_name': string;

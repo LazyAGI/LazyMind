@@ -1,4 +1,5 @@
 -- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers DROP COLUMN logo_data_url;
 ALTER TABLE user_model_providers DROP COLUMN request_config;
 
 -- Restore only migration-owned associations. New custom suppliers remain as

@@ -61,6 +61,7 @@ type selectedModelItem struct {
 	UserModelProviderID      string  `json:"user_model_provider_id,omitempty" gorm:"column:user_model_provider_id"`
 	UserModelProviderGroupID string  `json:"user_model_provider_group_id,omitempty" gorm:"column:user_model_provider_group_id"`
 	Name                     string  `json:"name" gorm:"column:name"`
+	LogoDataURL              string  `json:"logo_data_url,omitempty" gorm:"column:logo_data_url"`
 	Vision                   *bool   `json:"vision,omitempty" gorm:"column:vision"`
 	ProviderName             string  `json:"provider_name" gorm:"column:provider_name"`
 	BrandKey                 string  `json:"brand_key,omitempty" gorm:"-"`
@@ -98,9 +99,11 @@ type modelReadyResponse struct {
 	SharedByID   string `json:"shared_by_id,omitempty"`   // sharer's user_id
 	ProviderName string `json:"provider_name,omitempty"`  // e.g. "OpenAI"
 	ModelName    string `json:"model_name,omitempty"`     // e.g. "text-embedding-3-small"
+	LogoDataURL  string `json:"logo_data_url,omitempty"`
 }
 
 type selectedModelCandidate struct {
+	LogoDataURL        string `gorm:"column:logo_data_url" json:"logo_data_url,omitempty"`
 	ModelID            string `gorm:"column:model_id"`
 	RuntimeGroupID     string `gorm:"column:runtime_group_id"`
 	UserID             string `gorm:"column:user_id"`
@@ -183,6 +186,7 @@ func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*
 		if err != nil || row == nil {
 			return nil, err
 		}
+		setCandidateProviderLogo(ctx, db, row)
 		return row, nil
 	}
 	var rows []selectedModelCandidate
@@ -190,17 +194,30 @@ func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*
 		Table("user_selected_models usm").
 		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL").
 		Where("usm.model_type = ? AND usm.share = ?", modelType, true).
-		Select("usm.user_id, usm.user_name, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type").
+		Select("m.id AS model_id, usm.user_id, usm.user_name, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type").
 		Order("usm.updated_at DESC").Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 	for i := range rows {
 		if RuntimeSupportsModelType(rows[i].ProviderName, rows[i].TechnicalModelType) {
+			setCandidateProviderLogo(ctx, db, &rows[i])
 			return &rows[i], nil
 		}
 	}
 	return nil, nil
+}
+
+// A shared selection's display image follows its supplier through the same
+// visible model, without changing runtime selection or credential resolution.
+func setCandidateProviderLogo(ctx context.Context, db *gorm.DB, row *selectedModelCandidate) {
+	if row == nil || row.ModelID == "" {
+		return
+	}
+	var logo struct{ LogoDataURL string }
+	if db.WithContext(ctx).Table("user_model_provider_group_models m").Select("p.logo_data_url").Joins("JOIN user_model_providers p ON p.id=m.user_model_provider_id AND p.create_user_id=m.create_user_id AND p.deleted_at IS NULL").Where("m.id = ? AND m.deleted_at IS NULL", row.ModelID).Take(&logo).Error == nil {
+		row.LogoDataURL = logo.LogoDataURL
+	}
 }
 
 // GetSelectedModels returns selected model rows for the current user.
@@ -580,6 +597,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 	for _, item := range out {
 		identity := identities[item.UserModelProviderID]
 		item.BrandKey, item.ServiceKey, item.IsCustom = identity.BrandKey, identity.ServiceKey, identity.IsCustom
+		item.LogoDataURL = identity.LogoDataURL
 		item.Source = "own"
 		item.ProviderID = item.UserModelProviderID
 		item.ProviderGroupID = item.UserModelProviderGroupID
@@ -820,6 +838,7 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 				fallback.SharedByID = detail.UserID
 				fallback.ProviderName = detail.ProviderName
 				fallback.ModelName = detail.ModelName
+				fallback.LogoDataURL = detail.LogoDataURL
 			}
 			common.ReplyOK(w, fallback)
 			return
@@ -867,6 +886,7 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 			resp.SharedByID = detail.UserID
 			resp.ProviderName = detail.ProviderName
 			resp.ModelName = detail.ModelName
+			resp.LogoDataURL = detail.LogoDataURL
 		}
 		common.ReplyOK(w, resp)
 		return

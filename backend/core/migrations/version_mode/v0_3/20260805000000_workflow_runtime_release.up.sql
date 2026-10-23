@@ -3440,3 +3440,4 @@ ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE 
 -- Supplier request protocol overrides, PostgreSQL and SQLite.
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE user_model_providers ADD COLUMN request_config TEXT NOT NULL DEFAULT '';
+ALTER TABLE user_model_providers ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT '';

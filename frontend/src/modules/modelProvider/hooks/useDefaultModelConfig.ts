@@ -42,6 +42,7 @@ export type ModelCapability =
 
 interface ProviderModel {
   id: string;
+  logoDataUrl?: string;
   name: string;
   modelType?: string;
   vision?: boolean;
@@ -90,6 +91,7 @@ interface ModuleConfig {
 }
 
 interface ApiProvider {
+  logo_data_url?: string;
   id: string;
   name: string;
   brand_key?: string;
@@ -101,6 +103,7 @@ interface ApiProvider {
 }
 
 interface ApiModel {
+  logo_data_url?: string;
   brand_key?: string;
   service_key?: string;
   is_custom?: boolean;
@@ -126,6 +129,7 @@ interface ApiModel {
 }
 
 interface SelectedModelApiItem {
+  logo_data_url?: string;
   brand_key?: string;
   service_key?: string;
   is_custom?: boolean;
@@ -227,6 +231,7 @@ interface SelectedCloudServiceApiItem {
 }
 
 export interface ModelReadyResponse {
+  logo_data_url?: string;
   ready: boolean;
   source?: string;
 	fallback_from?: string;
@@ -478,7 +483,7 @@ function mapApiProvider(
     isCustom: provider.is_custom === true,
     protocolName: provider.protocol_name || provider.name,
     brand: provider.is_custom ? "API" : getProviderBrand(provider.brand_key || provider.name || provider.protocol_name || ""),
-    logoUrl: getProviderLogoUrl(provider.brand_key || provider.name || provider.protocol_name || "", provider.is_custom),
+    logoUrl: provider.logo_data_url || getProviderLogoUrl(provider.brand_key || provider.name || provider.protocol_name || "", provider.is_custom),
     headline: getLocalizedProviderDescription(
       provider.name,
       backendDescription,
@@ -691,6 +696,7 @@ export function useDefaultModelConfig({
         });
         const model: ProviderModel = {
           id: selection.model_id,
+          logoDataUrl: selection.logo_data_url,
           name: selection.name,
           modelType: selection.model_type,
           vision: selection.vision,
@@ -903,6 +909,7 @@ export function useDefaultModelConfig({
             });
             const providerModel: ProviderModel = {
               id: model.id,
+              logoDataUrl: model.logo_data_url,
               name: model.name,
               modelType: model.model_type,
               vision: model.vision,

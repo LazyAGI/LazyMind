@@ -3,6 +3,7 @@ import "./ModelIdentityIcon.scss";
 
 interface ModelIdentityIconProps {
   modelName: string;
+  logoUrl?: string;
   fallbackVendor?: string;
   className?: string;
   size?: number;
@@ -10,6 +11,7 @@ interface ModelIdentityIconProps {
 
 export function ModelIdentityIcon({
   modelName,
+  logoUrl,
   fallbackVendor,
   className,
   size = 24,
@@ -22,7 +24,7 @@ export function ModelIdentityIcon({
       aria-hidden="true"
     >
       <img
-        src={identity.logoUrl}
+        src={logoUrl || identity.logoUrl}
         alt=""
         width={size - 4}
         height={size - 4}

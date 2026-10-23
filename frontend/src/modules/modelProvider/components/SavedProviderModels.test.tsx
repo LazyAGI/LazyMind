@@ -78,6 +78,17 @@ function groupLabels(container: HTMLElement) {
 }
 
 describe("saved supplier models", () => {
+  it("inherits supplier artwork while retaining the saved UUID and edit contract", () => {
+    const logoDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+    const saved = models[1];
+    const { props } = setup({ models: [saved], providerLogoDataUrl: logoDataUrl });
+    const row = screen.getByRole("listitem", { name: saved.name });
+    expect(row.querySelector(".model-identity-icon img")).toHaveAttribute("src", logoDataUrl);
+    fireEvent.click(within(row).getByRole("button", { name: `modelProvider.editModelAria:${saved.name}` }));
+    expect(props.onEdit).toHaveBeenCalledWith(saved);
+    expect(saved.id).toBe("custom");
+  });
+
   it("probes the selected saved identity and locks only that row while in flight", async () => {
     let finish!: (result: unknown) => void;
     upstream.probe.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));

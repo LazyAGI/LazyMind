@@ -59,6 +59,16 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("compact default model options", () => {
+  it("shows the uploaded model logo in the selected value and refreshed options", async () => {
+    const logo = "data:image/png;base64,uploaded-model";
+    mocks.selections.mockResolvedValue({ data: { selections: [{ ...selection, logo_data_url: logo }] } });
+    mocks.models.mockResolvedValue({ data: { models: [{ ...identity, id: "saved-uuid", name: "catalog-vision", model_type: "llm", logo_data_url: logo }] } });
+    renderPanel();
+    await screen.findByText("catalog-vision · Private gateway");
+    expect(document.querySelector(".model-provider-select-value img")).toHaveAttribute("src", logo);
+    await openLlm();
+    await waitFor(() => expect(optionElement("catalog-vision").querySelector("img")).toHaveAttribute("src", logo));
+  });
   it("retains explicit service identity when a selected shared supplier is absent from the local provider list", async () => {
     mocks.providers.mockResolvedValue({ data: { providers: [] } });
     mocks.selections.mockResolvedValue({ data: { selections: [{ ...selection, brand_key: "Qwen", service_key: "coding", is_custom: false, provider_name: "OpenAI", group_name: "QwenCodingPlan" }] } });

@@ -690,6 +690,7 @@ type chatModelsQueryParams struct {
 }
 
 type chatModelSelectionOpenAPI struct {
+	LogoDataURL  string `json:"logo_data_url,omitempty" desc:"Optional normalized PNG logo inherited from the selected supplier, including a shared model."`
 	Mode         string `json:"mode" enum:"fixed,auto"`
 	ModelID      string `json:"model_id,omitempty"`
 	ProviderID   string `json:"provider_id,omitempty"`
@@ -704,6 +705,7 @@ type chatModelSelectionOpenAPI struct {
 
 type chatModelListOpenAPIItem struct {
 	ID           string   `json:"id"`
+	LogoDataURL  string   `json:"logo_data_url,omitempty" desc:"Optional normalized PNG supplier logo data URL. Display metadata only."`
 	Name         string   `json:"name"`
 	GroupID      string   `json:"group_id"`
 	GroupName    string   `json:"group_name"`
@@ -718,11 +720,12 @@ type chatModelListOpenAPIItem struct {
 }
 
 type chatModelProviderOpenAPIItem struct {
-	ID       string                     `json:"id"`
-	Name     string                     `json:"name"`
-	IsCustom bool                       `json:"is_custom"`
-	Source   string                     `json:"source" enum:"own,shared,cloud"`
-	Models   []chatModelListOpenAPIItem `json:"models"`
+	LogoDataURL string                     `json:"logo_data_url,omitempty"`
+	ID          string                     `json:"id"`
+	Name        string                     `json:"name"`
+	IsCustom    bool                       `json:"is_custom"`
+	Source      string                     `json:"source" enum:"own,shared,cloud"`
+	Models      []chatModelListOpenAPIItem `json:"models"`
 }
 
 type chatModelsOpenAPIResponse struct {
@@ -1258,22 +1261,26 @@ type revealModelProviderKeyOpenAPIResponse struct {
 }
 
 type createCustomModelProviderOpenAPIRequest struct {
-	Name             string `json:"name"`
-	SourceProviderID string `json:"source_provider_id" desc:"An owned model provider whose technical protocol is used for this custom supplier."`
-	BaseURL          string `json:"base_url"`
+	LogoDataURL      *string `json:"logo_data_url,omitempty" desc:"Optional PNG data URL, at most 128 by 128 pixels and 96 KiB decoded. Empty uses the default custom supplier icon."`
+	Name             string  `json:"name"`
+	SourceProviderID string  `json:"source_provider_id" desc:"An owned model provider whose technical protocol is used for this custom supplier."`
+	BaseURL          string  `json:"base_url"`
 }
 
 type createCustomModelProviderOpenAPIResponse struct {
-	ID      string `json:"id"`
-	GroupID string `json:"group_id" desc:"Private credential/model storage ID retained for API compatibility."`
+	LogoDataURL string `json:"logo_data_url,omitempty"`
+	ID          string `json:"id"`
+	GroupID     string `json:"group_id" desc:"Private credential/model storage ID retained for API compatibility."`
 }
 
 type updateCustomModelProviderOpenAPIRequest struct {
-	Name string `json:"name"`
+	LogoDataURL *string `json:"logo_data_url,omitempty" desc:"Optional normalized PNG supplier logo. Omit to preserve; empty restores the default icon."`
+	Name        *string `json:"name,omitempty" desc:"Optional custom supplier display name. Omit for a logo-only edit."`
 }
 
 type customModelProviderMutationOpenAPIResponse struct {
-	ID string `json:"id"`
+	LogoDataURL string `json:"logo_data_url,omitempty"`
+	ID          string `json:"id"`
 }
 
 type deleteCustomModelProviderQueryParams struct {
@@ -1400,6 +1407,7 @@ type updateModelProviderGroupModelOpenAPIRequest struct {
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
+	LogoDataURL              string   `json:"logo_data_url,omitempty"`
 	Vision                   bool     `json:"vision" desc:"Whether this LLM accepts image input"`
 	ID                       string   `json:"id"`
 	Source                   string   `json:"source" enum:"own,cloud"`
@@ -1435,6 +1443,7 @@ type listUserModelsByModelTypeQueryParams struct {
 }
 
 type selectedModelOpenAPIItem struct {
+	LogoDataURL              string  `json:"logo_data_url,omitempty"`
 	ModelKey                 string  `json:"model_key"`
 	ModelType                string  `json:"model_type,omitempty" desc:"Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata"`
 	Vision                   *bool   `json:"vision,omitempty" desc:"Actual configured vision support, including explicit false; omitted when unknown for cloud models"`
@@ -1538,6 +1547,7 @@ type setSharedProviderOpenAPIRequest struct {
 }
 
 type userModelProviderOpenAPIItem struct {
+	LogoDataURL            string                           `json:"logo_data_url,omitempty"`
 	ID                     string                           `json:"id"`
 	DefaultModelProviderID string                           `json:"default_model_provider_id"`
 	Name                   string                           `json:"name"`

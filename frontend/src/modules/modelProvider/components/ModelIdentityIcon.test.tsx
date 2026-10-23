@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { ModelIdentityIcon } from "./ModelIdentityIcon";
 
 describe("model identity icon", () => {
+  it("uses an uploaded model logo ahead of inferred brand artwork", () => {
+    const logo = "data:image/png;base64,fixture";
+    const { container } = render(<ModelIdentityIcon modelName="deepseek-r1" logoUrl={logo} />);
+    expect(container.querySelector("img")).toHaveAttribute("src", logo);
+  });
   it("is decorative beside a model name and keeps a square layout slot", () => {
     const { container } = render(
       <ModelIdentityIcon

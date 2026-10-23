@@ -112,6 +112,7 @@ export interface ProviderModel {
 export interface ProviderOption {
   id: string;
   name: string;
+  logoDataUrl?: string;
   brandKey?: string;
   serviceKey?: string;
   isCustom?: boolean;
@@ -331,6 +332,7 @@ function getLocalizedProviderDescription(
 interface ApiProvider {
   id: string;
   name: string;
+  logo_data_url?: string;
   brand_key?: string;
   service_key?: string;
   is_custom?: boolean;
@@ -386,6 +388,7 @@ function mapApiProvider(
   return {
     id: provider.id,
     name: provider.name,
+    logoDataUrl: provider.logo_data_url || undefined,
     brandKey: provider.brand_key,
     serviceKey: provider.service_key,
     isCustom: provider.is_custom === true,
@@ -1649,6 +1652,7 @@ export default function ModelProviderPage({
         open={!!catalogTarget}
         providerId={catalogProvider.id}
         providerName={getProviderDisplayName(catalogProvider, currentLanguage)}
+        providerLogoDataUrl={catalogProvider.logoDataUrl}
         protocolName={catalogProvider.protocolName || catalogProvider.source}
         groupId={catalogGroup.id}
         models={catalogGroup.models}

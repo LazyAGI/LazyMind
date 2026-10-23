@@ -46,6 +46,7 @@ interface Props {
   open: boolean;
   providerId: string;
   providerName: string;
+  providerLogoDataUrl?: string;
   protocolName: string;
   groupId: string;
   models: ProviderModel[];
@@ -563,6 +564,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
                         >
                           <ModelIdentityIcon
                             modelName={model.name}
+                            logoUrl={props.providerLogoDataUrl}
                             fallbackVendor={props.providerName}
                             size={24}
                             className="provider-model-catalog-logo"

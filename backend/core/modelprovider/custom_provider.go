@@ -34,14 +34,16 @@ var errCanonicalGroupExists = errors.New("model supplier already has credential 
 var errEmbeddingConfirmationRequired = errors.New("removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked")
 
 type createCustomProviderRequest struct {
-	Name             string `json:"name"`
-	SourceProviderID string `json:"source_provider_id"`
-	BaseURL          string `json:"base_url"`
+	LogoDataURL      *string `json:"logo_data_url,omitempty"`
+	Name             string  `json:"name"`
+	SourceProviderID string  `json:"source_provider_id"`
+	BaseURL          string  `json:"base_url"`
 }
 type customProviderResponse struct {
-	ID      string `json:"id"`
-	GroupID string `json:"group_id,omitempty"`
-	Name    string `json:"name,omitempty"`
+	LogoDataURL string `json:"logo_data_url,omitempty"`
+	ID          string `json:"id"`
+	GroupID     string `json:"group_id,omitempty"`
+	Name        string `json:"name,omitempty"`
 }
 
 func validCustomProviderURL(protocol, value string) bool {
@@ -61,7 +63,7 @@ func CreateCustomProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createCustomProviderRequest
-	if json.NewDecoder(r.Body).Decode(&req) != nil {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, customProviderBodyLimit)).Decode(&req) != nil {
 		common.ReplyErr(w, "invalid body", 400)
 		return
 	}
@@ -69,6 +71,15 @@ func CreateCustomProvider(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" || len(req.Name) > 255 {
 		common.ReplyErr(w, "name must contain 1 to 255 bytes", 400)
 		return
+	}
+	logo := ""
+	if req.LogoDataURL != nil {
+		var err error
+		logo, err = normalizeProviderLogo(*req.LogoDataURL)
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	var source orm.UserModelProvider
 	if err := db.WithContext(r.Context()).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL AND category = ?", req.SourceProviderID, user, defaultProviderCategory).Take(&source).Error; err != nil {
@@ -81,6 +92,7 @@ func CreateCustomProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now().UTC()
 	row := orm.UserModelProvider{ID: common.GenerateID(), DefaultModelProviderID: source.DefaultModelProviderID, Name: req.Name, ProtocolName: RuntimeProviderName(source), IsCustom: true, Category: defaultProviderCategory, Capabilities: strings.Join(modelSupplierCapabilities(source.Capabilities), ","), BaseURL: LazyLLMBaseURL(RuntimeProviderName(source), req.BaseURL), BaseModel: orm.BaseModel{CreateUserID: user, CreateUserName: store.UserName(r), CreatedAt: now, UpdatedAt: now}}
+	row.LogoDataURL = logo
 	group := orm.UserModelProviderGroup{ID: common.GenerateID(), UserModelProviderID: row.ID, Name: row.Name, BaseURL: row.BaseURL, CredentialRevision: 1, BaseModel: row.BaseModel}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := lockProvider(tx, &source); err != nil {
@@ -94,7 +106,7 @@ func CreateCustomProvider(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "create custom provider failed", 500)
 		return
 	}
-	common.ReplyOK(w, customProviderResponse{ID: row.ID, GroupID: group.ID, Name: row.Name})
+	common.ReplyOK(w, customProviderResponse{ID: row.ID, GroupID: group.ID, Name: row.Name, LogoDataURL: row.LogoDataURL})
 }
 
 func customProviderForRequest(w http.ResponseWriter, r *http.Request) (*gorm.DB, orm.UserModelProvider, bool) {
@@ -126,22 +138,48 @@ func UpdateCustomProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name string `json:"name"`
+		Name        *string `json:"name"`
+		LogoDataURL *string `json:"logo_data_url,omitempty"`
 	}
-	if json.NewDecoder(r.Body).Decode(&req) != nil {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, customProviderBodyLimit)).Decode(&req) != nil {
 		common.ReplyErr(w, "invalid body", 400)
 		return
 	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" || len(req.Name) > 255 {
+	if req.Name == nil && req.LogoDataURL == nil {
+		common.ReplyErr(w, "name or logo_data_url is required", 400)
+		return
+	}
+	if req.Name != nil {
+		trimmed := strings.TrimSpace(*req.Name)
+		req.Name = &trimmed
+	}
+	if req.Name != nil && (*req.Name == "" || len(*req.Name) > 255) {
 		common.ReplyErr(w, "name must contain 1 to 255 bytes", 400)
 		return
+	}
+	logo := ""
+	if req.LogoDataURL != nil {
+		var err error
+		logo, err = normalizeProviderLogo(*req.LogoDataURL)
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	now := time.Now().UTC()
 	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := lockProvider(tx, &row); err != nil {
 			return err
 		}
+		updates := map[string]any{"updated_at": now}
+		if req.LogoDataURL != nil {
+			updates["logo_data_url"] = logo
+			row.LogoDataURL = logo
+		}
+		if req.Name == nil || *req.Name == row.Name {
+			return tx.Model(&row).Updates(updates).Error
+		}
+		name := *req.Name
 		var groups []orm.UserModelProviderGroup
 		if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, row.CreateUserID).Find(&groups).Error; err != nil {
 			return err
@@ -151,14 +189,16 @@ func UpdateCustomProvider(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			if err := validateSavedKeyPool(row, req.Name, row.BaseURL, key); err != nil {
+			if err := validateSavedKeyPool(row, name, row.BaseURL, key); err != nil {
 				return err
 			}
 		}
-		if err := tx.Model(&row).Updates(map[string]any{"name": req.Name, "updated_at": now}).Error; err != nil {
+		updates["name"] = name
+		if err := tx.Model(&row).Updates(updates).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, row.CreateUserID).Updates(map[string]any{"name": req.Name, "updated_at": now}).Error; err != nil {
+		row.Name = name
+		if err := tx.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, row.CreateUserID).Updates(map[string]any{"name": name, "updated_at": now}).Error; err != nil {
 			return err
 		}
 		for _, g := range groups {
@@ -172,7 +212,7 @@ func UpdateCustomProvider(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "rename custom provider failed", 500)
 		return
 	}
-	common.ReplyOK(w, customProviderResponse{ID: row.ID, Name: req.Name})
+	common.ReplyOK(w, customProviderResponse{ID: row.ID, Name: row.Name, LogoDataURL: row.LogoDataURL})
 }
 
 func DeleteCustomProvider(w http.ResponseWriter, r *http.Request) {
