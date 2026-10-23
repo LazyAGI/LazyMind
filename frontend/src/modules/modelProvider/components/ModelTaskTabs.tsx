@@ -1,6 +1,5 @@
 import {
   AudioOutlined,
-  DotChartOutlined,
   MessageOutlined,
   OrderedListOutlined,
   PictureOutlined,
@@ -8,17 +7,38 @@ import {
   SoundOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
+import type { SVGProps } from "react";
 import { useTranslation } from "react-i18next";
 import { getModelTaskType } from "../modelTaskTypes";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 import "./ModelTaskTabs.scss";
+
+function EmbeddingOutlined(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      className="anticon"
+      width="1em"
+      height="1em"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      focusable="false"
+    >
+      <path d="m7.5 8-5 4 5 4m9-8 5 4-5 4m-2-12.5-5 17" />
+    </svg>
+  );
+}
 
 const filters = [
   { id: "all", icon: null },
   { id: "chat", icon: MessageOutlined },
   { id: "image", icon: PictureOutlined },
   { id: "video", icon: VideoCameraOutlined },
-  { id: "embedding", icon: DotChartOutlined },
+  { id: "embedding", icon: EmbeddingOutlined },
   { id: "rerank", icon: OrderedListOutlined },
   { id: "tts", icon: SoundOutlined },
   { id: "asr", icon: AudioOutlined },
