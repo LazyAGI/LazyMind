@@ -103,7 +103,7 @@ describe("provider model catalog drawer", () => {
     expect(screen.getAllByText("modelProvider.catalog.unsupportedType")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
     await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
-    expect(props.onAdd.mock.calls.map(([item]) => item.model_type)).toEqual(["embed", "text2image"]);
+    expect(props.onAdd.mock.calls.map(([item]) => item.model_type)).toEqual(["text2image", "embed"]);
   });
   it("blocks incompatible remote types and bulk imports for the current protocol", async () => {
     const props = { ...fixture([]), protocolName: "Claude" };
@@ -117,7 +117,7 @@ describe("provider model catalog drawer", () => {
     expect(props.onAdd).not.toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown" }));
     expect(props.onAdd).not.toHaveBeenCalledWith(expect.objectContaining({ name: "BAAI/bge-large" }));
   });
-  it("shows only populated task tabs, retains their counts while searching, and names custom sections", async () => {
+  it("shows only populated task tabs, retains counts while searching, and keeps pinned models free of custom labels", async () => {
     const { baseElement } = draw(fixture());
     await screen.findByText("deepseek-v3");
     const tabs = screen.getAllByRole("tab");
@@ -125,8 +125,9 @@ describe("provider model catalog drawer", () => {
     expect(screen.queryByRole("tab", { name: /modelProvider.taskType.rerank/ })).not.toBeInTheDocument();
     const embedding = screen.getByRole("tab", { name: /modelProvider.taskType.embedding/ });
     expect(embedding).toHaveTextContent("1");
-    expect(screen.getByRole("region", { name: "modelProvider.catalog.customGroup · modelProvider.taskType.chat" })).toHaveTextContent("qwen-private");
-    expect(baseElement.querySelector(".provider-model-catalog-group-kind")).toHaveTextContent("modelProvider.catalog.customGroup");
+    expect(screen.getAllByRole("region", { name: "modelProvider.taskType.chat" }).some((region) => region.textContent?.includes("qwen-private"))).toBe(true);
+    expect(screen.queryByText("modelProvider.catalog.customGroup")).not.toBeInTheDocument();
+    expect(baseElement.querySelector(".provider-model-catalog-row .provider-model-catalog-model-name")).toHaveTextContent("qwen-private");
     fireEvent.change(screen.getByRole("textbox", { name: "modelProvider.catalog.search" }), { target: { value: "deepseek" } });
     expect(screen.getAllByRole("tab")).toHaveLength(5);
     expect(embedding).toHaveTextContent("1");
@@ -367,8 +368,10 @@ describe("provider model catalog drawer", () => {
   });
 
   it("removes selected task groups and unavailable models without confirmation", async () => {
+    mocks.remote.mockResolvedValueOnce({ models: remote.slice(1) });
     const props = fixture();
     draw(props);
+    await screen.findByText("BAAI/bge-large");
     const group = await screen.findByRole("button", { name: /modelProvider.catalog.removeGroup/ });
     fireEvent.click(group);
     await waitFor(() => expect(props.onRemove).toHaveBeenCalledTimes(1));
@@ -427,7 +430,8 @@ describe("provider model catalog drawer", () => {
     expect(add).toBeDisabled();
     fireEvent.click(add);
     expect(props.onAdd).not.toHaveBeenCalled();
-    expect(screen.getByText("modelProvider.catalog.unclassifiedType")).toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.catalog.unclassifiedType")).not.toBeInTheDocument();
+    expect(add).toHaveAttribute("title", "modelProvider.catalog.unclassifiedType");
   });
 
   it("does not bulk add an unclassified group", async () => {
@@ -469,7 +473,7 @@ describe("provider model catalog drawer", () => {
     expect(screen.queryByText("vision-chat")).not.toBeInTheDocument();
   });
 
-  it("uses saved task types ahead of remote metadata and keeps all custom models above built-ins", async () => {
+  it("uses saved task types ahead of remote metadata and pins custom models within each task", async () => {
     const models: ProviderModel[] = [
       {
         id: "built",
@@ -508,19 +512,39 @@ describe("provider model catalog drawer", () => {
         (row) =>
           row.querySelector(".provider-model-catalog-model-name")?.textContent,
       ),
-    ).toEqual(["gpt-custom", "custom-rerank", "gpt-built"]);
+    ).toEqual(["gpt-custom", "gpt-built", "custom-rerank"]);
     expect(
       within(rows[0] as HTMLElement).getByText("modelProvider.taskType.chat"),
     ).toBeInTheDocument();
     expect(
-      within(rows[1] as HTMLElement).getByText("modelProvider.taskType.rerank"),
+      within(rows[2] as HTMLElement).getByText("modelProvider.taskType.rerank"),
     ).toBeInTheDocument();
+  });
+
+  it("orders tabs and sections like the main task bar while keeping custom unknowns last", async () => {
+    mocks.remote.mockResolvedValueOnce({ models: [
+      { id: "tts", name: "tts", model_type: "tts" },
+      { id: "unknown", name: "unknown", model_type: "" },
+      { id: "image-edit", name: "image-edit", model_type: "image_editing" },
+      { id: "embed", name: "embed", model_type: "embed" },
+      { id: "chat", name: "chat", model_type: "llm" },
+      { id: "image", name: "image", model_type: "text2image" },
+      { id: "video", name: "video", model_type: "text2video" },
+      { id: "stt", name: "stt", model_type: "stt" },
+      { id: "rerank", name: "rerank", model_type: "rerank" },
+    ] });
+    draw(fixture([{ id: "saved-unknown", name: "unknown", capability: "UNKNOWN", builtIn: false, enabled: true }]));
+    await screen.findByText("rerank");
+    const order = ["chat", "image-generation", "image-edit", "video-generation", "embedding", "rerank", "tts", "asr", "unknown"];
+    expect(screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))).toEqual(order.map((task) => `modelProvider.taskType.${task}`));
+    expect(screen.getAllByRole("tab").slice(2).map((tab) => tab.textContent?.replace(/\d+$/, ""))).toEqual(order.map((task) => `modelProvider.taskType.${task}`));
+    expect(document.querySelectorAll(".provider-model-catalog-row")[8]).toHaveTextContent("unknown");
   });
 
   it("keeps missing and unsupported types unselectable rather than guessing chat from modalities", async () => {
     mocks.remote.mockResolvedValueOnce({
       models: [
-        { id: "omni", name: "omni", model_type: "" },
+        { id: "omni", name: "omni", model_type: "", output: ["text", "audio"] },
         { id: "unsupported", name: "unsupported", model_type: "audio" },
       ],
     });
@@ -547,6 +571,44 @@ describe("provider model catalog drawer", () => {
     ).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
     expect(props.onAdd).not.toHaveBeenCalled();
+  });
+
+  it("fills an ID-only remote model from the catalog and passes its exact type when clicked", async () => {
+    mocks.remote.mockResolvedValueOnce({ models: [{ id: "gateway/vector-v2", name: "gateway/vector-v2", model_type: "" }] });
+    mocks.lookup.mockReturnValue({ name: "vendor/vector-v2", model_type: "embed", input: ["text"], output: ["embeddings"], context: 1000, max_output: 0 });
+    const props = fixture([]);
+    draw(props);
+    const add = await screen.findByRole("button", { name: "modelProvider.catalog.addModel:gateway/vector-v2" });
+    expect(add).toBeEnabled();
+    fireEvent.click(add);
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "gateway/vector-v2", model_type: "embed" })));
+  });
+
+  it("does not overwrite unknown outputs or explicit future types with catalog recognition", async () => {
+    mocks.remote.mockResolvedValueOnce({ models: [
+      { id: "raw-unknown", name: "raw-unknown", model_type: "", output: ["decisions"] },
+      { id: "declared-unknown", name: "declared-unknown", model_type: "unknown" },
+      { id: "future", name: "future", model_type: "future-task", output: [] },
+    ] });
+    mocks.lookup.mockReturnValue({ name: "known", model_type: "llm", input: ["text"], output: ["text"], context: 1000, max_output: 0 });
+    const props = fixture([]);
+    draw(props);
+    await screen.findByText("raw-unknown");
+    for (const name of ["raw-unknown", "declared-unknown", "future"])
+      expect(screen.getByRole("button", { name: `modelProvider.catalog.addModel:${name}` })).toBeDisabled();
+    expect(screen.queryByText("modelProvider.catalog.unclassifiedType")).not.toBeInTheDocument();
+    expect(props.onAdd).not.toHaveBeenCalled();
+  });
+
+  it("retains a saved manual type when both discovery and recognition disagree", async () => {
+    mocks.remote.mockResolvedValueOnce({ models: [{ id: "manual", name: "manual", model_type: "embed", output: ["embeddings"] }] });
+    mocks.lookup.mockReturnValue({ name: "manual", model_type: "tts", input: ["text"], output: ["speech"], context: 0, max_output: 0 });
+    const props = fixture([{ id: "saved", name: "manual", capability: "LLM_CHAT", builtIn: false, enabled: true }]);
+    draw(props);
+    await screen.findByText("manual");
+    const row = screen.getByRole("button", { name: "modelProvider.catalog.removeModel:manual" }).closest(".provider-model-catalog-row") as HTMLElement;
+    expect(within(row).getByText("modelProvider.taskType.chat")).toBeInTheDocument();
+    expect(within(row).queryByText("modelProvider.taskType.embedding")).not.toBeInTheDocument();
   });
 
   it("ignores a stale discovery response after switching suppliers", async () => {

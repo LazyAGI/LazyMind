@@ -3,6 +3,7 @@ import { Alert, Button, Drawer, Form, Input, Spin, Tag, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useSettingsFormDraft } from "@/modules/settings/SettingsNavigationGuard";
+import { useFocusModality } from "../hooks/useFocusModality";
 import {
   getProviderRequestConfig,
   updateProviderRequestConfig,
@@ -37,6 +38,7 @@ export function ProviderRequestConfigDrawer({
   onSaved,
 }: ProviderRequestConfigDrawerProps) {
   const {t} = useTranslation();
+  const focusModality = useFocusModality();
   const text = (key: string, options?: Record<string, unknown>) => t(`modelProvider.requestConfig.${key}`, options);
   const [form] = Form.useForm<FormValues>();
   const [config, setConfig] = useState<ProviderRequestConfig | null>(null);
@@ -128,6 +130,7 @@ export function ProviderRequestConfigDrawer({
   };
 
   return <Drawer
+    rootClassName={`model-provider-focus-${focusModality}`}
     className="provider-request-config-drawer"
     title={text("title")}
     open={open}

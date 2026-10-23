@@ -19,6 +19,9 @@ describe("supplier model capabilities", () => {
     expect(normalizeRuntimeModelType("ASR")).toBe("stt");
     expect(normalizeRuntimeModelType("embed_main")).toBe("embed");
     expect(normalizeRuntimeModelType("text_to_image")).toBe("text2image");
+    expect(normalizeRuntimeModelType("cross_modal_embed")).toBe("multimodal_embedding");
+    expect(normalizeRuntimeModelType(" EMBED_IMAGE ")).toBe("multimodal_embedding");
+    expect(normalizeRuntimeModelType("reranker")).toBe("rerank");
     expect(normalizeRuntimeModelType("vendor-mystery")).toBe("vendor-mystery");
   });
   it("keeps runtime subtypes distinct while merging the evolution role", () => {

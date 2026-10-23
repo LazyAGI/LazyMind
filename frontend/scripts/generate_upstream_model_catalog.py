@@ -2,7 +2,9 @@
 """Fetch the model catalog from models.dev and OpenRouter at build time.
 
 The JSON is not checked in. Builds share a validated snapshot for 24 hours;
-runtime startup never needs to contact the public catalogs.
+runtime startup never needs to contact the public catalogs. Service availability
+is limited to supported providers; a separate index recognizes model types from
+all upstream suppliers without adding their endpoints or offered models.
 """
 
 import argparse
@@ -28,7 +30,7 @@ def find_root():
 ROOT = find_root()
 MODELS_DEV_URL = 'https://models.dev/api.json?type=all'
 OPENROUTER_URL = 'https://openrouter.ai/api/v1/models?output_modalities=all'
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 PROVIDER_SOURCES = {
     'Claude': ['anthropic'],
@@ -164,6 +166,32 @@ def collect_models_dev(catalog, keys):
     return merged
 
 
+def collect_recognition_models(models_dev, openrouter_models):
+    models = list(openrouter_models.values())
+    for provider_name, provider in models_dev.items():
+        if not isinstance(provider, dict):
+            continue
+        for fallback_name, entry in (provider.get('models') or {}).items():
+            if not isinstance(entry, dict):
+                continue
+            model = from_models_dev(entry, fallback_name)
+            if not model['name']:
+                continue
+            # This supplier's models.dev entries mirror OpenRouter. Keep the
+            # live task evidence instead of introducing a stale mirror conflict.
+            if provider_name == 'openrouter' and model['name'] in openrouter_models:
+                continue
+            models.append(model)
+    distinct = {}
+    for model in models:
+        # A name alone is not an identity: different suppliers may use the same
+        # ID for different tasks. Consumers must see those conflicting records.
+        identity = (model['name'], model['model_type'], tuple(model['input']), tuple(model['output']))
+        if identity not in distinct:
+            distinct[identity] = finalize(model)
+    return [distinct[identity] for identity in sorted(distinct)]
+
+
 def keep_sensenova(name):
     lowered = name.lower()
     return lowered.startswith('sensenova') or lowered.startswith('sensechat') or lowered.startswith('sense-')
@@ -226,6 +254,7 @@ def build_catalog(models_dev, openrouter):
         'generated_at': utc_now(),
         'sources': [MODELS_DEV_URL, OPENROUTER_URL],
         'providers': providers,
+        'recognition_models': collect_recognition_models(models_dev, openrouter_models),
     }
 
 
@@ -234,14 +263,20 @@ def read_snapshot(path):
         with open(path, encoding='utf-8') as handle:
             payload = json.load(handle)
         version = payload.get('schema_version', 0)
-        if version not in (0, 1, SCHEMA_VERSION):
+        if version not in (0, 1, 2, SCHEMA_VERSION):
             return None
         payload['schema_version'] = version
         providers = payload['providers']
         if not isinstance(providers, dict) or not any(providers.values()):
             return None
         datetime.strptime(payload['generated_at'], '%Y-%m-%dT%H:%M:%SZ')
-        for models in providers.values():
+        model_lists = list(providers.values())
+        if version == SCHEMA_VERSION:
+            recognition = payload.get('recognition_models')
+            if not isinstance(recognition, list) or not recognition:
+                return None
+            model_lists.append(recognition)
+        for models in model_lists:
             if not isinstance(models, list):
                 return None
             for model in models:
@@ -251,6 +286,8 @@ def read_snapshot(path):
                     model.setdefault('max_input', 0)
                     model.setdefault('model_type', '')
                 if not isinstance(model['name'], str) or not model['name'].strip():
+                    return None
+                if not isinstance(model['model_type'], str):
                     return None
                 if any(
                     not isinstance(model[key], list) or any(not isinstance(v, str) or not v.strip() for v in model[key])

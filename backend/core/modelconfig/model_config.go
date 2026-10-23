@@ -227,6 +227,7 @@ type SelectedRuntimeModel struct {
 	BaseURL            string
 	APIKey             string
 	APIKeyCiphertext   string
+	SkipAuth           bool `gorm:"-"`
 	MaxInputTokens     *string
 	InputTokenLimit    *string
 	MaxOutputTokens    *string
@@ -794,6 +795,9 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 		"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 		"api_key":  row.APIKey,
 	}
+	if strings.TrimSpace(row.APIKey) == "" && strings.TrimSpace(row.BaseURL) != "" {
+		cfg["skip_auth"] = true
+	}
 	return cfg, nil
 }
 
@@ -804,6 +808,7 @@ func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRunti
 			return err
 		}
 		rows[i].BaseURL, rows[i].APIKey = baseURL, apiKey
+		rows[i].SkipAuth = strings.TrimSpace(apiKey) == "" && strings.TrimSpace(baseURL) != ""
 	}
 	return nil
 }
@@ -841,6 +846,9 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 			"model":    row.ModelName,
 			"base_url": baseURL,
 			"api_key":  row.APIKey,
+		}
+		if row.SkipAuth && strings.TrimSpace(row.APIKey) == "" {
+			cfg["skip_auth"] = true
 		}
 		cfg["vision"] = row.Vision || strings.EqualFold(strings.TrimSpace(row.TechnicalModelType), "vlm")
 		if tokens := modelprovider.FallbackMaxInputTokens(role, row.MaxInputTokens); tokens != nil {

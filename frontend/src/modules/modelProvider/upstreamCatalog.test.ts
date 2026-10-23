@@ -22,6 +22,65 @@ const fixture: UpstreamCatalogFile = {
 };
 
 describe("upstream model catalog", () => {
+  const record = (name: string, model_type = "llm") => ({
+    name, model_type, input: ["text"], output: ["text"], context: 1000, max_output: 100,
+  });
+
+  it("recognizes IDs from the full recognition catalog without adding provider entries", () => {
+    const index = createUpstreamCatalogIndex({
+      generated_at: "fixture", providers: {},
+      recognition_models: [record("vendor-a/vector-v2", "embed")],
+    });
+    expect(index.lookupModel("Custom", " VENDOR-A/VECTOR-V2 ")?.model_type).toBe("embed");
+    expect(index.lookupModel("Custom", "another-gateway/vector-v2")?.model_type).toBe("embed");
+  });
+
+  it("accepts matching nonempty types across sources and keeps provider-scoped metadata first", () => {
+    const scoped = record("shared", "tts");
+    const index = createUpstreamCatalogIndex({
+      generated_at: "fixture", providers: { Local: [scoped] },
+      recognition_models: [record("shared", "tts"), record(" SHARED ", " TTS "), record("shared", "")],
+    });
+    expect(index.lookupModel("LOCAL", "shared")).toBe(scoped);
+    expect(index.lookupModel("Custom", "shared")?.model_type?.trim().toLowerCase()).toBe("tts");
+  });
+
+  it("does not choose an arbitrary type for conflicting exact or basename matches", () => {
+    const index = createUpstreamCatalogIndex({
+      generated_at: "fixture", providers: { Local: [record("same", "embed"), record("same", "tts")] },
+      recognition_models: [record("same", "embed"), record("vendor-a/shared", "llm"), record("vendor-b/shared", "embed")],
+    });
+    expect(index.lookupModel("Local", "same")).toBeUndefined();
+    expect(index.lookupModel("Custom", "same")).toBeUndefined();
+    expect(index.lookupModel("Custom", "gateway/shared")).toBeUndefined();
+    expect(index.lookupModel("Custom", "vendor-a/shared")?.model_type).toBe("llm");
+  });
+
+  it("recognizes canonical and legacy aliases as the same type across catalog sources", () => {
+    const index = createUpstreamCatalogIndex({
+      generated_at: "fixture", providers: {},
+      recognition_models: [
+        record("vendor-a/vector", "multimodal_embedding"),
+        record("vendor-b/vector", "cross_modal_embed"),
+        record("vendor-c/vector", " EMBED_IMAGE "),
+        record("ranker", "rerank"),
+        record("ranker", "reranker"),
+      ],
+    });
+    expect(index.lookupModel("Custom", "gateway/vector")?.model_type).toBe("multimodal_embedding");
+    expect(index.lookupModel("Custom", "ranker")?.model_type).toBe("rerank");
+  });
+
+  it("only removes path prefixes and never strips versions, variants or suffixes", () => {
+    const index = createUpstreamCatalogIndex({
+      generated_at: "fixture", providers: {},
+      recognition_models: [record("vendor/model-v1:free", "embed"), record("vendor/model-v2", "tts")],
+    });
+    expect(index.lookupModel("Custom", "gateway/model-v1:free")?.model_type).toBe("embed");
+    for (const name of ["model-v1", "model-v1:paid", "model", "model-v3", "prefix-model-v2"])
+      expect(index.lookupModel("Custom", name)).toBeUndefined();
+  });
+
   it("leaves models unmarked when no generated snapshot is available", () => {
     const index = createUpstreamCatalogIndex();
 

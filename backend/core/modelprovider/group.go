@@ -590,19 +590,15 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	skipVerify := false
 	if baseURLChanged {
 		updates["is_verified"] = false
-		if hasSharedProviderEndpoint(parent) {
-			preserved, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, storedAPIKey, row.CredentialVersion)
-			if err != nil {
-				common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
-				return
-			}
-			for key, value := range preserved {
-				updates[key] = value
-			}
-		} else {
-			updates["api_key"] = ""
-			updates["api_key_ciphertext"] = ""
-			updates["credential_version"] = max(row.CredentialVersion, legacyModelProviderCredentialVersion)
+		// Address edits invalidate verification, never the saved key pool.
+		// Re-encrypt for the new revision so V2 AAD stays bound to this row.
+		preserved, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, storedAPIKey, row.CredentialVersion)
+		if err != nil {
+			common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
+			return
+		}
+		for key, value := range preserved {
+			updates[key] = value
 		}
 		skipVerify = true
 	}
@@ -622,7 +618,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	var checkData *CheckModelProviderData
 	effectiveAPIKey := apiKey
-	if effectiveAPIKey == "" && !baseURLChanged {
+	if effectiveAPIKey == "" {
 		effectiveAPIKey = storedAPIKey
 	}
 	selectedKey := ""
@@ -672,7 +668,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
 	if req.Verify && checkData == nil {
-		if effectiveAPIKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
+		if effectiveAPIKey == "" && providerAPIKeyRequiredForBaseURL(r.Context(), db, parent, baseURL) {
 			common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 			return
 		}
@@ -904,8 +900,18 @@ func isCustomBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseUR
 	return ok && normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(defaultURL)
 }
 
-func isAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
-	return !isCustomBaseURL(ctx, db, defaultProviderID, baseURL)
+// Custom suppliers can point to unauthenticated self-hosted services even when
+// their original catalog entry no longer exists. Official catalog endpoints
+// still require credentials, and an empty/invalid URL is never keyless.
+func providerAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider, baseURL string) bool {
+	if strings.TrimSpace(baseURL) == "" {
+		return true
+	}
+	defaultURL, known := defaultBaseURL(ctx, db, parent.DefaultModelProviderID)
+	if !known {
+		return !parent.IsCustom || !hasSharedProviderEndpoint(parent) || !validCustomProviderURL(RuntimeProviderName(parent), baseURL)
+	}
+	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(LazyLLMBaseURL(RuntimeProviderName(parent), defaultURL))
 }
 
 // sensenovaNewPlatformBaseURL is the alternative SenseNova base URL.

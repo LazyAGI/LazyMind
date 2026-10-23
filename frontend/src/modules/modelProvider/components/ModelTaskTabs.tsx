@@ -9,7 +9,7 @@ import {
 } from "@ant-design/icons";
 import type { SVGProps } from "react";
 import { useTranslation } from "react-i18next";
-import { getModelTaskType } from "../modelTaskTypes";
+import { getModelTaskType, getModelTaskFilter, modelTaskTypeOrder } from "../modelTaskTypes";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 import "./ModelTaskTabs.scss";
 
@@ -33,25 +33,26 @@ function EmbeddingOutlined(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+const filterIcons = {
+  chat: MessageOutlined,
+  image: PictureOutlined,
+  video: VideoCameraOutlined,
+  embedding: EmbeddingOutlined,
+  rerank: OrderedListOutlined,
+  tts: SoundOutlined,
+  asr: AudioOutlined,
+  unknown: QuestionCircleOutlined,
+};
 const filters = [
-  { id: "all", icon: null },
-  { id: "chat", icon: MessageOutlined },
-  { id: "image", icon: PictureOutlined },
-  { id: "video", icon: VideoCameraOutlined },
-  { id: "embedding", icon: EmbeddingOutlined },
-  { id: "rerank", icon: OrderedListOutlined },
-  { id: "tts", icon: SoundOutlined },
-  { id: "asr", icon: AudioOutlined },
-  { id: "unknown", icon: QuestionCircleOutlined },
-] as const;
+  { id: "all" as const, icon: null },
+  ...[...new Set(modelTaskTypeOrder.map(getModelTaskFilter))].map((id) => ({ id, icon: filterIcons[id] })),
+];
 
 export type ModelTaskFilter = (typeof filters)[number]["id"];
 
 export function matchesModelTaskFilter(model: ProviderModel, filter: ModelTaskFilter) {
-  const type = getModelTaskType(model.capability);
+  const type = getModelTaskFilter(getModelTaskType(model.capability));
   if (filter === "all") return true;
-  if (filter === "image") return type === "image-generation" || type === "image-edit";
-  if (filter === "video") return type === "video-generation";
   return type === filter;
 }
 

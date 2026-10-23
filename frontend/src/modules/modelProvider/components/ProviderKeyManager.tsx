@@ -22,6 +22,7 @@ import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useSettingsFormDraft } from "@/modules/settings/SettingsNavigationGuard";
 import { replaceProviderKey, revealProviderKey } from "../api";
+import { useFocusModality } from "../hooks/useFocusModality";
 import "./ProviderKeyManager.scss";
 
 export interface ProviderKeyManagerProps {
@@ -42,6 +43,7 @@ export interface ProviderKeyManagerProps {
 
 export function ProviderKeyManager(props: ProviderKeyManagerProps) {
   const { t } = useTranslation();
+  const focusModality = useFocusModality();
   const text = (key: string, number?: number) =>
     t(`modelProvider.keyManager.${key}`, { number });
   const workspace = (key: string, number?: number) =>
@@ -273,8 +275,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
     <>
       <div className="provider-workspace-key-heading">
         <h3>
-          {t("modelProvider.apiKeyLabel")}{" "}
-          <span className="provider-workspace-count">{props.keys.length}</span>
+          {t("modelProvider.apiKeyLabel")}
         </h3>
         <div className="provider-workspace-key-actions" onClickCapture={(event) => {
           if (inlineRequest.current) {
@@ -346,6 +347,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
         </Tooltip>
       </div>
       <Drawer
+        rootClassName={`model-provider-focus-${focusModality}`}
         title={`${props.providerName} · ${text("manage")}`}
         open={open}
         width={580}
@@ -369,6 +371,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
         {props.keys.length ? rows(true) : <p>{workspace("noKeys")}</p>}
       </Drawer>
       <Modal
+        rootClassName={`model-provider-focus-${focusModality}`}
         title={text("edit", editing?.number)}
         open={Boolean(editing)}
         centered

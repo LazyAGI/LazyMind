@@ -65,13 +65,13 @@ describe("model task types", () => {
   it("only offers the eight configured task types, keeping planned integrations out of selection", () => {
     expect(availableModelTaskTypes).toEqual([
       "chat",
-      "embedding",
-      "rerank",
-      "asr",
-      "tts",
       "image-generation",
       "image-edit",
       "video-generation",
+      "embedding",
+      "rerank",
+      "tts",
+      "asr",
     ]);
     expect(getModelTaskLabelKey("image-edit")).toBe(
       "modelProvider.taskType.image-edit",

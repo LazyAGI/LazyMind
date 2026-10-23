@@ -22,9 +22,10 @@ func HardcodedModelCatalogEnabled() bool {
 }
 
 type upstreamCatalogFile struct {
-	SchemaVersion int                               `json:"schema_version"`
-	GeneratedAt   string                            `json:"generated_at"`
-	Providers     map[string][]upstreamCatalogModel `json:"providers"`
+	SchemaVersion     int                               `json:"schema_version"`
+	GeneratedAt       string                            `json:"generated_at"`
+	Providers         map[string][]upstreamCatalogModel `json:"providers"`
+	RecognitionModels []upstreamCatalogModel            `json:"recognition_models"`
 }
 
 type upstreamCatalogModel struct {

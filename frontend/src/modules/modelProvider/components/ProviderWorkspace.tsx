@@ -45,6 +45,8 @@ import {
 import { getProviderLogoUrl } from "../providerBranding";
 import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
 import { useSupplierOrder } from "../hooks/useSupplierOrder";
+import { useFocusModality } from "../hooks/useFocusModality";
+import { canDiscoverWithoutApiKey } from "../providerAuthentication";
 import { SortableSupplierList } from "./SortableSupplierList";
 import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./ModelTaskTabs";
 import { SavedProviderModels } from "./SavedProviderModels";
@@ -119,6 +121,7 @@ function hasProviderConfiguration(provider: AddedProvider): boolean {
 
 export function ProviderWorkspace(props: Props) {
   const { t, i18n } = useTranslation();
+  const focusModality = useFocusModality();
   const language = i18n?.resolvedLanguage || i18n?.language;
   const label = (key: string, options?: Record<string, unknown>) =>
     t(`modelProvider.workspace.${key}`, options);
@@ -131,6 +134,7 @@ export function ProviderWorkspace(props: Props) {
   const [requestConfigOpen, setRequestConfigOpen] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(false);
   const [endpointSaving, setEndpointSaving] = useState(false);
+  const [savedEndpoint, setSavedEndpoint] = useState<{ providerId: string; baseUrl: string }>();
   const [keyOpen, setKeyOpen] = useState(false);
   const [keySaving, setKeySaving] = useState(false);
   const [removingKey, setRemovingKey] = useState("");
@@ -191,17 +195,19 @@ export function ProviderWorkspace(props: Props) {
   const groupKey = provider && group ? `${provider.id}:${group.id}` : "";
   const hasSavedKeys = Boolean(group?.keys.length || group?.apiKeyConfigured);
   const hasEnabledKey = group?.keys.length ? group.keys.some((key) => key.enabled) : Boolean(group?.apiKeyConfigured);
-  const verifiedSelection = hasEnabledKey && group?.verified === true;
-  const supplierStatus = !hasSavedKeys ? "notConfigured" : !hasEnabledKey ? "disabled" : verifiedSelection ? "connected" : "notConnected";
+  const keylessCustom = provider ? canDiscoverWithoutApiKey(provider, group) : false;
+  const verifiedSelection = (hasEnabledKey || keylessCustom) && group?.verified === true;
+  const supplierStatus = verifiedSelection ? "connected" : keylessCustom ? "notConnected" : !hasSavedKeys ? "notConfigured" : !hasEnabledKey ? "disabled" : "notConnected";
   const modelsError = groupKey ? props.modelsError?.[groupKey] : undefined;
+  const endpointBaseline = savedEndpoint && savedEndpoint.providerId === provider?.id ? savedEndpoint.baseUrl : provider?.baseUrl || "";
   const endpointDirty =
-    Boolean(provider) &&
-    (endpointValue ?? provider.baseUrl).trim() !== provider.baseUrl;
+    Boolean(provider && savedEndpoint?.providerId === provider.id) &&
+    (endpointValue ?? endpointBaseline).trim() !== endpointBaseline;
   const confirmEndpointLeave = useSettingsDraft({
     dirty: endpointDirty,
     saving: endpointSaving,
     discard: () =>
-      endpointForm.setFieldsValue({ baseUrl: provider?.baseUrl || "" }),
+      endpointForm.setFieldsValue({ baseUrl: endpointBaseline }),
   });
 
   useEffect(() => {
@@ -213,6 +219,7 @@ export function ProviderWorkspace(props: Props) {
   useEffect(() => {
     if (!provider) return;
     setSelectedId(provider.id);
+    setSavedEndpoint({ providerId: provider.id, baseUrl: provider.baseUrl });
     endpointForm.setFieldsValue({ baseUrl: provider.baseUrl });
   }, [provider?.id, provider?.baseUrl]);
   useEffect(() => {
@@ -232,7 +239,12 @@ export function ProviderWorkspace(props: Props) {
     if (!provider || endpointSaving) return;
     setEndpointSaving(true);
     try {
-      await updateProviderEndpoint(provider.id, baseUrl.trim());
+      const saved = await updateProviderEndpoint(provider.id, baseUrl.trim());
+      const canonical = saved?.base_url ?? baseUrl.trim();
+      if (activeSupplierId.current === provider.id) {
+        setSavedEndpoint({ providerId: provider.id, baseUrl: canonical });
+        endpointForm.setFieldsValue({ baseUrl: canonical });
+      }
       confirmEndpointLeave.acceptSaved();
       await props.onReload();
       message.success(label("endpointSaved"));
@@ -442,8 +454,9 @@ export function ProviderWorkspace(props: Props) {
     ) => void,
   ) => {
     if (!provider || initializing) return;
+    const currentProvider = provider.baseUrl === endpointBaseline ? provider : { ...provider, baseUrl: endpointBaseline };
     if (group) {
-      action(provider, group);
+      action(currentProvider, group.baseUrl === endpointBaseline ? group : { ...group, baseUrl: endpointBaseline });
       return;
     }
     setInitializing(true);
@@ -465,14 +478,14 @@ export function ProviderWorkspace(props: Props) {
         id: created.id,
         name: provider.name,
         source: provider.source,
-        baseUrl: provider.baseUrl,
+        baseUrl: endpointBaseline,
         apiKeyConfigured: false,
         verified: created.is_verified === true,
         models: [],
         keys: [],
       };
       await props.onReload();
-      action({ ...provider, groups: [canonical] }, canonical);
+      action({ ...currentProvider, groups: [canonical] }, canonical);
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
@@ -491,7 +504,8 @@ export function ProviderWorkspace(props: Props) {
 
   return (
     <section
-      className={`provider-workspace${mobileDetail ? " is-mobile-detail" : ""}`}
+      className={`provider-workspace model-provider-focus-${focusModality}${mobileDetail ? " is-mobile-detail" : ""}`}
+      data-focus-modality={focusModality}
       aria-label={label("title")}
     >
       {deleteModalContext}
@@ -818,7 +832,7 @@ export function ProviderWorkspace(props: Props) {
                           aria-label={label("getModelList")}
                           icon={<ReloadOutlined aria-hidden="true" />}
                           loading={props.modelsLoading[groupKey]}
-                          disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
+                          disabled={initializing || endpointDirty || endpointSaving || props.modelsLoading[groupKey]}
                           onClick={() =>
                             void withProviderModels(props.onSyncModels)
                           }
@@ -832,7 +846,7 @@ export function ProviderWorkspace(props: Props) {
                           className="provider-workspace-icon-button"
                           aria-label={t("modelProvider.customModel")}
                           icon={<PlusOutlined aria-hidden="true" />}
-                          disabled={initializing || endpointDirty || props.modelsLoading[groupKey]}
+                          disabled={initializing || endpointDirty || endpointSaving || props.modelsLoading[groupKey]}
                           onClick={() =>
                             void withProviderModels(props.onAddModel)
                           }
@@ -937,6 +951,7 @@ export function ProviderWorkspace(props: Props) {
         />
       ) : null}
       <Drawer
+        rootClassName={`model-provider-focus-${focusModality}`}
         title={label("cloud")}
         open={cloudOpen}
         width={460}
@@ -945,6 +960,7 @@ export function ProviderWorkspace(props: Props) {
         {props.cloudContent}
       </Drawer>
       <Modal
+        rootClassName={`model-provider-focus-${focusModality}`}
         title={label(providerModal === "edit" ? "editSupplier" : "addSupplier")}
         open={Boolean(providerModal)}
         centered
@@ -1041,6 +1057,7 @@ export function ProviderWorkspace(props: Props) {
         </Form>
       </Modal>
       <Modal
+        rootClassName={`model-provider-focus-${focusModality}`}
         title={label("addKey")}
         open={keyOpen}
         centered

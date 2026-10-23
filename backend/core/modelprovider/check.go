@@ -652,7 +652,7 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	// Official hosted endpoints require credentials. Self-hosted/custom
 	// endpoints may deliberately run without authentication.
-	if apiKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, urlStr) {
+	if apiKey == "" && providerAPIKeyRequiredForBaseURL(r.Context(), db, parent, urlStr) {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}

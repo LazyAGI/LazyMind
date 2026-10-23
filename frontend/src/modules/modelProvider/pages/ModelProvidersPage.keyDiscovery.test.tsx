@@ -5,12 +5,13 @@ import ModelProviderPage, { type AddedProvider, type ProviderOption } from "./Mo
 
 const mocks = vi.hoisted(() => ({
   providers: vi.fn(), withGroups: vi.fn(), groups: vi.fn(), models: vi.fn(),
-  remote: vi.fn(), add: vi.fn(), remove: vi.fn(), finished: vi.fn(), failed: vi.fn(),
+  remote: vi.fn(), add: vi.fn(), remove: vi.fn(), finished: vi.fn(), failed: vi.fn(), lookup: vi.fn(),
   current: true,
   translate: (key: string, options?: { name?: string }) => options?.name ? `${key}:${options.name}` : key,
 }));
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "zh-CN" }, t: mocks.translate }) }));
+vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: mocks.lookup }));
 vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code, getLocalizedErrorMessage: (error: unknown) => String(error) }));
 vi.mock("../api", () => ({
   modelProvidersApi: {
@@ -33,6 +34,7 @@ vi.mock("../components/ProviderWorkspace", () => ({ ProviderWorkspace: (props: {
   configuredProviders: AddedProvider[];
   loading: boolean;
   onKeySaved?: (provider: AddedProvider, groupId: string, isCurrent: () => boolean) => Promise<void>;
+  onSyncModels: (provider: AddedProvider, group: AddedProvider["groups"][number]) => void;
 }) => {
   const option = props.providers[0];
   const provider = props.configuredProviders[0] || (option ? { ...option, groups: [] } : undefined);
@@ -41,6 +43,9 @@ vi.mock("../components/ProviderWorkspace", () => ({ ProviderWorkspace: (props: {
     <button disabled={!provider || props.loading} onClick={() => {
       if (provider) void Promise.resolve(props.onKeySaved?.(provider, group?.id || "store", () => mocks.current)).then(mocks.finished, mocks.failed);
     }}>Key saved</button>
+    <button disabled={!provider || !group || props.loading} onClick={() => {
+      if (provider && group) props.onSyncModels(provider, group);
+    }}>Sync models</button>
     <output data-testid="group-models">{JSON.stringify(group?.models || [])}</output>
   </>;
 } }));
@@ -57,6 +62,7 @@ const remoteModels = (count: number) => Array.from({ length: count }, (_, index)
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.current = true;
+  mocks.lookup.mockReturnValue(undefined);
   mocks.providers.mockResolvedValue({ data: { providers: [supplier] } });
   mocks.withGroups.mockResolvedValue({ data: { providers: [supplier] } });
   mocks.groups.mockResolvedValue({ data: { groups: [savedGroup] } });
@@ -79,6 +85,64 @@ async function discoverAfterKeySave() {
 }
 
 describe("model discovery after verified key save", () => {
+  it("fetches an unverified keyless custom endpoint without requiring a key or verification", async () => {
+    mocks.groups.mockResolvedValue({ data: { groups: [{ ...savedGroup, is_verified: false, has_api_key: false, keys: [] }] } });
+    mocks.remote.mockResolvedValue({ models: remoteModels(1) });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
+    const sync = await screen.findByRole("button", { name: "Sync models" });
+    await waitFor(() => expect(sync).toBeEnabled());
+    fireEvent.click(sync);
+    await waitFor(() => expect(mocks.remote).toHaveBeenCalledWith("supplier", "store"));
+    expect(screen.queryByText("modelProvider.catalog.verifyBeforeSync")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:model-0" })).toBeEnabled();
+  });
+
+  it.each(["official", "disabled-key"] as const)("does not bypass verification for %s suppliers", async (kind) => {
+    const current = { ...supplier, is_custom: kind !== "official" };
+    mocks.providers.mockResolvedValue({ data: { providers: [current] } });
+    mocks.withGroups.mockResolvedValue({ data: { providers: [current] } });
+    mocks.groups.mockResolvedValue({ data: { groups: [{ ...savedGroup, is_verified: false, has_api_key: kind === "disabled-key", keys: kind === "disabled-key" ? [{ ...savedGroup.keys[0], enabled: false }] : [] }] } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
+    const sync = await screen.findByRole("button", { name: "Sync models" });
+    await waitFor(() => expect(sync).toBeEnabled());
+    fireEvent.click(sync);
+    expect(await screen.findByText("modelProvider.catalog.verifyBeforeSync")).toBeInTheDocument();
+    expect(mocks.remote).not.toHaveBeenCalled();
+  });
+
+  it("adds catalog-recognized ID-only models using their recognized types", async () => {
+    mocks.remote.mockResolvedValue({ models: [
+      { id: "gateway/vector", name: "gateway/vector", model_type: "" },
+      { id: "gateway/speech", name: "gateway/speech" },
+    ] });
+    mocks.lookup.mockImplementation((_protocol: string, name: string) => ({
+      name, model_type: name.endsWith("vector") ? "embed" : "tts", input: ["text"], output: [], context: 0, max_output: 0,
+    }));
+    await discoverAfterKeySave();
+    expect(mocks.add.mock.calls.map(([request]) => request.addModelProviderGroupModelOpenAPIRequest)).toEqual([
+      { name: "gateway/vector", model_type: "embed", vision: false },
+      { name: "gateway/speech", model_type: "tts", vision: false },
+    ]);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("preserves explicit and raw-output unknowns while keeping a saved manual type", async () => {
+    mocks.models.mockResolvedValue({ data: { models: [{ id: "manual", name: "manual", model_type: "tts", is_default: false }] } });
+    mocks.remote.mockResolvedValue({ models: [
+      { id: "manual", name: "manual", model_type: "llm" },
+      { id: "raw", name: "raw", model_type: "", output: ["decisions"] },
+      { id: "unknown", name: "unknown", model_type: "unknown" },
+      { id: "future", name: "future", model_type: "future-task", output: [] },
+    ] });
+    mocks.lookup.mockReturnValue({ name: "known", model_type: "embed", input: ["text"], output: ["embeddings"], context: 0, max_output: 0 });
+    await discoverAfterKeySave();
+    expect(mocks.add).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(JSON.parse(screen.getByTestId("group-models").textContent || "[]")).toEqual([
+      expect.objectContaining({ id: "manual", name: "manual", capability: "TTS", builtIn: false }),
+    ]);
+  });
+
   it("adds models after the first key creates a group that is not yet present in the rendered state", async () => {
     mocks.groups.mockResolvedValueOnce({ data: { groups: [] } });
     mocks.remote.mockResolvedValue({ models: remoteModels(4) });

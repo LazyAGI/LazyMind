@@ -17,18 +17,6 @@ import (
 	"lazymind/core/store"
 )
 
-func TestInferRemoteModelTypeUnknownIsEmpty(t *testing.T) {
-	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
-		t.Fatal(err)
-	}
-	if got := inferRemoteModelType("definitely-not-a-catalog-model"); got != "" {
-		t.Fatalf("unknown remote type = %q, want empty", got)
-	}
-	if got := inferRemoteModelType("qwen-plus"); got != "llm" {
-		t.Fatalf("qwen-plus type = %q, want llm", got)
-	}
-}
-
 func TestModelsListURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

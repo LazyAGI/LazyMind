@@ -284,6 +284,10 @@ func selectedProviderKey(tx *gorm.DB, parent orm.UserModelProvider) (orm.UserMod
 // ResolveProviderRuntimeCredential returns one consistent supplier endpoint/key
 // snapshot. Model keys never rotate and inactive saved keys are never returned.
 func ResolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID string) (string, string, error) {
+	return resolveProviderRuntimeCredential(ctx, db, groupID, false)
+}
+
+func resolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID string, allowUnverifiedKeylessCustom bool) (string, string, error) {
 	if db == nil {
 		return "", "", errors.New("store not initialized")
 	}
@@ -324,14 +328,14 @@ func ResolveProviderRuntimeCredential(ctx context.Context, db *gorm.DB, groupID 
 			if err != nil {
 				return err
 			}
-			if hasKeys || isAPIKeyRequiredForBaseURL(ctx, tx, parent.DefaultModelProviderID, baseURL) {
+			if hasKeys || providerAPIKeyRequiredForBaseURL(ctx, tx, parent, baseURL) {
 				unavailable = ErrProviderKeyDisabled
 				return nil
 			}
 			if err := tx.Where("id = ? AND deleted_at IS NULL", requested.ID).Take(&requested).Error; err != nil {
 				return err
 			}
-			if !requested.IsVerified {
+			if !requested.IsVerified && !(allowUnverifiedKeylessCustom && parent.IsCustom) {
 				unavailable = ErrProviderKeyUnverified
 				return nil
 			}
@@ -416,7 +420,7 @@ func checkSharedProviderGroup(w http.ResponseWriter, r *http.Request, db *gorm.D
 		common.ReplyErr(w, ErrProviderKeyDisabled.Error(), http.StatusBadRequest)
 		return
 	}
-	if key == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
+	if key == "" && providerAPIKeyRequiredForBaseURL(r.Context(), db, parent, baseURL) {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}

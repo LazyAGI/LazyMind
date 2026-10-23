@@ -12,6 +12,7 @@ export function normalizeRuntimeModelType(value: string): string {
   const aliases: Record<string, string> = {
     embedding: "embed", embed_main: "embed", asr: "stt",
     text_to_image: "text2image", text_to_video: "text2video",
+    cross_modal_embed: "multimodal_embedding", embed_image: "multimodal_embedding", reranker: "rerank",
   };
   return Object.prototype.hasOwnProperty.call(aliases, normalized) ? aliases[normalized] : normalized;
 }

@@ -68,7 +68,8 @@ import { sortCustomModelsFirst } from "../modelOrdering";
 import { getModelTaskType } from "../modelTaskTypes";
 import { ModelTypeIcon } from "../components/ModelTypeBadge";
 import { getSelectableCapabilities, isModelTypeSupportedByProtocol, normalizeRuntimeModelType, supportsModelContext } from "../modelCapabilities";
-import { lookupUpstreamModel } from "../upstreamCatalog";
+import { resolveRemoteModelMetadata } from "../remoteModelMetadata";
+import { canDiscoverWithoutApiKey } from "../providerAuthentication";
 import { getProviderDisplayName } from "../providerDisplayNames";
 import { ModelEditorModal, type ModelEditorValues } from "../components/ModelEditorModal";
 import "../index.scss";
@@ -1326,8 +1327,8 @@ export default function ModelProviderPage({
         const current = addedProviderListRef.current.find((item) => item.id === provider.id)?.groups.find((group) => group.id === groupId);
         if (!current || !currentSelection()) return;
         if (current.models.some((saved) => normalizeModelName(saved.name) === normalizeModelName(model.name))) continue;
-        const upstream = lookupUpstreamModel(protocol, model.name);
-        const modelType = normalizeRuntimeModelType(model.model_type?.trim() || "");
+        const metadata = resolveRemoteModelMetadata(protocol, model);
+        const modelType = metadata.modelType;
         if (!isModelTypeSupportedByProtocol(modelType, protocol)) {
           openCatalog();
           continue;
@@ -1336,7 +1337,7 @@ export default function ModelProviderPage({
           name: model.name,
           model_type: modelType,
           max_input_tokens: model.max_input_tokens,
-          vision: modelType === "llm" && (model.input || upstream?.input || []).some((value) => value === "image" || value === "video"),
+          vision: metadata.vision,
         });
         added = true;
       }
@@ -1633,7 +1634,7 @@ export default function ModelProviderPage({
         models={catalogGroup.models}
         initialRemoteModels={catalogTarget?.remoteModels}
         modelsLoading={loadingGroupModelIds[`${catalogProvider.id}:${catalogGroup.id}`] || discoveringGroupIds[`${catalogProvider.id}:${catalogGroup.id}`]}
-        requiresVerification={!catalogGroup.verified}
+        requiresVerification={!catalogGroup.verified && !canDiscoverWithoutApiKey(catalogProvider, catalogGroup)}
         onCheckConnection={() => {
           setCatalogTarget(null);
           void verifyProviderGroup(catalogProvider, catalogGroup, "");

@@ -13,17 +13,33 @@ export type ModelTaskType =
   | "moderation"
   | "unknown";
 
-/** Planned adapters have assets and names, but are not selectable integrations. */
-export const availableModelTaskTypes: readonly ModelTaskType[] = [
+/** Shared order for the main task bar, catalog tabs and catalog sections. */
+export const modelTaskTypeOrder: readonly ModelTaskType[] = [
   "chat",
-  "embedding",
-  "rerank",
-  "asr",
-  "tts",
   "image-generation",
   "image-edit",
   "video-generation",
+  "embedding",
+  "rerank",
+  "tts",
+  "asr",
+  "unknown",
 ];
+
+/** Planned adapters have assets and names, but are not selectable integrations. */
+export const availableModelTaskTypes = modelTaskTypeOrder.filter((type) => type !== "unknown");
+
+export function getModelTaskFilter(type: ModelTaskType) {
+  switch (type) {
+    case "image-generation":
+    case "image-edit": return "image";
+    case "video-generation": return "video";
+    case "realtime":
+    case "document":
+    case "moderation": return "unknown";
+    default: return type;
+  }
+}
 
 const taskByDeclaredType: Record<string, ModelTaskType> = {
   llm_chat: "chat",

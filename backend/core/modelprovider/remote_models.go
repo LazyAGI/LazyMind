@@ -125,6 +125,8 @@ type openaiModelListEntry struct {
 	Name             string   `json:"name"`
 	Model            string   `json:"model"`
 	ModelType        string   `json:"model_type"`
+	TaskType         string   `json:"task_type"`
+	Task             string   `json:"task"`
 	Type             string   `json:"type"`
 	ContextLength    int      `json:"context_length"`
 	InputModalities  []string `json:"input_modalities"`
@@ -253,15 +255,6 @@ func isBlockedRemoteModelsIP(ip net.IP) bool {
 	return ip.Equal(net.ParseIP("fd00:ec2::254"))
 }
 
-func inferRemoteModelType(name string) string {
-	for _, modelType := range []string{"llm", "vlm", "embed"} {
-		if _, ok := lookupMaxInputTokens(name, modelType); ok {
-			return modelType
-		}
-	}
-	return ""
-}
-
 func parseRemoteModelIDs(raw []byte) []string {
 	var parsed openaiModelListResponse
 	if err := json.Unmarshal(raw, &parsed); err == nil {
@@ -317,6 +310,10 @@ func uniqueSortedIDs(ids []string) []string {
 
 // ListRemoteGroupModels fetches OpenAI-compatible /v1/models from the group Base URL.
 func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
+	listRemoteGroupModels(w, r, upstreamModelRecognition.Load())
+}
+
+func listRemoteGroupModels(w http.ResponseWriter, r *http.Request, recognition *upstreamModelRecognitionIndex) {
 	db := store.DB()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
@@ -364,7 +361,9 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseURL, apiKey, err := ResolveProviderRuntimeCredential(r.Context(), db, group.ID)
+	// A new keyless custom service can expose its catalog before a connection
+	// check. Discovery does not verify it or loosen runtime admission.
+	baseURL, apiKey, err := resolveProviderRuntimeCredential(r.Context(), db, group.ID, true)
 	if err != nil {
 		if errors.Is(err, ErrProviderKeyDisabled) || errors.Is(err, ErrProviderKeyUnverified) {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -436,44 +435,55 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 
 	models := make([]remoteGroupModelItem, 0, len(entries))
 	for _, entry := range entries {
-		id := entry.ID
-		input, output := entry.Architecture.Input, entry.Architecture.Output
-		if len(input) == 0 {
-			input = entry.InputModalities
-		}
-		if len(output) == 0 {
-			output = entry.OutputModalities
-		}
-		modelType := classifyUpstreamModel("", input, output)
-		if len(output) == 0 {
-			declared := entry.ModelType
-			if declared == "" {
-				declared = entry.Type
-			}
-			modelType = classifyUpstreamModel(declared, input, output)
-			if modelType == "" && LazyLLMSource(RuntimeProviderName(parent)) != "openrouter" {
-				modelType = inferRemoteModelType(id)
-			}
-		}
-		item := remoteGroupModelItem{
-			ID:        id,
-			Name:      id,
-			ModelType: modelType,
-			Input:     append([]string{}, input...),
-			Output:    append([]string{}, output...),
-			Added:     false,
-		}
-		if _, ok := added[strings.ToLower(id)]; ok {
+		item := remoteModelItem(entry, RuntimeProviderName(parent), recognition)
+		if _, ok := added[strings.ToLower(item.ID)]; ok {
 			item.Added = true
-		}
-		if entry.ContextLength > 0 && (modelType == "llm" || modelType == "vlm" || modelType == "embed" || modelType == "multimodal_embedding" || modelType == "rerank") {
-			tokens := formatContextTokens(entry.ContextLength)
-			item.MaxInputTokens = &tokens
-		} else if tokens, ok := lookupMaxInputTokens(id, modelType); ok {
-			item.MaxInputTokens = &tokens
 		}
 		models = append(models, item)
 	}
 
 	common.ReplyOK(w, remoteGroupModelsResponse{URL: listURL, Models: models})
+}
+
+func remoteModelItem(entry openaiModelListEntry, providerName string, recognition *upstreamModelRecognitionIndex) remoteGroupModelItem {
+	input, output := entry.Architecture.Input, entry.Architecture.Output
+	if len(input) == 0 {
+		input = entry.InputModalities
+	}
+	if len(output) == 0 {
+		output = entry.OutputModalities
+	}
+	modelType := classifyUpstreamModel("", input, output)
+	if len(output) == 0 {
+		declared := ""
+		for _, value := range []string{entry.ModelType, entry.TaskType, entry.Task, entry.Type} {
+			if declared = strings.TrimSpace(value); declared != "" {
+				break
+			}
+		}
+		if declared != "" {
+			modelType = classifyUpstreamModel(declared, input, output)
+			if modelType == "" {
+				// Preserve explicit unknown tasks so downstream consumers do not
+				// mistake them for ID-only entries and reclassify from the catalog.
+				modelType = normalizedDeclaredModelType(declared)
+			}
+		} else {
+			modelType = classifyUpstreamModel(recognition.modelType(providerName, entry.ID), input, nil)
+		}
+	}
+	item := remoteGroupModelItem{
+		ID: entry.ID, Name: entry.ID, ModelType: modelType,
+		Input: append([]string{}, input...), Output: append([]string{}, output...),
+	}
+	hasInputLimit := modelType == "llm" || modelType == "vlm" || modelType == "embed" || modelType == "multimodal_embedding" || modelType == "rerank"
+	if entry.ContextLength > 0 && hasInputLimit {
+		tokens := formatContextTokens(entry.ContextLength)
+		item.MaxInputTokens = &tokens
+	} else if hasInputLimit {
+		if tokens, ok := lookupMaxInputTokens(entry.ID, modelType); ok {
+			item.MaxInputTokens = &tokens
+		}
+	}
+	return item
 }

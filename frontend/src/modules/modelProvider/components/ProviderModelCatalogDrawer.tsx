@@ -19,19 +19,21 @@ import {
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
-import { isModelTypeSupportedByProtocol, normalizeRuntimeModelType } from "../modelCapabilities";
+import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
 import { listRemoteGroupModels, type RemoteGroupModel } from "../api";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 import { getModelIdentity } from "../modelIdentity";
-import { lookupUpstreamModel } from "../upstreamCatalog";
+import { resolveRemoteModelMetadata } from "../remoteModelMetadata";
 import {
   availableModelTaskTypes,
   getModelTaskType,
   getModelTaskLabelKey,
+  modelTaskTypeOrder,
   type ModelTaskType,
 } from "../modelTaskTypes";
 import { ModelTypeBadge, ModelTypeIcon } from "./ModelTypeBadge";
 import { ModelIdentityIcon } from "./ModelIdentityIcon";
+import { useFocusModality } from "../hooks/useFocusModality";
 import "./ProviderModelCatalogDrawer.scss";
 
 export interface CatalogModelChoice {
@@ -89,6 +91,7 @@ interface Candidate extends CatalogModelChoice {
 
 export function ProviderModelCatalogDrawer(props: Props) {
   const { t } = useTranslation();
+  const focusModality = useFocusModality();
   const copy = (key: string, values?: Record<string, unknown>) =>
     t(`modelProvider.catalog.${key}`, values);
   const [remote, setRemote] = useState<RemoteGroupModel[]>([]);
@@ -165,16 +168,15 @@ export function ProviderModelCatalogDrawer(props: Props) {
       const key = normalizedName(model.name);
       if (!key || unique.has(key)) continue;
       const existing = saved.get(key);
-      const upstream = lookupUpstreamModel(props.protocolName, model.name);
-      const declaredType = normalizeRuntimeModelType(model.model_type?.trim() || "");
+      const metadata = resolveRemoteModelMetadata(props.protocolName, model);
       const modelType = existing
         ? savedModelType(existing)
-        : declaredType;
+        : metadata.modelType;
       unique.set(key, {
         name: existing?.name || model.name,
         model_type: modelType,
         max_input_tokens: existing?.maxInputTokens || model.max_input_tokens,
-        vision: existing ? existing.vision : modelType === "llm" && (model.input || upstream?.input || []).some((value) => value === "image" || value === "video"),
+        vision: existing ? existing.vision : metadata.vision,
         existing,
         missing: false,
         vendor: getModelIdentity(model.name, props.providerName).vendor,
@@ -197,6 +199,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     }
     return [...unique.values()].sort(
       (left, right) =>
+        modelTaskTypeOrder.indexOf(getModelTaskType(left.model_type)) - modelTaskTypeOrder.indexOf(getModelTaskType(right.model_type)) ||
         Number(!(left.existing && !left.existing.builtIn)) -
         Number(!(right.existing && !right.existing.builtIn)),
     );
@@ -245,13 +248,12 @@ export function ProviderModelCatalogDrawer(props: Props) {
   );
   const byTask = new Map<
     string,
-    { key: string; task: ModelTaskType; custom: boolean; models: Candidate[] }
+    { key: string; task: ModelTaskType; models: Candidate[] }
   >();
   for (const model of visible) {
     const task = getModelTaskType(model.model_type);
-    const custom = Boolean(model.existing && !model.existing.builtIn);
-    const key = JSON.stringify([custom ? "custom" : "catalog", task]);
-    const group = byTask.get(key) || { key, task, custom, models: [] };
+    const key = task;
+    const group = byTask.get(key) || { key, task, models: [] };
     group.models.push(model);
     byTask.set(key, group);
   }
@@ -327,6 +329,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
 
   return (
     <Drawer
+      rootClassName={`model-provider-focus-${focusModality}`}
       className="provider-model-catalog-drawer"
       width="min(660px, 100vw)"
       open={props.open}
@@ -482,11 +485,9 @@ export function ProviderModelCatalogDrawer(props: Props) {
               description={copy("empty")}
             />
           ) : null}
-          {groups.map(({ key: groupKey, task, custom, models }) => {
+          {groups.map(({ key: groupKey, task, models }) => {
             const taskLabel = t(getModelTaskLabelKey(task));
-            const groupLabel = custom
-              ? `${copy("customGroup")} · ${taskLabel}`
-              : taskLabel;
+            const groupLabel = taskLabel;
             const missing = models.filter(
               (model) => !model.existing && !model.missing && !model.unsupportedType,
             );
@@ -519,11 +520,6 @@ export function ProviderModelCatalogDrawer(props: Props) {
                     <ModelTypeIcon type={task} size={18} />
                     <strong>{taskLabel}</strong>
                     <small>{models.length}</small>
-                    {custom ? (
-                      <span className="provider-model-catalog-group-kind">
-                        {copy("customGroup")}
-                      </span>
-                    ) : null}
                   </button>
                   <Button
                     type="text"
@@ -570,8 +566,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
                             </Tooltip>
                             {model.missing ? (
                               <small>{copy("missingRemote")}</small>
-                            ) : model.unsupportedType ? (
-                              <small>{copy(model.model_type ? "unsupportedType" : "unclassifiedType")}</small>
+                            ) : model.unsupportedType && model.model_type && getModelTaskType(model.model_type) !== "unknown" ? (
+                              <small>{copy("unsupportedType")}</small>
                             ) : null}
                           </div>
                           <ModelTypeBadge type={getModelTaskType(model.model_type)} compact />
@@ -583,6 +579,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
                             )}
                             loading={pending.has(key)}
                             disabled={working || (!model.existing && model.unsupportedType)}
+                            title={!model.existing && model.unsupportedType ? copy(getModelTaskType(model.model_type) === "unknown" ? "unclassifiedType" : "unsupportedType") : undefined}
                             icon={
                               model.existing ? (
                                 <MinusOutlined aria-hidden="true" />

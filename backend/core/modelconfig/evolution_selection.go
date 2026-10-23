@@ -184,7 +184,7 @@ func loadEvolutionModels(ctx context.Context, db *gorm.DB, userID string) (Evolu
 			continue
 		}
 		models := []SelectedRuntimeModel{row.SelectedRuntimeModel}
-		if strings.TrimSpace(models[0].APIKey) == "" || strings.TrimSpace(models[0].BaseURL) == "" {
+		if (strings.TrimSpace(models[0].APIKey) == "" && !models[0].SkipAuth) || strings.TrimSpace(models[0].BaseURL) == "" {
 			if isDefault {
 				out.UnavailableReason = "configuration_incomplete"
 			}

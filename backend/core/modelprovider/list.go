@@ -206,15 +206,15 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		Model(&orm.UserModelProviderGroup{}).
 		Where("user_model_provider_id IN ? AND deleted_at IS NULL AND is_verified = ?", providerIDs, true).
 		Find(&configuredRows).Error; err == nil {
-		defaultProviderIDByProviderID := make(map[string]string, len(out))
-		for i := range out {
-			defaultProviderIDByProviderID[out[i].ID] = out[i].DefaultModelProviderID
+		providerByID := make(map[string]orm.UserModelProvider, len(rows))
+		for _, row := range rows {
+			providerByID[row.ID] = row
 		}
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
 		for _, row := range configuredRows {
 			row.APIKey, _ = apiKeyForGroup(db.WithContext(ctx), &row)
 			if strings.TrimSpace(row.APIKey) != "" ||
-				isCustomBaseURL(ctx, db, defaultProviderIDByProviderID[row.UserModelProviderID], row.BaseURL) {
+				!providerAPIKeyRequiredForBaseURL(ctx, db, providerByID[row.UserModelProviderID], row.BaseURL) {
 				configuredProviderIDs[row.UserModelProviderID] = true
 			}
 		}

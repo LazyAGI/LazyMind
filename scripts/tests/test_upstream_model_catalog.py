@@ -96,6 +96,92 @@ class UpstreamCatalogTests(unittest.TestCase):
         self.assertEqual(models['unknown']['model_type'], '')
         self.assertEqual(models['unknown']['output'], ['decisions'])
 
+    def test_recognition_includes_other_suppliers_without_expanding_available_models(self):
+        # These task declarations match the public catalog; their suppliers are
+        # recognition evidence, not newly configured LazyMind service endpoints.
+        dev = {
+            'openai': {'models': {'gpt': {'id': 'gpt'}}},
+            'alibaba-cn': {'models': {'regional': {'id': 'regional'}}},
+            'alibaba': {'models': {'global-only': {'id': 'global-only'}}},
+            'stackit': {'models': {'Qwen/Qwen3-VL-Embedding-8B': {
+                'id': 'Qwen/Qwen3-VL-Embedding-8B', 'type': 'embedding',
+                'modalities': {'input': ['text', 'image'], 'output': ['text']},
+            }}},
+            'nano-gpt': {'models': {'THUDM/GLM-Z1-9B-0414': {
+                'id': 'THUDM/GLM-Z1-9B-0414',
+                'modalities': {'input': ['text'], 'output': ['text']},
+            }}},
+            'novita-ai': {'models': {'qwen/qwen3-reranker-8b': {
+                'id': 'qwen/qwen3-reranker-8b', 'type': 'reranking',
+                'modalities': {'input': ['text'], 'output': ['text']},
+            }}},
+        }
+        router = {'data': [{'id': 'live', 'architecture': {
+            'input_modalities': ['text'], 'output_modalities': ['text'],
+        }}]}
+        result = catalog.build_catalog(dev, router)
+        recognition = {model['name']: model for model in result.get('recognition_models', [])}
+        self.assertIn('Qwen/Qwen3-VL-Embedding-8B', recognition)
+        self.assertEqual(recognition['Qwen/Qwen3-VL-Embedding-8B']['model_type'], 'multimodal_embedding')
+        self.assertEqual(recognition['THUDM/GLM-Z1-9B-0414']['model_type'], 'llm')
+        self.assertEqual(recognition['qwen/qwen3-reranker-8b']['model_type'], 'rerank')
+        self.assertIn('global-only', recognition)
+        self.assertEqual(set(result['providers']), {
+            'Claude', 'DeepSeek', 'Doubao', 'GLM', 'Kimi', 'Minimax',
+            'OpenAI', 'Qwen', 'SenseNova', 'SiliconFlow', 'OpenRouter',
+        })
+        self.assertEqual([model['name'] for model in result['providers']['Qwen']], ['regional'])
+        available = {model['name'] for models in result['providers'].values() for model in models}
+        self.assertTrue(available.isdisjoint({
+            'Qwen/Qwen3-VL-Embedding-8B', 'THUDM/GLM-Z1-9B-0414',
+            'qwen/qwen3-reranker-8b', 'global-only',
+        }))
+
+    def test_recognition_keeps_same_name_conflicts_and_uses_live_openrouter_modalities(self):
+        text = {'id': 'conflicting', 'modalities': {'input': ['text'], 'output': ['text']}}
+        dev = {
+            'openai': {'models': {'conflicting': text}},
+            'unconfigured-a': {'models': {'conflicting': text}},
+            'unconfigured-b': {'models': {'conflicting': {
+                'id': 'conflicting', 'type': 'embedding',
+                'modalities': {'input': ['text'], 'output': ['text']},
+            }}},
+            'openrouter': {'models': {'render': {
+                'id': 'render', 'type': 'chat',
+                'modalities': {'input': ['text'], 'output': ['text']},
+            }}},
+        }
+        router = {'data': [{'id': 'render', 'architecture': {
+            'input_modalities': ['text', 'image'], 'output_modalities': ['image', 'text'],
+        }}]}
+        recognition = catalog.build_catalog(dev, router).get('recognition_models', [])
+        conflicting = [model for model in recognition if model['name'] == 'conflicting']
+        self.assertEqual(sorted(model['model_type'] for model in conflicting), ['embed', 'llm'])
+        render = [model for model in recognition if model['name'] == 'render']
+        self.assertEqual(len(render), 1)
+        self.assertEqual(render[0]['model_type'], 'text2image')
+        self.assertEqual(render[0]['output'], ['image', 'text'])
+
+    def test_schema_three_validates_the_recognition_index_before_reusing_a_snapshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'catalog.json'
+            snapshot = {
+                'schema_version': 3, 'generated_at': catalog.utc_now(),
+                'providers': {'OpenAI': [catalog.blank_model('example')]},
+                'recognition_models': [catalog.blank_model('outside-provider')],
+            }
+            path.write_text(json.dumps(snapshot), encoding='utf-8')
+            self.assertIsNotNone(catalog.read_snapshot(str(path)))
+            invalid_model = dict(snapshot['recognition_models'][0], model_type=5)
+            for invalid in [None, {}, [], [{'name': 'missing-fields'}], [invalid_model]]:
+                with self.subTest(invalid=invalid):
+                    snapshot['recognition_models'] = invalid
+                    path.write_text(json.dumps(snapshot), encoding='utf-8')
+                    self.assertIsNone(catalog.read_snapshot(str(path)))
+            del snapshot['recognition_models']
+            path.write_text(json.dumps(snapshot), encoding='utf-8')
+            self.assertIsNone(catalog.read_snapshot(str(path)))
+
     def test_legacy_snapshot_forces_refresh_to_request_all_modalities(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'catalog.json'
@@ -119,15 +205,36 @@ class UpstreamCatalogTests(unittest.TestCase):
     def test_previous_schema_snapshot_remains_usable_offline_but_is_not_marked_fresh(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'catalog.json'
-            snapshot = {
-                'schema_version': 1, 'generated_at': catalog.utc_now(),
+            for version in [1, 2]:
+                with self.subTest(version=version):
+                    snapshot = {
+                        'schema_version': version, 'generated_at': catalog.utc_now(),
+                        'providers': {'OpenAI': [catalog.blank_model('old-catalog-model')]},
+                    }
+                    path.write_text(json.dumps(snapshot), encoding='utf-8')
+                    with patch.object(catalog, 'fetch_json', side_effect=OSError('offline')) as fetch:
+                        catalog.generate([str(path)])
+                    fetch.assert_called_once()
+                    self.assertEqual(json.loads(path.read_text()), snapshot)
+
+    def test_schema_two_is_refreshed_to_add_missing_recognition_models(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'catalog.json'
+            path.write_text(json.dumps({
+                'schema_version': 2, 'generated_at': catalog.utc_now(),
                 'providers': {'OpenAI': [catalog.blank_model('old-catalog-model')]},
-            }
-            path.write_text(json.dumps(snapshot), encoding='utf-8')
-            with patch.object(catalog, 'fetch_json', side_effect=OSError('offline')) as fetch:
+            }), encoding='utf-8')
+            dev = {'openai': {'models': {'fresh': {
+                'id': 'fresh', 'modalities': {'input': ['text'], 'output': ['text']},
+            }}}}
+            router = {'data': [{'id': 'live', 'architecture': {
+                'input_modalities': ['text'], 'output_modalities': ['embeddings'],
+            }}]}
+            with patch.object(catalog, 'fetch_json', side_effect=[dev, router]):
                 catalog.generate([str(path)])
-            fetch.assert_called_once()
-            self.assertEqual(json.loads(path.read_text()), snapshot)
+            result = catalog.read_snapshot(str(path))
+            self.assertEqual(result['schema_version'], 3)
+            self.assertEqual({model['name'] for model in result['recognition_models']}, {'fresh', 'live'})
 
     def test_regional_fallback_does_not_merge_models_from_another_endpoint(self):
         data = {
@@ -164,6 +271,7 @@ class UpstreamCatalogTests(unittest.TestCase):
             snapshot = {
                 'schema_version': catalog.SCHEMA_VERSION, 'generated_at': catalog.utc_now(),
                 'providers': {'OpenAI': [catalog.blank_model('example')]},
+                'recognition_models': [catalog.blank_model('outside-provider')],
             }
             first.write_text(json.dumps(snapshot), encoding='utf-8')
             with patch.object(catalog, 'fetch_json', side_effect=AssertionError('network must not be used')):
@@ -176,6 +284,7 @@ class UpstreamCatalogTests(unittest.TestCase):
             snapshot = {
                 'schema_version': catalog.SCHEMA_VERSION, 'generated_at': '2020-01-01T00:00:00Z',
                 'providers': {'OpenAI': [catalog.blank_model('example')]},
+                'recognition_models': [catalog.blank_model('outside-provider')],
             }
             path.write_text(json.dumps(snapshot), encoding='utf-8')
             with patch.object(catalog, 'fetch_json', side_effect=OSError('offline')):
@@ -219,6 +328,7 @@ class UpstreamCatalogTests(unittest.TestCase):
             snapshot = {
                 'schema_version': catalog.SCHEMA_VERSION, 'generated_at': '2020-01-01T00:00:00Z',
                 'providers': {'OpenAI': [catalog.blank_model('example')]},
+                'recognition_models': [catalog.blank_model('outside-provider')],
             }
             path.write_text(json.dumps(snapshot), encoding='utf-8')
             with patch.object(catalog.urllib.request, 'urlopen', side_effect=http.client.IncompleteRead(b'{', 2)):

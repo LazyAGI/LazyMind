@@ -53,6 +53,12 @@ beforeEach(() => {
 });
 
 describe("provider key controls", () => {
+  it("keeps the API key heading free of a count while showing the configured key", () => {
+    render(<ProviderKeyManager {...props()} />);
+    expect(screen.getByRole("heading", { name: "modelProvider.apiKeyLabel" })).toBeInTheDocument();
+    expect(screen.getByText("****1234")).toBeInTheDocument();
+  });
+
   it("opens management after inline creation gives an unconfigured supplier its first storage", async () => {
     const create = vi.fn().mockResolvedValue(true);
     function Harness() {

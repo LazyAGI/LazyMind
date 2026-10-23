@@ -183,6 +183,50 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("renders an empty supplier list before loading without treating it as a saved endpoint", () => {
+    setup({ providers: [], configuredProviders: [] });
+    expect(screen.getAllByText("modelProvider.noMatchedProviders").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("textbox", { name: "modelProvider.apiAddressLabel" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["https://api.example.test/", provider.baseUrl],
+    ["https://new.example.test", "https://new.example.test/v1/"],
+  ])("accepts the server's normalized endpoint after saving %s even before a provider refresh", async (entered, canonical) => {
+    mocks.updateEndpoint.mockResolvedValueOnce({ id: provider.id, base_url: canonical });
+    const callbacks = setup({}, true);
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    fireEvent.change(endpoint, { target: { value: entered } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledOnce());
+    await waitFor(() => expect(endpoint).toHaveValue(canonical));
+    expect(screen.queryByRole("button", { name: "modelProvider.workspace.saveEndpoint" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "modelProvider.workspace.getModelList" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.back" }));
+    expect(await screen.findByText("Settings overview open")).toBeInTheDocument();
+    expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
+  });
+
+  it("shows a verified keyless custom supplier as connected without adding a sidebar status dot", () => {
+    const custom = { ...provider, id: "custom", name: "Local models", isCustom: true, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false, verified: true }] };
+    setup({ providers: [custom], configuredProviders: [custom] });
+    expect(document.querySelector(".provider-workspace-status")).toHaveTextContent("modelProvider.workspace.connected");
+    expect(screen.getByRole("button", { name: /Local models/ }).querySelector("i")).not.toBeInTheDocument();
+  });
+
+  it("separates pointer focus from keyboard navigation without removing focused controls", () => {
+    setup();
+    const workspace = document.querySelector(".provider-workspace");
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(workspace).toHaveAttribute("data-focus-modality", "keyboard");
+    endpoint.focus();
+    expect(endpoint).toHaveFocus();
+    fireEvent.pointerDown(endpoint);
+    expect(workspace).toHaveAttribute("data-focus-modality", "pointer");
+    expect(endpoint).toHaveFocus();
+  });
+
   it("keeps all task filters visible and combines image tasks while searching a flat list", () => {
     const imageModels = [
       { ...provider.groups[0].models[0], id: "paint", name: "paint-model", capability: "TEXT_TO_IMAGE" as const },

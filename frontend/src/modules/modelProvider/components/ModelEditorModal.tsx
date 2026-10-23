@@ -3,6 +3,7 @@ import { Alert, Button, Form, Input, Modal, Select, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useSettingsFormDraft } from "@/modules/settings/SettingsNavigationGuard";
+import { useFocusModality } from "../hooks/useFocusModality";
 import type { ModelCapability, ProviderModel } from "../pages/ModelProvidersPage";
 import {
   LLM_MAX_INPUT_TOKENS_MAX_LENGTH,
@@ -75,6 +76,7 @@ function normalizeValues(values: ModelEditorValues): ModelEditorValues {
 
 export function ModelEditorModal(props: ModelEditorModalProps) {
   const { t } = useTranslation();
+  const focusModality = useFocusModality();
   const text = (key: string, values?: Record<string, unknown>) =>
     t(`modelProvider.editor.${key}`, values);
   const [form] = Form.useForm<ModelEditorValues>();
@@ -169,6 +171,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
 
   return (
     <Modal
+      rootClassName={`model-provider-focus-${focusModality}`}
       open={Boolean(props.model)}
       title={text("title", { name: props.model?.name || "", provider: props.providerName })}
       className="model-editor-modal"

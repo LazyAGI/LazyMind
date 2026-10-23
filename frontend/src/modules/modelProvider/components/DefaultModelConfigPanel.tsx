@@ -20,6 +20,7 @@ import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
 import { ModelModalityMarks } from "./ModelModalityMarks";
 import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
+import { useFocusModality } from "../hooks/useFocusModality";
 import {
   cloudServiceConfigs,
   normalizeProviderKey,
@@ -204,6 +205,7 @@ export default function DefaultModelConfigPanel({
   onHighlightResolved,
 }: DefaultModelConfigPanelProps) {
   const { t, i18n } = useTranslation();
+  const focusModality = useFocusModality();
   const language = i18n?.resolvedLanguage || i18n?.language;
   const {
     visibleModuleConfigs,
@@ -744,7 +746,8 @@ export default function DefaultModelConfigPanel({
 
   return (
     <section
-      className="model-provider-config-panel model-defaults-panel"
+      className={`model-provider-config-panel model-defaults-panel model-provider-focus-${focusModality}`}
+      data-focus-modality={focusModality}
       aria-label={t("modelProvider.defaultConfigAria")}
     >
       <div className="model-provider-panel-title-row">
