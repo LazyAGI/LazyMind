@@ -15,6 +15,7 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
+import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
 
 export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
 
@@ -683,7 +684,8 @@ export function useDefaultModelConfig({
           builtIn: Boolean(selection.is_default),
           enabled: true,
           maxInputTokens: selection.max_input_tokens,
-          availability: selection.availability,
+          availability: isModelTypeSupportedByProtocol(selection.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
+            ? selection.availability : "unavailable",
           readOnly: selection.read_only,
         };
         const option: ModelOptionItem = {
@@ -892,7 +894,8 @@ export function useDefaultModelConfig({
               builtIn: Boolean(model.is_default),
               enabled: true,
               maxInputTokens: model.max_input_tokens,
-              availability: model.availability,
+              availability: isModelTypeSupportedByProtocol(model.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
+                ? model.availability : "unavailable",
               lifecycle: model.lifecycle,
               readOnly: model.read_only,
             };

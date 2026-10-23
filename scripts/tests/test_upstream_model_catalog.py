@@ -27,7 +27,107 @@ class UpstreamCatalogTests(unittest.TestCase):
             'id': 'image-model', 'type': 'image',
             'modalities': {'input': ['text', 'image'], 'output': ['text', 'image']},
         }, 'fallback')
-        self.assertEqual(image['model_type'], 'image_editing')
+        self.assertEqual(image['model_type'], 'text2image')
+
+    def test_openrouter_keeps_raw_modalities_and_classifies_dedicated_tasks(self):
+        cases = [
+            (['text'], ['text'], 'llm'),
+            (['text'], ['embeddings'], 'embed'),
+            (['text', 'image'], ['embeddings'], 'multimodal_embedding'),
+            (['text', 'pdf'], ['embeddings'], 'multimodal_embedding'),
+            (['text', 'future-input'], ['embeddings'], 'multimodal_embedding'),
+            (['text'], ['image'], 'text2image'),
+            (['image', 'text'], ['text', 'image'], 'text2image'),
+            (['text', 'image'], ['video'], 'text2video'),
+            (['text'], ['speech'], 'tts'),
+            (['audio'], ['transcription'], 'stt'),
+            (['audio'], ['text'], 'stt'),
+            (['text', 'image'], ['rerank'], 'rerank'),
+            (['text'], ['decisions'], ''),
+            (['text'], ['text', 'audio'], ''),
+            (['text', 'future-input'], ['future-output'], ''),
+            (['text'], ['image', 'future-output'], ''),
+            ([], [], ''),
+        ]
+        for inputs, outputs, expected in cases:
+            with self.subTest(inputs=inputs, outputs=outputs):
+                model = catalog.finalize(catalog.from_openrouter({
+                    'id': 'opaque-model',
+                    'architecture': {'input_modalities': inputs, 'output_modalities': outputs},
+                }))
+                self.assertEqual(model['input'], inputs)
+                self.assertEqual(model['output'], outputs)
+                self.assertEqual(model['model_type'], expected)
+
+    def test_models_dev_explicit_editing_is_distinct_from_image_generation(self):
+        for kind, expected in [('image', 'text2image'), ('image_editing', 'image_editing')]:
+            with self.subTest(kind=kind):
+                model = catalog.from_models_dev({
+                    'id': 'opaque-image', 'type': kind,
+                    'modalities': {'input': ['text', 'image'], 'output': ['image']},
+                }, 'fallback')
+                self.assertEqual(model['model_type'], expected)
+
+    def test_models_dev_does_not_rename_unsupported_tasks_as_chat(self):
+        for kind in ['decision', 'realtime', 'future-task']:
+            with self.subTest(kind=kind):
+                model = catalog.from_models_dev({
+                    'id': 'opaque', 'type': kind,
+                    'modalities': {'input': ['text'], 'output': ['text']},
+                }, 'fallback')
+                self.assertEqual(model['model_type'], '')
+
+    def test_live_openrouter_modalities_override_stale_type_enrichment(self):
+        dev = {
+            'openai': {'models': {'direct': {'id': 'direct'}}},
+            'openrouter': {'models': {
+                'render': {'id': 'render', 'type': 'chat'},
+                'unknown': {'id': 'unknown', 'type': 'chat'},
+            }},
+        }
+        router = {'data': [
+            {'id': 'render', 'architecture': {
+                'input_modalities': ['text', 'image'], 'output_modalities': ['image', 'text'],
+            }},
+            {'id': 'unknown', 'architecture': {'input_modalities': ['text'], 'output_modalities': ['decisions']}},
+        ]}
+        models = {m['name']: m for m in catalog.build_catalog(dev, router)['providers']['OpenRouter']}
+        self.assertEqual(models['render']['model_type'], 'text2image')
+        self.assertEqual(models['unknown']['model_type'], '')
+        self.assertEqual(models['unknown']['output'], ['decisions'])
+
+    def test_legacy_snapshot_forces_refresh_to_request_all_modalities(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'catalog.json'
+            path.write_text(json.dumps({
+                'schema_version': 1, 'generated_at': catalog.utc_now(),
+                'providers': {'OpenAI': [catalog.blank_model('previous')]},
+            }), encoding='utf-8')
+            dev = {'openai': {'models': {'direct': {'id': 'direct'}}}}
+            router = {'data': [{'id': 'opaque', 'architecture': {
+                'input_modalities': ['text'], 'output_modalities': ['embeddings'],
+            }}]}
+            with patch.object(catalog, 'fetch_json', side_effect=[dev, router]) as fetch:
+                catalog.generate([str(path)])
+            self.assertEqual(
+                fetch.call_args_list[1].args[0], 'https://openrouter.ai/api/v1/models?output_modalities=all',
+            )
+            result = catalog.read_snapshot(str(path))
+            self.assertEqual(result['schema_version'], catalog.SCHEMA_VERSION)
+            self.assertEqual(result['providers']['OpenRouter'][0]['output'], ['embeddings'])
+
+    def test_previous_schema_snapshot_remains_usable_offline_but_is_not_marked_fresh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'catalog.json'
+            snapshot = {
+                'schema_version': 1, 'generated_at': catalog.utc_now(),
+                'providers': {'OpenAI': [catalog.blank_model('old-catalog-model')]},
+            }
+            path.write_text(json.dumps(snapshot), encoding='utf-8')
+            with patch.object(catalog, 'fetch_json', side_effect=OSError('offline')) as fetch:
+                catalog.generate([str(path)])
+            fetch.assert_called_once()
+            self.assertEqual(json.loads(path.read_text()), snapshot)
 
     def test_regional_fallback_does_not_merge_models_from_another_endpoint(self):
         data = {

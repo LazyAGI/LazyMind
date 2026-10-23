@@ -811,6 +811,9 @@ func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRunti
 func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 	eligible := rows[:0]
 	for _, row := range rows {
+		if !runtimeModelAdapterAvailable(row) {
+			continue
+		}
 		// Ignore retired metadata selections, including their stored credentials.
 		if strings.EqualFold(strings.TrimSpace(row.ModelType), "conversation_metadata") {
 			continue
@@ -828,6 +831,9 @@ func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
 func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 	out := map[string]any{}
 	for _, row := range rows {
+		if !runtimeModelAdapterAvailable(row) {
+			continue
+		}
 		role := strings.ToLower(strings.TrimSpace(row.ModelType))
 		baseURL := modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL)
 		cfg := map[string]any{
@@ -859,6 +865,14 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func runtimeModelAdapterAvailable(row SelectedRuntimeModel) bool {
+	technical := strings.TrimSpace(row.TechnicalModelType)
+	if technical == "" {
+		technical = row.ModelType
+	}
+	return modelprovider.RuntimeSupportsModelType(row.ProviderName, technical)
 }
 
 func openCodeDescriptor(row SelectedRuntimeModel) (modelprovider.OpenCodeModelDescriptor, bool) {

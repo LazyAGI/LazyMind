@@ -87,6 +87,24 @@ beforeEach(() => {
 });
 
 describe("provider model catalog drawer", () => {
+  it("shows unsupported OpenRouter types without allowing them to be imported", async () => {
+    mocks.remote.mockResolvedValueOnce({ models: [
+      { id: "text-vector", name: "text-vector", model_type: "embed" },
+      { id: "image", name: "image", model_type: "text2image" },
+      { id: "reranker", name: "reranker", model_type: "rerank" },
+      { id: "image-edit", name: "image-edit", model_type: "image_editing" },
+      { id: "joint-vector", name: "joint-vector", model_type: "multimodal_embedding" },
+    ] });
+    const props = { ...fixture([]), protocolName: "OpenRouter" };
+    draw(props);
+    await screen.findByText("joint-vector");
+    for (const name of ["reranker", "image-edit", "joint-vector"])
+      expect(screen.getByRole("button", { name: `modelProvider.catalog.addModel:${name}` })).toBeDisabled();
+    expect(screen.getAllByText("modelProvider.catalog.unsupportedType")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
+    expect(props.onAdd.mock.calls.map(([item]) => item.model_type)).toEqual(["embed", "text2image"]);
+  });
   it("blocks incompatible remote types and bulk imports for the current protocol", async () => {
     const props = { ...fixture([]), protocolName: "Claude" };
     draw(props);
@@ -94,9 +112,9 @@ describe("provider model catalog drawer", () => {
     expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" })).toBeDisabled();
     expect(screen.getByText("modelProvider.catalog.unsupportedType")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
-    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(1));
     expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "deepseek-v3", model_type: "llm" }));
-    expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown", model_type: "llm" }));
+    expect(props.onAdd).not.toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown" }));
     expect(props.onAdd).not.toHaveBeenCalledWith(expect.objectContaining({ name: "BAAI/bge-large" }));
   });
   it("shows only populated task tabs, retains their counts while searching, and names custom sections", async () => {
@@ -137,13 +155,13 @@ describe("provider model catalog drawer", () => {
     expect(await screen.findByRole("tooltip")).toHaveTextContent("deepseek-v3");
     expect(props.onAdd).not.toHaveBeenCalled();
   });
-  it("returns to all models when an added model leaves the unknown task tab", async () => {
+  it("returns to all models after the user explicitly classifies an existing unknown model", async () => {
     mocks.remote.mockResolvedValueOnce({ models: [remote[2]] });
     const props = fixture([]);
     const view = draw(props);
     fireEvent.click(await screen.findByRole("tab", { name: /modelProvider.taskType.unknown/ }));
-    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addModel:custom/unknown" }));
-    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:custom/unknown" })).toBeDisabled();
+    expect(props.onAdd).not.toHaveBeenCalled();
     view.rerender(
       <ConfigProvider theme={{ token: { motion: false } }}>
         <ProviderModelCatalogDrawer {...props} models={[{
@@ -376,7 +394,7 @@ describe("provider model catalog drawer", () => {
     ).toBeDisabled();
   });
 
-  it("adds missing models including unclassified models without reimporting saved models", async () => {
+  it("adds only classified missing models without reimporting saved models", async () => {
     const props = fixture([
       {
         id: "deepseek",
@@ -391,45 +409,39 @@ describe("provider model catalog drawer", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "modelProvider.catalog.addAll" }),
     );
-    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(1));
     expect(props.onAdd.mock.calls.map(([model]) => model.name)).toEqual([
       "BAAI/bge-large",
-      "custom/unknown",
     ]);
-    expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown", model_type: "llm" }));
+    expect(props.onAdd).not.toHaveBeenCalledWith(expect.objectContaining({ name: "custom/unknown" }));
     expect(props.onRemove).not.toHaveBeenCalled();
   });
 
-  it("adds an unclassified model without a type selector so its type can be edited afterward", async () => {
+  it("requires an explicit type in custom model settings before adding an unclassified model", async () => {
     const props = fixture();
     draw(props);
     const add = await screen.findByRole("button", {
       name: "modelProvider.catalog.addModel:custom/unknown",
     });
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(add).toBeEnabled();
+    expect(add).toBeDisabled();
     fireEvent.click(add);
-    await waitFor(() =>
-      expect(props.onAdd).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "custom/unknown", model_type: "llm" }),
-      ),
-    );
+    expect(props.onAdd).not.toHaveBeenCalled();
+    expect(screen.getByText("modelProvider.catalog.unclassifiedType")).toBeInTheDocument();
   });
 
-  it("adds the unclassified group with the editable default type", async () => {
+  it("does not bulk add an unclassified group", async () => {
     mocks.remote.mockResolvedValueOnce({ models: [remote[2], {
       id: "another-unknown", name: "another-unknown", model_type: "", added: false,
     }] });
     const props = fixture([]);
     draw(props);
-    fireEvent.click(await screen.findByRole("button", {
+    const add = await screen.findByRole("button", {
       name: "modelProvider.catalog.addGroup:modelProvider.taskType.unknown",
-    }));
-    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
-    expect(props.onAdd.mock.calls.map(([model]) => [model.name, model.model_type])).toEqual([
-      ["custom/unknown", "llm"],
-      ["another-unknown", "llm"],
-    ]);
+    });
+    expect(add).toBeDisabled();
+    fireEvent.click(add);
+    expect(props.onAdd).not.toHaveBeenCalled();
   });
 
   it("keeps distinct task groups for rerank, embedding, speech recognition and speech synthesis", async () => {
@@ -505,7 +517,7 @@ describe("provider model catalog drawer", () => {
     ).toBeInTheDocument();
   });
 
-  it("uses a default for missing types without inferring modalities or importing explicitly unsupported types", async () => {
+  it("keeps missing and unsupported types unselectable rather than guessing chat from modalities", async () => {
     mocks.remote.mockResolvedValueOnce({
       models: [
         { id: "omni", name: "omni", model_type: "" },
@@ -514,6 +526,7 @@ describe("provider model catalog drawer", () => {
     });
     mocks.lookup.mockReturnValue({
       name: "omni",
+      model_type: "llm",
       input: ["image", "audio"],
       output: ["text", "audio"],
       context: 128000,
@@ -526,17 +539,14 @@ describe("provider model catalog drawer", () => {
       screen.getByRole("button", {
         name: "modelProvider.catalog.addModel:omni",
       }),
-    ).toBeEnabled();
+    ).toBeDisabled();
     expect(
       screen.getByRole("button", {
         name: "modelProvider.catalog.addModel:unsupported",
       }),
     ).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
-    await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(1));
-    expect(props.onAdd).toHaveBeenCalledWith(expect.objectContaining({
-      name: "omni", model_type: "llm", vision: false,
-    }));
+    expect(props.onAdd).not.toHaveBeenCalled();
   });
 
   it("ignores a stale discovery response after switching suppliers", async () => {

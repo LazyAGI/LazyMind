@@ -1332,11 +1332,13 @@ type deleteModelProviderGroupOpenAPIResponse struct {
 }
 
 type listRemoteGroupModelsOpenAPIItem struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	ModelType      string  `json:"model_type"`
-	MaxInputTokens *string `json:"max_input_tokens,omitempty"`
-	Added          bool    `json:"added"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	ModelType      string   `json:"model_type"`
+	Input          []string `json:"input"`
+	Output         []string `json:"output"`
+	MaxInputTokens *string  `json:"max_input_tokens,omitempty"`
+	Added          bool     `json:"added"`
 }
 
 type listRemoteGroupModelsOpenAPIResponse struct {

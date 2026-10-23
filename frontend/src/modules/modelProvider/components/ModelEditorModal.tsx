@@ -11,7 +11,7 @@ import {
   resolveLlmMaxInputTokens,
   tokenLimitCount,
 } from "../maxInputTokens";
-import { supportsModelContext } from "../modelCapabilities";
+import { getRuntimeModelTypeForCapability, isModelTypeSupportedByProtocol, supportsModelContext } from "../modelCapabilities";
 import { getModelTaskType } from "../modelTaskTypes";
 import { ModelTypeIcon } from "./ModelTypeBadge";
 import "./ModelEditorModal.scss";
@@ -48,6 +48,7 @@ function TokenLimitInput({ id, value, onChange, label, presets, placeholder, dis
 interface ModelEditorModalProps {
   model: ProviderModel | null;
   providerName: string;
+  protocolName?: string;
   capabilities: readonly ModelCapability[];
   models: readonly ProviderModel[];
   onSave: (values: ModelEditorValues) => Promise<void>;
@@ -129,6 +130,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
     ...(props.model ? [props.model.capability] : []),
   ])].map((option) => ({
     value: option,
+    disabled: !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(option), props.protocolName),
     label: (
       <span className="model-editor-type-option">
         <ModelTypeIcon type={getModelTaskType(option)} size={18} />
@@ -224,7 +226,11 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
         <Form.Item
           label={t("modelProvider.modelType")}
           name="capability"
-          rules={[{ required: true, message: t("modelProvider.validation.modelTypeRequired") }]}
+          rules={[
+            { required: true, message: t("modelProvider.validation.modelTypeRequired") },
+            { validator: (_, value?: ModelCapability) => value && isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(value), props.protocolName)
+              ? Promise.resolve() : Promise.reject(new Error(t(value === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType"))) },
+          ]}
         >
           <Select aria-label={t("modelProvider.modelType")} options={options} />
         </Form.Item>

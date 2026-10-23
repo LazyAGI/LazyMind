@@ -310,4 +310,11 @@ describe("saved supplier models", () => {
     expect(props.onEdit).toHaveBeenCalledTimes(1);
     expect(props.onRemove).not.toHaveBeenCalled();
   });
+  it("marks a saved OpenRouter type without an adapter as not supported while allowing reclassification", () => {
+    const unsupported: ProviderModel = { ...models[1], id: "rerank", name: "vendor/rerank", capability: "RERANK" };
+    const { props } = setup({ models: [unsupported], providerName: "OpenRouter" });
+    expect(screen.getByText("modelProvider.catalog.notSupportedYet")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: `modelProvider.editModelAria:${unsupported.name}` }));
+    expect(props.onEdit).toHaveBeenCalledWith(unsupported);
+  });
 });

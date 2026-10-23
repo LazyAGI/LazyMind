@@ -136,6 +136,9 @@ jobs:
         working-directory: frontend
         run: node scripts/openapi/check-stale.mjs
 
+      - name: Test upstream model catalog generation
+        run: python3 -m unittest discover -s scripts/tests -p test_upstream_model_catalog.py
+
       - name: Install and test with coverage
         run: |
           cd tests/frontend

@@ -12,6 +12,7 @@ import type {
 } from "../pages/ModelProvidersPage";
 import { sortCustomModelsFirst } from "../modelOrdering";
 import { lookupUpstreamModel } from "../upstreamCatalog";
+import { getRuntimeModelTypeForCapability, isModelTypeSupportedByProtocol } from "../modelCapabilities";
 import {
   getModelTaskType,
   getModelTaskDescriptionKey,
@@ -73,6 +74,7 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
     <ul className="saved-provider-models saved-provider-model-list">
       {sortCustomModelsFirst(props.models).map((model) => {
         const type = getModelTaskType(model.capability);
+        const unsupported = type !== "unknown" && !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(model.capability), props.providerName);
         const chat = isLlmChatCapability(model.capability);
         const showContext =
           chat ||
@@ -120,8 +122,9 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                 {model.name}
               </button>
             </Tooltip>
-            <span className="saved-provider-model-task">
+            <span className={`saved-provider-model-task${unsupported ? " is-unsupported" : ""}`}>
               <ModelTypeBadge type={type} compact />
+              {unsupported ? <small title={t("modelProvider.catalog.unsupportedType")}>{t("modelProvider.catalog.notSupportedYet")}</small> : null}
             </span>
             <span className="saved-provider-model-actions">
               <Tooltip

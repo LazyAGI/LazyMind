@@ -37,6 +37,11 @@ import {
 } from "./ModelProvidersPage";
 
 describe("custom model type mapping", () => {
+  it("keeps unclassified models distinct from chat", () => {
+    expect(mapModelTypeToCapability("")).toBe("UNKNOWN");
+    expect(mapModelTypeToCapability("decisions")).toBe("UNKNOWN");
+    expect(mapModelTypeToCapability("llm")).toBe("LLM_CHAT");
+  });
   it.each(["cross_modal_embed", "embed_image", "multimodal_embedding"])(
     "preserves the multimodal embedding capability for %s",
     (type) => {

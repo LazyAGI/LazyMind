@@ -411,7 +411,9 @@ const enUS = {
     },
     catalog: {
       customGroup: "Custom",
-      unsupportedType: "The current API protocol does not support this model type",
+      unsupportedType: "This model type is not supported by the current runtime yet",
+      unclassifiedType: "Unclassified model. Choose its type explicitly when adding a custom model.",
+      notSupportedYet: "Not supported yet",
       title: "{{name}} models",
       search: "Search models…",
       filter: "Filter model types",

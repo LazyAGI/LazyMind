@@ -44,6 +44,9 @@ func validateSupplierModelType(parent orm.UserModelProvider, modelType string) e
 	if strings.EqualFold(RuntimeProviderName(parent), "Claude") && modelType != "llm" && modelType != "vlm" {
 		return errSupplierModelType
 	}
+	if !RuntimeSupportsModelType(RuntimeProviderName(parent), modelType) {
+		return errSupplierModelType
+	}
 	return nil
 }
 
@@ -66,6 +69,9 @@ func equivalentTechnicalType(typ string) string {
 
 func modelSupportsSelection(m orm.UserModelProviderGroupModel, slot, baseURL string) bool {
 	m.ModelType = normalizeGroupModelType(m.ModelType)
+	if !RuntimeSupportsModelType(m.ProviderName, m.ModelType) {
+		return false
+	}
 	switch slot {
 	case "llm":
 		return m.ModelType == "llm"

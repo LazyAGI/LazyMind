@@ -4567,9 +4567,11 @@ export interface ListModelProviderGroupsOpenAPIResponse {
 export interface ListRemoteGroupModelsOpenAPIItem {
     'added': boolean;
     'id': string;
+    'input'?: Array<string>;
     'max_input_tokens'?: string;
     'model_type': string;
     'name': string;
+    'output'?: Array<string>;
 }
 export interface ListRemoteGroupModelsOpenAPIResponse {
     'models'?: Array<ListRemoteGroupModelsOpenAPIItem>;

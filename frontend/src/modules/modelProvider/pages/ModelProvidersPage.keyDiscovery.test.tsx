@@ -129,11 +129,10 @@ describe("model discovery after verified key save", () => {
       { id: "unknown", name: "custom-unknown", model_type: "", added: false },
     ] });
     await discoverAfterKeySave();
-    expect(mocks.add).toHaveBeenCalledTimes(2);
-    expect(mocks.add.mock.calls.map(([request]) => request.addModelProviderGroupModelOpenAPIRequest.name)).toEqual(["model-1", "custom-unknown"]);
-    expect(mocks.add.mock.calls[1][0].addModelProviderGroupModelOpenAPIRequest.model_type).toBe("llm");
+    expect(mocks.add).toHaveBeenCalledTimes(1);
+    expect(mocks.add.mock.calls.map(([request]) => request.addModelProviderGroupModelOpenAPIRequest.name)).toEqual(["model-1"]);
     expect(JSON.parse(screen.getByTestId("group-models").textContent || "[]")).toEqual(expect.arrayContaining([expect.objectContaining({ id: "existing", name: "model-0" })]));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveClass("provider-model-catalog-drawer");
     expect(mocks.remove).not.toHaveBeenCalled();
   });
 

@@ -171,20 +171,22 @@ func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*
 		}
 		return row, nil
 	}
-	var row selectedModelCandidate
+	var rows []selectedModelCandidate
 	err := db.WithContext(ctx).
 		Table("user_selected_models usm").
 		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL").
 		Where("usm.model_type = ? AND usm.share = ?", modelType, true).
-		Select("usm.user_id, usm.user_name, m.provider_name, m.name AS model_name").
-		Order("usm.updated_at DESC").Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
+		Select("usm.user_id, usm.user_name, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type").
+		Order("usm.updated_at DESC").Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	return &row, nil
+	for i := range rows {
+		if RuntimeSupportsModelType(rows[i].ProviderName, rows[i].TechnicalModelType) {
+			return &rows[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // GetSelectedModels returns selected model rows for the current user.
@@ -554,6 +556,10 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		item.ProviderID = item.UserModelProviderID
 		item.ProviderGroupID = item.UserModelProviderGroupID
 		item.Availability = "available"
+		if !RuntimeSupportsModelType(item.ProviderName, item.TechnicalModelType) {
+			item.Availability = "unavailable"
+			item.UnavailableReason = "runtime_unsupported"
+		}
 		item.IsEditable = strings.EqualFold(strings.TrimSpace(item.ModelKey), "image_editing")
 		if item.ModelKey == EvoModelKey {
 			if _, ok := ResolveOpenCodeModel(item.ProviderName, item.Name, item.BaseURL, item.TechnicalModelType, item.IsDefault); !ok {
@@ -859,7 +865,7 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 // HasAnyMultimodalEmbeddingSelection reports whether any user still has a valid
 // embed_image selection (joined model row not soft-deleted).
 func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool, error) {
-	var count int64
+	var rows []orm.UserModelProviderGroupModel
 	err := db.WithContext(ctx).
 		Table("user_selected_models usm").
 		Joins(
@@ -868,13 +874,19 @@ func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool,
 				"m.deleted_at IS NULL",
 		).
 		Where("usm.model_type = ?", "embed_image").
-		Count(&count).Error
+		Select("m.provider_name, m.model_type").Scan(&rows).Error
 	if err != nil {
 		return false, err
 	}
-	if count > 0 || !db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
-		return count > 0, nil
+	for _, row := range rows {
+		if RuntimeSupportsModelType(row.ProviderName, row.ModelType) {
+			return true, nil
+		}
 	}
+	if !db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
+		return false, nil
+	}
+	var count int64
 	err = db.WithContext(ctx).Model(&orm.UserSelectedCloudModel{}).
 		Where("model_type = ?", "embed_image").Count(&count).Error
 	return count > 0, err
@@ -898,7 +910,10 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 		row, err := loadEligibleOpenCodeSelection(ctx, db, userID, sharedOnly)
 		return row != nil, err
 	}
-	var count int64
+	var rows []struct {
+		ProviderName string
+		ModelType    string
+	}
 	q := db.WithContext(ctx).
 		Table("user_selected_models usm").
 		Joins(
@@ -912,8 +927,15 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 	} else {
 		q = q.Where("usm.user_id = ?", userID)
 	}
-	err := q.Count(&count).Error
-	return count > 0, err
+	if err := q.Select("m.provider_name, m.model_type").Scan(&rows).Error; err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if RuntimeSupportsModelType(row.ProviderName, row.ModelType) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // IsModelReady checks whether a model of the given model_type is available for the user.

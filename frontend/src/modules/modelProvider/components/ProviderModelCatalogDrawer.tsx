@@ -64,6 +64,7 @@ const normalizedName = (name: string) => name.trim().toLowerCase();
 
 function savedModelType(model: ProviderModel) {
   const types: Record<ProviderModel["capability"], string> = {
+    UNKNOWN: "",
     LLM_CHAT: "llm",
     LLM_SELF_EVOLUTION: "llm",
     EMBEDDING: "embed",
@@ -165,7 +166,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
       if (!key || unique.has(key)) continue;
       const existing = saved.get(key);
       const upstream = lookupUpstreamModel(props.protocolName, model.name);
-      const declaredType = normalizeRuntimeModelType(model.model_type?.trim() || upstream?.model_type?.trim() || "");
+      const declaredType = normalizeRuntimeModelType(model.model_type?.trim() || "");
       const modelType = existing
         ? savedModelType(existing)
         : declaredType;
@@ -173,11 +174,11 @@ export function ProviderModelCatalogDrawer(props: Props) {
         name: existing?.name || model.name,
         model_type: modelType,
         max_input_tokens: existing?.maxInputTokens || model.max_input_tokens,
-        vision: existing ? existing.vision : modelType === "llm" && upstream?.input.includes("image"),
+        vision: existing ? existing.vision : modelType === "llm" && (model.input || upstream?.input || []).some((value) => value === "image" || value === "video"),
         existing,
         missing: false,
         vendor: getModelIdentity(model.name, props.providerName).vendor,
-        unsupportedType: Boolean(modelType) && !isModelTypeSupportedByProtocol(modelType, props.protocolName),
+        unsupportedType: !isModelTypeSupportedByProtocol(modelType, props.protocolName),
       });
     }
     for (const model of props.models) {
@@ -282,9 +283,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
           } else {
             await props.onAdd({
               name: model.name,
-              // The API requires an executable type; unclassified models start as
-              // editable chat models until the user sets their type in model settings.
-              model_type: model.model_type || "llm",
+              model_type: model.model_type,
               max_input_tokens: model.max_input_tokens,
               vision: model.vision,
             });
@@ -571,8 +570,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
                             </Tooltip>
                             {model.missing ? (
                               <small>{copy("missingRemote")}</small>
-                            ) : !model.existing && model.unsupportedType ? (
-                              <small>{copy("unsupportedType")}</small>
+                            ) : model.unsupportedType ? (
+                              <small>{copy(model.model_type ? "unsupportedType" : "unclassifiedType")}</small>
                             ) : null}
                           </div>
                           <ModelTypeBadge type={getModelTaskType(model.model_type)} compact />

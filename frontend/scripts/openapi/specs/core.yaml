@@ -12339,12 +12339,20 @@ components:
                     type: boolean
                 id:
                     type: string
+                input:
+                    items:
+                        type: string
+                    type: array
                 max_input_tokens:
                     type: string
                 model_type:
                     type: string
                 name:
                     type: string
+                output:
+                    items:
+                        type: string
+                    type: array
             required:
                 - added
                 - id

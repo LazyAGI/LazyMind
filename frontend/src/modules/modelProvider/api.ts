@@ -287,6 +287,8 @@ export interface RemoteGroupModel {
   id: string;
   name: string;
   model_type: string;
+  input?: string[];
+  output?: string[];
   max_input_tokens?: string;
   added: boolean;
 }

@@ -101,11 +101,13 @@ func resolveRemoteModelsDialIPs(ctx context.Context, host string) ([]net.IP, err
 }
 
 type remoteGroupModelItem struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	ModelType      string  `json:"model_type"`
-	MaxInputTokens *string `json:"max_input_tokens,omitempty"`
-	Added          bool    `json:"added"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	ModelType      string   `json:"model_type"`
+	Input          []string `json:"input"`
+	Output         []string `json:"output"`
+	MaxInputTokens *string  `json:"max_input_tokens,omitempty"`
+	Added          bool     `json:"added"`
 }
 
 type remoteGroupModelsResponse struct {
@@ -119,9 +121,55 @@ type openaiModelListResponse struct {
 }
 
 type openaiModelListEntry struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Model string `json:"model"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Model            string   `json:"model"`
+	ModelType        string   `json:"model_type"`
+	Type             string   `json:"type"`
+	ContextLength    int      `json:"context_length"`
+	InputModalities  []string `json:"input_modalities"`
+	OutputModalities []string `json:"output_modalities"`
+	Architecture     struct {
+		Input  []string `json:"input_modalities"`
+		Output []string `json:"output_modalities"`
+	} `json:"architecture"`
+}
+
+func remoteModelID(entry openaiModelListEntry) string {
+	for _, value := range []string{entry.ID, entry.Name, entry.Model} {
+		if name := strings.TrimSpace(value); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func parseRemoteModelEntries(raw []byte) []openaiModelListEntry {
+	var parsed openaiModelListResponse
+	_ = json.Unmarshal(raw, &parsed)
+	entries := parsed.Data
+	if len(entries) == 0 {
+		entries = parsed.Models
+	}
+	if len(entries) == 0 {
+		for _, id := range parseRemoteModelIDs(raw) {
+			entries = append(entries, openaiModelListEntry{ID: id})
+		}
+	}
+	seen := make(map[string]bool)
+	result := make([]openaiModelListEntry, 0, len(entries))
+	for _, entry := range entries {
+		id := remoteModelID(entry)
+		key := strings.ToLower(id)
+		if id == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		entry.ID = id
+		result = append(result, entry)
+	}
+	sort.Slice(result, func(i, j int) bool { return strings.ToLower(result[i].ID) < strings.ToLower(result[j].ID) })
+	return result
 }
 
 func modelsListURL(baseURL string) (string, error) {
@@ -335,6 +383,12 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, errRemoteModelsHostNotAllowed.Error(), http.StatusBadRequest)
 		return
 	}
+	if LazyLLMSource(RuntimeProviderName(parent)) == "openrouter" {
+		query := parsedListURL.Query()
+		query.Set("output_modalities", "all")
+		parsedListURL.RawQuery = query.Encode()
+		listURL = parsedListURL.String()
+	}
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, listURL, nil)
 	if err != nil {
@@ -367,7 +421,7 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ids := parseRemoteModelIDs(body)
+	entries := parseRemoteModelEntries(body)
 	var existing []orm.UserModelProviderGroupModel
 	if err := db.WithContext(r.Context()).
 		Where("user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, userID).
@@ -380,19 +434,42 @@ func ListRemoteGroupModels(w http.ResponseWriter, r *http.Request) {
 		added[strings.ToLower(strings.TrimSpace(row.Name))] = struct{}{}
 	}
 
-	models := make([]remoteGroupModelItem, 0, len(ids))
-	for _, id := range ids {
-		modelType := inferRemoteModelType(id)
+	models := make([]remoteGroupModelItem, 0, len(entries))
+	for _, entry := range entries {
+		id := entry.ID
+		input, output := entry.Architecture.Input, entry.Architecture.Output
+		if len(input) == 0 {
+			input = entry.InputModalities
+		}
+		if len(output) == 0 {
+			output = entry.OutputModalities
+		}
+		modelType := classifyUpstreamModel("", input, output)
+		if len(output) == 0 {
+			declared := entry.ModelType
+			if declared == "" {
+				declared = entry.Type
+			}
+			modelType = classifyUpstreamModel(declared, input, output)
+			if modelType == "" && LazyLLMSource(RuntimeProviderName(parent)) != "openrouter" {
+				modelType = inferRemoteModelType(id)
+			}
+		}
 		item := remoteGroupModelItem{
 			ID:        id,
 			Name:      id,
 			ModelType: modelType,
+			Input:     append([]string{}, input...),
+			Output:    append([]string{}, output...),
 			Added:     false,
 		}
 		if _, ok := added[strings.ToLower(id)]; ok {
 			item.Added = true
 		}
-		if tokens, ok := lookupMaxInputTokens(id, modelType); ok {
+		if entry.ContextLength > 0 && (modelType == "llm" || modelType == "vlm" || modelType == "embed" || modelType == "multimodal_embedding" || modelType == "rerank") {
+			tokens := formatContextTokens(entry.ContextLength)
+			item.MaxInputTokens = &tokens
+		} else if tokens, ok := lookupMaxInputTokens(id, modelType); ok {
 			item.MaxInputTokens = &tokens
 		}
 		models = append(models, item)

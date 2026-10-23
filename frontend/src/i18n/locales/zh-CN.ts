@@ -333,7 +333,7 @@ const zhCN = {
       rerank: "重排",
       tts: "语音合成",
       asr: "语音识别",
-      unknown: "待分类",
+      unknown: "未分类",
     },
     taskType: {
       "chat": "对话模型",
@@ -347,7 +347,7 @@ const zhCN = {
       "video-generation": "视频生成",
       "document": "文档解析",
       "moderation": "内容审核",
-      "unknown": "待分类",
+      "unknown": "未分类",
     },
     taskTypeDescription: {
       "chat": "理解输入、推理并回答；可包含视觉理解和工具调用。",
@@ -409,7 +409,9 @@ const zhCN = {
     },
     catalog: {
       customGroup: "自定义",
-      unsupportedType: "当前接口协议不支持此模型类型",
+      unsupportedType: "当前运行时暂不支持此模型类型",
+      unclassifiedType: "模型类型未分类，请在自定义模型中明确选择类型后添加。",
+      notSupportedYet: "暂不支持",
       title: "{{name}} 模型",
       search: "搜索模型…",
       filter: "筛选模型类型",

@@ -97,7 +97,7 @@ func TestListRemoteGroupModels(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
 			t.Errorf("Authorization = %q, want Bearer secret", got)
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-chat"},{"id":"deepseek-reasoner"},{"id":"qwen-plus"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-chat"},{"id":"deepseek-reasoner"},{"id":"qwen-plus","architecture":{"input_modalities":["text"],"output_modalities":["text"]}}]}`))
 	}))
 	t.Cleanup(upstream.Close)
 

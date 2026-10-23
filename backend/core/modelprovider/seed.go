@@ -254,8 +254,10 @@ func syncDefaultModelToUserGroups(
 		"free_auto_select_base_urls": freeAutoSelectBaseURLs,
 		"updated_at":                 now,
 	}
-	if maxInputTokens != nil {
-		updates["max_input_tokens"] = *maxInputTokens
+	updates["max_input_tokens"] = maxInputTokens
+	if !supportsUserMaxInputTokens(modelType) {
+		updates["input_token_limit"] = nil
+		updates["max_output_tokens"] = nil
 	}
 	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
 		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
@@ -269,6 +271,12 @@ func syncDefaultModelToUserGroups(
 			return nil
 		}
 		return err
+	}
+	// A catalog refresh repairs imported metadata without selecting newly
+	// discovered models for existing suppliers. Auxiliary services retain their
+	// original catalog synchronization behavior.
+	if strings.EqualFold(strings.TrimSpace(catalog.Category), defaultProviderCategory) {
+		return nil
 	}
 	catalogBaseURL := normalizeBaseURLForCompare(catalog.BaseURL)
 

@@ -61,6 +61,25 @@ async function chooseCapability(capability: string) {
 }
 
 describe("model editor", () => {
+  it("requires an explicit supported type when editing an unclassified model", async () => {
+    const options = props({ ...model, capability: "UNKNOWN" });
+    setup(options);
+    fireEvent.change(nameInput(), { target: { value: "unknown-renamed" } });
+    fireEvent.click(saveButton());
+    await visibleText("modelProvider.catalog.unclassifiedType");
+    expect(options.onSave).not.toHaveBeenCalled();
+    await chooseCapability("LLM_CHAT");
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({ capability: "LLM_CHAT", name: "unknown-renamed" })));
+  });
+  it("requires an OpenRouter type with an implemented adapter", async () => {
+    const options = { ...props({ ...model, capability: "RERANK" }), protocolName: "OpenRouter" };
+    setup(options);
+    fireEvent.change(nameInput(), { target: { value: "reranker-renamed" } });
+    fireEvent.click(saveButton());
+    await visibleText("modelProvider.catalog.unsupportedType");
+    expect(options.onSave).not.toHaveBeenCalled();
+  });
   it("uses separate context, input and output presets and preserves their values", async () => {
     const options = props();
     setup(options);

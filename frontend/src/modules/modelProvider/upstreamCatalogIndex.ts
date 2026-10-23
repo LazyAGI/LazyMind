@@ -1,6 +1,6 @@
-export const modelModalities = ["text", "image", "audio", "video", "file"] as const;
+export const modelModalities = ["text", "image", "audio", "video", "file", "embeddings", "speech", "transcription", "rerank", "decisions"] as const;
 
-export type ModelModality = (typeof modelModalities)[number];
+export type ModelModality = string;
 
 export interface UpstreamModelRecord {
   name: string;

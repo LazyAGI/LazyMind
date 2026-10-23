@@ -20,11 +20,24 @@ function isAnthropicProtocol(protocol?: string) {
   return /^(claude|anthropic)$/i.test(protocol?.trim() || "");
 }
 
+const openRouterRuntimeTypes = new Set(["llm", "vlm", "embed", "text2image", "text2video", "tts", "stt"]);
+
+const capabilityRuntimeTypes: Record<ModelCapability, string> = {
+  LLM_CHAT: "llm", LLM_SELF_EVOLUTION: "llm", VLM: "vlm", EMBEDDING: "embed",
+  MULTIMODAL_EMBEDDING: "multimodal_embedding", RERANK: "rerank", ASR: "stt", TTS: "tts",
+  TEXT_TO_IMAGE: "text2image", TEXT_TO_VIDEO: "text2video", IMAGE_EDITING: "image_editing", UNKNOWN: "",
+};
+
+export function getRuntimeModelTypeForCapability(capability: ModelCapability): string {
+  return capabilityRuntimeTypes[capability];
+}
+
 /** A protocol determines which real runtime adapters can serve a model. */
 export function isModelTypeSupportedByProtocol(modelType: string, protocol?: string) {
   const normalized = normalizeRuntimeModelType(modelType);
   return runtimeModelTypes.has(normalized) &&
-    (!isAnthropicProtocol(protocol) || normalized === "llm" || normalized === "vlm");
+    (!isAnthropicProtocol(protocol) || normalized === "llm" || normalized === "vlm") &&
+    (!/^openrouter$/i.test(protocol?.trim() || "") || openRouterRuntimeTypes.has(normalized));
 }
 
 export function getSelectableCapabilities(
@@ -34,9 +47,7 @@ export function getSelectableCapabilities(
   const distinct = [...new Set(capabilities.map((capability) =>
     capability === "LLM_SELF_EVOLUTION" ? "LLM_CHAT" : capability,
   ))];
-  return isAnthropicProtocol(protocol)
-    ? distinct.filter((capability) => capability === "LLM_CHAT" || capability === "VLM")
-    : distinct;
+  return distinct.filter((capability) => isModelTypeSupportedByProtocol(capabilityRuntimeTypes[capability], protocol));
 }
 
 export function supportsModelContext(capability?: string) {

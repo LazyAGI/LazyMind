@@ -84,7 +84,8 @@ export type ModelCapability =
   | "TEXT_TO_VIDEO"
   | "MULTIMODAL_EMBEDDING"
   | "IMAGE_EDITING"
-  | "LLM_SELF_EVOLUTION";
+  | "LLM_SELF_EVOLUTION"
+  | "UNKNOWN";
 
 export function getSelectableModelCapabilities(
   capabilities: readonly ModelCapability[],
@@ -157,6 +158,7 @@ interface CustomModelFormValues {
 }
 
 const capabilityLabelKeys: Record<ModelCapability, string> = {
+  UNKNOWN: "modelProvider.taskType.unknown",
   LLM_CHAT: "modelProvider.capability.llmChat",
   EMBEDDING: "modelProvider.capability.embedding",
   VLM: "modelProvider.capability.vlm",
@@ -222,7 +224,8 @@ enum ModelProviderModelType {
   ImageEditing = "image_editing",
 }
 
-const modelTypeByCapability: Record<ModelCapability, ModelProviderModelType> = {
+const modelTypeByCapability: Record<ModelCapability, string> = {
+  UNKNOWN: "",
   EMBEDDING: ModelProviderModelType.Embedding,
   VLM: ModelProviderModelType.VLM,
   RERANK: ModelProviderModelType.Rerank,
@@ -262,7 +265,7 @@ function getProviderBrand(name: string) {
 }
 
 export function mapModelTypeToCapability(modelType?: string): ModelCapability {
-  const normalized = (modelType || "").trim().toLowerCase();
+  const normalized = normalizeRuntimeModelType(modelType || "");
   if (
     normalized === ModelProviderModelType.MultimodalEmbedding ||
     normalized === "cross_modal_embed" ||
@@ -288,7 +291,7 @@ export function mapModelTypeToCapability(modelType?: string): ModelCapability {
     normalized.includes("vision")
   )
     return "VLM";
-  return "LLM_CHAT";
+  return normalized === "llm" ? "LLM_CHAT" : "UNKNOWN";
 }
 
 const createModelProviderFallbacks = (
@@ -1236,8 +1239,11 @@ export default function ModelProviderPage({
   };
 
   const addCatalogModel = async (providerId: string, groupId: string, choice: CatalogModelChoice) => {
-    const currentGroup = addedProviderListRef.current.find((provider) => provider.id === providerId)?.groups.find((group) => group.id === groupId);
+    const currentProvider = addedProviderListRef.current.find((provider) => provider.id === providerId);
+    const currentGroup = currentProvider?.groups.find((group) => group.id === groupId);
     if (!currentGroup) throw new Error(t("modelProvider.workspace.savedRefreshFailed"));
+    if (!isModelTypeSupportedByProtocol(choice.model_type, currentProvider?.protocolName || currentProvider?.source))
+      throw new Error(t(choice.model_type ? "modelProvider.catalog.unsupportedType" : "modelProvider.catalog.unclassifiedType"));
     if (currentGroup.models.some((model) => normalizeModelName(model.name) === normalizeModelName(choice.name))) return;
     const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
       modelProviderId: providerId,
@@ -1321,7 +1327,7 @@ export default function ModelProviderPage({
         if (!current || !currentSelection()) return;
         if (current.models.some((saved) => normalizeModelName(saved.name) === normalizeModelName(model.name))) continue;
         const upstream = lookupUpstreamModel(protocol, model.name);
-        const modelType = normalizeRuntimeModelType(model.model_type?.trim() || upstream?.model_type || "llm");
+        const modelType = normalizeRuntimeModelType(model.model_type?.trim() || "");
         if (!isModelTypeSupportedByProtocol(modelType, protocol)) {
           openCatalog();
           continue;
@@ -1330,7 +1336,7 @@ export default function ModelProviderPage({
           name: model.name,
           model_type: modelType,
           max_input_tokens: model.max_input_tokens,
-          vision: modelType === "llm" && upstream?.input.includes("image"),
+          vision: modelType === "llm" && (model.input || upstream?.input || []).some((value) => value === "image" || value === "video"),
         });
         added = true;
       }
@@ -1365,6 +1371,8 @@ export default function ModelProviderPage({
   const saveEditedModel = async (values: ModelEditorValues) => {
     const target = editModelWindowModal;
     if (!target) return;
+    if (!isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), target.provider.protocolName || target.provider.source))
+      throw new Error(t(values.capability === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType"));
     const updated = await updateGroupModel(target.provider.id, target.group.id, target.model.id, {
       name: values.name.trim(),
       model_type: getModelTypeForCapability(values.capability),
@@ -1401,6 +1409,11 @@ export default function ModelProviderPage({
     );
     const group = provider?.groups.find((item) => item.id === values.groupId);
     if (!provider || !group) {
+      return;
+    }
+
+    if (!isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), provider.protocolName || provider.source)) {
+      customModelForm.setFields([{ name: "capability", errors: [t(values.capability === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType")] }]);
       return;
     }
 
@@ -1635,6 +1648,7 @@ export default function ModelProviderPage({
       <ModelEditorModal
         model={editModelWindowModal?.model || null}
         providerName={editModelWindowModal ? getProviderDisplayName(editModelWindowModal.provider, currentLanguage) : ""}
+        protocolName={editModelWindowModal?.provider.protocolName || editModelWindowModal?.provider.source}
         capabilities={editModelWindowModal ? getSelectableModelCapabilities(editModelWindowModal.provider.capabilities, editModelWindowModal.provider.protocolName || editModelWindowModal.provider.source) : []}
         models={editModelWindowModal?.group.models || []}
         capabilityLabel={getCapabilityLabel}

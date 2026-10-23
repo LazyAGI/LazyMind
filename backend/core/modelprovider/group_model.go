@@ -541,6 +541,10 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 	out := make([]groupModelListItem, 0, len(rows))
 	for i := range rows {
 		m := rows[i]
+		availability := "available"
+		if !RuntimeSupportsModelType(RuntimeProviderName(parent), m.ModelType) {
+			availability = "unavailable"
+		}
 		out = append(out, groupModelListItem{
 			ID:                       m.ID,
 			Source:                   "own",
@@ -558,7 +562,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			IsEditable:               strings.EqualFold(strings.TrimSpace(m.ModelType), "image_editing"),
 			MaxInputTokens:           m.MaxInputTokens,
 			InputTokenLimit:          m.InputTokenLimit, MaxOutputTokens: m.MaxOutputTokens,
-			Availability: "available",
+			Availability: availability,
 			Lifecycle:    "active",
 			Capabilities: []string{},
 		})
@@ -650,6 +654,9 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		m := rows[i]
 		grp, ok := groupByID[m.UserModelProviderGroupID]
 		if !ok || !grp.isVerified {
+			continue
+		}
+		if !RuntimeSupportsModelType(m.ProviderName, m.ModelType) {
 			continue
 		}
 		if modelType == EvoModelKey {

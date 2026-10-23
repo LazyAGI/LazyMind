@@ -34,12 +34,12 @@ func TestInferUpstreamCatalogModel(t *testing.T) {
 		{name: "chat", item: upstreamCatalogModel{Name: "demo-chat", Input: []string{"text"}, Output: []string{"text"}, Context: 128000}, want: "llm"},
 		{name: "vision chat", item: upstreamCatalogModel{Name: "demo-vision", Input: []string{"text", "image"}, Output: []string{"text"}, Context: 1000000}, want: "llm", vision: true},
 		{name: "explicit vision type", item: upstreamCatalogModel{Name: "demo-vision", ModelType: "vlm", Input: []string{"text", "image"}, Output: []string{"text"}}, want: "vlm", vision: true},
-		{name: "embed", item: upstreamCatalogModel{Name: "demo-embed", Input: []string{"text"}, Output: []string{"text"}}, want: "embed"},
-		{name: "rerank", item: upstreamCatalogModel{Name: "demo-rerank", Input: []string{"text"}, Output: []string{"text"}}, want: "rerank"},
+		{name: "embed", item: upstreamCatalogModel{Name: "demo-embed", ModelType: "embed", Input: []string{"text"}, Output: []string{"embeddings"}}, want: "embed"},
+		{name: "rerank", item: upstreamCatalogModel{Name: "demo-rerank", ModelType: "rerank", Input: []string{"text"}, Output: []string{"rerank"}}, want: "rerank"},
 		{name: "stt", item: upstreamCatalogModel{Name: "demo-stt", Input: []string{"audio"}, Output: []string{"text"}}, want: "stt"},
 		{name: "tts", item: upstreamCatalogModel{Name: "demo-tts", Input: []string{"text"}, Output: []string{"audio"}}, want: "tts"},
 		{name: "image", item: upstreamCatalogModel{Name: "demo-image", Input: []string{"text"}, Output: []string{"image"}}, want: "text2image"},
-		{name: "edit", item: upstreamCatalogModel{Name: "demo-edit", Input: []string{"text", "image"}, Output: []string{"image"}}, want: "image_editing", vision: true},
+		{name: "reference image generation", item: upstreamCatalogModel{Name: "demo-edit", Input: []string{"text", "image"}, Output: []string{"image"}}, want: "text2image", vision: true},
 		{name: "video", item: upstreamCatalogModel{Name: "demo-video", Input: []string{"text", "image"}, Output: []string{"video"}}, want: "text2video", vision: true},
 	}
 	for _, tc := range cases {
@@ -318,22 +318,17 @@ func TestSeedUpstreamPreservesUserModelsAndSelectionsAcrossRestart(t *testing.T)
 		{ID: "proxy-old", UserModelProviderID: "user-provider", UserModelProviderGroupID: "proxy", Name: "old-chat", ModelType: "llm", IsDefault: true},
 	})
 	create(&orm.UserSelectedModel{UserID: "user", ModelKey: "llm", UserModelProviderGroupModelID: "selected-old"})
-	var insertedID string
 	for i := 0; i < 2; i++ {
 		if err := SeedUpstreamModelCatalog(t.Context(), db, yamlPath, upstreamPath); err != nil {
 			t.Fatal(err)
 		}
-		var added orm.UserModelProviderGroupModel
-		if err := db.Where("user_model_provider_group_id = ? AND name = ?", "official", "new-auto").Take(&added).Error; err != nil {
+		var added int64
+		if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("user_model_provider_group_id = ? AND name = ?", "official", "new-auto").Count(&added).Error; err != nil {
 			t.Fatal(err)
 		}
-		if !added.IsDefault || added.MaxInputTokens == nil || *added.MaxInputTokens != "8192" {
-			t.Fatalf("upstream model was not synced: %+v", added)
+		if added != 0 {
+			t.Fatalf("catalog refresh automatically added %d user models", added)
 		}
-		if i > 0 && added.ID != insertedID {
-			t.Fatalf("restart replaced user model: %s -> %s", insertedID, added.ID)
-		}
-		insertedID = added.ID
 	}
 	var modelNames []string
 	if err := db.Model(&orm.DefaultModel{}).Order("name").Pluck("name", &modelNames).Error; err != nil {
@@ -343,7 +338,7 @@ func TestSeedUpstreamPreservesUserModelsAndSelectionsAcrossRestart(t *testing.T)
 		t.Fatalf("catalog templates=%v", modelNames)
 	}
 	var groupModels []orm.UserModelProviderGroupModel
-	if err := db.Where("id <> ?", insertedID).Order("id").Find(&groupModels).Error; err != nil {
+	if err := db.Order("id").Find(&groupModels).Error; err != nil {
 		t.Fatal(err)
 	}
 	var ids []string

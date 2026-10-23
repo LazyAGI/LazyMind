@@ -35,7 +35,7 @@ func LazyLLMBaseURL(providerName, baseURL string) string {
 	}
 	if v1Index >= 0 {
 		rawPath = "/" + strings.Join(segments[:v1Index+1], "/") + "/"
-	} else if strings.Trim(rawPath, "/") == "" {
+	} else if strings.Trim(rawPath, "/") == "" || strings.EqualFold(strings.Trim(rawPath, "/"), "chat/completions") {
 		rawPath = "/v1/"
 	} else {
 		// OpenAI-compatible suppliers may version their API differently or put
