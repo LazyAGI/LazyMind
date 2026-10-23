@@ -495,21 +495,18 @@ export function ProviderWorkspace(props: Props) {
       aria-label={label("title")}
     >
       {deleteModalContext}
-      <header className="provider-workspace-topbar">
-        <div>
-          {props.onBack ? (
-            <button
-              type="button"
-              className="provider-workspace-back"
-              onClick={() => confirmEndpointLeave(props.onBack!)}
-            >
-              <ArrowLeftOutlined aria-hidden="true" />
-              {label("back")}
-            </button>
-          ) : null}
-          <h1>{label("title")}</h1>
-        </div>
-      </header>
+      {props.onBack ? (
+        <header className="provider-workspace-topbar">
+          <button
+            type="button"
+            className="provider-workspace-back"
+            onClick={() => confirmEndpointLeave(props.onBack!)}
+          >
+            <ArrowLeftOutlined aria-hidden="true" />
+            {label("back")}
+          </button>
+        </header>
+      ) : null}
       {props.loadError ? (
         <div className="provider-workspace-load-error" role="alert">
           <span>{label("loadFailed")}</span>

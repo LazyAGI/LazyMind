@@ -54,6 +54,9 @@
 
 .model-provider-page-content {
   flex: 1 1 auto;
+  width: 100%;
+  max-width: 960px;
+  margin-inline: auto;
   min-height: 0;
 }
 
@@ -3928,9 +3931,7 @@
   align-items: center;
   height: 28px;
   border: 0;
-  border-right: 1px solid var(--provider-line);
-  padding: 0 16px 0 0;
-  margin-right: 8px;
+  padding: 0;
   background: none;
   color: var(--provider-muted);
   font-size: 12px;
