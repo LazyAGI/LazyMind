@@ -2811,6 +2811,7 @@ const enUS = {
     modelFallbackContextAdapted: "Context adapted.",
     modelFallbackReason: {
       model_config_unavailable: "The original model configuration is unavailable.",
+      model_context_not_fit: "The original model cannot fit the current request context.",
       unknown: "The model service is temporarily unavailable.",
     },
     modelRouteReason: {

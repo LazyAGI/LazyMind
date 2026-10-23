@@ -274,7 +274,10 @@ def _commit_surviving_spills(
         if plan.compactor == 'spill'
     }
     for entry in entries:
-        plan = by_content.get(entry['message'].get('content'))
+        content = entry['message'].get('content')
+        if not isinstance(content, str):
+            continue
+        plan = by_content.get(content)
         if plan is None:
             continue
         commit_tool_result_plan(plan, workspace=workspace)

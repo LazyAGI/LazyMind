@@ -407,8 +407,8 @@ function ModelSwitchHistory({ records }: { records?: ChatModelSwitchRecord[] }) 
           <li key={record.event_id}>
             <span>{formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow)}</span>{" → "}
             <span>{formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow)}</span>
-            <div>{record.reason_code === "model_config_unavailable"
-              ? t("chat.modelFallbackReason.model_config_unavailable")
+            <div>{record.reason_code === "model_config_unavailable" || record.reason_code === "model_context_not_fit"
+              ? t(`chat.modelFallbackReason.${record.reason_code}`)
               : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") })}</div>
             <div>{t("chat.modelFallbackSucceeded")}</div>
             {record.context_compacted === true ? <div>{t("chat.modelFallbackContextAdapted")}</div> : null}

@@ -254,11 +254,11 @@ describe("AssistantMessage cancellation", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
   });
 
-  it("keeps switch identities, reasons and outcomes in keyboard-accessible message details", () => {
+  it.each(["model_config_unavailable", "model_context_not_fit"])("keeps switch identities, reasons and outcomes in keyboard-accessible message details (%s)", (reasonCode) => {
     const longName = "替代模型🌏".repeat(25);
     const item = { role: "assistant", delta: "answer", finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       model_switches: [{ event_id: "initial-switch", switch_index: 1,
-        reason_code: "model_config_unavailable", context_compacted: false,
+        reason_code: reasonCode, context_compacted: false,
         from_max_input_tokens: null, to_max_input_tokens: null,
         from: { source: "own", candidate_id: "own:removed", model_id: "removed-model", provider_group_id: "" },
         to: { source: "own", candidate_id: "own:b", model_id: "b", model_name: longName, provider_name: "Provider B", provider_group_id: "b" } }] };
@@ -271,7 +271,7 @@ describe("AssistantMessage cancellation", () => {
     expect(summary.closest("details")).toHaveAttribute("open");
     expect(screen.getByText("removed-model (chat.modelFallbackWindowUnknown)")).toBeVisible();
     expect(screen.getByText(`Provider B · ${longName} (chat.modelFallbackWindowUnknown)`)).toBeVisible();
-    expect(screen.getByText("chat.modelFallbackReason.model_config_unavailable")).toBeVisible();
+    expect(screen.getByText(`chat.modelFallbackReason.${reasonCode}`)).toBeVisible();
     expect(screen.getByText("chat.modelFallbackSucceeded")).toBeVisible();
   });
 

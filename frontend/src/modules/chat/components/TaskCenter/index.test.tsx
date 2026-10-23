@@ -118,8 +118,11 @@ describe("TaskCenter display modes", () => {
     expect(screen.getByText("SECOND CALL")).toBeVisible();
   });
 
-  it("shows structured model switches in the ordinary header and process history after reload", () => {
-    const record: ChatModelSwitchRecord = { event_id: "switch", switch_index: 1, reason_code: "rate_limited", context_compacted: true,
+  it.each([
+    ["rate_limited", "chat.runStatus.codes.rate_limited"],
+    ["model_context_not_fit", "chat.modelFallbackReason.model_context_not_fit"],
+  ])("shows structured model switches in the ordinary header and process history after reload (%s)", (reasonCode, reasonText) => {
+    const record: ChatModelSwitchRecord = { event_id: "switch", switch_index: 1, reason_code: reasonCode, context_compacted: true,
       from_max_input_tokens: 131072, to_max_input_tokens: 65536,
       from: { candidate_id: "own:a", source: "own", model_id: "a", model_name: "Original A", provider_group_id: "a" },
       to: { candidate_id: "own:b", source: "own", model_id: "b", model_name: "Replacement B", provider_group_id: "b" } };
@@ -131,7 +134,7 @@ describe("TaskCenter display modes", () => {
     const rendered = render(<TaskCenter sessionId="conversation-1" />);
     expect(screen.getAllByText("Original A (128K)")).toHaveLength(2);
     expect(screen.getAllByText("Replacement B (64K)")).toHaveLength(2);
-    expect(screen.getAllByText("chat.runStatus.codes.rate_limited")).toHaveLength(2);
+    expect(screen.getAllByText(reasonText)).toHaveLength(2);
     expect(screen.getAllByText("chat.modelFallbackContextAdapted")).toHaveLength(2);
     rendered.unmount();
     render(<TaskCenter sessionId="conversation-1" />);

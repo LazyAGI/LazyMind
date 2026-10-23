@@ -2747,6 +2747,7 @@ const zhCN = {
     modelFallbackContextAdapted: "上下文已适配。",
     modelFallbackReason: {
       model_config_unavailable: "原模型配置不可用。",
+      model_context_not_fit: "原模型无法容纳当前请求的上下文。",
       unknown: "模型服务暂时不可用。",
     },
     modelRouteReason: {

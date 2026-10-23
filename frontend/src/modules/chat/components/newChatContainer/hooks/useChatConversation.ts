@@ -886,8 +886,8 @@ export function useChatConversation({
     // Snapshots hydrate silently; only a new successful Host event announces.
     if (!record || !event.run_id || alreadySeen) return;
     const unknownWindow = t("chat.modelFallbackWindowUnknown");
-    const reason = record.reason_code === "model_config_unavailable"
-      ? t("chat.modelFallbackReason.model_config_unavailable")
+    const reason = record.reason_code === "model_config_unavailable" || record.reason_code === "model_context_not_fit"
+      ? t(`chat.modelFallbackReason.${record.reason_code}`)
       : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") });
     const key = `model-fallback:${event.run_id}`;
     modelFallbackNotification.open({

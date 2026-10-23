@@ -200,6 +200,65 @@ def test_first_exposure_spill_write_failure_keeps_original_projection(tmp_path) 
     assert (tmp_path / 'tool_spills').read_text(encoding='utf-8') == 'blocked directory'
 
 
+def test_image_message_survives_summary_without_spill_plans(tmp_path, monkeypatch) -> None:
+    from lazyllm import globals as lazy_globals
+
+    lazy_globals['agentic_config'] = lazy_globals.get('agentic_config') or {}
+    monkeypatch.setitem(lazy_globals, 'agentic_config', {})
+    history = [
+        {'role': 'user', 'content': 'Keep the original task.'},
+        {'role': 'assistant', 'content': 'old context\n' * 2500},
+        {'role': 'user', 'content': 'recent request'},
+    ]
+    image = {'role': 'user', 'content': [
+        {'type': 'text', 'text': 'current image'},
+        {'type': 'image_url', 'image_url': {'url': 'https://images.example/fixture.png'}},
+    ]}
+    original = copy.deepcopy(history)
+    original_current = copy.deepcopy([image])
+    state = {}
+    with config.temp('context_compression_enabled', True), \
+            config.temp('context_summary_compression_enabled', True), \
+            config.temp('context_compression_reserved_output_tokens', 0), \
+            config.temp('context_compression_trigger_ratio', 0.5), \
+            config.temp('context_compression_target_ratio', 0.4):
+        compact = make_history_compactor(max_input_tokens=8000, summarizer=lambda _s, _u: VALID_SUMMARY,
+                                         workspace=str(tmp_path))
+        prior, current = compact(history, current_round_messages=[image], runtime_state=state)
+
+    assert any(entry['kind'] == 'summary' for entry in state['entries'])
+    assert current == original_current
+    assert [image] == original_current
+    assert history == original
+    assert any('## Current task' in str(message['content']) for message in prior)
+    assert not (tmp_path / 'tool_spills').exists()
+
+
+def test_image_message_does_not_prevent_real_tool_spill(tmp_path) -> None:
+    image = {'role': 'user', 'content': [
+        {'type': 'image_url', 'image_url': {'url': 'https://images.example/fixture.png'}},
+    ]}
+    content = 'tool evidence\n' * 3000
+    history = [image, {'role': 'assistant', 'tool_calls': [
+        {'id': 'read', 'type': 'function', 'function': {'name': 'read_user_attachment', 'arguments': '{}'}},
+    ]}, {'role': 'tool', 'name': 'read_user_attachment', 'tool_call_id': 'read', 'content': content}]
+    original = copy.deepcopy(history)
+    state = {}
+    compact = make_history_compactor(max_input_tokens=100_000, workspace=str(tmp_path))
+    with config.temp('context_compression_enabled', True), \
+            config.temp('context_summary_compression_enabled', False), \
+            config.temp('context_compression_spill_bytes', 1024):
+        compact([], runtime_state=state)
+        projected = _projected(compact(history, runtime_state=state))
+
+    assert projected[0] == image
+    assert history == original
+    assert 'offloaded to workspace' in projected[-1]['content']
+    files = list((tmp_path / 'tool_spills').glob('*.txt'))
+    assert len(files) == 1
+    assert files[0].read_text(encoding='utf-8') == content
+
+
 def test_cache_unjustified_old_prune_is_rolled_back_when_summary_fails() -> None:
     old_tool = 'old output\n' * 800
     history = [

@@ -12,7 +12,8 @@ export function TaskModelSwitchSummary({ record }: { record: ChatModelSwitchReco
   return <>
     <span><span>{formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknown)}</span>{" → "}
       <span>{formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknown)}</span></span>
-    <span>{record.reason_code === "model_config_unavailable" ? t("chat.modelFallbackReason.model_config_unavailable")
+    <span>{record.reason_code === "model_config_unavailable" || record.reason_code === "model_context_not_fit"
+      ? t(`chat.modelFallbackReason.${record.reason_code}`)
       : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") })}</span>
     {record.context_compacted === true ? <span>{t("chat.modelFallbackContextAdapted")}</span> : null}
   </>;

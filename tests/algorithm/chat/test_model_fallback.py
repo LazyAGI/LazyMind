@@ -118,6 +118,10 @@ class ModelFallbackHTTPTests(unittest.TestCase):
                  and item['runtime_event']['type'] == 'model_call_finished']
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]['data']['attempt_count'], 1)
+        switches = [event['runtime_event']['data'] for event in events
+                    if (event.get('runtime_event') or {}).get('type') == 'model_switched']
+        self.assertEqual(switches[0]['reason_code'], 'model_context_not_fit')
+        self.assertNotIn('own:model-a', wrapper.state.failed_candidates)
 
     def test_all_local_fit_rejections_have_no_fabricated_model_calls(self):
         from lazymind.chat.runtime_events import RunOutcome

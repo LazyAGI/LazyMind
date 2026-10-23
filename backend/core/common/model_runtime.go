@@ -73,7 +73,7 @@ func ValidateModelSwitched(raw json.RawMessage) error {
 	if data.From.CandidateID == data.To.CandidateID {
 		return errors.New("model switch must change candidate")
 	}
-	if _, ok := ValidModelFailureCodes[data.ReasonCode]; !ok && data.ReasonCode != "model_config_unavailable" {
+	if _, ok := ValidModelFailureCodes[data.ReasonCode]; !ok && data.ReasonCode != "model_config_unavailable" && data.ReasonCode != "model_context_not_fit" {
 		return errors.New("invalid model switch reason")
 	}
 	for _, window := range []*int64{data.FromMaxInputTokens, data.ToMaxInputTokens} {

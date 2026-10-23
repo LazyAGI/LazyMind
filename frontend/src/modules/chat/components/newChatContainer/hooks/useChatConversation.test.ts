@@ -561,7 +561,10 @@ describe("useChatConversation regeneration recovery", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("restores history and snapshots silently and announces a new successful switch without SDK fields", async () => {
+  it.each([
+    ["model_config_unavailable", zhCN.chat.modelFallbackReason.model_config_unavailable],
+    ["model_context_not_fit", "原模型无法容纳当前请求的上下文。"],
+  ])("restores history and snapshots silently and announces a new successful switch without SDK fields (%s)", async (reasonCode, reasonText) => {
     vi.useFakeTimers();
     const { stream, listeners } = createMockStream();
     const { result } = renderConversation({ onOpenResumeSSE: vi.fn(() => stream), t: modelFallbackTranslate(zhCN) });
@@ -582,14 +585,14 @@ describe("useChatConversation regeneration recovery", () => {
       type: "model_switched", run_id: "old-run", event_id: prior.event_id, data: prior,
     } }); });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    const record = modelSwitch({ event_id: "initial-switch", reason_code: "model_config_unavailable",
+    const record = modelSwitch({ event_id: "initial-switch", reason_code: reasonCode,
       from: { candidate_id: "own:removed", source: "own", model_id: "removed-model", provider_group_id: "" } });
     await act(async () => { emit({ model_switches: [prior, record], runtime_event: {
       type: "model_switched", run_id: "new-run", event_id: record.event_id, data: record,
     } }); });
     expect(result.current.isStreaming).toBe(true);
     expect(screen.getByRole("status")).toHaveTextContent("removed-model");
-    expect(screen.getByRole("status")).toHaveTextContent(zhCN.chat.modelFallbackReason.model_config_unavailable);
+    expect(screen.getByRole("status")).toHaveTextContent(reasonText);
     expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(screen.getByRole("status")).toHaveTextContent(zhCN.chat.modelFallbackSucceeded);
   });
