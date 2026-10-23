@@ -206,7 +206,8 @@ describe("custom supplier deletion", () => {
         <ModelProviderPage />
       </ConfigProvider>,
     );
-    await screen.findByRole("button", {
+    const navigation = await screen.findByRole("navigation", { name: "modelProvider.workspace.suppliers" });
+    await within(navigation).findByRole("button", {
       name: "OpenAI",
     });
     expect(

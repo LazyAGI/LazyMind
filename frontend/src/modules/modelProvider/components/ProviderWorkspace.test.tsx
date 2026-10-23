@@ -89,6 +89,24 @@ const provider: AddedProvider = {
     },
   ],
 };
+const standardInformationProvider: AddedProvider = {
+  ...provider,
+  id: "ark-standard",
+  name: "Doubao",
+  brand: "Doubao",
+  source: "Doubao",
+  brandKey: "Doubao",
+  serviceKey: "standard",
+  groups: [{ ...provider.groups[0], source: "Doubao" }],
+};
+const codingInformationProvider: AddedProvider = {
+  ...standardInformationProvider,
+  id: "ark-coding",
+  name: "DoubaoCodingPlan",
+  serviceKey: "coding",
+  baseUrl: "https://coding.example.test/v1",
+  groups: [],
+};
 function setup(
   overrides: Partial<React.ComponentProps<typeof ProviderWorkspace>> = {},
   guarded = false,
@@ -191,6 +209,153 @@ beforeEach(() => {
 });
 
 describe("compact provider workspace", () => {
+  it("opens provider information from the existing right header name", async () => {
+    setup();
+    const heading = screen.getByRole("heading", { name: "OpenAI", level: 2 });
+    const trigger = within(heading).getByRole("button", { name: "OpenAI" });
+
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    expect(trigger).toHaveAttribute("title", "View service information");
+    expect(trigger.querySelector(".anticon-info-circle")).toHaveAttribute("aria-hidden", "true");
+    fireEvent.click(trigger);
+
+    expect(await screen.findByRole("dialog")).toBeVisible();
+  });
+
+  it("keeps information controls out of supplier navigation while service selection still works", () => {
+    const services = [provider, standardInformationProvider, codingInformationProvider];
+    setup({ providers: services, configuredProviders: services, highlightProviderId: provider.id });
+    const navigation = screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" });
+    const nav = within(navigation);
+
+    expect(nav.queryByTitle("View service information")).not.toBeInTheDocument();
+    expect(nav.queryByRole("button", { name: /information/i })).not.toBeInTheDocument();
+    expect(navigation.querySelector(".anticon-info-circle")).not.toBeInTheDocument();
+    fireEvent.click(nav.getByRole("button", { name: "Volcengine" }));
+    expect(screen.getByRole("heading", { name: "OpenAI", level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(nav.getByRole("button", { name: "Coding Plan" }));
+    expect(screen.getByRole("heading", { name: "Volcengine · Coding Plan", level: 2 })).toBeInTheDocument();
+    expect(nav.getByRole("button", { name: "Coding Plan" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("preserves a dirty API address when information opens and closes without a leave guard", async () => {
+    setup({}, true);
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    const draft = "https://unsaved.example.test/v1";
+    fireEvent.change(endpoint, { target: { value: draft } });
+    const trigger = within(screen.getByRole("heading", { name: "OpenAI", level: 2 }))
+      .getByRole("button", { name: "OpenAI" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
+    expect(endpoint).toHaveValue(draft);
+    expect(dialog.getByText(provider.baseUrl)).toBeVisible();
+    expect(dialog.queryByText(draft)).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "Return to configuration" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
+    expect(endpoint).toHaveValue(draft);
+    expect(screen.getByRole("heading", { name: "OpenAI", level: 2 })).toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(mocks.updateEndpoint).not.toHaveBeenCalled();
+  });
+
+  it("shows the latest saved API address in information before provider data refreshes", async () => {
+    const saved = "https://canonical.example.test/v1/";
+    const draft = "https://second-draft.example.test/v1";
+    mocks.updateEndpoint.mockResolvedValueOnce({ id: provider.id, base_url: saved });
+    const callbacks = setup({}, true);
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    fireEvent.change(endpoint, { target: { value: "https://canonical.example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.saveEndpoint" }));
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalledOnce());
+    await waitFor(() => expect(endpoint).toHaveValue(saved));
+    fireEvent.change(endpoint, { target: { value: draft } });
+    fireEvent.click(within(screen.getByRole("heading", { name: "OpenAI", level: 2 }))
+      .getByRole("button", { name: "OpenAI" }));
+
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByText(saved)).toBeVisible();
+    expect(dialog.queryByText(provider.baseUrl)).not.toBeInTheDocument();
+    expect(dialog.queryByText(draft)).not.toBeInTheDocument();
+    expect(endpoint).toHaveValue(draft);
+    expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
+    expect(mocks.updateEndpoint).toHaveBeenCalledOnce();
+  });
+
+  it("browses a sibling information guide without selecting it or changing the endpoint draft", async () => {
+    const services = [standardInformationProvider, codingInformationProvider];
+    const onLoadModels = vi.fn();
+    setup({ providers: services, configuredProviders: services, highlightProviderId: standardInformationProvider.id, onLoadModels }, true);
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    const draft = "https://draft-standard.example.test/v1";
+    fireEvent.change(endpoint, { target: { value: draft } });
+    onLoadModels.mockClear();
+    const heading = screen.getByRole("heading", { name: "Volcengine · Standard API", level: 2 });
+    fireEvent.click(within(heading).getByRole("button", { name: "Volcengine · Standard API" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "Read Volcengine · Coding Plan" }));
+
+    expect(dialog.getByRole("button", { name: "Read Volcengine · Coding Plan" })).toHaveAttribute("aria-current", "page");
+    expect(dialog.getByText(codingInformationProvider.baseUrl)).toBeVisible();
+    expect(heading).toHaveTextContent("Volcengine · Standard API");
+    const nav = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(nav.getByRole("button", { name: "Standard API" })).toHaveAttribute("aria-current", "page");
+    expect(nav.getByRole("button", { name: "Coding Plan" })).not.toHaveAttribute("aria-current");
+    expect(endpoint).toHaveValue(draft);
+    expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
+    expect(onLoadModels).not.toHaveBeenCalled();
+    expect(mocks.updateEndpoint).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole("button", { name: "Return to configuration" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(endpoint).toHaveValue(draft);
+    expect(nav.getByRole("button", { name: "Standard API" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("guards an explicit sibling configuration and keeps its guide and draft when staying", async () => {
+    const services = [standardInformationProvider, codingInformationProvider];
+    setup({ providers: services, configuredProviders: services, highlightProviderId: standardInformationProvider.id }, true);
+    const endpoint = screen.getByRole("textbox", { name: "modelProvider.apiAddressLabel" });
+    const draft = "https://unsaved-standard.example.test/v1";
+    fireEvent.change(endpoint, { target: { value: draft } });
+    fireEvent.click(within(screen.getByRole("heading", { name: "Volcengine · Standard API", level: 2 }))
+      .getByRole("button", { name: "Volcengine · Standard API" }));
+    const information = await screen.findByRole("dialog");
+    const dialog = within(information);
+    fireEvent.click(dialog.getByRole("button", { name: "Read Volcengine · Coding Plan" }));
+    fireEvent.click(dialog.getByRole("button", { name: "Configure this service" }));
+
+    const guardTitle = await screen.findByText("settingsPage.unsaved.title");
+    // rc-util uses the same "test-id" title id for stacked dialogs in test mode.
+    const guardElement = guardTitle.closest<HTMLElement>('[role="dialog"]')!;
+    expect(screen.getAllByRole("dialog")).toContain(guardElement);
+    const guard = within(guardElement);
+    expect(endpoint).toHaveValue(draft);
+    fireEvent.click(guard.getByRole("button", { name: "settingsPage.unsaved.stay" }));
+    await waitFor(() => expect(guardElement).not.toBeVisible());
+    expect(screen.getAllByRole("dialog")).not.toContain(guardElement);
+    expect(information).toBeVisible();
+    expect(dialog.getByRole("button", { name: "Read Volcengine · Coding Plan" })).toHaveAttribute("aria-current", "page");
+    expect(endpoint).toHaveValue(draft);
+    const nav = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(nav.getByRole("button", { name: "Standard API" })).toHaveAttribute("aria-current", "page");
+    expect(nav.getByRole("button", { name: "Coding Plan" })).not.toHaveAttribute("aria-current");
+
+    fireEvent.click(dialog.getByRole("button", { name: "Configure this service" }));
+    fireEvent.click(await screen.findByRole("button", { name: "settingsPage.unsaved.discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Volcengine · Coding Plan", level: 2 })).toBeInTheDocument();
+    expect(nav.getByRole("button", { name: "Coding Plan" })).toHaveAttribute("aria-current", "page");
+    expect(endpoint).toHaveValue(codingInformationProvider.baseUrl);
+    expect(mocks.updateEndpoint).not.toHaveBeenCalled();
+  });
+
   it("keeps uploaded supplier artwork in a failed create draft and retries it", async () => {
     mocks.createProvider.mockRejectedValueOnce(new Error("Create failed"));
     setup();
@@ -375,7 +540,8 @@ describe("compact provider workspace", () => {
     const custom = { ...provider, id: "custom", name: "Local models", isCustom: true, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false, verified: true }] };
     setup({ providers: [custom], configuredProviders: [custom] });
     expect(document.querySelector(".provider-workspace-status")).toHaveTextContent("modelProvider.workspace.connected");
-    expect(screen.getByRole("button", { name: /Local models/ }).querySelector("i")).not.toBeInTheDocument();
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    expect(navigation.getByRole("button", { name: /Local models/ }).querySelector("i")).not.toBeInTheDocument();
   });
 
   it("separates pointer focus from keyboard navigation without removing focused controls", () => {
@@ -500,12 +666,13 @@ describe("compact provider workspace", () => {
       groups: [{ ...provider.groups[0], ...state, id: `${id}-group`, verified: false }],
     }));
     setup({ providers: variants, configuredProviders: variants });
-    const emptyButton = screen.getByRole("button", { name: /Empty supplier/ });
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    const emptyButton = navigation.getByRole("button", { name: /Empty supplier/ });
     expect(emptyButton.querySelector("i")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.configured" }));
-    expect(screen.queryByRole("button", { name: /Empty supplier/ })).not.toBeInTheDocument();
+    expect(navigation.queryByRole("button", { name: /Empty supplier/ })).not.toBeInTheDocument();
     for (const name of ["Keys supplier", "Models supplier", "Stored-only supplier", "Credentials supplier"]) {
-      expect(screen.getByRole("button", { name: new RegExp(name) })).toBeInTheDocument();
+      expect(navigation.getByRole("button", { name: new RegExp(name) })).toBeInTheDocument();
     }
   });
 

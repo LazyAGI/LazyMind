@@ -6,6 +6,7 @@ import {
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
+  InfoCircleOutlined,
   MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -56,6 +57,8 @@ import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./M
 import { SavedProviderModels } from "./SavedProviderModels";
 import { ProviderKeyManager } from "./ProviderKeyManager";
 import { ProviderRequestConfigDrawer } from "./ProviderRequestConfigDrawer";
+import { ProviderInformationDrawer } from "./ProviderInformationDrawer";
+import { getProviderInformationCopy } from "../providerInformationCopy";
 import { CustomLogoPicker } from "./CustomLogoPicker";
 import { getCustomLogoCopy } from "../customLogoCopy";
 import { isCustomLogoDataUrl } from "../customLogo";
@@ -144,6 +147,8 @@ export function ProviderWorkspace(props: Props) {
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
   const [requestConfigOpen, setRequestConfigOpen] = useState(false);
+  const [informationOpen, setInformationOpen] = useState(false);
+  const informationTrigger = useRef<HTMLButtonElement>(null);
   const [mobileDetail, setMobileDetail] = useState(false);
   const [endpointSaving, setEndpointSaving] = useState(false);
   const [savedEndpoint, setSavedEndpoint] = useState<{ providerId: string; baseUrl: string }>();
@@ -212,6 +217,7 @@ export function ProviderWorkspace(props: Props) {
   const providerDisplayName = provider
     ? getProviderDisplayName(provider, language)
     : "";
+  const informationCopy = getProviderInformationCopy(language);
   // One private compatibility record belongs to each supplier.
   const group = provider?.groups[0];
   const groupKey = provider && group ? `${provider.id}:${group.id}` : "";
@@ -242,6 +248,9 @@ export function ProviderWorkspace(props: Props) {
     if (selectedAncestorId) setExpandedBrands((current) => current.has(selectedAncestorId) ? current : new Set(current).add(selectedAncestorId));
   }, [provider?.id, selectedAncestorId]);
   useEffect(() => {
+    setInformationOpen(false);
+  }, [provider?.id]);
+  useEffect(() => {
     if (!provider) return;
     setSelectedId(provider.id);
     setSavedEndpoint({ providerId: provider.id, baseUrl: provider.baseUrl });
@@ -253,13 +262,25 @@ export function ProviderWorkspace(props: Props) {
     props.onLoadModels(provider, group);
   }, [groupKey]);
 
+  const selectProvider = (id: string) => {
+    setSelectedId(id);
+    setModelSearch("");
+    setModelType("all");
+    setMobileDetail(true);
+  };
   const changeProvider = (id: string) =>
+    confirmEndpointLeave(() => selectProvider(id));
+  const configureInformationProvider = (id: string) => {
+    if (id === provider?.id) {
+      setInformationOpen(false);
+      return;
+    }
+    if (!providers.some((item) => item.id === id)) return;
     confirmEndpointLeave(() => {
-      setSelectedId(id);
-      setModelSearch("");
-      setModelType("all");
-      setMobileDetail(true);
+      setInformationOpen(false);
+      selectProvider(id);
     });
+  };
   const saveEndpoint = async ({ baseUrl }: { baseUrl: string }) => {
     if (!provider || endpointSaving) return;
     setEndpointSaving(true);
@@ -704,7 +725,20 @@ export function ProviderWorkspace(props: Props) {
                   />
                   <Logo provider={provider} />
                   <div className="provider-workspace-supplier-identity">
-                    <h2 title={providerDisplayName}>{providerDisplayName}</h2>
+                    <h2 title={providerDisplayName}>
+                      <button
+                        ref={informationTrigger}
+                        type="button"
+                        className="provider-workspace-information-trigger"
+                        title={informationCopy.open}
+                        aria-haspopup="dialog"
+                        aria-expanded={informationOpen}
+                        onClick={() => setInformationOpen(true)}
+                      >
+                        <span>{providerDisplayName}</span>
+                        <InfoCircleOutlined aria-hidden="true" />
+                      </button>
+                    </h2>
                     <span
                       className={`provider-workspace-status${verifiedSelection ? " is-ready" : ""}`}
                     >
@@ -1021,6 +1055,16 @@ export function ProviderWorkspace(props: Props) {
           )}
         </main>
       </div>
+      {provider ? (
+        <ProviderInformationDrawer
+          open={informationOpen}
+          provider={{ ...provider, baseUrl: endpointBaseline }}
+          providers={providers.map((item) => item.id === provider.id ? { ...item, baseUrl: endpointBaseline } : item)}
+          onClose={() => setInformationOpen(false)}
+          onConfigure={configureInformationProvider}
+          onAfterClose={() => informationTrigger.current?.focus({ preventScroll: true })}
+        />
+      ) : null}
       {provider ? (
         <ProviderRequestConfigDrawer
           providerId={provider.id}
