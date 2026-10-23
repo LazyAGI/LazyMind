@@ -123,4 +123,22 @@ describe("provider information", () => {
     expect(getProviderInformation(provider)).toEqual(english);
     expect(getProviderInformation(provider, "fr-FR")).toEqual(english);
   });
+
+  it("provides a real supplier profile with a website independent of its saved API address", () => {
+    const supplier = { name: "OpenAI", baseUrl: "https://private-gateway.example.test/v1/" };
+    const guide = getProviderInformation(supplier, "zh-CN");
+    expect(guide.profile?.websiteUrl).toBe("https://openai.com/");
+    expect(guide.profile?.introduction).toMatch(/OpenAI/);
+    expect(guide.profile?.highlights).toHaveLength(3);
+    expect(guide.profile?.introduction).not.toBe(guide.summary);
+    expect(JSON.stringify(guide.profile)).not.toContain("private-gateway");
+  });
+
+  it("keeps supplier profiles isolated from custom names and unknown service identities", () => {
+    for (const [name] of leaves) {
+      expect(getProviderInformation({ name, isCustom: true }).profile).toBeUndefined();
+    }
+    expect(getProviderInformation({ name: "Qwen", brandKey: "Qwen", serviceKey: "future_plan" }).profile).toBeUndefined();
+    expect(getProviderInformation({ name: "Private provider", protocolName: "OpenAI" }).profile).toBeUndefined();
+  });
 });

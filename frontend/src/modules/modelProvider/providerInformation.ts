@@ -1,9 +1,11 @@
 import { getSupplierBrandKey, resolveSupplierService, type SupplierServiceIdentity } from "./supplierServices";
 import { genericInformation, providerInformationContent, type InformationText } from "./providerInformationContent";
 import { programmingScopeLink } from "./supplierNavigation";
+import { getProviderProfileContent, type ProviderProfile } from "./providerProfileContent";
 
 export interface ProviderInformationGuide {
   kind: "cloud" | "plan" | "self-hosted" | "custom";
+  profile?: ProviderProfile;
   summary: string;
   audience: string;
   credential: string;
@@ -26,6 +28,9 @@ export function getProviderInformation(provider: SupplierServiceIdentity, langua
   const content = identity && Object.prototype.hasOwnProperty.call(providerInformationContent, identity)
     ? providerInformationContent[identity]
     : genericInformation;
+  const profile = content !== genericInformation
+    ? getProviderProfileContent(service?.brandKey || brand || "", service?.serviceKey, language)
+    : undefined;
   const links = content.links.map(([label, url]) => ({ label: text(label), url }));
   const scopeUrl = content !== genericInformation ? programmingScopeLink(provider) : "";
   if (scopeUrl && !links.some(({ url }) => url === scopeUrl)) {
@@ -33,6 +38,7 @@ export function getProviderInformation(provider: SupplierServiceIdentity, langua
   }
   return {
     kind: content.kind,
+    ...(profile ? { profile } : {}),
     summary: text(content.summary),
     audience: text(content.audience),
     credential: text(content.credential),

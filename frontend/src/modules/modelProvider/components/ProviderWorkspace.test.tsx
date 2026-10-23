@@ -215,7 +215,7 @@ describe("compact provider workspace", () => {
     const trigger = within(heading).getByRole("button", { name: "OpenAI" });
 
     expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
-    expect(trigger).toHaveAttribute("title", "View service information");
+    expect(trigger).toHaveAttribute("title", "View provider information");
     expect(trigger.querySelector(".anticon-info-circle")).toHaveAttribute("aria-hidden", "true");
     fireEvent.click(trigger);
 
@@ -228,7 +228,7 @@ describe("compact provider workspace", () => {
     const navigation = screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" });
     const nav = within(navigation);
 
-    expect(nav.queryByTitle("View service information")).not.toBeInTheDocument();
+    expect(nav.queryByTitle("View provider information")).not.toBeInTheDocument();
     expect(nav.queryByRole("button", { name: /information/i })).not.toBeInTheDocument();
     expect(navigation.querySelector(".anticon-info-circle")).not.toBeInTheDocument();
     fireEvent.click(nav.getByRole("button", { name: "Volcengine" }));
@@ -254,6 +254,7 @@ describe("compact provider workspace", () => {
     const dialog = within(await screen.findByRole("dialog"));
     expect(screen.queryByText("settingsPage.unsaved.title")).not.toBeInTheDocument();
     expect(endpoint).toHaveValue(draft);
+    fireEvent.click(dialog.getByRole("button", { name: "Connection help" }));
     expect(dialog.getByText(provider.baseUrl)).toBeVisible();
     expect(dialog.queryByText(draft)).not.toBeInTheDocument();
     fireEvent.click(dialog.getByRole("button", { name: "Return to configuration" }));
@@ -281,6 +282,7 @@ describe("compact provider workspace", () => {
       .getByRole("button", { name: "OpenAI" }));
 
     const dialog = within(await screen.findByRole("dialog"));
+    fireEvent.click(dialog.getByRole("button", { name: "Connection help" }));
     expect(dialog.getByText(saved)).toBeVisible();
     expect(dialog.queryByText(provider.baseUrl)).not.toBeInTheDocument();
     expect(dialog.queryByText(draft)).not.toBeInTheDocument();
@@ -303,6 +305,7 @@ describe("compact provider workspace", () => {
     fireEvent.click(dialog.getByRole("button", { name: "Read Volcengine · Coding Plan" }));
 
     expect(dialog.getByRole("button", { name: "Read Volcengine · Coding Plan" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(dialog.getByRole("button", { name: "Connection help" }));
     expect(dialog.getByText(codingInformationProvider.baseUrl)).toBeVisible();
     expect(heading).toHaveTextContent("Volcengine · Standard API");
     const nav = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));

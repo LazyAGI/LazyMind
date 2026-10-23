@@ -45,12 +45,27 @@ beforeEach(() => {
 });
 
 describe("provider information drawer", () => {
-  it("opens a complete reading page with the saved address and safe named sources", async () => {
+  it("opens with the provider introduction, official website, and safe named sources before connection help", async () => {
     const props = fixture();
     // The configured provider's last saved baseline takes precedence over a stale list item.
     draw({ ...props, providers: [coding, { ...standard, baseUrl: "https://stale.example.test/v1" }] });
-    const dialog = within(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API · Service information" }));
+    const dialog = within(await screen.findByRole("dialog"));
     expect(dialog.getByRole("heading", { name: "Alibaba Cloud Model Studio · Standard API" })).toBeInTheDocument();
+    expect(dialog.getByText("Alibaba Cloud Model Studio is a platform for building AI applications with Qwen and other models. It brings model inference, evaluation, fine-tuning, and application development into one cloud service.", { selector: "p" })).toBeVisible();
+    const website = dialog.getByRole("link", { name: /Official website/ });
+    expect(website).toBeVisible();
+    expect(website).toHaveAttribute("target", "_blank");
+    expect(website).toHaveAttribute("rel", "noopener noreferrer");
+    expect(website).toHaveAttribute("href", "https://www.aliyun.com/product/bailian");
+    expect(website).toHaveTextContent("https://www.aliyun.com/product/bailian");
+    expect(website).not.toHaveAttribute("href", standard.baseUrl);
+    expect(within(dialog.getByRole("region", { name: "Product highlights" })).getAllByRole("listitem")).toHaveLength(3);
+    expect(dialog.getByRole("region", { name: "Official sources" })).toBeVisible();
+    const help = dialog.getByRole("button", { name: "Connection help" });
+    expect(help).toHaveAttribute("aria-expanded", "false");
+    expect(dialog.queryByRole("region", { name: "Get started" })).not.toBeInTheDocument();
+    expect(dialog.queryByRole("region", { name: "Saved API address" })).not.toBeInTheDocument();
+    fireEvent.click(help);
     expect(within(dialog.getByRole("region", { name: "Get started" })).getAllByRole("listitem")).toHaveLength(3);
     const address = dialog.getByRole("region", { name: "Saved API address" });
     expect(address).toHaveTextContent("https://saved.example.test/v1");
@@ -73,14 +88,17 @@ describe("provider information drawer", () => {
     const props = fixture();
     draw(props);
     const comparison = within(await screen.findByRole("region", { name: "Services from this provider" }));
+    expect(comparison.queryByRole("columnheader", { name: "Credentials" })).not.toBeInTheDocument();
+    expect(comparison.getByRole("columnheader", { name: "Introduction" })).toBeInTheDocument();
     expect(comparison.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
       "Read Alibaba Cloud Model Studio · Standard API",
       "Read Alibaba Cloud Model Studio · Coding Plan",
       "Read Alibaba Cloud Model Studio · Token Plan",
     ]);
     fireEvent.click(comparison.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
-    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Coding Plan · Service information" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Coding Plan · Provider information" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" })).toHaveAttribute("aria-current", "page");
+    fireEvent.click(screen.getByRole("button", { name: "Connection help" }));
     expect(screen.getByRole("region", { name: "Saved API address" })).toHaveTextContent("https://coding.example.test/v1");
     expect(props.onConfigure).not.toHaveBeenCalled();
     expect(props.onClose).not.toHaveBeenCalled();
@@ -88,6 +106,26 @@ describe("provider information drawer", () => {
     expect(props.onConfigure).toHaveBeenCalledOnce();
     expect(props.onConfigure).toHaveBeenCalledWith("qwen-coding");
     expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes connection help when reading another service and when reopening the drawer", async () => {
+    const props = fixture();
+    const view = draw(props);
+    fireEvent.click(screen.getByRole("button", { name: "Connection help" }));
+    expect(screen.getByRole("region", { name: "Saved API address" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
+    expect(screen.getByRole("button", { name: "Connection help" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Saved API address" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connection help" }));
+    view.rerenderDrawer({ ...props, open: false });
+    await waitFor(() => expect(props.onAfterClose).toHaveBeenCalledOnce());
+    view.rerenderDrawer(props);
+    expect(await screen.findByRole("button", { name: "Connection help" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Saved API address" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Connection help" }));
+    view.rerenderDrawer({ ...props, provider: token });
+    expect(screen.getByRole("button", { name: "Connection help" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Saved API address" })).not.toBeInTheDocument();
   });
 
   it("returns to configuration without invoking a service switch", async () => {
@@ -123,10 +161,10 @@ describe("provider information drawer", () => {
     view.rerenderDrawer({ ...props, open: false });
     await waitFor(() => expect(props.onAfterClose).toHaveBeenCalledOnce());
     view.rerenderDrawer(props);
-    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API · Service information" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API · Provider information" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
     view.rerenderDrawer({ ...props, provider: token });
-    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Token Plan · Service information" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Token Plan · Provider information" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Configure this service" })).not.toBeInTheDocument();
     expect(props.onConfigure).not.toHaveBeenCalled();
   });
@@ -136,7 +174,7 @@ describe("provider information drawer", () => {
     const view = draw(props);
     fireEvent.click(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
     view.rerenderDrawer({ ...props, providers: [standard, token] });
-    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API · Service information" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API · Provider information" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Configure this service" })).not.toBeInTheDocument();
     view.rerenderDrawer({ ...props, providers: [] });
     expect(screen.getByRole("heading", { name: "Alibaba Cloud Model Studio · Standard API" })).toBeInTheDocument();
@@ -147,11 +185,13 @@ describe("provider information drawer", () => {
     const logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
     const custom = { ...standard, id: "custom", name: "Qwen", isCustom: true, protocolName: "Qwen", logoDataUrl: logo, baseUrl: "" };
     draw({ ...fixture(), provider: custom, providers: [coding, custom, standard] });
-    const dialog = within(await screen.findByRole("dialog", { name: "Qwen · Service information" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Qwen · Provider information" }));
     expect(dialog.getByRole("heading", { name: "Qwen" })).toBeInTheDocument();
     expect(document.querySelector(".provider-information-logo img")).toHaveAttribute("src", logo);
     expect(dialog.queryByRole("region", { name: "Services from this provider" })).not.toBeInTheDocument();
     expect(dialog.queryByRole("link")).not.toBeInTheDocument();
+    expect(dialog.queryByRole("region", { name: "Product highlights" })).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "Connection help" }));
     expect(dialog.getByRole("region", { name: "Saved API address" })).toHaveTextContent("No API address saved");
   });
 
@@ -162,23 +202,30 @@ describe("provider information drawer", () => {
     expect(comparison.getAllByRole("button")).toHaveLength(2);
   });
 
-  it("uses a generic guide without template links or comparison for unknown and self-hosted singles", async () => {
+  it("keeps unknown suppliers generic and presents self-hosted project information", async () => {
     const unknown = { ...standard, id: "unknown", name: "Private Gateway", brandKey: undefined, serviceKey: undefined, protocolName: "Qwen" };
     const props = { ...fixture(), provider: unknown, providers: [unknown, coding] };
     const view = draw(props);
-    const dialog = within(await screen.findByRole("dialog", { name: "Private Gateway · Service information" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Private Gateway · Provider information" }));
     expect(dialog.queryByRole("link")).not.toBeInTheDocument();
+    expect(dialog.queryByRole("region", { name: "Product highlights" })).not.toBeInTheDocument();
     expect(dialog.queryByRole("region", { name: "Services from this provider" })).not.toBeInTheDocument();
     const local = { ...unknown, id: "local", name: "vLLM", source: "vLLM", protocolName: "OpenAI" };
     view.rerenderDrawer({ ...props, provider: local, providers: [local] });
     expect(await screen.findByRole("heading", { name: "vLLM" })).toBeInTheDocument();
+    expect(screen.getByText(/vLLM is an open-source inference and serving engine/, { selector: "p" })).toBeVisible();
+    expect(screen.getByRole("link", { name: /Official website/ })).toHaveAttribute("href", "https://vllm.ai/");
+    expect(screen.getByRole("region", { name: "Official sources" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Saved API address" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Services from this provider" })).not.toBeInTheDocument();
   });
 
   it("localizes the reading page and safe source labels in Chinese", async () => {
     locale.language = "zh-CN";
     draw(fixture());
-    expect(await screen.findByRole("dialog", { name: "阿里云百炼 · 标准API · 服务说明" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "阿里云百炼 · 标准API · 供应商简介" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /官方网站/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "接入帮助" }));
     expect(screen.getByRole("region", { name: "已保存的API地址" })).toHaveTextContent("https://saved.example.test/v1");
     expect(screen.getByRole("button", { name: "查看阿里云百炼 · Coding Plan说明" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "返回配置" })).toBeInTheDocument();

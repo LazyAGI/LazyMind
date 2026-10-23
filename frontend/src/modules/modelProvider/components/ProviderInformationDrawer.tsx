@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ExportOutlined, InfoCircleOutlined } from "@ant-design/icons";
+import { ExportOutlined, InfoCircleOutlined, RightOutlined } from "@ant-design/icons";
 import { Button, Collapse, Drawer } from "antd";
 import { useTranslation } from "react-i18next";
 import { isCustomLogoDataUrl } from "../customLogo";
@@ -28,6 +28,7 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
   const focusModality = useFocusModality();
   const sectionId = useId();
   const [readingId, setReadingId] = useState(provider.id);
+  const [helpOpen, setHelpOpen] = useState(false);
   const contentRef = useRef<HTMLElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const pendingReadingFocus = useRef(false);
@@ -52,6 +53,10 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
   useEffect(() => {
     if (readingId !== readingProvider.id) setReadingId(readingProvider.id);
   }, [readingId, readingProvider.id]);
+
+  useEffect(() => {
+    setHelpOpen(false);
+  }, [open, readingProvider.id]);
 
   const resetReadingScroll = () => {
     const body = contentRef.current?.parentElement;
@@ -108,63 +113,17 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
   >
     <article ref={contentRef} className="provider-information-content">
       <header className="provider-information-introduction">
-        <p className="provider-information-summary">{guide.summary}</p>
-        <dl className="provider-information-facts">
-          <div><dt>{copy.audience}</dt><dd>{guide.audience}</dd></div>
-          <div><dt>{copy.credential}</dt><dd>{guide.credential}</dd></div>
-        </dl>
-        {guide.scope ? <aside className={`provider-information-scope provider-information-scope-${guide.scope.tone}`} aria-label={copy.scope}>
-          <InfoCircleOutlined aria-hidden="true" />
-          <div><strong>{copy.scope}</strong><p>{guide.scope.text}</p></div>
-        </aside> : null}
+        <p className="provider-information-summary">{guide.profile?.introduction || guide.summary}</p>
+        {guide.profile?.websiteUrl ? <a className="provider-information-website" href={guide.profile.websiteUrl}
+          target="_blank" rel="noopener noreferrer" title={copy.newTab} aria-label={`${copy.website}: ${guide.profile.websiteUrl}`}>
+          <span className="provider-information-website-label">{copy.website}</span>
+          <span className="provider-information-website-url">{guide.profile.websiteUrl}<ExportOutlined aria-hidden="true" /></span>
+        </a> : null}
       </header>
 
-      <section className="provider-information-section" aria-labelledby={`${sectionId}-setup`}>
-        <h3 id={`${sectionId}-setup`}>{copy.setup}</h3>
-        <ol className="provider-information-steps">
-          {guide.steps.map((step, index) => <li key={`${readingProvider.id}-${index}`}>
-            <span className="provider-information-step-number" aria-hidden="true">{index + 1}</span>
-            <div><h4>{step.title}</h4><p>{step.body}</p></div>
-          </li>)}
-        </ol>
-      </section>
-
-      <section className="provider-information-section" aria-labelledby={`${sectionId}-address`}>
-        <h3 id={`${sectionId}-address`}>{copy.savedAddress}</h3>
-        <div className="provider-information-address">{readingProvider.baseUrl
-          ? <code>{readingProvider.baseUrl}</code>
-          : <span>{copy.noSavedAddress}</span>}</div>
-        <p className="provider-information-note">{guide.endpointNote}</p>
-      </section>
-
-      {siblings.length > 1 ? <section className="provider-information-section" aria-labelledby={`${sectionId}-compare`}>
-        <h3 id={`${sectionId}-compare`}>{copy.compare}</h3>
-        <p className="provider-information-note provider-information-compare-hint">{copy.compareHint}</p>
-        <table className="provider-information-comparison">
-          <thead><tr><th scope="col">{copy.service}</th><th scope="col">{copy.purpose}</th><th scope="col">{copy.credential}</th></tr></thead>
-          <tbody>{siblings.map((sibling) => {
-            const information = getProviderInformation(sibling, language);
-            return <tr key={sibling.id} className={sibling.id === readingProvider.id ? "is-reading" : undefined}>
-              <th scope="row">
-                <button type="button" aria-label={copy.readService(getProviderDisplayName(sibling, language))}
-                  aria-current={sibling.id === readingProvider.id ? "page" : undefined}
-                  onClick={() => readService(sibling.id)}>
-                  {getProviderServiceDisplayName(sibling, language)}
-                </button>
-                {sibling.id === provider.id ? <span className="provider-information-current">{copy.currentlyConfigured}</span> : null}
-              </th>
-              <td data-label={copy.purpose}>{information.audience}</td>
-              <td data-label={copy.credential}>{information.credential}</td>
-            </tr>;
-          })}</tbody>
-        </table>
-      </section> : null}
-
-      {guide.faqs.length ? <section className="provider-information-section provider-information-faq" aria-labelledby={`${sectionId}-faq`}>
-        <h3 id={`${sectionId}-faq`}>{copy.faq}</h3>
-        <Collapse key={readingProvider.id} ghost accordion expandIconPosition="end" items={guide.faqs.map((faq, index) => ({
-          key: String(index), label: faq.question, children: <p>{faq.answer}</p>,
-        }))} />
+      {guide.profile?.highlights.length ? <section className="provider-information-section provider-information-highlights" aria-labelledby={`${sectionId}-highlights`}>
+        <h3 id={`${sectionId}-highlights`}>{copy.highlights}</h3>
+        <ul>{guide.profile.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
       </section> : null}
 
       {guide.links.length ? <section className="provider-information-section provider-information-sources" aria-labelledby={`${sectionId}-sources`}>
@@ -176,6 +135,72 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
         </li>)}</ul>
         {guide.verifiedAt ? <p className="provider-information-verified">{copy.verifiedAt(guide.verifiedAt)}</p> : null}
       </section> : null}
+
+      {siblings.length > 1 ? <section className="provider-information-section" aria-labelledby={`${sectionId}-compare`}>
+        <h3 id={`${sectionId}-compare`}>{copy.compare}</h3>
+        <p className="provider-information-note provider-information-compare-hint">{copy.compareHint}</p>
+        <table className="provider-information-comparison">
+          <thead><tr><th scope="col">{copy.service}</th><th scope="col">{copy.purpose}</th></tr></thead>
+          <tbody>{siblings.map((sibling) => {
+            const information = getProviderInformation(sibling, language);
+            return <tr key={sibling.id} className={sibling.id === readingProvider.id ? "is-reading" : undefined}>
+              <th scope="row">
+                <button type="button" aria-label={copy.readService(getProviderDisplayName(sibling, language))}
+                  aria-current={sibling.id === readingProvider.id ? "page" : undefined}
+                  onClick={() => readService(sibling.id)}>
+                  {getProviderServiceDisplayName(sibling, language)}
+                </button>
+                {sibling.id === provider.id ? <span className="provider-information-current">{copy.currentlyConfigured}</span> : null}
+              </th>
+              <td data-label={copy.purpose}>{information.profile?.introduction || information.summary}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </section> : null}
+
+      <section className="provider-information-section provider-information-help">
+        <Collapse ghost activeKey={helpOpen ? ["connection"] : []} onChange={(keys) => setHelpOpen(keys.includes("connection"))}
+          destroyOnHidden expandIconPosition="end"
+          expandIcon={({ isActive }) => <RightOutlined rotate={isActive ? 90 : 0} aria-hidden="true" />} items={[{
+            key: "connection",
+            label: <h3>{copy.connectionHelp}</h3>,
+            children: <div className="provider-information-help-content">
+              <dl className="provider-information-facts">
+                <div><dt>{copy.audience}</dt><dd>{guide.audience}</dd></div>
+                <div><dt>{copy.credential}</dt><dd>{guide.credential}</dd></div>
+              </dl>
+              {guide.scope ? <aside className={`provider-information-scope provider-information-scope-${guide.scope.tone}`} aria-label={copy.scope}>
+                <InfoCircleOutlined aria-hidden="true" />
+                <div><strong>{copy.scope}</strong><p>{guide.scope.text}</p></div>
+              </aside> : null}
+
+              <section className="provider-information-section" aria-labelledby={`${sectionId}-setup`}>
+                <h4 id={`${sectionId}-setup`}>{copy.setup}</h4>
+                <ol className="provider-information-steps">
+                  {guide.steps.map((step, index) => <li key={`${readingProvider.id}-${index}`}>
+                    <span className="provider-information-step-number" aria-hidden="true">{index + 1}</span>
+                    <div><h5>{step.title}</h5><p>{step.body}</p></div>
+                  </li>)}
+                </ol>
+              </section>
+
+              <section className="provider-information-section" aria-labelledby={`${sectionId}-address`}>
+                <h4 id={`${sectionId}-address`}>{copy.savedAddress}</h4>
+                <div className="provider-information-address">{readingProvider.baseUrl
+                  ? <code>{readingProvider.baseUrl}</code>
+                  : <span>{copy.noSavedAddress}</span>}</div>
+                <p className="provider-information-note">{guide.endpointNote}</p>
+              </section>
+
+              {guide.faqs.length ? <section className="provider-information-section provider-information-faq" aria-labelledby={`${sectionId}-faq`}>
+                <h4 id={`${sectionId}-faq`}>{copy.faq}</h4>
+                <Collapse key={readingProvider.id} ghost accordion expandIconPosition="end" items={guide.faqs.map((faq, index) => ({
+                  key: String(index), label: faq.question, children: <p>{faq.answer}</p>,
+                }))} />
+              </section> : null}
+            </div>,
+          }]} />
+      </section>
     </article>
   </Drawer>;
 }
