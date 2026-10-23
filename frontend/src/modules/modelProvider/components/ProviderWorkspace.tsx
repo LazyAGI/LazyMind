@@ -593,8 +593,6 @@ export function ProviderWorkspace(props: Props) {
           <div className="provider-workspace-sidebar-actions">
             <Tooltip title={label("cloud")}>
               <Button
-                type="text"
-                className="provider-workspace-icon-button"
                 aria-label={label("cloud")}
                 icon={<CloudOutlined aria-hidden="true" />}
                 onClick={() => setCloudOpen(true)}
@@ -602,8 +600,6 @@ export function ProviderWorkspace(props: Props) {
             </Tooltip>
             <Tooltip title={label("addSupplier")}>
               <Button
-                type="text"
-                className="provider-workspace-icon-button"
                 aria-label={label("addSupplier")}
                 icon={<PlusOutlined aria-hidden="true" />}
                 onClick={() => openProviderModal("create")}
