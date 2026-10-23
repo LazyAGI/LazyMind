@@ -19,6 +19,7 @@ import {
   CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH,
 } from "../utils/cloudDocumentUrls";
 import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
+import GitHubConnectionSection from "./GitHubConnectionSection";
 
 const OBSIDIAN_LOGO_URL = "https://obsidian.md/images/obsidian-logo-gradient.svg";
 
@@ -262,6 +263,10 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
       {cloudAuthProviderOptions.map((item) => {
         const isFeishu = item.type === "feishu";
         const isGitHub = item.type === "github";
+        if (isGitHub && vm.github) {
+          return <GitHubConnectionSection key={item.type} vm={vm}
+            logo={<ProviderLogo type={item.type} icon={item.icon} logoUrl={item.logoUrl} />} />;
+        }
         const isNotion = item.type === "notion";
         const isGoogleDrive = item.type === "googledrive";
         const isWeChatOfficialAccount = item.type === "wechat";

@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from core.cloud_crypto import decrypt_json, encrypt_json
 from core.database import SessionLocal
 from core.errors import AppException, ErrorCodes, app_exception_from_exception, raise_error
+from models import CloudAuthConnection
 from repositories import CloudAuthConnectionRepository
 from services.cloud_oauth_provider import (
     CloudAccountProfile,
@@ -135,6 +136,116 @@ class CloudOAuthService:
             self._providers[imap_name] = IMAPMailProvider(imap_name)
         self._cache_lock = threading.Lock()
         self._token_cache: dict[str, _TokenCacheItem] = {}
+        self._github_lock = threading.RLock()
+
+    def _is_github_cli_connection(self, row) -> bool:
+        if row.provider != 'github' or row.connection_method != 'legacy_byo':
+            return False
+        state = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+        return state.get('token_source') == 'github_cli'
+
+    def _verify_github_cli_token(self, access_token: str) -> tuple[CloudAccountProfile, str]:
+        try:
+            profile, scope = self._provider('github').verify_cli_access_token(access_token=access_token)
+            if not profile.provider_account_id or not profile.provider_account_id.isdecimal():
+                raise_error(ErrorCodes.GITHUB_CLI_FAILED)
+            return profile, scope
+        except CloudProviderError as exc:
+            if exc.requires_reauth:
+                code = ErrorCodes.GITHUB_CLI_RECONNECT_REQUIRED
+            elif exc.retryable:
+                code = ErrorCodes.GITHUB_CLI_NETWORK_UNAVAILABLE
+            else:
+                code = {
+                    'GITHUB_SCOPE_MISSING': ErrorCodes.GITHUB_CLI_SCOPE_MISSING,
+                    'GITHUB_SCOPE_UNVERIFIED': ErrorCodes.GITHUB_CLI_SCOPE_UNVERIFIED,
+                    '403': ErrorCodes.GITHUB_CLI_FORBIDDEN,
+                }.get(exc.provider_code, ErrorCodes.GITHUB_CLI_FAILED)
+            raise_error(code)
+
+    def verify_saved_github_connection(self, connection_id: str, *, owner_user_id: str) -> dict[str, Any]:
+        token = self.get_access_token(connection_id, user_id=owner_user_id)
+        if token['provider'] != 'github':
+            raise_error(ErrorCodes.CLOUD_PROVIDER_UNSUPPORTED)
+        try:
+            profile, _ = self._verify_github_cli_token(token['access_token'])
+        except AppException as exc:
+            if exc.code == ErrorCodes.GITHUB_CLI_RECONNECT_REQUIRED[1]:
+                with self._github_lock, SessionLocal() as db:
+                    row = CloudAuthConnectionRepository.get_for_owner(db, connection_id, owner_user_id)
+                    if row is not None and self._is_github_cli_connection(row) and row.status != 'REVOKED':
+                        current = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+                        if current.get('access_token') == token['access_token']:
+                            row.status, row.last_error = 'EXPIRED', ErrorCodes.GITHUB_CLI_RECONNECT_REQUIRED[2]
+                            db.commit()
+                            self._cache_delete(connection_id)
+            raise
+        result = self.get_connection(connection_id, user_id=owner_user_id)
+        if result['provider_account_id'] != profile.provider_account_id:
+            raise_error(ErrorCodes.CLOUD_REAUTHORIZED_ACCOUNT_MISMATCH)
+        return result
+
+    def save_github_cli_token(
+        self, *, owner_user_id: str, access_token: str, reauthorize_connection_id: str = '', _check_current=None,
+    ) -> dict[str, Any]:
+        owner = _normalize_owner_user_id(owner_user_id)
+        if not owner:
+            raise_error(ErrorCodes.UNAUTHORIZED)
+        profile, scope = self._verify_github_cli_token(access_token)
+        try:
+            with self._github_lock, SessionLocal() as db:
+                if _check_current is not None:
+                    _check_current()
+                row = None
+                if reauthorize_connection_id:
+                    row = CloudAuthConnectionRepository.get_by_id(db, reauthorize_connection_id)
+                    if row is None or row.status == 'REVOKED':
+                        raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
+                    self._ensure_connection_owner(row, tenant_id='', user_id=owner)
+                    if not self._is_github_cli_connection(row):
+                        raise_error(ErrorCodes.GITHUB_CLI_SOURCE_CONFLICT)
+                    if row.provider_account_id != profile.provider_account_id:
+                        raise_error(ErrorCodes.CLOUD_REAUTHORIZED_ACCOUNT_MISMATCH)
+                else:
+                    candidates = CloudAuthConnectionRepository.list_for_owner(
+                        db, owner_user_id=owner, provider='github', auth_mode='oauth_user',
+                    )
+                    row = next((item for item in candidates if item.status != 'REVOKED'
+                                and item.provider_account_id == profile.provider_account_id
+                                and self._is_github_cli_connection(item)), None)
+                credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential') if row else {
+                    'client_id': '', 'client_secret': '', 'provider_options': {'chat_enabled': False},
+                }
+                encrypted_credential = self._encrypt_payload(credential, field_name='credential')
+                encrypted_state = self._encrypt_payload({
+                    'token_source': 'github_cli', 'access_token': access_token, 'access_expires_at': '',
+                    'refresh_token': '', 'token_type': 'Bearer',
+                }, field_name='auth_state')
+                if row is None:
+                    row = CloudAuthConnection(
+                        connection_id=self._new_connection_id(), owner_user_id=owner, tenant_id='',
+                        provider='github', auth_mode='oauth_user', client_id=None,
+                        connection_method='legacy_byo', credential_location='local',
+                    )
+                    db.add(row)
+                row.credential_ciphertext = encrypted_credential
+                row.auth_state_ciphertext = encrypted_state
+                self._apply_profile(row, profile)
+                row.scope, row.status, row.last_error = scope, 'ACTIVE', ''
+                connection_id = row.connection_id
+                result = {
+                    'connection_id': connection_id, 'provider': 'github', 'status': 'ACTIVE',
+                    'provider_account_id': profile.provider_account_id,
+                }
+                if _check_current is not None:
+                    _check_current()
+                db.commit()
+                self._cache_delete(connection_id)
+                return result
+        except AppException as exc:
+            raise AppException(exc.http_code, exc.code, exc.message) from None
+        except Exception:
+            raise_error(ErrorCodes.GITHUB_CLI_FAILED)
 
     def _provider(self, provider: str) -> CloudOAuthProvider:
         key = (provider or '').strip().lower()
@@ -207,6 +318,9 @@ class CloudOAuthService:
             if (row.status or '').strip().upper() == 'REVOKED':
                 return None
             auth_state_payload = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+            if row.provider == 'github' and auth_state_payload.get('token_source') == 'github_cli':
+                self._cache_delete(connection_id)
+                return None
             access_token = (auth_state_payload.get('access_token') or '').strip()
             expires_at = _parse_dt(auth_state_payload.get('access_expires_at'))
             token_payload: CloudTokenPayload | None = None
@@ -466,6 +580,7 @@ class CloudOAuthService:
             'provider': row.provider,
             'auth_mode': row.auth_mode,
             'connection_method': row.connection_method or 'legacy_byo',
+            'token_source': 'github_cli' if self._is_github_cli_connection(row) else '',
             'credential_location': row.credential_location or 'local',
             'profile_ref': row.profile_ref or '',
             'cloud_connection_id': row.cloud_connection_id or '',
@@ -575,6 +690,8 @@ class CloudOAuthService:
                 raise_error(ErrorCodes.CLOUD_PROVIDER_UNSUPPORTED)
             if (row.auth_mode or '').strip().lower() != 'oauth_user':
                 raise_error(ErrorCodes.CLOUD_REAUTHORIZE_TARGET_OAUTH_USER_ONLY)
+            if self._is_github_cli_connection(row):
+                raise_error(ErrorCodes.GITHUB_CLI_SOURCE_CONFLICT)
             credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
         client_id = (credential.get('client_id') or '').strip()
         client_secret = (credential.get('client_secret') or '').strip()
@@ -608,6 +725,8 @@ class CloudOAuthService:
             self._ensure_connection_owner(row, tenant_id=tenant_id, user_id=owner)
             if (row.provider or '').strip().lower() != (provider or '').strip().lower():
                 raise_error(ErrorCodes.CLOUD_PROVIDER_UNSUPPORTED)
+            if self._is_github_cli_connection(row):
+                raise_error(ErrorCodes.GITHUB_CLI_SOURCE_CONFLICT)
             if (row.auth_mode or '').strip().lower() != 'oauth_user':
                 raise_error(ErrorCodes.CLOUD_REAUTHORIZE_TARGET_OAUTH_USER_ONLY)
             if (row.status or '').strip().upper() not in {'ACTIVE', 'EXPIRED', 'ERROR', 'PENDING'}:
@@ -1250,6 +1369,20 @@ class CloudOAuthService:
                         **provider_account_lookup,
                         status='REVOKED',
                     )
+            if provider_impl.provider_name() == 'github':
+                if reauthorize_connection_id and existing is not None and self._is_github_cli_connection(existing):
+                    raise_error(ErrorCodes.GITHUB_CLI_SOURCE_CONFLICT)
+                if not reauthorize_connection_id:
+                    candidates = CloudAuthConnectionRepository.list_for_owner(
+                        db, owner_user_id=row.owner_user_id, provider='github', auth_mode='oauth_user',
+                    )
+                    eligible = [item for item in candidates if item.connection_id != row.connection_id
+                                and item.provider_account_id == row.provider_account_id
+                                and not self._is_github_cli_connection(item)
+                                and (self._management_credential(item) or {}).get('client_id')
+                                == credential.get('client_id')]
+                    existing = next((item for item in eligible if item.status != 'REVOKED'),
+                                    eligible[0] if eligible else None)
             # Only merge when the existing connection belongs to the same
             # app (client_id).  Different apps keep independent rows even
             # if the same Feishu user authorized both.
@@ -1618,7 +1751,7 @@ class CloudOAuthService:
         connection_id = (connection_id or '').strip()
         if not connection_id:
             raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
-        with SessionLocal() as db:
+        with self._github_lock, SessionLocal() as db:
             row = CloudAuthConnectionRepository.get_by_id(db, connection_id)
             if row is None:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
@@ -1652,6 +1785,8 @@ class CloudOAuthService:
                 'reauthorize_provider_account_id': '',
                 'reauthorize_provider_tenant_key': '',
             }
+            if self._is_github_cli_connection(row):
+                empty_auth_state['token_source'] = 'github_cli'
             # Extract app_id before clearing the credential so we can scope
             # the PENDING cleanup to the same app only.
             # Without a verified app_id, leave other connections alone.
@@ -1750,6 +1885,10 @@ class CloudOAuthService:
 
             credential = self._decrypt_payload(row.credential_ciphertext, field_name='credential')
             original_client_id = (credential.get('client_id') or '').strip()
+            if self._is_github_cli_connection(row) and any(value is not None for value in (
+                client_id, app_id, appId, client_secret, app_secret, appSecret,
+            )):
+                raise_error(ErrorCodes.GITHUB_CLI_SOURCE_CONFLICT)
             original_client_secret = (credential.get('client_secret') or '').strip()
             options = credential.get('provider_options')
             if not isinstance(options, dict):
@@ -1920,6 +2059,8 @@ class CloudOAuthService:
             )
 
         refresh_token = (auth_state_payload.get('refresh_token') or '').strip()
+        if auth_state_payload.get('token_source') == 'github_cli':
+            raise_error(ErrorCodes.GITHUB_CLI_RECONNECT_REQUIRED)
         if not refresh_token:
             raise_error(ErrorCodes.CLOUD_REFRESH_TOKEN_REQUIRED)
         refreshed = provider_impl.refresh_access_token(
@@ -1938,7 +2079,8 @@ class CloudOAuthService:
             isinstance(exc, CloudProviderError) and exc.requires_reauth
         ) or (
             isinstance(exc, AppException)
-            and 'refresh_token is missing' in (exc.extra or '').lower()
+            and (exc.code == ErrorCodes.GITHUB_CLI_RECONNECT_REQUIRED[1]
+                 or 'refresh_token is missing' in (exc.extra or '').lower())
         )
         if requires_reauth:
             row.status = 'EXPIRED'
@@ -2116,6 +2258,17 @@ class CloudOAuthService:
             if row is None:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
             self._ensure_connection_owner(row, tenant_id=tenant_id, user_id=user_id)
+            if self._is_github_cli_connection(row):
+                self._ensure_connection_active(row)
+                state = self._decrypt_payload(row.auth_state_ciphertext, field_name='auth_state')
+                if not state.get('access_token'):
+                    raise_error(ErrorCodes.GITHUB_CLI_RECONNECT_REQUIRED)
+                # CLI tokens have no BYO refresh path. A read must never write an older token back.
+                return {
+                    'connection_id': connection_id, 'provider': row.provider, 'auth_mode': row.auth_mode,
+                    'access_token': state['access_token'], 'token_type': state.get('token_type') or 'Bearer',
+                    'expires_at': None, 'status': 'ACTIVE',
+                }
             if (row.status or '').strip().upper() != 'ACTIVE':
                 recovered = self._recover_refreshed_oauth_token(connection_id, user_id=user_id, tenant_id=tenant_id)
                 if recovered is not None:
@@ -2219,6 +2372,9 @@ class CloudOAuthService:
                 raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
             status = (row.status or '').strip().upper()
             if status in {'PENDING', 'REVOKED'}:
+                return status, False
+            if self._is_github_cli_connection(row):
+                self._cache_delete(connection_id)
                 return status, False
             if (row.auth_mode or '').strip().lower() != 'oauth_user':
                 return status, False

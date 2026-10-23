@@ -1,0 +1,67 @@
+.github-connection-section {
+  padding: 18px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #fff;
+
+  .github-connection-header {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+
+    .model-provider-cloud-doc-resource-copy > p {
+      white-space: normal;
+    }
+  }
+
+  .github-connection-actions {
+    display: flex;
+    flex-wrap: wrap;
+    margin: 8px 0 8px 48px;
+  }
+
+  .github-connection-account {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 14px 24px;
+    padding-block: 14px;
+    border-top: 1px solid #e5e7eb;
+  }
+
+  .github-connection-identity {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+    color: #344054;
+    font-size: 14px;
+
+    strong { overflow-wrap: anywhere; }
+  }
+
+  .github-connection-chat {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #344054;
+    font-size: 14px;
+  }
+
+  @media (max-width: 640px) {
+    .github-connection-header { grid-template-columns: 44px minmax(0, 1fr); }
+    .github-connection-header > button { grid-column: 2; justify-self: start; }
+    .github-connection-actions { margin-inline-start: 0; }
+  }
+}
+
+.github-device-code.ant-typography {
+  display: block;
+  margin-block: 20px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #111827;
+  user-select: all;
+}

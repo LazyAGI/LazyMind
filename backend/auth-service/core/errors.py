@@ -6,6 +6,18 @@ ErrorTuple = Tuple[int, int, str]
 
 
 class ErrorCodes:
+    GITHUB_CLI_FAILED: ErrorTuple = (502, 1001201, 'GitHub connection could not be completed')
+    GITHUB_CLI_SESSION_NOT_FOUND: ErrorTuple = (404, 1001202, 'GitHub authorization session expired or was not found')
+    GITHUB_CLI_RECONNECT_REQUIRED: ErrorTuple = (401, 1001203, 'Reconnect this GitHub CLI connection')
+    GITHUB_CLI_SOURCE_CONFLICT: ErrorTuple = (409, 1001204, 'GitHub connection authentication source cannot be changed')
+    GITHUB_CLI_BUSY: ErrorTuple = (409, 1001205, 'Another GitHub authorization is in progress')
+    GITHUB_CLI_SCOPE_MISSING: ErrorTuple = (403, 1001206, 'GitHub repository permission is missing')
+    GITHUB_CLI_SCOPE_UNVERIFIED: ErrorTuple = (403, 1001207, 'GitHub token permissions could not be verified')
+    GITHUB_CLI_NETWORK_UNAVAILABLE: ErrorTuple = (503, 1001208, 'GitHub is temporarily unavailable')
+    GITHUB_CLI_FORBIDDEN: ErrorTuple = (403, 1001209, 'GitHub denied access')
+    GITHUB_CLI_DISABLED: ErrorTuple = (
+        503, 1001210, 'GitHub CLI connections require the single-process macOS Desktop runtime',
+    )
     MCP_OAUTH_AUTHORIZATION_REQUIRED: ErrorTuple = (401, 1001101, 'MCP authorization required')
     MCP_OAUTH_INVALID_REQUEST: ErrorTuple = (400, 1001102, 'Invalid MCP OAuth request or state')
     MCP_OAUTH_PROVIDER_FAILED: ErrorTuple = (502, 1001103, 'MCP OAuth provider request failed')

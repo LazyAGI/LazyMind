@@ -626,7 +626,8 @@ export function createOAuthEngine(ctx: ManagementContext) {
     provider: CloudDataSourceProvider,
     options?: StartCloudOAuthOptions,
   ) => {
-    if (!options?.setup) {
+    const savedGitHubReauthorization = provider === "github" && Boolean(options?.reauthorizeConnectionId);
+    if (!options?.setup && !savedGitHubReauthorization) {
       if (provider === "feishu" && ctx.cloudManagedOAuthAvailable === true) {
         const connectionId = await startFeishuCLISession(
           options?.reauthorizeConnectionId,
@@ -657,7 +658,7 @@ export function createOAuthEngine(ctx: ManagementContext) {
     const previousConnection = options?.previousConnection ?? ctx.oauthConnection;
 
     try {
-      if (!activeSetup?.appId.trim()) {
+      if (!activeSetup?.appId.trim() && !savedGitHubReauthorization) {
         const credentialRequiredKey =
           provider === "feishu"
             ? "admin.dataSourceFeishuCredentialRequired"
@@ -682,8 +683,9 @@ export function createOAuthEngine(ctx: ManagementContext) {
               requestCloudDataSourceAuthorizeUrl(provider, input);
       const authorizeUrl = await requestAuthorizeUrl({
         tenantId: selectedAgent.tenant_id || getScanTenantId(),
-        appId: activeSetup.appId,
-        appSecret: activeSetup.appSecret,
+        ...(savedGitHubReauthorization && options?.reauthorizeConnectionId
+          ? { reauthorizeConnectionId: options.reauthorizeConnectionId }
+          : { appId: activeSetup?.appId || "", appSecret: activeSetup?.appSecret || "" }),
         scopes: provider === "feishu" ? FEISHU_DEFAULT_SCOPES : [],
         returnUrl: window.location.href,
       });
@@ -731,7 +733,7 @@ export function createOAuthEngine(ctx: ManagementContext) {
         previousConnection,
         resolved: false,
         accountId: options?.accountId,
-        appId: options?.appId || activeSetup.appId,
+        appId: options?.appId || activeSetup?.appId,
         provider,
         openWizardOnSuccess: options?.openWizardOnSuccess,
         reopenSetupOnFailure: options?.reopenSetupOnFailure,

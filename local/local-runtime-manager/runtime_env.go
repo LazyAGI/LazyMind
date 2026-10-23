@@ -8,6 +8,7 @@ import (
 )
 
 const localHostHomeEnvVar = "LAZYMIND_HOST_HOME"
+const githubHostConfigEnvVar = "LAZYMIND_GITHUB_HOST_CONFIG_DIR"
 
 func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 	return []string{
@@ -16,6 +17,7 @@ func scopedRuntimeEnv(paths RuntimePaths, home string) []string {
 		"XDG_CACHE_HOME=" + paths.XDGCacheDir,
 		"XDG_STATE_HOME=" + paths.XDGStateDir,
 		localHostHomeEnvVar + "=" + hostHomeDir(),
+		githubHostConfigEnvVar + "=" + githubHostConfigDir(),
 		"PYTHONDONTWRITEBYTECODE=1",
 		"NUMBA_CACHE_DIR=" + filepath.Join(paths.XDGCacheDir, "numba"),
 	}
@@ -61,6 +63,19 @@ func hostHomeDir() string {
 		return filepath.Clean(home)
 	}
 	return "."
+}
+
+func githubHostConfigDir() string {
+	// Preserve the caller's selected gh account before HOME/XDG are scoped for services.
+	for _, key := range []string{githubHostConfigEnvVar, "GH_CONFIG_DIR"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return filepath.Clean(value)
+		}
+	}
+	if value := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); value != "" {
+		return filepath.Join(value, "gh")
+	}
+	return filepath.Join(hostHomeDir(), ".config", "gh")
 }
 
 func cleanHostCacheEnv(key string, paths RuntimePaths, fallback string) string {

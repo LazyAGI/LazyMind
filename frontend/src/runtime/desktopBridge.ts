@@ -224,6 +224,7 @@ interface LazyMindDesktopBridge {
   openCloudLogin?: (url: string) => Promise<unknown> | unknown;
   openManagedProviderAuthorization?: (url: string) => Promise<unknown> | unknown;
   openFeishuCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
+  openGitHubCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
   openCloudRegister?: () => Promise<unknown> | unknown;
   openCloudTokenPlan?: (url: string) => Promise<unknown> | unknown;
   showItemInFolder?: (

@@ -48,6 +48,7 @@ const {
   installExternalNavigationHandler,
   isTrustedCloudNavigation,
   isTrustedFeishuCLINavigation,
+  isTrustedGitHubCLINavigation,
 } = require("./external-navigation");
 const { loadDesktopCloudConfiguration } = require("./cloud-release-config");
 const { startCloudOAuthCallbackRelay } = require("./cloud-oauth-callback-relay");
@@ -2003,6 +2004,14 @@ async function openTrustedFeishuCLINavigation(rawURL) {
   return { opened: true };
 }
 
+async function openTrustedGitHubCLINavigation(rawURL) {
+  if (!isTrustedGitHubCLINavigation(rawURL)) {
+    throw new Error("GitHub authorization navigation was rejected");
+  }
+  await shell.openExternal(rawURL);
+  return { opened: true };
+}
+
 function cloudRegisterURL() {
   const locale = /^(?:en|en-US)$/i.test(cloudRegisterLocale) ? "en" : "zh";
   return new URL(`/${locale}/register`, configuredCloudOrigin()).toString();
@@ -2925,6 +2934,9 @@ ipcMain.handle("lazymind:openManagedProviderAuthorization", async (_event, url) 
 });
 ipcMain.handle("lazymind:openFeishuCLIAuthorization", async (_event, url) => {
   return openTrustedFeishuCLINavigation(String(url || ""));
+});
+ipcMain.handle("lazymind:openGitHubCLIAuthorization", async (_event, url) => {
+  return openTrustedGitHubCLINavigation(String(url || ""));
 });
 ipcMain.handle("lazymind:openCloudRegister", async () => {
   const url = cloudRegisterURL();

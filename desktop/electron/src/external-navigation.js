@@ -86,6 +86,10 @@ function isTrustedFeishuCLINavigation(value) {
   return false;
 }
 
+function isTrustedGitHubCLINavigation(value) {
+  return value === "https://github.com/login/device";
+}
+
 function isLoopbackHostname(hostname) {
   const value = String(hostname || "").toLowerCase();
   if (value === "localhost" || value === "127.0.0.1" || value === "::1") return true;
@@ -138,5 +142,6 @@ module.exports = {
   isOAuthPopup,
   isSameOrigin,
   isTrustedFeishuCLINavigation,
+  isTrustedGitHubCLINavigation,
   isTrustedCloudNavigation,
 };

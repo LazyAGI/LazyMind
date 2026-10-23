@@ -45,6 +45,7 @@ import {
   CLOUD_DOCUMENTS_PATH,
 } from "../utils/cloudDocumentUrls";
 import { useLocalDataSourceSettings } from "./useLocalDataSourceSettings";
+import { useGitHubConnections } from "./useGitHubConnections";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
 import { isDesktopRuntime } from "@/runtime/mode";
 import {
@@ -89,6 +90,13 @@ export function useCloudDocumentProviders() {
     useState<ManagementContext["notionOauthConnection"]>(null);
   const [githubConnection, setGitHubConnection] =
     useState<ManagementContext["notionOauthConnection"]>(null);
+  const github = useGitHubConnections((items) => {
+    setGitHubConnection(previous => {
+      const active = items.filter(item => item.status === "ACTIVE");
+      const selected = active.find(item => item.connection_id === previous?.connectionId) || active[0];
+      return selected ? mapCloudConnectionToDataSourceConnection(selected, "github") : null;
+    });
+  });
   const [wechatOfficialAccountConnections, setWechatOfficialAccountConnections] =
     useState<CloudConnectionResponse[]>([]);
   const [mailAccounts, setMailAccounts] = useState<string[]>([]);
@@ -281,6 +289,10 @@ export function useCloudDocumentProviders() {
   const refreshProviderConnection = async (
     provider: Extract<CloudDataSourceProvider, "github" | "googledrive">,
   ) => {
+    if (provider === "github") {
+      await github.refresh();
+      return;
+    }
     try {
       const response =
         await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({
@@ -293,17 +305,9 @@ export function useCloudDocumentProviders() {
           (connection) =>
             connection.status === "connected" && Boolean(connection.connectionId),
         ) || null;
-      if (provider === "github") {
-        setGitHubConnection(nextConnection);
-      } else {
-        setGoogleDriveConnection(nextConnection);
-      }
+      setGoogleDriveConnection(nextConnection);
     } catch {
-      if (provider === "github") {
-        setGitHubConnection(null);
-      } else {
-        setGoogleDriveConnection(null);
-      }
+      setGoogleDriveConnection(null);
     }
   };
 
@@ -549,7 +553,15 @@ export function useCloudDocumentProviders() {
   };
 
   const handleOpenGitHubSetup = () => {
-    openCloudSetupModal("github", "auth");
+    void github.start();
+  };
+  const handleReauthorizeGitHub = async (connection: CloudConnectionResponse) => {
+    if (connection.token_source === "github_cli") {
+      await github.start(connection.connection_id);
+    } else {
+      await ctx.startCloudOAuth("github", { reauthorizeConnectionId: connection.connection_id,
+        draftWizardOpen: false, previousConnection: mapCloudConnectionToDataSourceConnection(connection, "github") });
+    }
   };
 
   const handleManageObsidian = async (onSelectionAccepted?: () => void) => {
@@ -637,6 +649,7 @@ export function useCloudDocumentProviders() {
       window.setTimeout(() => {
         if (storedGitHubResult.status === "success") {
           setGitHubConnection(storedGitHubResult.connection);
+          void github.refresh();
           markCloudDocumentConnectionSuccess("github");
         }
         ctx.applyOauthResult(storedGitHubResult);
@@ -653,6 +666,7 @@ export function useCloudDocumentProviders() {
       if (event.data.status === "success") {
         if (event.data.connection.provider === "github") {
           setGitHubConnection(event.data.connection);
+          void github.refresh();
         }
         markCloudDocumentConnectionSuccess(event.data.connection.provider);
       }
@@ -694,6 +708,8 @@ export function useCloudDocumentProviders() {
     validFeishuAccounts,
     notionOauthConnection,
     githubConnection,
+    github,
+    handleReauthorizeGitHub,
     googleDriveConnection,
     mailAccounts,
     handleManageFeishuAuth,

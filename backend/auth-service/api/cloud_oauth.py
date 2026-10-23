@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
+from fastapi.responses import JSONResponse
 
 from core.deps import current_user, require_internal_service_token
 from core.rbac import permission_required
+from core.errors import AppException, ErrorCodes
 from models import User
 from schemas.cloud_oauth import (
     CloudConnectionCreateBody,
@@ -22,11 +24,49 @@ from schemas.cloud_oauth import (
     CloudOAuthCallbackResponse,
     FeishuCLIConnectionMirrorBody,
     ManagedConnectionMirrorBody,
+    GitHubCLISessionCreateBody,
+    GitHubCLISessionResponse,
 )
 from services.cloud_oauth_service import cloud_oauth_service
+from services.github_cli_auth import github_cli_auth_service
 
 
 router = APIRouter(prefix='/v1/cloud', tags=['cloud-oauth'])
+
+
+def _github_cli_call(function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except AppException as exc:
+        status, code, message = exc.http_code, exc.code, exc.message
+    except Exception:
+        status, code, message = ErrorCodes.GITHUB_CLI_FAILED
+    return JSONResponse(status_code=status, content={'code': code, 'message': message},
+                        headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/github/cli/sessions', response_model=GitHubCLISessionResponse)
+@permission_required('model.write')
+def start_github_cli_session(body: GitHubCLISessionCreateBody, response: Response,
+                             user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_cli_call(github_cli_auth_service.start, owner_user_id=str(user.id),
+                            attempt_id=body.attempt_id, reauthorize_connection_id=body.reauthorize_connection_id,
+                            force_web=body.force_web)
+
+
+@router.get('/github/cli/sessions/{session_id}', response_model=GitHubCLISessionResponse)
+@permission_required('model.write')
+def get_github_cli_session(session_id: str, response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_cli_call(github_cli_auth_service.get, session_id, owner_user_id=str(user.id))
+
+
+@router.delete('/github/cli/sessions/{session_id}', response_model=GitHubCLISessionResponse)
+@permission_required('model.write')
+def cancel_github_cli_session(session_id: str, response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_cli_call(github_cli_auth_service.cancel, session_id, owner_user_id=str(user.id))
 
 
 @router.post('/{provider}/connections', response_model=CloudConnectionCreateResponse)
@@ -215,6 +255,9 @@ def delete_connection(
     connection_id: str,
     user: User = Depends(current_user),  # noqa: B008
 ):
+    connection = cloud_oauth_service.get_connection(connection_id, user_id=str(user.id))
+    if connection.get('token_source') == 'github_cli':
+        return _github_cli_call(github_cli_auth_service.disconnect, connection_id, owner_user_id=str(user.id))
     return cloud_oauth_service.delete_connection(connection_id, user_id=str(user.id))
 
 

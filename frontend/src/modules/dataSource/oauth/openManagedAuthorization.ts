@@ -5,9 +5,42 @@ export type ManagedAuthorizationOpenResult =
 type ManagedDesktopBridge = {
   openManagedProviderAuthorization?: (url: string) => Promise<unknown> | unknown;
   openFeishuCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
+  openGitHubCLIAuthorization?: (url: string) => Promise<unknown> | unknown;
 };
 
 export type ReservedManagedAuthorizationPopup = Window | null | undefined;
+
+export const GITHUB_DEVICE_URL = "https://github.com/login/device";
+
+export async function openGitHubCLIAuthorization(
+  url: string,
+  popup?: ReservedManagedAuthorizationPopup,
+): Promise<ManagedAuthorizationOpenResult> {
+  if (url !== GITHUB_DEVICE_URL) {
+    closeManagedAuthorizationPopup(popup);
+    return { ok: false, reason: "invalid" };
+  }
+  if (typeof window === "undefined") return { ok: false, reason: "blocked" };
+  const desktop = (window as Window & { lazymindDesktop?: ManagedDesktopBridge }).lazymindDesktop;
+  try {
+    if (desktop?.openGitHubCLIAuthorization) {
+      closeManagedAuthorizationPopup(popup);
+      const result = await desktop.openGitHubCLIAuthorization(url);
+      return result && typeof result === "object" && "opened" in result && result.opened === true
+        ? { ok: true } : { ok: false, reason: "blocked" };
+    }
+    if (popup !== undefined) {
+      if (!popup || popup.closed) return { ok: false, reason: "blocked" };
+      popup.location.replace(url);
+      return { ok: true };
+    }
+    return window.open(url, "_blank", "noopener,noreferrer")
+      ? { ok: true } : { ok: false, reason: "blocked" };
+  } catch {
+    closeManagedAuthorizationPopup(popup);
+    return { ok: false, reason: "blocked" };
+  }
+}
 
 export function reserveManagedAuthorizationPopup(): ReservedManagedAuthorizationPopup {
   if (typeof window === "undefined") {
