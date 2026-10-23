@@ -1,9 +1,26 @@
+from copy import copy, deepcopy
 import json
+import pickle
 
 import pytest
 import requests
 
-from lazymind.provider_request import apply_request_advanced, configure_request_advanced
+from lazymind.provider_request import ProviderRequestFailure, apply_request_advanced, configure_request_advanced
+
+
+@pytest.mark.parametrize('restore', [copy, deepcopy, lambda error: pickle.loads(pickle.dumps(error))],
+                         ids=['copy', 'deepcopy', 'pickle'])
+@pytest.mark.parametrize('code,http_status,message', [
+    ('provider_request_failed', None, 'provider request failed: provider_request_failed'),
+    ('quota_exceeded', 429, 'provider request failed: quota_exceeded (HTTP 429)'),
+    ('timeout', None, 'provider request failed: timeout'),
+])
+def test_provider_failure_preserves_diagnostics_when_copied(restore, code, http_status, message):
+    error = ProviderRequestFailure(code=code, http_status=http_status)
+    restored = restore(error)
+    assert restored.code == code
+    assert restored.http_status == http_status
+    assert str(error) == str(restored) == message
 
 
 def test_request_options_preserve_authentication_and_mandatory_body():

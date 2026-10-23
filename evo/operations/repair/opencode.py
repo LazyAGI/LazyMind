@@ -429,5 +429,7 @@ def _secrets(env: dict[str, str]) -> list[str]:
         if value and any(token in key.lower() for token in ('key', 'token', 'secret'))
     ]
     # Provider errors can repeat only the selected key from a stored pool.
-    return list(dict.fromkeys([*values, *(line.strip() for value in values
-                                       for line in value.splitlines() if line.strip())]))
+    return list(dict.fromkeys([
+        *values,
+        *(line.strip() for value in values for line in value.splitlines() if line.strip()),
+    ]))

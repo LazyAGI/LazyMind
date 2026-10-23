@@ -36,8 +36,11 @@ class ProviderRequestFailure(RuntimeError):
     def __init__(self, code='provider_request_failed', http_status=None):
         self.code = code
         self.http_status = http_status
-        status = f' (HTTP {http_status})' if http_status else ''
-        super().__init__(f'provider request failed: {code}{status}')
+        super().__init__(code, http_status)
+
+    def __str__(self):
+        status = f' (HTTP {self.http_status})' if self.http_status else ''
+        return f'provider request failed: {self.code}{status}'
 
 
 def validate_runtime_request_transport(source, kind, model):
