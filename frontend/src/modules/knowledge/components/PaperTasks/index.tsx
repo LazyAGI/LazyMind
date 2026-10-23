@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type Key } from 'react';
-import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { CheckboxChangeEvent } from 'antd/es/checkbox';
 import { DownOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -17,14 +17,21 @@ interface Props {
     selectionError?: string;
     onImportSubmitted: () => void;
 }
-interface ResultOperation {
-    kind: 'review' | 'import';
+interface ResultSelection {
     source: ExpansionDetail;
     selected: string[];
-    preview: ImportPreviewItem[];
-    previewStatus: 'loading' | 'ready' | 'error';
     requestKey: string;
-    error?: string;
+}
+interface ImportPreview {
+    sourceKey: string;
+    items: ImportPreviewItem[];
+    status: 'loading' | 'ready' | 'error';
+}
+function resultKey(source: ExpansionDetail) {
+    return `${source.record.id}:${source.record.version}`;
+}
+function importKey(source: ExpansionDetail, item: WorkflowPaper) {
+    return JSON.stringify([source.record.dataset_id, item.paper.paper_id, item.paper.source_provider, item.paper.source_version, item.paper.document_id]);
 }
 function distinctPapers(papers: WorkflowPaper[]) {
     const result = new Map<string, WorkflowPaper>();
@@ -34,8 +41,8 @@ function distinctPapers(papers: WorkflowPaper[]) {
     }
     return [...result.values()];
 }
-function currentPaperDocument(detail: ExpansionDetail, item: WorkflowPaper) {
-    const documents = detail.presence?.find(entry => entry.work_id === item.paper.paper_id)?.current_dataset || [];
+function currentPaperDocument(detail: ExpansionDetail, item: WorkflowPaper, preview?: ImportPreviewItem) {
+    const documents = [...(detail.presence?.find(entry => entry.work_id === item.paper.paper_id)?.current_dataset || []), ...(preview?.presence.current_dataset || [])];
     return documents.find(document => document.dataset_id === detail.record.dataset_id && document.document_id && (
         item.paper.document_id ? document.document_id === item.paper.document_id : item.paper.source_version
             ? document.source_version === item.paper.source_version && document.source_provider === item.paper.source_provider
@@ -55,10 +62,15 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
     const [history, setHistory] = useState(false);
     const [records, setRecords] = useState<Expansion[]>([]);
     const [detail, setDetail] = useState<ExpansionDetail>();
-    const [importBatches, setImportBatches] = useState<string[]>([]);
+    const [importBatches, setImportBatches] = useState<{ id: string; keys: string[] }[]>([]);
     const importsChanged = useRef(onImportSubmitted);
     importsChanged.current = onImportSubmitted;
-    const [operation, setOperation] = useState<ResultOperation>();
+    const [selection, setSelection] = useState<ResultSelection>();
+    const [confirmation, setConfirmation] = useState<ResultSelection>();
+    const [preview, setPreview] = useState<ImportPreview>();
+    const [actionError, setActionError] = useState('');
+    const submitting = useRef<'review' | 'import'>();
+    const importRequestKeys = useRef(new Map<string, string>());
     const requestKey = useRef('');
     const requestInput = useRef('');
     const previewRequest = useRef(0);
@@ -79,6 +91,14 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
         void refreshHistory().catch(() => {});
     };
     const openDetail = async (id: string) => {
+        if (detailTarget.current !== id) {
+            setSelection(undefined);
+            setConfirmation(undefined);
+            setPreview(undefined);
+            setActionError('');
+            importRequestKeys.current.clear();
+            previewRequest.current += 1;
+        }
         detailTarget.current = id;
         const request = ++detailRequest.current;
         const result = await getExpansion(id);
@@ -101,12 +121,14 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
         let active = true;
         const refresh = async () => {
             try {
-                const statuses = await Promise.all(importBatches.map(async id => ({ id, status: await getPaperImportStatus(id) })));
+                const statuses = await Promise.all(importBatches.map(async batch => ({ id: batch.id, status: await getPaperImportStatus(batch.id) })));
                 if (!active) return;
                 const completed = statuses.filter(item => ['succeeded', 'completed_with_errors', 'failed', 'canceled'].includes(item.status)).map(item => item.id);
                 if (completed.length) {
-                    setImportBatches(current => current.filter(id => !completed.includes(id)));
+                    if (statuses.some(item => ['failed', 'completed_with_errors'].includes(item.status))) setActionError(t('paperTasks.importIncomplete'));
+                    setImportBatches(current => current.filter(batch => !completed.includes(batch.id)));
                     importsChanged.current();
+                    if (detailTarget.current) void openDetail(detailTarget.current).catch(() => {});
                 }
             } catch {
                 // The persisted import continues; retry its status on the next tick.
@@ -167,86 +189,131 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
         const content = source.contents.find(item => item.paper_id === id);
         return t(`paperTasks.content.${content?.status === 'ready' && !content.content_hash ? 'pending' : content?.status || 'pending'}`);
     };
-    const refreshImportPreview = async (source: ExpansionDetail) => {
+    // Keep the selected result snapshot stable while polling live content and import status.
+    const source = detail && selection?.source.record.id === detail.record.id
+        ? (detail.record.version === selection.source.record.version ? { ...detail, record: selection.source.record } : selection.source) : detail;
+    const papers = source ? distinctPapers(source.record.result.papers || []) : [];
+    const refreshImportPreview = async (target: ExpansionDetail) => {
+        if (!canImport) return;
+        const sourceKey = resultKey(target);
+        const ids = distinctPapers(target.record.result.papers || []).map(item => item.paper.paper_id);
         const request = ++previewRequest.current;
-        setOperation(current => current ? { ...current, previewStatus: 'loading', error: undefined } : current);
+        setPreview(current => current?.sourceKey === sourceKey && current.status === 'ready'
+            ? current : { sourceKey, items: [], status: 'loading' });
         try {
-            const items = await previewPaperImport(distinctPapers(source.record.result.papers || []).map(item => item.paper.paper_id), source.record.dataset_id, source.record.id);
-            if (request === previewRequest.current) setOperation(current => current ? { ...current, preview: items, previewStatus: 'ready' } : current);
+            const items = ids.length ? await previewPaperImport(ids, target.record.dataset_id, target.record.id) : [];
+            if (request === previewRequest.current) setPreview({ sourceKey, items, status: 'ready' });
         } catch {
-            if (request === previewRequest.current) setOperation(current => current ? { ...current, previewStatus: 'error' } : current);
+            if (request === previewRequest.current) setPreview({ sourceKey, items: [], status: 'error' });
         }
     };
-    const openOperation = (kind: ResultOperation['kind']) => {
-        if (!detail || busy || (kind === 'import' && !canImport)) return;
-        previewRequest.current += 1;
-        const papers = distinctPapers(detail.record.result.papers || []);
-        setOperation({
-            kind, source: detail,
-            selected: kind === 'review' ? papers.filter(item => contentReady(detail, item.paper.paper_id)).map(item => item.paper.paper_id) : [],
-            preview: [], previewStatus: kind === 'import' ? 'loading' : 'ready', requestKey: crypto.randomUUID(),
-        });
-        if (kind === 'import') void refreshImportPreview(detail);
+    useEffect(() => {
+        if (source) void refreshImportPreview(source);
+    }, [detail, selection?.source, canImport]);
+    const previewMatches = (item: WorkflowPaper, entry?: ImportPreviewItem) => !item.paper.source_version ||
+        (entry?.paper?.source_version === item.paper.source_version && entry.paper.source_provider === item.paper.source_provider);
+    const previewItem = (target: ExpansionDetail, item: WorkflowPaper) => {
+        const entry = preview?.sourceKey === resultKey(target) ? preview.items.find(value => value.work_id === item.paper.paper_id) : undefined;
+        return previewMatches(item, entry) ? entry : undefined;
     };
-    const closeOperation = () => {
-        if (busy) return;
-        previewRequest.current += 1;
-        setOperation(undefined);
+    const importing = (target: ExpansionDetail, item: WorkflowPaper) => importBatches.some(batch => batch.keys.includes(importKey(target, item)))
+        || previewItem(target, item)?.disposition === 'importing'
+        || (detail?.record.version === target.record.version && target.presence?.some(entry => entry.work_id === item.paper.paper_id && entry.importing));
+    const importReason = (target: ExpansionDetail, item: WorkflowPaper) => {
+        const entry = previewItem(target, item);
+        if (currentPaperDocument(target, item, entry) || entry?.disposition === 'already_present') return t('paperTasks.inCurrentCollection');
+        if (!canImport) return t('paperTasks.importForbidden');
+        if (importing(target, item)) return t('paperTasks.importStatus.importing');
+        if (preview?.sourceKey !== resultKey(target) || preview.status === 'loading') return t('paperTasks.checkingImport');
+        if (preview.status === 'error') return t('paperTasks.previewFailed');
+        if (!previewMatches(item, preview.items.find(value => value.work_id === item.paper.paper_id))) return t('paperTasks.importVersionChanged');
+        return entry?.disposition === 'downloadable' && entry.fulltext_candidates.length ? '' : t('paperTasks.importStatus.metadata_only');
     };
     const changeSelection = (keys: Key[]) => {
-        const ids = keys.map(String);
-        setOperation(current => current ? { ...current, selected: ids, requestKey: crypto.randomUUID(), error: undefined } : current);
+        setSelection(current => current ? { ...current, selected: keys.map(String), requestKey: crypto.randomUUID() } : current);
+        setActionError('');
     };
-    const submitOperation = async () => {
-        if (!operation || busy || operation.previewStatus !== 'ready') return;
-        if (operation.selected.length < (operation.kind === 'review' ? 2 : 1)) return;
-        if (operation.kind === 'import' && !canImport) return;
+    const selectedPapers = papers.filter(item => selection?.selected.includes(item.paper.paper_id));
+    const importable = source ? selectedPapers.filter(item => !importReason(source, item)) : [];
+    const reviewReason = !source?.record.version ? t('paperTasks.resultPending')
+        : selectedPapers.length < 2 ? t('paperTasks.reviewMinimum')
+        : selectedPapers.some(item => !contentReady(source, item.paper.paper_id)) ? t('paperTasks.reviewFulltextRequired') : '';
+    const submitReview = async () => {
+        if (!source || !selection || reviewReason || submitting.current || busy) return;
+        submitting.current = 'review';
         setBusy(true);
+        setActionError('');
         try {
-            if (operation.kind === 'review') {
-                const result = await launchPaperTask({
-                    kind: 'review', dataset_id: operation.source.record.dataset_id,
-                    expansion_id: operation.source.record.id, expansion_version: operation.source.record.version,
-                    paper_ids: operation.selected, request_key: operation.requestKey,
-                });
-                setOperation(undefined);
-                goChat(result.conversation_id);
-            } else {
-                const chosen = operation.preview.filter(item => operation.selected.includes(item.work_id) && item.disposition === 'downloadable');
-                if (chosen.length !== operation.selected.length) throw new Error('Import preview changed');
-                const result = await startReferenceImport(operation.source.record.dataset_id, [], chosen, operation.requestKey);
-                setImportBatches(current => [...current, result.batch_id]);
-                importsChanged.current();
-                setOperation(undefined);
-                message.success(t('paperTasks.importSubmitted'));
-                void openDetail(operation.source.record.id).catch(() => {});
-            }
+            const result = await launchPaperTask({
+                kind: 'review', dataset_id: source.record.dataset_id,
+                expansion_id: source.record.id, expansion_version: source.record.version,
+                paper_ids: selection.selected, request_key: selection.requestKey,
+            });
+            goChat(result.conversation_id);
         } catch {
-            setOperation(current => current ? { ...current, error: t('paperTasks.submitFailed') } : current);
+            setActionError(t('paperTasks.submitFailed'));
         } finally {
+            submitting.current = undefined;
             setBusy(false);
         }
     };
+    const submitImport = async (target: ExpansionDetail, chosen: WorkflowPaper[], key: string) => {
+        if (!canImport || !chosen.length || chosen.some(item => importReason(target, item)) || submitting.current || busy) return;
+        submitting.current = 'import';
+        setBusy(true);
+        setActionError('');
+        try {
+            const items = chosen.map(item => previewItem(target, item)!);
+            const result = await startReferenceImport(target.record.dataset_id, [], items, key);
+            setImportBatches(current => [...current, { id: result.batch_id, keys: chosen.map(item => importKey(target, item)) }]);
+            setPreview(current => current?.sourceKey === resultKey(target) ? {
+                ...current,
+                items: current.items.map(item => chosen.some(paper => paper.paper.paper_id === item.work_id)
+                    ? { ...item, disposition: 'importing', presence: { ...item.presence, importing: true } } : item),
+            } : current);
+            chosen.forEach(item => importRequestKeys.current.delete(importKey(target, item)));
+            setSelection(current => current ? { ...current, requestKey: crypto.randomUUID() } : current);
+            setConfirmation(undefined);
+            importsChanged.current();
+            message.success(t('paperTasks.importSubmitted'));
+            if (detailTarget.current === target.record.id) void openDetail(target.record.id).catch(() => {});
+        } catch {
+            setActionError(t('paperTasks.submitFailed'));
+        } finally {
+            submitting.current = undefined;
+            setBusy(false);
+        }
+    };
+    const importPaper = (target: ExpansionDetail, item: WorkflowPaper) => {
+        const fingerprint = importKey(target, item);
+        let key = importRequestKeys.current.get(fingerprint);
+        if (!key) { key = crypto.randomUUID(); importRequestKeys.current.set(fingerprint, key); }
+        void submitImport(target, [item], key);
+    };
+    const cancelSelection = () => {
+        if (submitting.current) return;
+        setSelection(undefined);
+        setConfirmation(undefined);
+        setActionError('');
+    };
     const closeDetail = () => {
+        if (submitting.current) return;
+        previewRequest.current += 1;
         detailRequest.current += 1;
         detailTarget.current = undefined;
         setDetail(undefined);
+        setPreview(undefined);
+        importRequestKeys.current.clear();
+        cancelSelection();
         if (params.has('expansion_id')) {
             const next = new URLSearchParams(params);
             next.delete('expansion_id');
             setParams(next);
         }
     };
-    const available = detail ? distinctPapers(detail.record.result.papers || []).filter(item => contentReady(detail, item.paper.paper_id)).length : 0;
-    const operationPapers = operation ? distinctPapers(operation.source.record.result.papers || []) : [];
-    const selectedSeeds = operationPapers.filter(item => item.is_seed && operation?.selected.includes(item.paper.paper_id)).length;
-    const selectionReason = (item: WorkflowPaper) => {
-        if (!operation) return '';
-        if (operation.kind === 'review') return contentReady(operation.source, item.paper.paper_id) ? '' : contentStatus(operation.source, item.paper.paper_id);
-        if (operation.previewStatus !== 'ready') return t('paperTasks.checkingImport');
-        const preview = operation.preview.find(entry => entry.work_id === item.paper.paper_id);
-        return preview?.disposition === 'downloadable' ? '' : t(`paperTasks.importStatus.${preview?.disposition || 'metadata_only'}`);
-    };
+    const available = source ? papers.filter(item => contentReady(source, item.paper.paper_id)).length : 0;
+    const confirmationPapers = confirmation ? distinctPapers(confirmation.source.record.result.papers || []).filter(item => confirmation.selected.includes(item.paper.paper_id)) : [];
+    const confirmationImportable = confirmation ? confirmationPapers.filter(item => !importReason(confirmation.source, item)) : [];
     const sourceTag = (item: WorkflowPaper) => <Tag>{t(item.is_seed ? 'paperTasks.seed' : 'paperTasks.expanded')}</Tag>;
     return <>
         <Space wrap style={{ marginBottom: 12 }}>
@@ -284,15 +351,13 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                 <Button key="view" onClick={() => void openDetail(record.id).catch(() => {})}>{t('paperTasks.viewResult')}</Button>,
             ]}><List.Item.Meta title={record.title} description={`${statusLabel(record.status)} · ${t('paperTasks.paperCount', { count: distinctPapers(record.result?.papers || []).length })}`} /></List.Item>} />
         </Drawer>
-        <Drawer open={!!detail} title={t('paperTasks.resultTitle')} width={1000} onClose={closeDetail}>
+        <Drawer open={!!detail} title={t('paperTasks.resultTitle')} width={1000} onClose={closeDetail} closable={!busy}>
             {detail && <>
                 <Typography.Title level={4} ellipsis={{ rows: 2 }}>{detail.record.title}</Typography.Title>
                 <Tag>{statusLabel(detail.record.status)}</Tag>
                 {detail.chat_status !== 'available' && <Alert type="warning" message={t(detail.chat_status === 'trashed' ? 'paperTasks.expansionTrashed' : 'paperTasks.expansionDeleted')} />}
                 <Space wrap style={{ margin: '12px 0' }}>
                     <Button disabled={detail.chat_status !== 'available'} onClick={() => goChat(detail.record.conversation_id)}>{t('paperTasks.returnExpansion')}</Button>
-                    <Button type="primary" disabled={!detail.record.version} onClick={() => openOperation('review')}>{t('paperTasks.generateReview')}</Button>
-                    <Button disabled={!canImport} onClick={() => openOperation('import')}>{t('paperTasks.import')}</Button>
                     <Button danger onClick={() => Modal.confirm({
                         title: t('paperTasks.deleteTitle'), content: t('paperTasks.deleteHint'), okText: t('paperTasks.confirmDelete'), cancelText: t('paperTasks.cancel'), okButtonProps: { danger: true },
                         onOk: async () => { await deleteExpansion(detail.record.id); closeDetail(); await refreshHistory(); },
@@ -301,10 +366,25 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                 <Alert type={available >= 2 ? 'success' : 'info'} message={t('paperTasks.availableCount', { count: available })} />
                 <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }} style={{ whiteSpace: 'pre-wrap', marginTop: 12 }}>{detail.record.result.user_instruction}</Typography.Paragraph>
                 <Typography.Paragraph>{t('paperTasks.directions', { value: detail.record.result.selected_directions?.join('；') || t('paperTasks.undetermined') })}</Typography.Paragraph>
-                <Table<WorkflowPaper> rowKey={(item: WorkflowPaper) => item.paper.paper_id} dataSource={distinctPapers(detail.record.result.papers || [])} pagination={false} columns={[
+                {source && <>
+                <Space wrap style={{ display: 'flex', justifyContent: 'flex-end', margin: '12px 0' }}>
+                    {selection ? <>
+                        <span aria-live="polite">{t('paperTasks.selectedCount', { count: selection.selected.length })}</span>
+                        <Tooltip title={reviewReason}><span><Button type="primary" disabled={busy || !!confirmation || !!reviewReason} loading={submitting.current === 'review'} onClick={() => void submitReview()}>{t('paperTasks.generateReview')}</Button></span></Tooltip>
+                        <Tag>{t('paperTasks.demo')}</Tag>
+                        <Tooltip title={!canImport ? t('paperTasks.importForbidden') : !importable.length ? t('paperTasks.noImportableSelection') : ''}><span><Button disabled={busy || !!confirmation || !importable.length} onClick={() => { setActionError(''); setConfirmation({ ...selection, source }); }}>{t('paperTasks.bulkImport', { count: importable.length })}</Button></span></Tooltip>
+                        <Button disabled={busy || !!confirmation} onClick={cancelSelection}>{t('paperTasks.cancelMultiSelect')}</Button>
+                    </> : <Button disabled={busy} onClick={() => { setActionError(''); setSelection({ source, selected: [], requestKey: crypto.randomUUID() }); }}>{t('paperTasks.multiSelect')}</Button>}
+                </Space>
+                {selection && detail.record.version !== selection.source.record.version && <Alert type="info" message={t('paperTasks.selectionVersion', { version: selection.source.record.version })} style={{ marginBottom: 12 }} />}
+                {actionError && !confirmation && <Alert type="error" showIcon message={actionError} style={{ marginBottom: 12 }} />}
+                {canImport && preview?.status === 'error' && <Alert type="warning" message={t('paperTasks.previewFailed')} action={<Button onClick={() => void refreshImportPreview(source)}>{t('paperTasks.retry')}</Button>} style={{ marginBottom: 12 }} />}
+                <Table<WorkflowPaper> rowKey={(item: WorkflowPaper) => item.paper.paper_id} dataSource={papers} pagination={false} scroll={{ x: 960 }}
+                    rowSelection={selection ? { selectedRowKeys: selection.selected, onChange: changeSelection, getCheckboxProps: item => ({ disabled: busy || !!confirmation, 'aria-label': t('paperTasks.selectPaper', { title: item.paper.title || item.paper.paper_id }) }) } : undefined}
+                    columns={[
                     { title: t('paperTasks.paper'), width: 280, render: (_: unknown, item: WorkflowPaper) => {
                         const title = item.paper.title || item.paper.paper_id;
-                        const document = currentPaperDocument(detail, item);
+                        const document = currentPaperDocument(source, item, previewItem(source, item));
                         if (document) return <Link to={`/lib/knowledge/knowledge/${encodeURIComponent(document.dataset_id)}/${encodeURIComponent(document.document_id)}`} target="_blank" rel="noopener noreferrer">{title}</Link>;
                         if (item.is_seed) return title;
                         const { paper_url, doi, arxiv_id, pdf_url } = item.paper;
@@ -323,20 +403,27 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                     } },
                     { title: t('paperTasks.source'), width: 80, render: (_: unknown, item: WorkflowPaper) => sourceTag(item) },
                     { title: t('paperTasks.fullText'), width: 140, render: (_: unknown, item: WorkflowPaper) => {
-                        const content = detail.contents.find(entry => entry.paper_id === item.paper.paper_id);
-                        return <Space direction="vertical"><span>{contentStatus(detail, item.paper.paper_id)}</span>
+                        const content = source.contents.find(entry => entry.paper_id === item.paper.paper_id);
+                        return <Space direction="vertical"><span>{contentStatus(source, item.paper.paper_id)}</span>
                             {content?.error && <Typography.Text type="danger">{content.error}</Typography.Text>}
-                            {(content?.status === 'failed' || content?.status === 'unavailable') && <Button onClick={async () => { await retryPaperContent(item.paper.paper_id, detail.record.id); await openDetail(detail.record.id); }}>{t('paperTasks.retryContent')}</Button>}
+                            {(content?.status === 'failed' || content?.status === 'unavailable') && <Button disabled={source.record.version !== detail.record.version} onClick={async () => { await retryPaperContent(item.paper.paper_id, detail.record.id); await openDetail(detail.record.id); }}>{t('paperTasks.retryContent')}</Button>}
                         </Space>;
                     } },
-                    { title: t('paperTasks.importState'), width: 100, render: (_: unknown, item: WorkflowPaper) => {
-                        const presence = detail.presence?.find(entry => entry.work_id === item.paper.paper_id);
-                        const documents = presence?.current_dataset || [];
-                        const matching = currentPaperDocument(detail, item);
-                        return matching ? '已在当前论文集' : documents.length ? '已有其他版本' : presence?.metadata_only ? '已收录，待补全文' : presence?.importing ? t('paperTasks.importStatus.importing') : t('paperTasks.importStatus.not_imported');
+                    { title: t('paperTasks.importState'), width: 155, render: (_: unknown, item: WorkflowPaper) => {
+                        const entry = previewItem(source, item);
+                        const presence = detail.presence?.find(value => value.work_id === item.paper.paper_id);
+                        const present = currentPaperDocument(source, item, entry) || entry?.disposition === 'already_present';
+                        const inProgress = importing(source, item);
+                        const reason = importReason(source, item);
+                        const status = present ? t('paperTasks.inCurrentCollection') : inProgress ? t('paperTasks.importStatus.importing')
+                            : presence?.current_dataset.length ? t('paperTasks.otherVersion') : presence?.metadata_only ? t('paperTasks.bibliographyOnly') : t('paperTasks.importStatus.not_imported');
+                        return <Space direction="vertical"><span>{status}</span>{!present && <Tooltip title={reason}><span><Button size="small" disabled={busy || !!confirmation || !!reason}
+                            aria-label={t('paperTasks.importPaper', { title: item.paper.title || item.paper.paper_id })}
+                            onClick={() => importPaper(source, item)}>{t(inProgress ? 'paperTasks.importStatus.importing' : 'paperTasks.import')}</Button></span></Tooltip>}</Space>;
                     } },
                     { title: <Space>{t('paperTasks.relations')}{detail.record.discovery_mode !== 'external' && <Tag>{t('paperTasks.demo')}</Tag>}</Space>, render: (_: unknown, item: WorkflowPaper) => <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }}>{[item.seed_relation, item.direction_relation, item.key_contribution].filter(Boolean).join('；')}</Typography.Paragraph> },
                 ]} />
+                </>}
                 <Typography.Title level={5}>{t('paperTasks.progress')}</Typography.Title>
                 <List dataSource={Object.entries(detail.record.progress || {}).filter(([key, value]) => stages.includes(key) && value && typeof value === 'object').sort(([a], [b]) => stages.indexOf(a) - stages.indexOf(b))}
                     renderItem={([key, value]) => <List.Item><List.Item.Meta title={t(`paperTasks.stage.${key}`)} description={<><div>{value.candidate_directions?.join('；')}</div><div>{value.papers?.map(item => item.paper.title).filter(Boolean).join('；')}</div></>} /></List.Item>} />
@@ -351,23 +438,14 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                 <List dataSource={detail.handoffs} renderItem={item => <List.Item><Button onClick={() => goChat(item.conversation_id)}>{t('paperTasks.viewTask', { task: taskLabel(item.kind) })}</Button></List.Item>} />
             </>}
         </Drawer>
-        <Modal open={!!operation} width={720} title={t(operation?.kind === 'review' ? 'paperTasks.reviewDialog' : 'paperTasks.import')}
-            onCancel={closeOperation} onOk={() => void submitOperation()} cancelText={t('paperTasks.cancel')} confirmLoading={busy}
-            okText={t(operation?.kind === 'review' ? 'paperTasks.confirmReview' : 'paperTasks.confirmImport', { count: operation?.selected.length || 0 })}
-            okButtonProps={{ disabled: !operation || operation.previewStatus !== 'ready' || operation.selected.length < (operation.kind === 'review' ? 2 : 1) || (operation.kind === 'import' && !canImport) }}>
-            {operation && <>
-                <Alert type="info" message={t(operation.kind === 'review' ? 'paperTasks.reviewSelectionHint' : 'paperTasks.importSelectionHint')} />
-                <Typography.Paragraph style={{ marginTop: 12 }} aria-live="polite">{t('paperTasks.selectionCount', { count: operation.selected.length, seeds: selectedSeeds, expanded: operation.selected.length - selectedSeeds })}</Typography.Paragraph>
-                {operation.error && <Alert type="error" showIcon message={operation.error} style={{ marginBottom: 12 }} />}
-                {operation.previewStatus === 'error' && <Alert type="error" message={t('paperTasks.previewFailed')} action={<Button onClick={() => void refreshImportPreview(operation.source)}>{t('paperTasks.retry')}</Button>} style={{ marginBottom: 12 }} />}
-                <Table<WorkflowPaper> rowKey={(item: WorkflowPaper) => item.paper.paper_id} pagination={false} loading={operation.previewStatus === 'loading'} dataSource={operationPapers}
-                    rowSelection={{ selectedRowKeys: operation.selected, onChange: changeSelection, getCheckboxProps: (item: WorkflowPaper) => ({ disabled: busy || !!selectionReason(item), 'aria-label': t('paperTasks.selectPaper', { title: item.paper.title || item.paper.paper_id }) }) }}
-                    columns={[
-                        { title: t('paperTasks.paper'), render: (_: unknown, item: WorkflowPaper) => item.paper.title || item.paper.paper_id },
-                        { title: t('paperTasks.source'), width: 80, render: (_: unknown, item: WorkflowPaper) => sourceTag(item) },
-                        { title: t(operation.kind === 'review' ? 'paperTasks.fullText' : 'paperTasks.importState'), width: 180, render: (_: unknown, item: WorkflowPaper) => selectionReason(item) || t(operation.kind === 'review' ? 'paperTasks.content.ready' : 'paperTasks.canImport') },
-                    ]} />
-            </>}
+        <Modal open={!!confirmation} width={720} title={t('paperTasks.bulkImportTitle')}
+            onCancel={() => !busy && setConfirmation(undefined)} onOk={() => confirmation && void submitImport(confirmation.source, confirmationImportable, confirmation.requestKey)}
+            cancelText={t('paperTasks.cancel')} confirmLoading={busy} okText={t('paperTasks.confirmImport', { count: confirmationImportable.length })}
+            okButtonProps={{ disabled: !confirmationImportable.length || !canImport }}>
+            <Alert type="info" message={t('paperTasks.importSummary', { count: confirmationImportable.length, skipped: confirmationPapers.length - confirmationImportable.length })} />
+            {actionError && <Alert type="error" showIcon message={actionError} style={{ marginTop: 12 }} />}
+            <List dataSource={confirmationPapers} renderItem={item => <List.Item><List.Item.Meta title={item.paper.title || item.paper.paper_id}
+                description={confirmation && (importReason(confirmation.source, item) || t('paperTasks.canImport'))} /></List.Item>} />
         </Modal>
     </>;
 }
