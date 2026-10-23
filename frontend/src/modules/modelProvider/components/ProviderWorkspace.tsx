@@ -397,7 +397,7 @@ export function ProviderWorkspace(props: Props) {
       providerModalTarget.current = mode === "edit" ? provider : undefined;
       const source =
         providers.find(
-          (item) => !item.isCustom && item.source.toLowerCase() === "openai",
+          (item) => !item.isCustom && getSupplierBrandKey(item) === "OpenAI",
         ) ||
         providers.find((item) => !item.isCustom) ||
         provider;

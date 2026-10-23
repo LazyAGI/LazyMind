@@ -556,6 +556,7 @@ export default function ModelProviderPage({
   const [contextWindowExpanded, setContextWindowExpanded] = useState(false);
   const watchedCustomCapability = Form.useWatch("capability", customModelForm);
   const cloudCatalogRequestIdRef = useRef(0);
+  const providerLoadRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
   const addedProviderListRef = useRef<AddedProvider[]>([]);
   addedProviderListRef.current = addedProviderList;
@@ -717,16 +718,21 @@ export default function ModelProviderPage({
   );
 
   const loadModelProviders = useCallback(async () => {
+    const requestId = ++providerLoadRequestIdRef.current;
+    const isCurrent = () => requestId === providerLoadRequestIdRef.current;
     const isFirstLoad = !initialProvidersLoadedRef.current;
     if (isFirstLoad) {
       setLoading(true);
     }
     try {
       const providers = await fetchProviderOptions();
+      // A newer refresh owns the result; superseded requests are not failures.
+      if (!isCurrent()) return true;
       setProviderOptions(providers);
 
       const withGroupsResponse =
         await modelProvidersApi.apiCoreModelProvidersWithGroupsGet();
+      if (!isCurrent()) return true;
       const withGroupsData = unwrapModelProviderData<{
         providers?: ApiProvider[];
       }>(withGroupsResponse.data);
@@ -753,7 +759,9 @@ export default function ModelProviderPage({
           }),
       );
 
+      if (!isCurrent()) return true;
       setAddedProviderList((current) => {
+        if (!isCurrent()) return current;
         const cachedModels = new Map(
           current.flatMap((item) =>
             item.groups.map((group) => [group.id, group.models] as const),
@@ -770,27 +778,22 @@ export default function ModelProviderPage({
       setLoadError(false);
       return true;
     } catch (error) {
+      if (!isCurrent()) return true;
       setLoadError(true);
       return false;
     } finally {
-      initialProvidersLoadedRef.current = true;
-      setLoading(false);
+      if (isCurrent()) {
+        initialProvidersLoadedRef.current = true;
+        setLoading(false);
+      }
     }
   }, [fetchProviderOptions]);
 
   useEffect(() => {
     void loadModelProviders();
-    // Group models are fetched on expand. Re-running this on i18n identity
-    // changes (tab blur/focus) used to wipe them and show an empty list.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!initialProvidersLoadedRef.current) {
-      return;
-    }
-    void fetchProviderOptions().then(setProviderOptions);
-  }, [currentLanguage, fetchProviderOptions]);
+    // Language refreshes share the metadata gate and retain cached group models.
+    return () => { providerLoadRequestIdRef.current += 1; };
+  }, [currentLanguage, loadModelProviders]);
 
   const loadCredentialBackup = useCallback(async (showLoading = true) => {
     if (showLoading) setCredentialBackupLoading(true);

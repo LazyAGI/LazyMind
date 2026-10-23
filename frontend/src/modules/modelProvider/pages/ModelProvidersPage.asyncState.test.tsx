@@ -5,9 +5,11 @@ import ModelProviderPage, {
   type AddedProvider,
   type ProviderConnectionGroup,
   type ProviderModel,
+  type ProviderOption,
 } from "./ModelProvidersPage";
 
 const mocks = vi.hoisted(() => ({
+  language: "zh-CN",
   getProviders: vi.fn(),
   getProvidersWithGroups: vi.fn(),
   getGroups: vi.fn(),
@@ -21,7 +23,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ i18n: { language: "zh-CN" }, t: mocks.translate }),
+  useTranslation: () => ({ i18n: { language: mocks.language }, t: mocks.translate }),
 }));
 vi.mock("@/components/request", () => ({
   localizeErrorCode: (code: string) => code,
@@ -66,13 +68,17 @@ vi.mock("../components/CredentialRestorePanel", () => ({ CredentialRestorePanel:
 vi.mock("../components/CloudSystemProviderCard", () => ({ default: () => null }));
 
 interface WorkspaceProps {
+  providers: ProviderOption[];
   configuredProviders: AddedProvider[];
+  loading: boolean;
+  loadError: boolean;
   modelsError?: Record<string, string>;
   modelsLoading: Record<string, boolean>;
   onLoadModels: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
   onEditModel: (provider: AddedProvider, group: ProviderConnectionGroup, model: ProviderModel) => void;
   onDeleteModel: (provider: AddedProvider, group: ProviderConnectionGroup, model: ProviderModel) => void;
   onAddModel: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
+  onReload: () => Promise<void>;
 }
 
 vi.mock("../components/ProviderWorkspace", () => ({
@@ -82,12 +88,17 @@ vi.mock("../components/ProviderWorkspace", () => ({
     const key = provider && group ? `${provider.id}:${group.id}` : "";
     const error = props.modelsError?.[key];
     return <>
+      <button onClick={() => { void props.onReload().catch(() => {}); }}>Reload suppliers</button>
       <button disabled={!group || props.modelsLoading[key]} onClick={() => props.onLoadModels(provider, group)}>Load models</button>
       {error ? <div role="alert">{error}<button onClick={() => props.onLoadModels(provider, group)}>Retry models</button></div> : null}
       <button disabled={!group?.models[0]} onClick={() => props.onEditModel(provider, group, group.models[0])}>Edit first model</button>
       <button disabled={!group?.models[0]} onClick={() => props.onDeleteModel(provider, group, group.models[0])}>Delete first model</button>
       <button disabled={!group} onClick={() => props.onAddModel(provider, group)}>Add custom model</button>
       <output data-testid="group">{JSON.stringify(group)}</output>
+      <output data-testid="supplier">{JSON.stringify(provider)}</output>
+      <output data-testid="supplier-options">{JSON.stringify(props.providers)}</output>
+      <output data-testid="supplier-load-state">{props.loading ? "loading" : "ready"}</output>
+      <output data-testid="supplier-load-error">{props.loadError ? "error" : "none"}</output>
       <output data-testid="model-load-state">{props.modelsLoading[key] ? "loading" : "ready"}</output>
     </>;
   },
@@ -133,9 +144,13 @@ function deferred<T>() {
 
 const currentGroup = (): ProviderConnectionGroup =>
   JSON.parse(screen.getByTestId("group").textContent || "null");
+const currentSupplier = (): AddedProvider =>
+  JSON.parse(screen.getByTestId("supplier").textContent || "null");
+const supplierOptions = (): ProviderOption[] =>
+  JSON.parse(screen.getByTestId("supplier-options").textContent || "[]");
 
 function draw() {
-  render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
+  return render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
 }
 
 async function loadInitialModels() {
@@ -148,6 +163,7 @@ async function loadInitialModels() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.language = "zh-CN";
   mocks.getProviders.mockResolvedValue({ data: { providers: [supplier] } });
   mocks.getProvidersWithGroups.mockResolvedValue({ data: { providers: [supplier] } });
   mocks.getGroups.mockResolvedValue({ data: { groups: [initialGroup] } });
@@ -167,6 +183,75 @@ afterEach(() => {
 });
 
 describe("model provider asynchronous state", () => {
+  it.each(["success", "failure"] as const)("ignores an older supplier reload's %s after newer metadata is saved", async (completion) => {
+    draw();
+    await loadInitialModels();
+    const cachedModels = currentGroup().models;
+    const older = deferred<{ data: { groups: typeof initialGroup[] } }>();
+    mocks.getProviders.mockResolvedValueOnce({ data: { providers: [{ ...supplier, name: "Old gateway", logo_data_url: "old-logo" }] } });
+    mocks.getGroups.mockReturnValueOnce(older.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Reload suppliers" }));
+    await waitFor(() => expect(mocks.getGroups).toHaveBeenCalledTimes(2));
+
+    mocks.getProviders.mockResolvedValue({ data: { providers: [{ ...supplier, name: "Saved gateway", logo_data_url: "saved-logo" }] } });
+    mocks.getGroups.mockResolvedValue({ data: { groups: [{ ...initialGroup, name: "Saved connection", is_verified: false }] } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload suppliers" }));
+    await waitFor(() => expect(currentSupplier()).toMatchObject({ name: "Saved gateway", logoDataUrl: "saved-logo" }));
+    expect(currentGroup()).toMatchObject({ name: "Saved connection", verified: false });
+    expect(currentGroup().models).toEqual(cachedModels);
+
+    await act(async () => {
+      if (completion === "success") older.resolve({ data: { groups: [initialGroup] } });
+      else older.reject(new Error("Old reload failed"));
+    });
+    expect(currentSupplier()).toMatchObject({ name: "Saved gateway", logoDataUrl: "saved-logo" });
+    expect(supplierOptions()[0]).toMatchObject({ name: "Saved gateway", logoDataUrl: "saved-logo" });
+    expect(currentGroup()).toMatchObject({ name: "Saved connection", verified: false });
+    expect(currentGroup().models).toEqual(cachedModels);
+    expect(screen.getByTestId("supplier-load-error")).toHaveTextContent("none");
+  });
+
+  it.each(["success", "failure"] as const)("keeps the current initial supplier load pending when an older request ends with %s", async (completion) => {
+    const older = deferred<{ data: { providers: typeof supplier[] } }>();
+    const current = deferred<{ data: { providers: typeof supplier[] } }>();
+    mocks.getProviders.mockReturnValueOnce(older.promise).mockReturnValueOnce(current.promise);
+    draw();
+    fireEvent.click(screen.getByRole("button", { name: "Reload suppliers" }));
+    await waitFor(() => expect(mocks.getProviders).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      if (completion === "success") older.resolve({ data: { providers: [{ ...supplier, name: "Old gateway" }] } });
+      else older.reject(new Error("Old initial load failed"));
+    });
+    expect(screen.getByTestId("supplier-load-state")).toHaveTextContent("loading");
+    expect(screen.getByTestId("supplier-load-error")).toHaveTextContent("none");
+    expect(supplierOptions()).toEqual([]);
+    expect(screen.getByTestId("supplier")).toBeEmptyDOMElement();
+
+    await act(async () => current.resolve({ data: { providers: [{ ...supplier, name: "Current gateway" }] } }));
+    await waitFor(() => expect(currentSupplier().name).toBe("Current gateway"));
+    expect(screen.getByTestId("supplier-load-state")).toHaveTextContent("ready");
+    expect(screen.getByTestId("supplier-load-error")).toHaveTextContent("none");
+  });
+
+  it("does not let an older language refresh roll back saved supplier metadata or cached models", async () => {
+    const view = draw();
+    await loadInitialModels();
+    const cachedModels = currentGroup().models;
+    const older = deferred<{ data: { providers: typeof supplier[] } }>();
+    mocks.getProviders.mockReturnValueOnce(older.promise);
+    mocks.language = "en-US";
+    view.rerender(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
+    await waitFor(() => expect(mocks.getProviders).toHaveBeenCalledTimes(2));
+
+    mocks.getProviders.mockResolvedValue({ data: { providers: [{ ...supplier, name: "Saved gateway", logo_data_url: "saved-logo" }] } });
+    fireEvent.click(screen.getByRole("button", { name: "Reload suppliers" }));
+    await waitFor(() => expect(currentSupplier()).toMatchObject({ name: "Saved gateway", logoDataUrl: "saved-logo" }));
+    await act(async () => older.resolve({ data: { providers: [{ ...supplier, name: "Old gateway" }] } }));
+    expect(currentSupplier()).toMatchObject({ name: "Saved gateway", logoDataUrl: "saved-logo" });
+    expect(supplierOptions()[0]).toMatchObject({ name: "Saved gateway", logoDataUrl: "saved-logo" });
+    expect(currentGroup().models).toEqual(cachedModels);
+  });
+
   it("lets an unverified keyless vLLM service fetch custom-model metadata", async () => {
     const local = { ...supplier, name: "vLLM", protocol_name: "VLLM", base_url: "http://localhost:8000/v1/" };
     mocks.getProviders.mockResolvedValue({ data: { providers: [local] } });

@@ -766,6 +766,20 @@ func resolvedSelectionForConversation(conversation *orm.Conversation, models []a
 		selection.Mode = chatModelModeAuto
 		selection.Version = conversation.ChatModelVersion
 		selection.Availability = chatModelAvailabilityUnavailable
+		// The snapshot identifies the last model; its logo follows only the same
+		// supplier and connection that remain visible to the current user.
+		var snapshot chatModelSnapshot
+		if json.Unmarshal(conversation.ChatModelSnapshot, &snapshot) == nil && snapshot.ModelID != "" &&
+			snapshot.ProviderID != "" && snapshot.ProviderGroupID != "" && snapshot.Source != "" {
+			for index := range models {
+				model := &models[index]
+				if model.ID == snapshot.ModelID && model.ProviderID == snapshot.ProviderID &&
+					model.ProviderGroupID == snapshot.ProviderGroupID && model.Source == snapshot.Source {
+					selection.LogoDataURL = model.LogoDataURL
+					break
+				}
+			}
+		}
 		for index := range models {
 			if chatModelUsable(&models[index]) {
 				selection.Availability = chatModelAvailabilityAvailable

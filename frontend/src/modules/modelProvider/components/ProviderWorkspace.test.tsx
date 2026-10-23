@@ -981,6 +981,34 @@ describe("compact provider workspace", () => {
       provider.groups[0].models[0],
     );
   });
+  it("defaults to the OpenAI supplier when a plan shares its runtime protocol", async () => {
+    setup({
+      providers: [
+        {
+          ...provider,
+          id: "sense-token",
+          name: "SenseNovaTokenPlan",
+          brandKey: "SenseNova",
+          serviceKey: "token",
+          protocolName: "OpenAI",
+          baseUrl: "https://token.sensenova.cn/v1/",
+          groups: [],
+        },
+        provider,
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.addSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByRole("textbox", { name: "modelProvider.apiAddressLabel" })).toHaveValue(provider.baseUrl);
+    fireEvent.change(dialog.getByLabelText("modelProvider.workspace.supplierName"), { target: { value: "My gateway" } });
+    fireEvent.click(dialog.getByRole("button", { name: "common.save" }));
+    await waitFor(() => expect(mocks.createProvider).toHaveBeenCalledWith({
+      name: "My gateway",
+      source_provider_id: "openai",
+      base_url: provider.baseUrl,
+    }));
+  });
+
   it("creates a custom supplier using a built-in API protocol", async () => {
     setup({
       providers: [
