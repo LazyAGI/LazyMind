@@ -19,7 +19,7 @@ import (
 )
 
 func TestChatFallbackPreparesAfterFixedModelDeletion(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newChatExecutionTestDB(t).DB
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-a", "llm", true, "fixture-a")
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "OpenAI", "B", "gpt-b", "llm", true, "fixture-b")
 	conversation, _, err := ensureConversation(context.Background(), db, "fallback-deleted", "Fixed", nil, nil, "user-1", "User", false, "", nil, &initialChatModelSelection{Mode: "fixed", ModelID: "model-a", Source: "own"})
@@ -47,7 +47,7 @@ func TestChatFallbackPreparesAfterFixedModelDeletion(t *testing.T) {
 }
 
 func TestChatFallbackDoesNotDecryptBrokenDefaultBeforeAlternatives(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newChatExecutionTestDB(t).DB
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-a", "llm", true, "fixture-a")
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "OpenAI", "B", "gpt-b", "llm", true, "fixture-b")
 	seedSelectedChatModel(t, db, "user-1", "model-a", false)
@@ -69,7 +69,7 @@ func TestChatFallbackDoesNotDecryptBrokenDefaultBeforeAlternatives(t *testing.T)
 
 func fallbackTestBody(t *testing.T, mode string) (*gorm.DB, *orm.Conversation, map[string]any) {
 	t.Helper()
-	db := newPromptTestDB(t).DB
+	db := newChatExecutionTestDB(t).DB
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-a", "llm", true, "fixture-a")
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "OpenAI", "B", "gpt-b", "llm", true, "fixture-b")
 	seedSelectedChatModel(t, db, "user-1", "model-a", false)
@@ -578,7 +578,7 @@ func TestChatFallbackWireIgnoresForgedClientCandidates(t *testing.T) {
 }
 
 func TestChatFallbackUnknownInitialBindingStillRejectsExecution(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newChatExecutionTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "OpenAI", "B", "gpt-b", "llm", true, "fixture-b")

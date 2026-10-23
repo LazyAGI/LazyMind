@@ -380,6 +380,10 @@ const ChatModelSelector = ({
   const currentModel = currentProvider?.models.find(
     (model) => model.id === currentSelection?.model_id,
   );
+  const currentProviderName = currentProvider?.name ?? currentSelection?.provider_name;
+  const currentProviderLogoUrl = currentProviderName
+    ? getProviderLogoUrl(currentProviderName)
+    : undefined;
   const visibleProviders = useMemo(() => {
     const providers = (catalog?.providers ?? []).filter(
       (provider) => provider.models.length > 0,
@@ -911,7 +915,17 @@ const ChatModelSelector = ({
         message.warning(switchBlockedReason);
       }}
     >
-      {loadStatus === "loading" ? <Spin size="small" /> : null}
+      {loadStatus === "loading" ? (
+        <Spin size="small" />
+      ) : currentProviderName ? (
+        <span className="chat-model-selector-trigger-icon" aria-hidden="true">
+          {currentProviderLogoUrl ? (
+            <img src={currentProviderLogoUrl} alt="" width={16} height={16} />
+          ) : (
+            <ApiOutlined />
+          )}
+        </span>
+      ) : null}
       <span className="chat-model-selector-trigger-model">
         {combined ? compactModelLabel : triggerLabel}
       </span>

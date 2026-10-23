@@ -56,7 +56,7 @@ func TestDualAnswerEnvironmentInputProvidesSafeFallback(t *testing.T) {
 			for _, disconnected := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/snapshot=%t/disconnected=%t", locale, snapshot, disconnected), func(t *testing.T) {
 					db := setupUserEnvTest(t)
-					if err := db.AutoMigrate(&orm.MultiAnswersChatHistory{}); err != nil {
+					if err := db.AutoMigrate(&orm.MultiAnswersChatHistory{}, &orm.TaskCenterTask{}); err != nil {
 						t.Fatal(err)
 					}
 					if err := db.Create(&orm.Conversation{ID: "dual-env", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {

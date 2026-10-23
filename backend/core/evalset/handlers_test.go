@@ -22,10 +22,10 @@ func newEvalSetTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
 	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", "http://%")
-	db := orm.OpenTestDB(t)
-	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
+	db := orm.MigrateTestDB(t,
+		&orm.EvalSetShard{}, &orm.EvalSet{}, &orm.EvalSetItem{}, &orm.EvalSetImportPreview{}, &orm.AsyncJob{},
+		&orm.Dataset{}, &orm.Document{}, &orm.KBModel{}, &orm.ACLModel{}, &orm.UserGroupModel{},
+	)
 	store.Init(db.DB, db.DB, nil)
 	acl.InitStore(db)
 	seedEvalSetShard(t, db, DefaultShardID, 0, 0)

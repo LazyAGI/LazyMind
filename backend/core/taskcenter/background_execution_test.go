@@ -11,7 +11,7 @@ import (
 func TestBackgroundExecutionRecoveryRejectsForeignRunAndUnboundScope(t *testing.T) {
 	for _, scenario := range []string{"foreign-run", "foreign-owner", "unbound"} {
 		t.Run(scenario, func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newNotificationTestDB(t).DB
 			now := time.Now().UTC()
 			owner := "owner"
 			if scenario == "foreign-owner" {
@@ -52,7 +52,7 @@ func TestBackgroundExecutionRecoveryRejectsForeignRunAndUnboundScope(t *testing.
 func TestBackgroundExecutionLegacyWindowAndAmbiguity(t *testing.T) {
 	for _, scenario := range []string{"archived-boundary", "terminal-boundary", "ambiguous"} {
 		t.Run(scenario, func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newNotificationTestDB(t).DB
 			now := time.Now().UTC()
 			task := orm.TaskCenterTask{ID: "old", UserID: "owner", ConversationID: "conv", TaskType: "background_chat", Status: "running", CreatedAt: now.Add(-3 * time.Minute)}
 			if err := db.Create(&task).Error; err != nil {
@@ -91,7 +91,7 @@ func TestBackgroundExecutionLegacyWindowAndAmbiguity(t *testing.T) {
 }
 
 func TestBackgroundExecutionBindingPreservesProgressAndRejectsRebinding(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	if err := db.Create(&orm.Conversation{ID: "conv", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestBackgroundExecutionBindingPreservesProgressAndRejectsRebinding(t *testi
 }
 
 func TestBackgroundExecutionProjectionRechecksWorkflowBoundary(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newNotificationTestDB(t).DB
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Conversation{ID: "conv", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
 		t.Fatal(err)

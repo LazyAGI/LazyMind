@@ -18,7 +18,11 @@ func TestResumedSubagentBelongsToNewChatRound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "offline", 503) }))
 	t.Cleanup(server.Close)
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-	db := orm.MigrateAllModelsForTest(t)
+	db := orm.MigrateTestDB(t,
+		&orm.Conversation{}, &orm.ConversationWorkspaceBinding{}, &orm.UserEnvironmentVariable{},
+		&orm.SubAgentArtifact{}, &orm.SubAgentStep{}, &orm.SubAgentTask{},
+		&orm.TaskAttemptTiming{}, &orm.TaskExecutionTiming{}, &orm.WorkflowEvent{}, &orm.WorkflowSessionStep{},
+	)
 	shared, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "resume.db"))
 	if err != nil {
 		t.Fatal(err)

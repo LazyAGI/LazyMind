@@ -56,7 +56,7 @@ func installChatCloudCatalog(t *testing.T) {
 }
 
 func TestChatCatalogUsesCloudAsDefaultWhenNoLocalModelExists(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	installChatCloudCatalog(t)
 
 	response, err := buildChatModelsResponse(context.Background(), database.DB, "user-1", nil)
@@ -75,7 +75,7 @@ func TestChatCatalogUsesCloudAsDefaultWhenNoLocalModelExists(t *testing.T) {
 }
 
 func TestConversationFixedCloudSelectionBuildsOnlyInMemoryRuntimeConfig(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	db := database.DB
 	installChatCloudCatalog(t)
 	mode := chatModelModeFixed
@@ -113,7 +113,7 @@ func TestConversationFixedCloudSelectionBuildsOnlyInMemoryRuntimeConfig(t *testi
 }
 
 func TestDeprecatedCloudChatModelRemainsVisibleButIsNotAnAutomaticCandidate(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	modelprovider.SetCloudCatalogProvider(staticChatCloudCatalog{catalog: modelprovider.CloudModelCatalog{
 		Known: true, Available: true, ProviderID: modelprovider.CloudSystemProviderID,
 		ProviderName: modelprovider.CloudSystemProviderName,

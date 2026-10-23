@@ -20,7 +20,13 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "offline", 503) }))
 	t.Cleanup(server.Close)
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-	db := orm.MigrateAllModelsForTest(t)
+	db := orm.MigrateTestDB(t,
+		&orm.Conversation{}, &orm.ConversationToolGrant{}, &orm.ConversationWorkspaceBinding{}, &orm.LocalWorkspace{},
+		&orm.SubAgentArtifact{}, &orm.SubAgentStep{}, &orm.SubAgentTask{}, &orm.UserEnvironmentVariable{},
+		&orm.TaskAttemptTiming{}, &orm.TaskExecutionTiming{}, &orm.WorkflowEvent{}, &orm.WorkflowSessionStep{},
+		&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
+		&orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{}, &orm.UserSelectedProvider{},
+	)
 	seedAvailableChatModel(t, db.DB, "owner", "provider-task", "group-task", "model-task", "OpenAI", "task", "gpt-task", "llm", true, "fixture-task")
 	seedSelectedChatModel(t, db.DB, "owner", "model-task", false)
 	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))

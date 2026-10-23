@@ -1929,5 +1929,6 @@
   "2003215": {"zh-CN": "邮件读取失败，请稍后重试", "en-US": "Unable to read the email. Retry later."},
   "2003216": { "en-US": "Desktop does not support office conversion; upload docx, pptx or pdf instead", "zh-CN": "桌面版不支持 Office 格式转换，请改为上传 DOCX、PPTX 或 PDF 文件" },
   "2003217": { "en-US": "Document changed; native parsing must be retried", "zh-CN": "文件已发生变化，请重新执行本地解析" },
-  "2003218": { "en-US": "Select a processing level before ingesting retained files", "zh-CN": "请先选择高于仅储存的处理级别，再对已储存文件执行入库" }
+  "2003218": { "en-US": "Select a processing level before ingesting retained files", "zh-CN": "请先选择高于仅储存的处理级别，再对已储存文件执行入库" },
+  "2003219": { "en-US": "Failed to update the side chat source", "zh-CN": "更新侧聊引用失败" }
 }

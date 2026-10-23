@@ -11,7 +11,7 @@ import (
 func TestAutoChatModelKeepsSuccessfulCloudFallback(t *testing.T) {
 	for _, scenario := range []string{"next_round", "new_local_default", "cloud_unavailable"} {
 		t.Run(scenario, func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newChatExecutionTestDB(t).DB
 			installChatCloudCatalog(t)
 			seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-a", "llm", true, "fixture-a")
 			seedSelectedChatModel(t, db, "user-1", "model-a", false)
@@ -87,7 +87,7 @@ func TestAutoChatModelKeepsSuccessfulCloudFallback(t *testing.T) {
 }
 
 func TestAutoChatModelDoesNotEnableAnUnselectedCloudFallback(t *testing.T) {
-	db := newPromptTestDB(t).DB
+	db := newChatExecutionTestDB(t).DB
 	installChatCloudCatalog(t)
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-a", "llm", true, "fixture-a")
 	seedSelectedChatModel(t, db, "user-1", "model-a", false)

@@ -21,12 +21,7 @@ import (
 
 func newPromptTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-
-	db := orm.OpenTestDB(t)
-	if err := db.AutoMigrate(orm.AllModelsForDDL()...); err != nil {
-		t.Fatalf("auto migrate: %v", err)
-	}
-	return db
+	return orm.MigrateTestDB(t, &orm.Prompt{}, &orm.PromptCategory{}, &orm.PromptUserState{})
 }
 
 func TestPromptUsageUpsertQualifiesPostgresUsageCount(t *testing.T) {
@@ -63,7 +58,8 @@ func TestPromptUsageUpsertQualifiesPostgresUsageCount(t *testing.T) {
 }
 
 func TestPolishPromptCallsRewrite(t *testing.T) {
-	db := newPromptTestDB(t)
+	db := orm.MigrateTestDB(t, &orm.UserSelectedModel{}, &orm.UserSelectedCloudModel{},
+		&orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{})
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 

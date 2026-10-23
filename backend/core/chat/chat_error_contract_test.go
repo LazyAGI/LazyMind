@@ -40,7 +40,7 @@ func TestNonStreamHTTPAndHistoryShareFailureTerminal(t *testing.T) {
 		{name: "transport partial", text: "partial answer", truncated: true, wantStatus: "failed", wantReason: "runtime_failure", wantCode: "transport_error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newChatExecutionTestDB(t).DB
 			store.Init(db, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			conversation := orm.Conversation{ID: "contract-chat", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: time.Now(), UpdatedAt: time.Now()}}
@@ -129,7 +129,7 @@ func TestNonStreamHTTPAndHistoryShareFailureTerminal(t *testing.T) {
 func TestNonStreamTransientRequestFailureWritePreservesAcceptedTerminal(t *testing.T) {
 	for _, cancelRequest := range []bool{false, true} {
 		t.Run(fmt.Sprintf("cancelled=%t", cancelRequest), func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newChatExecutionTestDB(t).DB
 			stateStore := newRunDecisionTestStore(t)
 			store.Init(db, nil, stateStore)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -207,7 +207,7 @@ func TestNonStreamTransientFinalWritePreservesAcceptedTerminal(t *testing.T) {
 		{Status: "failed", Reason: "model_failure", Code: "authentication_failed", PartialOutput: true},
 	} {
 		t.Run(terminal.Reason, func(t *testing.T) {
-			db := newPromptTestDB(t).DB
+			db := newChatExecutionTestDB(t).DB
 			stateStore := newRunDecisionTestStore(t)
 			store.Init(db, nil, stateStore)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })

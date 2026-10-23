@@ -223,6 +223,13 @@ func TestResolveForkRelatedErrorsUseSpecificCodes(t *testing.T) {
 	}
 }
 
+func TestResolveSidechatSourceUpdateFailureUsesSpecificCode(t *testing.T) {
+	appErr := ResolveAppError("update sidechat source failed", 500)
+	if appErr.Code != 2003219 || appErr.HTTPStatus != 500 {
+		t.Fatalf("resolved error = %#v, want code 2003219 and HTTP status 500", appErr)
+	}
+}
+
 func TestResolveMaintenanceErrorsUseSpecificCodes(t *testing.T) {
 	for _, sample := range []struct {
 		message string
