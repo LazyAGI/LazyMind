@@ -551,6 +551,38 @@ describe("ChatInput model switch save lock", () => {
     expect(screen.getByTestId("local-workspace-control")).toHaveTextContent("conversation-1");
   });
 
+  it("reports whether the resource picker is open and closes after choosing an action", async () => {
+    render(<ChatInput value="" onChange={vi.fn()} isChatContent
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+    const trigger = screen.getByRole("button", { name: "chat.addResource" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const attachment = await screen.findByRole("button", { name: /chat\.addAttachment/ });
+    expect(document.getElementById(trigger.getAttribute("aria-controls")!)).toContainElement(attachment);
+
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("button", { name: /chat\.promptTemplate/ }));
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps the resource picker closed when the composer is disabled", () => {
+    render(<ChatInput value="" onChange={vi.fn()} isChatContent disabled
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+
+    const trigger = screen.getByRole("button", { name: "chat.addResource" });
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute("aria-disabled", "true");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /chat\.addAttachment/ })).not.toBeInTheDocument();
+  });
+
   it("hides knowledge-base selection for inherited child conversations", async () => {
     render(
       <ChatInput
@@ -567,7 +599,7 @@ describe("ChatInput model switch save lock", () => {
       />,
     );
 
-    fireEvent.click(screen.getByText("chat.addResource"));
+    fireEvent.click(screen.getByRole("button", { name: "chat.addResource" }));
 
     expect(
       await screen.findByRole("button", { name: /chat\.addAttachment/ }),

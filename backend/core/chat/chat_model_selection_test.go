@@ -87,7 +87,7 @@ func seedSelectedChatModel(t *testing.T, db *gorm.DB, owner, modelID string, sha
 }
 
 func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	db := database.DB
 
 	catalogDefault := seedAvailableChatModel(t, db, "user-1", "provider-own", "group-own", "model-catalog-default", "DeepSeek", "个人连接", "DeepSeek-V3", "llm", true, "own-secret")
@@ -144,7 +144,7 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 }
 
 func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	db := database.DB
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-default", "llm", true, "secret-a")
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "DeepSeek", "B", "deepseek-chat", "llm", true, "secret-b")
@@ -220,7 +220,7 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 }
 
 func TestAutoChatModelStaysWithSuccessfulModelAndRoutingIsReadOnly(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	db := database.DB
 	seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "Default", "Default", "default-chat", "llm", true, "secret-default")
 	seedAvailableChatModel(t, db, "user-1", "provider-other", "group-other", "model-other", "Other", "Other", "other-chat", "llm", true, "secret-other")
@@ -335,7 +335,7 @@ func TestAutoChatModelUsesProviderFailureOnlyForNextTurn(t *testing.T) {
 		{name: "cancelled", terminal: RunTerminal{Status: "cancelled", Reason: "user_cancelled"}, wantModelID: "model-default"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			database := newPromptTestDB(t)
+			database := newChatModelTestDB(t)
 			db := database.DB
 			seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "Default", "Default", "default-chat", "llm", true, "secret-default")
 			seedAvailableChatModel(t, db, "user-1", "provider-other", "group-other", "model-other", "Other", "Other", "other-chat", "llm", true, "secret-other")
@@ -379,7 +379,7 @@ func TestAutoChatModelUsesProviderFailureOnlyForNextTurn(t *testing.T) {
 }
 
 func TestLastSuccessfulChatModelIgnoresLegacyAttemptedSnapshot(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	db := database.DB
 	mode := chatModelModeAuto
 	conversation := orm.Conversation{ID: "legacy-attempt", ChatModelMode: &mode, ChatModelVersion: 1, ChatModelSnapshot: json.RawMessage(`{"model_id":"attempted","model_name":"Attempted"}`)}
@@ -448,7 +448,7 @@ func TestLegacyAutoRetryRespectsExplicitSelectionReset(t *testing.T) {
 		{name: "explicit Auto reset", version: 3, wantModelID: "model-b"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			database := newPromptTestDB(t)
+			database := newChatModelTestDB(t)
 			db := database.DB
 			seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "A", "A", "a-chat", "llm", true, "secret-a")
 			seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "B", "B", "b-chat", "llm", true, "secret-b")
@@ -486,7 +486,7 @@ func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
 			{name: "cancelled", terminal: RunTerminal{Status: "cancelled", Reason: "user_cancelled"}},
 		} {
 			t.Run(replyMode+"/"+test.name, func(t *testing.T) {
-				database := newPromptTestDB(t)
+				database := newChatExecutionTestDB(t)
 				db := database.DB
 				seedAvailableChatModel(t, db, "user-1", "provider-default", "group-default", "model-default", "Default", "Default", "default-chat", "llm", true, "secret-default")
 				seedSelectedChatModel(t, db, "user-1", "model-default", false)
@@ -569,7 +569,7 @@ func TestChatModelSuccessPersistsAcrossReplyModes(t *testing.T) {
 }
 
 func TestHostResponsePreservesLastSuccessfulChatModel(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "A", "A", "a-chat", "llm", true, "secret-a")
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "B", "B", "b-chat", "llm", true, "secret-b")
@@ -616,7 +616,7 @@ func TestHostResponsePreservesLastSuccessfulChatModel(t *testing.T) {
 }
 
 func TestChatConversationPersistsSafeModelPreflightFailure(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -803,7 +803,7 @@ func TestChatConversationPersistsUnavailableInitialSelection(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			database := newPromptTestDB(t)
+			database := newChatExecutionTestDB(t)
 			db := database.DB
 			store.Init(db, nil, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -941,7 +941,7 @@ func TestChatConversationPersistsUnavailableInitialSelection(t *testing.T) {
 }
 
 func TestConversationModelHandlersPersistVersionAndBlockActiveRuns(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	db := database.DB
 	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

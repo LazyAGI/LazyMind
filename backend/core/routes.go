@@ -508,6 +508,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}/fork-preview", []string{"qa.read"}, chat.PreviewConversationFork)
 	handleAPI(r, "POST", "/conversations/{conversation_id}/forks", []string{"qa.write"}, chat.CreateConversationFork)
 	handleAPI(r, "POST", "/conversations/{parent_id}/sidechat", []string{"qa.write"}, chat.CreateSidechat)
+	handleAPI(r, "PATCH", "/conversations/{child_id}/sidechat", []string{"qa.write"}, chat.UpdateSidechatSource)
 	handleAPI(r, "POST", "/conversations/{child_id}/retain", []string{"qa.write"}, chat.RetainSidechat)
 	handleAPI(r, "DELETE", "/conversations/{child_id}/sidechat", []string{"qa.write"}, chat.DiscardSidechat)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:promote", []string{"qa.write"}, chat.PromoteConversation)

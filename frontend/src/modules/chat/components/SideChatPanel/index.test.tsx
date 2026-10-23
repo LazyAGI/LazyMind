@@ -12,6 +12,7 @@ import {
   createSideChat,
   deleteSideChat,
   patchSideChatThinkingDepth,
+  patchSideChatSource,
   retainSideChat,
 } from "./api";
 
@@ -101,6 +102,7 @@ vi.mock("./api", () => ({
   createSideChat: vi.fn(),
   deleteSideChat: vi.fn(),
   patchSideChatThinkingDepth: vi.fn(),
+  patchSideChatSource: vi.fn(),
   retainSideChat: vi.fn(),
 }));
 
@@ -152,6 +154,7 @@ describe("SideChatPanel", () => {
     vi.mocked(patchSideChatThinkingDepth)
       .mockReset()
       .mockResolvedValue(undefined);
+    vi.mocked(patchSideChatSource).mockReset().mockImplementation(async (_id, source) => ({ ...child, selectedText: source?.selectedText }));
     mocks.closeStream.mockReset();
     mocks.warning.mockReset();
     mocks.success.mockReset();
@@ -188,7 +191,7 @@ describe("SideChatPanel", () => {
 
   it.each([
     ["chat.sideChat.clear", "chat.sideChat.clearTitle"],
-    ["chat.sideChat.close", "chat.sideChat.closeConfirmTitle"],
+    ["chat.sideChat.discard", "chat.sideChat.closeConfirmTitle"],
   ])("hides the %s confirmation when its parent is not visible", async (action, title) => {
     const onClose = vi.fn();
     const props = { open: true, parentConversationId: "parent-1", onClose };
@@ -233,6 +236,7 @@ describe("SideChatPanel", () => {
       chatConfig: { knowledgeBaseId: ["kb-1"] },
     });
     expect(mocks.latestChatProps.setChatConfig).toBeUndefined();
+    expect(screen.getByRole("dialog", { name: "chat.sideChat.title" })).toBeVisible();
     expect(document.querySelector(".ant-drawer-mask")).toBeNull();
     expect(
       screen.getByRole("button", { name: "chat.sideChat.retain" }),
@@ -306,7 +310,7 @@ describe("SideChatPanel", () => {
     act(() => mocks.latestChatProps.onRequestPendingChange(true));
 
     expect(
-      screen.getByRole("button", { name: "chat.sideChat.close" }),
+      screen.getByRole("button", { name: "chat.sideChat.discard" }),
     ).toBeDisabled();
     expect(
       screen.getByRole("button", { name: "chat.sideChat.retain" }),
@@ -336,7 +340,7 @@ describe("SideChatPanel", () => {
     }
     const { onClose } = await renderSideChat();
 
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.discard" }));
 
     const dialog = (await screen.findByText("chat.sideChat.closeConfirmTitle")).closest<HTMLElement>('[role="dialog"]')!;
     expect(deleteSideChat).not.toHaveBeenCalled();
@@ -351,7 +355,7 @@ describe("SideChatPanel", () => {
     const { onClose } = await renderSideChat();
     sendSideChatQuestion();
 
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.discard" }));
     expect(screen.getByText("chat.sideChat.closeConfirmTitle")).toBeInTheDocument();
     expect(deleteSideChat).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
@@ -363,17 +367,22 @@ describe("SideChatPanel", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("discards a generating draft when a new selection remounts the panel", async () => {
-    const props = { open: true, parentConversationId: "parent-1", source: { selectedText: "选文" }, onClose: vi.fn() };
-    const view = render(<SideChatPanel key="selection-1" {...props} />);
+  it.each(["streaming", "pending"])("queues a changed quote during %s without interrupting the live conversation", async (state) => {
+    const props = { open: true, parentConversationId: "parent-1", onClose: vi.fn() };
+    const view = render(<SideChatPanel {...props} source={{ selectedText: "第一段" }} />);
     await screen.findByTestId("side-chat-conversation");
-    act(() => mocks.latestChatProps.onStreamingChange(true));
-    vi.mocked(createSideChat).mockResolvedValueOnce({ ...child, id: "child-2" });
-    view.rerender(<SideChatPanel key="selection-2" {...props} />);
-    await waitFor(() => expect(createSideChat).toHaveBeenCalledTimes(2));
-    expect(deleteSideChat).toHaveBeenCalledWith("child-1");
-    expect(mocks.closeStream).toHaveBeenCalledWith("child-1");
-    expect(mocks.warning).not.toHaveBeenCalled();
+    const transcript = screen.getByTestId("side-chat-conversation");
+    act(() => state === "streaming" ? mocks.latestChatProps.onStreamingChange(true) : mocks.latestChatProps.onRequestPendingChange(true));
+    view.rerender(<SideChatPanel {...props} source={{ selectedText: "第二段" }} />);
+    expect(patchSideChatSource).not.toHaveBeenCalled();
+    expect(screen.getByText("第一段")).toBeInTheDocument();
+    act(() => state === "streaming" ? mocks.latestChatProps.onStreamingChange(false) : mocks.latestChatProps.onRequestPendingChange(false));
+    expect(await screen.findByText("第二段")).toBeInTheDocument();
+    expect(patchSideChatSource).toHaveBeenCalledWith("child-1", { selectedText: "第二段" });
+    expect(screen.getByTestId("side-chat-conversation")).toBe(transcript);
+    expect(mocks.chatMounts).toBe(1);
+    expect(deleteSideChat).not.toHaveBeenCalled();
+    expect(mocks.closeStream).not.toHaveBeenCalled();
   });
 
   it.each(["discard", "retain"])("confirms a close from references and %s before closing", async (choice) => {
@@ -459,7 +468,7 @@ describe("SideChatPanel", () => {
     vi.mocked(retainSideChat).mockRejectedValue(new Error("failed"));
     const { onClose } = await renderSideChat();
     sendSideChatQuestion();
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.close" }));
+    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.discard" }));
     const dialog = (await screen.findByText("chat.sideChat.closeConfirmTitle")).closest<HTMLElement>('[role="dialog"]')!;
     fireEvent.click(within(dialog).getByRole("button", { name: "chat.sideChat.retain" }));
     await waitFor(() => expect(retainSideChat).toHaveBeenCalled());
@@ -468,46 +477,81 @@ describe("SideChatPanel", () => {
     expect(dialog).toBeVisible();
   });
 
-  it("rejects replacement of an active unretained draft", async () => {
+  it.each([false, true])("updates only the reference while preserving the conversation (retained: %s)", async (retained) => {
     const view = await renderSideChat({ selectedText: "第一段" });
-
     sendSideChatQuestion();
-    view.rerender(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        source={{ selectedText: "第二段" }}
-        onClose={vi.fn()}
-      />,
-    );
-    await waitFor(() => expect(mocks.warning).toHaveBeenCalled());
+    if (retained) {
+      fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.retain" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "chat.sideChat.retained" })).toBeDisabled());
+    }
+    const transcript = screen.getByTestId("side-chat-conversation");
+    view.rerender(<SideChatPanel open parentConversationId="parent-1" source={{ selectedText: "第二段", historyId: "h2" }} onClose={vi.fn()} />);
+    expect(await screen.findByText("第二段")).toBeInTheDocument();
+    expect(patchSideChatSource).toHaveBeenCalledWith("child-1", { selectedText: "第二段", historyId: "h2" });
+    expect(screen.getByTestId("side-chat-conversation")).toBe(transcript);
+    expect(mocks.chatMounts).toBe(1);
+    expect(mocks.chatUnmounts).toBe(0);
     expect(createSideChat).toHaveBeenCalledTimes(1);
+    expect(deleteSideChat).not.toHaveBeenCalled();
+    expect(mocks.warning).not.toHaveBeenCalled();
   });
 
-  it("keeps a retained side chat active when its source changes during generation", async () => {
+  it("retries a reference update that overlaps server-side stream cleanup", async () => {
+    vi.mocked(patchSideChatSource).mockRejectedValueOnce({ response: { status: 409 } });
     const view = await renderSideChat({ selectedText: "第一段" });
-
-    sendSideChatQuestion();
-    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.retain" }));
-    await waitFor(() => expect(retainSideChat).toHaveBeenCalledWith("child-1"));
-
-    act(() => mocks.latestChatProps.onStreamingChange(true));
-    view.rerender(
-      <SideChatPanel
-        open
-        parentConversationId="parent-1"
-        source={{ selectedText: "第二段" }}
-        onClose={vi.fn()}
-      />,
-    );
-
-    await waitFor(() =>
-      expect(mocks.warning).toHaveBeenCalledWith(
-        "chat.sideChat.generatingUnavailable",
-      ),
-    );
+    view.rerender(<SideChatPanel open parentConversationId="parent-1" source={{ selectedText: "第二段" }} onClose={vi.fn()} />);
+    expect(await screen.findByText("第二段")).toBeInTheDocument();
+    expect(patchSideChatSource).toHaveBeenCalledTimes(2);
+    expect(mocks.chatMounts).toBe(1);
     expect(createSideChat).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("side-chat-conversation")).toBeInTheDocument();
+    expect(deleteSideChat).not.toHaveBeenCalled();
+  });
+
+  it("keeps the previous reference and transcript on update failure and retries in place", async () => {
+    vi.mocked(patchSideChatSource).mockRejectedValueOnce(new Error("source update failed"));
+    const view = await renderSideChat({ selectedText: "第一段" });
+    const transcript = screen.getByTestId("side-chat-conversation");
+    view.rerender(<SideChatPanel open parentConversationId="parent-1" source={{ selectedText: "第二段" }} onClose={vi.fn()} />);
+    expect(await screen.findByText("errors.2000509")).toBeInTheDocument();
+    expect(screen.getByText("第一段")).toBeInTheDocument();
+    expect(screen.getByTestId("side-chat-conversation")).toBe(transcript);
+    expect(patchSideChatSource).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "chat.sideChat.retry" }));
+    expect(await screen.findByText("第二段")).toBeInTheDocument();
+    expect(mocks.chatMounts).toBe(1);
+    expect(createSideChat).toHaveBeenCalledTimes(1);
+    expect(deleteSideChat).not.toHaveBeenCalled();
+  });
+
+  it("clears obsolete reference errors when returning to the applied quote and allows selecting the failed quote again", async () => {
+    vi.mocked(patchSideChatSource).mockRejectedValueOnce(new Error("source update failed"));
+    const view = await renderSideChat({ selectedText: "第一段" });
+    const props = { open: true, parentConversationId: "parent-1", onClose: vi.fn() };
+    view.rerender(<SideChatPanel {...props} source={{ selectedText: "第二段" }} />);
+    await screen.findByText("errors.2000509");
+    view.rerender(<SideChatPanel {...props} source={{ selectedText: "第一段" }} />);
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByText("第一段")).toBeInTheDocument();
+    view.rerender(<SideChatPanel {...props} source={{ selectedText: "第二段" }} />);
+    expect(await screen.findByText("第二段")).toBeInTheDocument();
+    expect(patchSideChatSource).toHaveBeenCalledTimes(2);
+    expect(mocks.chatMounts).toBe(1);
+  });
+
+  it("serializes rapid quote changes and applies the latest quote without remounting", async () => {
+    let finishFirst!: (value: typeof child) => void;
+    vi.mocked(patchSideChatSource).mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }));
+    const view = await renderSideChat({ selectedText: "第一段" });
+    const props = { open: true, parentConversationId: "parent-1", onClose: vi.fn() };
+    view.rerender(<SideChatPanel {...props} source={{ selectedText: "第二段" }} />);
+    await waitFor(() => expect(patchSideChatSource).toHaveBeenCalledTimes(1));
+    view.rerender(<SideChatPanel {...props} source={{ selectedText: "第三段" }} />);
+    expect(patchSideChatSource).toHaveBeenCalledTimes(1);
+    await act(async () => finishFirst({ ...child, selectedText: "第二段" }));
+    expect(await screen.findByText("第三段")).toBeInTheDocument();
+    expect(patchSideChatSource).toHaveBeenLastCalledWith("child-1", { selectedText: "第三段" });
+    expect(mocks.chatMounts).toBe(1);
+    expect(deleteSideChat).not.toHaveBeenCalled();
   });
 
   it("preserves the mounted transcript when clearing fails", async () => {

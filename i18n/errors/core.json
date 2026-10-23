@@ -2007,5 +2007,6 @@
   "2005037": {"en-US": "Change the incompatible default model selection before editing this model", "zh-CN": "此更改会使默认模型选择失效，请先切换默认模型"},
   "2005038": {"en-US": "Change the fixed conversation model before editing this model", "zh-CN": "此更改会使会话固定模型失效，请先切换会话模型"},
   "2005039": {"en-US": "This embedding model is in use; change default selections and downgrade indexed knowledge bases before editing its identity", "zh-CN": "此向量模型正在使用中；修改模型 ID 或类型前，请先切换默认模型并将相关已索引知识库降级"},
-  "2005040": {"en-US": "The selected model does not support this default role", "zh-CN": "所选模型不支持此默认模型用途"}
+  "2005040": {"en-US": "The selected model does not support this default role", "zh-CN": "所选模型不支持此默认模型用途"},
+  "2003219": {"en-US": "Failed to update the side chat source", "zh-CN": "更新侧聊引用失败"}
 }

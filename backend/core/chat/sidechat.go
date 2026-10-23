@@ -160,6 +160,12 @@ type createSidechatRequest struct {
 	ThinkingDepth   string `json:"thinking_depth,omitempty"`
 }
 
+type updateSidechatSourceRequest struct {
+	SourceHistoryID string `json:"source_history_id,omitempty"`
+	SourceSeq       *int   `json:"source_seq,omitempty"`
+	SelectedText    string `json:"selected_text,omitempty"`
+}
+
 type conversationSourceContextSnapshot struct {
 	Messages []map[string]any                               `json:"messages,omitempty"`
 	Files    map[string][]string                            `json:"files,omitempty"`
@@ -185,17 +191,28 @@ func sidechatUserID(r *http.Request) string {
 	return userID
 }
 
-func decodeCreateSidechatRequest(w http.ResponseWriter, r *http.Request) (createSidechatRequest, error) {
-	var body createSidechatRequest
+func decodeSidechatRequest(w http.ResponseWriter, r *http.Request, body any) error {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSidechatRequestBodyBytes))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-		return body, err
+	if err := decoder.Decode(body); err != nil && !errors.Is(err, io.EOF) {
+		return err
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return body, errors.New("invalid trailing JSON")
+		return errors.New("invalid trailing JSON")
 	}
+	return nil
+}
+
+func decodeCreateSidechatRequest(w http.ResponseWriter, r *http.Request) (createSidechatRequest, error) {
+	var body createSidechatRequest
+	if err := decodeSidechatRequest(w, r, &body); err != nil {
+		return body, err
+	}
+	return normalizeSidechatSourceRequest(body)
+}
+
+func normalizeSidechatSourceRequest(body createSidechatRequest) (createSidechatRequest, error) {
 	body.SourceHistoryID = strings.TrimSpace(body.SourceHistoryID)
 	body.SelectedText = strings.TrimSpace(body.SelectedText)
 	body.ThinkingDepth = strings.ToLower(strings.TrimSpace(body.ThinkingDepth))
@@ -670,6 +687,116 @@ func CreateSidechat(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeConversationJSON(w, http.StatusOK, map[string]any{
 			"conversation": sidechatConversationPayload(*child, parentName),
+		})
+	}
+}
+
+// UpdateSidechatSource refreshes the parent's frozen reference context while
+// preserving the child's identity, messages, settings, and retained status.
+func UpdateSidechatSource(w http.ResponseWriter, r *http.Request) {
+	childID := strings.TrimSpace(mux.Vars(r)["child_id"])
+	if childID == "" || len(childID) > maxConversationIDLength {
+		common.ReplyErr(w, "invalid child conversation", http.StatusBadRequest)
+		return
+	}
+	var sourceRequest updateSidechatSourceRequest
+	if err := decodeSidechatRequest(w, r, &sourceRequest); err != nil {
+		common.ReplyErr(w, "invalid sidechat request", http.StatusBadRequest)
+		return
+	}
+	body, err := normalizeSidechatSourceRequest(createSidechatRequest{
+		SourceHistoryID: sourceRequest.SourceHistoryID,
+		SourceSeq:       sourceRequest.SourceSeq,
+		SelectedText:    sourceRequest.SelectedText,
+	})
+	if err != nil {
+		common.ReplyErr(w, "invalid sidechat request", http.StatusBadRequest)
+		return
+	}
+	userID := sidechatUserID(r)
+	db := store.DB().WithContext(r.Context())
+	var child orm.Conversation
+	if err := db.Where(
+		"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL",
+		childID, userID,
+	).Take(&child).Error; err != nil || !isSidechatConversation(child) {
+		common.ReplyErr(w, "sidechat not found", http.StatusNotFound)
+		return
+	}
+	if reason, err := conversationModelSwitchBlock(r.Context(), db, userID, childID); err != nil {
+		common.ReplyErr(w, "check sidechat status failed", http.StatusInternalServerError)
+		return
+	} else if reason != "" {
+		common.ReplyErr(w, "conversation is busy", http.StatusConflict)
+		return
+	}
+	guard, err := acquireSidechatNextRequestGuard(r.Context(), store.State(), childID, "")
+	if errors.Is(err, errSidechatRequestBusy) {
+		common.ReplyErr(w, "conversation is busy", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		common.ReplyErr(w, errSidechatStateUnavailable.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	defer guard.Release()
+	parentName := ""
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var parent orm.Conversation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL",
+			*child.ParentConversationID, userID,
+		).Take(&parent).Error; err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL", childID, userID,
+		).Take(&child).Error; err != nil {
+			return err
+		}
+		if !isSidechatConversation(child) || *child.ParentConversationID != parent.ID {
+			return gorm.ErrRecordNotFound
+		}
+		source, histories, err := resolveSidechatSource(r.Context(), tx, parent.ID, body)
+		if err != nil {
+			return err
+		}
+		snapshot, err := snapshotSidechatContext(r.Context(), tx, parent.ID, histories, sidechatDatasetCaller(r, userID))
+		if err != nil {
+			return err
+		}
+		var sourceID *string
+		var sourceSeq *int
+		if source != nil {
+			sourceID, sourceSeq = &source.ID, &source.Seq
+		}
+		if err := tx.Model(&orm.Conversation{}).Where("id = ? AND create_user_id = ?", childID, userID).
+			Updates(map[string]any{
+				"source_history_id": sourceID, "source_seq": sourceSeq,
+				"source_selected_text": body.SelectedText, "source_context": snapshot,
+				"updated_at": time.Now().UTC(),
+			}).Error; err != nil {
+			return err
+		}
+		parentName = parent.DisplayName
+		return tx.First(&child, "id = ?", childID).Error
+	})
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		common.ReplyErr(w, "sidechat not found", http.StatusNotFound)
+	case errors.Is(err, errSidechatSourceMissing):
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+	case errors.Is(err, errSidechatSourceUnsettled):
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, doc.ErrChatSourceAttachmentUnavailable):
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+	case errors.Is(err, doc.ErrChatSourceAttachmentForbidden):
+		common.ReplyErr(w, err.Error(), http.StatusForbidden)
+	case err != nil:
+		common.ReplyErr(w, "update sidechat source failed", http.StatusInternalServerError)
+	default:
+		writeConversationJSON(w, http.StatusOK, map[string]any{
+			"conversation": sidechatConversationPayload(child, parentName),
 		})
 	}
 }

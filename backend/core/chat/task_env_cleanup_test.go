@@ -19,7 +19,7 @@ import (
 func TestChatExecutionIsTrackedBeforeUpstreamAndReleasedAfterCompletion(t *testing.T) {
 	for _, streaming := range []bool{false, true} {
 		t.Run(map[bool]string{false: "nonstream", true: "stream"}[streaming], func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t)
+			db := newChatExecutionTestDB(t)
 			shared := newRunDecisionTestStore(t)
 			store.Init(db.DB, nil, shared)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -91,7 +91,7 @@ func TestTaskRemovalExternalExecutorDoesNotRequirePythonChat(t *testing.T) {
 func TestTaskRemovalUsesStoredExecutionAndPreservesNewerExecution(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t)
+			db := newChatExecutionTestDB(t)
 			shared := newRunDecisionTestStore(t)
 			store.Init(db.DB, nil, shared)
 			previousTrash, previousRemoval := taskcenter.OnConversationTrashHook, taskcenter.OnRemovalCancelHook

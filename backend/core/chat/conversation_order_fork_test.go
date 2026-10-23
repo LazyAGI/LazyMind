@@ -14,7 +14,7 @@ import (
 
 func newForkOrderTestDB(t *testing.T) (*gorm.DB, map[string]orm.Conversation) {
 	t.Helper()
-	db := newPromptTestDB(t).DB
+	db := newConversationTestDB(t).DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	base := time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)

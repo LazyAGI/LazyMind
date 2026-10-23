@@ -133,10 +133,16 @@ function catalog(modelName = "DeepSeek-V3", version = 3): ChatModelCatalog {
 }
 
 describe("ChatModelSelector", () => {
-  it('shows the provider brand beside each model instead of the group heading', async () => {
+  it('shows the selected provider brand in the trigger and beside each model', async () => {
     fetchCatalogMock.mockResolvedValue(catalog());
     render(<ChatModelSelector />);
-    fireEvent.click(await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' }));
+    expect(screen.getByRole('button', { name: '当前模型：模型信息加载中' }).querySelector('img')).toBeNull();
+    const trigger = await screen.findByRole('button', { name: '当前模型：DeepSeek · DeepSeek-V3' });
+    const triggerIcon = trigger.querySelector('img');
+    expect(triggerIcon).toHaveAttribute('src', '/provider-icons/deepseek.svg');
+    expect(triggerIcon).toHaveAttribute('alt', '');
+    expect(triggerIcon?.parentElement).toHaveAttribute('aria-hidden', 'true');
+    fireEvent.click(trigger);
     const dialog = within(await screen.findByRole('dialog'));
     const deepseekOption = dialog.getByRole('button', { name: /DeepSeek-V3/ });
     const openaiOption = dialog.getByRole('button', { name: /GPT-4o/ });
@@ -307,9 +313,8 @@ describe("ChatModelSelector", () => {
       { mode: "auto" },
       expect.objectContaining({ mode: "auto", version: 0 }),
     );
-    expect(
-      await screen.findByRole("button", { name: "当前模型：Auto" }),
-    ).toBeInTheDocument();
+    const trigger = await screen.findByRole("button", { name: "当前模型：Auto" });
+    expect(trigger.querySelector("img")).toBeNull();
   });
 
   it("shows the most recently resolved model beside Auto", async () => {
@@ -325,11 +330,13 @@ describe("ChatModelSelector", () => {
 
     render(<ChatModelSelector conversationId="conversation-1" />);
 
-    expect(
-      await screen.findByRole("button", {
-        name: "当前模型：Auto · DeepSeek · DeepSeek-V3",
-      }),
-    ).toBeInTheDocument();
+    const trigger = await screen.findByRole("button", {
+      name: "当前模型：Auto · DeepSeek · DeepSeek-V3",
+    });
+    expect(trigger.querySelector("img")).toHaveAttribute(
+      "src",
+      "/provider-icons/deepseek.svg",
+    );
   });
 
   it("preserves an available new-chat choice when another selector loads", async () => {
@@ -380,11 +387,11 @@ describe("ChatModelSelector", () => {
 
     render(<ChatModelSelector onSelectionChange={onSelectionChange} />);
 
-    expect(
-      await screen.findByRole("button", {
-        name: "当前模型：Removed Provider · Removed Model · 模型不可用",
-      }),
-    ).toBeInTheDocument();
+    const trigger = await screen.findByRole("button", {
+      name: "当前模型：Removed Provider · Removed Model · 模型不可用",
+    });
+    expect(trigger.querySelector("img")).toBeNull();
+    expect(trigger.querySelector('[data-icon="api"]')).toBeInTheDocument();
     expect(
       useModelSelectionStore.getState().selections[
         NEW_CHAT_MODEL_SELECTION_KEY
