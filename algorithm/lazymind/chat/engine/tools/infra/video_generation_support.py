@@ -17,8 +17,8 @@ from lazymind.chat.engine.tools.infra.image_generation_support import (
     _register_generated_image_paths,
     resolve_tool_image_path,
 )
+from lazymind.chat.engine.tools.system_resources import generated_upload_directory
 from lazymind.chat.service.utils.static_file_url import (
-    _upload_root,
     basename_from_path,
     static_file_url_from_any,
 )
@@ -30,7 +30,6 @@ _DEFAULT_VIDEO_RATIO = '16:9'
 _DEFAULT_GIF_FPS = 10
 _DEFAULT_GIF_WIDTH = 480
 _VIDEO_SUFFIXES = ('.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v')
-_UPLOAD_SUBDIR = 'ai_generated'
 # Ark Seedance rejects first-frame images smaller than 300px on either side.
 _ARK_FIRST_FRAME_MIN_PX = 300
 # Cap concurrent Seedance / ffmpeg calls when the agent emits many tool_calls in one turn.
@@ -47,7 +46,7 @@ def _agentic_priority() -> int:
 def _ensure_ark_first_frame_size(path: str) -> str:
     """Upscale a local first-frame image when it is below Ark's minimum size.
 
-    Writes a JPEG under ai_generated/ and returns that path. Leaves the original
+    Writes a JPEG under the user's managed upload directory and returns that path. Leaves the original
     file untouched when already large enough or when the path is not a local image.
     """
     src = Path(str(path or '').strip())
@@ -75,8 +74,7 @@ def _ensure_ark_first_frame_size(path: str) -> str:
             resample = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS', Image.LANCZOS)
             resized = img.convert('RGB').resize((new_w, new_h), resample)
 
-            dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
-            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_dir = generated_upload_directory('generated-video-inputs')
             dest = dest_dir / f'{uuid.uuid4().hex}_ark_frame.jpg'
             resized.save(dest, format='JPEG', quality=95)
             lazyllm.LOG.info(
@@ -97,8 +95,7 @@ def _parse_generated_files(result: Any) -> List[str]:
 
 
 def _relocate_generated_video_to_upload(source_path: str) -> str:
-    dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir = generated_upload_directory('generated-videos')
     src = Path(source_path)
     suffix = src.suffix if src.suffix.lower() in _VIDEO_SUFFIXES else '.mp4'
     dest = dest_dir / f'{uuid.uuid4().hex}{suffix}'
@@ -227,8 +224,7 @@ def run_video_to_gif(
     if out_width < 16:
         raise ToolExecutionError('width must be at least 16')
 
-    dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
-    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_dir = generated_upload_directory('generated-gifs')
     dest = dest_dir / f'{uuid.uuid4().hex}.gif'
     palette = dest_dir / f'{uuid.uuid4().hex}_palette.png'
 
