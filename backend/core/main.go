@@ -910,7 +910,7 @@ func run(ctx context.Context) error {
 			PollInterval:    asyncConfig.PollInterval,
 			LockTTL:         asyncConfig.LockTTL,
 		})
-		backgroundDone = append(backgroundDone, runner.Done())
+		backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
 		paperChatRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
 		backgroundDone = append(backgroundDone, paperChatRunner.Done())
 		academic.RecoverPaperExpansions(runtimeCtx, store.DB())

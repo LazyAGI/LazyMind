@@ -111,7 +111,7 @@ func TestArxivBatchPinsRevisionBeforeDownloadAndKeepsItOnRetry(t *testing.T) {
 			t.Fatalf("download failure was hidden: %+v", item)
 		}
 	}
-	if len(queries) != 2 || queries[0] != "2404.06654" || queries[1] != "2404.06654v2" {
+	if len(queries) != 1 || queries[0] != "2404.06654" {
 		t.Fatalf("retry changed the selected revision: %v", queries)
 	}
 }

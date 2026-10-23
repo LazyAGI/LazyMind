@@ -10,6 +10,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/doc"
+	"lazymind/core/state"
 	"lazymind/core/store"
 	"net/http"
 	"net/http/httptest"
@@ -24,9 +25,15 @@ import (
 
 func arxivImportTestService(t *testing.T) (*arxivImportService, *atomic.Int32) {
 	t.Helper()
-	db := orm.MigrateTestDB(t, &orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}).DB
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
+	db := orm.MigrateTestDB(t, &orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.AcademicExpansion{}, &orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}).DB
 	previous, previousLazy, previousState := store.DB(), store.LazyLLMDB(), store.State()
-	store.Init(db, db, previousState)
+	shared, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shared.Close() })
+	store.Init(db, db, shared)
 	t.Cleanup(func() { store.Init(previous, previousLazy, previousState) })
 	sqlDB, _ := db.DB()
 	sqlDB.SetMaxOpenConns(1)

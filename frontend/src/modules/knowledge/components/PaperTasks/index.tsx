@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getChatConversationPath, CHAT_CONVERSATION_LIST_REFRESH_EVENT } from '@/modules/chat/constants/chat';
 import { deleteExpansion, getExpansion, launchPaperTask, listExpansions, resolvePaperSelection, retryPaperContent, type Expansion, type ExpansionDetail, type PaperTask, type WorkflowPaper } from '../../api/paperWorkflows';
-import { previewPaperImport, startReferenceImport, getPaperImportStatus, type ImportPreviewItem } from '../../api/academicReferences';
+import { previewPaperImport, startReferenceImport, getPaperImportStatus, type ImportPreviewItem, isImportPreviewExpired } from '../../api/academicReferences';
 
 interface Props {
     dataset: string;
@@ -74,6 +74,8 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
     const requestKey = useRef('');
     const requestInput = useRef('');
     const previewRequest = useRef(0);
+    const pendingPreview = useRef<{ key: string; promise: Promise<ImportPreviewItem[]> }>();
+    const pendingDetail = useRef<{ id: string; promise: Promise<ExpansionDetail> }>();
     const detailRequest = useRef(0);
     const detailTarget = useRef<string>();
     const taskLabel = (kind: string) => t(`paperTasks.task.${kind}`, { defaultValue: kind });
@@ -98,28 +100,46 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
             setActionError('');
             importRequestKeys.current.clear();
             previewRequest.current += 1;
+            pendingDetail.current = undefined; pendingPreview.current = undefined;
         }
         detailTarget.current = id;
         const request = ++detailRequest.current;
-        const result = await getExpansion(id);
-        if (request === detailRequest.current) setDetail(result);
+        const pending = pendingDetail.current?.id === id ? pendingDetail.current : { id, promise: getExpansion(id) };
+        pendingDetail.current = pending;
+        try {
+            const result = await pending.promise;
+            if (request === detailRequest.current) setDetail(result);
+        } finally { if (pendingDetail.current === pending) pendingDetail.current = undefined; }
     };
     const expansionID = params.get('expansion_id');
     useEffect(() => {
         if (expansionID) void openDetail(expansionID).catch(() => {});
     }, [expansionID]);
+    const detailActive = !!detail && (['pending', 'running'].includes(detail.record.status)
+        || detail.contents.some(content => ['pending', 'processing'].includes(content.status))
+        || detail.presence?.some(item => item.importing));
     useEffect(() => {
         if (!detail) return;
-        const timer = window.setInterval(() => {
-            if (detailTarget.current === detail.record.id) void openDetail(detail.record.id).catch(() => {});
-        }, 5000);
-        return () => window.clearInterval(timer);
-    }, [detail?.record.id]);
+        let running = false;
+        const refresh = async () => {
+            if (running || detailTarget.current !== detail.record.id) return;
+            running = true;
+            try { await openDetail(detail.record.id); } catch { /* Keep the last saved result visible. */ }
+            finally { running = false; }
+        };
+        const onFocus = () => { void refresh(); };
+        window.addEventListener('focus', onFocus);
+        const timer = detailActive ? window.setInterval(onFocus, 12000) : undefined;
+        return () => { window.removeEventListener('focus', onFocus); if (timer) window.clearInterval(timer); };
+    }, [detail?.record.id, detailActive]);
     useEffect(() => () => { previewRequest.current += 1; detailRequest.current += 1; detailTarget.current = undefined; }, []);
     useEffect(() => {
         if (!importBatches.length) return;
         let active = true;
+        let running = false;
         const refresh = async () => {
+            if (running) return;
+            running = true;
             try {
                 const statuses = await Promise.all(importBatches.map(async batch => ({ id: batch.id, status: await getPaperImportStatus(batch.id) })));
                 if (!active) return;
@@ -128,14 +148,14 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                     if (statuses.some(item => ['failed', 'completed_with_errors'].includes(item.status))) setActionError(t('paperTasks.importIncomplete'));
                     setImportBatches(current => current.filter(batch => !completed.includes(batch.id)));
                     importsChanged.current();
-                    if (detailTarget.current) void openDetail(detailTarget.current).catch(() => {});
+                    if (detailTarget.current) void openDetail(detailTarget.current).then(() => { if (detail) void refreshImportPreview(detail); }).catch(() => {});
                 }
             } catch {
                 // The persisted import continues; retry its status on the next tick.
-            }
+            } finally { running = false; }
         };
         void refresh();
-        const timer = window.setInterval(() => void refresh(), 2500);
+        const timer = window.setInterval(() => void refresh(), 12000);
         return () => { active = false; window.clearInterval(timer); };
     }, [dataset, importBatches]);
     const enter = (kind: PaperTask) => {
@@ -201,7 +221,12 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
         setPreview(current => current?.sourceKey === sourceKey && current.status === 'ready'
             ? current : { sourceKey, items: [], status: 'loading' });
         try {
-            const items = ids.length ? await previewPaperImport(ids, target.record.dataset_id, target.record.id) : [];
+            const key = `${sourceKey}:${ids.join(',')}`;
+            const pending = pendingPreview.current?.key === key ? pendingPreview.current : { key, promise: ids.length ? previewPaperImport(ids, target.record.dataset_id, target.record.id) : Promise.resolve([]) };
+            pendingPreview.current = pending;
+            let items: ImportPreviewItem[];
+            try { items = await pending.promise; }
+            finally { if (pendingPreview.current === pending) pendingPreview.current = undefined; }
             if (request === previewRequest.current) setPreview({ sourceKey, items, status: 'ready' });
         } catch {
             if (request === previewRequest.current) setPreview({ sourceKey, items: [], status: 'error' });
@@ -209,7 +234,12 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
     };
     useEffect(() => {
         if (source) void refreshImportPreview(source);
-    }, [detail, selection?.source, canImport]);
+    }, [source ? resultKey(source) : '', JSON.stringify(papers.map(item => [item.paper.paper_id, item.paper.source_version])), JSON.stringify(detail?.presence), canImport]);
+    useEffect(() => {
+        const onFocus = () => { if (source) void refreshImportPreview(source); };
+        window.addEventListener('focus', onFocus);
+        return () => window.removeEventListener('focus', onFocus);
+    }, [source ? resultKey(source) : '', canImport]);
     const previewMatches = (item: WorkflowPaper, entry?: ImportPreviewItem) => !item.paper.source_version ||
         (entry?.paper?.source_version === item.paper.source_version && entry.paper.source_provider === item.paper.source_provider);
     const previewItem = (target: ExpansionDetail, item: WorkflowPaper) => {
@@ -277,7 +307,12 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
             importsChanged.current();
             message.success(t('paperTasks.importSubmitted'));
             if (detailTarget.current === target.record.id) void openDetail(target.record.id).catch(() => {});
-        } catch {
+        } catch (error) {
+            if (isImportPreviewExpired(error)) {
+                await refreshImportPreview(target);
+                setActionError('导入预览已刷新，请确认论文及版本后重试');
+                return;
+            }
             setActionError(t('paperTasks.submitFailed'));
         } finally {
             submitting.current = undefined;
@@ -301,6 +336,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
         previewRequest.current += 1;
         detailRequest.current += 1;
         detailTarget.current = undefined;
+        pendingDetail.current = undefined; pendingPreview.current = undefined;
         setDetail(undefined);
         setPreview(undefined);
         importRequestKeys.current.clear();

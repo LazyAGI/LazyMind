@@ -901,6 +901,10 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var linkInput *WorkInput
+	if strings.TrimSpace(req.Identifier) != "" && req.ResolveExternal != nil && !*req.ResolveExternal {
+		replyError(w, 422, "UNRESOLVED_REFERENCES", "链接题录尚未解析，请先查询并确认文献")
+		return
+	}
 	if strings.TrimSpace(req.Identifier) != "" {
 		work, err := lookupPaperLink(r.Context(), req.Identifier)
 		if err != nil {
@@ -1015,6 +1019,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items := make([]PreviewItem, 0, len(works))
+	verified := map[string]PaperRef{}
 	for _, work := range works {
 		p := presenceByID[work.ID]
 		ref := paperRef(work)
@@ -1032,7 +1037,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 					version = requested
 				}
 			}
-			if work.ID != linkedWorkID {
+			if work.ID != linkedWorkID && resolveExternal {
 				metadata, e := arxivsource.NewClient().Lookup(r.Context(), work.ArxivIDBase+version)
 				if e != nil {
 					replyArxivImportError(w, ArxivImportResult{}, e)
@@ -1040,10 +1045,18 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 				}
 				ref = documentPaperRef(ref, marshal(arxivWorkInput(metadata)))
 				version = metadata.Version
+				verified[work.ID] = ref
 			}
 			ref.SourceVersion, ref.SourceProvider = version, "arxiv"
 			pinPaperURLs(&ref)
-			candidates = []FulltextCandidate{{URL: ref.PDFURL, SourceProvider: "arxiv", Version: version, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}}
+			if work.ID == linkedWorkID || resolveExternal {
+				verified[work.ID] = ref
+			}
+			if version != "" {
+				candidates = []FulltextCandidate{{URL: ref.PDFURL, SourceProvider: "arxiv", Version: version, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}}
+			} else if !resolveExternal {
+				candidates = nil
+			}
 		}
 		if expansion != nil && expansion.DiscoveryMode == "external" {
 			source, e := expansionSource(store.DB(), *expansion, work.ID)
@@ -1053,6 +1066,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			}
 			if source.Paper.PDFURL != "" {
 				ref = source.Paper
+				verified[work.ID] = ref
 				candidates = []FulltextCandidate{{URL: source.Paper.PDFURL, SourceProvider: source.Paper.SourceProvider, Version: source.Paper.SourceVersion, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}}
 			}
 		}
@@ -1084,7 +1098,12 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		items = append(items, PreviewItem{Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Title < items[j].Title })
-	common.ReplyJSON(w, map[string]any{"preview_token": uuid.NewString(), "target_dataset_id": req.TargetDatasetID, "items": items, "total": len(items)})
+	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified)
+	if err != nil {
+		replyError(w, 500, "IMPORT_PREVIEW_FAILED", err.Error())
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"preview_token": token, "target_dataset_id": req.TargetDatasetID, "items": items, "total": len(items)})
 }
 
 // Shared identities only gain missing metadata; document-specific corrections

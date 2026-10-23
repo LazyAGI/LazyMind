@@ -1102,6 +1102,24 @@ describe("paper library backend arXiv import", () => {
 
 
 describe("backend durable paper library", () => {
+  it("keeps polling a retry whose failed items are still waiting for the worker", async () => {
+    const waiting = { item_id: 'retry-item', batch_id: 'retry-batch', target_dataset_id: datasetId, work_id: 'retry-paper', title: 'Retry paper', status: 'failed' as const, batch_status: 'pending', stage: 'acquire', created_at: '2026-10-23T00:00:00Z', updated_at: '2026-10-23T00:00:00Z' };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      vi.mocked(listAcademicImportQueue).mockResolvedValue([waiting]);
+      await renderLibrary();
+      expect(screen.getByText('论文导入：0 篇待处理 · 1 篇进行中')).toBeInTheDocument();
+      const requests = vi.mocked(listAcademicImportQueue).mock.calls.length;
+      vi.mocked(listAcademicImportQueue).mockResolvedValue([{ ...waiting, status: 'succeeded', batch_status: 'succeeded', current_document: { document_id: 'saved', processing_status: 'ready' } }]);
+      await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+      expect(vi.mocked(listAcademicImportQueue).mock.calls.length).toBeGreaterThan(requests);
+      expect(screen.getByText('论文导入：0 篇待处理 · 0 篇进行中')).toBeInTheDocument();
+      const completedRequests = vi.mocked(listAcademicImportQueue).mock.calls.length;
+      await act(async () => { await vi.advanceTimersByTimeAsync(24000); });
+      expect(vi.mocked(listAcademicImportQueue).mock.calls.length).toBe(completedRequests);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("protects an edit draft while saving and restores editing after a failed write", async () => {
     let fail!: (error: Error) => void;
     vi.mocked(updatePaperIdentity).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));

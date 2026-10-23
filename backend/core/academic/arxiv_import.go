@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/doc"
+	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
@@ -45,6 +46,7 @@ type arxivImportRequest struct {
 	TargetDatasetID string `json:"target_dataset_id"`
 }
 type arxivImportService struct {
+	resolved   func(arxivsource.Metadata) error
 	db         *gorm.DB
 	lookup     func(context.Context, string) (arxivsource.Metadata, error)
 	acquire    func(context.Context, FulltextCandidate) (string, int64, error)
@@ -182,26 +184,20 @@ type arxivDocumentExt struct {
 	Marker     *arxivDocumentMarker `json:"arxiv_import,omitempty"`
 }
 
-func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, userID, userName string) (result ArxivImportResult, err error) {
-	paper, err := s.lookup(ctx, input)
-	if err != nil {
-		return ArxivImportResult{}, err
-	}
-	return s.importResolvedPaper(ctx, paper, datasetID, userID, userName)
+func (s *arxivImportService) importPaper(ctx context.Context, input, datasetID, userID, userName string) (ArxivImportResult, error) {
+	return s.importPaperWithMetadata(ctx, input, datasetID, userID, userName, nil)
 }
-
-func (s *arxivImportService) importResolvedPaper(ctx context.Context, paper arxivsource.Metadata, datasetID, userID, userName string) (result ArxivImportResult, err error) {
-	// Trust provider metadata only, and pin the actual version before downloading.
-	identifier, err := arxivsource.Parse(paper.BaseID + paper.Version)
-	if err != nil || identifier.Version == "" || identifier.BaseID != paper.BaseID || strings.TrimSpace(paper.Title) == "" {
-		return ArxivImportResult{}, errors.New("arXiv 返回的题录缺少可靠的编号、版本或标题")
+func (s *arxivImportService) importResolvedPaper(ctx context.Context, paper arxivsource.Metadata, datasetID, userID, userName string) (ArxivImportResult, error) {
+	return s.importPaperWithMetadata(ctx, paper.BaseID+paper.Version, datasetID, userID, userName, &paper)
+}
+func (s *arxivImportService) importPaperWithMetadata(ctx context.Context, input, datasetID, userID, userName string, trusted *arxivsource.Metadata) (result ArxivImportResult, err error) {
+	identifier, err := arxivsource.Parse(input)
+	if err != nil {
+		return result, err
 	}
-	paper.AbsURL, paper.PDFURL = identifier.AbsURL(), identifier.PDFURL()
-	// Parent identity is shared across datasets and revisions, so serialize by
-	// base identifier; attachment lookup below still matches dataset + version.
 	lock, err := lockArxivImport(ctx, s.db, identifier.BaseID)
 	if err != nil {
-		return ArxivImportResult{}, err
+		return result, err
 	}
 	defer lock.release()
 	ctx = lock.ctx
@@ -210,46 +206,35 @@ func (s *arxivImportService) importResolvedPaper(ctx context.Context, paper arxi
 			err = cause
 		}
 	}()
-	// Earlier Workflow imports may already have a verified revision link but
-	// no direct-import marker. Recover that attachment through the same path
-	// instead of downloading another copy or admitting incomplete list metadata.
-	var existingWork orm.AcademicWork
-	if e := s.db.WithContext(ctx).Where("arxiv_id_base=?", paper.BaseID).Take(&existingWork).Error; e == nil {
-		var link orm.AcademicWorkDocument
-		e = s.db.WithContext(ctx).Where("academic_work_id=? AND dataset_id=? AND source_provider='arxiv' AND source_version=? AND document_id IN (?)", existingWork.ID, datasetID, paper.Version, s.db.Model(&orm.Document{}).Select("id").Where("dataset_id=? AND deleted_at IS NULL", datasetID)).Order("is_preferred_version DESC, updated_at DESC").Take(&link).Error
-		if e == nil {
-			var document orm.Document
-			if e = s.db.WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", link.DocumentID, datasetID).Take(&document).Error; e != nil {
-				return result, e
-			}
-			ext, _, available, fileErr := readArxivDocument(document)
-			if fileErr != nil {
-				return result, fileErr
-			}
-			if available && ext.Marker == nil {
-				return s.recoverSavedImport(ctx, paper, document, userID, userName, nil)
-			}
-		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
-			return result, e
+	if identifier.Version != "" {
+		if present, found, e := s.existingVersion(ctx, identifier.BaseID, identifier.Version, datasetID, userID, userName); e != nil || found {
+			return present, e
 		}
-	} else if !errors.Is(e, gorm.ErrRecordNotFound) {
-		return result, e
 	}
-	items, err := s.library(ctx, datasetID)
-	if err != nil {
-		return ArxivImportResult{}, err
-	}
-	for _, item := range items {
-		if item.Paper.BaseID == paper.BaseID && item.SourceVersion == paper.Version {
-			if err = lock.check(); err != nil {
-				return item, err
-			}
-			var document orm.Document
-			if err = s.db.WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", item.DocumentID, datasetID).Take(&document).Error; err != nil {
-				return item, err
-			}
-			return s.recoverSavedImport(ctx, item.Paper, document, userID, userName, &item)
+	var paper arxivsource.Metadata
+	if trusted != nil {
+		paper = *trusted
+		log.Logger.Info().Str("version", paper.Version).Msg("academic import using verified metadata")
+	} else {
+		log.Logger.Info().Str("identifier", identifier.ID()).Msg("academic import metadata request started")
+		paper, err = s.lookup(ctx, input)
+		if err != nil {
+			return result, err
 		}
+	}
+	actual, e := arxivsource.Parse(paper.BaseID + paper.Version)
+	if e != nil || actual.Version == "" || actual.BaseID != identifier.BaseID || (identifier.Version != "" && actual.Version != identifier.Version) || strings.TrimSpace(paper.Title) == "" {
+		return result, errors.New("arXiv 返回的题录缺少可靠的编号、版本或标题")
+	}
+	identifier = actual
+	paper.AbsURL, paper.PDFURL = identifier.AbsURL(), identifier.PDFURL()
+	if s.resolved != nil {
+		if err = s.resolved(paper); err != nil {
+			return result, err
+		}
+	}
+	if present, found, e := s.existingVersion(ctx, identifier.BaseID, identifier.Version, datasetID, userID, userName); e != nil || found {
+		return present, e
 	}
 	// Recover a document left behind if metadata/link persistence previously failed.
 	if orphan, ok, findErr := s.findUnlinkedImport(ctx, datasetID, paper); findErr != nil {
@@ -260,11 +245,11 @@ func (s *arxivImportService) importResolvedPaper(ctx context.Context, paper arxi
 		}
 		return s.recoverSavedImport(ctx, paper, orphan, userID, userName, nil)
 	}
-	path, _, err := s.acquire(ctx, FulltextCandidate{URL: paper.PDFURL, SourceType: "pdf", SourceProvider: "arxiv", Version: paper.Version, ExpectedMIME: "application/pdf"})
+	ref := PaperRef{PaperID: paper.BaseID, Title: paper.Title, Abstract: &paper.Abstract, Authors: paper.Authors, Year: paper.Year, Venue: paper.Venue, DOI: paper.DOI, ArxivID: paper.BaseID, SourceProvider: "arxiv", SourceVersion: paper.Version, PDFURL: paper.PDFURL}
+	path, _, err := acquireCachedPDFLocked(ctx, userID, ref, s.acquire)
 	if err != nil {
-		return ArxivImportResult{}, fmt.Errorf("arXiv PDF 下载失败：%w", err)
+		return result, fmt.Errorf("arXiv PDF 下载失败：%w", err)
 	}
-	defer os.Remove(path)
 	// Check again at the write boundary: a lost private session must not let a
 	// completed download proceed to document creation between health probes.
 	if err = lock.check(); err != nil {
@@ -302,6 +287,46 @@ func (s *arxivImportService) importResolvedPaper(ctx context.Context, paper arxi
 // A saved file can outlive the request before its processing task is submitted.
 // Recover that task under the import lock, including attachments associated by
 // older recovery code. Running and terminal tasks retain their existing state.
+// Fetch exactly the requested revision; never enumerate the collection.
+func (s *arxivImportService) existingVersion(ctx context.Context, base, version, dataset, user, userName string) (ArxivImportResult, bool, error) {
+	var work orm.AcademicWork
+	if err := s.db.WithContext(ctx).Where("arxiv_id_base=?", base).Take(&work).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return ArxivImportResult{}, false, nil
+	} else if err != nil {
+		return ArxivImportResult{}, false, err
+	}
+	var links []orm.AcademicWorkDocument
+	err := s.db.WithContext(ctx).Where("academic_work_id=? AND dataset_id=? AND source_provider='arxiv' AND source_version=? AND document_id IN (?)", work.ID, dataset, version, s.db.Model(&orm.Document{}).Select("id").Where("dataset_id=? AND deleted_at IS NULL", dataset)).Order("is_preferred_version DESC, updated_at DESC").Find(&links).Error
+	if err != nil {
+		return ArxivImportResult{}, false, err
+	}
+	for _, link := range links {
+		var document orm.Document
+		if err = s.db.WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", link.DocumentID, dataset).Take(&document).Error; err != nil {
+			return ArxivImportResult{}, false, err
+		}
+		ext, _, available, e := readArxivDocument(document)
+		if e != nil {
+			return ArxivImportResult{}, false, e
+		}
+		if !available {
+			continue
+		}
+		present, e := s.makeResult(ctx, work, link, document, "already_present")
+		if e != nil {
+			return present, true, e
+		}
+		var previous *ArxivImportResult
+		if ext.Marker != nil {
+			previous = &present
+		}
+		result, e := s.recoverSavedImport(ctx, present.Paper, document, user, userName, previous)
+		log.Logger.Info().Str("document_id", document.ID).Str("version", version).Msg("academic import reused current PDF")
+		return result, true, e
+	}
+	return ArxivImportResult{}, false, nil
+}
+
 func (s *arxivImportService) recoverSavedImport(ctx context.Context, paper arxivsource.Metadata, document orm.Document, userID, userName string, present *ArxivImportResult) (ArxivImportResult, error) {
 	result := ArxivImportResult{Paper: paper, DocumentID: document.ID, Status: "already_present"}
 	if present != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"lazymind/core/academic/arxivsource"
+	"lazymind/core/log"
 	"net"
 	"net/http"
 	"net/url"
@@ -148,6 +149,7 @@ func acquirePDFOnce(ctx context.Context, candidate FulltextCandidate) (path stri
 	}
 	req.Header.Set("Accept", "application/pdf")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; LazyMind/1.0; +https://github.com/LazyAGI/LazyMind)")
+	log.Logger.Info().Str("provider", candidate.SourceProvider).Str("version", candidate.Version).Msg("academic PDF request started")
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, err
@@ -163,7 +165,8 @@ func acquirePDFOnce(ctx context.Context, candidate FulltextCandidate) (path stri
 	if contentType != "" && !strings.Contains(contentType, "pdf") && !strings.Contains(contentType, "octet-stream") {
 		return "", 0, errors.New("paper response is not a PDF")
 	}
-	tmp, err := os.CreateTemp("", "lazymind-paper-*.pdf")
+	downloadDir, _ := ctx.Value(paperPDFDownloadDir{}).(string)
+	tmp, err := os.CreateTemp(downloadDir, "lazymind-paper-*.pdf")
 	if err != nil {
 		return "", 0, err
 	}

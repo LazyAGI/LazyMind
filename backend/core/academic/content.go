@@ -217,11 +217,26 @@ func readKnownPaper(ctx context.Context, userID string, source paperSource, cont
 	if paper.PDFURL == "" {
 		return nil, "", "", "", errFulltextUnavailable
 	}
-	path, _, err := acquirePDF(ctx, FulltextCandidate{URL: paper.PDFURL, SourceType: "official_pdf", SourceProvider: paper.SourceProvider, Version: paper.SourceVersion, ExpectedMIME: "application/pdf"})
+	var path string
+	var err error
+	if _, ok := arxivMetadataFromRef(paper); ok {
+		id, _ := arxivsource.Parse(paper.ArxivID + paper.SourceVersion)
+		guard, e := lockArxivImport(ctx, store.DB(), id.BaseID)
+		if e != nil {
+			return nil, "", "", "", e
+		}
+		defer guard.release()
+		ctx = guard.ctx
+		path, _, err = acquireCachedPDFLocked(ctx, userID, paper, acquirePDF)
+	} else {
+		path, _, err = acquirePDF(ctx, FulltextCandidate{URL: paper.PDFURL, SourceType: "official_pdf", SourceProvider: paper.SourceProvider, Version: paper.SourceVersion, ExpectedMIME: "application/pdf"})
+		if err == nil {
+			defer os.Remove(path)
+		}
+	}
 	if err != nil {
 		return nil, "", "", "", err
 	}
-	defer os.Remove(path)
 	pages, hash, err := parsePaperPDF(ctx, path, "")
 	return pages, "external", hash, paper.SourceVersion, err
 }

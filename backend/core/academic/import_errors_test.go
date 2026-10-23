@@ -298,7 +298,7 @@ func importErrorDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}); err != nil {
+	if err := db.AutoMigrate(&orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.AcademicExpansion{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}); err != nil {
 		t.Fatal(err)
 	}
 	previous, previousLazy, previousState := store.DB(), store.LazyLLMDB(), store.State()

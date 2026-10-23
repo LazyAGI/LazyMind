@@ -58,15 +58,27 @@ type PreviewItem struct {
 }
 
 type ImportQueueItem struct {
-	ItemID       string    `json:"item_id"`
-	BatchID      string    `json:"batch_id"`
-	WorkID       string    `json:"work_id"`
-	Title        string    `json:"title"`
-	Status       string    `json:"status"`
-	Stage        string    `json:"stage"`
-	DocumentID   string    `json:"document_id,omitempty"`
-	ErrorCode    string    `json:"error_code,omitempty"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	TargetDatasetID  string               `json:"target_dataset_id"`
+	SourceProvider   string               `json:"source_provider,omitempty"`
+	SourceVersion    string               `json:"source_version,omitempty"`
+	BatchStatus      string               `json:"batch_status"`
+	BatchFailedItems int                  `json:"batch_failed_items"`
+	CurrentDocument  *ImportQueueDocument `json:"current_document,omitempty" gorm:"-"`
+	ItemID           string               `json:"item_id"`
+	BatchID          string               `json:"batch_id"`
+	WorkID           string               `json:"work_id"`
+	Title            string               `json:"title"`
+	Status           string               `json:"status"`
+	Stage            string               `json:"stage"`
+	DocumentID       string               `json:"document_id,omitempty"`
+	ErrorCode        string               `json:"error_code,omitempty"`
+	ErrorMessage     string               `json:"error_message,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	UpdatedAt        time.Time            `json:"updated_at"`
+}
+
+type ImportQueueDocument struct {
+	DocumentID       string `json:"document_id"`
+	ProcessingStatus string `json:"processing_status"`
+	ProcessingError  string `json:"processing_error,omitempty"`
 }

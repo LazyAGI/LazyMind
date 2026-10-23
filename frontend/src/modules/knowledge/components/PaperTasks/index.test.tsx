@@ -12,7 +12,7 @@ import PaperImportanceButton from './PaperImportanceButton';
 import { deleteExpansion, getExpansion, launchPaperTask, listExpansions, resolvePaperSelection, setPaperImportance, type ExpansionDetail, type PaperTask } from '../../api/paperWorkflows';
 import { previewPaperImport, startReferenceImport, getPaperImportStatus, type ImportPreviewItem } from '../../api/academicReferences';
 vi.mock('../../api/paperWorkflows', () => ({ launchPaperTask: vi.fn(), getExpansion: vi.fn(), listExpansions: vi.fn(), resolvePaperSelection: vi.fn(), retryPaperContent: vi.fn(), deleteExpansion: vi.fn(), setPaperImportance: vi.fn() }));
-vi.mock('../../api/academicReferences', () => ({ previewPaperImport: vi.fn(), startReferenceImport: vi.fn(), getPaperImportStatus: vi.fn() }));
+vi.mock('../../api/academicReferences', () => ({ previewPaperImport: vi.fn(), startReferenceImport: vi.fn(), getPaperImportStatus: vi.fn(), isImportPreviewExpired: () => false }));
 const importsChanged = vi.fn();
 const i18n = createInstance();
 void i18n.init({ lng: 'zh-CN', resources: { 'zh-CN': { translation: zhCN }, 'en-US': { translation: enUS } }, initImmediate: false });
@@ -205,7 +205,7 @@ describe('result list actions', () => {
         mount(undefined, '?expansion_id=r');
         await selectMultiple('a', 'b');
         vi.mocked(getExpansion).mockResolvedValue({ ...threePapers, record: { ...threePapers.record, version: 2 } });
-        await act(async () => { vi.advanceTimersByTime(5000); });
+        await act(async () => { window.dispatchEvent(new Event('focus')); });
         expect(screen.queryByRole('checkbox', { name: '选择 C' })).not.toBeInTheDocument();
         expect(screen.getByText('成果已有更新，本次选择仍使用第 1 版；取消多选后可查看最新结果。')).toBeInTheDocument();
         fireEvent.click(reviewButton());
@@ -222,7 +222,7 @@ describe('result list actions', () => {
         await selectMultiple('a');
         expect(screen.getByRole('button', { name: '重试获取全文' })).toBeEnabled();
         vi.mocked(getExpansion).mockResolvedValue({ ...detail, record: { ...record, version: 2 } });
-        await act(async () => { vi.advanceTimersByTime(5000); });
+        await act(async () => { window.dispatchEvent(new Event('focus')); });
         expect(screen.getByRole('button', { name: '重试获取全文' })).toBeDisabled();
         expect(reviewButton()).toBeDisabled();
     });
@@ -233,7 +233,7 @@ describe('result list actions', () => {
         const drawer = screen.getByText('论文扩展成果').closest('[role=dialog]') as HTMLElement;
         let finish!: (value: ExpansionDetail) => void;
         vi.mocked(getExpansion).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
-        await act(async () => { vi.advanceTimersByTime(5000); });
+        await act(async () => { window.dispatchEvent(new Event('focus')); });
         fireEvent.click(within(drawer).getByRole('button', { name: /close/i }));
         await act(async () => { finish(detail); });
         expect(screen.queryByRole('button', { name: '生成综述' })).not.toBeInTheDocument();

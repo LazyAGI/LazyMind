@@ -258,6 +258,8 @@ components:
                     items:
                         $ref: '#/components/schemas/AcademicImportItem'
                     type: array
+                preview_token:
+                    type: string
                 source_document_ids:
                     items:
                         type: string
@@ -278,6 +280,84 @@ components:
                     items:
                         type: string
                     type: array
+                work_id:
+                    type: string
+            type: object
+        AcademicImportPreview:
+            properties:
+                items:
+                    items:
+                        properties:
+                            disposition:
+                                type: string
+                            fulltext_candidates:
+                                items:
+                                    $ref: '#/components/schemas/AcademicImportCandidate'
+                                type: array
+                            paper:
+                                $ref: '#/components/schemas/AcademicPaperRef'
+                            presence:
+                                $ref: '#/components/schemas/AcademicPresence'
+                            reference_ids:
+                                items:
+                                    type: string
+                                type: array
+                            title:
+                                type: string
+                            work_id:
+                                type: string
+                        type: object
+                    type: array
+                preview_token:
+                    type: string
+                target_dataset_id:
+                    type: string
+                total:
+                    type: integer
+            type: object
+        AcademicImportQueueItem:
+            properties:
+                batch_failed_items:
+                    type: integer
+                batch_id:
+                    type: string
+                batch_status:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                current_document:
+                    properties:
+                        document_id:
+                            type: string
+                        processing_error:
+                            type: string
+                        processing_status:
+                            type: string
+                    type: object
+                document_id:
+                    type: string
+                error_code:
+                    type: string
+                error_message:
+                    type: string
+                item_id:
+                    type: string
+                source_provider:
+                    type: string
+                source_version:
+                    type: string
+                stage:
+                    type: string
+                status:
+                    type: string
+                target_dataset_id:
+                    type: string
+                title:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
                 work_id:
                     type: string
             type: object
@@ -370,9 +450,9 @@ components:
                             status:
                                 type: string
                         required:
-                        - paper_id
-                        - status
-                        - source_version
+                            - paper_id
+                            - status
+                            - source_version
                         type: object
                     type: array
                 papers:
@@ -380,8 +460,8 @@ components:
                         $ref: '#/components/schemas/AcademicWorkflowPaper'
                     type: array
             required:
-            - papers
-            - contents
+                - papers
+                - contents
             type: object
         AcademicReviewInput:
             properties:
@@ -15976,10 +16056,10 @@ paths:
     /api/core/academic/expansions/{expansion_id}/papers:resolve:
         post:
             parameters:
-            -   in: path
-                name: expansion_id
-                required: true
-                schema:
+                - in: path
+                  name: expansion_id
+                  required: true
+                  schema:
                     type: string
             requestBody:
                 content:
@@ -15992,28 +16072,49 @@ paths:
                                     maxItems: 500
                                     type: array
                             required:
-                            - paper_ids
+                                - paper_ids
                             type: object
                 required: true
             responses:
-                '200':
+                "200":
                     content:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/AcademicResolvedPapers'
-                    description: Resolve registered expansion papers and version-scoped
-                        content metadata without full bodies
-            summary: Resolve registered expansion papers and version-scoped content metadata
-                without full bodies
+                    description: Resolve registered expansion papers and version-scoped content metadata without full bodies
+            summary: Resolve registered expansion papers and version-scoped content metadata without full bodies
             tags:
-            - AcademicService
-            operationId: academicServiceResolveExpansionPapers
+                - AcademicWorkflows
     /api/core/academic/imports:
         get:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: source_document_id
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /academic/imports
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    items:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicImportQueueItem'
+                                        type: array
+                                    total:
+                                        type: integer
+                                type: object
+                    description: Read import history and matching current-collection PDF processing state
+            summary: Read import history and matching current-collection PDF processing state
+            tags:
+                - AcademicWorkflows
         post:
             requestBody:
                 content:
@@ -16113,13 +16214,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                properties:
-                                    items:
-                                        items:
-                                            properties: {}
-                                            type: object
-                                        type: array
-                                type: object
+                                $ref: '#/components/schemas/AcademicImportPreview'
                     description: Preview reference or identifier import into the current collection
             summary: Preview reference or identifier import into the current collection
             tags:

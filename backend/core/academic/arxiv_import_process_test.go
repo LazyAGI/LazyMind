@@ -190,11 +190,9 @@ func TestArxivImportProcessWorker(t *testing.T) {
 	pool, _ := db.DB.DB()
 	defer pool.Close()
 	store.Init(db.DB, db.DB, nil)
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", filepath.Join(spec.Directory, "uploads"))
 	svc := newArxivImportService(db.DB)
 	svc.lookup = func(ctx context.Context, _ string) (arxivsource.Metadata, error) {
-		if err := os.WriteFile(filepath.Join(spec.Directory, spec.Worker+".ready"), nil, 0600); err != nil {
-			return arxivsource.Metadata{}, err
-		}
 		waitForArxivProcessFile(t, ctx, filepath.Join(spec.Directory, "go"))
 		return arxivsource.Metadata{BaseID: "2404.06654", Version: "v2", Title: "Shared import", Authors: []string{"Author"}}, nil
 	}
@@ -232,6 +230,9 @@ func TestArxivImportProcessWorker(t *testing.T) {
 			os.Exit(0)
 		}
 		return doc.LocalFileImportResult{DocumentID: document.ID, TaskID: task.ID, ContentSHA256: strings.Repeat("a", 64)}, nil
+	}
+	if err := os.WriteFile(filepath.Join(spec.Directory, spec.Worker+".ready"), nil, 0600); err != nil {
+		t.Fatal(err)
 	}
 	result, err := svc.importPaper(t.Context(), "2404.06654v2", "dataset", "user", "User")
 	if err != nil {

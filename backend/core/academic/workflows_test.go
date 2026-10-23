@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/workflow"
 )
@@ -23,7 +25,12 @@ func paperFixture(t *testing.T) *orm.DB {
 	t.Helper()
 	db := orm.MigrateAllModelsForTest(t)
 	old, oldLazy, oldState := store.DB(), store.LazyLLMDB(), store.State()
-	store.Init(db.DB, nil, nil)
+	shared, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shared.Close() })
+	store.Init(db.DB, nil, shared)
 	t.Cleanup(func() { store.Init(old, oldLazy, oldState) })
 	ds := orm.Dataset{ID: "papers", KbID: "papers", DisplayName: "Papers", ScenarioKey: "academic_papers", ProcessingLevel: "parsed", Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: "u", CreatedAt: time.Now(), UpdatedAt: time.Now()}}
 	if err := db.Create(&ds).Error; err != nil {

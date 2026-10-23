@@ -38,7 +38,8 @@ import { paperFromPdf } from "./pdfMeta";
 import { downloadPaperCitations } from "./exportLibrary";
 import { isArxivInput } from "./arxivImport";
 import { loadPaperLibrarySources } from './libraryLoader';
-import { previewPaperLink, importPaperLink, retryAcademicImport, listAcademicImportQueue, type ImportPreviewItem, type AcademicImportQueueItem } from '../api/academicReferences';
+import PaperImportStatus from "./PaperImportStatus";
+import { previewPaperLink, importPaperLink, retryAcademicImport, listAcademicImportQueue, type ImportPreviewItem, type AcademicImportQueueItem, isImportPreviewExpired, isAcademicImportActive } from '../api/academicReferences';
 
 import PaperSearch from "./PaperSearch";
 import PaperFilterPanel from "./PaperFilterPanel";
@@ -207,7 +208,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       applySnapshot(emptyLibraryV3());
       void reload();
     }
-    const onFocus = () => { void reload(); };
+    const onFocus = () => { void reload(); setSyncRevision(value => value + 1); };
     window.addEventListener("focus", onFocus);
     return () => {
       datasetScope.active = false;
@@ -284,7 +285,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
         setAcademicStates(source.states);
         setImportQueue(queue);
         applySnapshot(source.data);
-        if (source.active || queue.some(item => item.status === 'pending' || item.status === 'running')) retry();
+        if (source.active || queue.some(isAcademicImportActive)) retry();
         if (cancelled) return;
         setSyncError(null);
       } catch (error) {
@@ -652,6 +653,11 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       clearImportResult();
       setImportMethod(null);
     } catch (error) {
+      if (isImportPreviewExpired(error)) {
+        setLinkPreview(undefined); setPendingArxiv(null);
+        setImportError('导入预览已过期，请重新查询并确认文献');
+        return;
+      }
       if (isCurrentScope()) showImportError(error, "arXiv 导入失败，请重试");
     } finally {
       if (isCurrentScope()) {
@@ -762,7 +768,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
       {persistenceError && <Alert className="paper-library-sync-error" type="error" showIcon message="文献保存或加载失败" description={persistenceError} action={<Button size="small" disabled={loading || saving} onClick={() => void reload()}>重新加载</Button>} />}
       {!loading && !canWrite && !persistenceError && <Alert type="info" showIcon message="当前文献库为只读，无法编辑" />}
       {syncError && <Alert className="paper-library-sync-error" type="error" showIcon message="文献同步失败" description={syncError} action={<Button size="small" disabled={loading || saving} onClick={() => setSyncRevision((value) => value + 1)}>重新同步</Button>} />}
-      {importQueue.filter(item => item.status === 'pending' || item.status === 'running' || item.status === 'failed').map(item => <Alert key={item.item_id} type={item.status === 'failed' ? 'error' : 'info'} showIcon message={`${item.title}：${item.status === 'failed' ? '导入失败' : '导入中'}`} description={item.error_message} action={item.status === 'failed' && canWrite ? <Button onClick={async () => { await retryAcademicImport(item.batch_id); setSyncRevision(value => value + 1); }}>重试导入</Button> : undefined} />)}
+      <PaperImportStatus items={importQueue} canWrite={canWrite} onRetry={async batch => { await retryAcademicImport(batch); setSyncRevision(value => value + 1); }} />
 
       <div className="paper-library-layout">
         <nav className="paper-library-rail" aria-label="文献浏览">
