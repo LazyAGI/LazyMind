@@ -166,6 +166,7 @@ func TestOpenAPIChatSelectionAndSidechatHaveOneClientOwner(t *testing.T) {
 		{"get", "/api/core/chat/models", "chat"},
 		{"patch", "/api/core/conversations/{conversation_id}/model", "conversations"},
 		{"post", "/api/core/conversations/{parent_id}/sidechat", "conversations"},
+		{"patch", "/api/core/conversations/{child_id}/sidechat", "conversations"},
 		{"post", "/api/core/conversations/{child_id}/retain", "conversations"},
 		{"delete", "/api/core/conversations/{child_id}/sidechat", "conversations"},
 	} {

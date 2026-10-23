@@ -691,6 +691,7 @@ func init() {
 	registerAdditionalError("check sidechat status failed", http.StatusInternalServerError, 2002338)
 	registerAdditionalError("retain sidechat failed", http.StatusInternalServerError, 2002339)
 	registerAdditionalError("discard sidechat failed", http.StatusInternalServerError, 2002340)
+	registerAdditionalError("update sidechat source failed", http.StatusInternalServerError, 2003219)
 	registerAdditionalErrorPattern("at most %d %s are allowed", "Too many search configuration values", http.StatusBadRequest, 2002341)
 	registerAdditionalErrorPattern("%s value is too long", "Search configuration value is too long", http.StatusBadRequest, 2002342)
 	registerAdditionalError("sidechat nesting limit reached", http.StatusConflict, 2002343)

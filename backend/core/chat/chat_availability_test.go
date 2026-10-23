@@ -7,7 +7,7 @@ import (
 )
 
 func TestChatRuntimeDropsCloudConfigWhenNoConnectionsRemain(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatModelTestDB(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"items":[]}}`))

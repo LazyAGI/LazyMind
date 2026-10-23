@@ -11,7 +11,7 @@ skill:
   required_version: 1.0.1
 placement:
   home: true
-  gallery: false
+  gallery: true
   order: 31
 classification:
   category: 设计创意

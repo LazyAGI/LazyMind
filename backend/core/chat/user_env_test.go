@@ -24,7 +24,7 @@ func setupUserEnvTest(t *testing.T) *orm.DB {
 	t.Helper()
 	t.Setenv("LAZYMIND_USER_ENV_SECRET_KEY", "test-only-user-env-secret-key-32-bytes")
 	t.Setenv("LAZYMIND_USER_ENV_SECRET_KEY_FILE", "")
-	db := newPromptTestDB(t)
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.UserEnvironmentVariable{})
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 	return db

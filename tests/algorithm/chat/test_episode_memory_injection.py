@@ -3,12 +3,27 @@ from __future__ import annotations
 import asyncio
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
 from lazymind.chat.service import chat_service
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.common.memory import EpisodeReadError
+
+
+@pytest.fixture(autouse=True)
+def empty_task_context():
+    with patch('lazymind.chat.engine.subagent.db.TaskQueryDB._get', return_value={'tasks': []}) as task_read, patch(
+        'requests.sessions.Session.request', side_effect=AssertionError('Unexpected HTTP in memory unit test'),
+    ) as http_request:
+        yield
+    for call in task_read.call_args_list:
+        assert call.args in (
+            ('/internal/subagent/conversations/episode-prompt-conversation/tasks', None),
+            ('/internal/subagent/conversations/episode-stream-conversation/tasks', None),
+        )
+    http_request.assert_not_called()
 
 
 class _ContextAgent:

@@ -2825,6 +2825,7 @@ const enUS = {
         "No excerpt selected. The current conversation context will be inherited.",
       inheritedContext:
         "Model, thinking depth, and knowledge bases inherited from the main chat",
+      updatingSource: "Updating reference…",
       knowledgeInheritedOnly:
         "Side chat only uses knowledge bases inherited from the main chat",
       loading: "Creating side chat",
@@ -2835,6 +2836,7 @@ const enUS = {
       clearDescription:
         "This side chat will be deleted and replaced with a new empty one.",
       clearFailed: "Could not clear the side chat. Try again.",
+      discard: "Discard",
       retain: "Keep",
       retained: "Kept",
       retainSuccess: "Side chat saved to conversation history",

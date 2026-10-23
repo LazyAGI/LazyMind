@@ -155,7 +155,7 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 }
 
 func TestEnsureConversationDoesNotReuseAnotherUsersID(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Conversation{
@@ -176,7 +176,7 @@ func TestEnsureConversationDoesNotReuseAnotherUsersID(t *testing.T) {
 }
 
 func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -227,7 +227,7 @@ func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
 }
 
 func TestSetChatHistoryRemovesRejectedAnswerPerformance(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -283,7 +283,7 @@ func TestSetChatHistoryRemovesRejectedAnswerPerformance(t *testing.T) {
 }
 
 func TestConversationPinningOrdersHistoryWithoutChangingUpdatedAt(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -374,7 +374,7 @@ func TestConversationPinningOrdersHistoryWithoutChangingUpdatedAt(t *testing.T) 
 }
 
 func TestPersistentEphemeralConversationHasNoExpiry(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -395,7 +395,7 @@ func TestPersistentEphemeralConversationHasNoExpiry(t *testing.T) {
 }
 
 func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -484,7 +484,7 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 }
 
 func TestConversationListKeepsLazyMindManagedExternalConversationWithoutNativeSession(t *testing.T) {
-	database := newPromptTestDB(t)
+	database := newChatExecutionTestDB(t)
 	db := database.DB
 	store.Init(db, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -598,7 +598,7 @@ func TestPromoteAgentRuntimeFlagsPrefersExplicitRequest(t *testing.T) {
 }
 
 func TestApplyChatFeatureControlsKeepsWorkflowsIndependentFromTaskCenter(t *testing.T) {
-	db := newPromptTestDB(t)
+	db := newChatExecutionTestDB(t)
 	now := time.Now().UTC()
 	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
 		"user_id": "user-1", "task_center_enabled": false, "skills_enabled": true,
@@ -632,7 +632,7 @@ func TestApplyChatFeatureControlsKeepsWorkflowsIndependentFromTaskCenter(t *test
 }
 
 func TestApplyChatFeatureControlsKeepsSubagentsIndependentFromWorkflows(t *testing.T) {
-	db := newPromptTestDB(t)
+	db := newChatExecutionTestDB(t)
 	now := time.Now().UTC()
 	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
 		"user_id": "user-1", "task_center_enabled": true, "skills_enabled": true,
@@ -2398,7 +2398,7 @@ func TestUserExplicitlyRequestedWorkflowRetry(t *testing.T) {
 }
 
 func TestDirectoryFeatureControlOverridesClientAndReachesChat(t *testing.T) {
-	db := newPromptTestDB(t)
+	db := newChatExecutionTestDB(t)
 	for _, enabled := range []bool{true, false, true} {
 		if err := db.Exec("DELETE FROM user_ui_preferences WHERE user_id=?", "directory-user").Error; err != nil {
 			t.Fatal(err)

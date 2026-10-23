@@ -6,7 +6,7 @@ status: published
 default_locale: zh-CN
 provider: SkillHub
 skill:
-  source_url: https://skillhub.cn/skills/user_141d55f7/landscape-art-postcard
+  source_url: https://skillhub.cn/skills/org-ni2p9rei/landscape-art-postcardv2
   category: design
   required_version: 2.0.0
 placement:
