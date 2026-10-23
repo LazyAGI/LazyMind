@@ -1226,7 +1226,7 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 
 	first := mergeChunksToFirstChunk(chunks)
 	if first != nil {
-		sendChunk(w, flusher, first)
+		sendChunk(w, flusher, steeringResumeChunk(chunks, first))
 	} else {
 		sendChunk(w, flusher, &ChatChunkResponse{
 			ConversationID: convID,
@@ -1757,6 +1757,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"run_id":            h.RunID,
 		"run_status":        h.RunStatus,
 	}
+	hydrateSteeringTimeline(h, item)
 	var forkFlags struct {
 		ReadOnly bool `json:"fork_read_only"`
 	}
@@ -2093,6 +2094,10 @@ func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
 		nextToken = encodeListPageToken(nextOffset, pageSize, total)
 	}
 	historyItems := conversationHistoryResponseItems(page)
+	if err := hydrateConversationSteeringHistory(r.Context(), store.DB(), convID, userID, historyItems); err != nil {
+		common.ReplyErr(w, fmt.Sprintf("load conversation steering history: %v", err), http.StatusInternalServerError)
+		return
+	}
 	if err := hydrateHistoryPerformance(r.Context(), store.DB(), userID, convID, historyItems); err != nil {
 		log.Logger.Warn().Err(err).Str("conversation_id", convID).
 			Msg("failed to hydrate chat performance history")

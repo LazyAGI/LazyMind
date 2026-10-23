@@ -426,7 +426,8 @@ interface ChatInputProps {
   draftWorkspace?: Pick<SendMessageParams, "workspace_id" | "workspace_permission_mode" | "project_name">;
   value: string;
   onChange: (value: string) => void;
-  onSend?: (params: SendMessageParams) => void;
+  onSend?: (params: SendMessageParams) => void | boolean | Promise<void | boolean>;
+  followUpQueue?: ReactNode;
   placeholder?: string;
   openHistory?: () => void;
   openNewChat?: () => void;
@@ -449,6 +450,8 @@ interface ChatInputProps {
   /** Bump to remount the chat config popover (e.g. when starting a fresh welcome-screen chat). */
   configResetKey?: number | string;
   sessionId?: string;
+  /** Optional persistence key for composers that do not have a conversation yet. */
+  draftKey?: string;
   isStreaming?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
@@ -529,6 +532,7 @@ export interface SkillDepositStats {
 
 interface SendButtonProps {
   isStreaming: boolean;
+  hasDraft: boolean;
   sendDisabled: boolean;
   disabled: boolean;
   sendLabel: string;
@@ -538,6 +542,7 @@ interface SendButtonProps {
 }
 const SendButton: React.FC<SendButtonProps> = ({
   isStreaming,
+  hasDraft,
   sendDisabled,
   disabled,
   sendLabel,
@@ -545,7 +550,10 @@ const SendButton: React.FC<SendButtonProps> = ({
   onSend,
   onStop,
 }) => {
-  const isStopMode = isStreaming && Boolean(onStop);
+  // While a response is running, an empty composer controls that response.
+  // As soon as the user types a valid follow-up, the same control submits the
+  // draft to the queue so it can subsequently be steered or sent normally.
+  const isStopMode = isStreaming && Boolean(onStop) && !hasDraft;
   const isDisabled = isStopMode ? disabled : sendDisabled || disabled;
 
   return (
@@ -574,6 +582,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       value,
       onChange,
       onSend,
+      followUpQueue,
       placeholder,
       openHistory,
       isChatContent,
@@ -591,6 +600,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       allowLocalWorkspace = true,
       configResetKey,
       sessionId,
+      draftKey,
       isStreaming = false,
       onStopGeneration,
       embeddingReady,
@@ -725,6 +735,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       kb: boolean | null;
     }>({ kb: null });
     const disabledNoticeId = useId();
+    const inputDraftKey = sessionId ?? draftKey;
     const draftRef = useRef<{ sessionId?: string; content: string; mentions: ChatMention[] }>({ content: value, mentions: [] });
     const [initialModelSelection, setInitialModelSelection] =
       useState<ChatModelSelectionRequest>();
@@ -918,29 +929,29 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     );
 
     useEffect(() => {
-      if (draftRef.current.sessionId === sessionId && draftRef.current.content !== value) {
-        draftRef.current = { sessionId, content: value, mentions: [] };
+      if (draftRef.current.sessionId === inputDraftKey && draftRef.current.content !== value) {
+        draftRef.current = { sessionId: inputDraftKey, content: value, mentions: [] };
       }
-    }, [sessionId, value]);
+    }, [inputDraftKey, value]);
 
     useEffect(() => {
-      if (sessionId === draftRef.current.sessionId) return;
+      if (inputDraftKey === draftRef.current.sessionId) return;
       debouncedSaveInput.cancel();
       const previous = draftRef.current;
       if (previous.sessionId !== undefined) {
         if (previous.content.trim()) saveInputContent(previous.sessionId, previous.content, previous.mentions);
         else clearInputContent(previous.sessionId);
-        if (previous.content.trim() && previous.sessionId.startsWith("temp_") && sessionId && !sessionId.startsWith("temp_")) {
-          saveInputContent(sessionId, previous.content, previous.mentions);
+        if (previous.content.trim() && previous.sessionId.startsWith("temp_") && inputDraftKey && !inputDraftKey.startsWith("temp_")) {
+          saveInputContent(inputDraftKey, previous.content, previous.mentions);
           clearInputContent(previous.sessionId);
         }
       }
-      const content = sessionId !== undefined ? getInputContent(sessionId) : value;
-      const savedMentions = sessionId !== undefined ? getInputMentions(sessionId) : [];
-      draftRef.current = { sessionId, content, mentions: savedMentions };
+      const content = inputDraftKey !== undefined ? getInputContent(inputDraftKey) : value;
+      const savedMentions = inputDraftKey !== undefined ? getInputMentions(inputDraftKey) : [];
+      draftRef.current = { sessionId: inputDraftKey, content, mentions: savedMentions };
       setMentions(savedMentions);
       if (content !== value) onChange(content);
-    }, [sessionId, value, onChange, saveInputContent, getInputContent, getInputMentions, clearInputContent, debouncedSaveInput]);
+    }, [inputDraftKey, value, onChange, saveInputContent, getInputContent, getInputMentions, clearInputContent, debouncedSaveInput]);
 
     useEffect(() => () => {
       debouncedSaveInput.cancel();
@@ -1184,7 +1195,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       if ((runInBackground && (!projectValid || workspacePermissionSavingRef.current)) || modelSelectionSaving) {
         return;
       }
-      if (isStreaming || isSendDisabled || resolvingSkillWorkflow || featuredBusy) {
+      if (isSendDisabled || resolvingSkillWorkflow || featuredBusy) {
         return;
       }
       const normalizedText = value.trim();
@@ -1250,16 +1261,19 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         setPendingMessage(sendParams);
         setIsChatContent?.(true);
       } else {
-        onSend?.(sendParams);
+        const submitted = await onSend?.(sendParams);
+        if (submitted === false) {
+          return;
+        }
         clearMultiData();
       }
 
-      draftRef.current = { sessionId, content: "", mentions: [] };
+      draftRef.current = { sessionId: inputDraftKey, content: "", mentions: [] };
       setContextUsageReset((current) => current + 1);
 
-      if (sessionId !== undefined) {
+      if (inputDraftKey !== undefined) {
         debouncedSaveInput.cancel();
-        clearInputContent(sessionId);
+        clearInputContent(inputDraftKey);
       }
       onChange("");
       setMentions([]);
@@ -1281,7 +1295,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     };
 
     const handleInputChange = (text: string) => {
-      draftRef.current = { sessionId, content: text, mentions: [] };
+      const draftMentions = draftRef.current.mentions;
+      draftRef.current = { sessionId: inputDraftKey, content: text, mentions: draftMentions };
+      if (draftKey !== undefined && inputDraftKey !== undefined) {
+        if (text.trim()) saveInputContent(inputDraftKey, text, draftMentions);
+        else clearInputContent(inputDraftKey);
+      }
       onChange(text);
       setText(text);
     };
@@ -1289,10 +1308,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const handleMentionsChange = useCallback((nextMentions: ChatMention[]) => {
       setMentions(nextMentions);
       const draft = draftRef.current;
-      if (draft.sessionId !== sessionId) return;
+      if (draft.sessionId !== inputDraftKey) return;
       draft.mentions = nextMentions;
-      if (sessionId !== undefined) debouncedSaveInput(sessionId, draft.content, nextMentions);
-    }, [sessionId, debouncedSaveInput]);
+      if (inputDraftKey !== undefined) debouncedSaveInput(inputDraftKey, draft.content, nextMentions);
+    }, [inputDraftKey, debouncedSaveInput]);
 
     const handleApplyPromptSuggestion = async (
       suggestion: (typeof PROMPT_SUGGESTIONS)[number],
@@ -1315,12 +1334,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           return;
         }
         textAreaRef.current?.setPlainText(nextPrompt);
-        draftRef.current = { sessionId, content: nextPrompt, mentions: [] };
+        draftRef.current = { sessionId: inputDraftKey, content: nextPrompt, mentions: [] };
         setMentions([]);
         onChange(nextPrompt);
         setText(nextPrompt);
-        if (sessionId !== undefined) {
-          debouncedSaveInput(sessionId, nextPrompt, []);
+        if (inputDraftKey !== undefined) {
+          debouncedSaveInput(inputDraftKey, nextPrompt, []);
         }
         setTimeout(() => onHeightChange?.(), 0);
       } catch {
@@ -1467,6 +1486,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             ) : null}
           </div>
         ) : null}
+        {followUpQueue}
         <div className="input-container">
           <div className={`chat-input-surface${showWorkspaceEnvironment ? " has-environment" : ""}`}>
           <div className="input-top">
@@ -1520,13 +1540,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 </div>
               )}
               <MentionEditor
-                key={sessionId}
+                key={inputDraftKey}
                 ref={textAreaRef}
                 runInBackground={runInBackground}
                 conversationId={sessionId}
                 fileCandidates={composerFiles}
                 onQueryOpen={() => setActiveMenu(null)}
-                initialMentions={sessionId !== undefined ? getInputMentions(sessionId) : props.transferredDraft?.mentions}
+                initialMentions={inputDraftKey !== undefined ? getInputMentions(inputDraftKey) : props.transferredDraft?.mentions}
                 placeholder={placeholder || t(allowMentions
                   ? "chat.inputPlaceholder"
                   : "chat.inputPlaceholderWithoutMentions")}
@@ -1549,8 +1569,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     disabled ||
                     isPromptPolishing ||
                     modelSelectionSaving ||
-                    (runInBackground && (workspacePermissionSaving || !projectValid)) ||
-                    isStreaming
+                    (runInBackground && (workspacePermissionSaving || !projectValid))
                   ) return;
                   void handleSend();
                   setNewMessage(false);
@@ -1831,6 +1850,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   <div className="input-bottom-actions-right-item">
                     <SendButton
                       isStreaming={isStreaming}
+                      hasDraft={Boolean(value.trim())}
                       sendDisabled={isSendDisabled || featuredBusy}
                       disabled={disabled}
                       sendLabel={t("chat.send")}

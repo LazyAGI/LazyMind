@@ -316,8 +316,20 @@ class AgentExecutor:
 
     @staticmethod
     def runtime_llm(agent: Any) -> Any:
-        """Return the module that actually issued the agent's model calls."""
+        """Return the configured module that actually issues model calls.
+
+        ReactAgent creates its FunctionCall model lazily.  Resolving the model
+        before ``build_agent`` returns the unconfigured source model instead of
+        the shared copy carrying the agent prompt, formatter, and history.  A
+        stream hook installed on that source model can therefore bypass the
+        complete model request context.
+        """
         function_call = getattr(agent, '_fc', None)
+        if function_call is None:
+            build_agent = getattr(agent, 'build_agent', None)
+            if callable(build_agent):
+                build_agent()
+                function_call = getattr(agent, '_fc', None)
         function_call_llm = getattr(function_call, '_llm', None)
         if function_call_llm is not None:
             return function_call_llm
