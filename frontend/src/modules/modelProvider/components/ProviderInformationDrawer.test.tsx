@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { ConfigProvider } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderInformationDrawer } from "./ProviderInformationDrawer";
+import { getProviderInformation } from "../providerInformation";
 import type { AddedProvider } from "../pages/ModelProvidersPage";
 
 const locale = vi.hoisted(() => ({ language: "en-US" }));
@@ -51,15 +52,15 @@ describe("provider information drawer", () => {
     draw({ ...props, providers: [coding, { ...standard, baseUrl: "https://stale.example.test/v1" }] });
     const dialog = within(await screen.findByRole("dialog"));
     expect(dialog.getByRole("heading", { name: "Alibaba Cloud Model Studio · Standard API" })).toBeInTheDocument();
-    expect(dialog.getByText("Alibaba Cloud Model Studio is a platform for building AI applications with Qwen and other models. It brings model inference, evaluation, fine-tuning, and application development into one cloud service.", { selector: "p" })).toBeVisible();
+    expect(dialog.getByText(getProviderInformation(standard, "en-US").profile!.introduction, { selector: "p" })).toBeVisible();
     const website = dialog.getByRole("link", { name: /Official website/ });
     expect(website).toBeVisible();
     expect(website).toHaveAttribute("target", "_blank");
     expect(website).toHaveAttribute("rel", "noopener noreferrer");
     expect(website).toHaveAttribute("href", "https://www.aliyun.com/product/bailian");
-    expect(website).toHaveTextContent("https://www.aliyun.com/product/bailian");
+    expect(website).toHaveTextContent("aliyun.com");
     expect(website).not.toHaveAttribute("href", standard.baseUrl);
-    expect(within(dialog.getByRole("region", { name: "Product highlights" })).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(dialog.getByRole("region", { name: "Product highlights" })).getAllByRole("listitem")).toHaveLength(2);
     expect(dialog.getByRole("region", { name: "Official sources" })).toBeVisible();
     const help = dialog.getByRole("button", { name: "Connection help" });
     expect(help).toHaveAttribute("aria-expanded", "false");
@@ -80,7 +81,7 @@ describe("provider information drawer", () => {
       expect(link.getAttribute("href")).toMatch(/^https:\/\//);
       expect(link.textContent?.trim()).not.toBe("");
     }
-    expect(sources.getByText(/2026-10-23/)).toBeInTheDocument();
+    expect(dialog.getByText(/2026-10-23/)).toBeInTheDocument();
     expect(props.onConfigure).not.toHaveBeenCalled();
   });
 
@@ -89,7 +90,7 @@ describe("provider information drawer", () => {
     draw(props);
     const comparison = within(await screen.findByRole("region", { name: "Services from this provider" }));
     expect(comparison.queryByRole("columnheader", { name: "Credentials" })).not.toBeInTheDocument();
-    expect(comparison.getByRole("columnheader", { name: "Introduction" })).toBeInTheDocument();
+    expect(comparison.getByRole("columnheader", { name: "Purpose and differences" })).toBeInTheDocument();
     expect(comparison.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
       "Read Alibaba Cloud Model Studio · Standard API",
       "Read Alibaba Cloud Model Studio · Coding Plan",
@@ -213,7 +214,7 @@ describe("provider information drawer", () => {
     const local = { ...unknown, id: "local", name: "vLLM", source: "vLLM", protocolName: "OpenAI" };
     view.rerenderDrawer({ ...props, provider: local, providers: [local] });
     expect(await screen.findByRole("heading", { name: "vLLM" })).toBeInTheDocument();
-    expect(screen.getByText(/vLLM is an open-source inference and serving engine/, { selector: "p" })).toBeVisible();
+    expect(screen.getByText(getProviderInformation(local, "en-US").profile!.introduction, { selector: "p" })).toBeVisible();
     expect(screen.getByRole("link", { name: /Official website/ })).toHaveAttribute("href", "https://vllm.ai/");
     expect(screen.getByRole("region", { name: "Official sources" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Saved API address" })).not.toBeInTheDocument();
@@ -250,4 +251,39 @@ describe("provider information drawer", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Open information" })).toHaveFocus());
     expect(configured).not.toHaveBeenCalled();
   });
+  it("uses short service summaries instead of repeating whole provider introductions", async () => {
+    draw(fixture());
+    const comparison = within(await screen.findByRole("region", { name: "Services from this provider" }));
+    for (const provider of [standard, coding, token]) {
+      const profile = getProviderInformation(provider, "en-US").profile!;
+      expect(comparison.getByText(profile.serviceSummary)).toBeVisible();
+      expect(comparison.queryByText(profile.introduction)).not.toBeInTheDocument();
+    }
+    expect(comparison.getByRole("columnheader", { name: "Purpose and differences" })).toBeInTheDocument();
+  });
+
+  it("shows compact resource labels while keeping each complete accessible name and target", async () => {
+    draw(fixture());
+    const resources = within(await screen.findByRole("region", { name: "Official sources" }));
+    const guide = getProviderInformation(standard, "en-US");
+    const credentials = guide.links.find((link) => link.kind === "credentials")!;
+    const keyLink = resources.getByRole("link", { name: `Credentials: ${credentials.label}` });
+    expect(keyLink).toHaveTextContent("Credentials");
+    expect(keyLink).toHaveAttribute("href", credentials.url);
+    const website = resources.getByRole("link", { name: /Official website/ });
+    expect(website).toHaveTextContent("aliyun.com");
+    expect(website).not.toHaveTextContent("https://");
+  });
+
+  it("keeps distinct names for official resources with the same purpose", async () => {
+    const senseNova = { ...standard, id: "sense", name: "SenseNova", brandKey: "SenseNova", serviceKey: "standard" };
+    draw({ ...fixture(), provider: senseNova, providers: [senseNova] });
+    const resources = within(await screen.findByRole("region", { name: "Official sources" }));
+    const docs = getProviderInformation(senseNova, "en-US").links.filter((link) => link.kind === "docs");
+    expect(docs).toHaveLength(2);
+    for (const doc of docs) {
+      expect(resources.getByRole("link", { name: doc.label })).toHaveTextContent(doc.label);
+    }
+  });
+
 });

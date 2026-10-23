@@ -84,6 +84,8 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
 
   const guide = getProviderInformation(readingProvider, language);
   const name = getProviderDisplayName(readingProvider, language);
+  const resourceCounts = new Map<string, number>();
+  for (const link of guide.links) resourceCounts.set(link.kind, (resourceCounts.get(link.kind) || 0) + 1);
   const fallbackLogo = getProviderLogoUrl(
     readingProvider.brandKey || readingProvider.name || readingProvider.protocolName || readingProvider.source,
     readingProvider.isCustom,
@@ -114,45 +116,55 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
     <article ref={contentRef} className="provider-information-content">
       <header className="provider-information-introduction">
         <p className="provider-information-summary">{guide.profile?.introduction || guide.summary}</p>
-        {guide.profile?.websiteUrl ? <a className="provider-information-website" href={guide.profile.websiteUrl}
-          target="_blank" rel="noopener noreferrer" title={copy.newTab} aria-label={`${copy.website}: ${guide.profile.websiteUrl}`}>
-          <span className="provider-information-website-label">{copy.website}</span>
-          <span className="provider-information-website-url">{guide.profile.websiteUrl}<ExportOutlined aria-hidden="true" /></span>
-        </a> : null}
       </header>
 
       {guide.profile?.highlights.length ? <section className="provider-information-section provider-information-highlights" aria-labelledby={`${sectionId}-highlights`}>
-        <h3 id={`${sectionId}-highlights`}>{copy.highlights}</h3>
+        <h3 id={`${sectionId}-highlights`} className="provider-information-visually-hidden">{copy.highlights}</h3>
         <ul>{guide.profile.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
       </section> : null}
 
-      {guide.links.length ? <section className="provider-information-section provider-information-sources" aria-labelledby={`${sectionId}-sources`}>
-        <h3 id={`${sectionId}-sources`}>{copy.sources}</h3>
-        <ul>{guide.links.map((link) => <li key={link.url}>
-          <a href={link.url} target="_blank" rel="noopener noreferrer" title={copy.newTab}>
-            {link.label}<ExportOutlined aria-hidden="true" />
-          </a>
-        </li>)}</ul>
-        {guide.verifiedAt ? <p className="provider-information-verified">{copy.verifiedAt(guide.verifiedAt)}</p> : null}
+      {guide.links.length || guide.profile?.websiteUrl ? <section className="provider-information-section provider-information-sources" aria-labelledby={`${sectionId}-sources`}>
+        <h3 id={`${sectionId}-sources`} className="provider-information-visually-hidden">{copy.sources}</h3>
+        <ul>
+          {guide.profile?.websiteUrl ? <li className="provider-information-website-item">
+            <a className="provider-information-website" href={guide.profile.websiteUrl}
+              target="_blank" rel="noopener noreferrer" title={`${guide.profile.websiteUrl} · ${copy.newTab}`}
+              aria-label={`${copy.website}: ${guide.profile.websiteUrl}`}>
+              <span>{copy.website}</span>
+              <span className="provider-information-website-host">{new URL(guide.profile.websiteUrl).hostname.replace(/^www\./, "")}</span>
+              <ExportOutlined aria-hidden="true" />
+            </a>
+          </li> : null}
+          {guide.links.map((link) => {
+            const label = resourceCounts.get(link.kind) === 1 ? copy.resources[link.kind] : link.label;
+            return <li key={link.url}>
+              <a href={link.url} target="_blank" rel="noopener noreferrer" title={`${link.label} · ${copy.newTab}`} aria-label={label === link.label ? link.label : `${label}: ${link.label}`}>
+                {label}<ExportOutlined aria-hidden="true" />
+              </a>
+            </li>;
+          })}
+        </ul>
       </section> : null}
 
       {siblings.length > 1 ? <section className="provider-information-section" aria-labelledby={`${sectionId}-compare`}>
-        <h3 id={`${sectionId}-compare`}>{copy.compare}</h3>
-        <p className="provider-information-note provider-information-compare-hint">{copy.compareHint}</p>
+        <div className="provider-information-section-title">
+          <h3 id={`${sectionId}-compare`}>{copy.compare}</h3>
+          <p className="provider-information-note provider-information-compare-hint">{copy.compareHint}</p>
+        </div>
         <table className="provider-information-comparison">
           <thead><tr><th scope="col">{copy.service}</th><th scope="col">{copy.purpose}</th></tr></thead>
           <tbody>{siblings.map((sibling) => {
             const information = getProviderInformation(sibling, language);
             return <tr key={sibling.id} className={sibling.id === readingProvider.id ? "is-reading" : undefined}>
-              <th scope="row">
+              <th scope="row"><div className="provider-information-service-name">
                 <button type="button" aria-label={copy.readService(getProviderDisplayName(sibling, language))}
                   aria-current={sibling.id === readingProvider.id ? "page" : undefined}
                   onClick={() => readService(sibling.id)}>
                   {getProviderServiceDisplayName(sibling, language)}
                 </button>
                 {sibling.id === provider.id ? <span className="provider-information-current">{copy.currentlyConfigured}</span> : null}
-              </th>
-              <td data-label={copy.purpose}>{information.profile?.introduction || information.summary}</td>
+              </div></th>
+              <td data-label={copy.purpose}>{information.profile?.serviceSummary || information.summary}</td>
             </tr>;
           })}</tbody>
         </table>
@@ -166,7 +178,6 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
             label: <h3>{copy.connectionHelp}</h3>,
             children: <div className="provider-information-help-content">
               <dl className="provider-information-facts">
-                <div><dt>{copy.audience}</dt><dd>{guide.audience}</dd></div>
                 <div><dt>{copy.credential}</dt><dd>{guide.credential}</dd></div>
               </dl>
               {guide.scope ? <aside className={`provider-information-scope provider-information-scope-${guide.scope.tone}`} aria-label={copy.scope}>
@@ -201,6 +212,7 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
             </div>,
           }]} />
       </section>
+      {guide.verifiedAt ? <p className="provider-information-verified">{copy.verifiedAt(guide.verifiedAt)}</p> : null}
     </article>
   </Drawer>;
 }

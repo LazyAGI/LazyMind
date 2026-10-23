@@ -40,15 +40,25 @@ describe("provider profile content", () => {
       expect(profile).toBeDefined();
       expect(profile!.introduction.trim().length).toBeGreaterThan(40);
       expect(profile!.websiteUrl).toBe(websiteUrl);
-      expect(profile!.highlights).toHaveLength(3);
+      expect(profile!.highlights).toHaveLength(2);
       expect(profile!.highlights.every((highlight) => highlight.trim().length > 3)).toBe(true);
-      const text = [profile!.introduction, ...profile!.highlights].join(" ");
+      expect(profile!.serviceSummary.trim().length).toBeGreaterThan(15);
+      expect(profile!.serviceSummary).not.toBe(profile!.introduction);
+      if (language === "zh-CN") {
+        expect(profile!.introduction.length).toBeGreaterThanOrEqual(45);
+        expect(profile!.introduction.length).toBeLessThanOrEqual(65);
+        expect(profile!.serviceSummary.length).toBeGreaterThanOrEqual(18);
+        expect(profile!.serviceSummary.length).toBeLessThanOrEqual(30);
+      }
+      const text = [profile!.introduction, profile!.serviceSummary, ...profile!.highlights].join(" ");
       expect(/[\u4e00-\u9fff]/.test(text)).toBe(language === "zh-CN");
     });
 
     it("distinguishes every product leaf rather than repeating its company description", () => {
       const introductions = leaves.map(([name]) => profileFor(name, language)?.introduction);
       expect(new Set(introductions).size).toBe(22);
+      const summaries = leaves.map(([name]) => profileFor(name, language)?.serviceSummary);
+      expect(new Set(summaries).size).toBe(22);
     });
   });
 
@@ -74,13 +84,22 @@ describe("provider profile content", () => {
   it.each(["vLLM", "LMDeploy"])("introduces %s as a deployment project rather than a hosted vendor", (name) => {
     const profile = profileFor(name, "en-US")!;
     expect(profile.introduction).toMatch(/open.source/i);
-    expect(profile.highlights.join(" ")).toMatch(/self.hosted/i);
+    expect(profile.serviceSummary).toMatch(/self.hosted/i);
   });
 
   it("distinguishes a model router from model developers", () => {
     const profile = profileFor("OpenRouter", "en-US")!;
     expect(profile.introduction).toMatch(/routing/i);
     expect(profile.highlights.join(" ")).toMatch(/providers/i);
+  });
+
+  it("keeps the differences that determine which subscription to choose", () => {
+    expect(profileFor("DoubaoCodingPlan", "en-US")!.serviceSummary).toMatch(/coding tools/i);
+    expect(profileFor("DoubaoAgentPlan", "en-US")!.serviceSummary).toMatch(/Harness/i);
+    expect(profileFor("QwenTokenPlan", "en-US")!.serviceSummary).toMatch(/Credits/i);
+    expect(profileFor("QwenTokenPlanTeam", "en-US")!.serviceSummary).toMatch(/seats/i);
+    expect(profileFor("SenseNovaTokenPlan", "en-US")!.highlights.join(" ")).toMatch(/Anthropic/i);
+    expect(profileFor("MiniMaxMPlan", "en-US")!.highlights.join(" ")).toMatch(/Dify/i);
   });
 
   it.each([

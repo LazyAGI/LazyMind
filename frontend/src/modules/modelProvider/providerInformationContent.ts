@@ -1,4 +1,4 @@
-import type { ProviderInformationGuide } from "./providerInformation";
+import type { ProviderInformationGuide, ProviderInformationResourceKind } from "./providerInformation";
 
 /** Chinese, English. These are reading notes, not connection or capability defaults. */
 export type InformationText = readonly [string, string];
@@ -12,7 +12,7 @@ interface EditorialGuide {
   connect: InformationText;
   scope?: { tone: "info" | "warning"; text: InformationText };
   faqs: readonly (readonly [InformationText, InformationText])[];
-  links: readonly (readonly [InformationText, string])[];
+  links: readonly (readonly [InformationText, string, ProviderInformationResourceKind])[];
 }
 
 export const genericInformation: EditorialGuide = {
@@ -42,9 +42,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["在标准 API 配置中填写方舟凭据，核对已保存地址和控制台模型标识。", "Enter the Ark credentials under Standard API and check the saved address and console model identifier."],
     faqs: [[["为什么不能直接使用网页聊天里的模型名称？", "Why might a web chat model name fail?"], ["API 请求需要控制台认可的标识，并且目标项目已开通该模型；网页产品名称不能替代 API 标识。", "Requests need a console-recognized identifier and model activation in the target project. A web product name may differ from the API identifier."]]],
     links: [
-      [["方舟快速入门", "Ark quick start"], "https://docs.volcengine.com/docs/ark/quick-start?lang=zh"],
-      [["方舟 API Key 管理", "Ark API key management"], "https://ark.volcengine.com/region:cn-beijing/apiKey"],
-      [["模型开通管理", "Model activation management"], "https://ark.volcengine.com/region:cn-beijing/openManagement"],
+      [["方舟快速入门", "Ark quick start"], "https://docs.volcengine.com/docs/ark/quick-start?lang=zh", "docs"],
+      [["方舟 API Key 管理", "Ark API key management"], "https://ark.volcengine.com/region:cn-beijing/apiKey", "credentials"],
+      [["模型开通管理", "Model activation management"], "https://ark.volcengine.com/region:cn-beijing/openManagement", "models"],
     ],
   },
   "Doubao:coding": {
@@ -58,8 +58,8 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["从该套餐控制台获取凭据，按该产品文档核对地址和可选模型。", "Get credentials from that plan's console and check its address and model choices against the product guide."],
     faqs: [[["Coding Plan 与 Agent Plan 可以直接互换吗？", "Can I interchange Coding Plan and Agent Plan?"], ["它们是独立的产品配置，应分别核对订阅、凭据和工具要求；切换配置不会转换已有订阅权益。", "They have separate product configurations. Check each subscription, credentials, and tool requirements; switching configuration does not convert subscription benefits."]]],
     links: [
-      [["个人版 Coding Plan 快速入门", "Personal Coding Plan quick start"], "https://docs.volcengine.com/docs/ark/coding-plan-personal-get-started?lang=zh"],
-      [["个人版 Coding Plan 工具接入", "Personal Coding Plan tool setup"], "https://docs.volcengine.com/docs/ark/coding-plan-personal-ai-codex?lang=en"],
+      [["个人版 Coding Plan 快速入门", "Personal Coding Plan quick start"], "https://docs.volcengine.com/docs/ark/coding-plan-personal-get-started?lang=zh", "docs"],
+      [["个人版 Coding Plan 工具接入", "Personal Coding Plan tool setup"], "https://docs.volcengine.com/docs/ark/coding-plan-personal-ai-codex?lang=en", "scope"],
     ],
   },
   "Doubao:agent": {
@@ -73,8 +73,8 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写 Agent Plan 专属凭据，按官方工具指南核对连接和模型选择。", "Enter the dedicated credentials and check the connection and model choice against the official tool guide."],
     faqs: [[["为什么普通方舟 API Key 认证失败？", "Why does an ordinary Ark key fail?"], ["Agent Plan 要求专属 API Key；先确认复制的是该套餐的密钥，并检查套餐状态和请求配置。", "Agent Plan requires its dedicated API key. Confirm the key's origin, then check plan status and the request configuration."]]],
     links: [
-      [["Agent Plan 第三方工具接入", "Agent Plan third-party tool integration"], "https://docs.volcengine.com/docs/ark/agent-plan-personal-other-tools?lang=zh"],
-      [["个人版 Agent Plan 快速入门", "Personal Agent Plan quick start"], "https://docs.volcengine.com/docs/ark/agent-plan-personal-get-started?lang=zh"],
+      [["Agent Plan 第三方工具接入", "Agent Plan third-party tool integration"], "https://docs.volcengine.com/docs/ark/agent-plan-personal-other-tools?lang=zh", "scope"],
+      [["个人版 Agent Plan 快速入门", "Personal Agent Plan quick start"], "https://docs.volcengine.com/docs/ark/agent-plan-personal-get-started?lang=zh", "docs"],
     ],
   },
   "SenseNova:standard": {
@@ -87,10 +87,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["选择经典 API，核对当前地址、认证方式和模型标识，避免混用 Token Plan 配置。", "Choose Classic API and check the current address, authentication, and model identifier against its guide."],
     faqs: [[["应当根据新文档直接覆盖已有地址吗？", "Should I overwrite a working address from a newer guide?"], ["先确认文档对应的平台和接口版本，再验证拟采用的配置；本页不会迁移或替换已保存地址。", "First confirm the guide's platform and interface version, then validate the proposed configuration. This page does not migrate or replace the saved address."]]],
     links: [
-      [["经典 API 兼容模式", "Classic API compatibility guide"], "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/overview/compatible-mode/"],
-      [["大装置日日新服务入门", "SenseCore SenseNova service setup"], "https://console.sensecore.cn/micro/help/en/docs/model-as-a-service/nova/"],
-      [["经典 API 认证说明", "Classic API authentication"], "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/overview/Authorization"],
-      [["模型调用计费", "Model usage billing"], "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/pricing/"],
+      [["经典 API 兼容模式", "Classic API compatibility guide"], "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/overview/compatible-mode/", "docs"],
+      [["大装置日日新服务入门", "SenseCore SenseNova service setup"], "https://console.sensecore.cn/micro/help/en/docs/model-as-a-service/nova/", "docs"],
+      [["经典 API 认证说明", "Classic API authentication"], "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/overview/Authorization", "credentials"],
+      [["模型调用计费", "Model usage billing"], "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/pricing/", "pricing"],
     ],
   },
   "SenseNova:token": {
@@ -104,10 +104,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["选择 Token Plan，填写新平台密钥，并确认当前保存的地址属于该服务。", "Choose Token Plan, enter the newer platform key, and confirm the saved address belongs to that service."],
     faqs: [[["为什么经典 API 的凭据不能直接拿来用？", "Why should I check classic credentials before reuse?"], ["经典 API 与 Token Plan 的平台、密钥管理和接入方式不同。请在 Token Plan 控制台重新确认本服务需要的凭据。", "The platforms, key management, and connection methods differ. Confirm the required credentials in the Token Plan console."]]],
     links: [
-      [["SenseNova 新平台文档", "SenseNova platform documentation"], "https://platform.sensenova.cn/docs"],
-      [["SenseNova API 接入说明", "SenseNova API setup guide"], "https://github.com/OpenSenseNova/SenseNova6.7/blob/main/API_CN.md"],
-      [["Token Plan 产品说明", "Token Plan overview"], "https://www.sensenova.cn/token-plan"],
-      [["新平台 API Key 管理", "Platform API key management"], "https://platform.sensenova.cn/console/keys"],
+      [["SenseNova 新平台文档", "SenseNova platform documentation"], "https://platform.sensenova.cn/docs", "docs"],
+      [["SenseNova API 接入说明", "SenseNova API setup guide"], "https://github.com/OpenSenseNova/SenseNova6.7/blob/main/API_CN.md", "docs"],
+      [["Token Plan 产品说明", "Token Plan overview"], "https://www.sensenova.cn/token-plan", "product"],
+      [["新平台 API Key 管理", "Platform API key management"], "https://platform.sensenova.cn/console/keys", "credentials"],
     ],
   },
   "Qwen:standard": {
@@ -120,9 +120,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写标准 API 凭据，核对地域和工作空间对应的地址及模型标识。", "Enter standard API credentials and check the region, workspace address, and model identifier."],
     faqs: [[["可以填 Coding Plan 或 Token Plan 的 Key 吗？", "Can I use a Coding Plan or Token Plan key?"], ["这些产品使用各自的套餐凭据。标准 API 应使用百炼标准服务的 Key，并核对当前工作空间。", "Those products use their own plan credentials. Standard API requires a standard Model Studio key for the intended workspace."]]],
     links: [
-      [["百炼模型入门", "Model Studio getting started"], "https://help.aliyun.com/zh/model-studio/get-started-with-models/"],
-      [["获取标准 API Key", "Get a Standard API key"], "https://help.aliyun.com/zh/model-studio/get-api-key"],
-      [["模型规格与计费", "Model specifications and billing"], "https://help.aliyun.com/zh/model-studio/models"],
+      [["百炼模型入门", "Model Studio getting started"], "https://help.aliyun.com/zh/model-studio/get-started-with-models/", "docs"],
+      [["获取标准 API Key", "Get a Standard API key"], "https://help.aliyun.com/zh/model-studio/get-api-key", "credentials"],
+      [["模型规格与计费", "Model specifications and billing"], "https://help.aliyun.com/zh/model-studio/models", "models"],
     ],
   },
   "Qwen:coding": {
@@ -136,9 +136,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写 Coding Plan 专属 Key，对照套餐文档检查连接配置和支持的模型。", "Enter the dedicated Coding Plan key and check the connection and model choice against its plan guide."],
     faqs: [[["能把套餐 Key 用于 LazyMind 的任意工作流吗？", "Can I use the plan key for any LazyMind workflow?"], ["不能这样推定。官方明确排除工作流、自动化及自定义应用后端；这些用途应查看标准 API。", "No. The official guide excludes workflows, automation platforms, and custom application backends. Review Standard API for those uses."]]],
     links: [
-      [["Coding Plan 工具与使用范围", "Coding Plan tools and usage scope"], "https://help.aliyun.com/zh/model-studio/more-tools"],
-      [["Coding Plan 概览与模型", "Coding Plan overview and models"], "https://help.aliyun.com/zh/model-studio/coding-plan"],
-      [["Coding Plan 订阅与 Key", "Coding Plan subscription and key"], "https://bailian.console.aliyun.com/cn-beijing/subscription/coding-plan"],
+      [["Coding Plan 工具与使用范围", "Coding Plan tools and usage scope"], "https://help.aliyun.com/zh/model-studio/more-tools", "scope"],
+      [["Coding Plan 概览与模型", "Coding Plan overview and models"], "https://help.aliyun.com/zh/model-studio/coding-plan", "product"],
+      [["Coding Plan 订阅与 Key", "Coding Plan subscription and key"], "https://bailian.console.aliyun.com/cn-beijing/subscription/coding-plan", "credentials"],
     ],
   },
   "Qwen:token": {
@@ -152,9 +152,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["选择 Token Plan 个人版，填写对应 Key，核对套餐允许的模型标识。", "Choose Token Plan Personal, enter its key, and check the model identifiers allowed by that plan."],
     faqs: [[["个人版 Key 能当作团队版 Key 吗？", "Can a personal key serve as a team key?"], ["应使用各自产品页面提供的专属 Key；不要根据地址或模型名称相似就互换凭据。", "Use the dedicated key supplied by each product page; similar addresses or model names do not establish credential interchangeability."]]],
     links: [
-      [["Token Plan 个人版工具与使用范围", "Token Plan Personal tools and usage scope"], "https://help.aliyun.com/zh/model-studio/more-tools"],
-      [["Token Plan 个人版概览", "Token Plan Personal overview"], "https://help.aliyun.com/zh/model-studio/token-plan-personal-overview"],
-      [["个人版订阅与 Key", "Personal subscription and key"], "https://bailian.console.aliyun.com/cn-beijing/subscription/overview"],
+      [["Token Plan 个人版工具与使用范围", "Token Plan Personal tools and usage scope"], "https://help.aliyun.com/zh/model-studio/more-tools", "scope"],
+      [["Token Plan 个人版概览", "Token Plan Personal overview"], "https://help.aliyun.com/zh/model-studio/token-plan-personal-overview", "product"],
+      [["个人版订阅与 Key", "Personal subscription and key"], "https://bailian.console.aliyun.com/cn-beijing/subscription/overview", "credentials"],
     ],
   },
   "Qwen:token_team": {
@@ -168,9 +168,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["选择团队版服务，填写团队版专属 Key，并核对组织允许的模型。", "Choose the team-edition service, enter its dedicated key, and check the models available to the organization."],
     faqs: [[["个人版配置成功，为什么团队版仍不可用？", "Why can the personal edition work while the team edition fails?"], ["团队版有自己的专属 Key 和成员权限；检查 Key 来源、成员授权和团队套餐状态。", "The team edition has its own key and membership permissions. Check the key's source, member authorization, and team plan status."]]],
     links: [
-      [["Token Plan 团队版工具与使用范围", "Token Plan Team tools and usage scope"], "https://help.aliyun.com/zh/model-studio/more-tools"],
-      [["Token Plan 团队版概览", "Token Plan Team overview"], "https://help.aliyun.com/zh/model-studio/token-plan-overview"],
-      [["团队成员与专属 Key", "Team members and dedicated keys"], "https://bailian.console.aliyun.com/cn-beijing/subscription/uac-admin/organization/members/list"],
+      [["Token Plan 团队版工具与使用范围", "Token Plan Team tools and usage scope"], "https://help.aliyun.com/zh/model-studio/more-tools", "scope"],
+      [["Token Plan 团队版概览", "Token Plan Team overview"], "https://help.aliyun.com/zh/model-studio/token-plan-overview", "product"],
+      [["团队成员与专属 Key", "Team members and dedicated keys"], "https://bailian.console.aliyun.com/cn-beijing/subscription/uac-admin/organization/members/list", "credentials"],
     ],
   },
   "GLM:standard": {
@@ -183,10 +183,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["选择标准 API 并填写该类型的 Key，使用官方模型标识核对配置。", "Choose Standard API, enter the matching key, and check configuration using the official model identifier."],
     faqs: [[["能用 Coding Plan 的 Key 抵扣标准 API 吗？", "Can a Coding Plan key cover Standard API usage?"], ["标准 API、个人编程套餐和团队编程套餐的 Key 分开管理，产品类型之间不能互换。", "Standard API, personal coding plans, and team coding plans manage keys separately; keys are not interchangeable between product types."]]],
     links: [
-      [["智谱 API 入门与 Key", "BigModel API setup and keys"], "https://docs.bigmodel.cn/cn/guide/start/quick-start"],
-      [["智谱模型概览", "BigModel model overview"], "https://docs.bigmodel.cn/cn/guide/start/model-overview"],
-      [["标准 API 定价", "Standard API pricing"], "https://docs.bigmodel.cn/cn/guide/start/pricing"],
-      [["API Key 产品类型说明", "API key product-type guidance"], "https://docs.bigmodel.cn/cn/coding-plan/quick-start"],
+      [["智谱 API 入门与 Key", "BigModel API setup and keys"], "https://docs.bigmodel.cn/cn/guide/start/quick-start", "docs"],
+      [["智谱模型概览", "BigModel model overview"], "https://docs.bigmodel.cn/cn/guide/start/model-overview", "models"],
+      [["标准 API 定价", "Standard API pricing"], "https://docs.bigmodel.cn/cn/guide/start/pricing", "pricing"],
+      [["API Key 产品类型说明", "API key product-type guidance"], "https://docs.bigmodel.cn/cn/coding-plan/quick-start", "credentials"],
     ],
   },
   "GLM:coding": {
@@ -200,10 +200,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["获取对应个人或团队套餐 Key，按 Coding Plan 指南核对连接和模型标识。", "Get the matching personal or team plan key and check the connection and model identifier against the Coding Plan guide."],
     faqs: [[["只要接口兼容，就能使用套餐吗？", "Does API compatibility make a tool eligible?"], ["不能。兼容格式与套餐许可是两回事，仍需满足官方列出的工具和产品环境要求。", "No. Format compatibility does not establish plan eligibility; the tool must still meet the official product-environment requirements."]]],
     links: [
-      [["GLM Coding Plan 快速开始", "GLM Coding Plan quick start"], "https://docs.bigmodel.cn/cn/coding-plan/quick-start"],
-      [["官方支持工具和使用范围", "Official tools and usage scope"], "https://docs.bigmodel.cn/cn/coding-plan/tool/others"],
-      [["个人编程套餐与 Key", "Personal coding plan and key"], "https://bigmodel.cn/apikey/coding-plan-per"],
-      [["团队编程套餐与 Key", "Team coding plan and key"], "https://bigmodel.cn/apikey/coding-plan-team"],
+      [["GLM Coding Plan 快速开始", "GLM Coding Plan quick start"], "https://docs.bigmodel.cn/cn/coding-plan/quick-start", "docs"],
+      [["官方支持工具和使用范围", "Official tools and usage scope"], "https://docs.bigmodel.cn/cn/coding-plan/tool/others", "scope"],
+      [["个人编程套餐与 Key", "Personal coding plan and key"], "https://bigmodel.cn/apikey/coding-plan-per", "credentials"],
+      [["团队编程套餐与 Key", "Team coding plan and key"], "https://bigmodel.cn/apikey/coding-plan-team", "credentials"],
     ],
   },
   "Kimi:standard": {
@@ -216,9 +216,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["选择开放平台服务，填写 API Key，并使用平台提供的模型标识。", "Choose the Open Platform service, enter the API key, and use a platform model identifier."],
     faqs: [[["Kimi 网页会员就包含开放平台 API 权限吗？", "Does Kimi web membership establish Open Platform API access?"], ["应在开放平台独立确认 API Key、模型权限及用量状态，不能仅凭网页会员身份判断。", "Check the API key, model permissions, and usage status in Open Platform itself; web membership alone does not establish them."]]],
     links: [
-      [["Kimi API 快速开始", "Kimi API quick start"], "https://platform.kimi.com/docs/get-api-key"],
-      [["开放平台 API Key 管理", "Open Platform API key management"], "https://platform.kimi.com/console/api-keys"],
-      [["Kimi API 模型列表", "Kimi API model list"], "https://platform.kimi.com/docs/models"],
+      [["Kimi API 快速开始", "Kimi API quick start"], "https://platform.kimi.com/docs/get-api-key", "docs"],
+      [["开放平台 API Key 管理", "Open Platform API key management"], "https://platform.kimi.com/console/api-keys", "credentials"],
+      [["Kimi API 模型列表", "Kimi API model list"], "https://platform.kimi.com/docs/models", "models"],
     ],
   },
   "Kimi:code": {
@@ -232,10 +232,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写 Code Key，选择账号获准使用的模型，核对工具与交互使用方式。", "Enter the Code key, choose an authorized model, and confirm the tool and interactive usage pattern."],
     faqs: [[["模型标识正确，为什么仍可能认证失败？", "Why might authentication fail with a correct model identifier?"], ["还需检查 Code Key、会员状态及该模型的订阅权限；模型名称正确不代表当前会员拥有访问权。", "Also check the Code key, membership status, and subscription access to that model. A correct name does not establish authorization."]]],
     links: [
-      [["Kimi Code 模型配置", "Kimi Code model configuration"], "https://www.kimi.com/code/docs/kimi-code/models.html"],
-      [["Kimi Code 使用规范", "Kimi Code community guidelines"], "https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html"],
-      [["Kimi Code 会员权益", "Kimi Code membership benefits"], "https://www.kimi.com/code/docs/en/kimi-code/membership.html"],
-      [["Kimi Code 控制台与 Key", "Kimi Code console and keys"], "https://www.kimi.com/code/console"],
+      [["Kimi Code 模型配置", "Kimi Code model configuration"], "https://www.kimi.com/code/docs/kimi-code/models.html", "models"],
+      [["Kimi Code 使用规范", "Kimi Code community guidelines"], "https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html", "scope"],
+      [["Kimi Code 会员权益", "Kimi Code membership benefits"], "https://www.kimi.com/code/docs/en/kimi-code/membership.html", "product"],
+      [["Kimi Code 控制台与 Key", "Kimi Code console and keys"], "https://www.kimi.com/code/console", "credentials"],
     ],
   },
   "Minimax:standard": {
@@ -248,10 +248,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["在标准 API 下填写该 Key，核对平台文档、地址和模型标识。", "Enter that key under Standard API and check the platform guide, address, and model identifier."],
     faqs: [[["订阅了 M Plan，标准 API 调用会自动抵扣吗？", "Does an M Plan subscription automatically cover Standard API calls?"], ["不要这样推定。订阅 Key 与标准 API Key 分别使用对应资源，检查当前填写的密钥类型和账户用量。", "Do not assume so. Subscription and Standard API keys use their respective resources; check the selected key type and account usage."]]],
     links: [
-      [["MiniMax API 准备工作", "MiniMax API prerequisites"], "https://platform.minimax.io/docs/guides/quickstart-preparation"],
-      [["中国内地平台与 Key 说明", "Mainland China platform and key setup"], "https://platform.minimax.cn/docs/guides/quickstart-preparation"],
-      [["中国内地 API Key 管理", "Mainland China API key management"], "https://platform.minimax.cn/console/access?tab=api-keys"],
-      [["MiniMax 模型概览", "MiniMax model overview"], "https://platform.minimax.io/docs/guides/models-intro"],
+      [["MiniMax API 准备工作", "MiniMax API prerequisites"], "https://platform.minimax.io/docs/guides/quickstart-preparation", "docs"],
+      [["中国内地平台与 Key 说明", "Mainland China platform and key setup"], "https://platform.minimax.cn/docs/guides/quickstart-preparation", "credentials"],
+      [["中国内地 API Key 管理", "Mainland China API key management"], "https://platform.minimax.cn/console/access?tab=api-keys", "credentials"],
+      [["MiniMax 模型概览", "MiniMax model overview"], "https://platform.minimax.io/docs/guides/models-intro", "models"],
     ],
   },
   "Minimax:m_plan": {
@@ -265,10 +265,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写 Subscription Key，对照官方兼容工具指南核对连接与模型配置。", "Enter the Subscription Key and check the connection and model configuration against the compatible-tool guide."],
     faqs: [[["M Plan 是否一律禁止工作流工具？", "Does M Plan categorically exclude workflow tools?"], ["不是。官方其他工具指南包含 Dify 接入示例；仍应检查套餐条件和负载要求，生产环境参考按量付费建议。", "No. The official other-tools guide includes Dify. Still check plan conditions and workload requirements, including the pay-as-you-go recommendation for production."]]],
     links: [
-      [["M Plan 兼容工具接入", "M Plan compatible tools"], "https://platform.minimax.cn/docs/m-plan/other-tools"],
-      [["M Plan Key 与使用条件", "M Plan keys and usage conditions"], "https://platform.minimax.io/docs/m-plan/faq"],
-      [["M Plan 概览", "M Plan overview"], "https://platform.minimax.cn/docs/m-plan/intro"],
-      [["中国内地订阅管理与 Key", "Mainland China subscription management and key"], "https://platform.minimax.cn/console/plan"],
+      [["M Plan 兼容工具接入", "M Plan compatible tools"], "https://platform.minimax.cn/docs/m-plan/other-tools", "scope"],
+      [["M Plan Key 与使用条件", "M Plan keys and usage conditions"], "https://platform.minimax.io/docs/m-plan/faq", "faq"],
+      [["M Plan 概览", "M Plan overview"], "https://platform.minimax.cn/docs/m-plan/intro", "product"],
+      [["中国内地订阅管理与 Key", "Mainland China subscription management and key"], "https://platform.minimax.cn/console/plan", "credentials"],
     ],
   },
   Claude: {
@@ -281,9 +281,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写开发者 API Key，核对当前地址及所需 Claude 模型标识。", "Enter the developer API key and check the current address and required Claude model identifier."],
     faqs: [[["Claude 网页订阅能代替 API Key 吗？", "Can a Claude web subscription replace an API key?"], ["应用接入需要开发者平台的 API 凭据与权限，请在对应控制台核对。", "Application integration requires developer-platform API credentials and permissions; confirm them in the relevant console."]]],
     links: [
-      [["Claude API 概览", "Claude API overview"], "https://platform.claude.com/docs/en/api/overview"],
-      [["Claude API Key 管理", "Claude API key management"], "https://platform.claude.com/settings/keys"],
-      [["Claude 模型概览", "Claude model overview"], "https://platform.claude.com/docs/en/models/overview"],
+      [["Claude API 概览", "Claude API overview"], "https://platform.claude.com/docs/en/api/overview", "docs"],
+      [["Claude API Key 管理", "Claude API key management"], "https://platform.claude.com/settings/keys", "credentials"],
+      [["Claude 模型概览", "Claude model overview"], "https://platform.claude.com/docs/en/models/overview", "models"],
     ],
   },
   DeepSeek: {
@@ -296,9 +296,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写官方平台 Key，核对连接配置及官方文档中的模型标识。", "Enter the official platform key and check the connection and documented model identifier."],
     faqs: [[["网页聊天可用，为什么 API 仍失败？", "Why can web chat work while API access fails?"], ["应分别检查开放平台的 Key、账户状态和 API 模型标识，网页登录状态不能证明 API 配置有效。", "Check the developer-platform key, account status, and API model identifier separately; a web login does not validate the API configuration."]]],
     links: [
-      [["DeepSeek 首次 API 调用", "DeepSeek first API call"], "https://api-docs.deepseek.com/"],
-      [["DeepSeek 模型与定价", "DeepSeek models and pricing"], "https://api-docs.deepseek.com/quick_start/pricing/"],
-      [["DeepSeek API Key 管理", "DeepSeek API key management"], "https://platform.deepseek.com/api_keys"],
+      [["DeepSeek 首次 API 调用", "DeepSeek first API call"], "https://api-docs.deepseek.com/", "docs"],
+      [["DeepSeek 模型与定价", "DeepSeek models and pricing"], "https://api-docs.deepseek.com/quick_start/pricing/", "pricing"],
+      [["DeepSeek API Key 管理", "DeepSeek API key management"], "https://platform.deepseek.com/api_keys", "credentials"],
     ],
   },
   OpenAI: {
@@ -311,10 +311,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写项目 API Key，核对连接配置，再选择项目可访问的模型。", "Enter the project API key, check the connection, and select a model accessible to that project."],
     faqs: [[["ChatGPT 订阅等于 API 已开通吗？", "Does a ChatGPT subscription establish API access?"], ["API 使用独立的开发者项目、凭据与用量管理，请在开发者平台确认。", "API access uses developer projects, credentials, and usage management; confirm availability on the developer platform."]]],
     links: [
-      [["OpenAI API 开发入门", "OpenAI API developer quick start"], "https://developers.openai.com/api/docs/quickstart"],
-      [["OpenAI API Key 管理", "OpenAI API key management"], "https://platform.openai.com/api-keys"],
-      [["OpenAI API 模型", "OpenAI API models"], "https://developers.openai.com/api/docs/models"],
-      [["OpenAI API 定价", "OpenAI API pricing"], "https://developers.openai.com/api/docs/pricing"],
+      [["OpenAI API 开发入门", "OpenAI API developer quick start"], "https://developers.openai.com/api/docs/quickstart", "docs"],
+      [["OpenAI API Key 管理", "OpenAI API key management"], "https://platform.openai.com/api-keys", "credentials"],
+      [["OpenAI API 模型", "OpenAI API models"], "https://developers.openai.com/api/docs/models", "models"],
+      [["OpenAI API 定价", "OpenAI API pricing"], "https://developers.openai.com/api/docs/pricing", "pricing"],
     ],
   },
   OpenRouter: {
@@ -327,10 +327,10 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写 OpenRouter Key 和当前连接配置，使用目录提供的完整模型标识。", "Enter the OpenRouter key and current connection settings, using the full catalog model identifier."],
     faqs: [[["同名模型为什么可能有不同响应？", "Why can a model's behavior vary across requests?"], ["路由可能涉及不同上游提供商；参数、可用性及数据处理要求请结合模型和路由文档确认。", "Routing can involve different upstream providers. Check the model and routing documentation for parameter behavior, availability, and data-handling requirements."]]],
     links: [
-      [["OpenRouter 快速开始", "OpenRouter quick start"], "https://openrouter.ai/docs/quickstart"],
-      [["OpenRouter API Key 管理", "OpenRouter API key management"], "https://openrouter.ai/settings/keys"],
-      [["OpenRouter 模型与定价", "OpenRouter models and pricing"], "https://openrouter.ai/models"],
-      [["OpenRouter 常见问题", "OpenRouter FAQ"], "https://openrouter.ai/docs/faq"],
+      [["OpenRouter 快速开始", "OpenRouter quick start"], "https://openrouter.ai/docs/quickstart", "docs"],
+      [["OpenRouter API Key 管理", "OpenRouter API key management"], "https://openrouter.ai/settings/keys", "credentials"],
+      [["OpenRouter 模型与定价", "OpenRouter models and pricing"], "https://openrouter.ai/models", "models"],
+      [["OpenRouter 常见问题", "OpenRouter FAQ"], "https://openrouter.ai/docs/faq", "faq"],
     ],
   },
   SiliconFlow: {
@@ -343,9 +343,9 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
     connect: ["填写平台 Key，核对当前连接地址与目录中的完整模型名称。", "Enter the platform key and check the current address and full catalog model name."],
     faqs: [[["原厂模型名可以直接作为硅基流动标识吗？", "Can I use the model vendor's name directly?"], ["以硅基流动模型详情和接口文档提供的完整标识为准；原厂名称可能缺少平台所需前缀或版本信息。", "Use the full identifier from SiliconFlow's model details and API documentation; the vendor name may omit a required prefix or version."]]],
     links: [
-      [["硅基流动快速入门", "SiliconFlow quick start"], "https://docs.siliconflow.cn/docs/userguide/quickstart"],
-      [["硅基流动 API Key 管理", "SiliconFlow API key management"], "https://cloud.siliconflow.cn/account/ak"],
-      [["硅基流动模型详情", "SiliconFlow model details"], "https://cloud.siliconflow.cn/models"],
+      [["硅基流动快速入门", "SiliconFlow quick start"], "https://docs.siliconflow.cn/docs/userguide/quickstart", "docs"],
+      [["硅基流动 API Key 管理", "SiliconFlow API key management"], "https://cloud.siliconflow.cn/account/ak", "credentials"],
+      [["硅基流动模型详情", "SiliconFlow model details"], "https://cloud.siliconflow.cn/models", "models"],
     ],
   },
   vLLM: {
@@ -360,7 +360,7 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
       [["为什么浏览器能打开，LazyMind 却连接失败？", "Why can my browser reach it while LazyMind cannot?"], ["检查后端或容器的网络、端口、服务监听和代理设置；浏览器所在电脑与后端的网络环境可能不同。", "Check backend or container networking, ports, server binding, and proxy settings; the browser and backend may have different network access."]],
       [["上下文长度从哪里来？", "Where does the context length come from?"], ["获取模型时，LazyMind 可从 vLLM 返回的 max_model_len 补充缺失的上下文信息；已保存或手动设置的限制仍优先，实际能力取决于部署。", "When fetching models, LazyMind can use vLLM's max_model_len to fill missing context metadata. Saved or manual limits retain priority, and actual capability depends on the deployment."]],
     ],
-    links: [[["vLLM 服务部署文档", "vLLM server deployment guide"], "https://docs.vllm.ai/en/stable/serving/online_serving/openai_compatible_server/"]],
+    links: [[["vLLM 服务部署文档", "vLLM server deployment guide"], "https://docs.vllm.ai/en/stable/serving/online_serving/openai_compatible_server/", "deployment"]],
   },
   LMDeploy: {
     kind: "self-hosted",
@@ -374,6 +374,6 @@ export const providerInformationContent: Readonly<Record<string, EditorialGuide>
       [["模型下载好了，就能在这里调用吗？", "Is downloading a model enough to call it here?"], ["还需要启动 API Server，并让后端能够访问服务；模型目录本身不是 API 地址。", "The API Server must be running and reachable from the backend; a local model directory is not an API address."]],
       [["为什么模型名称或上下文不匹配？", "Why might the model name or context length differ?"], ["检查部署时的对外名称和会话长度设置。以当前服务能力为准，必要时在模型配置中填写相应限制并测试。", "Check the served name and session-length settings used at deployment. Use the actual server capabilities and configure and test the corresponding model limits."]],
     ],
-    links: [[["LMDeploy API Server 部署文档", "LMDeploy API Server deployment guide"], "https://lmdeploy.readthedocs.io/en/latest/llm/api_server.html"]],
+    links: [[["LMDeploy API Server 部署文档", "LMDeploy API Server deployment guide"], "https://lmdeploy.readthedocs.io/en/latest/llm/api_server.html", "deployment"]],
   },
 };

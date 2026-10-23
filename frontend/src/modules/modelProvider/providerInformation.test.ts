@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getProviderInformation } from "./providerInformation";
 import { programmingScopeLink } from "./supplierNavigation";
+import * as supplierNavigation from "./supplierNavigation";
 
 const leaves = [
   ["Doubao", "cloud", "volcengine.com"],
@@ -37,6 +38,8 @@ const officialHosts = new Set([
   "cloud.siliconflow.cn", "platform.deepseek.com",
 ]);
 
+const resourceKinds = ["docs", "credentials", "models", "pricing", "scope", "product", "deployment", "faq"];
+
 describe("provider information", () => {
   describe.each(["zh-CN", "en-US"])("%s", (language) => {
     it.each(leaves)("provides an actionable guide for %s", (name, kind, officialDomain) => {
@@ -47,17 +50,18 @@ describe("provider information", () => {
       }
       expect(guide.steps).toHaveLength(3);
       expect(guide.steps.every((step) => step.title.trim() && step.body.trim())).toBe(true);
-      expect(guide.faqs.length).toBeGreaterThanOrEqual(2);
-      expect(guide.faqs.length).toBeLessThanOrEqual(3);
+      expect(guide.faqs.length).toBeGreaterThanOrEqual(1);
+      expect(guide.faqs.length).toBeLessThanOrEqual(2);
       expect(guide.faqs.every((faq) => faq.question.trim() && faq.answer.trim())).toBe(true);
       expect(guide.links.length).toBeGreaterThan(0);
       expect(guide.links.some(({ url }) => {
         const host = new URL(url).hostname;
         return host === officialDomain || host.endsWith(`.${officialDomain}`);
       })).toBe(true);
-      for (const { label, url } of guide.links) {
+      for (const { label, url, kind: resourceKind } of guide.links) {
         const source = new URL(url);
         expect(label.trim()).not.toBe("");
+        expect(resourceKinds).toContain(resourceKind);
         expect(source.protocol).toBe("https:");
         expect(source.username).toBe("");
         expect(source.password).toBe("");
@@ -74,6 +78,66 @@ describe("provider information", () => {
     it("keeps every leaf's introduction specific to its service", () => {
       expect(new Set(leaves.map(([name]) => getProviderInformation({ name }, language).summary)).size).toBe(22);
     });
+
+    it.each([
+      ["SenseNova", "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/overview/Authorization", "credentials"],
+      ["SenseNova", "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/pricing/", "pricing"],
+      ["QwenCodingPlan", "https://bailian.console.aliyun.com/cn-beijing/subscription/coding-plan", "credentials"],
+      ["QwenTokenPlan", "https://bailian.console.aliyun.com/cn-beijing/subscription/overview", "credentials"],
+      ["QwenTokenPlanTeam", "https://bailian.console.aliyun.com/cn-beijing/subscription/uac-admin/organization/members/list", "credentials"],
+      ["GLM", "https://docs.bigmodel.cn/cn/guide/start/pricing", "pricing"],
+      ["GLMCodingPlan", "https://bigmodel.cn/apikey/coding-plan-per", "credentials"],
+      ["GLMCodingPlan", "https://bigmodel.cn/apikey/coding-plan-team", "credentials"],
+      ["DeepSeek", "https://api-docs.deepseek.com/quick_start/pricing/", "pricing"],
+      ["DeepSeek", "https://platform.deepseek.com/api_keys", "credentials"],
+      ["OpenAI", "https://developers.openai.com/api/docs/pricing", "pricing"],
+      ["OpenAI", "https://platform.openai.com/api-keys", "credentials"],
+      ["MiniMaxMPlan", "https://platform.minimax.cn/console/plan", "credentials"],
+    ])("keeps the purpose of %s resource %s", (name, url, kind) => {
+      expect(getProviderInformation({ name }, language).links.find((link) => link.url === url)?.kind).toBe(kind);
+    });
+
+    it("keeps model catalogs and product, scope, FAQ, and deployment resources distinct", () => {
+      const resource = (name: string, url: string) => getProviderInformation({ name }, language).links.find((link) => link.url === url);
+      expect(resource("Qwen", "https://help.aliyun.com/zh/model-studio/models")?.kind).toBe("models");
+      expect(resource("OpenRouter", "https://openrouter.ai/models")?.kind).toBe("models");
+      expect(resource("SenseNovaTokenPlan", "https://www.sensenova.cn/token-plan")?.kind).toBe("product");
+      expect(resource("QwenCodingPlan", "https://help.aliyun.com/zh/model-studio/more-tools")?.kind).toBe("scope");
+      expect(resource("MiniMaxMPlan", "https://platform.minimax.io/docs/m-plan/faq")?.kind).toBe("faq");
+      expect(resource("vLLM", "https://docs.vllm.ai/en/stable/serving/online_serving/openai_compatible_server/")?.kind).toBe("deployment");
+      expect(resource("LMDeploy", "https://lmdeploy.readthedocs.io/en/latest/llm/api_server.html")?.kind).toBe("deployment");
+    });
+  });
+
+  it("appends a scope resource with its complete label when the scope URL is not already listed", () => {
+    const scopeUrl = "https://help.aliyun.com/zh/model-studio/more-tools";
+    const scopeLink = vi.spyOn(supplierNavigation, "programmingScopeLink").mockReturnValue(scopeUrl);
+    try {
+      for (const [language, label] of [["zh-CN", "使用范围与工具接入"], ["en-US", "Usage scope and tool integration"]]) {
+        const guide = getProviderInformation({ name: "OpenAI" }, language);
+        expect(guide.links[guide.links.length - 1]).toEqual({ label, url: scopeUrl, kind: "scope" });
+        expect(guide.links.filter(({ url }) => url === scopeUrl)).toHaveLength(1);
+      }
+      expect(getProviderInformation({ name: "OpenAI", isCustom: true }).links).toEqual([]);
+      expect(getProviderInformation({ name: "Unknown" }).links).toEqual([]);
+    } finally {
+      scopeLink.mockRestore();
+    }
+  });
+
+  it("preserves complete localized labels and document order when several resources have the same kind", () => {
+    const urls = [
+      "https://console.sensecore.cn/micro/help/docs/model-as-a-service/nova/overview/compatible-mode/",
+      "https://console.sensecore.cn/micro/help/en/docs/model-as-a-service/nova/",
+    ];
+    expect(getProviderInformation({ name: "SenseNova" }, "zh-CN").links.slice(0, 2)).toEqual([
+      { label: "经典 API 兼容模式", url: urls[0], kind: "docs" },
+      { label: "大装置日日新服务入门", url: urls[1], kind: "docs" },
+    ]);
+    expect(getProviderInformation({ name: "SenseNova" }, "en-US").links.slice(0, 2)).toEqual([
+      { label: "Classic API compatibility guide", url: urls[0], kind: "docs" },
+      { label: "SenseCore SenseNova service setup", url: urls[1], kind: "docs" },
+    ]);
   });
 
   it("uses immutable service metadata after the display name and request adapter change", () => {
@@ -129,7 +193,7 @@ describe("provider information", () => {
     const guide = getProviderInformation(supplier, "zh-CN");
     expect(guide.profile?.websiteUrl).toBe("https://openai.com/");
     expect(guide.profile?.introduction).toMatch(/OpenAI/);
-    expect(guide.profile?.highlights).toHaveLength(3);
+    expect(guide.profile?.highlights).toHaveLength(2);
     expect(guide.profile?.introduction).not.toBe(guide.summary);
     expect(JSON.stringify(guide.profile)).not.toContain("private-gateway");
   });
