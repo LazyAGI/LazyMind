@@ -104,7 +104,7 @@ def test_real_agent_rolls_back_only_failed_call_then_continues_after_one_tool(pr
 
 
 def test_old_raw_sink_keeps_its_identity_and_late_sdk_observation_is_only_accounted(provider, monkeypatch):
-    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
+    from lazyllm.module.llms.onlinemodule.base import OnlineChatModuleBase
 
     provider.script['model-a'] = [broken_output()]
     provider.script['model-b'] = [{'message': {'role': 'assistant', 'content': ''}}]
@@ -130,16 +130,16 @@ def test_old_raw_sink_keeps_its_identity_and_late_sdk_observation_is_only_accoun
             lazyllm.FileSystemQueue().enqueue(json.dumps(event))
 
         executor.runtime_llm(agent)._stream = {'_stream_sink': deliver}
-        original_execute = PreparedModelRequest.execute
+        original_execute = OnlineChatModuleBase.forward
 
-        def execute(request, **kwargs):
-            if request.payload['model'] == 'model-b':
+        def execute(module, *args, **kwargs):
+            if module._model_name == 'model-b':
                 old_sinks[0]({'tag': 'text', 'delta': 'LATE-A-TEXT'})
                 old_sinks[0]({'tag': 'think', 'delta': 'LATE-A-THINK'})
                 old_sinks[0](delayed[0])
-            return original_execute(request, **kwargs)
+            return original_execute(module, *args, **kwargs)
 
-        monkeypatch.setattr(PreparedModelRequest, 'execute', execute)
+        monkeypatch.setattr(OnlineChatModuleBase, 'forward', execute)
         assert asyncio.run(drive(executor, agent, plan, translator, frames, events)) == ''
     assert [request['model'] for request in provider.requests] == ['model-a', 'model-b']
     late = [event for event in events if str(event.get('delta') or '').startswith('LATE-A-')]
@@ -151,7 +151,7 @@ def test_old_raw_sink_keeps_its_identity_and_late_sdk_observation_is_only_accoun
 
 
 def test_late_failed_sink_does_not_poison_the_replacement_call(provider, monkeypatch):
-    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
+    from lazyllm.module.llms.onlinemodule.base import OnlineChatModuleBase
 
     provider.script['model-a'] = [broken_output()]
     provider.script['model-b'] = [{'message': {'role': 'assistant', 'content': 'B CLEAN ANSWER'}}]
@@ -175,16 +175,16 @@ def test_late_failed_sink_does_not_poison_the_replacement_call(provider, monkeyp
             lazyllm.FileSystemQueue().enqueue(json.dumps(event))
 
         executor.runtime_llm(agent)._stream = {'_stream_sink': deliver}
-        original_execute = PreparedModelRequest.execute
+        original_execute = OnlineChatModuleBase.forward
 
-        def execute(request, **kwargs):
-            if request.payload['model'] == 'model-b':
+        def execute(module, *args, **kwargs):
+            if module._model_name == 'model-b':
                 with pytest.raises(RuntimeError, match='old call sink failed') as error:
                     old_sinks[0]({'tag': 'text', 'delta': 'LATE-A-TEXT'})
                 late_errors.append(error.value)
-            return original_execute(request, **kwargs)
+            return original_execute(module, *args, **kwargs)
 
-        monkeypatch.setattr(PreparedModelRequest, 'execute', execute)
+        monkeypatch.setattr(OnlineChatModuleBase, 'forward', execute)
         assert asyncio.run(drive(executor, agent, plan, translator, frames, events)) == 'B CLEAN ANSWER'
     assert len(late_errors) == 1
     assert [request['model'] for request in provider.requests] == ['model-a', 'model-b']

@@ -1,6 +1,7 @@
 import copy
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import lazyllm
@@ -109,7 +110,13 @@ class ScriptedProvider:
                 self.send_header('Content-Type', content_type)
                 self.send_header('Content-Length', str(len(body) + (100 if step and step.get('disconnect') else 0)))
                 self.end_headers()
-                self.wfile.write(body)
+                if step and step.get('chunk_delay'):
+                    for frame in body.splitlines(keepends=True):
+                        self.wfile.write(frame)
+                        self.wfile.flush()
+                        time.sleep(step['chunk_delay'])
+                else:
+                    self.wfile.write(body)
 
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01), daemon=True)
@@ -200,7 +207,23 @@ def broken_output():
 
 
 def request_tokens_for(llm, input, history, files, kwargs):
+    from lazyllm.common import HandledException
+    from lazyllm.module.llms.onlinemodule.base import ModelCallControl
     from lazymind.chat.engine.agent_runtime.context_estimator import estimate_tokens
     from lazymind.chat.engine.agent_runtime.message_fields import estimate_message_tokens
-    return llm.prepare_request(input, llm_chat_history=history, lazyllm_files=files, **kwargs).estimate_tokens(
-        estimate_tokens, estimate_message_tokens)
+
+    class Inspected(HandledException):
+        pass
+
+    tokens = []
+
+    def inspect(request):
+        tokens.append(request.estimate_tokens(estimate_tokens, estimate_message_tokens))
+        raise Inspected('Only inspect the payload; do not send HTTP.')
+
+    try:
+        llm(input, llm_chat_history=history, lazyllm_files=files,
+            call_control=ModelCallControl(request_check=inspect), **kwargs)
+    except Inspected:
+        return tokens[0]
+    raise AssertionError('request inspection must run before transport')

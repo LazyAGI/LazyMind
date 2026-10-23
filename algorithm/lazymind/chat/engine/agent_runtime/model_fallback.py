@@ -1,8 +1,9 @@
-"""Recover one prepared Agent model call without entering the Agent again."""
+"""Recover one Agent model call without entering the Agent again."""
 from __future__ import annotations
 
 import copy
 import json
+import math
 import random
 import socket
 import time
@@ -11,6 +12,7 @@ from typing import Any
 
 import lazyllm
 import requests
+from lazyllm.common import HandledException
 from lazyllm.module import ModuleBase
 from lazyllm.module.module import ModuleExecutionError
 from lazyllm.module.servermodule import LLMBase
@@ -19,7 +21,7 @@ from lazyllm.module.llms.onlinemodule.base.model_outcome import (
 )
 
 from .budget import build_context_budget, parse_token_limit
-from .model_calls import ContextCapacityError, UnsupportedModelInput, prepare_model_call, request_tokens
+from .model_calls import ContextCapacityError, UnsupportedModelInput, request_tokens
 from .message_fields import model_facing_history
 from lazyllm.module.llms.onlinemodule.base import ModelCallControl
 from .cancellation import UserCancelledError
@@ -31,13 +33,17 @@ from lazymind.chat.runtime_events import runtime_event
 _RECOVERABLE = frozenset({
     'authentication_failed', 'permission_denied', 'not_found', 'rate_limited',
     'usage_limit_exceeded', 'concurrency_limited', 'quota_exhausted', 'balance_exhausted',
-    'organization_spend_limit_exceeded', 'project_spend_limit_exceeded', 'token_limit',
+    'organization_spend_limit_exceeded', 'project_spend_limit_exceeded',
     'request_timeout', 'provider_overloaded', 'service_unavailable', 'provider_internal_error',
     'transport_error',
 })
 _INVALID_KEY_CODES = frozenset({'invalid_api_key', 'api_key_invalid', 'expired_api_key',
                                 'revoked_api_key', 'invalid_authentication'})
 _UNSUPPORTED_CALL_CODES = frozenset({'unsupported_tools', 'tools_not_supported', 'unsupported_function_call'})
+
+
+class _RecoveryBudgetExhausted(HandledException):
+    pass
 
 
 def model_candidate(value: ModelCandidate | dict[str, Any]) -> ModelCandidate:
@@ -119,7 +125,7 @@ def _make_llm(candidate: ModelCandidate):
         skip_auth=bool(config.get('skip_auth', False)),
         type='vlm' if config.get('vision') is True else config.get('type'),
         static_params=copy.deepcopy(config.get('static_params') or {}),
-        timeout=config.get('timeout', 180), stream=False,
+        stream=False,
     )
 
 
@@ -128,8 +134,6 @@ def _failure_from_error(error: Exception):
     network_failure = None
     while error is not None and id(error) not in seen:
         seen.add(id(error))
-        if isinstance(error, ContextCapacityError):
-            return ModelFailure(ModelFailureOrigin.PROTOCOL, ModelFailureCode.TOKEN_LIMIT)
         if isinstance(error, UnsupportedModelInput):
             return ModelFailure(ModelFailureOrigin.PROTOCOL, ModelFailureCode.PROVIDER_REJECTED)
         if isinstance(error, ModelCallError):
@@ -146,35 +150,15 @@ def _failure_from_error(error: Exception):
     return network_failure
 
 
-def _summarize_context(raw, view, input, files, kwargs, *, budget, state, control, estimated_total_tokens,
-                       on_summary_attempt):
-    from .summarizer import _call_summarizer_llm, summarize_model_history
-
-    wrapped_input = isinstance(input, dict) and set(input) == {'input'}
-    current_input = input['input'] if wrapped_input else input
-    current_count = state.current_message_count
-    current = state.model_history[-current_count:] if current_count else []
-    prior = state.model_history[:-current_count] if current_count else state.model_history
-    if current_count and (not isinstance(current_input, list)
-                          or current_input[:current_count] != model_facing_history(current)):
-        raise ContextCapacityError('The model history boundary no longer matches.')
-    fixed_current = current_input[current_count:] if isinstance(current_input, list) else current_input
-    fixed_input = {'input': fixed_current or ''} if wrapped_input else fixed_current
-    fixed_tokens = request_tokens(prepare_model_call(view, fixed_input or '', [], files, kwargs, budget))
-    if fixed_tokens > budget.effective_input_budget:
-        raise ContextCapacityError('The fixed request does not fit this candidate.')
-    history, current = summarize_model_history(
-        prior or [], current, budget=budget, estimated_total_tokens=estimated_total_tokens,
-        summarizer=lambda system, user: _call_summarizer_llm(
-            raw, system, user, candidate_budget=budget, control=control, on_attempt=on_summary_attempt),
-    )
-    state.model_history = [*history, *current]
-    state.current_message_count = len(current)
-    if current_count:
-        input = [*model_facing_history(current), *fixed_current]
-        if wrapped_input:
-            input = {'input': input}
-    return input, model_facing_history(history)
+def _request_timeout(candidate):
+    role = candidate.llm_config.get('llm') or {}
+    configured = role.get('timeout')
+    if configured is None:
+        configured = (config['model_fallback_connect_timeout_seconds'], config['model_fallback_read_timeout_seconds'])
+    values = configured if isinstance(configured, (list, tuple)) else (configured, configured)
+    if len(values) != 2 or any(not math.isfinite(float(value)) or float(value) <= 0 for value in values):
+        raise ValueError('Model timeouts must contain finite positive connect and read limits.')
+    return tuple(float(value) for value in values)
 
 
 class FallbackLLM(ModuleBase, LLMBase):
@@ -202,51 +186,6 @@ class FallbackLLM(ModuleBase, LLMBase):
     def prompt(self, prompt=None, history=None):
         return LLMBase.prompt(self, '' if prompt is None else _copy_prompt(prompt), history=copy.deepcopy(history))
 
-    def bind_history_compactor(self, compactor):
-        from lazyllm.tools.agent import describe_tool_turns, invoke_history_compactor
-
-        state = self.state
-        source_count, source_scope = 0, None
-
-        def compact(history, keep_full_turns=None, **kwargs):
-            nonlocal source_count, source_scope
-            scope = kwargs.pop('runtime_state', None)
-            if scope is not source_scope or len(history) < source_count:
-                state.model_history, source_count = None, 0
-            source_scope = scope
-            kwargs['model_visible_prefix'] = len(history) if state.model_history is None else len(state.model_history)
-            prior = [*(state.model_history or []), *history[source_count:]]
-            current = list(kwargs.get('current_round_messages') or [])
-            kwargs['tool_turns'] = describe_tool_turns(prior, current)
-            if state.call_control is not None:
-                # Resolve attachments with the SDK before ordinary compaction can
-                # call the summarizer. This local snapshot is never executed.
-                current_input = kwargs.get('current_input') or ''
-                if isinstance(current_input, (list, dict)):
-                    current_input = {'input': current_input}
-                request = state.raw_llm.share().prompt(None).prepare_request(
-                    current_input, llm_chat_history=model_facing_history([*prior, *current]))
-                state.call_requires_vision = request.requires_vision
-            compacted_prior, compacted_current = invoke_history_compactor(compactor, prior, keep_full_turns, **kwargs)
-            state.model_history = copy.deepcopy([*compacted_prior, *compacted_current])
-            state.current_message_count = len(compacted_current)
-            source_count = len(history) + len(current)
-            return model_facing_history(compacted_prior), model_facing_history(compacted_current)
-
-        return compact
-
-    def begin_request(self):
-        self.state.call_requires_vision = False
-        self.state.call_started_at = time.monotonic()
-        self.state.call_control = ModelCallControl(
-            self.state.call_started_at + max(0.001, float(config['model_fallback_timeout_seconds'])), self._check_cancel)
-        return self.state.call_control
-
-    def _candidate_control(self, control, count, started_at):
-        # Unused time remains available to later candidates. Summary and generation
-        # share a start time, including ordinary compaction before forward().
-        return ModelCallControl(started_at + (control.deadline - started_at) / count, self._check_cancel)
-
     def _check_cancel(self):
         if self._cancel_check is not None and self._cancel_check(None):
             raise UserCancelledError('stopped during a model request')
@@ -255,51 +194,41 @@ class FallbackLLM(ModuleBase, LLMBase):
     def initialization_budget(self):
         candidates = [item for item in _ordered_candidates(self.state)
                       if item.candidate_id != self.state.current.candidate_id]
-        count = max(1, int(config['model_fallback_max_candidates']))
         budgets = [self.state.budget]
-        budgets.extend(build_context_budget(item.max_input_tokens) for item in candidates[:count - 1])
+        budgets.extend(build_context_budget(item.max_input_tokens) for item in candidates)
         return max(budgets, key=lambda budget: budget.effective_input_budget)
 
     def auxiliary_call(self, system, user):
         from .summarizer import _call_summarizer_llm
-        control = self.state.call_control or ModelCallControl(
-            time.monotonic() + max(0.001, float(config['model_fallback_timeout_seconds'])), self._check_cancel)
-        if self.state.call_control is not None:
-            count = 1 + sum(item.candidate_id != self.state.current.candidate_id
-                            for item in _ordered_candidates(self.state,
-                                                            requires_vision=self.state.call_requires_vision))
-            count = min(count, max(1, int(config['model_fallback_max_candidates'])))
-            control = self._candidate_control(control, count, self.state.call_started_at)
         return _call_summarizer_llm(
-            self.state.raw_llm, system, user, candidate_budget=self.state.budget, control=control)
+            self.state.raw_llm, system, user, candidate_budget=self.state.budget,
+            control=ModelCallControl(cancel_check=self._check_cancel), timeout=_request_timeout(self.state.current))
 
     def forward(self, input=None, *, llm_chat_history=None, lazyllm_files=None,
                 stream_output=None, stream=None, **kwargs):
-        control = self.state.call_control or self.begin_request()
         try:
             return self._recover(input, llm_chat_history=llm_chat_history, lazyllm_files=lazyllm_files,
-                                 stream_output=stream_output, stream=stream, control=control, **kwargs)
-        finally:
-            self.state.call_control = None
-            self.state.call_started_at = None
-            self.state.call_requires_vision = False
+                                 stream_output=stream_output, stream=stream, **kwargs)
+        except ModuleExecutionError as exc:
+            exc._model_fallback_local_failure = True
+            raise
 
     def _recover(self, input=None, *, llm_chat_history=None, lazyllm_files=None,
-                 stream_output=None, stream=None, control=None, **kwargs):
+                 stream_output=None, stream=None, **kwargs):
         state = self.state
         prior_usage = state.usage_snapshot
         current, raw = state.current, state.raw_llm
         original = state.current
         history, files = copy.deepcopy(llm_chat_history), copy.deepcopy(lazyllm_files)
-        if not state.current_message_count and model_facing_history(state.model_history or []) != (history or []):
-            state.model_history = copy.deepcopy(history or [])
-        summary_attempted = context_compacted = False
+        history = model_facing_history(history) if history is not None else None
         reason = ''
         only_context_failures = True
         stream = stream_output if stream_output is not None else stream
         stream = self._stream if stream is None else stream
         outer_sink = stream.get('_stream_sink') if isinstance(stream, dict) else getattr(self, '_stream_sink', None)
-        requires_vision = state.call_requires_vision
+        requires_vision = False
+        control = ModelCallControl(cancel_check=self._check_cancel)
+        deadline = time.monotonic() + max(0.001, float(config['model_fallback_timeout_seconds']))
 
         def emit(event):
             try:
@@ -313,24 +242,15 @@ class FallbackLLM(ModuleBase, LLMBase):
 
         attempted = set()
         max_candidates = max(1, int(config['model_fallback_max_candidates']))
-        candidate_started_at = state.call_started_at
-
-        def summary_attempt():
-            nonlocal summary_attempted
-            summary_attempted = True
+        sent_count = 0
 
         def remaining_candidates():
             candidates = [item for item in _ordered_candidates(state, requires_vision=requires_vision)
                           if item.candidate_id not in attempted]
-            return candidates[:max(0, max_candidates - len(attempted))]
+            return candidates if sent_count < max_candidates and time.monotonic() < deadline else []
 
         while True:
-            try:
-                control.check()
-            except requests.Timeout as exc:
-                exc.fallback_code = 'model_fallback_exhausted'
-                emit({'tag': 'model_fallback_failed', 'fallback_code': exc.fallback_code})
-                raise
+            control.check()
             attempted.add(current.candidate_id)
             local_failure = []
             call_index = 0
@@ -363,39 +283,44 @@ class FallbackLLM(ModuleBase, LLMBase):
             usage_module_id = self._used_by_moduleid or self._module_id
             view.used_by(usage_module_id)
             budget = build_context_budget(current.max_input_tokens)
-            call_kwargs = copy.deepcopy(kwargs)
+            call_kwargs = dict(kwargs)
             call_kwargs['max_retries'] = 1
-            preparing_context = False
-            try:
-                role_config = current.llm_config.get('llm') or {}
-                request = prepare_model_call(view, input, history, files, call_kwargs, budget)
-                requires_vision = requires_vision or request.requires_vision
-                if requires_vision and request.model_type != 'VLM' and role_config.get('vision') is not True:
-                    raise UnsupportedModelInput('The configured model does not support this image input.')
-                candidate_control = self._candidate_control(
-                    control, 1 + len(remaining_candidates()), candidate_started_at)
-                total_tokens = request_tokens(request)
-                if total_tokens > budget.effective_input_budget:
-                    if not config['context_compression_enabled'] or summary_attempted:
-                        raise ContextCapacityError('The complete request exceeds the configured input budget.')
-                    preparing_context = True
-                    input, history = _summarize_context(
-                        raw, view, input, files, call_kwargs, budget=budget,
-                        state=state, control=candidate_control, estimated_total_tokens=total_tokens,
-                        on_summary_attempt=summary_attempt,
-                    )
-                    context_compacted = True
-                    request = prepare_model_call(view, input, history, files, call_kwargs, budget)
-                    if request_tokens(request) > budget.effective_input_budget:
-                        raise ContextCapacityError('The summarized request does not fit this candidate.')
-                preparing_context = False
-                candidate_control.check()
+            call_kwargs['timeout'] = _request_timeout(current)
+            call_kwargs['output_limit'] = budget.reserved_output_tokens
+
+            def begin_output(output_metadata=output_metadata):
+                nonlocal call_index, call_open
+                if call_open:
+                    return
                 state.model_output_index += 1
                 call_index = state.model_output_index
                 output_metadata['call_index'] = call_index
                 call_open = True
                 emit({'tag': 'model_output', 'model_output': {'call_index': call_index, 'phase': 'begin'}})
-                response = request.execute(control=candidate_control).value
+
+            def check_request(request, current=current, budget=budget, begin_output=begin_output):
+                nonlocal requires_vision, sent_count
+                control.check()
+                requires_vision = requires_vision or request.requires_vision
+                role_config = current.llm_config.get('llm') or {}
+                if requires_vision and request.model_type != 'VLM' and role_config.get('vision') is not True:
+                    raise UnsupportedModelInput('The configured model does not support this image input.')
+                if request_tokens(request) > budget.effective_input_budget:
+                    raise ContextCapacityError('The complete request exceeds the configured input budget.')
+                control.check()
+                if time.monotonic() >= deadline:
+                    raise _RecoveryBudgetExhausted('The model recovery budget is exhausted.')
+                sent_count += 1
+                begin_output()
+
+            try:
+                response = view(
+                    input, llm_chat_history=history, lazyllm_files=files,
+                    call_control=ModelCallControl(cancel_check=self._check_cancel, request_check=check_request),
+                    **call_kwargs)
+                # A cache hit has no transport or stream callbacks, but its returned
+                # value still belongs to a normal output commit boundary.
+                begin_output()
             except CancelledError:
                 rollback()
                 raise
@@ -411,24 +336,33 @@ class FallbackLLM(ModuleBase, LLMBase):
                     if failure is exc:
                         raise
                     raise failure from exc
+                control.check()
+                if isinstance(exc, _RecoveryBudgetExhausted):
+                    exc.fallback_code = 'model_fallback_exhausted'
+                    emit({'tag': 'model_fallback_failed', 'fallback_code': exc.fallback_code})
+                    raise
+                capacity_rejection = isinstance(exc, ContextCapacityError)
+                input_rejection = capacity_rejection or isinstance(exc, UnsupportedModelInput)
                 failure = _failure_from_error(exc)
                 unsupported_call = isinstance(exc, UnsupportedModelInput) or failure is not None and str(
                     failure.provider_error_code or '',
                 ).lower() in _UNSUPPORTED_CALL_CODES
-                if failure is None:
+                if failure is None and not input_rejection:
                     if not isinstance(exc, ModelCallError):
                         exc._model_fallback_local_failure = True
                     raise
-                if failure.code.value not in _RECOVERABLE and not unsupported_call and not preparing_context:
+                if not input_rejection and failure.code.value not in _RECOVERABLE and not unsupported_call:
                     raise
-                state.failed_candidates.add(current.candidate_id)
-                if (current.provider_group_id and current.credential_count == 1
+                if not input_rejection:
+                    state.failed_candidates.add(current.candidate_id)
+                if (failure is not None and current.provider_group_id and current.credential_count == 1
                         and str(failure.provider_error_code or '').lower() in _INVALID_KEY_CODES):
                     state.failed_credentials.add((current.provider_group_id, current.credential_revision))
                 if not reason:
-                    reason = 'provider_rejected' if unsupported_call else failure.code.value
-                only_context_failures = only_context_failures and failure.code.value == 'token_limit'
-                candidates = remaining_candidates() if time.monotonic() < control.deadline else []
+                    reason = ('model_context_not_fit' if capacity_rejection else
+                              'provider_rejected' if unsupported_call else failure.code.value)
+                only_context_failures = only_context_failures and capacity_rejection
+                candidates = remaining_candidates()
                 for candidate in candidates:
                     try:
                         raw = _make_llm(candidate)
@@ -438,7 +372,6 @@ class FallbackLLM(ModuleBase, LLMBase):
                         only_context_failures = False
                         continue
                     current = candidate
-                    candidate_started_at = time.monotonic()
                     break
                 else:
                     fallback_code = 'model_context_not_fit' if only_context_failures else 'model_fallback_exhausted'
@@ -474,7 +407,7 @@ class FallbackLLM(ModuleBase, LLMBase):
                         'from_max_input_tokens': parse_token_limit(initial.get('from_max_input_tokens'))
                         if initial is not None else original.max_input_tokens,
                         'to_max_input_tokens': current.max_input_tokens,
-                        'context_compacted': context_compacted,
+                        'context_compacted': False,
                     }))
                 emit(commit_event)
                 call_open = False

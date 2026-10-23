@@ -117,11 +117,6 @@ class FallbackRunState:
     initial_model_switch: Optional[dict[str, Any]] = field(default=None, repr=False)
     usage_snapshot: dict[str, Any] = field(default_factory=dict, repr=False)
     model_output_index: int = 0
-    call_control: Any = field(default=None, repr=False)
-    call_started_at: Optional[float] = field(default=None, repr=False)
-    call_requires_vision: bool = False
-    model_history: Optional[list[dict[str, Any]]] = field(default=None, repr=False)
-    current_message_count: int = 0
 
 
 @dataclass(frozen=True)

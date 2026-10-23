@@ -155,11 +155,8 @@ class AgentExecutor:
                 llm=llm,
                 summarizer=llm.auxiliary_call if fallback_state is not None else None,
                 budget_provider=(lambda: fallback_state.budget) if fallback_state is not None else None,
-                retain_message_metadata=fallback_state is not None,
                 workspace=options.workspace,
             )
-        if fallback_state is not None and history_compactor is not None:
-            history_compactor = llm.bind_history_compactor(history_compactor)
         run_id = uuid.uuid4().hex[:12]
         observer = (
             make_runtime_observer(
@@ -194,8 +191,6 @@ class AgentExecutor:
         configuration_runtime = None if options.context_preview else options.configuration_runtime
 
         def prepare_request():
-            if fallback_state is not None:
-                llm.begin_request()
             if options.before_model_request is not None:
                 result = options.before_model_request()
                 if result is not None:
@@ -264,7 +259,7 @@ class AgentExecutor:
             'runtime_observer': runtime_observer,
             'model_context_provider': model_context,
             'before_model_request': (
-                prepare_request if configuration_runtime is not None or fallback_state is not None
+                prepare_request if configuration_runtime is not None
                 else options.before_model_request) if not options.context_preview else None,
             'final_summary_call': (
                 (lambda prompt: llm.auxiliary_call('', prompt)) if fallback_state is not None else None),

@@ -54,13 +54,13 @@ def test_unavailable_and_text_only_candidates_do_not_consume_the_limit(provider)
 
 
 @pytest.mark.parametrize('text_only_backups', [0, 3])
-def test_image_request_deadline_excludes_incompatible_backups(provider, text_only_backups):
+def test_image_request_is_not_interrupted_by_the_soft_budget(provider, text_only_backups):
     a = candidate(provider, 'model-a')
     a.llm_config['llm']['vision'] = True
     succeed(provider, 'model-a')
     provider.on_request = lambda _: time.sleep(0.3)
     model = wrapper(a, [candidate(provider, f'text-{index}') for index in range(text_only_backups)])
-    with config.temp('model_fallback_timeout_seconds', 0.8):
+    with config.temp('model_fallback_timeout_seconds', 0.1):
         assert model('continue', llm_chat_history=[{'role': 'user', 'content': [
             {'type': 'image_url', 'image_url': {'url': 'https://images.example/fixture.png'}},
         ]}]) == 'done:model-a'
@@ -82,7 +82,8 @@ def test_slow_initial_model_leaves_time_for_a_healthy_fallback(provider):
     model = wrapper(candidate(provider, 'model-a'), [candidate(provider, 'model-b')])
     events = []
     try:
-        with config.temp('model_fallback_timeout_seconds', 0.6):
+        with config.temp('model_fallback_timeout_seconds', 0.6), \
+                config.temp('model_fallback_read_timeout_seconds', 0.1):
             started = time.monotonic()
             assert model('continue', stream={'_stream_sink': events.append}) == 'done:model-b'
             assert time.monotonic() - started < 0.8
@@ -150,8 +151,6 @@ def test_sse_cancel_closes_the_socket_and_never_starts_fallback(provider):
     assert provider.requests == []
     assert [item['model_output']['phase'] for item in events
             if item.get('tag') == 'model_output'] == ['begin', 'rollback']
-    assert model.state.call_control is None
-    assert model.state.call_started_at is None
 
 
 @pytest.mark.parametrize('limit', [1, 4])
@@ -167,55 +166,137 @@ def test_candidate_limit_includes_initial_model(provider, limit):
     assert failure.value.fallback_code == 'model_fallback_exhausted'
 
 
-def test_candidate_deadlines_remain_within_the_total_request_limit(provider, monkeypatch):
-    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
+def test_soft_budget_stops_new_attempts_but_allows_the_last_attempt_to_finish(provider, monkeypatch):
+    from types import SimpleNamespace
+    from lazymind.chat.engine.agent_runtime import model_fallback
 
     candidates = [candidate(provider, 'model-' + str(i)) for i in range(5)]
-    deadlines = []
-    execute = PreparedModelRequest.execute
-
-    def observe(request, *, control=None):
-        deadlines.append(control.deadline)
-        return execute(request, control=control)
-
-    monkeypatch.setattr(PreparedModelRequest, 'execute', observe)
+    now = [0.0]
+    monkeypatch.setattr(model_fallback, 'time', SimpleNamespace(monotonic=lambda: now[0]))
 
     def slow_failure(request):
-        time.sleep(0.08)
+        now[0] += 0.08
         return {'error': 'model_not_found', 'status': 404}
 
     provider.on_request = slow_failure
     model = wrapper(candidates[0], candidates[1:])
     with config.temp('model_fallback_timeout_seconds', 0.12), config.temp('model_fallback_max_candidates', 5):
-        started = time.monotonic()
         with pytest.raises(Exception) as failure:
             model('continue')
-        elapsed = time.monotonic() - started
-    assert elapsed < 1.5
-    assert 1 <= len(provider.requests) <= 5
-    assert all(deadline <= started + 0.15 for deadline in deadlines)
+    assert [request['model'] for request in provider.requests] == ['model-0', 'model-1']
     assert failure.value.fallback_code == 'model_fallback_exhausted'
 
 
-def test_ordinary_summary_and_initial_generation_keep_one_candidate_deadline(provider, monkeypatch):
-    from lazyllm.module.llms.onlinemodule.base import PreparedModelRequest
-
+def test_ordinary_summary_does_not_consume_primary_soft_budget_or_candidates(provider):
     model = wrapper(candidate(provider, 'model-a'), [candidate(provider, 'model-b')])
     succeed(provider, 'model-a')
-    deadlines = []
-    execute = PreparedModelRequest.execute
-
-    def observe(request, *, control=None):
-        deadlines.append(control.deadline)
-        return execute(request, control=control)
-
-    monkeypatch.setattr(PreparedModelRequest, 'execute', observe)
-    total = model.begin_request()
-    model.auxiliary_call('summary system', 'summary input')
-    assert model('continue') == 'done:model-a'
-    assert len(deadlines) == 2
-    assert deadlines[0] == deadlines[1] < total.deadline
+    provider.on_request = lambda _: time.sleep(0.08)
+    with config.temp('model_fallback_timeout_seconds', 0.02):
+        model.auxiliary_call('summary system', 'summary input')
+        assert model('continue') == 'done:model-a'
     assert [item['model'] for item in provider.requests] == ['model-a', 'model-a']
+    assert model.state.failed_candidates == set()
+
+
+def test_balance_failure_switches_immediately_without_sdk_retry(provider):
+    a = candidate(provider, 'model-a', source='deepseek')
+    b = candidate(provider, 'model-b')
+    provider.script['model-a'] = [{'error': 'balance_exhausted', 'status': 402}]
+    succeed(provider, 'model-b')
+    events = []
+    assert wrapper(a, [b])('continue', stream={'_stream_sink': events.append}) == 'done:model-b'
+    assert [request['model'] for request in provider.requests] == ['model-a', 'model-b']
+    assert not any((event.get('runtime_event') or {}).get('type') == 'model_retry_scheduled' for event in events)
+    changed = [event['runtime_event']['data'] for event in events
+               if (event.get('runtime_event') or {}).get('type') == 'model_switched']
+    assert changed[0]['reason_code'] == 'balance_exhausted'
+
+
+@pytest.mark.parametrize('overrides', [False, True])
+def test_initial_backup_and_auxiliary_calls_receive_the_same_timeout_policy(provider, monkeypatch, overrides):
+    import requests
+
+    a, b = candidate(provider, 'model-a'), candidate(provider, 'model-b')
+    if overrides:
+        a.llm_config['llm']['timeout'] = [0.3, 0.7]
+        b.llm_config['llm']['timeout'] = [0.4, 0.8]
+    fail(provider, 'model-a')
+    succeed(provider, 'model-b')
+    model = wrapper(a, [b])
+    post = requests.post
+    observed = []
+
+    def record(url, **kwargs):
+        observed.append((kwargs['json']['model'], kwargs['timeout']))
+        return post(url, **kwargs)
+
+    monkeypatch.setattr(requests, 'post', record)
+    assert model('continue') == 'done:model-b'
+    assert model.auxiliary_call('', 'final summary') == 'done:model-b'
+    initial_timeout, backup_timeout = ((0.3, 0.7), (0.4, 0.8)) if overrides else ((3.0, 10.0), (3.0, 10.0))
+    assert observed == [('model-a', initial_timeout), ('model-b', backup_timeout), ('model-b', backup_timeout)]
+
+
+def test_continuous_generation_finishes_after_soft_budget(provider):
+    from fallback_test_support import sse_frame
+
+    a, b = candidate(provider, 'model-a'), candidate(provider, 'model-b')
+    provider.script['model-a'] = [{'message': {'role': 'assistant', 'content': ''}, 'frames': [
+        sse_frame({'role': 'assistant', 'content': 'one '}),
+        sse_frame({'content': 'two '}), sse_frame({'content': 'three'}, finish='stop'),
+    ], 'chunk_delay': 0.02}]
+    succeed(provider, 'model-b')
+    events = []
+    with config.temp('model_fallback_timeout_seconds', 0.02), \
+            config.temp('model_fallback_read_timeout_seconds', 0.1):
+        assert wrapper(a, [b])('continue', stream={'_stream_sink': events.append}) == 'one two three'
+    assert [request['model'] for request in provider.requests] == ['model-a']
+    phases = [event['model_output']['phase'] for event in events if event.get('tag') == 'model_output']
+    assert phases == ['begin', 'commit']
+
+
+def test_expired_budget_after_request_validation_does_not_start_http(provider, monkeypatch):
+    from types import SimpleNamespace
+    from lazymind.chat.engine.agent_runtime import model_fallback
+
+    now = [0.0]
+    estimate = model_fallback.request_tokens
+    monkeypatch.setattr(model_fallback, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+
+    def slow_estimate(request):
+        result = estimate(request)
+        now[0] += 31
+        return result
+
+    monkeypatch.setattr(model_fallback, 'request_tokens', slow_estimate)
+    model = wrapper(candidate(provider, 'model-a'), [candidate(provider, 'model-b')])
+    with pytest.raises(Exception) as failure:
+        model('continue')
+    assert failure.value.fallback_code == 'model_fallback_exhausted'
+    assert provider.requests == []
+    assert model.state.failed_candidates == set()
+
+
+def test_cancel_during_blocked_read_does_not_start_backup(provider):
+    import threading
+    from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError
+
+    cancelled, release = threading.Event(), threading.Event()
+
+    def slow_initial(request):
+        cancelled.set()
+        release.wait(2)
+
+    provider.on_request = slow_initial
+    model = wrapper(candidate(provider, 'model-a'), [candidate(provider, 'model-b')])
+    model._cancel_check = lambda _: cancelled.is_set()
+    try:
+        with config.temp('model_fallback_read_timeout_seconds', 0.1), pytest.raises(UserCancelledError):
+            model('continue')
+    finally:
+        release.set()
+    assert [request['model'] for request in provider.requests] == ['model-a']
+    assert model.state.failed_candidates == set()
 
 
 def test_local_cancellation_check_failure_does_not_try_another_model(provider):

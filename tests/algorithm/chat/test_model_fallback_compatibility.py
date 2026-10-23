@@ -243,7 +243,7 @@ def test_local_image_preparation_failure_does_not_try_another_candidate(provider
 
 
 @pytest.mark.parametrize('normal_image', [False, True])
-def test_image_prefix_does_not_invalidate_a_usable_summary(provider, image_data, normal_image):
+def test_image_input_is_not_rewritten_for_short_candidates(provider, image_data, normal_image):
     tiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jFZkAAAAASUVORK5CYII='
     image = image_data if normal_image else tiny
     a = candidate(provider, 'model-a', window=32768)
@@ -274,15 +274,19 @@ def test_image_prefix_does_not_invalidate_a_usable_summary(provider, image_data,
             'context_summary_min_recent_user_turns': 1,
         }.items():
             stack.enter_context(config.temp(key, value))
-        result = model('Continue.', llm_chat_history=history)
-    assert result == 'B completed after summary'
-    assert [request['model'] for request in provider.requests] == ['model-a', 'model-b', 'model-b']
+        from lazymind.chat.engine.agent_runtime.model_calls import ContextCapacityError
+        with pytest.raises(ContextCapacityError) as failure:
+            model('Continue.', llm_chat_history=history)
+    assert failure.value.fallback_code == 'model_fallback_exhausted'
+    assert [request['model'] for request in provider.requests] == ['model-a']
+    assert model.state.failed_candidates == {a.candidate_id}
     assert image in json.dumps(provider.requests[-1])
     assert history == original
 
 
 @pytest.mark.parametrize('window', [131072, None])
-def test_long_plan_input_reaches_a_larger_candidate_during_real_agent_initialization(provider, window):
+@pytest.mark.parametrize('limit', [1, 4])
+def test_long_plan_input_reaches_a_larger_candidate_during_real_agent_initialization(provider, window, limit):
     a = candidate(provider, 'small', window=16384)
     b = candidate(provider, 'large', window=window)
     succeed(provider, 'large')
@@ -297,7 +301,7 @@ def test_long_plan_input_reaches_a_larger_candidate_during_real_agent_initializa
         role=AgentRole.CHAT, prompt=PromptBuilder.for_role(AgentRole.CHAT).input(text, source='user').build(),
         tools=[record_fallback_effect], execution_options=options,
     )
-    with config.temp('context_compression_enabled', False):
+    with config.temp('context_compression_enabled', False), config.temp('model_fallback_max_candidates', limit):
         agent = AgentExecutor().create_agent(raw_model(a), plan)
         assert agent(plan.prompt.current_input) == 'done:large'
     assert [request['model'] for request in provider.requests] == ['large']

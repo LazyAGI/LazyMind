@@ -401,7 +401,6 @@ def make_history_compactor(
     summarizer: Optional[Callable[[str, str], str]] = None,
     workspace: Optional[str] = None,
     budget_provider: Optional[Callable[[], ContextBudget]] = None,
-    retain_message_metadata: bool = False,
 ) -> Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
     """Build a mid-turn history projector compatible with ReactAgent/FunctionCall."""
 
@@ -415,15 +414,15 @@ def make_history_compactor(
             history, keep_full_turns, budget=budget_provider() if budget_provider is not None else budget,
             default_keep=default_keep, trigger=trigger,
             llm=llm, summarizer=summarizer,
-            workspace=workspace, retain_message_metadata=retain_message_metadata, **kwargs,
+            workspace=workspace, **kwargs,
         )
 
     return _compact
 
 
-def _finish_projection(state, prior_len, *, retain_message_metadata=False):
+def _finish_projection(state, prior_len):
     mark_projection_sent(state)
-    return split_projection(state['entries'], prior_len, model_facing=not retain_message_metadata)
+    return split_projection(state['entries'], prior_len, model_facing=True)
 
 
 def _compact_history(history, keep_full_turns=None, *, budget, default_keep, trigger,
@@ -511,7 +510,7 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
         before_total < pressure_at
         and before_total <= budget.effective_input_budget
     ):
-        return _finish_projection(state, prior_len, retain_message_metadata=kwargs.get('retain_message_metadata', False))
+        return _finish_projection(state, prior_len)
 
     tool_indices = _entry_tool_indices(stable)
     protected = set(tool_indices[-effective_keep:]) if effective_keep else set()
@@ -697,4 +696,4 @@ def _compact_history(history, keep_full_turns=None, *, budget, default_keep, tri
             next_pressure_tokens=_pressure_rearm_tokens(accepted_total, budget),
         )
 
-    return _finish_projection(state, prior_len, retain_message_metadata=kwargs.get('retain_message_metadata', False))
+    return _finish_projection(state, prior_len)

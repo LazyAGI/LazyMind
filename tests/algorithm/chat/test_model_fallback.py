@@ -17,6 +17,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import lazyllm
+from lazyllm.module.llms.onlinemodule.base import ModelCallError
 import pytest
 from fallback_test_support import EFFECT_RECEIPTS, record_fallback_effect
 
@@ -93,16 +94,17 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.assertEqual(wrapper('start'), 'done')
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a', 'long', 'small'])
 
-    def test_unknown_token_limit_is_excluded_without_compression_or_requeue(self):
+    def test_unknown_token_limit_stops_without_compression_or_another_candidate(self):
         self.fail_model('model-a')
         self.fail_model('unknown-1', code='context_length_exceeded', status=400)
         self.succeed('unknown-2')
         with patch.object(fallback_module.random, 'shuffle', return_value=None):
             wrapper = self.wrapper([self.candidate('unknown-1', None), self.candidate('unknown-2', None)])
-        self.assertEqual(wrapper('preserve all text'), 'done')
+        with self.assertRaises(ModelCallError) as failure:
+            wrapper('preserve all text')
+        self.assertEqual(failure.exception.terminal.failure.code.value, 'token_limit')
         self.assertEqual([item['model'] for item in self.provider.requests],
-                         ['model-a', 'unknown-1', 'unknown-2'])
-        self.assertEqual(self.provider.requests[1]['messages'], self.provider.requests[2]['messages'])
+                         ['model-a', 'unknown-1'])
 
     def test_local_fit_skips_http_and_larger_candidate_receives_the_full_input(self):
         self.succeed('large')

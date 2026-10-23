@@ -9,8 +9,8 @@ import lazyllm
 from lazymind.config import config
 
 from .budget import usage_ratio
-from .model_calls import ContextCapacityError, prepare_model_call, request_tokens
-from lazyllm.module.llms.onlinemodule.base import ModelCallError, ModelFinish
+from .model_calls import ContextCapacityError, request_tokens
+from lazyllm.module.llms.onlinemodule.base import ModelCallControl, ModelCallError, ModelFinish
 from .context_estimator import estimate_tokens
 from .message_fields import model_facing_history, estimate_message_tokens
 from .models import ContextBudget, CompressionTrigger, SummaryEvent
@@ -61,23 +61,26 @@ def _llm_response_text(resp: Any) -> str:
 
 
 def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str, *,
-                         candidate_budget: Optional[ContextBudget] = None, control=None, on_attempt=None) -> str:
+                         candidate_budget: Optional[ContextBudget] = None, control=None, timeout=None) -> str:
     if llm is None:
         raise ValueError('summarizer llm is required')
     if candidate_budget is not None:
         view = llm.share(prompt=system_prompt, format=_llm_response_text, stream=False, copy_static_params=True)
-        request = prepare_model_call(view, user_prompt, None, None, {'tools': [], 'max_retries': 1}, candidate_budget)
-        if request_tokens(request) > candidate_budget.effective_input_budget:
-            raise ContextCapacityError('The summary request does not fit this candidate.')
-        if on_attempt is not None:
-            if control is not None:
-                control.check()
-            on_attempt()
+
+        def check_request(request):
+            if request_tokens(request) > candidate_budget.effective_input_budget:
+                raise ContextCapacityError('The summary request does not fit this model.')
+
+        call_control = ModelCallControl(cancel_check=control.cancel_check if control is not None else None,
+                                        request_check=check_request)
+        kwargs = {'timeout': timeout} if timeout is not None else {}
         try:
-            return _llm_response_text(request.execute(control=control).value)
+            return _llm_response_text(view(
+                user_prompt, tools=[], max_retries=1, output_limit=candidate_budget.reserved_output_tokens,
+                call_control=call_control, **kwargs))
         except ModelCallError as exc:
             if exc.terminal.kind == 'finish' and exc.terminal.finish == ModelFinish.LENGTH:
-                raise ContextCapacityError('The candidate summary exceeded its output limit.') from exc
+                raise ContextCapacityError('The summary exceeded its output limit.') from exc
             raise
     prompt = f'{system_prompt}\n\n{user_prompt}'
     if hasattr(llm, 'share'):
@@ -319,19 +322,6 @@ def apply_summary_compression(
             _max_history_seq(history[selected.replace_start:selected.replace_end]),
         )
     return projected, event
-
-
-def summarize_model_history(history, current, *, budget, summarizer, estimated_total_tokens):
-    messages = [*history, *current]
-    summarized, event, selected = prepare_summary_compression(
-        messages, budget=budget, trigger='mid_turn', force=True, summarizer=summarizer,
-        estimated_total_tokens=estimated_total_tokens,
-    )
-    if event.decision != 'summarized':
-        raise ContextCapacityError('The recovery summary did not pass validation.')
-    removed = selected.replace_end - selected.replace_start - 1
-    boundary = max(selected.replace_start + 1, len(history) - removed)
-    return summarized[:boundary], summarized[boundary:]
 
 
 def strip_lazymind_meta(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
