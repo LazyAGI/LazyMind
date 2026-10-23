@@ -28,7 +28,6 @@ function SortableSupplierRow({ item, disabled, children }: {
       type="button"
       className="provider-workspace-drag-handle"
       aria-label={t("modelProvider.workspace.reorderSupplier", { name: (item.isBrandGroup ? getProviderBrandDisplayName : getProviderDisplayName)(item, i18n?.resolvedLanguage || i18n?.language) })}
-      title={t("modelProvider.workspace.reorderSupplierHint")}
       onClick={(event) => event.stopPropagation()}
     ><HolderOutlined aria-hidden="true" /></button> : null}
     {children}
