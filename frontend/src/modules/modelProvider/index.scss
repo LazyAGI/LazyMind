@@ -4085,13 +4085,17 @@
     font-weight: 600;
     line-height: 24px;
   }
-  > div > span {
-    color: var(--provider-muted);
-    font-size: 11px;
-  }
   > div {
     min-width: 0;
   }
+}
+.provider-workspace-supplier-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  h2 { flex: 0 1 auto; min-width: 0; }
+  .provider-workspace-status { flex: 0 0 auto; }
 }
 .provider-workspace-supplier-actions {
   flex-shrink: 0;

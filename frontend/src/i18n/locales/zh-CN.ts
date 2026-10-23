@@ -435,6 +435,12 @@ const zhCN = {
       empty: "没有匹配的模型",
     },
     workspace: {
+      reorderSupplier: "拖动排序：{{name}}",
+      reorderSupplierHint: "拖动调整顺序；也可按空格开始，用方向键移动，再按空格确认。",
+      reorderSupplierStarted: "已选中{{name}}，使用方向键调整位置，空格键确认，Esc 取消。",
+      reorderSupplierOver: "目标位置：{{name}}",
+      reorderSupplierEnded: "排序已更新",
+      reorderSupplierCanceled: "已取消排序",
       notConfigured: "未配置秘钥",
       disabled: "已停用",
       modelsLoadFailed: "模型加载失败",

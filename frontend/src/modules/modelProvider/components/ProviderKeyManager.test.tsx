@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   act,
   fireEvent,
@@ -52,6 +53,105 @@ beforeEach(() => {
 });
 
 describe("provider key controls", () => {
+  it("opens management after inline creation gives an unconfigured supplier its first storage", async () => {
+    const create = vi.fn().mockResolvedValue(true);
+    function Harness() {
+      const [groupId, setGroupId] = useState("");
+      return <ProviderKeyManager {...props()} groupId={groupId}
+        keys={groupId ? [{ id: "created-key", masked: "********5678", enabled: true }] : []}
+        onCreate={async (value) => {
+          await create(value);
+          setGroupId("created-storage");
+          return true;
+        }} />;
+    }
+    render(<Harness />);
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel");
+    fireEvent.change(input, { target: { value: "fixture-first-key" } });
+    fireEvent.blur(input);
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.keyManager.manage" }));
+    const drawer = within(await screen.findByRole("dialog"));
+    expect(await drawer.findByText("****5678")).toBeVisible();
+    await act(async () => {});
+    expect(document.querySelector(".provider-key-manager-drawer")?.closest(".ant-drawer")).toHaveClass("ant-drawer-open");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+  it.each(["enter", "blur"])("saves a trimmed first key directly on %s without opening management", async (action) => {
+    const current = { ...props(), keys: [], onCreate: vi.fn().mockResolvedValue(true) };
+    render(<ProviderKeyManager {...current} />);
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel");
+    expect(input).toHaveAttribute("type", "password");
+    fireEvent.change(input, { target: { value: "  fixture-inline-key  " } });
+    if (action === "enter") fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    else fireEvent.blur(input);
+    await waitFor(() => expect(current.onCreate).toHaveBeenCalledWith("fixture-inline-key"));
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("ignores blank values and rejects whitespace within a key", async () => {
+    const current = { ...props(), keys: [], onCreate: vi.fn().mockResolvedValue(true) };
+    render(<ProviderKeyManager {...current} />);
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel");
+    fireEvent.change(input, { target: { value: "  " } });
+    fireEvent.blur(input);
+    fireEvent.change(input, { target: { value: "fixture key" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(await screen.findByRole("alert")).toHaveTextContent("modelProvider.validation.apiKeyNoSpaces");
+    expect(current.onCreate).not.toHaveBeenCalled();
+  });
+  it("coalesces Enter and blur into one pending save and blocks a concurrent connection check", async () => {
+    let finish!: (saved: boolean) => void;
+    const check = vi.fn();
+    const current = { ...props(), keys: [], onCreate: vi.fn().mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; })) };
+    render(<ProviderKeyManager {...current} checkAction={<button onClick={check}>Check</button>} />);
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel");
+    fireEvent.change(input, { target: { value: "fixture-inline-key" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    fireEvent.blur(input);
+    fireEvent.click(screen.getByRole("button", { name: "Check" }));
+    await waitFor(() => expect(current.onCreate).toHaveBeenCalledTimes(1));
+    expect(check).not.toHaveBeenCalled();
+    expect(input).toBeDisabled();
+    await act(async () => finish(true));
+    expect(input).toHaveValue("");
+  });
+  it("keeps an unsuccessful draft and lets the user retry", async () => {
+    const current = { ...props(), keys: [], onCreate: vi.fn().mockRejectedValueOnce(new Error("Could not save key")).mockResolvedValueOnce(true) };
+    render(<ProviderKeyManager {...current} />);
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel");
+    fireEvent.change(input, { target: { value: "fixture-inline-key" } });
+    fireEvent.blur(input);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not save key");
+    expect(input).toHaveValue("fixture-inline-key");
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(current.onCreate).toHaveBeenCalledTimes(2);
+  });
+  it("keeps a declined draft without resubmitting until another explicit action", async () => {
+    const current = { ...props(), keys: [], onCreate: vi.fn().mockResolvedValue(false) };
+    render(<ProviderKeyManager {...current} />);
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel");
+    fireEvent.change(input, { target: { value: "fixture-inline-key" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(input).not.toBeDisabled());
+    expect(input).toHaveValue("fixture-inline-key");
+    expect(current.onCreate).toHaveBeenCalledTimes(1);
+  });
+  it("discards a first-key draft on supplier change and ignores its stale result", async () => {
+    let finish!: (saved: boolean) => void;
+    const current = { ...props(), keys: [], onCreate: vi.fn().mockReturnValue(new Promise<boolean>((resolve) => { finish = resolve; })) };
+    const nextCreate = vi.fn().mockResolvedValue(true);
+    const view = render(<ProviderKeyManager {...current} />);
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel");
+    fireEvent.change(input, { target: { value: "old-supplier-key" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(current.onCreate).toHaveBeenCalledTimes(1));
+    view.rerender(<ProviderKeyManager {...current} providerId="next-supplier" groupId="next-storage" onCreate={nextCreate} />);
+    expect(screen.getByLabelText("modelProvider.apiKeyLabel")).toHaveValue("");
+    await act(async () => finish(true));
+    expect(screen.getByLabelText("modelProvider.apiKeyLabel")).toHaveValue("");
+    expect(nextCreate).not.toHaveBeenCalled();
+  });
   it.each([
     ["********...ABCD", "****ABCD"],
     ["********1234", "****1234"],

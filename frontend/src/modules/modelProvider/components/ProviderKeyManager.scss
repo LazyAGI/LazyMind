@@ -8,6 +8,10 @@
     min-width: 0;
   }
 }
+.provider-key-inline-create {
+  .ant-input { min-height: 38px; font-size: 12px; }
+  > p { margin: 5px 0 0; color: var(--ant-color-error, #bd3e45); font-size: 12px; }
+}
 .provider-key-row {
   gap: 10px;
   code {
@@ -89,6 +93,7 @@
   margin: 0 0 20px;
 }
 @media (pointer: coarse) {
+  .provider-key-inline-create .ant-input { min-height: 44px; }
   .provider-key-row {
     flex-wrap: wrap;
     code {

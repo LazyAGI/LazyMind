@@ -577,6 +577,71 @@ describe("compact provider workspace", () => {
       screen.queryByDisplayValue("secret-new-5678"),
     ).not.toBeInTheDocument();
   });
+  it("creates the first private credential storage directly from the empty key field", async () => {
+    const callbacks = setup();
+    await act(async () => callbacks.setProvider({ ...provider, groups: [] }));
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" });
+    fireEvent.change(input, { target: { value: "  fixture-first-key  " } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    fireEvent.blur(input);
+    await waitFor(() => expect(mocks.createGroup).toHaveBeenCalledTimes(1));
+    expect(mocks.createGroup).toHaveBeenCalledWith({
+      modelProviderId: "openai",
+      createModelProviderGroupOpenAPIRequest: { name: "OpenAI", api_key: "fixture-first-key", verify: true },
+    }, { timeout: 180000 });
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(mocks.addKey).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("clears a persisted inline key when refreshing fails instead of allowing a duplicate retry", async () => {
+    const onReload = vi.fn().mockRejectedValue(new Error("Refresh unavailable"));
+    const callbacks = setup({ onReload });
+    await act(async () => callbacks.setProvider({ ...provider, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false }] }));
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" });
+    fireEvent.change(input, { target: { value: "fixture-first-key" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(input).toHaveValue(""));
+    expect(await screen.findByText("modelProvider.workspace.savedRefreshFailed")).toBeVisible();
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    fireEvent.blur(input);
+    expect(mocks.addKey).toHaveBeenCalledTimes(1);
+  });
+  it("keeps an in-flight inline key attached to its original supplier after selection changes", async () => {
+    let finish!: (value: unknown) => void;
+    mocks.addKey.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const other = { ...provider, id: "other", name: "Other supplier", isCustom: true, groups: [] };
+    const callbacks = setup({ providers: [provider, other] });
+    await act(async () => callbacks.setProvider({ ...provider, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false }] }));
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    fireEvent.click(navigation.getByRole("button", { name: /^OpenAI/ }));
+    const input = screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" });
+    fireEvent.change(input, { target: { value: "fixture-original-key" } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(mocks.addKey).toHaveBeenCalledTimes(1));
+    fireEvent.click(navigation.getByRole("button", { name: "Other supplier" }));
+    await act(async () => finish({ data: { success: true } }));
+    expect(mocks.addKey).toHaveBeenCalledWith({ modelProviderId: "openai", groupId: "primary" }, { data: { api_key: "fixture-original-key" }, timeout: 180000 });
+    expect(screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" })).toHaveValue("");
+    expect(mocks.createGroup).not.toHaveBeenCalled();
+  });
+  it("reports a failed inline save for the original supplier after switching away", async () => {
+    let fail!: (error: Error) => void;
+    mocks.addKey.mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject; }));
+    const other = { ...provider, id: "other", name: "Other supplier", isCustom: true, groups: [] };
+    const callbacks = setup({ providers: [provider, other] });
+    await act(async () => callbacks.setProvider({ ...provider, groups: [{ ...provider.groups[0], keys: [], apiKeyConfigured: false }] }));
+    const navigation = within(screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" }));
+    fireEvent.click(navigation.getByRole("button", { name: /^OpenAI/ }));
+    fireEvent.change(screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" }), { target: { value: "fixture-original-key" } });
+    fireEvent.blur(screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" }));
+    await waitFor(() => expect(mocks.addKey).toHaveBeenCalledTimes(1));
+    fireEvent.click(navigation.getByRole("button", { name: "Other supplier" }));
+    await act(async () => fail(new Error("Fixture key rejected")));
+    expect(await screen.findByText("OpenAI: Fixture key rejected")).toBeVisible();
+    expect(screen.getByLabelText("modelProvider.apiKeyLabel", { selector: "input" })).toHaveValue("");
+    expect(screen.queryByDisplayValue("fixture-original-key")).not.toBeInTheDocument();
+    expect(callbacks.onReload).not.toHaveBeenCalled();
+  });
   it.each([
     ["", "apiKeyRequired"],
     ["   ", "apiKeyRequired"],
@@ -664,14 +729,12 @@ describe("compact provider workspace", () => {
     );
     expect(await screen.findByText("Cloud login")).toBeInTheDocument();
   });
-  it("allows removing a catalog model through the same confirmation flow", async () => {
+  it("removes a catalog model directly without confirmation", () => {
     const callbacks = setup();
     fireEvent.click(
       screen.getByRole("button", { name: "modelProvider.deleteModelAria" }),
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.delete" }),
-    );
+    expect(screen.queryByRole("button", { name: "common.delete" })).not.toBeInTheDocument();
     expect(callbacks.onDeleteModel).toHaveBeenCalledWith(
       provider,
       provider.groups[0],

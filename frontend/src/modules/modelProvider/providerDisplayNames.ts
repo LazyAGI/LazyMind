@@ -21,8 +21,8 @@ const providerNames: readonly ProviderBrandName[] = [
   { en: "Claude", zh: "Claude", aliases: ["claude", "anthropic"] },
   { en: "DeepSeek", zh: "深度求索", aliases: ["deepseek", "深度求索"] },
   {
-    en: "Doubao",
-    zh: "豆包",
+    en: "Volcengine",
+    zh: "火山引擎",
     aliases: ["doubao", "豆包", "volcengine", "火山方舟", "火山引擎"],
   },
   { en: "GLM", zh: "智谱", aliases: ["glm", "zhipu", "bigmodel", "智谱", "智谱ai"] },

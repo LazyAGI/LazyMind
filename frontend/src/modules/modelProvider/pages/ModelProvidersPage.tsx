@@ -518,6 +518,7 @@ export default function ModelProviderPage({
   const customModelSavePending = useRef(false);
   const remoteModelRequest = useRef(0);
   const groupModelVersions = useRef<Record<string, number>>({});
+  const modelDeleteRequests = useRef(new Map<string, Promise<boolean>>());
   const [modelsError, setModelsError] = useState<Record<string, string>>({});
   const [remoteModels, setRemoteModels] = useState<RemoteGroupModel[]>([]);
   const [remoteModelsLoading, setRemoteModelsLoading] = useState(false);
@@ -1391,54 +1392,63 @@ export default function ModelProviderPage({
     }
   };
 
-  const deleteCustomModel = async (
+  const deleteCustomModel = (
     providerId: string,
     groupId: string,
     model: ProviderModel,
     notify = true,
   ) => {
-    try {
-      await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(
-        {
-          modelProviderId: providerId,
-          groupId,
-          modelId: model.id,
-        },
-        model.capability === "EMBEDDING"
-          ? { params: { confirm_indexed_downgrade: true } }
-          : undefined,
-      );
-      const key = `${providerId}:${groupId}`;
-      groupModelVersions.current[key] = (groupModelVersions.current[key] || 0) + 1;
-      setAddedProviderList((current) =>
-        current.map((provider) =>
-          provider.id === providerId
-            ? {
-                ...provider,
-                groups: provider.groups.map((group) =>
-                  group.id === groupId
-                    ? {
-                        ...group,
-                        models: group.models.filter(
-                          (item) => item.id !== model.id,
-                        ),
-                        modelCount: Math.max(0, (group.modelCount ?? group.models.length) - 1),
-                      }
-                    : group,
-                ),
-              }
-            : provider,
-        ),
-      );
-      if (notify) {
-        message.success(t("modelProvider.message.modelDeleted"));
-        void onConfigurationChanged?.();
+    const operationKey = `${providerId}:${groupId}:${model.id}`;
+    const existing = modelDeleteRequests.current.get(operationKey);
+    if (existing) return existing;
+    const operation = Promise.resolve().then(async () => {
+      try {
+        await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(
+          {
+            modelProviderId: providerId,
+            groupId,
+            modelId: model.id,
+          },
+          model.capability === "EMBEDDING"
+            ? { params: { confirm_indexed_downgrade: true } }
+            : undefined,
+        );
+        const key = `${providerId}:${groupId}`;
+        groupModelVersions.current[key] = (groupModelVersions.current[key] || 0) + 1;
+        setAddedProviderList((current) =>
+          current.map((provider) =>
+            provider.id === providerId
+              ? {
+                  ...provider,
+                  groups: provider.groups.map((group) =>
+                    group.id === groupId
+                      ? {
+                          ...group,
+                          models: group.models.filter(
+                            (item) => item.id !== model.id,
+                          ),
+                          modelCount: Math.max(0, (group.modelCount ?? group.models.length) - 1),
+                        }
+                      : group,
+                  ),
+                }
+              : provider,
+          ),
+        );
+        if (notify) {
+          message.success(t("modelProvider.message.modelDeleted"));
+          void onConfigurationChanged?.();
+        }
+        return true;
+      } catch (error) {
+        if (notify) message.error(getLocalizedErrorMessage(error));
+        return false;
+      } finally {
+        modelDeleteRequests.current.delete(operationKey);
       }
-      return true;
-    } catch (error) {
-      if (notify) message.error(getLocalizedErrorMessage(error));
-      return false;
-    }
+    });
+    modelDeleteRequests.current.set(operationKey, operation);
+    return operation;
   };
 
   const catalogProvider = addedProviderList.find((provider) => provider.id === catalogTarget?.providerId);
@@ -1471,7 +1481,7 @@ export default function ModelProviderPage({
         }
         onEditModel={openEditModelWindowModal}
         onDeleteModel={(provider, group, model) =>
-          void deleteCustomModel(provider.id, group.id, model)
+          deleteCustomModel(provider.id, group.id, model)
         }
         onCheck={(provider, group) =>
           void verifyProviderGroup(provider, group, "")

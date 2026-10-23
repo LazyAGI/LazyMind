@@ -62,9 +62,27 @@ describe("model catalog integration", () => {
     await waitFor(() => expect(mocks.add).toHaveBeenCalledTimes(1));
     expect(mocks.add).toHaveBeenCalledWith({ modelProviderId: "supplier", groupId: "store", addModelProviderGroupModelOpenAPIRequest: { name: "qwen-plus", model_type: "llm", vision: false } });
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:qwen-plus" }));
-    expect(mocks.remove).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole("button", { name: "common.delete" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith({ modelProviderId: "supplier", groupId: "store", modelId: "saved-model-id" }, undefined));
+    expect(screen.queryByRole("button", { name: "common.delete" })).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:qwen-plus" })).toBeInTheDocument();
+  });
+
+  it("directly removes an embedding while retaining the indexed-downgrade request contract", async () => {
+    mocks.remote.mockResolvedValue({ models: [{ id: "bge", name: "BAAI/bge-large", model_type: "embed", added: false }] });
+    mocks.add.mockResolvedValue({ data: { id: "saved-vector-id", name: "BAAI/bge-large", model_type: "embed", is_default: false } });
+    render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
+    const sync = await screen.findByRole("button", { name: "Sync models" });
+    await waitFor(() => expect(sync).toBeEnabled());
+    fireEvent.click(sync);
+    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" }));
+    const remove = await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:BAAI/bge-large" });
+    await waitFor(() => expect(remove).toBeEnabled());
+    fireEvent.click(remove);
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
+      { modelProviderId: "supplier", groupId: "store", modelId: "saved-vector-id" },
+      { params: { confirm_indexed_downgrade: true } },
+    ));
+    expect(screen.queryByRole("button", { name: "common.delete" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" })).toBeInTheDocument();
   });
 });

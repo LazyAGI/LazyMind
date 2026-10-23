@@ -252,4 +252,22 @@ describe("model provider asynchronous state", () => {
     await waitFor(() => expect(screen.getByTestId("model-load-state")).toHaveTextContent("ready"));
     expect(currentGroup().models).toEqual([]);
   });
+
+  it("keeps a model on failed direct deletion and sends one request during repeated clicks", async () => {
+    draw();
+    await loadInitialModels();
+    const pending = deferred<{ data: object }>();
+    mocks.deleteModel.mockReturnValueOnce(pending.promise).mockResolvedValueOnce({ data: {} });
+    const remove = screen.getByRole("button", { name: "Delete first model" });
+    act(() => { fireEvent.click(remove); fireEvent.click(remove); });
+    await waitFor(() => expect(mocks.deleteModel).toHaveBeenCalledTimes(1));
+    expect(currentGroup().models).toHaveLength(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await act(async () => pending.reject(new Error("Delete unavailable")));
+    expect(await screen.findByText("localized:Delete unavailable")).toBeInTheDocument();
+    expect(currentGroup().models).toHaveLength(1);
+    fireEvent.click(remove);
+    await waitFor(() => expect(mocks.deleteModel).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(currentGroup().models).toEqual([]));
+  });
 });

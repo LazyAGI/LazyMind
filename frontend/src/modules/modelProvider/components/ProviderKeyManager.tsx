@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   CopyOutlined,
   DeleteOutlined,
@@ -34,6 +34,7 @@ export interface ProviderKeyManagerProps {
   changingKey?: string;
   removingKey?: string;
   onAdd: () => void;
+  onCreate?: (apiKey: string) => Promise<boolean | void>;
   onDelete: (id: string) => Promise<void>;
   onToggle: (id: string, enabled: boolean) => Promise<void>;
   onReload: () => Promise<void>;
@@ -49,6 +50,11 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState("");
   const [saving, setSaving] = useState(false);
+  const [inlineValue, setInlineValue] = useState("");
+  const [inlineError, setInlineError] = useState("");
+  const [inlineSaving, setInlineSaving] = useState(false);
+  const inlineErrorId = useId();
+  const inlineRequest = useRef<{ context: string; promise: Promise<boolean> } | null>(null);
   const [editing, setEditing] = useState<{ id: string; number: number }>();
   const [secrets, setSecrets] = useState<{
     context: string;
@@ -65,12 +71,15 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
       props.changingKey ||
       props.removingKey ||
       pending ||
-      saving,
+      saving ||
+      inlineSaving,
   );
   useEffect(() => {
     setSecrets({ context, values: {} });
     setPending("");
     setEditing(undefined);
+    setInlineValue("");
+    setInlineError("");
     form.resetFields();
   }, [context, form]);
   useEffect(() => {
@@ -86,6 +95,38 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
   const close = () => {
     setOpen(false);
     setSecrets({ context, values: {} });
+  };
+  const saveInline = (): Promise<boolean> => {
+    if (inlineRequest.current)
+      return inlineRequest.current.context === context ? inlineRequest.current.promise : Promise.resolve(false);
+    const value = inlineValue.trim();
+    if (!value) return Promise.resolve(true);
+    if (busy || !props.onCreate) return Promise.resolve(false);
+    const invalid = value.length > 512 ? "apiKeyMax" : /\s/.test(value) ? "apiKeyNoSpaces" : "";
+    if (invalid) {
+      setInlineError(t(`modelProvider.validation.${invalid}`));
+      return Promise.resolve(false);
+    }
+    setInlineError("");
+    setInlineSaving(true);
+    const request: { context: string; promise: Promise<boolean> } = {
+      context,
+      promise: Promise.resolve().then(async () => {
+        try {
+          const saved = await props.onCreate!(value);
+          if (currentContext.current === context && saved !== false) setInlineValue("");
+          return saved !== false;
+        } catch (error) {
+          if (currentContext.current === context) setInlineError(getLocalizedErrorMessage(error));
+          return false;
+        } finally {
+          if (inlineRequest.current === request) inlineRequest.current = null;
+          setInlineSaving(false);
+        }
+      }),
+    };
+    inlineRequest.current = request;
+    return request.promise;
   };
   const reveal = async (keyId: string, copy = false) => {
     if (busy) return;
@@ -236,7 +277,12 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
           {t("modelProvider.apiKeyLabel")}{" "}
           <span className="provider-workspace-count">{props.keys.length}</span>
         </h3>
-        <div className="provider-workspace-key-actions">
+        <div className="provider-workspace-key-actions" onClickCapture={(event) => {
+          if (inlineRequest.current) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}>
           {props.checkAction}
         </div>
       </div>
@@ -245,7 +291,28 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
           {props.keys.length ? (
             rows()
           ) : (
-            <p className="provider-workspace-key-empty">{workspace("noKeys")}</p>
+            props.onCreate ? <div className="provider-key-inline-create">
+              <Input
+                type="password"
+                aria-label={t("modelProvider.apiKeyLabel")}
+                aria-invalid={Boolean(inlineError)}
+                aria-describedby={inlineError ? inlineErrorId : undefined}
+                autoComplete="new-password"
+                placeholder={workspace("noKeys")}
+                value={inlineValue}
+                status={inlineError ? "error" : undefined}
+                disabled={busy}
+                maxLength={512}
+                onChange={(event) => { setInlineValue(event.target.value); setInlineError(""); }}
+                onPressEnter={(event) => {
+                  if (event.nativeEvent.isComposing) return;
+                  event.preventDefault();
+                  void saveInline();
+                }}
+                onBlur={() => void saveInline()}
+              />
+              {inlineError ? <p id={inlineErrorId} role="alert">{inlineError}</p> : null}
+            </div> : <p className="provider-workspace-key-empty">{workspace("noKeys")}</p>
           )}
         </div>
         <Tooltip title={text("manage")}>
@@ -254,7 +321,12 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
             className="provider-workspace-icon-button"
             aria-label={text("manage")}
             icon={<KeyOutlined aria-hidden="true" />}
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              const supplier = props.providerId;
+              void saveInline().then((saved) => {
+                if (saved && currentContext.current.split("\0")[0] === supplier) setOpen(true);
+              });
+            }}
           />
         </Tooltip>
       </div>

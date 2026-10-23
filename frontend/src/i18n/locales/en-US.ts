@@ -437,6 +437,12 @@ const enUS = {
       empty: "No matching models",
     },
     workspace: {
+      reorderSupplier: "Reorder {{name}}",
+      reorderSupplierHint: "Drag to reorder, or press Space, use the arrow keys, then press Space to confirm.",
+      reorderSupplierStarted: "Picked up {{name}}. Use arrow keys to move, Space to confirm, or Escape to cancel.",
+      reorderSupplierOver: "Target position: {{name}}",
+      reorderSupplierEnded: "Order updated",
+      reorderSupplierCanceled: "Reordering canceled",
       notConfigured: "No API key",
       disabled: "Disabled",
       modelsLoadFailed: "Unable to load models",

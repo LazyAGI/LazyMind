@@ -42,6 +42,8 @@ import {
 } from "../api";
 import { getProviderLogoUrl } from "../providerBranding";
 import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
+import { useSupplierOrder } from "../hooks/useSupplierOrder";
+import { SortableSupplierList } from "./SortableSupplierList";
 import { ModelTaskTabs, matchesModelTaskFilter, type ModelTaskFilter } from "./ModelTaskTabs";
 import { SavedProviderModels } from "./SavedProviderModels";
 import { ProviderKeyManager } from "./ProviderKeyManager";
@@ -83,7 +85,7 @@ interface Props {
     provider: AddedProvider,
     group: ProviderConnectionGroup,
     model: ProviderModel,
-  ) => void;
+  ) => void | Promise<boolean>;
   onCheck: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
   checking: Record<string, boolean>;
   onReload: () => Promise<void>;
@@ -144,13 +146,14 @@ export function ProviderWorkspace(props: Props) {
     providerSaving,
   );
   const activeKeyRequestPending = useRef(false);
+  const addKeyRequestPending = useRef(false);
   const [endpointForm] = Form.useForm<{ baseUrl: string }>();
   const [keyForm] = Form.useForm<{ apiKey: string }>();
   const keyDraft = useSettingsFormDraft(keyForm, keyOpen, keySaving);
   const endpointValue = Form.useWatch("baseUrl", endpointForm);
   const sourceTemplateId = Form.useWatch("sourceProviderId", providerForm);
   const loadedGroups = useRef(new Set<string>());
-  const providers = useMemo(
+  const mergedProviders = useMemo(
     () =>
       props.providers
         .map(
@@ -161,15 +164,14 @@ export function ProviderWorkspace(props: Props) {
               ...provider,
               groups: [],
             },
-        )
-        .sort(
-          (left, right) =>
-            Number(Boolean(right.isCustom)) - Number(Boolean(left.isCustom)),
         ),
     [props.providers, props.configuredProviders],
   );
+  const { providers, reorder: reorderSuppliers } = useSupplierOrder(mergedProviders);
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
+  const activeSupplierId = useRef(provider?.id);
+  activeSupplierId.current = provider?.id;
   const providerDisplayName = provider
     ? getProviderDisplayName(provider, language)
     : "";
@@ -234,9 +236,12 @@ export function ProviderWorkspace(props: Props) {
     setKeyOpen(true);
     keyDraft.captureSavedValues();
   };
-  const addKey = async ({ apiKey }: { apiKey: string }) => {
-    if (!provider || keySaving) return;
+  const addKey = async ({ apiKey }: { apiKey: string }): Promise<boolean> => {
+    if (!provider || addKeyRequestPending.current || !apiKey.trim()) return false;
+    const supplierId = provider.id;
+    addKeyRequestPending.current = true;
     setKeySaving(true);
+    let saved = false;
     try {
       if (group) {
         await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
@@ -259,14 +264,21 @@ export function ProviderWorkspace(props: Props) {
           { timeout: 180000 },
         );
       }
-      keyDraft.acceptSaved();
-      keyForm.resetFields();
-      setKeyOpen(false);
+      saved = true;
+      if (activeSupplierId.current === supplierId) {
+        keyDraft.acceptSaved();
+        keyForm.resetFields();
+        setKeyOpen(false);
+      }
       await props.onReload();
-      message.success(label("keyAdded"));
+      if (activeSupplierId.current === supplierId) message.success(label("keyAdded"));
+      return true;
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
+      const errorMessage = saved ? label("savedRefreshFailed") : getLocalizedErrorMessage(error);
+      message.error(activeSupplierId.current === supplierId ? errorMessage : `${providerDisplayName}: ${errorMessage}`);
+      return saved;
     } finally {
+      addKeyRequestPending.current = false;
       setKeySaving(false);
     }
   };
@@ -528,7 +540,10 @@ export function ProviderWorkspace(props: Props) {
             className="provider-workspace-provider-list"
             aria-label={label("suppliers")}
           >
-            {visibleProviders.map((item) => (
+            <SortableSupplierList items={visibleProviders}
+              disabled={initializing || providerSaving || providerDeleting}
+              onReorder={reorderSuppliers}>
+            {(item) => (
               <button
                 type="button"
                 key={item.id}
@@ -555,7 +570,8 @@ export function ProviderWorkspace(props: Props) {
                   />
                 ) : null}
               </button>
-            ))}
+            )}
+            </SortableSupplierList>
             {!visibleProviders.length ? (
               <div className="provider-workspace-empty">
                 {props.loading ? (
@@ -588,8 +604,18 @@ export function ProviderWorkspace(props: Props) {
                     onClick={() => confirmEndpointLeave(() => setMobileDetail(false))}
                   />
                   <Logo provider={provider} />
-                  <div>
+                  <div className="provider-workspace-supplier-identity">
                     <h2 title={providerDisplayName}>{providerDisplayName}</h2>
+                    <span
+                      className={`provider-workspace-status${verifiedSelection ? " is-ready" : ""}`}
+                    >
+                      {verifiedSelection ? (
+                        <CheckCircleFilled aria-hidden="true" />
+                      ) : (
+                        <span className="provider-workspace-status-dot" />
+                      )}
+                      {label(supplierStatus)}
+                    </span>
                   </div>
                 </div>
                 <div className="provider-workspace-supplier-actions">
@@ -615,16 +641,6 @@ export function ProviderWorkspace(props: Props) {
                       />
                     </>
                   ) : null}
-                  <span
-                    className={`provider-workspace-status${verifiedSelection ? " is-ready" : ""}`}
-                  >
-                    {verifiedSelection ? (
-                      <CheckCircleFilled aria-hidden="true" />
-                    ) : (
-                      <span className="provider-workspace-status-dot" />
-                    )}
-                    {label(supplierStatus)}
-                  </span>
                 </div>
               </header>
               <div className="provider-workspace-scroll">
@@ -641,6 +657,7 @@ export function ProviderWorkspace(props: Props) {
                     changingKey={changingActiveKey}
                     removingKey={removingKey}
                     onAdd={openAddKey}
+                    onCreate={(apiKey) => addKey({ apiKey })}
                     onDelete={deleteKey}
                     onToggle={changeActiveKey}
                     onReload={props.onReload}
@@ -651,6 +668,7 @@ export function ProviderWorkspace(props: Props) {
                         disabled={
                           endpointDirty ||
                           endpointSaving ||
+                          keySaving ||
                           Boolean(changingActiveKey)
                         }
                         loading={initializing || props.checking[groupKey]}
@@ -834,7 +852,7 @@ export function ProviderWorkspace(props: Props) {
                         if (group) props.onEditModel(provider, group, model);
                       }}
                       onRemove={(model) => {
-                        if (group) props.onDeleteModel(provider, group, model);
+                        if (group) return props.onDeleteModel(provider, group, model);
                       }}
                     />
                   ) : null}

@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -15,6 +16,9 @@ import {
 
 const upstream = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: upstream.lookup }));
+vi.mock("@/components/request", () => ({
+  getLocalizedErrorMessage: (error: unknown) => error instanceof Error ? error.message : String(error),
+}));
 beforeEach(() => upstream.lookup.mockReturnValue(undefined));
 
 vi.mock("react-i18next", () => ({
@@ -234,7 +238,7 @@ describe("saved supplier models", () => {
     );
   });
   it.each(["EMBEDDING", "MULTIMODAL_EMBEDDING"] as const)(
-    "keeps %s removal behind its impact confirmation",
+    "removes %s directly without a confirmation",
     async (capability) => {
       const embedding: ProviderModel = { ...models[2], capability };
       const { props } = setup({ models: [embedding] });
@@ -243,31 +247,15 @@ describe("saved supplier models", () => {
           name: `modelProvider.deleteModelAria:${embedding.name}`,
         }),
       );
-      const warning = await screen.findByText(
-        capability === "EMBEDDING"
-          ? "modelProvider.confirmDeleteEmbeddingDesc"
-          : "modelProvider.confirmDeleteModelDesc",
-      );
-      await waitFor(() => expect(warning).toBeVisible());
-      expect(props.onRemove).not.toHaveBeenCalled();
-      fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
-      await waitFor(() => expect(warning).not.toBeVisible());
-      expect(props.onRemove).not.toHaveBeenCalled();
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: `modelProvider.deleteModelAria:${embedding.name}`,
-        }),
-      );
-      fireEvent.click(
-        await screen.findByRole("button", { name: "common.delete" }),
-      );
       await waitFor(() =>
         expect(props.onRemove).toHaveBeenCalledWith(embedding),
       );
       expect(props.onRemove).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc")).not.toBeInTheDocument();
     },
   );
-  it("retains VLM's underlying capability when confirming removal from the flat list", async () => {
+  it("retains VLM's underlying capability when removing directly from the flat list", async () => {
     const vlm: ProviderModel = {
       ...models[1],
       id: "vlm",
@@ -281,16 +269,25 @@ describe("saved supplier models", () => {
         name: `modelProvider.deleteModelAria:${vlm.name}`,
       }),
     );
-    const description = await screen.findByText(
-      "modelProvider.confirmDeleteModelDesc",
-    );
-    await waitFor(() => expect(description).toBeVisible());
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.delete" }),
-    );
     await waitFor(() => expect(props.onRemove).toHaveBeenCalledWith(vlm));
     expect(props.onRemove).toHaveBeenCalledTimes(1);
     expect(vlm.capability).toBe("VLM");
+  });
+  it("keeps a failed removal visible and blocks repeated clicks until the request settles", async () => {
+    let resolveRemoval!: (value: boolean) => void;
+    const pending = new Promise<boolean>((resolve) => { resolveRemoval = resolve; });
+    const onRemove = vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(true);
+    setup({ models: [models[1]], onRemove });
+    const remove = screen.getByRole("button", { name: `modelProvider.deleteModelAria:${models[1].name}` });
+    act(() => { fireEvent.click(remove); fireEvent.click(remove); });
+    expect(onRemove).toHaveBeenCalledTimes(1);
+    expect(remove).toBeDisabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await act(async () => resolveRemoval(false));
+    expect(screen.getByRole("listitem", { name: models[1].name })).toBeVisible();
+    await waitFor(() => expect(remove).toBeEnabled());
+    fireEvent.click(remove);
+    await waitFor(() => expect(onRemove).toHaveBeenCalledTimes(2));
   });
   it("edits existing chat models with their original capability and keeps unknown logos neutral", () => {
     const unknown: ProviderModel = {

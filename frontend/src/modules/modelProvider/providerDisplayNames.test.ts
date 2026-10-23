@@ -7,7 +7,7 @@ import {
 describe("supplier display names", () => {
   it.each([
     ["DeepSeek", "深度求索", "DeepSeek"],
-    ["Doubao", "豆包", "Doubao"],
+    ["Doubao", "火山引擎", "Volcengine"],
     ["GLM", "智谱", "GLM"],
     ["Kimi", "月之暗面", "Kimi"],
     ["Qwen", "通义千问", "Qwen"],
@@ -72,5 +72,13 @@ describe("supplier display names", () => {
     expect(text).toBe("自建代理");
     expect(text).not.toContain("deepseek");
     expect(text).not.toContain("深度求索");
+  });
+
+  it("renames the supplier to Volcengine while retaining old Doubao search aliases", () => {
+    for (const language of ["zh-CN", "en-US"]) {
+      const text = getProviderSearchText({ name: "Doubao" }, language);
+      for (const alias of ["doubao", "豆包", "volcengine", "火山方舟", "火山引擎"]) expect(text).toContain(alias);
+    }
+    expect(getProviderDisplayName({ name: "Doubao", isCustom: true }, "zh-CN")).toBe("Doubao");
   });
 });

@@ -298,7 +298,7 @@ describe("provider model catalog drawer", () => {
     expect(screen.queryByText("BAAI/bge-large")).not.toBeInTheDocument();
   });
 
-  it("confirms a multimodal vector removal without claiming a text-index downgrade", async () => {
+  it("removes a multimodal vector directly without a confirmation", async () => {
     const props = fixture([
       {
         id: "multimodal",
@@ -314,16 +314,14 @@ describe("provider model catalog drawer", () => {
         name: "modelProvider.catalog.removeModel:multi-vector",
       }),
     );
-    expect(
-      await screen.findByText("modelProvider.catalog.removeDescription"),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(props.onRemove).toHaveBeenCalledWith(props.models[0]));
     expect(
       screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc"),
     ).not.toBeInTheDocument();
-    expect(props.onRemove).not.toHaveBeenCalled();
+    expect(screen.queryByText("modelProvider.catalog.removeDescription")).not.toBeInTheDocument();
   });
 
-  it("asks before removing an embedding model and preserves it when canceled", async () => {
+  it("removes an embedding directly and retains it after a failed request", async () => {
     const embedding: ProviderModel = {
       id: "embedding",
       name: "BAAI/bge-large",
@@ -332,32 +330,36 @@ describe("provider model catalog drawer", () => {
       enabled: true,
     };
     const props = fixture([embedding]);
+    let resolveRemoval!: (value: boolean) => void;
+    props.onRemove.mockReturnValueOnce(new Promise<boolean>((resolve) => { resolveRemoval = resolve; }));
     draw(props);
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "modelProvider.catalog.removeModel:BAAI/bge-large",
-      }),
-    );
-    expect(
-      await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
-    ).toBeInTheDocument();
-    expect(props.onRemove).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
-    await waitFor(() =>
-      expect(
-        screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc"),
-      ).not.toBeInTheDocument(),
-    );
-    expect(props.onRemove).not.toHaveBeenCalled();
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "modelProvider.catalog.removeModel:BAAI/bge-large",
-      }),
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "common.delete" }),
-    );
+    const remove = await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:BAAI/bge-large" });
+    act(() => { fireEvent.click(remove); fireEvent.click(remove); });
     await waitFor(() => expect(props.onRemove).toHaveBeenCalledWith(embedding));
+    expect(props.onRemove).toHaveBeenCalledTimes(1);
+    expect(remove).toBeDisabled();
+    expect(screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc")).not.toBeInTheDocument();
+    await act(async () => resolveRemoval(false));
+    expect(await screen.findByText("modelProvider.catalog.partialFailure")).toBeInTheDocument();
+    expect(props.onChanged).not.toHaveBeenCalled();
+    expect(screen.getByText(embedding.name)).toBeVisible();
+    await waitFor(() => expect(remove).toBeEnabled());
+    fireEvent.click(remove);
+    await waitFor(() => expect(props.onRemove).toHaveBeenCalledTimes(2));
+  });
+
+  it("removes selected task groups and unavailable models without confirmation", async () => {
+    const props = fixture();
+    draw(props);
+    const group = await screen.findByRole("button", { name: /modelProvider.catalog.removeGroup/ });
+    fireEvent.click(group);
+    await waitFor(() => expect(props.onRemove).toHaveBeenCalledTimes(1));
+    expect(props.onRemove).toHaveBeenCalledWith(selected[0]);
+    expect(screen.queryByRole("button", { name: "common.delete" })).not.toBeInTheDocument();
+    await waitFor(() => expect(group).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.clearUnavailable" }));
+    await waitFor(() => expect(props.onRemove).toHaveBeenCalledTimes(2));
+    expect(props.onRemove).toHaveBeenLastCalledWith(selected[0]);
   });
 
   it("does not mark saved models unlisted when discovery fails", async () => {

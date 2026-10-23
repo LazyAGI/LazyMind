@@ -1,9 +1,11 @@
+import { useRef, useState } from "react";
 import {
   MinusOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import { Button, Popconfirm, Spin, Tooltip } from "antd";
+import { Button, Spin, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
+import { getLocalizedErrorMessage } from "@/components/request";
 import type {
   ModelCapability,
   ProviderModel,
@@ -29,11 +31,26 @@ export interface SavedProviderModelsProps {
   supplierName?: string;
   capabilityLabel: (capability: ModelCapability) => string;
   onEdit: (model: ProviderModel) => void;
-  onRemove: (model: ProviderModel) => void | Promise<void>;
+  onRemove: (model: ProviderModel) => void | boolean | Promise<void | boolean>;
 }
 
 export function SavedProviderModels(props: SavedProviderModelsProps) {
   const { t } = useTranslation();
+  const pending = useRef(new Set<string>());
+  const [removing, setRemoving] = useState<Set<string>>(new Set());
+  const remove = async (model: ProviderModel) => {
+    if (pending.current.has(model.id)) return;
+    pending.current.add(model.id);
+    setRemoving(new Set(pending.current));
+    try {
+      await props.onRemove(model);
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
+    } finally {
+      pending.current.delete(model.id);
+      setRemoving(new Set(pending.current));
+    }
+  };
   if (props.loading)
     return (
       <div
@@ -117,37 +134,26 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                     name: model.name,
                   })}
                   icon={<SettingOutlined aria-hidden="true" />}
+                  disabled={removing.has(model.id)}
                   onClick={() => props.onEdit(model)}
                 />
               </Tooltip>
-              <Popconfirm
-                title={t("modelProvider.confirmDeleteModel", {
+              <Tooltip
+                title={t("modelProvider.deleteModelAria", {
                   name: model.name,
                 })}
-                description={t(
-                  model.capability === "EMBEDDING"
-                    ? "modelProvider.confirmDeleteEmbeddingDesc"
-                    : "modelProvider.confirmDeleteModelDesc",
-                )}
-                okText={t("common.delete")}
-                cancelText={t("common.cancel")}
-                okButtonProps={{ danger: true }}
-                onConfirm={() => props.onRemove(model)}
               >
-                <Tooltip
-                  title={t("modelProvider.deleteModelAria", {
+                <Button
+                  type="text"
+                  aria-label={t("modelProvider.deleteModelAria", {
                     name: model.name,
                   })}
-                >
-                  <Button
-                    type="text"
-                    aria-label={t("modelProvider.deleteModelAria", {
-                      name: model.name,
-                    })}
-                    icon={<MinusOutlined aria-hidden="true" />}
-                  />
-                </Tooltip>
-              </Popconfirm>
+                  icon={<MinusOutlined aria-hidden="true" />}
+                  loading={removing.has(model.id)}
+                  disabled={removing.has(model.id)}
+                  onClick={() => void remove(model)}
+                />
+              </Tooltip>
             </span>
           </li>
         );

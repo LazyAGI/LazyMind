@@ -5,7 +5,6 @@ import {
   Drawer,
   Empty,
   Input,
-  Modal,
   Spin,
   Tooltip,
   message,
@@ -100,7 +99,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [modal, modalContext] = Modal.useModal();
+  const busyRequest = useRef(false);
   const [messageApi, messageContext] = message.useMessage();
   const sequence = useRef(0);
   const filterId = useId();
@@ -255,7 +254,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
 
   const runChanges = async (requested: Candidate[], remove: boolean) => {
     const items = remove ? requested : requested.filter((model) => !model.unsupportedType);
-    if (busy || props.modelsLoading || !items.length) return;
+    if (busyRequest.current || props.modelsLoading || !items.length) return;
+    busyRequest.current = true;
     setBusy(true);
     let index = 0;
     let succeeded = 0;
@@ -309,24 +309,9 @@ export function ProviderModelCatalogDrawer(props: Props) {
         );
       }
     } finally {
+      busyRequest.current = false;
       setBusy(false);
     }
-  };
-
-  const removeModels = (items: Candidate[]) => {
-    const includesEmbedding = items.some(
-      (model) => model.existing?.capability === "EMBEDDING",
-    );
-    modal.confirm({
-      title: copy("confirmRemove", { count: items.length }),
-      content: includesEmbedding
-        ? t("modelProvider.confirmDeleteEmbeddingDesc")
-        : copy("removeDescription"),
-      okText: t("common.delete"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      onOk: () => runChanges(items, true),
-    });
   };
 
   const working = busy || loading || props.modelsLoading === true;
@@ -359,7 +344,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
               type="text"
               icon={<DeleteOutlined aria-hidden="true" />}
               disabled={working || !unavailable.length || !loaded}
-              onClick={() => removeModels(unavailable)}
+              onClick={() => void runChanges(unavailable, true)}
             >
               {copy("clearUnavailable")}
             </Button>
@@ -377,7 +362,6 @@ export function ProviderModelCatalogDrawer(props: Props) {
         </div>
       }
     >
-      {modalContext}
       {messageContext}
       <div className="provider-model-catalog-search">
         <Input
@@ -548,7 +532,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
                     disabled={working || (!missing.length && !selected.length)}
                     onClick={() =>
                       removing
-                        ? removeModels(selected)
+                        ? void runChanges(selected, true)
                         : void runChanges(missing, false)
                     }
                   />
@@ -599,7 +583,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
                             }
                             onClick={() =>
                               model.existing
-                                ? removeModels([model])
+                                ? void runChanges([model], true)
                                 : void runChanges([model], false)
                             }
                           />
