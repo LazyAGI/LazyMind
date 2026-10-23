@@ -1560,23 +1560,25 @@
   .settings-integrated-page.is-models-page { padding: 12px; }
 }
 
-.settings-reference.is-default-model-workspace .settings-reference-content {
-  background: var(--color-bg-container, #fff);
-}
 .settings-reference.is-default-model-workspace .settings-reference-scroll {
   overflow-x: hidden;
   overflow-y: auto;
   scroll-padding-block: 24px;
 }
 .settings-model-defaults-page {
+  display: flex;
+  flex-direction: column;
   width: 100%;
-  max-width: 960px;
   min-height: 100%;
-  margin-inline: auto;
-  padding: 28px 36px 56px;
+  padding: 18px 24px 24px;
 
-  .settings-detail-header { margin-bottom: 24px; }
-  .settings-integrated-surface.is-default-models { margin: 0; padding: 0; border: 0; overflow: visible; }
+  .model-defaults-workspace {
+    flex: 1 0 auto;
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+  .settings-integrated-surface.is-default-models { margin: 0; padding: 20px 24px 32px; border: 0; overflow: visible; }
   .model-provider-service-page { height: auto; min-height: 0; padding: 0; overflow: visible; }
   .model-provider-config-panel.model-defaults-panel {
     margin: 0;
@@ -1590,6 +1592,8 @@
   .model-provider-section-title { display: none; }
   .model-provider-section-subtitle { margin-top: 0; }
 
-  @media (max-width: 800px) { padding: 20px 20px 40px; }
-  @media (max-width: 480px) { padding-inline: 16px; }
+  @media (max-width: 800px) {
+    padding: 12px;
+    .settings-integrated-surface.is-default-models { padding: 16px; }
+  }
 }

@@ -722,8 +722,8 @@ function SettingsPageContent() {
     } else if (section === "models") {
       content = integratedSurface(<ModelProvidersPage onConfigurationChanged={syncOverview} highlightProviderId={modelProviderTarget} />, "is-models");
     } else if (section === "model_defaults") {
-      content = <>
-        <header className="settings-detail-header"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1></header>
+      content = <div className="provider-workspace model-defaults-workspace">
+        <header className="provider-workspace-topbar"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1></header>
         {integratedSurface(<DefaultServicesPage
           onModelSelectionChanged={syncOverview}
           highlightTarget={modelTarget}
@@ -737,7 +737,7 @@ function SettingsPageContent() {
           onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {section: "knowledge", tool: service === "cloudParsing" ? "document-parsing" : "web-search"}))}
           onConfigureProviders={() => selectSection("models")}
         />, "is-default-models")}
-      </>;
+      </div>;
     } else if (section === "tasks") {
       const schedulesEnabled = Boolean(overview?.controls.schedules_enabled);
       content = <>

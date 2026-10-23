@@ -11,6 +11,7 @@ import {
   MinusCircleOutlined,
   QuestionCircleOutlined,
   PictureOutlined,
+  RightOutlined,
   RocketOutlined,
   ScanOutlined,
   SearchOutlined,
@@ -259,7 +260,7 @@ export default function DefaultModelConfigPanel({
     }
   }, [highlightedGroup, highlightTarget]);
   const selectInteractionProps = {
-    popupClassName: `model-provider-select-dropdown${keyboardNavigation ? " is-keyboard-navigation" : ""}`,
+    popupClassName: `model-provider-select-dropdown model-defaults-select-dropdown${keyboardNavigation ? " is-keyboard-navigation" : ""}`,
     onMouseDown: () => setKeyboardNavigation(false),
     onInputKeyDown: () => setKeyboardNavigation(true),
     popupRender: (menu: ReactElement) => (
@@ -379,20 +380,21 @@ export default function DefaultModelConfigPanel({
                   : t("modelProvider.shareOff")
               }
             >
-              <Switch
-                aria-label={t("modelProvider.shareToggleAria", {
-                  title: moduleTitle,
-                })}
-                checked={!!shareStatus[module.key]}
-                disabled={saving}
-                checkedChildren={t("modelProvider.shared")}
-                className="model-provider-share-switch"
-                size="small"
-                unCheckedChildren={t("modelProvider.unshared")}
-                onChange={(checked) =>
-                  void toggleShareModel(module.key, checked)
-                }
-              />
+              <span className="model-provider-share-control">
+                <span aria-hidden="true">{t(shareStatus[module.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
+                <Switch
+                  aria-label={t("modelProvider.shareToggleAria", {
+                    title: moduleTitle,
+                  })}
+                  checked={!!shareStatus[module.key]}
+                  disabled={saving}
+                  className="model-provider-share-switch"
+                  size="small"
+                  onChange={(checked) =>
+                    void toggleShareModel(module.key, checked)
+                  }
+                />
+              </span>
             </Tooltip>
           ) : null}
           {!isAdmin && capabilityReadyStates[module.key] === "ready" ? (
@@ -430,11 +432,12 @@ export default function DefaultModelConfigPanel({
             action={<Button size="small" onClick={modelProviderSetupState === "error" ? onRetrySetup : () => void loadModuleModels(module.key, true)}>{t("common.retry")}</Button>} />
         ) : null}
         {modelProviderSetupState === "empty" || (!configured && modelProviderSetupState === "ready" && optionState === "ready" && !hasAvailableOptions) ? (
-          <Button className="model-provider-configure-capability" size="small"
+          <Button className="model-provider-configure-capability" type="text" size="small"
             disabled={(module.restricted && !isAdmin) || saving} onClick={onConfigureProviders}>
             {t(module.restricted && !isAdmin
               ? "modelProvider.contactAdminToConfigure"
               : "modelProvider.configureCapability")}
+            <RightOutlined aria-hidden="true" />
           </Button>
         ) : null}
         {modelProviderSetupState === "ready" && (configured || hasAvailableOptions) && <Select
@@ -597,20 +600,21 @@ export default function DefaultModelConfigPanel({
                   : t("modelProvider.shareOff")
               }
             >
-              <Switch
-                aria-label={t("modelProvider.shareToggleAria", {
-                  title: serviceTitle,
-                })}
-                checked={!!cloudServiceShareStatus[service.key]}
-                disabled={saving}
-                checkedChildren={t("modelProvider.shared")}
-                className="model-provider-share-switch"
-                size="small"
-                unCheckedChildren={t("modelProvider.unshared")}
-                onChange={(checked) =>
-                  toggleShareCloudService(service.key, checked)
-                }
-              />
+              <span className="model-provider-share-control">
+                <span aria-hidden="true">{t(cloudServiceShareStatus[service.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
+                <Switch
+                  aria-label={t("modelProvider.shareToggleAria", {
+                    title: serviceTitle,
+                  })}
+                  checked={!!cloudServiceShareStatus[service.key]}
+                  disabled={saving}
+                  className="model-provider-share-switch"
+                  size="small"
+                  onChange={(checked) =>
+                    toggleShareCloudService(service.key, checked)
+                  }
+                />
+              </span>
             </Tooltip>
           ) : null}
           {setupState === "ready" && !isAdmin && capabilityReadyStates[service.key] === "ready" ? (
@@ -648,8 +652,9 @@ export default function DefaultModelConfigPanel({
             action={<Button size="small" onClick={setupState === "error" ? onRetrySetup : () => void loadVerifiedCloudService(service)}>{t("common.retry")}</Button>} />
         ) : null}
         {setupState === "empty" || (!configured && setupState === "ready" && optionState === "ready" && !options.length) ? (
-          <Button className="model-provider-configure-capability" size="small" disabled={saving} onClick={() => onConfigureCloudService(service.key)}>
+          <Button className="model-provider-configure-capability" type="text" size="small" disabled={saving} onClick={() => onConfigureCloudService(service.key)}>
             {t("modelProvider.configureCapability")}
+            <RightOutlined aria-hidden="true" />
           </Button>
         ) : null}
         {setupState === "ready" && (configured || options.length > 0) && <Select
