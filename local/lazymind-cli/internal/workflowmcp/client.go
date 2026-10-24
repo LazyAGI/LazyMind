@@ -64,7 +64,7 @@ type Projection struct {
 type StartInput struct {
 	WorkflowID      string         `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
 	RequestContext  string         `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
-	InputBindings   map[string]any `json:"input_bindings,omitempty" jsonschema:"Prepared LazyMind input-resource bindings keyed by material ID"`
+	InputBindings   map[string]any `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
 	IdempotencyKey  string         `json:"idempotency_key,omitempty" jsonschema:"Stable retry key; WorkBuddy requires an explicit unique key of 16–256 characters, preserved on retries"`
 	SessionID       string         `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
 	DriverSessionID string         `json:"driver_session_id,omitempty" jsonschema:"Codex only: current native thread UUID obtained from host context or current shell CODEX_THREAD_ID. Never invent an ID or use the Workflow session_id. Host request metadata takes precedence."`
@@ -308,10 +308,16 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 		}
 		state.InteractionURL = strings.TrimRight(base, "/") + "/workflow-runs/" + url.PathEscape(sessionID) + "/embed"
 	}
-	if c.HostProvider == "codex" || c.HostProvider == "workbuddy" {
+	continuation, _ := state.Control["continuation"].(string)
+	admission, _ := state.Control["admission"].(map[string]any)
+	retries, _ := state.Control["automatic_retry_steps"].([]any)
+	if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
+		steps, _ := json.Marshal(retries)
+		state.AgentInstruction = "A step failed but automatic retry budget remains. Call workflow.step.begin for one step in control.automatic_retry_steps=" + string(steps) + " using the current state version. Keep this run; do not stop it or start a replacement run. Inspect the failure and adjust the retry instruction if needed."
+	} else if c.HostProvider == "codex" || c.HostProvider == "workbuddy" {
 		if continuation, _ := state.Control["continuation"].(string); continuation == "awaiting_user" {
 			state.AgentInstruction = "Human review is required. Tell the user to review in the Workflow panel, then END this turn. Do not approve the review yourself, begin another step, or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
-		} else if continuation == "awaiting_executor" || continuation == "stopped" || continuation == "completed" || continuation == "binding_required" {
+		} else if continuation == "awaiting_executor" || continuation == "draining" || continuation == "stopped" || continuation == "completed" || continuation == "binding_required" || continuation == "failed" {
 			state.AgentInstruction = "END this turn. Do not continue Workflow execution or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
 		}
 	}

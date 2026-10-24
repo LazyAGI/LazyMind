@@ -1035,15 +1035,37 @@ def test_required_text_draft_is_committed_before_completion(completion_case):
     model.share.assert_not_called()
 
 
-def test_workflow_final_incomplete_report_is_reviewed(completion_case):
+@pytest.mark.parametrize('final', [
+    '成功 9 页，0 失败。',
+    '成功 9 页，失败 0。',
+    'The first conversion failed, but the retry succeeded.',
+    'I cannot complete the required action.',
+    '缺少页脚，需要用户审核。',
+])
+def test_workflow_summary_does_not_introduce_model_review(completion_case, final):
     events, model, _ = completion_case(
-        agent_type='workflow_step', final='I cannot complete the required action.',
+        agent_type='workflow_step', final=final,
+        params={'required_output_artifact_keys': ['document'],
+                'output_slot_types': {'document': 'file'}},
+        output_slots=['document'], save=('document', 'file'),
         verdict={'completed': False, 'requires_artifact': False, 'artifact_keys': [],
                  'reason': 'The required action was not completed.'},
     )
+    assert _terminal(events)['status'] == 'succeeded'
+    assert any(event['type'] == 'artifact' for event in events)
+    model.share.assert_not_called()
+
+
+def test_workflow_without_model_review_still_requires_actual_delivery(completion_case):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', final='成功 9 页，0 失败。',
+        params={'required_output_artifact_keys': ['document'],
+                'output_slot_types': {'document': 'file'}},
+        output_slots=['document'],
+    )
     assert _terminal(events)['status'] == 'failed'
-    assert _terminal(events)['current_phase'] == 'objective_incomplete'
-    _assert_silent_stream_call(model)
+    assert _terminal(events)['current_phase'] == 'missing_required_artifacts'
+    model.share.assert_not_called()
 
 
 def test_cancel_after_draft_publication_cannot_emit_success(monkeypatch, completion_case):
@@ -2043,6 +2065,47 @@ def test_display_plan_does_not_delay_execution_and_is_persisted_live(monkeypatch
     assert next(e for e in events if e['type'] == 'plan')['steps'] == outline
     assert any(e['type'] == 'done' for e in events)
     assert len({s['seq'] for s in db.steps}) == len(db.steps)
+
+
+@pytest.mark.parametrize('final', ['成功 9 页，失败 0，重试 0', '失败：0页', 'failed: 0', 'failures = 0'])
+def test_zero_failure_counter_does_not_trigger_extra_review(completion_case, final):
+    events, model, _ = completion_case(output_slots=['document'], save=('document', 'file'), final=final)
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('text', ['失败 01', '失败 0.5', 'failed: 0.5', '失败 0，但缺少页脚', 'failed: 0, missing footer'])
+def test_zero_counter_does_not_hide_real_concerns(text):
+    assert runner_mod._has_completion_concern(text)
+
+
+def test_completion_retries_invalid_format_once_and_accepts_fenced_content():
+    model = MagicMock()
+    verdict = {'completed': True, 'requires_artifact': False, 'artifact_keys': [], 'reason': 'Delivered.'}
+    model.share.return_value.side_effect = ['not JSON', {'reasoning_content': 'private', 'content': '```json\n' + json.dumps(verdict) + '\n```'}]
+    assert runner_mod._evaluate_completion(model, 'objective', [], [], 'result') == (True, 'Delivered.', '')
+    assert model.share.call_count == 2
+
+
+def test_completion_invalid_format_retry_preserves_negative_verdict():
+    model = MagicMock()
+    model.share.return_value.side_effect = ['', json.dumps({'completed': False, 'requires_artifact': True,
+        'artifact_keys': [], 'reason': 'Required footer is missing.'})]
+    completed, summary, phase = runner_mod._evaluate_completion(model, 'objective', [], [], 'result')
+    assert not completed and phase == 'missing_required_artifacts'
+    assert 'footer' in summary
+    assert model.share.call_count == 2
+
+
+def test_invalid_reviewer_retains_saved_delivery(completion_case):
+    events, model, _ = completion_case(
+        output_slots=['document'], save=('document', 'file'),
+        final='The conversion failed before retrying.', verdict={'completed': 'true'},
+    )
+    assert _terminal(events)['status'] == 'failed'
+    assert _terminal(events)['current_phase'] == 'completion_evaluation_failed'
+    assert any(event['type'] == 'artifact' for event in events)
+    assert model.share.call_count == 2
 
 
 @pytest.mark.asyncio

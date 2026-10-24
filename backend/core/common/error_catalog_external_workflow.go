@@ -7,14 +7,18 @@ func init() {
 	registerAdditionalErrorAlias("idempotency conflict", "Conflict", http.StatusConflict, 2000107)
 	for _, source := range []string{
 		"task_description is required", "invalid skill import url", "skill import url must use http or https",
+		"input_bindings requires a nonempty material ID",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
 	for _, pattern := range []string{
 		"unsupported skill source type %q",
 		"input_bindings[%q] requires an object with resource_id",
+		"input_bindings[%q][%d] requires an object with resource_id",
+		"input_bindings[%q] must not be an empty list",
 		"input_bindings[%q]", "input_bindings[%q].revision must be a positive integer",
 		"input_bindings[%q].content_hash must be a string",
+		"input_bindings[%q].content_hash must be a nonempty string",
 		"input_bindings[%q] requires material_id and resource_id",
 		"input_files[%d]", "input_files[%d] requires material_id, name and mime_type",
 		"input_files[%d].content_base64 must encode a non-empty file",
