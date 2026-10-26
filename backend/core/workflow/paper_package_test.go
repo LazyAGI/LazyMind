@@ -8,7 +8,7 @@ import (
 )
 
 func TestPaperWorkflowPackagesCompile(t *testing.T) {
-	for _, id := range []string{"paper_expansion", "paper_workflow_mock"} {
+	for _, id := range []string{"paper_expansion", "paper_workflow_mock", "paper_ppt_with_reflection_mock"} {
 		t.Run(id, func(t *testing.T) {
 			root := filepath.Join("../../../workflows", id)
 			w, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))

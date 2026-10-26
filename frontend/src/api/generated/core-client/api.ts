@@ -48,11 +48,16 @@ export interface AbortUploadResponse {
 /**
  * @type AcademicContentRead
  */
-export type AcademicContentRead = AcademicContentReadOneOf | ApiCoreAcademicPaperContentsRetryPostRequest;
+export type AcademicContentRead = AcademicContentReadOneOf | AcademicContentReadOneOf1 | ApiCoreAcademicPaperContentsRetryPostRequest;
 
 export interface AcademicContentReadOneOf {
+    'handoff_id': string;
+    'paper_id': string;
+}
+export interface AcademicContentReadOneOf1 {
     'cursor': string;
     'expansion_id'?: string;
+    'handoff_id'?: string;
 }
 export interface AcademicContentResponse {
     'content_hash': string;
@@ -165,6 +170,11 @@ export const AcademicExpansionDiscoveryModeEnum = {
 } as const;
 
 export type AcademicExpansionDiscoveryModeEnum = typeof AcademicExpansionDiscoveryModeEnum[keyof typeof AcademicExpansionDiscoveryModeEnum];
+
+/**
+ * @type AcademicHandoffInput
+ */
+export type AcademicHandoffInput = AcademicPaperTaskInput | AcademicReviewInput;
 
 export interface AcademicImportCandidate {
     'expected_mime'?: string;
@@ -285,6 +295,17 @@ export interface AcademicPaperRef {
     'title'?: string;
     'venue'?: string;
     'year'?: number;
+}
+export interface AcademicPaperTaskInput {
+    'notes'?: Array<AcademicPaperTaskNote>;
+    'papers': Array<AcademicPaperRef>;
+    'user_instruction': string;
+}
+export interface AcademicPaperTaskNote {
+    'content': string;
+    'id': string;
+    'paper_id': string;
+    'title': string;
 }
 export interface AcademicPresence {
     'coverage_complete'?: boolean;
@@ -678,16 +699,25 @@ export interface AllDatasetTagsResponse {
     'tags'?: Array<string>;
 }
 export interface ApiCoreAcademicChatContextGet200Response {
+    'contents'?: ApiCoreAcademicChatContextGet200ResponseContents;
     'dataset_id'?: string;
     'expansion_id'?: string;
+    'handoff_id'?: string;
+    'input'?: AcademicHandoffInput;
     'kind'?: string;
     'next_conversation_id'?: string;
     'paper_count'?: number;
     'ready_count'?: number;
+    'source_available'?: boolean;
     'source_conversation_id'?: string;
     'status'?: string;
     'version'?: number;
 }
+/**
+ * @type ApiCoreAcademicChatContextGet200ResponseContents
+ */
+export type ApiCoreAcademicChatContextGet200ResponseContents = Array<object> | object;
+
 export interface ApiCoreAcademicDocumentStatesGet200Response {
     'items'?: Array<AcademicDocumentStatus>;
 }
@@ -794,11 +824,11 @@ export interface ApiCoreAcademicLibraryPutRequestImportContextItemsInner {
 }
 export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response {
     'feedback'?: string;
-    'input'?: AcademicReviewInput;
+    'input'?: AcademicHandoffInput;
     'kind'?: string;
-    'mock'?: boolean;
     'papers'?: Array<AcademicPaperRef>;
     'reflection_markdown'?: string;
+    'status'?: string;
 }
 export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest {
     'reflection_markdown'?: string;
@@ -8073,7 +8103,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
     return {
         /**
          *
-         * @summary Read owned academic Chat progress and handoff navigation
+         * @summary Read owned academic Chat progress and complete frozen handoff
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -8620,7 +8650,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Submit the frozen original request to the Mock adapter; PPT relay reads its saved reflection
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
          * @param {string} handoffId
          * @param {ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest
          * @param {*} [options] Override http request option.
@@ -8882,7 +8912,7 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
-         * @summary Read owned academic Chat progress and handoff navigation
+         * @summary Read owned academic Chat progress and complete frozen handoff
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9074,7 +9104,7 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Submit the frozen original request to the Mock adapter; PPT relay reads its saved reflection
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
          * @param {string} handoffId
          * @param {ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest
          * @param {*} [options] Override http request option.
@@ -9176,7 +9206,7 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
     return {
         /**
          *
-         * @summary Read owned academic Chat progress and handoff navigation
+         * @summary Read owned academic Chat progress and complete frozen handoff
          * @param {AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9316,7 +9346,7 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Submit the frozen original request to the Mock adapter; PPT relay reads its saved reflection
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
          * @param {AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9564,7 +9594,7 @@ export interface AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest 
 export class AcademicWorkflowsApi extends BaseAPI {
     /**
      *
-     * @summary Read owned academic Chat progress and handoff navigation
+     * @summary Read owned academic Chat progress and complete frozen handoff
      * @param {AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -9718,7 +9748,7 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Submit the frozen original request to the Mock adapter; PPT relay reads its saved reflection
+     * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
      * @param {AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

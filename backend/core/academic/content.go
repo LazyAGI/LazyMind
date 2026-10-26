@@ -287,7 +287,8 @@ type contentCursor struct {
 	ID          string `json:"id"`
 	Hash        string `json:"hash"`
 	Offset      int    `json:"offset"`
-	ExpansionID string `json:"expansion_id"`
+	ExpansionID string `json:"expansion_id,omitempty"`
+	HandoffID   string `json:"handoff_id,omitempty"`
 }
 
 func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
@@ -299,36 +300,66 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 		PaperID     string `json:"paper_id"`
 		Cursor      string `json:"cursor"`
 		ExpansionID string `json:"expansion_id"`
+		HandoffID   string `json:"handoff_id"`
 	}
-	if !parseJSON(r, &req) || (req.PaperID == "") == (req.Cursor == "") {
-		replyError(w, 400, "INVALID_REQUEST", "supply expansion_id and paper_id, or a context-bound cursor")
+	if !parseJSON(r, &req) || (req.PaperID == "") == (req.Cursor == "") || (req.ExpansionID != "" && req.HandoffID != "") {
+		replyError(w, 400, "INVALID_REQUEST", "supply paper_id with expansion_id or handoff_id, or a context-bound cursor")
 		return
 	}
 	var cursor contentCursor
 	var row orm.AcademicPaperContent
 	if req.Cursor != "" {
 		data, err := base64.RawURLEncoding.DecodeString(req.Cursor)
-		if err != nil || json.Unmarshal(data, &cursor) != nil || cursor.Offset < 0 || cursor.ExpansionID == "" || (req.ExpansionID != "" && req.ExpansionID != cursor.ExpansionID) {
+		if err != nil || json.Unmarshal(data, &cursor) != nil || cursor.Offset < 0 || (cursor.ExpansionID == "") == (cursor.HandoffID == "") || (req.ExpansionID != "" && req.ExpansionID != cursor.ExpansionID) || (req.HandoffID != "" && req.HandoffID != cursor.HandoffID) {
 			replyError(w, 400, "INVALID_CURSOR", "invalid cursor")
 			return
 		}
 		req.ExpansionID = cursor.ExpansionID
+		req.HandoffID = cursor.HandoffID
 		if store.DB().Where("id=? AND user_id=?", cursor.ID, user).Take(&row).Error != nil {
 			replyError(w, 404, "NOT_FOUND", "content not found")
 			return
 		}
 		req.PaperID = row.PaperID
 	}
-	record, ok := ownedExpansion(w, r, user, req.ExpansionID)
-	if !ok {
-		return
+	var source paperSource
+	var selected orm.AcademicPaperContent
+	var err error
+	if req.HandoffID != "" {
+		handoff, ok := ownedHandoff(w, r, user, req.HandoffID)
+		if !ok {
+			return
+		}
+		var contents []orm.AcademicPaperContent
+		source, contents, err = handoffSource(store.DB(), handoff, req.PaperID)
+		if err != nil {
+			replyError(w, 422, "INVALID_SELECTION", err.Error())
+			return
+		}
+		for _, content := range contents {
+			if content.PaperID != req.PaperID || content.Status != "ready" || content.ContentHash == "" {
+				continue
+			}
+			if store.DB().Where("id=? AND user_id=? AND paper_id=? AND status='ready' AND content_hash=?", content.ID, user, req.PaperID, content.ContentHash).Take(&selected).Error != nil {
+				replyError(w, 409, "VERSION_CHANGED", "handoff content version unavailable")
+				return
+			}
+			break
+		}
+	} else {
+		record, ok := ownedExpansion(w, r, user, req.ExpansionID)
+		if !ok {
+			return
+		}
+		source, err = expansionSource(store.DB(), record, req.PaperID)
+		if err != nil {
+			replyError(w, 422, "INVALID_SELECTION", err.Error())
+			return
+		}
 	}
-	source, err := expansionSource(store.DB(), record, req.PaperID)
-	if err != nil {
-		replyError(w, 422, "INVALID_SELECTION", err.Error())
-		return
+	if selected.ID == "" {
+		selected, err = ensurePaperContent(r.Context(), store.DB(), user, req.PaperID, source)
 	}
-	selected, err := ensurePaperContent(r.Context(), store.DB(), user, req.PaperID, source)
 	if err != nil {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
@@ -351,7 +382,7 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 	}
 	next := ""
 	if end < len(pages) {
-		next = base64.RawURLEncoding.EncodeToString(marshal(contentCursor{ID: row.ID, Hash: row.ContentHash, Offset: end, ExpansionID: record.ID}))
+		next = base64.RawURLEncoding.EncodeToString(marshal(contentCursor{ID: row.ID, Hash: row.ContentHash, Offset: end, ExpansionID: req.ExpansionID, HandoffID: req.HandoffID}))
 	}
 	level := "none"
 	if row.Status == "ready" {

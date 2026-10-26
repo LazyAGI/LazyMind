@@ -1,2 +1,2 @@
-# 心得接续 PPT Mock
-沿用原始论文清单，将 Mock 心得正文作为 PPT 接口输入。
+# 心得接续汇报 PPT
+沿用原始论文清单、用户要求和已有笔记，核对 reflection_markdown 到 PPT 的输入串联。生成能力待对接。

@@ -56,9 +56,20 @@ components:
                     - paper_id
                   type: object
                 - properties:
+                    handoff_id:
+                        type: string
+                    paper_id:
+                        type: string
+                  required:
+                    - handoff_id
+                    - paper_id
+                  type: object
+                - properties:
                     cursor:
                         type: string
                     expansion_id:
+                        type: string
+                    handoff_id:
                         type: string
                   required:
                     - cursor
@@ -230,6 +241,10 @@ components:
                 - version
                 - result
             type: object
+        AcademicHandoffInput:
+            oneOf:
+                - $ref: '#/components/schemas/AcademicReviewInput'
+                - $ref: '#/components/schemas/AcademicPaperTaskInput'
         AcademicImportCandidate:
             properties:
                 expected_mime:
@@ -463,6 +478,38 @@ components:
             required:
                 - paper_id
                 - abstract
+            type: object
+        AcademicPaperTaskInput:
+            properties:
+                notes:
+                    items:
+                        $ref: '#/components/schemas/AcademicPaperTaskNote'
+                    type: array
+                papers:
+                    items:
+                        $ref: '#/components/schemas/AcademicPaperRef'
+                    type: array
+                user_instruction:
+                    type: string
+            required:
+                - user_instruction
+                - papers
+            type: object
+        AcademicPaperTaskNote:
+            properties:
+                content:
+                    type: string
+                id:
+                    type: string
+                paper_id:
+                    type: string
+                title:
+                    type: string
+            required:
+                - id
+                - paper_id
+                - title
+                - content
             type: object
         AcademicPresence:
             properties:
@@ -15931,10 +15978,22 @@ paths:
                         application/json:
                             schema:
                                 properties:
+                                    contents:
+                                        oneOf:
+                                            - properties: {}
+                                              type: object
+                                            - items:
+                                                properties: {}
+                                                type: object
+                                              type: array
                                     dataset_id:
                                         type: string
                                     expansion_id:
                                         type: string
+                                    handoff_id:
+                                        type: string
+                                    input:
+                                        $ref: '#/components/schemas/AcademicHandoffInput'
                                     kind:
                                         type: string
                                     next_conversation_id:
@@ -15943,6 +16002,8 @@ paths:
                                         type: integer
                                     ready_count:
                                         type: integer
+                                    source_available:
+                                        type: boolean
                                     source_conversation_id:
                                         type: string
                                     status:
@@ -15951,8 +16012,8 @@ paths:
                                         format: int64
                                         type: integer
                                 type: object
-                    description: Read owned academic Chat progress and handoff navigation
-            summary: Read owned academic Chat progress and handoff navigation
+                    description: Read owned academic Chat progress and complete frozen handoff
+            summary: Read owned academic Chat progress and complete frozen handoff
             tags:
                 - AcademicWorkflows
     /api/core/academic/document-states:
@@ -16511,20 +16572,20 @@ paths:
                                     feedback:
                                         type: string
                                     input:
-                                        $ref: '#/components/schemas/AcademicReviewInput'
+                                        $ref: '#/components/schemas/AcademicHandoffInput'
                                     kind:
                                         type: string
-                                    mock:
-                                        type: boolean
                                     papers:
                                         items:
                                             $ref: '#/components/schemas/AcademicPaperRef'
                                         type: array
                                     reflection_markdown:
                                         type: string
+                                    status:
+                                        type: string
                                 type: object
-                    description: Submit the frozen original request to the Mock adapter; PPT relay reads its saved reflection
-            summary: Submit the frozen original request to the Mock adapter; PPT relay reads its saved reflection
+                    description: Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+            summary: Acknowledge the frozen downstream input; PPT relay reads its saved reflection
             tags:
                 - AcademicWorkflows
     /api/core/academic/paper-contents:read:

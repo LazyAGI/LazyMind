@@ -247,7 +247,7 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 			}
 			return enqueueAcademicChat(r.Context(), tx, user, convID, "paper_expansion", query, req.RequestKey)
 		}
-		handoff, e := createMockHandoff(r.Context(), tx, user, req.DatasetID, "", 0, req.Kind, req.RequestKey, input, nil, req.ReflectionFirst)
+		handoff, e := createPaperHandoff(r.Context(), tx, user, req.DatasetID, "", 0, req.Kind, req.RequestKey, input, nil, req.ReflectionFirst)
 		if e != nil {
 			return e
 		}
@@ -348,7 +348,12 @@ func runAcademicChat(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 	if err := store.DB().WithContext(ctx).Model(&orm.AcademicExpansion{}).Where("conversation_id=? AND user_id=? AND deleted_at IS NULL", row.ID, job.CreateUserID).Updates(map[string]any{"status": "running", "updated_at": time.Now().UTC()}).Error; err != nil {
 		return asyncjob.Result{}, err
 	}
-	body := marshal(map[string]any{"conversation_id": row.ID, "query": payload["query"], "stream": true, "enable_workflow": true, "enable_plugin": true, "workflow_mode": "auto", "mentions": []map[string]string{{"type": "workflow", "resource_id": "builtin:" + payload["workflow_id"], "display_name": payload["workflow_id"]}}})
+	var task struct {
+		Kind string `json:"academic_task"`
+	}
+	_ = json.Unmarshal(row.Ext, &task)
+	name := firstNonEmpty(paperTaskNames[task.Kind], payload["workflow_id"])
+	body := marshal(map[string]any{"conversation_id": row.ID, "query": payload["query"], "stream": true, "enable_workflow": true, "enable_plugin": true, "workflow_mode": "auto", "mentions": []map[string]string{{"type": "workflow", "resource_id": "builtin:" + payload["workflow_id"], "display_name": name}}})
 	req, _ := http.NewRequestWithContext(ctx, "POST", "http://internal/api/core/conversations:chat", bytes.NewReader(body))
 	req.Header.Set("X-User-Id", job.CreateUserID)
 	req.Header.Set("Content-Type", "application/json")
@@ -359,20 +364,50 @@ func runAcademicChat(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 	}
 	return asyncjob.Result{}, nil
 }
-func createMockHandoff(ctx context.Context, tx *gorm.DB, user, dataset, record string, version int64, kind, key string, input ReviewWorkflowInput, contents any, reflectionFirst bool) (orm.AcademicHandoff, error) {
+func createPaperHandoff(ctx context.Context, tx *gorm.DB, user, dataset, record string, version int64, kind, key string, input ReviewWorkflowInput, contents []orm.AcademicPaperContent, reflectionFirst bool) (orm.AcademicHandoff, error) {
 	var old orm.AcademicHandoff
 	if tx.Where("user_id=? AND request_key=?", user, key).Take(&old).Error == nil {
 		return old, nil
 	}
-	conv, err := newAcademicConversation(tx, user, dataset, map[string]string{"review": "论文综述", "reflection": "阅读心得", "ppt": "汇报 PPT"}[kind]+"（演示）："+truncateTitle(input.UserInstruction), kind)
+	snapshot := handoffContentSnapshot{Sources: []paperSource{}, Contents: contents}
+	refs := make([]PaperRef, 0, len(input.Papers))
+	for _, paper := range input.Papers {
+		refs = append(refs, paper.Paper)
+		if paper.IsSeed {
+			sources, err := seedSources(tx, dataset, []WorkflowPaper{paper})
+			if err != nil {
+				return old, err
+			}
+			snapshot.Sources = append(snapshot.Sources, sources[0])
+		} else {
+			source, err := matchingLibrarySource(tx, paperSource{Paper: paper.Paper, DatasetID: dataset})
+			if err != nil {
+				return old, err
+			}
+			snapshot.Sources = append(snapshot.Sources, source)
+		}
+	}
+	inputJSON := marshal(input)
+	if kind != "review" {
+		task := PaperTaskInput{UserInstruction: input.UserInstruction, Papers: refs}
+		if kind == "reflection" || reflectionFirst {
+			notes, err := paperTaskNotes(ctx, tx, dataset, refs)
+			if err != nil {
+				return old, err
+			}
+			task.Notes = notes
+		}
+		inputJSON = marshal(task)
+	}
+	conv, err := newAcademicConversation(tx, user, dataset, paperTaskNames[kind]+"："+truncateTitle(input.UserInstruction), kind)
 	if err != nil {
 		return old, err
 	}
-	handoff := orm.AcademicHandoff{DatasetID: dataset, ReflectionFirst: reflectionFirst, ID: uuid.NewString(), UserID: user, RequestKey: key, ExpansionID: record, Version: version, Kind: kind, ConversationID: conv, InputJSON: marshal(input), ContentsJSON: marshal(contents), CreatedAt: time.Now().UTC()}
+	handoff := orm.AcademicHandoff{DatasetID: dataset, ReflectionFirst: reflectionFirst, ID: uuid.NewString(), UserID: user, RequestKey: key, ExpansionID: record, Version: version, Kind: kind, ConversationID: conv, InputJSON: inputJSON, ContentsJSON: marshal(snapshot), CreatedAt: time.Now().UTC()}
 	if err = tx.Create(&handoff).Error; err != nil {
 		return handoff, err
 	}
-	query := "请生成" + map[string]string{"review": "论文综述", "reflection": "阅读心得", "ppt": "汇报 PPT"}[kind] + "（演示）。\n" + input.UserInstruction
+	query := "请生成" + paperTaskNames[kind] + "。\n" + input.UserInstruction
 	if reflectionFirst {
 		query += "\n先生成阅读心得，再携带心得和原论文清单生成汇报 PPT。"
 	}
@@ -545,7 +580,7 @@ func launchHistoryReview(w http.ResponseWriter, r *http.Request, user string, re
 		if e != nil {
 			return e
 		}
-		handoff, e = createMockHandoff(r.Context(), tx, user, record.DatasetID, record.ID, version, "review", req.RequestKey, input, contents, false)
+		handoff, e = createPaperHandoff(r.Context(), tx, user, record.DatasetID, record.ID, version, "review", req.RequestKey, input, contents, false)
 		return e
 	})
 	if err != nil {
@@ -838,7 +873,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			if e != nil {
 				return nil
 			}
-			handoff, e := createMockHandoff(ctx, tx, record.UserID, record.DatasetID, record.ID, latest.Version, "review", "auto:"+record.ID, snapshot, contents, false)
+			handoff, e := createPaperHandoff(ctx, tx, record.UserID, record.DatasetID, record.ID, latest.Version, "review", "auto:"+record.ID, snapshot, contents, false)
 			if e != nil {
 				return e
 			}
@@ -1023,7 +1058,7 @@ func academicChatContext(ctx context.Context, db *gorm.DB, user, conversation st
 	}
 	var handoff orm.AcademicHandoff
 	if db.WithContext(ctx).Where("user_id=? AND conversation_id=?", user, conversation).Take(&handoff).Error == nil {
-		return "论文下游接口联调上下文：\n" + string(marshal(map[string]any{"handoff_id": handoff.ID, "kind": handoff.Kind, "input": json.RawMessage(handoff.InputJSON), "contents": json.RawMessage(handoff.ContentsJSON)})) + "\n这是 Mock 接口联调；只展示模拟反馈，不冒充真实文稿或 PPT。"
+		return "论文任务交接上下文：\n" + string(marshal(map[string]any{"handoff_id": handoff.ID, "dataset_id": handoff.DatasetID, "kind": handoff.Kind, "input": json.RawMessage(handoff.InputJSON)})) + "\n读取完整交接后原样提交。材料已接收，生成能力待对接；不声称已生成正式文稿或 PPT。"
 	}
 	return ""
 }
@@ -1102,7 +1137,7 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		source := ""
-		dataset := ""
+		dataset := handoff.DatasetID
 		available := false
 		if handoff.ExpansionID != "" && store.DB().Where("id=? AND user_id=?", handoff.ExpansionID, user).Take(&record).Error == nil {
 			dataset = record.DatasetID
@@ -1114,7 +1149,7 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		common.ReplyJSON(w, map[string]any{"handoff_id": handoff.ID, "input": json.RawMessage(handoff.InputJSON), "kind": handoff.Kind, "expansion_id": handoff.ExpansionID, "dataset_id": dataset, "version": handoff.Version, "source_conversation_id": source, "source_available": available, "mock": true})
+		common.ReplyJSON(w, map[string]any{"handoff_id": handoff.ID, "input": json.RawMessage(handoff.InputJSON), "contents": json.RawMessage(handoff.ContentsJSON), "kind": handoff.Kind, "expansion_id": handoff.ExpansionID, "dataset_id": dataset, "version": handoff.Version, "source_conversation_id": source, "source_available": available, "status": "awaiting_downstream"})
 		return
 	}
 	replyError(w, 404, "NOT_FOUND", "paper task not found")

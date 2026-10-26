@@ -9,10 +9,11 @@ transitions:
 steps:
   reflection:
     tools:
-    - academic_mock_context
+    - academic_handoff_context
+    - academic_read_paper
     prompt: '{{runtime_instruction}}
 
-      先调用 academic_mock_context 读取完整原始交接（以此为准，不使用任务上下文的模型缩写），再根据原始交接中的论文清单、主题和受众，输出明确标注 Mock 的简短阅读心得正文，用于后续接口联调；不声称核验全文或生成正式心得。将正文保存为 reflection_markdown。'
+      先调用 academic_handoff_context 读取完整原始交接，以此为准保留论文清单、用户要求和已有笔记。下游心得生成能力开发中；仅为输入串联保存简短占位正文，明确“阅读心得生成能力待对接”，不声称核验全文或生成正式心得。将正文保存为 reflection_markdown。'
     outputs:
     - material: reflection_markdown
     inputs:
@@ -20,10 +21,11 @@ steps:
       required: true
   ppt:
     tools:
-    - academic_mock_submit
+    - academic_handoff_submit
+    - academic_read_paper
     prompt: '{{runtime_instruction}}
 
-      调用 academic_mock_submit，它会读取服务端真实交接及已保存的 reflection_markdown，固定原始论文清单，并自动发布 ppt_request JSON。返回 artifact.status=ok 后立即完成，用简短中文反馈本次为 Mock、未生成真实 PPT 文件。不要重抄交接 JSON，不要再次 save_artifacts，不重新选择论文。'
+      调用 academic_handoff_submit，它会读取服务端交接及已保存的 reflection_markdown，固定原始论文清单，并自动发布 ppt_request JSON。返回 artifact.status=ok 后立即完成，简短反馈“材料已接收，生成能力待对接”。不要重抄交接 JSON，不要再次 save_artifacts，不重新选择论文。'
     inputs:
     - material: task_context
       required: true

@@ -30,6 +30,7 @@
 
 .paper-library-heading { display: flex; align-items: center; min-width: 0; gap: 10px; }
 .paper-library-heading h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; color: var(--ink); font-size: 20px; font-weight: 650; line-height: 1.5; }
+.paper-library-refreshing { flex: none; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .paper-library-back.ant-btn { flex: none; color: var(--muted); width: 32px; padding: 0; }
 .paper-library-tools { display: flex; align-items: center; justify-content: flex-end; flex: none; gap: 4px; }
 .paper-library-tool.ant-btn { display: inline-flex; align-items: center; height: 32px; padding: 0 10px; gap: 6px; border-radius: 6px; color: var(--muted); font-size: 13px; }
@@ -89,7 +90,8 @@
 .paper-library-task-action.ant-btn:not(:disabled):hover,
 .paper-library-task-action.ant-btn.is-active,
 .paper-library-task-action.ant-btn.ant-dropdown-open { color: var(--blue); background: var(--blue-soft); }
-.paper-library-task-selection.ant-alert { margin: 12px; }
+.paper-library-task-action.ant-btn:disabled { color: var(--faint); pointer-events: none; }
+.paper-library-task-selection-label { display: block; }
 .ant-dropdown .ant-dropdown-menu .paper-library-task-selection-action:not(.ant-dropdown-menu-item-disabled) {
   color: var(--color-primary-text);
   &:hover { background: var(--color-primary-bg); }
@@ -165,6 +167,7 @@
 .paper-library-tag { display: inline-flex; align-items: center; }
 
 .paper-library-board { min-width: 0; }
+.paper-library-loading { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 240px; color: var(--muted); font-size: 13px; }
 .paper-library-table-scroll { overflow-x: auto; border-radius: 10px; }
 .paper-library-table-scroll:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .paper-library-table { width: 100%; min-width: 820px; border-spacing: 0; table-layout: fixed; text-align: left; }

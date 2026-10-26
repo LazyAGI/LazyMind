@@ -26,7 +26,7 @@ function Harness({ selected = ['a'], canImport = true, selectionError, initialMo
     const [mode, setMode] = useState<PaperTask | undefined>(initialMode);
     const [actionsContainer, setActionsContainer] = useState<HTMLDivElement | null>(null);
     const location = useLocation();
-    return <><aside aria-label="论文工具栏"><div ref={setActionsContainer} /></aside><main><PaperTasks dataset="d" mode={mode} setMode={setMode} selected={selected} selectionError={selectionError} canImport={canImport} onImportSubmitted={importsChanged} actionsContainer={actionsContainer} /></main><div data-testid="location">{location.pathname}</div></>;
+    return <><aside aria-label="论文工具栏"><div ref={setActionsContainer} /></aside><main><PaperTasks dataset="d" mode={mode} setMode={setMode} selected={selected} selectedTitles={selected.map(id => id.toUpperCase())} selectionError={selectionError} canImport={canImport} onImportSubmitted={importsChanged} actionsContainer={actionsContainer} /></main><div data-testid="location">{location.pathname}</div></>;
 }
 function mount(selected?: string[], query = '', canImport = true, options: { selectionError?: string; initialMode?: PaperTask } = {}) {
     return render(<I18nextProvider i18n={i18n}><MemoryRouter initialEntries={['/knowledge' + query]}><ConfigProvider theme={{ token: { motion: false } }}><Harness selected={selected} canImport={canImport} {...options} /></ConfigProvider></MemoryRouter></I18nextProvider>);
@@ -93,30 +93,76 @@ describe('paper task startup routes', () => {
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'review', document_ids: direction ? [] : ['a'] }));
     });
     describe.each([['自动扩展', '基于选中论文扩展'], ['论文综述', '基于选中论文生成综述']])('%s selection requirements', (task, label) => {
-        it('disables the paper entry and explains why when no paper is selected', async () => {
+        it('shows the selection hint only while hovering the disabled paper entry', async () => {
             mount([]);
             fireEvent.click(screen.getByRole('button', { name: new RegExp(task) }));
             const entry = await screen.findByRole('menuitem', { name: new RegExp(label) });
             expect(entry).toHaveAttribute('aria-disabled', 'true');
-            await waitFor(() => expect(within(entry).getByText('请至少选择一篇已确认论文')).toBeVisible());
+            expect(screen.queryByText('请先选择论文')).not.toBeInTheDocument();
+            fireEvent.mouseEnter(within(entry).getByText(label));
+            expect(await screen.findByRole('tooltip')).toHaveTextContent('请先选择论文');
+            fireEvent.mouseLeave(within(entry).getByText(label));
+            await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
             fireEvent.click(within(entry).getByText(label));
             expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
             expect(launchPaperTask).not.toHaveBeenCalled();
         });
-        it.each(['所选文献尚未关联入库 PDF，请先添加 PDF', '所选文献的论文身份尚未确认，请先识别或手动确认'])('displays the selection problem directly: %s', async selectionError => {
+        it.each(['所选文献尚未关联入库 PDF，请先添加 PDF', '所选文献的论文身份尚未确认，请先识别或手动确认'])('shows the specific selection problem on hover: %s', async selectionError => {
             mount(['a'], '', true, { selectionError });
             fireEvent.click(screen.getByRole('button', { name: new RegExp(task) }));
             const entry = await screen.findByRole('menuitem', { name: new RegExp(label) });
             expect(entry).toHaveAttribute('aria-disabled', 'true');
-            await waitFor(() => expect(within(entry).getByText(selectionError)).toBeVisible());
+            expect(screen.queryByText(selectionError)).not.toBeInTheDocument();
+            fireEvent.mouseEnter(within(entry).getByText(label));
+            expect(await screen.findByRole('tooltip')).toHaveTextContent(selectionError);
         });
     });
-    it.each(['expansion', 'review'] as const)('opens the %s action from the library without another selection step', async kind => {
+    it.each(['expansion', 'review', 'reflection', 'ppt'] as const)('opens the %s action from the library without another selection step', async kind => {
         mount(['a'], '', true, { initialMode: kind });
         expect(await screen.findByLabelText('补充要求（选填）')).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^继\s*续$/ })).not.toBeInTheDocument();
         await submit();
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind, document_ids: ['a'] }));
+    });
+    it.each([['reflection', '阅读心得'], ['ppt', '汇报 PPT']] as const)('starts %s directly from the current library selection', async (kind, label) => {
+        mount(['a', 'b']);
+        fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /^继\s*续$/ })).not.toBeInTheDocument();
+        const dialog = within(screen.getByRole('dialog'));
+        expect(dialog.getByText('已选 2 篇库中论文')).toBeInTheDocument();
+        expect(dialog.getByText('A · B')).toBeInTheDocument();
+        fireEvent.change(dialog.getByLabelText('补充要求（选填）'), { target: { value: 'Focus on the main contributions' } });
+        if (kind === 'ppt') {
+            const reflection = dialog.getByRole('checkbox', { name: '先生成阅读心得，再生成汇报 PPT' });
+            expect(reflection).not.toBeChecked();
+            fireEvent.click(reflection);
+        }
+        await submit();
+        expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a', 'b']);
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind, document_ids: ['a', 'b'], direction: undefined, user_instruction: 'Focus on the main contributions', reflection_first: kind === 'ppt' }));
+    });
+    it.each(['阅读心得', '汇报 PPT'])('shows the selection hint only while hovering disabled %s', async label => {
+        mount([]);
+        const button = screen.getByRole('button', { name: label, exact: true });
+        expect(button).toBeDisabled();
+        expect(screen.queryByText('请先选择论文')).not.toBeInTheDocument();
+        fireEvent.mouseEnter(button.parentElement!);
+        expect(await screen.findByRole('tooltip')).toHaveTextContent('请先选择论文');
+        fireEvent.mouseLeave(button.parentElement!);
+        await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
+        fireEvent.click(button);
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        expect(launchPaperTask).not.toHaveBeenCalled();
+    });
+    it.each(['阅读心得', '汇报 PPT'])('explains an invalid library selection when hovering disabled %s', async label => {
+        const selectionError = '所选文献的论文身份尚未确认，请先识别或手动确认';
+        mount(['a'], '', true, { selectionError });
+        expect(screen.getByRole('button', { name: '阅读心得', exact: true })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '汇报 PPT', exact: true })).toBeDisabled();
+        expect(screen.queryByText(selectionError)).not.toBeInTheDocument();
+        fireEvent.mouseEnter(screen.getByRole('button', { name: label, exact: true }).parentElement!);
+        expect(await screen.findByRole('tooltip')).toHaveTextContent(selectionError);
     });
     it('opens history and reviews papers selected in the result list', async () => {
         mount();

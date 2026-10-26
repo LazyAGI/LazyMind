@@ -139,11 +139,11 @@ func TestReviewGateFullManifestImportanceAndSeparateChat(t *testing.T) {
 	if err = db.Create(&record).Error; err != nil {
 		t.Fatal(err)
 	}
-	first, err := createMockHandoff(t.Context(), db.DB, "u", "papers", record.ID, 1, "review", "review-click", snapshot, contents, false)
+	first, err := createPaperHandoff(t.Context(), db.DB, "u", "papers", record.ID, 1, "review", "review-click", snapshot, contents, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := createMockHandoff(t.Context(), db.DB, "u", "papers", record.ID, 1, "review", "review-click", snapshot, contents, false)
+	second, err := createPaperHandoff(t.Context(), db.DB, "u", "papers", record.ID, 1, "review", "review-click", snapshot, contents, false)
 	if err != nil || first.ID != second.ID {
 		t.Fatal("replay duplicated review", err)
 	}
@@ -295,7 +295,7 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 func TestMockAdapterFreezesOriginalPapers(t *testing.T) {
 	db := paperFixture(t)
 	input := ReviewWorkflowInput{UserInstruction: "agents", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", Title: "original a"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}}}}
-	handoff, err := createMockHandoff(t.Context(), db.DB, "u", "papers", "", 0, "ppt", "mock-adapter", input, nil, false)
+	handoff, err := createPaperHandoff(t.Context(), db.DB, "u", "papers", "", 0, "ppt", "mock-adapter", input, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,12 +315,12 @@ func TestMockAdapterFreezesOriginalPapers(t *testing.T) {
 	}
 	var output struct {
 		Papers []PaperRef `json:"papers"`
-		Mock   bool       `json:"mock"`
+		Status string     `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(first), &output); err != nil {
 		t.Fatal(err)
 	}
-	if !output.Mock || len(output.Papers) != 2 || output.Papers[0].PaperID != "a" || output.Papers[0].Title != "original a" || output.Papers[1].PaperID != "b" {
+	if output.Status != "awaiting_downstream" || len(output.Papers) != 2 || output.Papers[0].PaperID != "a" || output.Papers[0].Title != "original a" || output.Papers[1].PaperID != "b" {
 		t.Fatal("mock adapter rewrote original manifest", first)
 	}
 }
@@ -564,14 +564,14 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 	var snapshot ReviewWorkflowInput
-	var contents []orm.AcademicPaperContent
+	var contents handoffContentSnapshot
 	if err := json.Unmarshal(handoff.InputJSON, &snapshot); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(handoff.ContentsJSON, &contents); err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Papers) != 2 || snapshot.Papers[0].Paper.PaperID != "a" || !snapshot.Papers[0].IsSeed || snapshot.Papers[1].Paper.PaperID != "b" || snapshot.UserInstruction != input.UserInstruction || len(contents) != 2 {
+	if len(snapshot.Papers) != 2 || snapshot.Papers[0].Paper.PaperID != "a" || !snapshot.Papers[0].IsSeed || snapshot.Papers[1].Paper.PaperID != "b" || snapshot.UserInstruction != input.UserInstruction || len(contents.Contents) != 2 || len(contents.Sources) != 2 {
 		t.Fatal("review snapshot did not preserve exactly the selected papers", snapshot, contents)
 	}
 	if err := db.Model(&orm.AcademicPaperContent{}).Where("paper_id=?", "c").Update("status", "failed").Error; err != nil {

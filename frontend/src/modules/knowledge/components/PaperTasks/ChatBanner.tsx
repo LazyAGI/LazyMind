@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Space, Tag } from 'antd';
+import { Alert, Button, Space } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { axiosInstance, BASE_URL } from '@/components/request';
@@ -13,7 +13,6 @@ interface Context {
     next_conversation_id?: string;
     source_conversation_id?: string;
     source_available?: boolean;
-    mock?: boolean;
     ready_count?: number;
     paper_count?: number;
 }
@@ -57,9 +56,8 @@ export default function AcademicChatBanner({ conversation }: {
     const result = () => navigate(`/lib/knowledge/detail/${encodeURIComponent(context.dataset_id!)}?expansion_id=${encodeURIComponent(context.expansion_id!)}`);
     return <Alert style={{ marginBottom: 8 }} type="info" message={<Space wrap>
         <span>{t(`paperTasks.task.${context.kind}`, { defaultValue: t('paperTasks.resultTitle') })}{context.kind === 'expansion' && ` · ${t(`paperTasks.status.${context.status || 'running'}`)}`}</span>
-        {context.mock && <Tag>{t('paperTasks.demo')}</Tag>}
         {context.expansion_id && context.dataset_id && (context.kind === 'expansion' || context.source_available) && <Button size="small" onClick={result}>{t('paperTasks.viewResult')}</Button>}
-        {context.source_conversation_id && <Button size="small" onClick={() => navigate(getChatConversationPath(context.source_conversation_id!))}>{t('paperTasks.returnExpansion')}</Button>}
+        {context.kind !== 'review' && context.source_conversation_id && <Button size="small" onClick={() => navigate(getChatConversationPath(context.source_conversation_id!))}>{t('paperTasks.returnExpansion')}</Button>}
         {context.next_conversation_id && <Button type="primary" size="small" onClick={() => navigate(getChatConversationPath(context.next_conversation_id!))}>{t('paperTasks.viewReview')}</Button>}
         {auto && !context.next_conversation_id && <span>{context.status === 'completed' ? t('paperTasks.reviewNotReady', { count: context.ready_count || 0 }) : t('paperTasks.waitingReview')}</span>}
     </Space>} />;

@@ -40,11 +40,8 @@
 @media (hover: none) {
   .paper-expansion-result-table .ant-checkbox-wrapper { opacity: 1; }
 }
-.paper-library-task-selection-reason {
-  max-width: 280px;
-  margin-top: 4px;
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: normal;
+.paper-task-launch-selection {
+  margin-top: 12px;
+  .ant-typography { margin-bottom: 0; }
+  .ant-typography + .ant-typography { margin-top: 4px; font-size: 12px; }
 }

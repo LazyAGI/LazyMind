@@ -48,8 +48,8 @@ func SubmitMockHandoff(w http.ResponseWriter, r *http.Request) {
 			output = handoff.MockResultJSON
 			return nil
 		}
-		var input ReviewWorkflowInput
-		if err := json.Unmarshal(handoff.InputJSON, &input); err != nil {
+		papers, err := handoffPapers(handoff.InputJSON)
+		if err != nil {
 			return err
 		}
 		reflection := ""
@@ -90,12 +90,8 @@ func SubmitMockHandoff(w http.ResponseWriter, r *http.Request) {
 				return errors.New("心得与已保存的上一步产物不一致")
 			}
 		}
-		result := map[string]any{"mock": true, "kind": handoff.Kind, "input": input, "feedback": "已模拟接收完整交接参数；本次未调用正式下游 Workflow，未生成正式文稿或 PPT 文件。"}
+		result := map[string]any{"kind": handoff.Kind, "input": json.RawMessage(handoff.InputJSON), "status": "awaiting_downstream", "feedback": "材料已接收，生成能力待对接。"}
 		if handoff.Kind == "ppt" {
-			papers := make([]PaperRef, 0, len(input.Papers))
-			for _, paper := range input.Papers {
-				papers = append(papers, paper.Paper)
-			}
 			result["papers"] = papers
 			result["reflection_markdown"] = reflection
 		}

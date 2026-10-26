@@ -1,7 +1,7 @@
 id: paper_workflow_mock
-name: 论文下游接口联调（Mock）
+name: 论文任务交接
 description: 综述、独立阅读心得、科研 PPT 的接口联调，不生成正式成果。
-when_to_use: 仅用于从论文业务发起的 Mock 交接。
+when_to_use: 从论文业务发起综述、阅读心得或汇报 PPT 的材料交接。
 steps:
 - id: acknowledge
   label: 核对交接并反馈
@@ -12,17 +12,28 @@ slots:
   cardinality: single
   external: true
   exposed: false
-- id: mock_feedback
-  label: 模拟反馈
+- id: handoff_receipt
+  label: 交接结果
   type: text
   cardinality: single
 runtime:
-  publisher_owned_slots: [mock_feedback]
+  publisher_owned_slots: [handoff_receipt]
   trigger_inputs:
   - task_context
 
 tool_scripts:
 - path: scripts/tools.py
   functions:
-  - academic_mock_submit
-  - academic_mock_context
+  - academic_handoff_submit
+  - academic_handoff_context
+  - academic_read_paper
+
+ui:
+  tabs:
+  - id: acknowledge
+    step_id: acknowledge
+    label: 任务交接
+    layout: list
+    slots:
+    - id: handoff_receipt
+      label: 交接结果

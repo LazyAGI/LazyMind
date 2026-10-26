@@ -15,6 +15,7 @@ interface Props {
     mode: PaperTask | undefined;
     setMode: (mode: PaperTask | undefined) => void;
     selected: string[];
+    selectedTitles?: string[];
     canImport: boolean;
     selectionError?: string;
     onImportSubmitted: () => void;
@@ -54,7 +55,7 @@ function currentPaperDocument(detail: ExpansionDetail, item: WorkflowPaper, prev
 }
 const stages = ['direction_research', 'seed_set', 'expanded_papers', 'paper_relations', 'expansion_result'];
 
-export default function PaperTasks({ dataset, mode, setMode, selected, selectionError, canImport, onImportSubmitted, actionsContainer }: Props) {
+export default function PaperTasks({ dataset, mode, setMode, selected, selectedTitles = [], selectionError, canImport, onImportSubmitted, actionsContainer }: Props) {
     const { t } = useTranslation();
     const navigate = useNavigate();
     const [params, setParams] = useSearchParams();
@@ -83,9 +84,9 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
     const detailTarget = useRef<string>();
     const taskLabel = (kind: string) => t(`paperTasks.task.${kind}`, { defaultValue: kind });
     const statusLabel = (status: string) => t(`paperTasks.status.${status}`, { defaultValue: status });
-    const selectedPaperTaskError = selectionError || (!selected.length ? t('paperTasks.selectConfirmedPaper') : '');
+    const selectedPaperTaskError = selectionError || (!selected.length ? t('paperTasks.selectPaperFirst') : '');
     const openLaunch = useCallback((kind: PaperTask, direction: boolean) => {
-        if (!direction && (kind === 'expansion' || kind === 'review')) {
+        if (!direction) {
             setMode(undefined);
             if (selectedPaperTaskError) { message.warning(selectedPaperTaskError); return; }
         }
@@ -96,7 +97,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
         requestInput.current = '';
     }, [selectedPaperTaskError, setMode]);
     useEffect(() => {
-        if (mode === 'expansion' || mode === 'review') openLaunch(mode, false);
+        if (mode) openLaunch(mode, false);
     }, [mode, openLaunch]);
     const refreshHistory = async () => setRecords(await listExpansions(dataset));
     const openHistory = () => {
@@ -170,18 +171,13 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
         const timer = window.setInterval(() => void refresh(), 12000);
         return () => { active = false; window.clearInterval(timer); };
     }, [dataset, importBatches]);
-    const enter = (kind: PaperTask) => {
-        setMode(kind);
-        setLaunch(undefined);
-    };
     const goChat = (id: string, autoReview = false) => {
         window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT));
         navigate(getChatConversationPath(id) + (autoReview ? '?paper_auto_review=1' : ''));
     };
     const submit = async () => {
         if (!launch || busy) return;
-        if (!launch.direction && selectionError) { message.warning(selectionError); return; }
-        if (!launch.direction && (launch.kind === 'expansion' || launch.kind === 'review') && selectedPaperTaskError) {
+        if (!launch.direction && selectedPaperTaskError) {
             message.warning(selectedPaperTaskError);
             return;
         }
@@ -198,7 +194,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                     return;
                 }
                 if (!selection.papers.length) {
-                    message.warning(t('paperTasks.selectConfirmedPaper'));
+                    message.warning(t('paperTasks.selectPaperFirst'));
                     return;
                 }
             }
@@ -379,29 +375,28 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
             <Dropdown trigger={['click']} placement="topLeft" menu={{ items: [
                 { key: 'direction', label: t('paperTasks.expandDirection'), onClick: () => openLaunch('expansion', true) },
                 { type: 'divider' },
-                { key: 'papers', className: 'paper-library-task-selection-action', label: <div>{t('paperTasks.expandPapers')}{selectedPaperTaskError && <div className="paper-library-task-selection-reason">{selectedPaperTaskError}</div>}</div>, disabled: !!selectedPaperTaskError, onClick: () => openLaunch('expansion', false) },
+                { key: 'papers', className: 'paper-library-task-selection-action', label: <Tooltip title={selectedPaperTaskError || undefined} placement="right"><span className="paper-library-task-selection-label">{t('paperTasks.expandPapers')}</span></Tooltip>, disabled: !!selectedPaperTaskError, onClick: () => openLaunch('expansion', false) },
             ] }}><Button type="text" className={`paper-library-task-action ${activeTask === 'expansion' ? 'is-active' : ''}`} icon={<BranchesOutlined aria-hidden />} aria-pressed={activeTask === 'expansion'}>{taskLabel('expansion')} <DownOutlined aria-hidden /></Button></Dropdown>
             <Dropdown trigger={['click']} placement="topLeft" menu={{ items: [
                 { key: 'history', label: t('paperTasks.reviewHistory'), onClick: openHistory },
                 { key: 'direction', label: t('paperTasks.reviewDirection'), onClick: () => openLaunch('review', true) },
                 { type: 'divider' },
-                { key: 'papers', className: 'paper-library-task-selection-action', label: <div>{t('paperTasks.reviewPapers')}{selectedPaperTaskError && <div className="paper-library-task-selection-reason">{selectedPaperTaskError}</div>}</div>, disabled: !!selectedPaperTaskError, onClick: () => openLaunch('review', false) },
+                { key: 'papers', className: 'paper-library-task-selection-action', label: <Tooltip title={selectedPaperTaskError || undefined} placement="right"><span className="paper-library-task-selection-label">{t('paperTasks.reviewPapers')}</span></Tooltip>, disabled: !!selectedPaperTaskError, onClick: () => openLaunch('review', false) },
             ] }}><Button type="text" className={`paper-library-task-action ${activeTask === 'review' ? 'is-active' : ''}`} icon={<ReadOutlined aria-hidden />} aria-pressed={activeTask === 'review'}>{taskLabel('review')} <DownOutlined aria-hidden /></Button></Dropdown>
-            <Button type="text" className={`paper-library-task-action ${activeTask === 'reflection' ? 'is-active' : ''}`} icon={<EditOutlined aria-hidden />} aria-pressed={activeTask === 'reflection'} onClick={() => enter('reflection')}>{taskLabel('reflection')}</Button>
-            <Button type="text" className={`paper-library-task-action ${activeTask === 'ppt' ? 'is-active' : ''}`} icon={<FundProjectionScreenOutlined aria-hidden />} aria-pressed={activeTask === 'ppt'} onClick={() => enter('ppt')}>{taskLabel('ppt')}</Button>
+            <Tooltip title={selectedPaperTaskError || undefined} placement="right"><span><Button type="text" className={`paper-library-task-action ${activeTask === 'reflection' ? 'is-active' : ''}`} icon={<EditOutlined aria-hidden />} aria-pressed={activeTask === 'reflection'} disabled={!!selectedPaperTaskError} onClick={() => openLaunch('reflection', false)}>{taskLabel('reflection')}</Button></span></Tooltip>
+            <Tooltip title={selectedPaperTaskError || undefined} placement="right"><span><Button type="text" className={`paper-library-task-action ${activeTask === 'ppt' ? 'is-active' : ''}`} icon={<FundProjectionScreenOutlined aria-hidden />} aria-pressed={activeTask === 'ppt'} disabled={!!selectedPaperTaskError} onClick={() => openLaunch('ppt', false)}>{taskLabel('ppt')}</Button></span></Tooltip>
             <Button type="text" className="paper-library-task-action" icon={<HistoryOutlined aria-hidden />} onClick={openHistory}>{t('paperTasks.records')}</Button>
         </div>;
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
-        {mode && mode !== 'expansion' && mode !== 'review' && <Alert className="paper-library-task-selection" type="info" message={<Space wrap>
-            <span>{t('paperTasks.choosePapers', { task: taskLabel(mode), count: selected.length })}</span>
-            <Button type="primary" disabled={!selected.length || !!selectionError} onClick={() => openLaunch(mode, false)}>{t('paperTasks.continue')}</Button>
-            <Button onClick={() => setMode(undefined)}>{t('paperTasks.cancel')}</Button>
-        </Space>} />}
         <Modal okText={t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
-            title={launch ? <Space>{taskLabel(launch.kind)}{launch.kind !== 'expansion' && <Tag>{t('paperTasks.demo')}</Tag>}</Space> : ''}
+            title={launch ? taskLabel(launch.kind) : ''}
             onCancel={() => !busy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {launch?.kind === 'review' && <Alert type="info" showIcon message={t('paperTasks.reviewStartHint')} />}
+            {launch && !launch.direction && <div className="paper-task-launch-selection">
+                <Typography.Text type="secondary">{t('paperTasks.selectedLibraryPapers', { count: selected.length })}</Typography.Text>
+                {selectedTitles.length > 0 && <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, tooltip: true }}>{selectedTitles.join(' · ')}</Typography.Paragraph>}
+            </div>}
             <Typography.Paragraph style={{ marginTop: 12, marginBottom: 4 }}>{t(launch?.direction ? 'paperTasks.topic' : 'paperTasks.additional')}</Typography.Paragraph>
             <Input.TextArea aria-label={t(launch?.direction ? 'paperTasks.topic' : 'paperTasks.additional')}
                 placeholder={t(launch?.direction ? 'paperTasks.topicPlaceholder' : `paperTasks.placeholder.${launch?.kind || 'expansion'}`)}
@@ -441,7 +436,6 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                     </div>
                     <Space wrap>
                         <Tooltip title={reviewReason} trigger={['hover', 'focus']}><span tabIndex={reviewReason ? 0 : undefined}><Button type="primary" disabled={!!reviewReason} loading={submitting.current === 'review'} onClick={() => void submitReview()}>{t('paperTasks.generateReview')}</Button></span></Tooltip>
-                        <Tag>{t('paperTasks.demo')}</Tag>
                         <Tooltip title={bulkImportReason} trigger={['hover', 'focus']}><span tabIndex={bulkImportReason ? 0 : undefined}><Button disabled={!!bulkImportReason} onClick={() => { if (selection) { setActionError(''); setConfirmation({ ...selection, source }); } }}>{t('paperTasks.bulkImport', { count: importable.length })}</Button></span></Tooltip>
                     </Space>
                 </div>
@@ -490,7 +484,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                             aria-label={t('paperTasks.importPaper', { title: item.paper.title || item.paper.paper_id })}
                             onClick={() => importPaper(source, item)}>{t(inProgress ? 'paperTasks.importStatus.importing' : 'paperTasks.import')}</Button></span></Tooltip>}</Space>;
                     } },
-                    { title: <Space>{t('paperTasks.relations')}{detail.record.discovery_mode !== 'external' && <Tag>{t('paperTasks.demo')}</Tag>}</Space>, render: (_: unknown, item: WorkflowPaper) => <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }}>{[item.seed_relation, item.direction_relation, item.key_contribution].filter(Boolean).join('；')}</Typography.Paragraph> },
+                    { title: t('paperTasks.relations'), render: (_: unknown, item: WorkflowPaper) => <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }}>{[item.seed_relation, item.direction_relation, item.key_contribution].filter(Boolean).join('；')}</Typography.Paragraph> },
                 ]} />
                 </>}
                 <Typography.Title level={5}>{t('paperTasks.progress')}</Typography.Title>
@@ -498,7 +492,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selection
                     renderItem={([key, value]) => <List.Item><List.Item.Meta title={t(`paperTasks.stage.${key}`)} description={<><div>{value.candidate_directions?.join('；')}</div><div>{value.papers?.map(item => item.paper.title).filter(Boolean).join('；')}</div></>} /></List.Item>} />
                 <Typography.Title level={5}>{t('paperTasks.rounds')}</Typography.Title>
                 <List dataSource={detail.rounds} renderItem={round => <List.Item><details>
-                    <summary>{round.discovery_mode !== 'external' && <Tag>{t('paperTasks.demo')}</Tag>}{t('paperTasks.round', { count: round.version })} · {statusLabel(round.status)} · {t('paperTasks.paperCount', { count: distinctPapers(round.result.papers || []).length })}</summary>
+                    <summary>{t('paperTasks.round', { count: round.version })} · {statusLabel(round.status)} · {t('paperTasks.paperCount', { count: distinctPapers(round.result.papers || []).length })}</summary>
                     <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{round.result.user_instruction}</Typography.Paragraph>
                     <Typography.Paragraph>{t('paperTasks.directions', { value: round.result.selected_directions?.join('；') })}</Typography.Paragraph>
                     <ul>{distinctPapers(round.result.papers || []).map(item => <li key={item.paper.paper_id}>{item.paper.title || item.paper.paper_id} <Tag>{sourceLabel(item)}</Tag></li>)}</ul>

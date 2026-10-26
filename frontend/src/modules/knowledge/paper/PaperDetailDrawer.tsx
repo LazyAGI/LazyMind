@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Alert, Button, Input, Tabs, Tag } from 'antd';
+import { Alert, Button, Input, Tabs, Tag, Tooltip } from 'antd';
+import { ExclamationCircleOutlined } from '@ant-design/icons';
 import type { PaperLibraryDataV3, PaperRecord, Attachment } from './libraryModel';
 import { createNote, readingSummary } from './libraryModel';
 import { importMethodLabel, safePaperUrl, type PaperEdits } from './model';
@@ -22,6 +23,8 @@ interface Props {
   onSave?: (edits: PaperEdits) => Promise<boolean>;
   editError?: string | null;
   onRetryIdentification?: () => Promise<void>;
+  onReparse?: () => void;
+  reparseDisabledReason?: string;
 }
 
 function sourceName(attachment?: Attachment) {
@@ -33,7 +36,7 @@ function sourceName(attachment?: Attachment) {
   return attachment.sourceProvider && attachment.sourceProvider !== 'manual' ? attachment.sourceProvider : '未记录';
 }
 
-export default function PaperDetailDrawer({ paper, data, initialTab = 'overview', initialEditing = false, academic, onClose, onChange, onOpenAttachment, onEdit, onSave, editError, onRetryIdentification, disabled = false }: Props) {
+export default function PaperDetailDrawer({ paper, data, initialTab = 'overview', initialEditing = false, academic, onClose, onChange, onOpenAttachment, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, disabled = false }: Props) {
   const [tab, setTab] = useState(initialTab);
   const [editing, setEditing] = useState(initialEditing);
   const [note, setNote] = useState('');
@@ -69,11 +72,29 @@ export default function PaperDetailDrawer({ paper, data, initialTab = 'overview'
   return <div className="paper-detail-mask" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
     <aside className="paper-detail-drawer" role="dialog" aria-modal="true" aria-label="文献详情">
       <header className="paper-detail-head"><div><span className="paper-detail-kicker">文献档案</span><h2>{current.title}</h2><p>{current.authors} · {current.venue} {current.year || ''}</p><div className="paper-detail-facts"><span>{current.status === 'read' ? '已读' : current.status === 'reading' ? '阅读中' : '未读'}</span></div></div><Button type="text" disabled={saving || (editing && disabled)} onClick={onClose}>关闭</Button></header>
-      <div className="paper-detail-summary"><span><b>{summary.attachments}</b> 个附件</span><span><b>{summary.notes}</b> 条笔记</span><span><b>{summary.annotations}</b> 条批注</span></div>
+      <div className="paper-detail-summary">
+        <div className="paper-detail-attachment-summary">
+          <span><b>{summary.attachments}</b> 个附件</span>
+          {current.parse === 'failed' && <>
+            <span className="paper-detail-status-failed" role="status" aria-label="正文解析状态"><ExclamationCircleOutlined />正文解析失败</span>
+            {onReparse && <Tooltip title={reparseDisabledReason}><Button size="small" disabled={disabled || saving || editing || !!reparseDisabledReason} onClick={onReparse}>重新解析</Button></Tooltip>}
+          </>}
+          {current.parse === 'parsing' && <span role="status" aria-label="正文解析状态">正文解析中</span>}
+        </div>
+        <span className="paper-detail-count"><b>{summary.notes}</b> 条笔记</span>
+        <span className="paper-detail-count"><b>{summary.annotations}</b> 条批注</span>
+      </div>
       {error && <Alert className="paper-detail-error" type="error" showIcon message="操作未完成" description={error} />}
       <Tabs activeKey={tab} onChange={(next: string) => { if (!saving && !editing) setTab(next as PaperDetailTab); }} items={[
         { key: 'overview', label: '概览', children: <div className="paper-detail-section">
-          <div className="paper-detail-section-head"><h3>论文信息</h3>{onSave && !editing && <Button size="small" disabled={disabled || saving} onClick={() => { onEdit?.(); setEditing(true); }}>编辑</Button>}</div>
+          <div className="paper-detail-section-head">
+            <h3>论文信息</h3>
+            <div className="paper-detail-identification">
+              {academic && <span className={academic.state.status === 'failed' && !academic.state.manual ? 'paper-detail-status-failed' : undefined} role="status" aria-label="论文信息自动识别">{identifyStatus}</span>}
+              {academic?.state.status === 'failed' && onRetryIdentification && <Button size="small" aria-label="重试自动识别" disabled={disabled || saving || editing} loading={saving} onClick={() => void run(onRetryIdentification, '自动识别重试失败，请稍后重试')}>重试自动识别</Button>}
+              {onSave && !editing && <Button size="small" disabled={disabled || saving} onClick={() => { onEdit?.(); setEditing(true); }}>编辑</Button>}
+            </div>
+          </div>
           {editing ? <>
             {editError && <Alert type="error" showIcon message="题录尚未保存" description={editError} />}
             <PaperMetadataForm value={{ ...current, abstract: current.abstract ?? current.metadata.abstract, arxiv_id: current.arxiv, tags: current.tags.join(';') }} disabled={disabled || saving} includeTags onSave={value => run(async () => {
@@ -85,8 +106,6 @@ export default function PaperDetailDrawer({ paper, data, initialTab = 'overview'
             <dl><dt>标题</dt><dd>{current.title}</dd><dt>作者</dt><dd>{current.authors || '未填写'}</dd><dt>年份</dt><dd>{current.year || '未填写'}</dd><dt>会议／期刊</dt><dd>{current.venue || '未填写'}</dd><dt>DOI</dt><dd>{current.doi || '未填写'}</dd><dt>arXiv</dt><dd>{current.arxiv ? `${current.arxiv}${current.arxivVersion || ''}` : '未填写'}</dd><dt>摘要</dt><dd>{current.abstract ?? current.metadata.abstract ?? '未填写'}</dd></dl>
             <div className="paper-detail-tags">{current.tags.filter(tag => tag !== 'paper' && !tag.startsWith('arxiv:')).map(tag => <Tag key={tag}>{tag}</Tag>)}</div>
           </>}
-          {academic && <div className="paper-detail-identification"><span>论文信息自动识别：{identifyStatus}</span>{academic.state.status === 'failed' && <Alert type="warning" showIcon message="论文信息提取失败，可以重试或手动编辑" description={academic.state.error} />}{academic.state.status === 'failed' && onRetryIdentification && <Button size="small" aria-label="重试自动识别" disabled={disabled || saving || editing} loading={saving} onClick={() => void run(onRetryIdentification, '自动识别重试失败，请稍后重试')}>重试自动识别</Button>}</div>}
-          {current.parse === "failed" && <Alert type="error" showIcon message="正文解析失败，可通过论文菜单重新解析" description={current.processingError || academic?.processing_error} />}
           <div className="paper-detail-section-head"><h3>来源</h3></div>
           <dl><dt>导入方式</dt><dd>{method ? importMethodLabel[method] || '未记录' : '未记录'}</dd><dt>原文来源</dt><dd>{sourceName(primary)}</dd><dt>原始链接</dt><dd>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer">{sourceUrl}</a> : '未记录'}</dd><dt>来源版本</dt><dd>{primary?.sourceVersion || '未记录'}</dd></dl>
         </div> },

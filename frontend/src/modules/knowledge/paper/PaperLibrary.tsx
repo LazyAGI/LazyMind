@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ChangeEvent, type DragEvent, type DragEventHandler } from "react";
-import { Alert, Button, Dropdown, Input, Modal, Popover, Radio, Select, Tooltip, Upload, message, type RadioChangeEvent } from "antd";
+import { Alert, Button, Dropdown, Input, Modal, Popover, Radio, Select, Spin, Tooltip, Upload, message, type RadioChangeEvent } from "antd";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
 import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, InfoCircleOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, StarFilled, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
@@ -113,6 +113,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   const syncGeneration = useRef(0);
   const [syncRevision, setSyncRevision] = useState(0);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const initialLoading = !isDemo && !academicStatesReady && !persistenceError && !syncError;
   const [linkPreview, setLinkPreview] = useState<ImportPreviewItem>();
   const [importPage, setImportPage] = useState<ImportBatchPage>(emptyImportBatchPage);
   const pendingImportKey = useRef(uuidv4());
@@ -162,7 +163,6 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
     busyRef.current = true;
     const generation = ++syncGeneration.current;
     setLoading(true);
-    setAcademicStatesReady(false);
     setPersistenceError(null);
     try {
       const saved = await loadPersistedPaperLibrary(datasetId);
@@ -752,6 +752,16 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
   };
   const primaryDocument = (paperId: string) => primaryAttachment(paperId)?.contentRef;
   const originalUrl = (item: PaperItem) => safePaperUrl(primaryAttachment(item.id)?.sourceUrl) || safePaperUrl(item.sourceUrl) || paperLink(item);
+  const reparseDisabledReason = (item: PaperItem) => !canParse ? '文档解析服务当前不可用'
+    : !primaryDocument(item.id) ? '请先添加 PDF 附件'
+    : processingLevel === 'stored' ? '请先提高知识库处理级别'
+    : item.parse === 'parsing' ? '正文正在解析中' : undefined;
+  const openReparse = (item: PaperItem) => {
+    const document = primaryDocument(item.id);
+    if (disabled || reparseDisabledReason(item) || !document) return;
+    restartRef.current?.onOpen({ dataset: datasetId, ids: [document], names: [item.title], title: '重新解析', processingLevel });
+  };
+  const detailPaper = modernData.papers.find(item => item.id === detailPaperId);
 
   return (
     <DndContext sensors={dragSensors} collisionDetection={pointerWithin}
@@ -783,6 +793,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
         <div className="paper-library-heading">
           {onBack && <Tooltip title="返回知识库"><Button className="paper-library-back" type="text" icon={<ArrowLeftOutlined />} aria-label="返回知识库" onClick={onBack} /></Tooltip>}
           <h1 title={title}>{title}</h1>
+          {loading && !initialLoading && <span className="paper-library-refreshing" role="status">正在刷新…</span>}
         </div>
         <div className="paper-library-tools" role="toolbar" aria-label="文献工具">
           <PaperSearch open={activeTool === "search"} value={keyword} onChange={setKeyword}
@@ -807,7 +818,6 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
             onRetry={async batch => { await retryAcademicImport(batch); setSyncRevision(value => value + 1); }} />
         </div>
       </header>
-      {loading && <p role="status">正在加载已保存的文献…</p>}
       {persistenceError && <Alert className="paper-library-sync-error" type="error" showIcon message="文献保存或加载失败" description={persistenceError} action={<Button size="small" disabled={loading || saving} onClick={() => void reload()}>重新加载</Button>} />}
       {!loading && !canWrite && !persistenceError && <Alert type="info" showIcon message="当前文献库为只读，无法编辑" />}
       {syncError && <Alert className="paper-library-sync-error" type="error" showIcon message="文献同步失败" description={syncError} action={<Button size="small" disabled={loading || saving} onClick={() => setSyncRevision((value) => value + 1)}>重新同步</Button>} />}
@@ -862,7 +872,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
           {!isDemo && <div ref={setTaskActionsContainer} className="paper-library-task-actions-slot" />}
         </nav>
         <div className="paper-library-board">
-          {!isDemo && <PaperTasks key={datasetId} dataset={datasetId} actionsContainer={taskActionsContainer} mode={paperTask} setMode={setPaperTask} selected={selectedDocuments} selectionError={selectionError} canImport={canWrite} onImportSubmitted={() => setSyncRevision(value => value + 1)} />}
+          {!isDemo && <PaperTasks key={datasetId} dataset={datasetId} actionsContainer={taskActionsContainer} mode={paperTask} setMode={setPaperTask} selected={selectedDocuments} selectedTitles={selectedPapers.map(item => item.title)} selectionError={selectionError} canImport={canWrite} onImportSubmitted={() => setSyncRevision(value => value + 1)} />}
           {selectedPapers.length > 0 && (
         <div className="paper-library-selection-bar" role="region" aria-label="已选论文">
           <div className="paper-library-selection-summary"><Button type="text" size="small" aria-label="取消选择" icon={<CloseOutlined />} onClick={() => setSelected([])} /><span>已选 <strong>{selectedPapers.length}</strong> 篇</span></div>
@@ -870,7 +880,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
           <Button type="text" size="small" disabled={disabled} danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: `移除已选的 ${selectedPapers.length} 篇题录？`, okText: "移除", cancelText: "取消", onOk: () => dropPapers(selected) })}>移除</Button>
           </div>
           )}
-          <div className="paper-library-table-scroll" tabIndex={0} aria-label="论文列表，可横向滚动">
+          <div className="paper-library-table-scroll" tabIndex={0} aria-label="论文列表，可横向滚动" aria-busy={initialLoading || loading}>
           <table className="paper-library-table" aria-label="论文列表">
             <colgroup><col className="paper-library-controls-col" /><col /><col className="paper-library-year-col" /><col className="paper-library-venue-col" /><col className="paper-library-actions-col" /></colgroup>
             <thead>
@@ -885,8 +895,9 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
               </tr>
             </thead>
             <tbody>
-          {!visible.length && <tr><td colSpan={5}><div className="paper-library-empty">没有符合条件的论文。可以导入 DOI、arXiv、BibTeX、RIS、CSV，或上传 PDF。</div></td></tr>}
-          {visible.map((item) => (
+          {initialLoading && <tr><td colSpan={5}><div className="paper-library-loading" role="status"><Spin size="small" />正在加载文献…</div></td></tr>}
+          {!initialLoading && !visible.length && <tr><td colSpan={5}><div className="paper-library-empty">没有符合条件的论文。可以导入 DOI、arXiv、BibTeX、RIS、CSV，或上传 PDF。</div></td></tr>}
+          {!initialLoading && visible.map((item) => (
             <tr className={`paper-library-row ${selected.includes(item.id) ? "selected" : ""} ${draggedIds.includes(item.id) ? "is-dragging" : ""}`} key={item.id}>
               <td className="paper-library-controls-cell"><div className="paper-library-row-controls">
               <input
@@ -946,9 +957,8 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
                       key: style, label: citationLabel[style], onClick: () => copyText(formatCitation(item, style), `${citationLabel[style]}引用`),
                     })) },
                     { key: "link", label: "打开原文", disabled: !originalUrl(item), onClick: () => { const href = originalUrl(item); if (href) window.open(href, "_blank", "noopener"); } },
-                    { key: "reparse", label: "重新解析", disabled: disabled || !canParse || !primaryDocument(item.id) || item.parse === 'parsing' || processingLevel === 'stored',
-                      title: !canParse ? '文档解析服务当前不可用' : !primaryDocument(item.id) ? '请先添加 PDF 附件' : processingLevel === 'stored' ? '请先提高知识库处理级别' : item.parse === 'parsing' ? '正文正在解析中' : undefined,
-                      onClick: () => restartRef.current?.onOpen({ dataset: datasetId, ids: [primaryDocument(item.id)!], names: [item.title], title: "重新解析", processingLevel }) },
+                    { key: "reparse", label: "重新解析", disabled: disabled || !!reparseDisabledReason(item),
+                      title: reparseDisabledReason(item), onClick: () => openReparse(item) },
                     { type: "divider" },
                     { key: "move", label: "移动到", disabled, children: folderOptions.map((option) => ({ key: option.value, label: option.label, onClick: () => placePapers([item.id], option.value) })) },
                     { key: "remove", label: "从论文集移除", disabled, danger: true, onClick: () => Modal.confirm({ title: "从论文集移除这篇题录？", okText: "移除", cancelText: "取消", onOk: () => dropPapers([item.id]) }) },
@@ -1015,7 +1025,7 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
             <p className="paper-library-arxiv-authors">{pendingArxiv.authors} · {pendingArxiv.year}</p>
             {pendingArxiv.abstract && <p className="paper-library-arxiv-abstract">{pendingArxiv.abstract}</p>}
             <p className="paper-library-arxiv-hint">{linkPreview?.fulltext_candidates.length ? "确认后提交下载入库任务，同一论文的不同版本保留为独立附件。" : "仅找到文献信息，可先保存题录，后续补充 PDF。"}</p>
-            {isDemo ? <Alert type="info" showIcon message="当前为演示页面，请进入论文知识库保存文献和 PDF" /> : <div className="paper-library-modal-actions"><Button type="primary" loading={searching || saving} disabled={disabled} onClick={commitArxiv}>{searching ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : "保存题录"}</Button></div>}
+            {isDemo ? <Alert type="info" showIcon message="请进入论文知识库保存文献和 PDF" /> : <div className="paper-library-modal-actions"><Button type="primary" loading={searching || saving} disabled={disabled} onClick={commitArxiv}>{searching ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : "保存题录"}</Button></div>}
           </section>}
           {pending && <section className="paper-library-import-confirm" aria-label="导入确认">
             <h3>{pending.attachTo ? "为已有文献添加 PDF" : pending.fresh.length ? `可导入 ${pending.fresh.length} 篇文献` : "文献已在库中"}</h3>
@@ -1028,17 +1038,17 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
           </section>}
         </div>
       </Modal>
-      {detailPaperId && modernData.papers.some((item) => item.id === detailPaperId) && (
+      {detailPaper && (
         <PaperDetailDrawer
           key={`${detailPaperId}:${detailTab}:${detailEditing}`}
           initialTab={detailTab}
           initialEditing={detailEditing}
-          academic={paperDocument(modernData, detailPaperId, academicStates)}
+          academic={paperDocument(modernData, detailPaper.id, academicStates)}
           editError={editError}
           onEdit={() => { editingRevisionRef.current = revisionRef.current; setEditing(data.papers.find(item => item.id === detailPaperId)!); setEditError(null); }}
           onSave={saveEdits}
           onRetryIdentification={async () => {
-            const document = paperDocument(modernDataRef.current, detailPaperId, academicStates)?.state.document_id;
+            const document = paperDocument(modernDataRef.current, detailPaper.id, academicStates)?.state.document_id;
             if (!document) throw new Error("请先关联 PDF 附件");
             await updatePaperIdentity(document, { reidentify: true });
             if (isCurrentScope()) {
@@ -1048,7 +1058,9 @@ export default function PaperLibrary({ datasetId, preview, onUploadPdf, title = 
               setSyncRevision(value => value + 1);
             }
           }}
-          paper={modernData.papers.find((item) => item.id === detailPaperId)!}
+          paper={detailPaper}
+          onReparse={() => openReparse(detailPaper)}
+          reparseDisabledReason={reparseDisabledReason(detailPaper)}
           data={modernData}
           onClose={() => setDetailPaperId(null)}
           onChange={persistModern}
