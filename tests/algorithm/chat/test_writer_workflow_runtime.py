@@ -155,6 +155,53 @@ def test_authoritative_step_inputs_reject_unbound_agent_paths(tmp_path):
         )
 
 
+@pytest.mark.parametrize("step", ["outline", "draft", "flat_draft"])
+@pytest.mark.parametrize("control", ["继续", "审批通过，继续执行", "重试"])
+def test_writer_continuation_keeps_launch_request_identity(monkeypatch, step, control):
+    runtime = _load_tools()
+    request = "写一篇解释天空为什么是蓝色的科普文章"
+    context = SimpleNamespace(params={
+        "launch_user_input": request, "user_input": control,
+        "current_user_input": control,
+    })
+    monkeypatch.setattr(runtime, "require_context", lambda: context)
+    monkeypatch.setattr(runtime, "_emit_writer_progress", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runtime, "_authoritative_writer_input_path", lambda slot, **kwargs: slot)
+    monkeypatch.setattr(runtime, "_read_json_file", lambda path: {})
+    command = runtime.WriterCommand(
+        action="create", source_role="none", target_stage="document",
+        next_step="outline", structure_mode="flat" if step == "flat_draft" else "sectioned",
+        user_instruction=request, request_fingerprint=runtime._writer_request_fingerprint(request),
+    )
+    monkeypatch.setattr(runtime, "_load_writer_command", lambda path: command)
+
+    class ValidatedRequest(Exception):
+        pass
+
+    def validated(*args, **kwargs):
+        assert request in args
+        assert control not in args
+        raise ValidatedRequest
+
+    fingerprint = "_outline_workspace_fingerprint" if step == "outline" else "_draft_workspace_fingerprint"
+    monkeypatch.setattr(runtime, fingerprint, validated)
+    execute = getattr(runtime, f"writer_{step}_workspace")
+    with pytest.raises(ValidatedRequest):
+        execute()
+
+    # A genuinely different workflow request must still fail provenance checks.
+    context.params["launch_user_input"] = "写一篇完全不同的文章"
+    with pytest.raises(ValueError, match="belongs to a different user request"):
+        execute()
+
+
+def test_writer_direct_request_still_uses_authoritative_input():
+    runtime = _load_tools()
+    assert runtime._state_authoritative_user_input(
+        SimpleNamespace(params={"user_input": "原始请求"}), "模型改写的请求"
+    ) == "原始请求"
+
+
 def test_workspace_checkpoint_round_trip_and_stale_fingerprint(tmp_path):
     runtime = _load_tools()
     context = SimpleNamespace(params={}, workspace_path=str(tmp_path))

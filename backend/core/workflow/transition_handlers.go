@@ -20,6 +20,7 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
@@ -614,6 +615,21 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			return snapshotErr
 		}
 		projection := projectSessionWithApprovalPreferences(tx.WithContext(ctx), session, graph, snapshot)
+		if session.Status == "pausing" {
+			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_PAUSING", "wait for execution to stop before continuing", false, nil)
+		}
+		if !controlstore.Controlled(session) {
+			display, err := displaystate.Read(tx, session)
+			if err != nil {
+				return err
+			}
+			if display.Status == "waiting" {
+				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_APPROVAL_REQUIRED", "approve the completed step from the workflow controls before continuing", false, nil)
+			}
+			if display.Status == "paused" {
+				return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "WORKFLOW_PAUSED", "resume the workflow explicitly before starting another attempt", false, nil)
+			}
+		}
 		if req.ExpectedStateVersion != session.StateVersion {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "STATE_VERSION_CONFLICT", "plugin session state changed; use the returned projection", true, map[string]any{"expected": req.ExpectedStateVersion, "actual": session.StateVersion})
 		}

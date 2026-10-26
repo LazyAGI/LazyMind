@@ -80,6 +80,7 @@ function payloadProjection(payload: Record<string, unknown>): Record<string, unk
   if (!isRecord(body.projection)) return body;
   return {
     ...body.projection,
+    ...(isRecord(body.display) ? { display: body.display } : {}),
     ...(typeof body.status === 'string' ? { status: body.status } : {}),
     ...(typeof body.current_step_id === 'string' ? { current_step_id: body.current_step_id } : {}),
     ...(isRecord(body.attempt_history) ? { attempt_history: body.attempt_history } : {}),

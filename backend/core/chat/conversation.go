@@ -204,6 +204,23 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	dualReply := stream && len(modelStrs) >= 2
+	var workflowControl *workflow.NativeControlCommand
+	if value, present := raw["workflow_control"]; present {
+		if !stream || dualReply || basicChatOnly || !workflow.IsWorkflowUserControlRequest(r) {
+			common.ReplyErr(w, "workflow controls require an interactive single Chat run", http.StatusBadRequest)
+			return
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			common.ReplyErr(w, "invalid workflow control", http.StatusBadRequest)
+			return
+		}
+		workflowControl = &workflow.NativeControlCommand{}
+		if err := json.Unmarshal(encoded, workflowControl); err != nil || workflowControl.SessionID == "" {
+			common.ReplyErr(w, "invalid workflow control", http.StatusBadRequest)
+			return
+		}
+	}
 
 	query := ""
 	if v, ok := raw["query"].(string); ok && strings.TrimSpace(v) != "" {
@@ -840,6 +857,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	baseURL := chatServiceURL()
+	if workflowControl != nil {
+		if isExternalChatProvider(conversationRecord.ChatExecutor) {
+			common.ReplyErr(w, "native workflow controls require the LazyMind Chat executor", http.StatusConflict)
+			return
+		}
+		reqBody["_workflow_control"] = workflowControl
+		reqBody["_workflow_control_owner"] = userID
+	}
 	reqCtx := r.Context()
 	stateStore := store.State()
 	if stateStore != nil && !isExternalChatProvider(conversationRecord.ChatExecutor) {

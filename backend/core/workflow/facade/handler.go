@@ -201,6 +201,7 @@ type prepareRequest struct {
 	OriginHost          string         `json:"origin_host"`
 	OriginRef           string         `json:"origin_ref"`
 	ConversationID      string         `json:"conversation_id"`
+	TriggerHistoryID    string         `json:"trigger_history_id,omitempty"`
 	ControllerHost      string         `json:"controller_host"`
 	RequestContext      string         `json:"request_context"`
 	WorkflowMode        string         `json:"workflow_mode"`
@@ -876,9 +877,24 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 				CreatedByCommandID: "prepare:" + prepared.ID,
 			})
 		}
-		session, _, createErr := h.Store.CreateInitializedHostSession(
+		if original.TriggerHistoryID != "" {
+			var count int64
+			err := h.Store.Database().WithContext(r.Context()).Raw(`SELECT COUNT(*) FROM (
+				SELECT id FROM chat_histories WHERE id = ? AND conversation_id = ?
+				UNION ALL SELECT id FROM multi_answers_chat_histories WHERE id = ? AND conversation_id = ?
+			) AS trigger_history`, original.TriggerHistoryID, conversationID, original.TriggerHistoryID, conversationID).Scan(&count).Error
+			if err != nil {
+				fail(w, http.StatusServiceUnavailable, "HISTORY_LOOKUP_FAILED", err.Error(), true)
+				return
+			}
+			if count == 0 {
+				fail(w, http.StatusForbidden, "PERMISSION_DENIED", "trigger history does not belong to the workflow conversation", false)
+				return
+			}
+		}
+		session, _, createErr := h.Store.CreateInitializedHostSessionWithTrigger(
 			r.Context(), owner, sessionID, conversationID, original.OriginHost, original.OriginRef,
-			original.ControllerHost, workflowPackage, original.WorkflowMode, intentContext, bindings,
+			original.ControllerHost, workflowPackage, original.WorkflowMode, original.TriggerHistoryID, intentContext, bindings,
 			workflowstore.ControlSettings{Protocol: original.ControlProtocol, BindingRequired: original.HostBindingRequired, Provider: original.HostProvider},
 		)
 		if createErr != nil {

@@ -625,6 +625,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           i18n.resolvedLanguage || i18n.language,
         ),
         ...(workflowContext ? { workflow_context: workflowContext } : {}),
+        ...(extras?.workflow_control ? { workflow_control: extras.workflow_control } : {}),
         ...(workflowUIState ? { workflow_ui_state: workflowUIState } : {}),
         ...(artifactRefs.length > 0 ? { artifact_refs: artifactRefs } : {}),
         ...(extras?.run_in_background ? { run_in_background: true } : {}),

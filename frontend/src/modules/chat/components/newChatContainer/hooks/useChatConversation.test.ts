@@ -14,6 +14,7 @@ import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { ordinary } from "@/modules/chat/components/TaskCenter/ordinaryTestFixtures";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
+import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
 import { emitConversationActivity, emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
 
 const {
@@ -22,8 +23,10 @@ const {
   listToolAssetsMock,
   waitForRuntimeCapabilityMock,
   scrollMock,
+  stopGenerationMock,
 } = vi.hoisted(() => ({
   listConversationsMock: vi.fn(),
+  stopGenerationMock: vi.fn(async () => ({})),
   getHistoryMock: vi.fn(),
   listToolAssetsMock: vi.fn(),
   waitForRuntimeCapabilityMock: vi.fn(),
@@ -73,6 +76,7 @@ vi.mock("@/modules/chat/utils/request", () => ({
   ChatServiceApi: () => ({
     conversationServiceListConversations: listConversationsMock,
     conversationServiceGetConversationHistory: getHistoryMock,
+    conversationServiceStopChatGeneration: stopGenerationMock,
   }),
 }));
 
@@ -133,6 +137,163 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it.each([false, true])('retains turn stop after workflow hand-off and confirmed pause (restored: %s)', async (restored) => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList('handoff-chat', restored ? [
+      { role: RoleTypes.ASSISTANT, history_id: 'resumed-turn', delta: 'Handed off', run_status: 'completed' },
+    ] : []));
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.canStopGeneration).toBe(false);
+    if (!restored) {
+      await act(async () => { await result.current.sendMessage({ text: 'continue' }); });
+      expect(result.current.canStopGeneration).toBe(true);
+      await act(async () => listeners.get('message')?.({ data: JSON.stringify({ result: {
+        conversation_id: 'handoff-chat', history_id: 'resumed-turn', seq: 1, delta: 'Handed off',
+        runtime_event: { type: 'run_finished', data: { status: 'completed' } },
+        finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+      } }) }));
+    }
+    const session = {
+      session_id: 'workflow', conversation_id: 'handoff-chat', controller_host: 'lazymind',
+      workflow_id: 'ppt', workflow_mode: 'auto' as const, status: 'active' as const,
+      current_step_id: '', created_at: '', updated_at: '',
+      projection: { display: { status: 'running' as const, reason: 'executing', approval_step_id: '', chat_history_id: 'resumed-turn' } },
+    };
+    act(() => useWorkflowStore.setState({ sessionByConversation: { 'handoff-chat': session } }));
+    expect(result.current.canStopGeneration).toBe(true);
+    expect(result.current.isStreaming).toBe(false);
+    await act(async () => result.current.stopGeneration());
+    expect(stopGenerationMock).toHaveBeenCalledWith({ stopChatGenerationRequest: {
+      conversation_id: 'handoff-chat', history_id: 'resumed-turn',
+    } });
+    expect(result.current.canStopGeneration).toBe(true); // wait for authoritative confirmation
+    act(() => useWorkflowStore.setState({ sessionByConversation: { 'handoff-chat': {
+      ...session, projection: { display: { ...session.projection.display, status: 'paused' } },
+    } } }));
+    expect(result.current.canStopGeneration).toBe(false);
+  });
+
+  it.each([
+    ['running', 'older-turn'], ['running', undefined], ['paused', 'current-turn'],
+    ['waiting', 'current-turn'], ['failed', 'current-turn'], ['completed', 'current-turn'],
+  ] as const)('does not offer stop for unrelated or settled workflow (%s / %s)', (status, historyId) => {
+    const { result } = renderConversation();
+    act(() => result.current.replaceMessageList('scope-chat', [
+      { role: RoleTypes.ASSISTANT, history_id: 'current-turn', delta: 'Done' },
+    ]));
+    act(() => useWorkflowStore.setState({ sessionByConversation: { 'scope-chat': {
+      session_id: 'workflow', conversation_id: 'scope-chat', workflow_id: 'ppt', workflow_mode: 'auto',
+      status: 'active', current_step_id: '', created_at: '', updated_at: '',
+      projection: { display: { status, reason: '', approval_step_id: '', chat_history_id: historyId } },
+    } } }));
+    expect(result.current.canStopGeneration).toBe(false);
+  });
+
+  it('cancels runtime readiness wait without stopping a historical turn or opening a stream', async () => {
+    waitForRuntimeCapabilityMock.mockImplementationOnce((_capability, { signal, onWaiting }) => {
+      onWaiting();
+      return new Promise((_resolve, reject) => signal.addEventListener('abort', () =>
+        reject(new DOMException('Cancelled', 'AbortError'))));
+    });
+    const onOpenSSE = vi.fn();
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList('waiting-chat', [
+      { role: RoleTypes.ASSISTANT, history_id: 'old-turn', delta: 'Done' },
+    ]));
+    let sending: Promise<boolean>;
+    act(() => { sending = result.current.sendMessage({ text: 'hello' }); });
+    await waitFor(() => expect(result.current.runtimeWaiting).toBe(true));
+    expect(result.current.canStopGeneration).toBe(true);
+    await act(async () => { result.current.stopGeneration(); await sending; });
+    expect(result.current.canStopGeneration).toBe(false);
+    expect(onOpenSSE).not.toHaveBeenCalled();
+    expect(stopGenerationMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('queues early Chat pause until the server turn exists (new conversation: %s)', async (isNew) => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    if (!isNew) act(() => result.current.replaceMessageList('early-chat', []));
+    await act(async () => { expect(await result.current.sendMessage({ text: 'hello' })).toBe(true); });
+    act(() => result.current.stopGeneration());
+    expect(stopGenerationMock).not.toHaveBeenCalled();
+    await act(async () => listeners.get('message')?.({ data: JSON.stringify({ result: {
+      conversation_id: 'early-chat', history_id: 'new-turn', seq: 1, delta: 'hello',
+    } }) }));
+    expect(stopGenerationMock).toHaveBeenCalledTimes(1);
+    expect(stopGenerationMock).toHaveBeenCalledWith({ stopChatGenerationRequest: {
+      conversation_id: 'early-chat', history_id: 'new-turn',
+    } });
+    await act(async () => listeners.get('message')?.({ data: JSON.stringify({ result: {
+      conversation_id: 'early-chat', history_id: 'new-turn', seq: 2, delta: 'world',
+    } }) }));
+    expect(stopGenerationMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not stop an unrelated conversation or an already finished early turn', async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList('early-chat', []));
+    await act(async () => { await result.current.sendMessage({ text: 'hello' }); });
+    act(() => result.current.stopGeneration());
+    for (const frame of [
+      { conversation_id: 'other-chat', history_id: 'other-turn', seq: 1 },
+      { conversation_id: 'early-chat', history_id: 'new-turn', seq: 2,
+        runtime_event: { type: 'run_finished', data: { status: 'completed' } },
+        finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop },
+    ]) await act(async () => listeners.get('message')?.({ data: JSON.stringify({ result: frame }) }));
+    expect(stopGenerationMock).not.toHaveBeenCalled();
+  });
+
+  it('queues pause for a regeneration placeholder instead of cancelling its old answer', async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList('regen-chat', [
+      { role: RoleTypes.USER, delta: 'hello', history_id: 'saved-history' },
+      { role: RoleTypes.ASSISTANT, delta: 'old answer', history_id: 'saved-history', run_status: 'completed',
+        finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop },
+    ]));
+    await act(async () => { expect(await result.current.regenerate()).toBe(true); });
+    act(() => result.current.stopGeneration());
+    expect(stopGenerationMock).not.toHaveBeenCalled();
+    await act(async () => listeners.get('message')?.({ data: JSON.stringify({ result: {
+      conversation_id: 'regen-chat', history_id: 'saved-history', seq: 1, delta: 'new answer',
+    } }) }));
+    expect(stopGenerationMock).toHaveBeenCalledOnce();
+    expect(stopGenerationMock).toHaveBeenCalledWith({ stopChatGenerationRequest: {
+      conversation_id: 'regen-chat', history_id: 'saved-history',
+    } });
+  });
+
+  it.each(['approve', 'resume', 'retry', 'rewind'] as const)('passes an explicit workflow %s only with the accepted Chat request', async (kind) => {
+    const { stream } = createMockStream();
+    const onOpenSSE = vi.fn(() => stream);
+    const { result } = renderConversation({ onOpenSSE });
+    act(() => result.current.replaceMessageList('approval-chat', []));
+    const control = { session_id: 'workflow', kind, ...(['approve', 'rewind'].includes(kind) ? { step_id: 'review' } : {}), expected_state_version: 3 };
+    await act(async () => { expect(await result.current.sendMessage({ text: 'continue', workflow_control: control })).toBe(true); });
+    expect(onOpenSSE).toHaveBeenCalledWith(expect.any(Array), expect.anything(), {}, expect.objectContaining({ workflow_control: control }));
+    await act(async () => { expect(await result.current.sendMessage({ text: 'continue', workflow_control: control })).toBe(false); });
+    expect(onOpenSSE).toHaveBeenCalledOnce();
+  });
+
+  it('scopes pause to the displayed turn, not the latest workflow in the conversation', async () => {
+    const { result } = renderConversation();
+    act(() => result.current.replaceMessageList('scope-chat', [
+      { role: RoleTypes.ASSISTANT, history_id: 'foreground-history', delta: 'working' },
+    ]));
+    useWorkflowStore.setState({ sessionByConversation: { 'scope-chat': {
+      session_id: 'background-workflow', conversation_id: 'scope-chat', controller_host: 'lazymind',
+      workflow_id: 'workflow', workflow_mode: 'auto', status: 'active', current_step_id: '', created_at: '', updated_at: '',
+      projection: { display: { status: 'running', reason: 'executing', approval_step_id: '' } },
+    } } });
+    await act(async () => result.current.stopGeneration());
+    expect(stopGenerationMock).toHaveBeenCalledWith({ stopChatGenerationRequest: {
+      conversation_id: 'scope-chat', history_id: 'foreground-history',
+    } });
+    useWorkflowStore.setState({ sessionByConversation: {} });
+  });
   it("replays the exact mail confirmation only on explicit failed-run retry", async () => {
     const { stream, listeners } = createMockStream();
     const onOpenSSE = vi.fn(() => stream);
@@ -203,6 +364,8 @@ describe("useChatConversation regeneration recovery", () => {
   });
 
   beforeEach(() => {
+    useWorkflowStore.setState({ sessionByConversation: {} });
+    stopGenerationMock.mockClear();
     sessionStorage.clear();
     getHistoryMock.mockReset();
     scrollMock.isMouseScrollingRef.current = false;
