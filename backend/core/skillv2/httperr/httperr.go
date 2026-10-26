@@ -34,6 +34,7 @@ const (
 	CodeInvalidSkillName       = "invalid_skill_name"
 	CodeDescriptionTooLong     = "description_too_long"
 	CodeGitHubMultipleSkills   = "github_multiple_skills"
+	CodeSkillSourceAmbiguous   = "skill_source_ambiguous"
 	CodeSourceUnavailable      = "source_unavailable"
 )
 
@@ -147,6 +148,8 @@ func codeForMessage(message string, status int) string {
 		return importCode
 	case strings.Contains(msg, "github repository contains multiple skills"):
 		return CodeGitHubMultipleSkills
+	case strings.Contains(msg, "skill name is ambiguous"), strings.Contains(msg, "multiple different skill sources"):
+		return CodeSkillSourceAmbiguous
 	case strings.Contains(msg, "unsafe path"), strings.Contains(msg, "invalid path"),
 		strings.Contains(msg, "path is required"):
 		return CodeInvalidPath

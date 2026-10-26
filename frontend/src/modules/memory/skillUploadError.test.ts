@@ -13,6 +13,7 @@ describe("skill URL import error recovery", () => {
   it.each([
     { response: { status: 400, data: { data: { code: "github_multiple_skills" } } } },
     { response: { status: 422, data: { data: { code: "skill_md_ambiguous" } } } },
+    { response: { status: 400, data: { data: { code: "skill_source_ambiguous" } } } },
     { response: { data: { error: { code: "github_multiple_skills" } } } },
   ])("recognizes repositories or packages with multiple possible skill roots", (error) => {
     expect(isSkillSourceAmbiguousError(error)).toBe(true);

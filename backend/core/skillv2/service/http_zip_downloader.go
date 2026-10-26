@@ -63,10 +63,6 @@ func (d HTTPZipDownloader) Download(ctx context.Context, rawURL string) (Downloa
 		status := http.StatusBadGateway
 		code := httperr.CodeSourceUnavailable
 		switch resp.StatusCode {
-		case http.StatusUnauthorized:
-			status, code = http.StatusUnauthorized, httperr.CodeUnauthenticated
-		case http.StatusForbidden:
-			status, code = http.StatusForbidden, httperr.CodeForbidden
 		case http.StatusNotFound:
 			status, code = http.StatusNotFound, httperr.CodeNotFound
 		case http.StatusTooManyRequests:

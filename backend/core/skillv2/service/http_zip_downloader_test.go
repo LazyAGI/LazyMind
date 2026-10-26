@@ -77,7 +77,7 @@ func TestSkillArchiveDownloadReportsTypedSizeErrors(t *testing.T) {
 }
 
 func TestSkillArchiveDownloadReportsTypedUpstreamErrors(t *testing.T) {
-	for _, status := range []int{http.StatusNotFound, http.StatusTooManyRequests, http.StatusBadGateway} {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusTooManyRequests, http.StatusBadGateway} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(status)
@@ -92,6 +92,12 @@ func TestSkillArchiveDownloadReportsTypedUpstreamErrors(t *testing.T) {
 				t.Fatalf("error=%+v", sem)
 			}
 			if status != http.StatusNotFound && sem.Code != httperr.CodeSourceUnavailable {
+				t.Fatalf("error=%+v", sem)
+			}
+			if status != http.StatusNotFound && status != http.StatusTooManyRequests && sem.Status != http.StatusBadGateway {
+				t.Fatalf("error=%+v", sem)
+			}
+			if status == http.StatusTooManyRequests && sem.Status != http.StatusTooManyRequests {
 				t.Fatalf("error=%+v", sem)
 			}
 		})

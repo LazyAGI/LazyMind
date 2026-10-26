@@ -11,7 +11,7 @@ export const isSkillPackageTooLargeError = (error: unknown): boolean =>
   readSemanticCode(error) === "payload_too_large";
 
 export const isSkillSourceAmbiguousError = (error: unknown): boolean =>
-  ["github_multiple_skills", "skill_md_ambiguous"].includes(readSemanticCode(error));
+  ["github_multiple_skills", "skill_md_ambiguous", "skill_source_ambiguous"].includes(readSemanticCode(error));
 
 export const isSkillAlreadyExistsError = (error: unknown): boolean => {
   const payload = (error as any)?.response?.data ?? error;
