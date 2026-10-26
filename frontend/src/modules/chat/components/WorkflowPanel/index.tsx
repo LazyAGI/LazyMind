@@ -36,7 +36,6 @@ import { WorkflowSessionApi } from '@/modules/chat/utils/request';
 import StateGraphModal from '@/components/StateGraphModal';
 import {
   WORKFLOW_PANEL_EXPANDED_EVENT,
-  WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
 } from '@/modules/chat/constants/chat';
 import type {
   WorkflowSession,
@@ -74,11 +73,14 @@ import { linkedPageTabs, buildPageOrderChange } from './workflowPageGroup';
 import { WorkflowTrustNotice } from './WorkflowTrustNotice';
 import { PreviewContent } from '../ArtifactPreview';
 import { useArtifactPreview } from '../ArtifactPreview/context';
+import { useWorkflowViewState } from './useWorkflowViewState';
+import { resolveWorkflowActiveTabIndex, resolveWorkflowRealTabIndex } from './workflowFollowMode';
 import './WorkflowPanel.scss';
 
 const PageGroupContext = React.createContext<{ tabs: TabDef[]; pages: Record<string, number>; select: (group: string, page: number) => void }>({ tabs: [], pages: {}, select: () => {} });
 
 const EMPTY_TASK_CENTER_TASKS: SubAgentTask[] = [];
+const EMPTY_WORKFLOW_UI: WorkflowUI = {};
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
 function parseIntentText(raw?: string): string {
@@ -1648,25 +1650,6 @@ function TabSlotGrid({
   );
 }
 
-function readPersistedExpanded(conversationId: string): boolean {
-  try {
-    return localStorage.getItem(`${WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function persistExpanded(conversationId: string, expanded: boolean) {
-  try {
-    localStorage.setItem(
-      `${WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX}${conversationId}`,
-      String(expanded),
-    );
-  } catch {
-    // The live layout state still works when browser storage is unavailable.
-  }
-}
-
 export function WorkflowPanel({
   conversationId,
   onSendMessage,
@@ -1681,6 +1664,7 @@ export function WorkflowPanel({
   const previewTarget = artifactPreview?.target?.workflow && artifactPreview.target.workflow.sessionId === session?.session_id
     ? artifactPreview?.target : null;
   const previewFocusRef = useRef<HTMLDivElement>(null);
+  const locatedPreview = useRef<string | null>(null);
   const refresh = onRefresh ?? refreshConversation;
   const activities = externalPresentation?.activities ?? {};
   const runningTasks = externalPresentation ? activeExecutionTasks(session) : [];
@@ -1691,32 +1675,51 @@ export function WorkflowPanel({
       : EMPTY_TASK_CENTER_TASKS,
   );
   const bumpDismissedRefresh = useWorkflowStore((s) => s.bumpDismissedRefresh);
-  const [activeTabIdx, setActiveTabIdx] = React.useState(0);
-  const [localCollapsed, setCollapsed] = useState(false);
-  const collapsed = externalPresentation?.collapsed ?? localCollapsed;
-  const toggleCollapsed = externalPresentation?.onToggleCollapse
-    ?? (() => setCollapsed(value => !value));
   const fetchWorkflowUI = useWorkflowStore((s) => s.fetchWorkflowUI);
   const setFocusedTab = useWorkflowStore((s) => s.setFocusedTab);
   const setFocusedSortOrder = useWorkflowStore((s) => s.setFocusedSortOrder);
-  // Focused tab id mirrored out of the session so polling refreshes don't
-  // reset the user's current tab.
   const focusedTabByConversation = useWorkflowStore((s) => s.focusedTabByConversation);
   const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
-  const [rawUI, setUI] = useState<WorkflowUI>();
+  const [uiResponse, setUIResponse] = useState<{ workflowId: string; ui: WorkflowUI } | null>(null);
+  const uiReady = uiResponse?.workflowId === session?.workflow_id && Boolean(session);
+  const rawUI = uiReady ? uiResponse!.ui : undefined;
   const [developerMode, setDeveloperMode] = useState(isDeveloperModeActive);
   useEffect(() => {
     const update = () => setDeveloperMode(isDeveloperModeActive());
     window.addEventListener(DEVELOPER_ACTIVE_EVENT, update);
     return () => window.removeEventListener(DEVELOPER_ACTIVE_EVENT, update);
   }, []);
-  const ui = useMemo(() => workflowUIForAudience(rawUI ?? {}, developerMode), [rawUI, developerMode]);
+  const ui = useMemo(() => workflowUIForAudience(rawUI ?? EMPTY_WORKFLOW_UI, developerMode), [rawUI, developerMode]);
   const hiddenSlots = useMemo(() => developerMode ? new Set<string>() : hiddenUserSlots(rawUI ?? {}), [rawUI, developerMode]);
+  const { view, update: updateView, key: viewKey } = useWorkflowViewState(session, ui, uiReady);
+  const expanded = view.expanded;
+  const collapsed = externalPresentation?.collapsed ?? view.collapsed;
+  const setCollapsed = useCallback((value: boolean) => updateView({ collapsed: value }), [updateView]);
+  const toggleCollapsed = externalPresentation?.onToggleCollapse ?? (() => setCollapsed(!collapsed));
+  const panelExpanded = embedded ? Boolean(externalPresentation?.expanded) : expanded;
+  const activeTabId = view.tabId;
+  const followingEnabled = Boolean(ui.follow_mode?.default);
+  const tabs = useMemo(() => filterWorkflowTabs(ui.tabs ?? [], session?.slots ?? [], ui.tab_visibility_ready_material,
+    { steps: session?.steps, projection: session?.projection }), [ui, session?.slots, session?.steps, session?.projection]);
+  const visibleActiveTabIdx = resolveWorkflowActiveTabIndex(tabs, activeTabId);
+  const runtimeTabIdx = session ? resolveWorkflowRealTabIndex(session, tabs, activeTabId) : -1;
+  const runtimeTabId = tabs[runtimeTabIdx]?.id;
+  const navigation = useRef(0);
+  const currentView = useRef({ key: viewKey, runtimeTabId });
+  currentView.current = { key: viewKey, runtimeTabId };
+  const enterBrowse = useCallback((tabId?: string) => {
+    navigation.current++;
+    if (!followingEnabled) return;
+    updateView({ mode: 'free', tabId: tabId ?? tabs[resolveWorkflowActiveTabIndex(tabs, activeTabId)]?.id ?? '' });
+  }, [followingEnabled, updateView, tabs, activeTabId]);
+  const [resumingFollow, setResumingFollow] = useState(false);
+  const resumePending = useRef<number | null>(null);
+  useEffect(() => {
+    setResumingFollow(false);
+    return () => { resumePending.current = null; navigation.current++; };
+  }, [viewKey]);
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
-  const [expanded, setExpanded] = useState(() => readPersistedExpanded(conversationId));
-  const panelExpanded = embedded ? Boolean(externalPresentation?.expanded) : expanded;
-  const initialExpandedRef = useRef(expanded);
   // Track which slots are currently being edited; dismiss stays blocked until
   // each editor saves or cancels. Footer retry/continue flushes pending saves.
   const editingSlots = useRef<Set<string>>(new Set());
@@ -1766,32 +1769,29 @@ export function WorkflowPanel({
     // Follow runtime stage changes without scrolling the conversation or editor.
     if (tab.left < viewport.left) container.scrollLeft += tab.left - viewport.left;
     else if (tab.right > viewport.right) container.scrollLeft += tab.right - viewport.right;
-  }, [activeTabIdx, ui.tabs, collapsed]);
+  }, [activeTabId, ui.tabs, collapsed]);
 
   const setExpandedMode = useCallback((nextExpanded: boolean) => {
-    if (nextExpanded) setCollapsed(false);
-    setExpanded(nextExpanded);
-    persistExpanded(conversationId, nextExpanded);
+    updateView({ expanded: nextExpanded, ...(nextExpanded ? { collapsed: false } : {}) });
+  }, [updateView]);
+
+  useEffect(() => {
+    if (embedded) return;
     window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
-      detail: { conversationId, expanded: nextExpanded },
+      detail: { conversationId, expanded },
     }));
-  }, [conversationId]);
+  }, [conversationId, embedded, expanded]);
 
   useEffect(() => {
     // A conversation can contain both ordinary replies and a workflow.
     if (!embedded && expanded && artifactPreview?.target && !artifactPreview.target.workflow) setExpandedMode(false);
   }, [artifactPreview?.target, embedded, expanded, setExpandedMode]);
 
-  useEffect(() => {
-    window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
-      detail: { conversationId, expanded: initialExpandedRef.current },
+  useEffect(() => () => {
+    if (!embedded) window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
+      detail: { conversationId, expanded: false },
     }));
-    return () => {
-      window.dispatchEvent(new CustomEvent(WORKFLOW_PANEL_EXPANDED_EVENT, {
-        detail: { conversationId, expanded: false },
-      }));
-    };
-  }, [conversationId]);
+  }, [conversationId, embedded]);
 
   const handleDismiss = useCallback(async () => {
     if (!session || dismissing || anySlotEditing) return;
@@ -1810,11 +1810,12 @@ export function WorkflowPanel({
   const handleSlotEditingChange = useCallback((key: string, editing: boolean) => {
     if (editing) {
       editingSlots.current.add(key);
+      enterBrowse();
     } else {
       editingSlots.current.delete(key);
     }
     setAnySlotEditing(editingSlots.current.size > 0);
-  }, []);
+  }, [enterBrowse]);
 
   const registerSnapshot = useCallback((key: string, read: () => unknown) => {
     snapshotFns.current.set(key, read);
@@ -1850,54 +1851,61 @@ export function WorkflowPanel({
 
   useEffect(() => {
     if (!session?.workflow_id) return;
-    const lang = i18n.language || '';
-    const cached = useWorkflowStore.getState().workflowUIByWorkflow[`${session.workflow_id}:${lang}`];
-    if (cached) {
-      setUI(cached);
-    }
-    // Always re-fetch once to avoid stale cached tab/slot layouts after workflow.yaml updates.
-    fetchWorkflowUI(session.workflow_id).then(setUI);
+    let disposed = false;
+    const workflowId = session.workflow_id;
+    const cached = useWorkflowStore.getState().workflowUIByWorkflow[`${workflowId}:${i18n.language || ''}`];
+    if (cached) setUIResponse({ workflowId, ui: cached });
+    void fetchWorkflowUI(workflowId).then(config => {
+      if (!disposed) setUIResponse({ workflowId, ui: config });
+    });
+    return () => { disposed = true; };
   }, [session?.workflow_id, fetchWorkflowUI, i18n.language]);
 
-  // Restore the previously focused tab when UI loads.
   useEffect(() => {
-    const tabs = filterWorkflowTabs(
-      ui.tabs ?? [],
-      session?.slots ?? [],
-      ui.tab_visibility_ready_material,
-    );
-    if (!tabs.length || !persistedFocusedTab) return;
-    const idx = tabs.findIndex((t) => t.id === persistedFocusedTab);
-    if (idx !== -1) setActiveTabIdx(idx);
-  }, [ui.tabs, ui.tab_visibility_ready_material, persistedFocusedTab, session?.slots]);
-
-  // Until the user explicitly chooses a visible tab, follow the runtime
-  // frontier. This also moves focus immediately when a skip material removes
-  // the previously selected tab.
-  useEffect(() => {
-    const tabs = filterWorkflowTabs(
-      ui.tabs ?? [],
-      session?.slots ?? [],
-      ui.tab_visibility_ready_material,
-    );
-    const focusedTabVisible = Boolean(
-      persistedFocusedTab && tabs.some((tab) => tab.id === persistedFocusedTab),
-    );
-    if (!tabs.length || focusedTabVisible || !session) return;
-    let idx = tabs.findIndex((tab) => getTabStepId(tab) === session.current_step_id);
-    if (idx === -1 && (session.status === 'completed' || session.status === 'failed')) {
-      idx = tabs.length - 1;
+    if (!uiReady || !session || !tabs.length || previewTarget) return;
+    if (followingEnabled) {
+      if (view.mode === 'following') {
+        if (runtimeTabId) updateView({ tabId: runtimeTabId });
+      } else if (!tabs.some(tab => tab.id === activeTabId)) {
+        // Fall back to the first visible tab; never follow runtime in free mode.
+        updateView({ tabId: tabs[0].id });
+      }
+      return;
     }
-    if (idx !== -1) setActiveTabIdx(idx);
-  }, [
-    ui.tabs,
-    ui.tab_visibility_ready_material,
-    persistedFocusedTab,
-    session?.current_step_id,
-    session?.session_id,
-    session?.slots,
-    session?.status,
-  ]);
+    // Unconfigured workflows retain their existing implicit navigation behavior.
+    const focused = tabs.find(tab => tab.id === persistedFocusedTab);
+    if (focused) { updateView({ tabId: focused.id }); return; }
+    let index = tabs.findIndex(tab => getTabStepId(tab) === session.current_step_id);
+    if (index === -1 && ['completed', 'failed'].includes(session.status)) index = tabs.length - 1;
+    if (index !== -1) updateView({ tabId: tabs[index].id });
+  }, [uiReady, session, tabs, previewTarget, followingEnabled, view.mode, runtimeTabId, activeTabId, persistedFocusedTab, updateView]);
+
+  const resumeFollowing = async () => {
+    if (resumePending.current !== null) return;
+    const request = ++navigation.current;
+    resumePending.current = request;
+    setResumingFollow(true);
+    const key = viewKey;
+    const isCurrent = () => resumePending.current === request && currentView.current.key === key && request === navigation.current;
+    try {
+      const saved = await flushPendingEdits();
+      if (!isCurrent()) return;
+      if (!saved) {
+        antdMessage.error(t('chat.workflowFollowSaveFailed'));
+        return;
+      }
+      artifactPreview?.close();
+      updateView({ mode: 'following', ...(currentView.current.runtimeTabId ? { tabId: currentView.current.runtimeTabId } : {}) });
+      setFocusedSortOrder(conversationId, undefined);
+    } catch {
+      if (isCurrent()) antdMessage.error(t('chat.workflowFollowSaveFailed'));
+    } finally {
+      if (resumePending.current === request) {
+        resumePending.current = null;
+        setResumingFollow(false);
+      }
+    }
+  };
 
   const [groupFocus, setGroupFocus] = useState<{ sessionId?: string; pages: Record<string, number> }>({ pages: {} });
   const groupPages = groupFocus.sessionId === session?.session_id ? groupFocus.pages : {};
@@ -1909,8 +1917,8 @@ export function WorkflowPanel({
 
   // Track focused tab changes.
   useEffect(() => {
-    if (!previewTarget?.workflow) return;
-    const tabs = filterWorkflowTabs(ui.tabs ?? [], session?.slots ?? [], ui.tab_visibility_ready_material);
+    if (!previewTarget?.workflow) { locatedPreview.current = null; return; }
+    if (!uiReady || locatedPreview.current === `${session?.session_id}:${previewTarget.key}`) return;
     const stepId = previewTarget.workflow.stepId;
     const idx = tabs.findIndex(tab => [tab.step_id ?? tab.id, ...(tab.status_step_ids ?? [])].includes(stepId));
     if (tabs.length && idx === -1) {
@@ -1919,7 +1927,9 @@ export function WorkflowPanel({
       return;
     }
     if (idx !== -1) {
-      setActiveTabIdx(idx);
+      locatedPreview.current = `${session?.session_id}:${previewTarget.key}`;
+      enterBrowse(tabs[idx].id);
+      updateView({ tabId: tabs[idx].id });
       setFocusedTab(conversationId, tabs[idx].id);
     }
     setFocusedSortOrder(conversationId, undefined);
@@ -1930,15 +1940,16 @@ export function WorkflowPanel({
       previewFocusRef.current?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [previewTarget, ui, conversationId, session?.session_id, setFocusedTab, setFocusedSortOrder]);
+  }, [previewTarget, uiReady, conversationId, session?.session_id, setFocusedTab, setFocusedSortOrder, enterBrowse, updateView, tabs]);
 
   const handleTabChange = useCallback((idx: number, tabId: string) => {
     if (previewTarget) artifactPreview?.close();
-    setActiveTabIdx(idx);
+    if (!followingEnabled || view.mode === 'free' || idx !== runtimeTabIdx) enterBrowse(tabId);
+    updateView({ tabId });
     setFocusedTab(conversationId, tabId);
     const group = ui.tabs?.find(tab => tab.id === tabId)?.page_group;
     setFocusedSortOrder(conversationId, group ? groupPages[group] : undefined);
-  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages, previewTarget, artifactPreview?.close]);
+  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages, previewTarget, artifactPreview?.close, followingEnabled, view.mode, runtimeTabIdx, enterBrowse, updateView]);
 
   const handleFocusSortOrder = useCallback((sortOrder: number | undefined) => {
     setFocusedSortOrder(conversationId, sortOrder);
@@ -1956,15 +1967,7 @@ export function WorkflowPanel({
 
   if (!session) return null;
 
-  const tabs = filterWorkflowTabs(
-    ui.tabs ?? [],
-    session.slots ?? [],
-    ui.tab_visibility_ready_material,
-  );
   const hasTabs = tabs.length > 0;
-  const visibleActiveTabIdx = hasTabs
-    ? Math.min(activeTabIdx, tabs.length - 1)
-    : 0;
   const showActions =
     session.status === 'waiting' ||
     session.status === 'active' ||
@@ -2191,6 +2194,7 @@ export function WorkflowPanel({
   const panel = (
     <CompactWorkflowEmptyStatesContext.Provider value={externalPresentation?.compactEmptyStates === true}>
     <SlotEditingContext.Provider value={{
+      onBrowse: enterBrowse,
       setEditing: handleSlotEditingChange,
       registerFlush,
       registerSnapshot,
@@ -2236,6 +2240,12 @@ export function WorkflowPanel({
               moreButtonRef.current?.focus();
             }} />}
           </div>
+          {followingEnabled && <div className='workflow-panel__follow-mode' role='group' aria-label={t('chat.workflowFollowModeLabel')}>
+            <button type='button' aria-pressed={view.mode === 'following'} disabled={resumingFollow}
+              onClick={() => void resumeFollowing()}>{t('chat.workflowFollowProgress')}</button>
+            <button type='button' aria-pressed={view.mode === 'free'}
+              onClick={() => enterBrowse()}>{t('chat.workflowFreeBrowse')}</button>
+          </div>}
           {(!embedded || externalPresentation?.onToggleExpand) && <button
             type='button'
             className='workflow-panel__expand-btn'
@@ -2369,8 +2379,14 @@ export function WorkflowPanel({
                   {!ui.task_presentation?.grouped && (
                     <span className='workflow-panel__tab-badge' aria-hidden='true'>{idx + 1}</span>
                   )}
-                  <span className='workflow-panel__tab-label'>{tab.label}</span>
-                  {stepStatus && stepStatus !== 'succeeded' && (
+                  <span className='workflow-panel__tab-text'>
+                    <span className='workflow-panel__tab-label'>{tab.label}</span>
+                    {followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx && (
+                      <span className='workflow-panel__tab-current' role='img'
+                        aria-label={t('chat.workflowCurrentStep')} title={t('chat.workflowCurrentStep')} />
+                    )}
+                  </span>
+                  {stepStatus && stepStatus !== 'succeeded' && !(followingEnabled && idx === runtimeTabIdx && idx !== visibleActiveTabIdx) && (
                     <span
                       className={`workflow-panel__step-status workflow-panel__step-status--${stepStatus}`}
                       aria-label={`Step status: ${stepStatus}`}
@@ -2404,7 +2420,11 @@ export function WorkflowPanel({
 
       {/* Body */}
       {!collapsed && (
-        <div className={`workflow-panel__body${previewTarget ? ' workflow-panel__body--artifact-preview' : ''}`} key={session.session_id}>
+        <div className={`workflow-panel__body${previewTarget ? ' workflow-panel__body--artifact-preview' : ''}`} key={session.session_id}
+          onFocusCapture={event => {
+            const target = event.target as HTMLElement;
+            if (target.closest('[contenteditable="true"], textarea:not([readonly]), input[type="text"]:not([readonly])')) enterBrowse();
+          }}>
           <PageGroupContext.Provider value={{ tabs: ui.tabs ?? [], pages: groupPages, select: selectGroupPage }}>
           {previewTarget && <div className="workflow-panel__artifact-preview" ref={previewFocusRef} tabIndex={-1}
             onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); artifactPreview?.close(); } }}>

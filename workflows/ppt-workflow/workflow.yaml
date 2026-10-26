@@ -558,6 +558,8 @@ slots:
     summary_max_chars: 1200
 
 ui:
+  follow_mode:
+    default: following
   tab_visibility_ready_material: ppt_capability_requirements
   slots:
     requirement_analysis:
@@ -600,11 +602,13 @@ ui:
 
     - id: materials
       step_id: collect_materials
+      status_step_ids: [collect_materials, analyze_academic_sources]
       label: Materials
       hide_when_material: skip_material_collection
       layout: list
       slots:
         - id: material_summary
+        - id: academic_brief
 
     - id: style
       step_id: choose_style

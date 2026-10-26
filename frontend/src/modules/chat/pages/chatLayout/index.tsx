@@ -1,4 +1,4 @@
-import { FC, type ReactNode, type CSSProperties, useRef, useState, useEffect, useCallback, useMemo } from "react";
+import { FC, type ReactNode, type CSSProperties, useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import { Alert, Button, Dropdown, message, Space } from "antd";
@@ -51,7 +51,6 @@ import {
   CHAT_SELECT_CONVERSATION_EVENT,
   CHAT_OPEN_ARTIFACT_PANEL_EVENT,
   WORKFLOW_PANEL_EXPANDED_EVENT,
-  WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
   type ChatOpenArtifactPanelDetail,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
@@ -205,17 +204,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     };
   }, []);
 
-  useEffect(() => {
-    let restoredExpanded = false;
-    try {
-      restoredExpanded = localStorage.getItem(
-        `${WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX}${sessionId}`,
-      ) === "true";
-    } catch {
-      // Keep the default compact layout when browser storage is unavailable.
-    }
-    setWorkflowPanelExpanded(restoredExpanded);
-    if (restoredExpanded) setExpandedRailTab("chat");
+  useLayoutEffect(() => {
+    setWorkflowPanelExpanded(false);
 
     const handleExpandedChange = (event: Event) => {
       const detail = (event as CustomEvent<{ conversationId: string; expanded: boolean }>).detail;

@@ -890,6 +890,9 @@ func TestWorkflowCatalogHandlersReadCoreRevisionWithoutChatUpstream(t *testing.T
 	if spec["name"] != "测试工作流" {
 		t.Fatalf("localized name missing: %#v", spec["name"])
 	}
+	if spec["source_type"] != "builtin" {
+		t.Fatalf("catalog must expose the authoritative builtin source: %#v", spec["source_type"])
+	}
 	ui, _ := spec["ui"].(map[string]any)
 	if ui == nil || ui["tabs"] == nil {
 		t.Fatalf("panel UI declaration missing: %#v", spec)

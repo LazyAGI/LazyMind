@@ -255,6 +255,8 @@ slots:
     type: file
     cardinality: single
 ui:
+  follow_mode:
+    default: following
   slots:
     outline_document:
       widgetType: writer-document

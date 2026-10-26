@@ -32,6 +32,8 @@ export interface SlotFooterAction {
 }
 
 export interface SlotEditingContextValue {
+  /** Explicit reading/editing intent stops automatic stage navigation. */
+  onBrowse?: () => void;
   actionPending?: boolean;
   runFooterAction?: (action: () => void | Promise<void>, flushKey?: string) => Promise<void>;
   registerSnapshot?: (key: string, read: () => unknown) => () => void;
