@@ -1967,5 +1967,7 @@
   "2004934": {"en-US": "The paper workflow input is not ready or changed; refresh and retry", "zh-CN": "论文工作流输入尚未就绪或已变化，请刷新后重试"},
   "2004935": {"en-US": "The selected paper does not match the import request", "zh-CN": "所选论文与导入请求不一致"},
   "2004936": {"en-US": "The paper identifiers conflict", "zh-CN": "论文身份标识冲突"},
-  "2004937": {"en-US": "The paper content or cache is unavailable or changed; retry the read", "zh-CN": "论文内容或缓存不可用或已变化，请重试读取"}
+  "2004937": {"en-US": "The paper content or cache is unavailable or changed; retry the read", "zh-CN": "论文内容或缓存不可用或已变化，请重试读取"},
+  "2004938": {"en-US": "The paper library changed; refresh and retry", "zh-CN": "论文库已发生变化，请刷新后重试"},
+  "2004939": {"en-US": "Failed to read the paper library data", "zh-CN": "读取论文库数据失败"}
 }

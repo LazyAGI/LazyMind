@@ -77,6 +77,8 @@ func init() {
 			"论文库 %s 的 id 为空、重复或过长", "论文 important 必须为布尔值", "论文 year 无效",
 			"论文 metadata 必须为对象", "论文 metadata.%s 必须为对象", "论文 folderid 无效", "论文 %s 无效",
 			"论文附件 contentref 无效", "论文库 %s.%s 必须为文本", "论文库 %s 必须为文本数组",
+			"目录 parentid 无效", "目录名称不能为空", "同一目录下不能存在同名目录", "上级目录不存在",
+			"目录层级不能包含循环", "论文所属目录不存在", "论文附件引用无效", "同一 pdf 不能关联到多篇论文",
 		}},
 		{2004926, http.StatusInternalServerError, "Failed to read the imported document file", []string{"read imported file metadata", "read imported file"}},
 		{2004927, http.StatusInternalServerError, "Failed to recover the imported document task", []string{"recover imported document task"}},
@@ -90,6 +92,8 @@ func init() {
 		{2004919, 500, "Some paper imports failed; inspect their errors before retrying", []string{"one or more paper imports failed", "verified arxiv metadata required"}},
 		{2004932, 400, "The paper upload request is invalid or conflicts with an existing request", []string{"paper upload only supports pdf", "paper upload request does not match its original context", "paper upload request key is already in use", "paper upload requires a paper library", "paper upload requires an uploaded pdf", "record paper upload"}},
 		{2004930, 400, "Paper libraries require document parsing", []string{"academic paper libraries require at least parsed processing", "enable document parsing before using an academic paper library"}},
+		{2004938, http.StatusConflict, "The paper library changed; refresh and retry", []string{"paper library revision conflict"}},
+		{2004939, http.StatusInternalServerError, "Failed to read the paper library data", []string{"read paper graph"}},
 	} {
 		for _, source := range group.sources {
 			if strings.Contains(source, "%") {
