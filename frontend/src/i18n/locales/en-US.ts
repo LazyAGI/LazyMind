@@ -2863,6 +2863,17 @@ const enUS = {
             "local_persist_failed": "Remote success; result not saved"
       }
 },
+    writerImages: {
+      preview: 'View image: {{name}}',
+      title: 'Article images', downloadAll: 'Download all images', downloadOne: 'Download original',
+      image: 'Image {{index}}', preparing: 'Preparing images {{current}} / {{total}}', started: 'Images are ready. Download started.',
+      empty: 'This article has no images to download.', imageUnavailable: 'Image unavailable',
+      partial: '{{ready}} / {{total}} images ready', failed: 'Unable to finish downloading images. Retry or refresh the task status.',
+      conflict: 'The article has changed. Start a new image download.', expired: 'This download has expired. Start a new image download.',
+      busy: 'Other image downloads are in progress. Try again shortly.', retry: 'Retry / refresh status',
+      downloadReady: 'Download {{count}} ready images', downloadAgain: 'Download again', downloadCurrent: 'Download current article images',
+      errors: { IMAGE_UNAVAILABLE: 'Image missing or access denied', IMAGE_TOO_LARGE: 'Image exceeds the size limit', IMAGE_FORMAT_UNSUPPORTED: 'Unsupported image format', IMAGE_CHANGED: 'The original image has changed', IMAGE_EXPORT_TOO_LARGE: 'Images exceed the total size limit' },
+    },
     writerLocal: {
       "toggleMath": "Toggle formula editor",
       "publishingPendingSave": "Publishing; new edits are waiting to save",

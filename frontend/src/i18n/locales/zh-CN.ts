@@ -2810,6 +2810,17 @@ const zhCN = {
             "local_persist_failed": "远端已成功，结果待保存"
       }
 },
+    writerImages: {
+      preview: '查看图片：{{name}}',
+      title: '文章图片', downloadAll: '下载全部图片', downloadOne: '下载原图',
+      image: '图片 {{index}}', preparing: '正在准备图片 {{current}} / {{total}}', started: '图片已准备，已开始下载',
+      empty: '当前文章没有可下载的图片', imageUnavailable: '图片暂时无法获取',
+      partial: '已准备 {{ready}} / {{total}} 张图片', failed: '暂时无法完成图片下载，请重试或刷新任务状态。',
+      conflict: '文章已更新，请重新下载当前文章的图片。', expired: '本次下载已过期，请重新下载当前文章的图片。',
+      busy: '正在处理其他图片下载，请稍后重试。', retry: '重试 / 刷新状态',
+      downloadReady: '下载已准备的 {{count}} 张', downloadAgain: '再次下载', downloadCurrent: '重新下载当前文章',
+      errors: { IMAGE_UNAVAILABLE: '图片缺失或无权访问', IMAGE_TOO_LARGE: '图片超过大小限制', IMAGE_FORMAT_UNSUPPORTED: '不是支持的图片格式', IMAGE_CHANGED: '原图片已发生变化', IMAGE_EXPORT_TOO_LARGE: '图片总大小超过限制' },
+    },
     writerLocal: {
       "toggleMath": "展开或收起公式编辑",
       "publishingPendingSave": "发布中，新修改待保存",

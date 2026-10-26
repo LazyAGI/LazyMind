@@ -496,6 +496,18 @@ export function WorkflowSessionApi() {
     pauseSession(sessionId: string) {
       return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}:pause`);
     },
+    createDocumentImageExport(artifactId: string, body: import('@/api/generated/core-client').DocumentImageExportRequest, options?: PublicationRequestOptions) {
+      return axiosInstance.post<import('@/api/generated/core-client').DocumentImageExportResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/image-exports`, body, { silentError: true, ...options } as PublicationRequestOptions);
+    },
+    readDocumentImageExport(artifactId: string, exportId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<import('@/api/generated/core-client').DocumentImageExportResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/image-exports/${encodeURIComponent(exportId)}`, { silentError: true, ...options } as PublicationRequestOptions);
+    },
+    retryDocumentImageExport(artifactId: string, exportId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.post<import('@/api/generated/core-client').DocumentImageExportResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/image-exports/${encodeURIComponent(exportId)}:retry`, undefined, { silentError: true, ...options } as PublicationRequestOptions);
+    },
+    downloadDocumentImages(artifactId: string, exportId: string, fileId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<Blob>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/image-exports/${encodeURIComponent(exportId)}/files/${encodeURIComponent(fileId)}`, { silentError: true, ...options, responseType: 'blob' } as PublicationRequestOptions);
+    },
     getControl(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
     },

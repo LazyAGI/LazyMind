@@ -16362,6 +16362,101 @@ components:
             required:
                 - base_revision
             type: object
+        DocumentImageExportItem:
+            properties:
+                error_code:
+                    type: string
+                filename:
+                    type: string
+                id:
+                    type: string
+                size:
+                    format: int64
+                    type: integer
+                status:
+                    enum:
+                        - pending
+                        - ready
+                        - failed
+                    type: string
+            required:
+                - filename
+                - id
+                - status
+            type: object
+        DocumentImageExportRequest:
+            properties:
+                base_draft_version:
+                    format: int64
+                    type: integer
+                base_revision:
+                    type: integer
+                document:
+                    description: Inline Markdown text or Writer IR object; never a file locator.
+                    oneOf:
+                        - type: string
+                        - additionalProperties: true
+                          type: object
+                image_reference:
+                    type: string
+            required:
+                - base_revision
+                - document
+            type: object
+        DocumentImageExportState:
+            properties:
+                completed:
+                    type: integer
+                expires_at:
+                    format: date-time
+                    type: string
+                filename:
+                    type: string
+                id:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/DocumentImageExportItem'
+                    type: array
+                ready:
+                    type: integer
+                single:
+                    type: boolean
+                status:
+                    enum:
+                        - pending
+                        - running
+                        - ready
+                        - partial
+                        - failed
+                        - expired
+                    type: string
+                total:
+                    type: integer
+            required:
+                - completed
+                - expires_at
+                - filename
+                - id
+                - ready
+                - single
+                - status
+                - total
+            type: object
+        documentImageExportResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/DocumentImageExportState'
+                message:
+                    type: string
+            required:
+                - code
+                - data
+                - message
+            type: object
+
 info:
     description: LazyMind Go backend core API - proxies to algorithm services. text Kong text /api/core。
     title: Backend Core API
@@ -32002,6 +32097,165 @@ paths:
                                 $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
                     description: Artifact not found
             summary: Find the blocking or latest owned document publication
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/image-exports:
+        post:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DocumentImageExportRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentImageExportResponse'
+                    description: Image export accepted
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Invalid snapshot
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document changed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: No downloadable images
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Too many exports
+            summary: Prepare images referenced by the current document snapshot
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}:
+        get:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: export_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentImageExportResponse'
+                    description: Image export
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Export not found
+            summary: Read owned image export progress and individual outcomes
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}/files/{file_id}:
+        get:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: export_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: file_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/octet-stream:
+                            schema:
+                                format: binary
+                                type: string
+                    description: Image or ZIP attachment
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: File not found
+                "410":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Export expired
+            summary: Download an owned image archive or original image
+            tags:
+                - workflow
+    /api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}:retry:
+        post:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: export_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentImageExportResponse'
+                    description: Image export accepted
+                "404":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Export not found
+                "410":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Export expired
+            summary: Retry missing images without changing the captured document
             tags:
                 - workflow
     /api/core/workflow-artifacts/{artifact_id}/publications:

@@ -23,6 +23,8 @@ import { documentPublicationTargetUrl } from './documentPublicationUrl';
 import { WriterProviderIcon } from './DocumentProviderChoice';
 import { pendingImageGroups, keepVerticalImageGroups, imageGroupKey } from './writerImageGroups';
 import type { SlotVersionPopover } from './SlotComponents';
+import { documentImages } from './documentImages';
+import { useDocumentImageDownloads } from './useDocumentImageDownloads';
 
 function unwrap(value: unknown): unknown {
   while (value && typeof value === 'object') {
@@ -99,6 +101,8 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const representation = typeof value === 'string' ? 'markdown' : isWriterDocument(value) ? 'ir' : descriptor.representation;
   const [version, setVersion] = useState(initial.revision);
   const [loaded, setLoaded] = useState(false);
+  const [hasImages, setHasImages] = useState(false);
+  useEffect(() => { setHasImages(documentImages(value).length > 0); }, [value]);
   const [providers, setProviders] = useState<DocumentProvider[]>([]);
   const [publishDialog, setPublishDialog] = useState<{ provider?: string }>();
   const [publicationChoices, setPublicationChoices] = useState<PublicationProviderChoices>({});
@@ -155,6 +159,11 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     // MDXEditor does not cancel older preview lookups when its handler changes.
     return latestMediaUrls.current === mediaUrls ? resolved : resolveMarkdownImageUrlFromMap(url, latestMediaUrls.current);
   }, [mediaUrls]);
+  const imageDownloads = useDocumentImageDownloads({ scopeKey: editingKey, resolveImage: resolveImageUrl,
+    readSource: () => ({ artifactId: latest.current.id, revision: latest.current.revision, draft: latest.current.draft,
+      document: getSnapshot?.(editingKey) ?? draftContent.current }),
+  });
+  const imageDownloadsRef = useRef(imageDownloads); imageDownloadsRef.current = imageDownloads;
 
   useEffect(() => {
     if (descriptor.representation !== 'markdown' || !writerSlot || mediaRevision === undefined || (slot.list_index ?? -1) >= 0) return;
@@ -218,6 +227,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   }, []);
   const edit = useCallback((content: unknown) => {
     draftContent.current = content;
+    setHasImages(documentImages(content).length > 0);
     dirty.current = JSON.stringify(content) !== JSON.stringify(retainedPublicationSource.current ?? external.current.value);
     setHasLocalChanges(dirty.current);
     if (!dirty.current) {
@@ -332,15 +342,17 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   };
   const downloadRef = useRef(beginDownload); downloadRef.current = beginDownload;
   useEffect(() => {
-    if (!active || !loaded || !descriptor.capabilities.includes('convert_document')) return;
+    const convertible = descriptor.capabilities.includes('convert_document');
+    if (!active || !loaded || (!convertible && !hasImages)) return;
     return registerFooterAction(`${editingKey}:download`, {
-      label: String(i18n.t(downloading ? 'chat.writerLocal.preparing' : 'chat.slots.download')), icon: 'download', order: 25,
+      label: String(i18n.t(downloading || imageDownloads.busy ? 'chat.writerLocal.preparing' : 'chat.slots.download')), icon: 'download', order: 25,
       menuLabel: String(i18n.t('chat.writerLocal.chooseDownload')),
-      disabled: downloading, onClick: () => void downloadRef.current('markdown'),
-      menu: (['markdown', 'text', 'latex', 'lmd'] as const).map(format => ({ key: format,
-        label: String(i18n.t(format === 'lmd' ? 'chat.writerLocal.structure' : `chat.writerCopy.${format}`)), onClick: () => void downloadRef.current(format) })),
+      disabled: downloading || imageDownloads.busy, onClick: () => convertible ? void downloadRef.current('markdown') : imageDownloadsRef.current.showGallery(),
+      menu: [...(convertible ? (['markdown', 'text', 'latex', 'lmd'] as const).map(format => ({ key: format,
+        label: String(i18n.t(format === 'lmd' ? 'chat.writerLocal.structure' : `chat.writerCopy.${format}`)), onClick: () => void downloadRef.current(format) })) : []),
+        ...(hasImages ? imageDownloadsRef.current.menu : [])],
     });
-  }, [active, loaded, descriptor.capabilities, registerFooterAction, editingKey, downloading]);
+  }, [active, loaded, descriptor.capabilities, registerFooterAction, editingKey, downloading, hasImages, imageDownloads.busy]);
   const applyPreview = async () => {
     if (!preview?.value.commit?.token) return undefined;
     const baseline=previewSource.current;
@@ -428,11 +440,11 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     readCurrentValue={() => getSnapshot?.(editingKey) ?? draftContent.current} contentType='text'
     readOnly={!writable} triggerLabel={String(i18n.t('chat.slots.versionHistory'))} onRollback={rollback} /> : undefined;
   return <SlotEditingContext.Provider value={editorContext}><div className='workflow-slot workflow-slot--artifact'>
-    <div className={`workflow-slot__artifact-body${representation === 'markdown' ? ' workflow-slot__artifact-body--markdown' : ''}`}>
+    <div className={`workflow-slot__artifact-body${representation === 'markdown' ? ' workflow-slot__artifact-body--markdown' : ''}`} onClick={imageDownloads.onImageClick}>
     {representation === 'markdown' && typeof value === 'string'
       ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
         numberingDocument={typeof currentNumbering?.document === 'string' ? currentNumbering.document : undefined}
-        resolveImageUrl={resolveImageUrl} onContentChange={edit} numbering={numbering} toolbarActions={versionHistory}
+        resolveImageUrl={resolveImageUrl} onDownloadImage={imageDownloads.downloadImage} onContentChange={edit} numbering={numbering} toolbarActions={versionHistory}
         onRewriteSelection={canRewrite ? (picked) => { if (picked.supported) setSelection({ type: 'markdown', selected_text: picked.text, selectedText: picked.text, paragraph: picked.paragraph, paragraphs: picked.paragraphSelections?.map(item => item.paragraph), startOffset: picked.startOffset, sourceRange: picked.sourceRange, sourceRanges: picked.sourceRanges, anchor: picked.anchor }); } : undefined}
         rewriteDialogOpen={selection !== null}
         rewritePreview={preview?.selection.paragraph ? { paragraph: preview.selection.paragraph, paragraphs: preview.selection.paragraphs, sourceMarkdown: String(previewSource.current?.value ?? value), startOffset: preview.selection.startOffset,
@@ -450,6 +462,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           return { document: saved.value as WriterDocument, sourceRevision: saved.revision, draftVersion: saved.draft };
         }} /> : <div role='alert'>{String(i18n.t('chat.writerIR.saveFailed'))}</div>}
     </div>
+    {imageDownloads.dialog}
     {error && <div className={`workflow-document-notice${authorizationNeeded ? ' workflow-document-notice--authorization' : ''}`} role='alert'>
       <span className='workflow-document-notice__icon' aria-hidden='true'>{authorizationNeeded ? <LockOutlined /> : <ExclamationCircleOutlined />}</span>
       <span className='workflow-document-notice__message'>{error}</span>
