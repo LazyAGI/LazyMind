@@ -19,9 +19,16 @@ func TestLiveSkillWebsiteImports(t *testing.T) {
 	}
 	for _, tt := range []struct{ site, source string }{
 		{"skills_sh", "https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practices?utm_source=share#install"},
+		{"skills_sh_www", "https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices?utm_source=share#install"},
 		{"skillsmp", "https://skillsmp.com/skills/anthropics-skills-skills-frontend-design-skill-md?utm_source=share#install"},
+		{"skillsmp_www", "https://www.skillsmp.com/skills/anthropics-skills-skills-frontend-design-skill-md?utm_source=share#install"},
 		{"clawhub", "https://clawhub.ai/paudyyin/skills/summarize?version=1.0.0#install"},
+		{"clawhub_www_legacy", "https://www.clawhub.ai/paudyyin/summarize?tag=latest#install"},
 		{"skillhub", "https://skillhub.cn/skills/clawhub_paudyyin/summarize?version=1.0.0#install"},
+		{"skillhub_www", "https://www.skillhub.cn/skills/clawhub_paudyyin/summarize?version=1.0.0#install"},
+		{"github_directory", "https://github.com/anthropics/skills/tree/main/skills/frontend-design?tab=readme#install"},
+		{"github_skill_md", "https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md?plain=1#install"},
+		{"clawhub_direct_zip", "https://clawhub.ai/api/v1/download?owner=paudyyin&slug=summarize&version=1.0.0"},
 	} {
 		t.Run(tt.site, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
