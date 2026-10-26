@@ -134,13 +134,17 @@ export async function uploadSkillTempFile(
       completeRequest,
       { timeout, silentError: options?.silentError, signal: options?.signal } as never,
     );
-    completed = true;
 
     options?.signal?.throwIfAborted();
     const storedPath = completeResponse.data.stored_path;
     if (!storedPath) {
       throw new Error("Missing stored_path from temp upload complete");
     }
+    // Keep the session abortable until the complete response has been
+    // validated and cancellation has been observed. This closes the small
+    // race where cancellation arrives after the server completes the upload
+    // but before the caller receives the result.
+    completed = true;
 
     return {
       uploadId,

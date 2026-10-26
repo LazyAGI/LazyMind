@@ -47,4 +47,19 @@ describe('multipart skill upload', () => {
     expect(http.post).toHaveBeenCalledTimes(2);
     expect(http.post.mock.calls[1][0]).toContain('temp/uploads/upload:abort');
   });
+
+  it('aborts a session when cancellation arrives after complete responds', async () => {
+    const controller = new AbortController();
+    http.post.mockImplementation(async (url: string) => {
+      if (url.endsWith(':initUpload')) return { data: { upload_id: 'upload', part_size: 2, total_parts: 2 } };
+      if (url.endsWith(':complete')) {
+        controller.abort();
+        return { data: { stored_path: 'skill.zip' } };
+      }
+      return { data: {} };
+    });
+    await expect(uploadSkillTempFile(new File(['abcd'], 'skill.zip'), { signal: controller.signal })).rejects.toBeDefined();
+    expect(http.post).toHaveBeenCalledTimes(3);
+    expect(http.post.mock.calls[2][0]).toContain('temp/uploads/upload:abort');
+  });
 });
