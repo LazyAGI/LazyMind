@@ -1098,7 +1098,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		items = append(items, PreviewItem{Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Title < items[j].Title })
-	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified)
+	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified, expansion)
 	if err != nil {
 		replyError(w, 500, "IMPORT_PREVIEW_FAILED", err.Error())
 		return

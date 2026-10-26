@@ -70,27 +70,7 @@
 .paper-filter-panel .ant-slider-handle::after { box-shadow: 0 0 0 2px #6385c7; }
 .paper-filter-panel .ant-slider-rail { background-color: #edf0f5; }
 .paper-filter-panel .ant-slider-disabled .ant-slider-handle::after { box-shadow: 0 0 0 2px #c8d2e5; }
-.paper-filter-citations { margin-top: 16px; }
 .paper-filter-empty { margin: 12px 0 0; color: #98a2b3; font-size: 12px; }
-.paper-filter-citation-input {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #667085;
-  font-size: 12px;
-
-  input {
-    width: 70px;
-    min-height: 28px;
-    padding: 3px 8px;
-    border: 1px solid #dfe3eb;
-    border-radius: 5px;
-    background: #fff;
-    color: #344054;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-  }
-}
 .paper-filter-panel button:focus-visible,
 .paper-filter-panel input:focus-visible { outline: 2px solid #2858b8; outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) {

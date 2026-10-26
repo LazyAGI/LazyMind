@@ -28,6 +28,7 @@ export async function paperFromPdf(file: File): Promise<PaperItem> {
     important: false,
     tags: [],
     source: "local",
+    importMethod: "upload",
     parse: "ready",
     doi: found.doi,
     arxiv: found.arxiv,

@@ -31,7 +31,7 @@ func TestImportReceiptValidatesOwnershipVersionAndSurvivesEnqueue(t *testing.T) 
 	db := paperFixture(t)
 	ref, candidate := testVerifiedPaper(), testPDFCandidate()
 	item := PreviewItem{WorkID: "a", Paper: ref, Candidates: []FulltextCandidate{candidate}}
-	token, err := saveImportPreview(t.Context(), "u", "papers", []PreviewItem{item}, map[string]PaperRef{"a": ref})
+	token, err := saveImportPreview(t.Context(), "u", "papers", []PreviewItem{item}, map[string]PaperRef{"a": ref}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,5 +337,100 @@ func TestImportQueueFiltersSourceDocumentOnBothDatabases(t *testing.T) {
 	}
 	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &result) != nil || len(result.Items) != 1 || result.Items[0].ItemID != "source-item-a" {
 		t.Fatal(response.Code, response.Body.String())
+	}
+}
+
+func TestExpansionImportKeepsDocumentProvenance(t *testing.T) {
+	db := paperFixture(t)
+	record := orm.AcademicExpansion{ID: "source-expansion", UserID: "u", DatasetID: "papers", Version: 3, ResultJSON: marshal(ReviewWorkflowInput{})}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	ref, candidate := testVerifiedPaper(), testPDFCandidate()
+	token, err := saveImportPreview(t.Context(), "u", "papers", []PreviewItem{{WorkID: "a", Paper: ref, Candidates: []FulltextCandidate{candidate}}}, map[string]PaperRef{"a": ref}, &record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := createImportRequest{EntryType: "single_reference", PreviewToken: token, TargetDatasetID: "papers", Items: []selectedImportItem{{WorkID: "a", Candidate: candidate}}, IdempotencyKey: "expansion-origin"}
+	response := httptest.NewRecorder()
+	CreateImport(response, paperRequest(string(marshal(request))))
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var batch orm.PaperImportBatch
+	if err := db.Take(&batch).Error; err != nil {
+		t.Fatal(err)
+	}
+	var origin struct {
+		ExpansionID      string `json:"expansion_id"`
+		ExpansionVersion int64  `json:"expansion_version"`
+	}
+	if err := json.Unmarshal(batch.PolicySnapshotJSON, &origin); err != nil {
+		t.Fatal(err)
+	}
+	if batch.EntryType != "paper_expansion" || origin.ExpansionID != record.ID || origin.ExpansionVersion != 3 {
+		t.Fatalf("origin not persisted: %+v %+v", batch, origin)
+	}
+	if err := db.Model(&orm.PaperImportItem{}).Where("batch_id=?", batch.ID).Updates(map[string]any{"document_id": "a", "status": "succeeded"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, link := range []orm.AcademicWorkDocument{
+		{AcademicWorkID: "a", DatasetID: "papers", DocumentID: "a", SourceProvider: "arxiv", SourceLocator: candidate.URL, SourceVersion: "v2"},
+		{AcademicWorkID: "b", DatasetID: "papers", DocumentID: "b", SourceProvider: "upload"},
+	} {
+		if err := db.Create(&link).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Create(&orm.Document{ID: "legacy", DatasetID: "papers", DisplayName: "legacy.pdf", BaseModel: orm.BaseModel{CreateUserID: "u"}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.AcademicDocumentState{DocumentID: "legacy", DatasetID: "papers", Kind: "paper", PaperID: "a", Status: "succeeded"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.AcademicWorkDocument{AcademicWorkID: "a", DatasetID: "papers", DocumentID: "legacy", SourceProvider: "arxiv"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.PaperImportBatch{ID: "legacy-batch", TargetDatasetID: "papers", EntryType: "single_reference", SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{})}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.PaperImportItem{ID: "legacy-item", BatchID: "legacy-batch", AcademicWorkID: "a", DocumentID: "legacy", Status: "succeeded", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{})}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	response = httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/?dataset_id=papers&document_ids=a,b,legacy", nil)
+	req.Header.Set("X-User-Id", "u")
+	DocumentStates(response, req)
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	var result struct {
+		Items []struct {
+			State          orm.AcademicDocumentState `json:"state"`
+			SourceProvider string                    `json:"source_provider"`
+			SourceURL      string                    `json:"source_url"`
+			SourceVersion  string                    `json:"source_version"`
+			ImportMethod   string                    `json:"import_method"`
+			ExpansionID    string                    `json:"expansion_id"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 3 {
+		t.Fatal(response.Body.String())
+	}
+	for _, item := range result.Items {
+		if item.State.DocumentID == "a" && (item.SourceProvider != "arxiv" || item.SourceURL != candidate.URL || item.SourceVersion != "v2" || item.ImportMethod != "expansion" || item.ExpansionID != record.ID) {
+			t.Fatalf("source lost in knowledge response: %+v", item)
+		}
+		if item.State.DocumentID == "b" && item.ImportMethod != "upload" {
+			t.Fatalf("upload mislabeled: %+v", item)
+		}
+		if item.State.DocumentID == "legacy" && item.ImportMethod != "" {
+			t.Fatalf("invented provenance for a legacy expansion import: %+v", item)
+		}
+
 	}
 }

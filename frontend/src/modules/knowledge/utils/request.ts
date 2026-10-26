@@ -1,3 +1,4 @@
+import type { PaperUploadContext } from "../api/academicReferences";
 import {
   Configuration,
   type DatasetServiceApiDatasetServiceCreateDatasetRequest,
@@ -434,7 +435,7 @@ export interface CreateTaskItem {
   cross_dataset?: boolean;
 }
 
-export type CreateTaskRequest = CoreCreateTaskRequest;
+export type CreateTaskRequest = CoreCreateTaskRequest & { paper_import?: PaperUploadContext };
 
 export interface TaskDocumentInfo {
   display_name: string;

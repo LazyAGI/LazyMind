@@ -225,9 +225,60 @@ func DocumentStates(w http.ResponseWriter, r *http.Request) {
 	for _, mark := range marks {
 		important[mark.PaperID] = mark.IsImportant
 	}
+	// Provenance belongs to the imported document, not its globally shared work.
+	documentIDs := make([]string, 0, len(states))
+	for _, state := range states {
+		documentIDs = append(documentIDs, state.DocumentID)
+	}
+	var origins []struct {
+		DocumentID         string
+		EntryType          string
+		PolicySnapshotJSON json.RawMessage
+		ReferenceIDsJSON   json.RawMessage
+	}
+	if err := store.DB().Table("paper_import_items AS i").
+		Select("i.document_id, i.reference_ids_json, b.entry_type, b.policy_snapshot_json").
+		Joins("JOIN paper_import_batches AS b ON b.id=i.batch_id").
+		Where("b.target_dataset_id=? AND i.status=? AND i.document_id IN ?", dataset, "succeeded", documentIDs).
+		Order("i.created_at ASC, i.id ASC").Scan(&origins).Error; err != nil {
+		replyError(w, 500, "READ_FAILED", err.Error())
+		return
+	}
+	originByDocument := map[string]map[string]any{}
+	for _, origin := range origins {
+		if _, exists := originByDocument[origin.DocumentID]; exists {
+			continue
+		}
+		method := map[string]string{"paper_link": "link", "paper_expansion": "expansion"}[origin.EntryType]
+		// Older expansion imports also used the reference entry types. Only
+		// actual reference associations prove that this was a reference import.
+		if method == "" {
+			var referenceIDs []string
+			if json.Unmarshal(origin.ReferenceIDsJSON, &referenceIDs) == nil && len(referenceIDs) > 0 {
+				method = "references"
+			}
+		}
+		if method == "" {
+			continue
+		}
+		value := map[string]any{"import_method": method}
+		if method == "expansion" {
+			var snapshot struct {
+				ExpansionID      string `json:"expansion_id"`
+				ExpansionVersion int64  `json:"expansion_version"`
+			}
+			if json.Unmarshal(origin.PolicySnapshotJSON, &snapshot) == nil {
+				value["expansion_id"], value["expansion_version"] = snapshot.ExpansionID, snapshot.ExpansionVersion
+			}
+		}
+		originByDocument[origin.DocumentID] = value
+	}
 	items := make([]map[string]any, 0, len(states))
 	for _, state := range states {
 		item := map[string]any{"state": state, "is_important": important[state.PaperID]}
+		for key, value := range originByDocument[state.DocumentID] {
+			item[key] = value
+		}
 		if paper, ok := papers[state.PaperID]; ok {
 			item["paper"] = documentPaperRef(paper, state.MetadataJSON)
 		}
@@ -242,6 +293,10 @@ func DocumentStates(w http.ResponseWriter, r *http.Request) {
 		var link orm.AcademicWorkDocument
 		if err := store.DB().Where("dataset_id=? AND document_id=? AND academic_work_id=?", dataset, state.DocumentID, state.PaperID).Take(&link).Error; err == nil {
 			item["source_provider"], item["source_version"], item["content_sha256"] = link.SourceProvider, link.SourceVersion, link.ContentSHA256
+			item["source_url"] = link.SourceLocator
+			if link.SourceProvider == "upload" && item["import_method"] == nil {
+				item["import_method"] = "upload"
+			}
 			if paper, ok := item["paper"].(PaperRef); ok {
 				paper.SourceProvider, paper.SourceVersion = link.SourceProvider, link.SourceVersion
 				pinPaperURLs(&paper)

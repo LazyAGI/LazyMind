@@ -10,6 +10,31 @@ import (
 
 func currentImportDocument(ctx context.Context, db *gorm.DB, item ImportQueueItem) (*ImportQueueDocument, error) {
 	var links []orm.AcademicWorkDocument
+	if item.DocumentID != "" {
+		var document orm.Document
+		err := db.WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", item.DocumentID, item.TargetDatasetID).Take(&document).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if err == nil {
+			ext, _, available, err := readArxivDocument(document)
+			if err != nil {
+				return nil, err
+			}
+			if available {
+				_, status, detail, err := newArxivImportService(db).processingStatus(ctx, document, ext.Marker)
+				if err != nil {
+					return nil, err
+				}
+				return &ImportQueueDocument{DocumentID: document.ID, ProcessingStatus: status, ProcessingError: detail}, nil
+			}
+		}
+		// A historical document binding must not silently jump to a replacement.
+		return nil, nil
+	}
+	if item.WorkID == "" {
+		return nil, nil
+	}
 	query := db.WithContext(ctx).Where("academic_work_id=? AND dataset_id=?", item.WorkID, item.TargetDatasetID)
 	if item.SourceProvider != "" && item.SourceVersion != "" {
 		query = query.Where("source_provider=? AND source_version=?", item.SourceProvider, item.SourceVersion)

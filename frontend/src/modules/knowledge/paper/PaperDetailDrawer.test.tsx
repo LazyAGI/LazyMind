@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { migratePaperLibrary, type PaperLibraryDataV3 } from './libraryModel';
@@ -37,4 +37,17 @@ describe('durable paper notes', () => {
     expect(saved?.papers[0].noteIds).toEqual([saved?.notes[0].id]);
     expect(saved?.papers[0].metadata).toEqual(data.papers[0].metadata);
   });
+  it('retries failed metadata recognition separately and prevents duplicate submission', async () => {
+    const data = fixture();
+    let finish!: () => void;
+    const retry = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    render(<ConfigProvider theme={{ token: { motion: false } }}><PaperDetailDrawer paper={data.papers[0]} data={data} academic={{ state: { document_id: 'pdf', kind: 'unknown', status: 'failed', paper_id: '', manual: false, error: 'Model unavailable' }, is_important: false }} onClose={() => {}} onChange={vi.fn()} onRetryIdentification={retry} /></ConfigProvider>);
+    fireEvent.click(screen.getByRole('button', { name: '重试自动识别' }));
+    expect(screen.getByRole('button', { name: '重试自动识别' })).toBeDisabled();
+    expect(retry).toHaveBeenCalledOnce();
+    await act(async () => finish());
+    await waitFor(() => expect(screen.getByRole('button', { name: '重试自动识别' })).toBeEnabled());
+    expect(data.papers[0].title).toBe('A study');
+  });
+
 });

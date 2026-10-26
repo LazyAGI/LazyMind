@@ -197,6 +197,41 @@ export interface AcademicImportItem {
     'reference_ids'?: Array<string>;
     'work_id'?: string;
 }
+export interface AcademicImportOperation {
+    'created_at'?: string;
+    'entry_type'?: string;
+    'id'?: string;
+    'source'?: object;
+    'status'?: string;
+    'summary'?: AcademicImportOperationSummary;
+    'target_dataset_id'?: string;
+}
+export interface AcademicImportOperationItem {
+    'batch_id'?: string;
+    'can_retry'?: boolean;
+    'current_document'?: object;
+    'current_state'?: string;
+    'document_deleted'?: boolean;
+    'item_id'?: string;
+    'library_paper_id'?: string;
+    'resolved_later'?: boolean;
+    'result_kind'?: string;
+    'status'?: string;
+    'title'?: string;
+}
+export interface AcademicImportOperationSummary {
+    'active'?: number;
+    'canceled'?: number;
+    'deleted'?: number;
+    'failed'?: number;
+    'metadata_only'?: number;
+    'needs_action'?: number;
+    'ready'?: number;
+    'resolved_later'?: number;
+    'retryable'?: number;
+    'skipped'?: number;
+    'total'?: number;
+}
 export interface AcademicImportPreview {
     'items'?: Array<AcademicImportPreviewItemsInner>;
     'preview_token'?: string;
@@ -689,6 +724,20 @@ export interface ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
 export interface ApiCoreAcademicExpansionsGet200Response {
     'items'?: Array<AcademicExpansion>;
 }
+export interface ApiCoreAcademicImportBatchesBatchIdGet200Response {
+    'items'?: Array<AcademicImportOperationItem>;
+    'next_cursor'?: string;
+    'operation'?: AcademicImportOperation;
+}
+export interface ApiCoreAcademicImportBatchesGet200Response {
+    'items'?: Array<AcademicImportOperation>;
+    'next_cursor'?: string;
+    'notification'?: ApiCoreAcademicImportBatchesGet200ResponseNotification;
+}
+export interface ApiCoreAcademicImportBatchesGet200ResponseNotification {
+    'active'?: number;
+    'needs_action'?: number;
+}
 export interface ApiCoreAcademicImportsGet200Response {
     'items'?: Array<AcademicImportQueueItem>;
     'total'?: number;
@@ -706,6 +755,42 @@ export interface ApiCoreAcademicImportsPreviewPostRequest {
     'target_dataset_id': string;
     'work_ids'?: Array<string>;
     'works'?: Array<object>;
+}
+export interface ApiCoreAcademicLibraryGet200Response {
+    'can_write'?: boolean;
+    'data'?: object;
+    'revision'?: number;
+}
+export interface ApiCoreAcademicLibraryPutRequest {
+    'data': object;
+    'import_context'?: ApiCoreAcademicLibraryPutRequestImportContext;
+    'revision': number;
+}
+export interface ApiCoreAcademicLibraryPutRequestImportContext {
+    'entry_type': ApiCoreAcademicLibraryPutRequestImportContextEntryTypeEnum;
+    'file_name'?: string;
+    'format'?: ApiCoreAcademicLibraryPutRequestImportContextFormatEnum;
+    'idempotency_key': string;
+    'items': Array<ApiCoreAcademicLibraryPutRequestImportContextItemsInner>;
+    'preview_token'?: string;
+}
+
+export const ApiCoreAcademicLibraryPutRequestImportContextEntryTypeEnum = {
+    Bibliography: 'bibliography',
+    PaperLink: 'paper_link'
+} as const;
+
+export type ApiCoreAcademicLibraryPutRequestImportContextEntryTypeEnum = typeof ApiCoreAcademicLibraryPutRequestImportContextEntryTypeEnum[keyof typeof ApiCoreAcademicLibraryPutRequestImportContextEntryTypeEnum];
+export const ApiCoreAcademicLibraryPutRequestImportContextFormatEnum = {
+    Bib: 'bib',
+    Ris: 'ris',
+    Csv: 'csv'
+} as const;
+
+export type ApiCoreAcademicLibraryPutRequestImportContextFormatEnum = typeof ApiCoreAcademicLibraryPutRequestImportContextFormatEnum[keyof typeof ApiCoreAcademicLibraryPutRequestImportContextFormatEnum];
+
+export interface ApiCoreAcademicLibraryPutRequestImportContextItemsInner {
+    'paper_id': string;
 }
 export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response {
     'feedback'?: string;
@@ -2616,9 +2701,11 @@ export interface CreateTaskItem {
 }
 export interface CreateTaskRequest {
     'items': Array<CreateTaskItem>;
+    'paper_import'?: PaperUploadContext;
     'parent'?: string;
 }
 export interface CreateTasksResponse {
+    'paper_import_batch_id'?: string;
     'tasks'?: Array<TaskResponse>;
 }
 export interface CreateWordGroupFromConflictRequest {
@@ -5462,6 +5549,11 @@ export interface Pages {
     'sources': CollectionPage;
     'stage_artifacts': CollectionPage;
 }
+export interface PaperUploadContext {
+    'idempotency_key': string;
+    'library_paper_id': string;
+    'title': string;
+}
 export interface ParserConfig {
     'name': string;
     'params'?: { [key: string]: object; };
@@ -8248,6 +8340,97 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
+         * @summary Read a complete operation summary and a page of its papers
+         * @param {string} batchId
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportBatchesBatchIdGet: async (batchId: string, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'batchId' is not null or undefined
+            assertParamExists('apiCoreAcademicImportBatchesBatchIdGet', 'batchId', batchId)
+            const localVarPath = `/api/core/academic/import-batches/{batch_id}`
+                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List owned paper import operations with complete summaries and notification totals
+         * @param {string} targetDatasetId
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportBatchesGet: async (targetDatasetId: string, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicImportBatchesGet', 'targetDatasetId', targetDatasetId)
+            const localVarPath = `/api/core/academic/import-batches`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Read import history and matching current-collection PDF processing state
          * @param {string} [targetDatasetId]
          * @param {string} [sourceDocumentId]
@@ -8350,6 +8533,85 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicImportsPreviewPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read the saved paper library
+         * @param {string} targetDatasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryGet: async (targetDatasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryGet', 'targetDatasetId', targetDatasetId)
+            const localVarPath = `/api/core/academic/library`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Save the paper library and an optional atomic import receipt
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPutRequest} apiCoreAcademicLibraryPutRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPut: async (targetDatasetId: string, apiCoreAcademicLibraryPutRequest: ApiCoreAcademicLibraryPutRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPut', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryPutRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPut', 'apiCoreAcademicLibraryPutRequest', apiCoreAcademicLibraryPutRequest)
+            const localVarPath = `/api/core/academic/library`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPutRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -8715,6 +8977,36 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Read a complete operation summary and a page of its papers
+         * @param {string} batchId
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportBatchesBatchIdGet(batchId: string, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportBatchesBatchIdGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportBatchesBatchIdGet(batchId, cursor, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportBatchesBatchIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List owned paper import operations with complete summaries and notification totals
+         * @param {string} targetDatasetId
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportBatchesGet(targetDatasetId: string, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportBatchesGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportBatchesGet(targetDatasetId, cursor, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportBatchesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Read import history and matching current-collection PDF processing state
          * @param {string} [targetDatasetId]
          * @param {string} [sourceDocumentId]
@@ -8751,6 +9043,33 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPreviewPost(apiCoreAcademicImportsPreviewPostRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read the saved paper library
+         * @param {string} targetDatasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryGet(targetDatasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicLibraryGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Save the paper library and an optional atomic import receipt
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPutRequest} apiCoreAcademicLibraryPutRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPut(targetDatasetId: string, apiCoreAcademicLibraryPutRequest: ApiCoreAcademicLibraryPutRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicLibraryGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPut(targetDatasetId, apiCoreAcademicLibraryPutRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -8927,6 +9246,26 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Read a complete operation summary and a page of its papers
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportBatchesBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportBatchesBatchIdGet200Response> {
+            return localVarFp.apiCoreAcademicImportBatchesBatchIdGet(requestParameters.batchId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List owned paper import operations with complete summaries and notification totals
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportBatchesGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportBatchesGet200Response> {
+            return localVarFp.apiCoreAcademicImportBatchesGet(requestParameters.targetDatasetId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Read import history and matching current-collection PDF processing state
          * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -8954,6 +9293,26 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
          */
         apiCoreAcademicImportsPreviewPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicImportPreview> {
             return localVarFp.apiCoreAcademicImportsPreviewPost(requestParameters.apiCoreAcademicImportsPreviewPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read the saved paper library
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicLibraryGet200Response> {
+            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Save the paper library and an optional atomic import receipt
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPut(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicLibraryGet200Response> {
+            return localVarFp.apiCoreAcademicLibraryPut(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPutRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -9086,6 +9445,28 @@ export interface AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreAcademicImportBatchesBatchIdGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest {
+    readonly batchId: string
+
+    readonly cursor?: string
+
+    readonly limit?: number
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportBatchesGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest {
+    readonly targetDatasetId: string
+
+    readonly cursor?: string
+
+    readonly limit?: number
+}
+
+/**
  * Request parameters for apiCoreAcademicImportsGet operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicImportsGetRequest {
@@ -9106,6 +9487,22 @@ export interface AcademicWorkflowsApiApiCoreAcademicImportsPostRequest {
  */
 export interface AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest {
     readonly apiCoreAcademicImportsPreviewPostRequest: ApiCoreAcademicImportsPreviewPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest {
+    readonly targetDatasetId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPut operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryPutRequest: ApiCoreAcademicLibraryPutRequest
 }
 
 /**
@@ -9244,6 +9641,28 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
+     * @summary Read a complete operation summary and a page of its papers
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportBatchesBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportBatchesBatchIdGet(requestParameters.batchId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List owned paper import operations with complete summaries and notification totals
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportBatchesGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportBatchesGet(requestParameters.targetDatasetId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Read import history and matching current-collection PDF processing state
      * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -9273,6 +9692,28 @@ export class AcademicWorkflowsApi extends BaseAPI {
      */
     public apiCoreAcademicImportsPreviewPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsPreviewPost(requestParameters.apiCoreAcademicImportsPreviewPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read the saved paper library
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Save the paper library and an optional atomic import receipt
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPut(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPut(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPutRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -16010,64 +16451,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /academic/library
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicLibraryGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/library`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PUT /academic/library
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicLibraryPut: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/library`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -28570,30 +28953,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /academic/library
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicLibraryGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicLibraryGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PUT /academic/library
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicLibraryPut(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPut(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicLibraryPut']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /academic/references:resolve
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -33410,24 +33769,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /academic/library
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicLibraryGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicLibraryGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PUT /academic/library
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicLibraryPut(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicLibraryPut(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -39129,26 +39470,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /academic/library
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicLibraryGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicLibraryGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PUT /academic/library
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicLibraryPut(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicLibraryPut(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

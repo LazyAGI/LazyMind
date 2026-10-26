@@ -1,4 +1,4 @@
-import type { ImportSource, PaperFolder, PaperItem, PaperLibraryData } from './model';
+import type { ImportSource, PaperImportMethod, PaperFolder, PaperItem, PaperLibraryData } from './model';
 
 export type AttachmentKind = 'pdf' | 'supplement' | 'snapshot' | 'other';
 export type NoteKind = 'note' | 'ai_summary' | 'method' | 'conclusion';
@@ -18,6 +18,10 @@ export interface Attachment {
   mimeType?: string;
   size?: number;
   source: ImportSource;
+  sourceProvider?: string;
+  importMethod?: PaperImportMethod;
+  expansionId?: string;
+  expansionVersion?: number;
   addedAt: string;
   isPrimary?: boolean;
   contentRef?: string;

@@ -30,7 +30,6 @@ export default function PaperFilterPanel({ papers, value, onChange }: Props) {
   const years = value.yearRange || bounds.years;
   const minYear = Math.min(bounds.years?.[0] ?? years?.[0] ?? 0, years?.[0] ?? Number.POSITIVE_INFINITY);
   const maxYear = Math.max(bounds.years?.[1] ?? 0, years?.[1] ?? 0);
-  const citationMax = Math.max(bounds.maxCitations, value.minCitations, 1);
   const update = <K extends keyof PaperFilters>(key: K, next: PaperFilters[K]) => onChange({ ...value, [key]: next });
   const updateYear = (range: number[]) => {
     const next: [number, number] = [range[0], range[1]];
@@ -60,17 +59,6 @@ export default function PaperFilterPanel({ papers, value, onChange }: Props) {
         <div className="paper-filter-range-values" aria-live="polite"><span>{years[0]}</span><span>{years[1]}</span></div>
       </> : <p className="paper-filter-empty">暂无年份数据</p>}
     </div>
-    <div className="paper-filter-range-group paper-filter-citations">
-      <div className="paper-filter-range-title" id={`${id}-citations`}>引用量</div>
-      <Slider min={0} max={citationMax} value={value.minCitations} disabled={bounds.maxCitations === 0 && value.minCitations === 0} onChange={(next: number) => update("minCitations", next)} ariaLabelForHandle="最低引用量滑块" tooltip={{ formatter: (count: number | undefined) => `至少 ${count} 次` }} />
-      <label className="paper-filter-citation-input">
-        <span>至少</span>
-        <input aria-label="最低引用量" type="number" min={0} step={1} value={value.minCitations} onChange={(event) => {
-          const next = Number(event.target.value);
-          if (Number.isSafeInteger(next) && next >= 0) update("minCitations", next);
-        }} />
-        <span>次引用</span>
-      </label>
-    </div>
+
   </div>;
 }

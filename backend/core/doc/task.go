@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -671,6 +672,18 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "items is required", http.StatusBadRequest)
 		return
 	}
+	var batchID string
+	var replay *orm.Task
+	var importErr error
+	r, batchID, replay, importErr = preparePaperUpload(r, ds, req)
+	if importErr != nil {
+		common.ReplyErr(w, importErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if replay != nil {
+		common.ReplyJSON(w, CreateTasksResponse{Tasks: []TaskResponse{buildTaskResponse(r, *replay)}, PaperImportBatchID: batchID})
+		return
+	}
 	resp := make([]TaskResponse, 0, len(req.Items))
 
 	// Pre-allocate one new folder per unique relative_path prefix across all items in
@@ -742,7 +755,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	common.ReplyJSON(w, CreateTasksResponse{Tasks: resp})
+	common.ReplyJSON(w, CreateTasksResponse{Tasks: resp, PaperImportBatchID: batchID})
 }
 
 func GetTask(w http.ResponseWriter, r *http.Request) {
@@ -2537,6 +2550,13 @@ func createTaskFromContentHash(r *http.Request, ds *orm.Dataset, datasetID, user
 }
 
 func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName string, item CreateTaskItem, tType string) ([]orm.Task, error) {
+	if scope, ok := r.Context().Value(paperUploadKey{}).(paperUploadScope); ok {
+		if task, err := existingPaperUpload(store.DB().WithContext(r.Context()), scope); err == nil {
+			return []orm.Task{task}, nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
 	uploadFileID := strings.TrimSpace(item.UploadFileID)
 	if uploadFileID == "" {
 		return nil, fmt.Errorf("upload_file_id is required")
@@ -2647,10 +2667,18 @@ func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName str
 		if err := tx.Model(&orm.UploadedFile{}).Where("upload_file_id = ? AND deleted_at IS NULL", uploadFileID).Updates(updates).Error; err != nil {
 			return fmt.Errorf("update uploaded file state failed")
 		}
+		if err := recordPaperUpload(r, tx, taskRow, uploaded, upExt.OriginalFilename); err != nil {
+			return err
+		}
 		created = taskRow
 		return nil
 	})
 	if err != nil {
+		if scope, ok := r.Context().Value(paperUploadKey{}).(paperUploadScope); ok {
+			if task, replayErr := existingPaperUpload(store.DB().WithContext(r.Context()), scope); replayErr == nil {
+				return []orm.Task{task}, nil
+			}
+		}
 		return nil, err
 	}
 	recalcAffectedFolderStats(r.Context(), datasetID, documentPID)

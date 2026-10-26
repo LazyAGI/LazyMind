@@ -78,12 +78,14 @@ type CreateTaskItem struct {
 }
 
 type CreateTaskRequest struct {
-	Parent string           `json:"parent,omitempty"`
-	Items  []CreateTaskItem `json:"items"`
+	PaperImport *PaperUploadContext `json:"paper_import,omitempty"`
+	Parent      string              `json:"parent,omitempty"`
+	Items       []CreateTaskItem    `json:"items"`
 }
 
 type CreateTasksResponse struct {
-	Tasks []TaskResponse `json:"tasks"`
+	PaperImportBatchID string         `json:"paper_import_batch_id,omitempty"`
+	Tasks              []TaskResponse `json:"tasks"`
 }
 
 type StartTaskRequest struct {

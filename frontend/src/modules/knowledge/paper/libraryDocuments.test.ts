@@ -22,6 +22,15 @@ describe('existing PDF and Workflow bindings', () => {
     expect(paperDocument(first, first.papers[0].id, source.states)?.state.document_id).toBe('pdf');
   });
 
+  it('clears an old missing-title flag after automatic recognition returns a formal title', () => {
+    const library = mergeLibraryDocuments(emptyLibraryV3(), source);
+    library.papers[0].title = 'paper';
+    library.papers[0].incomplete = true;
+    const refreshed = mergeLibraryDocuments(library, source);
+    expect(refreshed.papers[0]).toMatchObject({ title: 'Confirmed paper', incomplete: false });
+    expect(library.papers[0].incomplete).toBe(true);
+  });
+
   it('keeps library reading preferences while using current document metadata and personal importance', () => {
     const library = mergeLibraryDocuments(emptyLibraryV3(), source);
     library.papers[0].important = true;
@@ -91,4 +100,18 @@ describe('existing PDF and Workflow bindings', () => {
     expect(restored.attachments).toHaveLength(1);
     expect(restored.hiddenDocumentIds).toEqual([]);
   });
+  it('repairs a legacy local label from the actual imported attachment without changing reading data', () => {
+    const library = mergeLibraryDocuments(emptyLibraryV3(), source);
+    library.papers[0].status = 'read';
+    library.papers[0].noteIds = ['keep-note'];
+    library.attachments[0].source = 'local';
+    const imported = { ...source, states: source.states.map(item => ({ ...item, source_provider: 'arxiv', source_url: 'https://arxiv.org/pdf/2404.06654v2', source_version: 'v2', import_method: 'expansion' as const, expansion_id: 'expansion', expansion_version: 3 })) };
+    const refreshed = mergeLibraryDocuments(library, imported);
+    expect(refreshed.papers[0]).toMatchObject({ source: 'arxiv', status: 'read', noteIds: ['keep-note'], importMethod: 'expansion' });
+    expect(refreshed.attachments[0]).toMatchObject({ source: 'arxiv', sourceProvider: 'arxiv', sourceUrl: 'https://arxiv.org/pdf/2404.06654v2', sourceVersion: 'v2', importMethod: 'expansion', expansionId: 'expansion' });
+    const upload = mergeLibraryDocuments(refreshed, { ...source, states: source.states.map(item => ({ ...item, source_provider: 'upload', source_url: '', import_method: 'upload' as const, paper: { ...item.paper!, arxiv_id: '2404.06654' } })) });
+    expect(upload.attachments[0]).toMatchObject({ source: 'local', importMethod: 'upload', sourceUrl: '' });
+    expect(mergeLibraryDocuments(emptyLibraryV3(), source).attachments[0].source).toBe('unknown');
+  });
+
 });

@@ -283,6 +283,74 @@ components:
                 work_id:
                     type: string
             type: object
+        AcademicImportOperation:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                entry_type:
+                    type: string
+                id:
+                    type: string
+                source:
+                    properties: {}
+                    type: object
+                status:
+                    type: string
+                summary:
+                    properties:
+                        active:
+                            type: integer
+                        canceled:
+                            type: integer
+                        deleted:
+                            type: integer
+                        failed:
+                            type: integer
+                        metadata_only:
+                            type: integer
+                        needs_action:
+                            type: integer
+                        ready:
+                            type: integer
+                        resolved_later:
+                            type: integer
+                        retryable:
+                            type: integer
+                        skipped:
+                            type: integer
+                        total:
+                            type: integer
+                    type: object
+                target_dataset_id:
+                    type: string
+            type: object
+        AcademicImportOperationItem:
+            properties:
+                batch_id:
+                    type: string
+                can_retry:
+                    type: boolean
+                current_document:
+                    properties: {}
+                    type: object
+                current_state:
+                    type: string
+                document_deleted:
+                    type: boolean
+                item_id:
+                    type: string
+                library_paper_id:
+                    type: string
+                resolved_later:
+                    type: boolean
+                result_kind:
+                    type: string
+                status:
+                    type: string
+                title:
+                    type: string
+            type: object
         AcademicImportPreview:
             properties:
                 items:
@@ -3546,6 +3614,20 @@ components:
                     items:
                         $ref: '#/components/schemas/CreateTaskItem'
                     type: array
+                paper_import:
+                    $ref: '#/components/schemas/PaperUploadContext'
+                    properties:
+                        idempotency_key:
+                            type: string
+                        library_paper_id:
+                            type: string
+                        title:
+                            type: string
+                    required:
+                        - idempotency_key
+                        - library_paper_id
+                        - title
+                    type: object
                 parent:
                     type: string
             required:
@@ -3553,6 +3635,8 @@ components:
             type: object
         CreateTasksResponse:
             properties:
+                paper_import_batch_id:
+                    type: string
                 tasks:
                     items:
                         $ref: '#/components/schemas/TaskResponse'
@@ -8116,6 +8200,19 @@ components:
                 - process_steps
                 - sources
                 - stage_artifacts
+            type: object
+        PaperUploadContext:
+            properties:
+                idempotency_key:
+                    type: string
+                library_paper_id:
+                    type: string
+                title:
+                    type: string
+            required:
+                - idempotency_key
+                - library_paper_id
+                - title
             type: object
         ParserConfig:
             properties:
@@ -16073,6 +16170,85 @@ paths:
             summary: Resolve registered expansion papers and version-scoped content metadata without full bodies
             tags:
                 - AcademicWorkflows
+    /api/core/academic/import-batches:
+        get:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    items:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicImportOperation'
+                                        type: array
+                                    next_cursor:
+                                        type: string
+                                    notification:
+                                        properties:
+                                            active:
+                                                type: integer
+                                            needs_action:
+                                                type: integer
+                                        type: object
+                                type: object
+                    description: List owned paper import operations with complete summaries and notification totals
+            summary: List owned paper import operations with complete summaries and notification totals
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/import-batches/{batch_id}:
+        get:
+            parameters:
+                - in: path
+                  name: batch_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    items:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicImportOperationItem'
+                                        type: array
+                                    next_cursor:
+                                        type: string
+                                    operation:
+                                        $ref: '#/components/schemas/AcademicImportOperation'
+                                type: object
+                    description: Read a complete operation summary and a page of its papers
+            summary: Read a complete operation summary and a page of its papers
+            tags:
+                - AcademicWorkflows
     /api/core/academic/imports:
         get:
             parameters:
@@ -16209,15 +16385,106 @@ paths:
                 - AcademicWorkflows
     /api/core/academic/library:
         get:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /academic/library
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    can_write:
+                                        type: boolean
+                                    data:
+                                        properties: {}
+                                        type: object
+                                    revision:
+                                        format: int64
+                                        type: integer
+                                type: object
+                    description: Read the saved paper library
+            summary: Read the saved paper library
+            tags:
+                - AcademicWorkflows
         put:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                data:
+                                    properties: {}
+                                    type: object
+                                import_context:
+                                    properties:
+                                        entry_type:
+                                            enum:
+                                                - bibliography
+                                                - paper_link
+                                            type: string
+                                        file_name:
+                                            type: string
+                                        format:
+                                            enum:
+                                                - bib
+                                                - ris
+                                                - csv
+                                            type: string
+                                        idempotency_key:
+                                            type: string
+                                        items:
+                                            items:
+                                                properties:
+                                                    paper_id:
+                                                        type: string
+                                                required:
+                                                    - paper_id
+                                                type: object
+                                            type: array
+                                        preview_token:
+                                            type: string
+                                    required:
+                                        - idempotency_key
+                                        - entry_type
+                                        - items
+                                    type: object
+                                revision:
+                                    format: int64
+                                    type: integer
+                            required:
+                                - data
+                                - revision
+                            type: object
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: PUT /academic/library
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    can_write:
+                                        type: boolean
+                                    data:
+                                        properties: {}
+                                        type: object
+                                    revision:
+                                        format: int64
+                                        type: integer
+                                type: object
+                    description: Save the paper library and an optional atomic import receipt
+            summary: Save the paper library and an optional atomic import receipt
+            tags:
+                - AcademicWorkflows
     /api/core/academic/mock-handoffs/{handoff_id}:submit:
         post:
             parameters:

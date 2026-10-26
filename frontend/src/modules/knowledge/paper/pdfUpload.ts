@@ -1,3 +1,4 @@
+import type { PaperUploadContext } from "../api/academicReferences";
 import { TaskServiceApi } from '../utils/request';
 import { buildUploadTaskItems } from '../utils/uploadByHash';
 import { getImportErrorMessage, ImportTaskStartError } from '../utils/importError';
@@ -9,7 +10,7 @@ export function createPaperPdfUploader(datasetId: string) {
   // A File belongs to the pending confirmation. Keep its task even if starting
   // fails so retry does not bind the same bytes to a second document.
   const attempts = new WeakMap<File, { task: TaskResponse; canRestart: boolean }>();
-  return async (file: File, startMode: 'DEFAULT' | 'UPLOAD'): Promise<UploadedPaperPdf> => {
+  return async (file: File, startMode: 'DEFAULT' | 'UPLOAD', importContext?: PaperUploadContext): Promise<UploadedPaperPdf> => {
     const api = TaskServiceApi();
     let attempt = attempts.get(file);
     let task = attempt?.task;
@@ -38,7 +39,7 @@ export function createPaperPdfUploader(datasetId: string) {
     } else {
       const items = await buildUploadTaskItems({ datasetId, fileItems: [{ originFile: file, path: file.name }] });
       if (!items.length) throw new Error('PDF 上传未返回文件信息，请重试');
-      const created = await api.createTasks(datasetId, { items });
+      const created = await api.createTasks(datasetId, { items, ...(importContext ? { paper_import: importContext } : {}) });
       if (created.data.tasks?.length !== 1 || !created.data.tasks[0].task_id?.trim()) {
         throw new Error('文件已上传，但未能确认导入任务，请在导入任务中检查');
       }

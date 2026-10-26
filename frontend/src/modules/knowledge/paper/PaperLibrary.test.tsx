@@ -1,3 +1,6 @@
+const taskApi = vi.hoisted(() => ({ createTasks: vi.fn(), startTasks: vi.fn() }));
+vi.mock('../utils/request', () => ({ TaskServiceApi: () => taskApi }));
+vi.mock('@/runtime/readiness', () => ({ waitForRuntimeCapability: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../components/PaperTasks', () => ({ default: () => null }));
 vi.mock('./libraryDocuments', async (original) => ({ ...await original<typeof import('./libraryDocuments')>(), loadLibraryDocuments: vi.fn() }));
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -7,8 +10,8 @@ import PaperLibrary from "./PaperLibrary";
 import { loadLibraryDocuments } from './libraryDocuments';
 import { setPaperImportance, updatePaperIdentity } from '../api/paperWorkflows';
 vi.mock('../api/paperWorkflows', async original => ({ ...await original<typeof import('../api/paperWorkflows')>(), setPaperImportance: vi.fn(), updatePaperIdentity: vi.fn().mockResolvedValue(undefined) }));
-import { previewPaperLink, importPaperLink, listAcademicImportQueue } from '../api/academicReferences';
-vi.mock('../api/academicReferences', async original => ({ ...await original<typeof import('../api/academicReferences')>(), previewPaperLink: vi.fn(), importPaperLink: vi.fn(), listAcademicImportQueue: vi.fn(), retryAcademicImport: vi.fn() }));
+import { previewPaperLink, importPaperLink, listAcademicImportBatches } from '../api/academicReferences';
+vi.mock('../api/academicReferences', async original => ({ ...await original<typeof import('../api/academicReferences')>(), previewPaperLink: vi.fn(), importPaperLink: vi.fn(), listAcademicImportBatches: vi.fn(), retryAcademicImport: vi.fn() }));
 const personalMarks = new Map<string, boolean>();
 import { migratePaperLibrary } from "./libraryModel";
 import type { PaperItem } from "./model";
@@ -32,7 +35,6 @@ vi.mock("./pdfMeta", () => ({ paperFromPdf: vi.fn() }));
 vi.mock("./scholar", () => ({
   lookupIdentifier: vi.fn(),
 }));
-vi.mock("./PaperDetailDrawer", () => ({ default: ({ paper }: { paper: PaperItem }) => <div role="dialog" aria-label="文献详情">{paper.title}</div> }));
 
 const datasetId = "paper-navigation-test";
 const makePaper = (id: string, title: string, folderId: string | null, important = false): PaperItem => ({
@@ -142,7 +144,7 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
   vi.mocked(listImportedArxivPapers).mockReset().mockResolvedValue([]);
-  vi.mocked(listAcademicImportQueue).mockReset().mockResolvedValue([]);
+  vi.mocked(listAcademicImportBatches).mockReset().mockResolvedValue({ items: [], next_cursor: '', notification: { active: 0, needs_action: 0 } });
   vi.mocked(importPaperLink).mockReset().mockResolvedValue({ batch_id: 'link-batch' });
   vi.mocked(previewPaperLink).mockReset().mockImplementation(async input => {
     const item = await lookupIdentifier(input);
@@ -182,6 +184,37 @@ afterEach(async () => {
 });
 
 describe("paper library navigation and import", () => {
+  it("does not show an old missing-title prompt before current recognition metadata is loaded", async () => {
+    const data = loadPreviewPaperLibrary(datasetId);
+    data.papers[0].incomplete = true;
+    savePreviewPaperLibrary(datasetId, data);
+    let finish!: (source: Awaited<ReturnType<typeof loadLibraryDocuments>>) => void;
+    vi.mocked(loadLibraryDocuments).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    await renderLibrary();
+    expect(screen.queryByRole('button', { name: '待补全论文题名' })).not.toBeInTheDocument();
+    await act(async () => finish({
+      documents: [{ document_id: 'stored-pdf-a', display_name: 'paper.pdf' }],
+      states: [{ state: { document_id: 'stored-pdf-a', kind: 'paper', status: 'succeeded', paper_id: 'a', manual: false },
+        paper: { paper_id: 'a', title: 'Confirmed title', abstract: null }, is_important: false }],
+    }));
+    expect(screen.getByRole('heading', { name: 'Confirmed title' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '待补全论文题名' })).not.toBeInTheDocument();
+  });
+
+  it("opens the missing-title editor directly and clears the prompt only after a successful save", async () => {
+    const data = loadPreviewPaperLibrary(datasetId);
+    data.papers[0].incomplete = true;
+    savePreviewPaperLibrary(datasetId, data);
+    await renderLibrary();
+    fireEvent.click(screen.getByRole('button', { name: '待补全论文题名' }));
+    const dialog = within(screen.getByRole('dialog', { name: '文献详情' }));
+    fireEvent.change(dialog.getByLabelText('题名'), { target: { value: 'Confirmed title' } });
+    fireEvent.click(dialog.getByRole('button', { name: /保存题录/ }));
+    await waitFor(() => expect(updatePaperIdentity).toHaveBeenCalledWith('stored-pdf-a', expect.objectContaining({ paper: expect.objectContaining({ title: 'Confirmed title' }) })));
+    await waitFor(() => expect(loadPreviewPaperLibrary(datasetId).papers[0].incomplete).toBe(false));
+    expect(screen.queryByRole('button', { name: '待补全论文题名' })).not.toBeInTheDocument();
+  });
+
   it("opens the primary readable PDF in the current tab from the paper title", async () => {
     const data = loadPreviewPaperLibrary(datasetId);
     const primary = { ...data.attachments[0], id: "primary-pdf", contentRef: "primary-doc", isPrimary: true };
@@ -199,7 +232,8 @@ describe("paper library navigation and import", () => {
   it("keeps metadata accessible separately and uses it when there is no readable attachment", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     await renderLibrary();
-    fireEvent.click(screen.getByRole("button", { name: "Folder paper 的文献详情" }));
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Folder paper 的更多操作" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "查看详情" }));
     expect(screen.getByRole("dialog", { name: "文献详情" })).toHaveTextContent("Folder paper");
     expect(open).not.toHaveBeenCalled();
   });
@@ -210,6 +244,42 @@ describe("paper library navigation and import", () => {
     fireEvent.click(screen.getByRole("link", { name: "Unfiled paper" }));
     expect(screen.getByRole("dialog", { name: "文献详情" })).toHaveTextContent("Unfiled paper");
     expect(open).not.toHaveBeenCalled();
+  });
+
+  it('opens attachment and note counts directly on their detail tabs', async () => {
+    await renderLibrary();
+    const row = within(screen.getByRole('heading', { name: 'Folder paper' }).closest('tr')!);
+    fireEvent.click(row.getByRole('button', { name: '1 个附件' }));
+    expect(within(screen.getByRole('dialog', { name: '文献详情' })).getByRole('tab', { name: '附件 1' })).toHaveAttribute('aria-selected', 'true');
+    fireEvent.click(within(screen.getByRole('dialog', { name: '文献详情' })).getByRole('button', { name: '关闭' }));
+    fireEvent.click(row.getByRole('button', { name: '1 条笔记' }));
+    expect(within(screen.getByRole('dialog', { name: '文献详情' })).getByRole('tab', { name: '笔记 1' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Keep these notes')).toBeInTheDocument();
+  });
+
+  it('reuses document reparse with the primary PDF and actual processing level', async () => {
+    taskApi.createTasks.mockResolvedValue({ data: { tasks: [{ task_id: 'reparse-task' }] } });
+    taskApi.startTasks.mockResolvedValue({ data: { started_count: 1 } });
+    await renderLibrary({ processingLevel: 'parsed' });
+    fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '重新解析' }));
+    const dialog = screen.getByRole('dialog', { name: '重新解析' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /OK|确\s*定/ }));
+    await waitFor(() => expect(taskApi.createTasks).toHaveBeenCalled());
+    expect(taskApi.createTasks.mock.calls[0]).toEqual([datasetId, { parent: `datasets/${datasetId}`, items: [{ upload_file_id: '', task: { task_type: 'TASK_TYPE_REPARSE', document_ids: ['stored-pdf-a'], display_name: expect.any(String), reparse_groups: [], reparse_mode: 'rebuild' } }] }]);
+    await waitFor(() => expect(taskApi.startTasks).toHaveBeenCalledWith(datasetId, { task_ids: ['reparse-task'] }));
+  });
+
+  it('acknowledges a metadata retry and shows the pending state while refreshing', async () => {
+    let status = 'failed';
+    vi.mocked(loadLibraryDocuments).mockImplementation(async () => ({ documents: [], states: [{ state: { document_id: 'stored-pdf-a', kind: 'paper', paper_id: 'a', status, manual: false, error: status === 'failed' ? 'Model unavailable' : undefined }, is_important: false }] }));
+    vi.mocked(updatePaperIdentity).mockImplementationOnce(async () => { status = 'pending'; });
+    await renderLibrary();
+    fireEvent.click(screen.getByRole('button', { name: '论文信息识别失败' }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: '文献详情' })).getByRole('button', { name: '重试自动识别' }));
+    await waitFor(() => expect(updatePaperIdentity).toHaveBeenCalledWith('stored-pdf-a', { reidentify: true }));
+    await waitFor(() => expect(screen.getByText('论文信息自动识别：待识别')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: '重试自动识别' })).not.toBeInTheDocument();
   });
 
   it("places the star beside the title and updates favorites without opening the reader", async () => {
@@ -247,14 +317,14 @@ describe("paper library navigation and import", () => {
     expect(browse().getByRole("button", { name: "删除文件夹" })).toBeDisabled();
   });
 
-  it.each(["bib", "ris", "csv"] as const)("exports only selected papers as %s from the bulk menu", async (format) => {
+  it.each(["bib", "ris", "csv"] as const)("exports only selected papers as %s from the document toolbar", async (format) => {
     const readDownload = captureDownload();
     await renderLibrary();
     fireEvent.click(screen.getByRole("checkbox", { name: "选择 Folder paper" }));
     const bulkActions = within(screen.getByRole("region", { name: "已选论文" }));
-    fireEvent.mouseEnter(bulkActions.getByRole("button", { name: /更\s*多/ }));
-    fireEvent.mouseEnter(await screen.findByRole("menuitem", { name: /导出已选/ }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: format === "bib" ? "BibTeX" : format.toUpperCase() }));
+    expect(bulkActions.queryByRole("button", { name: /更\s*多/ })).not.toBeInTheDocument();
+    fireEvent.click(libraryTools().getByRole("button", { name: "导出题录" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(format === "bib" ? "BibTeX" : format.toUpperCase()) }));
 
     const content = await readDownload();
     expect(content).toContain("Folder paper");
@@ -263,11 +333,12 @@ describe("paper library navigation and import", () => {
     if (format === "csv") expect(content).toContain("第一个文件夹");
   });
 
-  it("keeps the document toolbar limited to search, filter and export", async () => {
+  it("groups search, filter, export and import notifications in the document toolbar", async () => {
     await renderLibrary();
     const tools = libraryTools();
-    expect(tools.getAllByRole("button")).toHaveLength(3);
-    for (const name of ["搜索", "筛选", "导出"]) expect(tools.getByRole("button", { name })).toBeInTheDocument();
+    expect(tools.getAllByRole("button")).toHaveLength(4);
+    for (const name of ["搜索", "筛选", "导出题录"]) expect(tools.getByRole("button", { name })).toBeInTheDocument();
+    expect(tools.getByRole("button", { name: /论文导入通知/ })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("textbox", { name: "搜索文献" })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText("搜索题名、作者、DOI 或 arXiv")).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "阅读状态" })).not.toBeInTheDocument();
@@ -291,9 +362,9 @@ describe("paper library navigation and import", () => {
     expect(screen.queryByRole("heading", { name: "Other favorite" })).not.toBeInTheDocument();
   });
 
-  it("switches directly between the three tools without closing the newly opened panel", async () => {
+  it("switches between tools and import notifications without overlapping panels", async () => {
     await renderLibrary();
-    for (const [tool, panel] of [["搜索", "搜索文献"], ["筛选", "筛选文献"], ["搜索", "搜索文献"]] as const) {
+    for (const [tool, panel] of [["搜索", "搜索文献"], ["筛选", "筛选文献"], ["论文导入通知：0 项进行中 · 0 项待处理", "论文导入通知"], ["搜索", "搜索文献"]] as const) {
       const button = libraryTools().getByRole("button", { name: tool });
       fireEvent.mouseDown(button);
       fireEvent.mouseUp(button);
@@ -303,14 +374,14 @@ describe("paper library navigation and import", () => {
         expect(screen.getByRole("dialog", { name: panel })).toBeInTheDocument();
       });
     }
-    const exportButton = libraryTools().getByRole("button", { name: "导出" });
+    const exportButton = libraryTools().getByRole("button", { name: "导出题录" });
     fireEvent.mouseDown(exportButton);
     fireEvent.mouseUp(exportButton);
     fireEvent.click(exportButton);
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       expect(screen.getAllByRole("menu")).toHaveLength(1);
-      expect(screen.getByRole("menuitem", { name: "BibTeX" })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: /BibTeX/ })).toBeInTheDocument();
     });
   });
 
@@ -367,8 +438,8 @@ describe("paper library navigation and import", () => {
     fireEvent.change(within(search).getByRole("textbox", { name: "搜索文献" }), { target: { value: "paper" } });
     await closePopover("搜索文献");
     if (selectOnly) fireEvent.click(screen.getByRole("checkbox", { name: "选择 Folder paper" }));
-    fireEvent.click(libraryTools().getByRole("button", { name: "导出" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: format === "bib" ? "BibTeX" : format.toUpperCase() }));
+    fireEvent.click(libraryTools().getByRole("button", { name: "导出题录" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: new RegExp(format === "bib" ? "BibTeX" : format.toUpperCase()) }));
     const content = await readDownload();
     expect(content).toContain("Folder paper");
     expect(content).not.toContain("Other favorite");
@@ -480,7 +551,7 @@ describe("paper library navigation and import", () => {
     fireEvent.click(addButton);
     await waitFor(() => expect(onUploadPdf).toHaveBeenCalledOnce());
     expect(paperFromPdf).toHaveBeenCalledOnce();
-    expect(onUploadPdf.mock.calls[0]).toEqual([vi.mocked(paperFromPdf).mock.calls[0][0]]);
+    expect(onUploadPdf.mock.calls[0]).toEqual([vi.mocked(paperFromPdf).mock.calls[0][0], expect.objectContaining({ idempotency_key: expect.any(String), library_paper_id: "uploaded-paper", title: "A different original study" })]);
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(addButton).toBeDisabled();
     expect(loadPreviewPaperLibrary(datasetId).papers.some((item) => item.id === paper.id)).toBe(false);
@@ -737,24 +808,20 @@ describe("paper library navigation and import", () => {
 });
 
 describe("paper library table and drag to folders", () => {
-  it("shows title, publication year, venue and citation count in aligned columns", async () => {
+  it("shows publication columns without an unavailable citation count", async () => {
     const data = loadPreviewPaperLibrary(datasetId);
     data.papers[0].citationCount = 1250;
     data.papers[1].citationCount = 0;
     savePreviewPaperLibrary(datasetId, data);
     await renderLibrary();
 
-    for (const name of ["标题", "年份", "刊物", "引用量"]) {
+    for (const name of ["标题", "年份", "会议／期刊"]) {
       expect(screen.getByRole("columnheader", { name })).toBeInTheDocument();
     }
     const firstRow = within(screen.getByRole("heading", { name: "Folder paper" }).closest('[role="row"], tr') as HTMLElement);
     expect(firstRow.getByRole("cell", { name: "2026" })).toBeInTheDocument();
     expect(firstRow.getByRole("cell", { name: "Research Journal" })).toBeInTheDocument();
-    expect(firstRow.getByRole("cell", { name: /^(1,250|1250)$/ })).toBeInTheDocument();
-    const zeroRow = within(screen.getByRole("heading", { name: "Other favorite" }).closest('[role="row"], tr') as HTMLElement);
-    expect(zeroRow.getByRole("cell", { name: "0" })).toBeInTheDocument();
-    const unknownRow = within(screen.getByRole("heading", { name: "Unfiled paper" }).closest('[role="row"], tr') as HTMLElement);
-    expect(unknownRow.getByRole("cell", { name: "—" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "引用量" })).not.toBeInTheDocument();
   });
 
   it("moves a dragged paper into a folder without changing its rich content", async () => {
@@ -1099,20 +1166,19 @@ describe("paper library backend arXiv import", () => {
 
 describe("backend durable paper library", () => {
   it("keeps polling a retry whose failed items are still waiting for the worker", async () => {
-    const waiting = { item_id: 'retry-item', batch_id: 'retry-batch', target_dataset_id: datasetId, work_id: 'retry-paper', title: 'Retry paper', status: 'failed' as const, batch_status: 'pending', stage: 'acquire', created_at: '2026-10-23T00:00:00Z', updated_at: '2026-10-23T00:00:00Z' };
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      vi.mocked(listAcademicImportQueue).mockResolvedValue([waiting]);
+      vi.mocked(listAcademicImportBatches).mockResolvedValue({ items: [], next_cursor: '', notification: { active: 1, needs_action: 0 } });
       await renderLibrary();
-      expect(screen.getByText('论文导入：0 篇待处理 · 1 篇进行中')).toBeInTheDocument();
-      const requests = vi.mocked(listAcademicImportQueue).mock.calls.length;
-      vi.mocked(listAcademicImportQueue).mockResolvedValue([{ ...waiting, status: 'succeeded', batch_status: 'succeeded', current_document: { document_id: 'saved', processing_status: 'ready' } }]);
+      expect(screen.getByRole('button', { name: '论文导入通知：1 项进行中 · 0 项待处理' })).toBeInTheDocument();
+      const requests = vi.mocked(listAcademicImportBatches).mock.calls.length;
+      vi.mocked(listAcademicImportBatches).mockResolvedValue({ items: [], next_cursor: '', notification: { active: 0, needs_action: 0 } });
       await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
-      expect(vi.mocked(listAcademicImportQueue).mock.calls.length).toBeGreaterThan(requests);
-      expect(screen.getByText('论文导入：0 篇待处理 · 0 篇进行中')).toBeInTheDocument();
-      const completedRequests = vi.mocked(listAcademicImportQueue).mock.calls.length;
+      expect(vi.mocked(listAcademicImportBatches).mock.calls.length).toBeGreaterThan(requests);
+      expect(screen.getByRole('button', { name: '论文导入通知：0 项进行中 · 0 项待处理' })).toBeInTheDocument();
+      const completedRequests = vi.mocked(listAcademicImportBatches).mock.calls.length;
       await act(async () => { await vi.advanceTimersByTimeAsync(24000); });
-      expect(vi.mocked(listAcademicImportQueue).mock.calls.length).toBe(completedRequests);
+      expect(vi.mocked(listAcademicImportBatches).mock.calls.length).toBe(completedRequests);
     } finally { vi.useRealTimers(); }
   });
 
@@ -1121,8 +1187,9 @@ describe("backend durable paper library", () => {
     vi.mocked(updatePaperIdentity).mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
     await renderLibrary();
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Folder paper 的更多操作" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }));
-    const dialog = await screen.findByRole("dialog", { name: "编辑题录" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "查看详情" }));
+    const dialog = await screen.findByRole("dialog", { name: "文献详情" });
+    fireEvent.click(within(dialog).getByRole("button", { name: /编\s*辑/ }));
     fireEvent.change(within(dialog).getByLabelText("题名"), { target: { value: "Keep this draft" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "保存题录" }));
     await waitFor(() => expect(updatePaperIdentity).toHaveBeenCalledOnce());
@@ -1140,8 +1207,9 @@ describe("backend durable paper library", () => {
   it("retains a stale edit draft without overwriting another member's changes after refresh", async () => {
     await renderLibrary();
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Folder paper 的更多操作" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "编辑" }));
-    const dialog = await screen.findByRole("dialog", { name: "编辑题录" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "查看详情" }));
+    const dialog = await screen.findByRole("dialog", { name: "文献详情" });
+    fireEvent.click(within(dialog).getByRole("button", { name: /编\s*辑/ }));
     fireEvent.change(within(dialog).getByLabelText("题名"), { target: { value: "My unsaved title" } });
     const shared = loadPreviewPaperLibrary(datasetId);
     shared.papers[0].tags = ["Shared tag"];
@@ -1151,8 +1219,8 @@ describe("backend durable paper library", () => {
     expect(savePersistedPaperLibrary).not.toHaveBeenCalled();
     expect(within(dialog).getByRole("alert")).toHaveTextContent("重新打开编辑");
     expect(within(dialog).getByLabelText("题名")).toHaveValue("My unsaved title");
-    expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
-    expect(screen.getByText("Shared tag")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "Folder paper" })).toHaveLength(2);
+    expect(screen.getAllByText("Shared tag")[0]).toBeInTheDocument();
   });
 
   it("honors reader access and never writes an arXiv synchronization snapshot", async () => {

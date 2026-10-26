@@ -66,6 +66,10 @@ export interface ExpansionDetail {
   handoffs: Array<{ id: string; kind: string; conversation_id: string; version: number }>;
 }
 export interface DocumentAcademic {
+  source_url?: string;
+  import_method?: import('../paper/model').PaperImportMethod;
+  expansion_id?: string;
+  expansion_version?: number;
   source_version?: string;
   source_provider?: string;
   content_sha256?: string;

@@ -1,6 +1,7 @@
 export type ReadingStatus = "unread" | "reading" | "read";
 export type LibraryView = "all" | "important" | "incomplete";
-export type ImportSource = "local" | "zotero" | "google_scholar" | "semantic_scholar" | "doi" | "arxiv";
+export type ImportSource = "local" | "zotero" | "google_scholar" | "semantic_scholar" | "doi" | "arxiv" | "web" | "unknown";
+export type PaperImportMethod = "upload" | "link" | "bibliography" | "expansion" | "references";
 export type ParseState = "ready" | "parsing" | "failed";
 export type MatchMode = "all" | "any";
 export type CitationStyle = "gbt" | "apa" | "mla";
@@ -22,6 +23,7 @@ export interface PaperItem {
   important: boolean;
   tags: string[];
   source: ImportSource;
+  importMethod?: PaperImportMethod;
   parse: ParseState;
   doi?: string;
   arxiv?: string;
@@ -59,7 +61,21 @@ export const sourceLabel: Record<ImportSource, string> = {
   semantic_scholar: "Semantic Scholar",
   doi: "DOI",
   arxiv: "arXiv",
+  web: "网站",
+  unknown: "未记录",
 };
+
+export const importMethodLabel: Record<PaperImportMethod, string> = {
+  upload: "上传 PDF", link: "链接导入", bibliography: "题录导入", expansion: "自动扩展", references: "参考文献导入",
+};
+
+export function safePaperUrl(value?: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : undefined;
+  } catch { return undefined; }
+}
 
 export const statusLabel: Record<ReadingStatus, string> = {
   unread: "未读",

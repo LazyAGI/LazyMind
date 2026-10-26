@@ -197,3 +197,53 @@ export async function importPaperLink(targetDatasetId: string, item: ImportPrevi
 export async function retryAcademicImport(batchId: string) {
   await axiosInstance.post(`${core}/imports/${encodeURIComponent(batchId)}:retry`, {});
 }
+
+export interface PaperUploadContext {
+  idempotency_key: string;
+  library_paper_id: string;
+  title: string;
+}
+export interface LibraryImportContext {
+  idempotency_key: string;
+  entry_type: 'bibliography' | 'paper_link';
+  format?: 'bib' | 'ris' | 'csv';
+  file_name?: string;
+  preview_token?: string;
+  items: Array<{ paper_id: string }>;
+}
+export interface ImportOperationItem extends AcademicImportQueueItem {
+  library_paper_id?: string;
+  result_kind: string;
+  current_state: 'importing' | 'processing' | 'ready' | 'metadata_only' | 'skipped' | 'failed' | 'processing_failed' | 'canceled' | 'deleted';
+  document_deleted: boolean;
+  resolved_later: boolean;
+  can_retry: boolean;
+}
+export interface ImportOperation {
+  id: string;
+  entry_type: string;
+  target_dataset_id: string;
+  source: { title?: string; expansion_id?: string; expansion_version?: number; file_name?: string; format?: string };
+  status: string;
+  created_at: string;
+  summary: { total: number; ready: number; metadata_only: number; skipped: number; active: number; failed: number; canceled: number; deleted: number; resolved_later: number; retryable: number; needs_action: number };
+}
+export interface ImportBatchPage {
+  items: ImportOperation[];
+  next_cursor: string;
+  notification: { active: number; needs_action: number };
+}
+export interface ImportBatchDetail {
+  operation: ImportOperation;
+  items: ImportOperationItem[];
+  next_cursor: string;
+}
+export const emptyImportBatchPage = (): ImportBatchPage => ({ items: [], next_cursor: '', notification: { active: 0, needs_action: 0 } });
+export async function listAcademicImportBatches(datasetId: string, cursor?: string): Promise<ImportBatchPage> {
+  const response = await axiosInstance.get(`${core}/import-batches`, { params: { target_dataset_id: datasetId, cursor }, silentError: true } as never);
+  return unwrap<ImportBatchPage>(response.data);
+}
+export async function getAcademicImportBatch(batchId: string, cursor?: string): Promise<ImportBatchDetail> {
+  const response = await axiosInstance.get(`${core}/import-batches/${encodeURIComponent(batchId)}`, { params: { cursor }, silentError: true } as never);
+  return unwrap<ImportBatchDetail>(response.data);
+}

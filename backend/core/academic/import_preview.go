@@ -17,11 +17,13 @@ import (
 const importPreviewTTL = 30 * time.Minute
 
 type importPreviewReceipt struct {
-	UserID    string              `json:"user_id"`
-	DatasetID string              `json:"dataset_id"`
-	ExpiresAt time.Time           `json:"expires_at"`
-	Items     []PreviewItem       `json:"items"`
-	Verified  map[string]PaperRef `json:"verified"`
+	UserID           string              `json:"user_id"`
+	DatasetID        string              `json:"dataset_id"`
+	ExpiresAt        time.Time           `json:"expires_at"`
+	Items            []PreviewItem       `json:"items"`
+	Verified         map[string]PaperRef `json:"verified"`
+	ExpansionID      string              `json:"expansion_id,omitempty"`
+	ExpansionVersion int64               `json:"expansion_version,omitempty"`
 }
 
 // This field exists only in persisted job input. The public candidate type
@@ -31,12 +33,15 @@ type savedImportCandidate struct {
 	VerifiedPaper *PaperRef `json:"verified_paper,omitempty"`
 }
 
-func saveImportPreview(ctx context.Context, user, dataset string, items []PreviewItem, verified map[string]PaperRef) (string, error) {
+func saveImportPreview(ctx context.Context, user, dataset string, items []PreviewItem, verified map[string]PaperRef, expansion *orm.AcademicExpansion) (string, error) {
 	if store.State() == nil {
 		return "", errors.New("import preview state is unavailable")
 	}
 	token := uuid.NewString()
 	receipt := importPreviewReceipt{UserID: user, DatasetID: dataset, ExpiresAt: time.Now().UTC().Add(importPreviewTTL), Items: items, Verified: verified}
+	if expansion != nil {
+		receipt.ExpansionID, receipt.ExpansionVersion = expansion.ID, expansion.Version
+	}
 	return token, store.State().Set(ctx, "academic:import-preview:"+token, marshal(receipt), importPreviewTTL)
 }
 

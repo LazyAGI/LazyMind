@@ -223,14 +223,18 @@ export default function MainLayout() {
     matchPath("/memory-management/workflows/published/:workflowRef", pathname) ||
     matchPath("/memory-management/workflows/cloud/:resourceId", pathname),
   );
-  const knowledgeDatasetId = matchPath("/lib/knowledge/detail/:id", pathname)?.params.id;
-  const currentKnowledgeDataset = useDatasetPermissionStore((state) => state.currentDataset);
+  const knowledgeDatasetId = matchPath("/lib/knowledge/detail/:id", pathname)?.params.id
+    || matchPath("/lib/knowledge/knowledge/:knowledgeBaseId/:knowledgeId", pathname)?.params.knowledgeBaseId;
+  const { currentDataset: currentKnowledgeDataset, requestedDatasetId, datasetLoading, datasetError, loadDataset, clearDataset } = useDatasetPermissionStore();
+  const datasetOwner = useRef(notificationUserKey);
+  const knowledgeDatasetReady = datasetOwner.current === notificationUserKey && currentKnowledgeDataset?.dataset_id === knowledgeDatasetId;
   const libraryKind = currentKnowledgeDataset?.dataset_id === knowledgeDatasetId
     ? currentKnowledgeDataset?.library_kind : undefined;
-  const isPaperLibraryDetail = Boolean(
-    matchPath("/lib/knowledge/paper-preview", pathname) || isPaperLibrary(knowledgeDatasetId, libraryKind),
+  const isPaperPage = Boolean(
+    matchPath("/lib/knowledge/paper-preview", pathname) || isPaperLibrary(knowledgeDatasetId, libraryKind)
+      || (knowledgeDatasetReady && libraryKind === undefined && currentKnowledgeDataset && 'scenario_key' in currentKnowledgeDataset && currentKnowledgeDataset.scenario_key === 'academic_papers'),
   );
-  const startsWithCompactSidebar = isWorkflowDetail || isPaperLibraryDetail;
+  const startsWithCompactSidebar = isWorkflowDetail || isPaperPage;
   const defaultSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
   const [sidebarSize, setSidebarSize] = useState({
     pathname,
@@ -383,6 +387,19 @@ export default function MainLayout() {
     checkFailed: agreementCheckFailed,
     retryCheck: retryAgreementCheck,
   } = useUserAgreementConsentGate(isLoggedIn);
+
+  useEffect(() => {
+    if (datasetOwner.current !== notificationUserKey) {
+      datasetOwner.current = notificationUserKey;
+      clearDataset();
+    }
+    if (!isLoggedIn || !knowledgeDatasetId) {
+      clearDataset();
+      return;
+    }
+    if (localSessionGate.loading || localSessionGate.error || agreementLoading || agreementCheckFailed) return;
+    void loadDataset(knowledgeDatasetId).catch(() => {});
+  }, [knowledgeDatasetId, notificationUserKey, isLoggedIn, localSessionGate.loading, localSessionGate.error, agreementLoading, agreementCheckFailed, loadDataset, clearDataset]);
 
   useEffect(() => {
     if (!localSessionGate.enabled) {
@@ -944,13 +961,24 @@ export default function MainLayout() {
     );
   }
 
+  if (knowledgeDatasetId && !knowledgeDatasetReady) {
+    const error = requestedDatasetId === knowledgeDatasetId ? datasetError : '';
+    return <div className="local-session-gate" role="status">
+      <div className="local-session-panel">
+        {(datasetLoading || !error) && <Spin />}
+        <div className="local-session-message">{error ? t('layout.knowledgeLoadFailed') : t('layout.loadingKnowledge')}</div>
+        {error && <Button type="primary" onClick={() => void loadDataset(knowledgeDatasetId, true).catch(() => {})}>{t('common.retry')}</Button>}
+      </div>
+    </div>;
+  }
+
   return (
     <Layout hasSider className="main-layout">
       <Sider
         id="main-navigation"
         width={sidebarWidth}
         trigger={null}
-        className={`sider-bar-style${isMenuCollapsed ? " is-collapsed" : ""}`}
+        className={`sider-bar-style${isMenuCollapsed ? " is-collapsed" : ""}${!sidebarRouteChanged && sidebarSize.manuallyResized ? " is-manually-resized" : ""}`}
       >
         <div className="sider-inner">
           <div className="sider-brand-row">

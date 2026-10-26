@@ -23,16 +23,11 @@ describe("PaperFilterPanel", () => {
   });
 
   it("clears all groups and ranges", () => {
-    render(<Harness initial={{ ...DEFAULT_PAPER_FILTERS, star: "starred", pdf: "uploaded", folder: "filed", status: "read", yearRange: [2024, 2024], minCitations: 20 }} />);
+    render(<Harness initial={{ ...DEFAULT_PAPER_FILTERS, star: "starred", pdf: "uploaded", folder: "filed", status: "read", yearRange: [2024, 2024] }} />);
     fireEvent.click(screen.getByRole("button", { name: "清除筛选" }));
     expect(JSON.parse(screen.getByLabelText("筛选条件").textContent || "{}")).toEqual(DEFAULT_PAPER_FILTERS);
   });
 
-  it("exposes minimum citations as an editable numeric field", () => {
-    render(<Harness />);
-    fireEvent.change(screen.getByRole("spinbutton", { name: "最低引用量" }), { target: { value: "12" } });
-    expect(JSON.parse(screen.getByLabelText("筛选条件").textContent || "{}").minCitations).toBe(12);
-  });
 
   it("handles an empty library without fabricated years", () => {
     render(<PaperFilterPanel papers={[]} value={DEFAULT_PAPER_FILTERS} onChange={() => {}} />);

@@ -13,6 +13,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/store"
@@ -105,8 +106,9 @@ func PutPaperLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Revision *int64          `json:"revision"`
-		Data     json.RawMessage `json:"data"`
+		Revision      *int64                `json:"revision"`
+		ImportContext *LibraryImportContext `json:"import_context,omitempty"`
+		Data          json.RawMessage       `json:"data"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPaperLibraryBytes))
 	decoder.DisallowUnknownFields()
@@ -162,9 +164,28 @@ func PutPaperLibrary(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	saved, err := savePaperLibrary(r.Context(), store.DB(), datasetID, *request.Revision, request.Data)
+	if request.ImportContext != nil && request.ImportContext.IdempotencyKey != "" {
+		guard, lockErr := lockArxivImport(r.Context(), store.DB(), "request:"+store.UserID(r)+":"+request.ImportContext.IdempotencyKey)
+		if lockErr != nil {
+			replyError(w, 500, "PAPER_LIBRARY_SAVE_FAILED", lockErr.Error())
+			return
+		}
+		defer guard.release()
+		r = r.WithContext(guard.ctx)
+	}
+	saved, replay, err := savePaperLibraryImport(r.Context(), store.DB(), datasetID, store.UserID(r), *request.Revision, request.Data, request.ImportContext)
 	if err != nil {
 		replyError(w, 500, "PAPER_LIBRARY_SAVE_FAILED", "论文库保存失败，请重试；已保存的数据未被修改")
+		return
+	}
+	if replay {
+		result, loadErr := readPaperLibrary(r.Context(), store.DB(), datasetID)
+		if loadErr != nil {
+			replyError(w, 500, "PAPER_LIBRARY_LOAD_FAILED", loadErr.Error())
+			return
+		}
+		result.CanWrite = canWrite
+		common.ReplyJSON(w, result)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -311,7 +332,7 @@ func validatePaperLibraryObject(value any, documents map[string]bool) error {
 						return errors.New("论文 folderId 无效")
 					}
 				}
-				for field, allowed := range map[string]string{"status": "|unread|reading|read|", "parse": "|ready|parsing|failed|", "source": "|local|zotero|google_scholar|semantic_scholar|doi|arxiv|"} {
+				for field, allowed := range map[string]string{"status": "|unread|reading|read|", "parse": "|ready|parsing|failed|", "source": "|local|zotero|google_scholar|semantic_scholar|doi|arxiv|web|unknown|"} {
 					v, ok := object[field].(string)
 					if !ok || !strings.Contains(allowed, "|"+v+"|") {
 						return fmt.Errorf("论文 %s 无效", field)

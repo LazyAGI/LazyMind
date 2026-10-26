@@ -33,6 +33,12 @@ beforeEach(() => {
 });
 
 describe('confirmed PDF upload retries', () => {
+  it('attaches a durable operation context to the existing upload request', async () => {
+    const context = { idempotency_key: 'operation-key', library_paper_id: 'paper', title: 'Study' };
+    await createPaperPdfUploader('papers')(file, 'DEFAULT', context);
+    expect(requests.create.mock.calls[0][0].createTaskRequest.paper_import).toEqual(context);
+  });
+
   it('reuses the created document and task after a rejected start', async () => {
     const upload = createPaperPdfUploader('papers');
     requests.start.mockResolvedValueOnce(rejected);

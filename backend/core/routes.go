@@ -308,6 +308,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/academic/arxiv:import", []string{"document.write"}, academic.ImportArxiv)
 	handleAPI(r, "GET", "/academic/arxiv/library", []string{"document.read"}, academic.ListArxivLibrary)
 	handleAPI(r, "GET", "/academic/library", []string{"document.read"}, academic.GetPaperLibrary)
+	handleAPI(r, "GET", "/academic/import-batches", []string{"document.read"}, academic.ListImportBatches)
+	handleAPI(r, "GET", "/academic/import-batches/{batch_id}", []string{"document.read"}, academic.GetImportBatch)
 	handleAPI(r, "PUT", "/academic/library", []string{"document.write"}, academic.PutPaperLibrary)
 	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)
 	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, systemdeps.RequireRAG(academic.CheckPresence))

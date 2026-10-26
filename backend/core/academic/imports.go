@@ -43,9 +43,10 @@ type createImportRequest struct {
 }
 
 type paperImportPayload struct {
-	BatchID  string `json:"batch_id"`
-	UserID   string `json:"user_id"`
-	UserName string `json:"user_name"`
+	ItemIDs  []string `json:"item_ids,omitempty"`
+	BatchID  string   `json:"batch_id"`
+	UserID   string   `json:"user_id"`
+	UserName string   `json:"user_name"`
 }
 
 func init() { asyncjob.Register(paperImportJobType, handlePaperImportJob) }
@@ -107,8 +108,24 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	batchID := uuid.NewString()
 	sources, _ := json.Marshal(req.SourceDocumentIDs)
-	policy, _ := json.Marshal(map[string]any{"version_policy": "skip_exact"})
+	policySnapshot := map[string]any{"version_policy": "skip_exact"}
+	sourceContext := map[string]any{}
+	if preview != nil && preview.ExpansionID != "" {
+		record, ok := ownedExpansion(w, r, userID, preview.ExpansionID)
+		if !ok {
+			return
+		}
+		if record.DatasetID != req.TargetDatasetID {
+			replyError(w, 400, "INVALID_REQUEST", "target must be the expansion collection")
+			return
+		}
+		entryType = "paper_expansion"
+		sourceContext["expansion_id"], sourceContext["expansion_version"], sourceContext["title"] = record.ID, preview.ExpansionVersion, record.Title
+		policySnapshot["expansion_id"], policySnapshot["expansion_version"] = preview.ExpansionID, preview.ExpansionVersion
+	}
+	policy, _ := json.Marshal(policySnapshot)
 	batch := orm.PaperImportBatch{ID: batchID, EntryType: entryType, TargetDatasetID: req.TargetDatasetID, TargetPID: req.TargetPID, SourceDocumentIDsJSON: sources, PolicySnapshotJSON: policy, Status: "pending", TotalItems: len(req.Items), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey), CreatedBy: userID, CreatedAt: now, UpdatedAt: now}
+	batch.SourceContextJSON = marshal(sourceContext)
 	items := make([]orm.PaperImportItem, 0, len(req.Items))
 	seen := map[string]bool{}
 	alreadyQueued := 0
@@ -165,7 +182,12 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 		if input.Candidate.URL == "" {
 			stage = "resolve"
 		}
-		items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batchID, AcademicWorkID: input.WorkID, ReferenceIDsJSON: refs, PresenceSnapshotJSON: json.RawMessage("{}"), SelectedCandidateJSON: candidate, Stage: stage, Status: "pending", ErrorDetailsJSON: json.RawMessage("{}"), CreatedAt: now, UpdatedAt: now})
+		var work orm.AcademicWork
+		if err := store.DB().WithContext(r.Context()).Select("id, canonical_title").Where("id=?", input.WorkID).Take(&work).Error; err != nil {
+			replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
+			return
+		}
+		items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batchID, AcademicWorkID: input.WorkID, TitleSnapshot: work.CanonicalTitle, ReferenceIDsJSON: refs, PresenceSnapshotJSON: json.RawMessage("{}"), SelectedCandidateJSON: candidate, Stage: stage, Status: "pending", ErrorDetailsJSON: json.RawMessage("{}"), CreatedAt: now, UpdatedAt: now})
 	}
 	if len(items) == 0 {
 		if alreadyQueued > 0 {
@@ -347,27 +369,58 @@ func RetryImport(w http.ResponseWriter, r *http.Request) {
 		common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": batch.AsyncJobID, "status": batch.Status})
 		return
 	}
-	var failed int64
-	if err := store.DB().WithContext(r.Context()).Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batchID).Count(&failed).Error; err != nil {
-		replyError(w, http.StatusInternalServerError, "IMPORT_QUERY_FAILED", err.Error())
-		return
-	}
-	if failed == 0 {
-		replyError(w, http.StatusConflict, "NO_FAILED_ITEMS", "there are no failed items to retry")
-		return
-	}
-	queued, err := asyncjob.Enqueue(r.Context(), store.DB(), asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID,
-		IdempotencyKey: "paper-import-retry:" + batch.ID + ":" + uuid.NewString(), Payload: paperImportPayload{BatchID: batch.ID, UserID: userID, UserName: store.UserName(r)},
-		CreateUserID: userID, CreateUserName: store.UserName(r)})
+	operations, err := loadImportOperations(r.Context(), store.DB(), []orm.PaperImportBatch{batch}, true, map[string]*ImportQueueDocument{})
 	if err != nil {
 		replyError(w, 500, "IMPORT_RETRY_FAILED", err.Error())
 		return
 	}
-	if err := store.DB().WithContext(r.Context()).Model(&batch).Updates(map[string]any{"status": "pending", "async_job_id": queued.ID, "updated_at": time.Now().UTC()}).Error; err != nil {
-		replyError(w, http.StatusInternalServerError, "IMPORT_RETRY_FAILED", err.Error())
+	ids := []string{}
+	resumed := 0
+	for _, item := range operations[0].Items {
+		if !item.CanRetry {
+			continue
+		}
+		if item.CurrentDocument != nil {
+			imported, resumeErr := doc.ResumeLocalFileImport(r.Context(), doc.ResumeLocalFileImportRequest{DatasetID: batch.TargetDatasetID, DocumentID: item.CurrentDocument.DocumentID, TaskID: item.taskID, UserID: userID, UserName: store.UserName(r)})
+			if resumeErr != nil {
+				replyError(w, 500, "IMPORT_RETRY_FAILED", resumeErr.Error())
+				return
+			}
+			if err := store.DB().WithContext(r.Context()).Model(&orm.PaperImportItem{}).Where("id=?", item.ItemID).Updates(map[string]any{"document_task_id": imported.TaskID, "status": "succeeded", "result_kind": "imported", "error_code": "", "error_details_json": json.RawMessage(`{}`), "updated_at": time.Now().UTC()}).Error; err != nil {
+				replyError(w, 500, "IMPORT_RETRY_FAILED", err.Error())
+				return
+			}
+			resumed++
+		} else if batch.EntryType != "pdf_upload" {
+			ids = append(ids, item.ItemID)
+		}
+	}
+	if len(ids) == 0 {
+		if resumed == 0 {
+			replyError(w, 409, "NO_FAILED_ITEMS", "there are no failed items to retry")
+			return
+		}
+		if err := store.DB().WithContext(r.Context()).Model(&batch).Updates(map[string]any{"status": "succeeded", "updated_at": time.Now().UTC()}).Error; err != nil {
+			replyError(w, 500, "IMPORT_RETRY_FAILED", err.Error())
+			return
+		}
+		common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "retry_items": resumed})
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": queued.ID, "status": "pending", "retry_items": failed})
+	var queued *orm.AsyncJob
+	err = store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var err error
+		queued, err = asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID, IdempotencyKey: "paper-import-retry:" + batch.ID + ":" + uuid.NewString(), Payload: paperImportPayload{BatchID: batch.ID, UserID: userID, UserName: store.UserName(r), ItemIDs: ids}, CreateUserID: userID, CreateUserName: store.UserName(r)})
+		if err != nil {
+			return err
+		}
+		return tx.Model(&batch).Updates(map[string]any{"status": "pending", "async_job_id": queued.ID, "updated_at": time.Now().UTC()}).Error
+	})
+	if err != nil {
+		replyError(w, 500, "IMPORT_RETRY_FAILED", err.Error())
+		return
+	}
+	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": queued.ID, "status": "pending", "retry_items": len(ids) + resumed})
 }
 
 type paperImportService struct {
@@ -402,7 +455,11 @@ func (s paperImportService) handleJob(ctx context.Context, job asyncjob.Job, rep
 		}
 	}()
 	var items []orm.PaperImportItem
-	if err := store.DB().WithContext(ctx).Where("batch_id = ? AND status IN ?", batch.ID, []string{"pending", "failed"}).Order("created_at ASC").Find(&items).Error; err != nil {
+	itemQuery := store.DB().WithContext(ctx).Where("batch_id = ? AND status IN ?", batch.ID, []string{"pending", "failed"})
+	if len(payload.ItemIDs) > 0 {
+		itemQuery = itemQuery.Where("id IN ?", payload.ItemIDs)
+	}
+	if err := itemQuery.Order("created_at ASC").Find(&items).Error; err != nil {
 		return asyncjob.Result{}, err
 	}
 	if err := store.DB().WithContext(ctx).Model(&batch).Updates(map[string]any{"status": "running", "updated_at": time.Now().UTC()}).Error; err != nil {

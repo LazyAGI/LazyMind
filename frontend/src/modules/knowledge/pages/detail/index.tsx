@@ -1,3 +1,4 @@
+import type { PaperUploadContext } from "../../api/academicReferences";
 import {
   Alert,
   message,
@@ -50,7 +51,6 @@ import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common"
 import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import { inspectFinishedImportTasks, mergeTrackedImportTasks, reconcileImportTaskFailures, type ImportTaskFailure, type ImportTaskState } from "./importTaskFailures";
 import { TaskTab } from "./components/ImportTaskList";
-import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
 import { createPaperPdfUploader } from "@/modules/knowledge/paper/pdfUpload";
 import { RuntimeReadinessError, waitForRuntimeCapability } from "@/runtime/readiness";
 import { DocumentServiceApi, TaskServiceApi } from "../../utils/request";
@@ -140,7 +140,9 @@ const Detail = () => {
   const importingTaskListRef = useRef<ImportTaskState[]>([]);
   const taskInspectionTokensRef = useRef(new Map<string, symbol>());
 
-  const [detail, setDetail] = useState<DatasetWithProcessingLevel>();
+  const { id = "" } = useParams();
+  const currentDataset = useDatasetPermissionStore(state => state.currentDataset);
+  const detail = currentDataset?.dataset_id === id ? currentDataset as DatasetWithProcessingLevel : undefined;
   const [runningTotal, setRunningTotal] = useState(0);
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
@@ -153,7 +155,6 @@ const Detail = () => {
   const [importTaskFailures, setImportTaskFailures] = useState<ImportTaskFailure[]>([]);
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === "system-admin";
 
-  const { id = "" } = useParams();
   const uploadPaperPdfTask = useMemo(() => createPaperPdfUploader(id), [id]);
   const activeDatasetIdRef = useRef(id);
   activeDatasetIdRef.current = id;
@@ -162,25 +163,17 @@ const Detail = () => {
   const navigate = useNavigate();
   const { returnToList, listUrl } = useKnowledgeListReturn();
 
-  const { setCurrentDataset, clearDataset } = useDatasetPermissionStore();
-
-  const getDetail = useCallback(() => {
-    KnowledgeBaseServiceApi()
-      .datasetServiceGetDataset({ dataset: id })
-      .then((res) => {
-        if (activeDatasetIdRef.current !== id) return;
-        const dataset = res.data as unknown as DatasetWithProcessingLevel;
-        setDetail(dataset);
-        setCurrentDataset(dataset);
-      });
-  }, [id, setCurrentDataset]);
+  const loadDataset = useDatasetPermissionStore(state => state.loadDataset);
+  const getDetail = useCallback((refresh = true) => {
+    void loadDataset(id, refresh).catch(() => {});
+  }, [id, loadDataset]);
 
   useEffect(() => {
     importingTaskListRef.current = [];
     taskInspectionTokensRef.current.clear();
     setTaskPollingError("");
     setImportTaskFailures([]);
-    getDetail();
+    getDetail(false);
     getImportingTotal();
     const unwrap = (
       resp: { data: { data?: { ready: boolean } } | { ready: boolean } } | null,
@@ -238,10 +231,9 @@ const Detail = () => {
       );
       document.removeEventListener("visibilitychange", onVisibilityChange);
       pollingRef.current.cancel();
-      clearDataset();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getDetail, clearDataset]);
+  }, [getDetail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -437,7 +429,7 @@ const Detail = () => {
   );
   const canImport = hasUploadPermission || hasWritePermission;
 
-  async function uploadPaperPdf(file: File): Promise<string | void> {
+  async function uploadPaperPdf(file: File, importContext?: PaperUploadContext): Promise<string | void> {
     if (!canImport) throw new Error("没有向此论文库上传文件的权限");
     if (!file.name.toLowerCase().endsWith(".pdf")) throw new Error("请选择 PDF 文件");
     if (file.size > 500 * 1024 * 1024) throw new Error("单个 PDF 文件不能超过 500 MB");
@@ -451,7 +443,7 @@ const Detail = () => {
       throw error;
     }
 
-    const { documentId, tasks } = await uploadPaperPdfTask(file, hasWritePermission ? "DEFAULT" : "UPLOAD");
+    const { documentId, tasks } = await uploadPaperPdfTask(file, hasWritePermission ? "DEFAULT" : "UPLOAD", importContext);
     if (activeDatasetIdRef.current === id) {
       importingTaskListRef.current = mergeTrackedImportTasks(importingTaskListRef.current, tasks);
       getImportingTotal();
@@ -570,6 +562,9 @@ const Detail = () => {
             title={detail.display_name || "论文库"}
             onBack={() => returnToList()}
             onUploadPdf={uploadPaperPdf}
+            processingLevel={effectiveProcessingLevel(detail.processing_level)}
+            parsers={detail.parsers}
+            canParse={ragReady && documentParsingEnabled !== false}
           />
         </div>
       ) : null}

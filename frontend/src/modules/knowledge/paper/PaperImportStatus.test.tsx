@@ -1,51 +1,83 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useState, type ComponentProps } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PaperImportStatus from './PaperImportStatus';
-import type { AcademicImportQueueItem } from '../api/academicReferences';
-
+import { emptyImportBatchPage, getAcademicImportBatch, listAcademicImportBatches, type ImportOperation, type ImportOperationItem } from '../api/academicReferences';
+vi.mock('../api/academicReferences', async original => ({ ...await original<typeof import('../api/academicReferences')>(), getAcademicImportBatch: vi.fn(), listAcademicImportBatches: vi.fn() }));
 afterEach(cleanup);
-const item = (id: string, work = 'lora', extra: Partial<AcademicImportQueueItem> = {}): AcademicImportQueueItem => ({
-  item_id: id, batch_id: id, work_id: work, title: work, target_dataset_id: 'papers', source_provider: 'arxiv', source_version: 'v2',
-  status: 'failed', batch_status: 'failed', stage: 'acquire', created_at: `2026-10-23T10:0${id}:00Z`, updated_at: `2026-10-23T10:0${id}:00Z`,
-  error_message: 'arXiv 元数据服务返回 HTTP 429，查询失败', ...extra,
+beforeEach(() => vi.clearAllMocks());
+const operation = (id: string, extra: Partial<ImportOperation> = {}): ImportOperation => ({
+  id, entry_type: 'paper_expansion', target_dataset_id: 'papers', source: { title: '研究方向' }, status: 'succeeded', created_at: '2026-10-23T02:00:00Z',
+  summary: { total: 2, ready: 1, metadata_only: 0, skipped: 1, active: 0, failed: 0, canceled: 0, deleted: 0, resolved_later: 0, retryable: 0, needs_action: 0 }, ...extra,
 });
-
-describe('paper import history', () => {
-  it('collapses historical failures and reports only unresolved paper versions', () => {
-    render(<PaperImportStatus canWrite onRetry={vi.fn()} items={[item('1'), item('2'), item('3'), item('4', 'qlora'), item('5', 'qlora', { status: 'succeeded', current_document: { document_id: 'pdf', processing_status: 'ready' } })]} />);
-    expect(screen.getByText('论文导入：1 篇待处理 · 0 篇进行中')).toBeInTheDocument();
-    expect(screen.queryByText('lora')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('论文导入：1 篇待处理 · 0 篇进行中'));
-    expect(screen.getAllByText('lora')).toHaveLength(1);
-    expect(screen.getByText('已入库')).toBeInTheDocument();
-    expect(screen.getByText('历史记录（3 次）')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /重试本批次/ })).toHaveLength(1);
-    expect(screen.queryByText('arXiv 元数据服务返回 HTTP 429，查询失败')).not.toBeInTheDocument();
+const paper = (id: string, extra: Partial<ImportOperationItem> = {}): ImportOperationItem => ({
+  item_id: id, batch_id: 'batch', work_id: id, title: `Paper ${id}`, target_dataset_id: 'papers', source_provider: 'arxiv', source_version: 'v2',
+  status: 'skipped', stage: 'done', result_kind: 'already_present', current_state: 'skipped', document_deleted: false, resolved_later: false, can_retry: false,
+  current_document: { document_id: id, processing_status: 'ready' }, created_at: '2026-10-23T02:00:00Z', updated_at: '2026-10-23T02:00:00Z', ...extra,
+});
+function Notice(props: Omit<ComponentProps<typeof PaperImportStatus>, 'open' | 'onOpenChange' | 'datasetId' | 'onOpenPaper'> & { onOpenPaper?: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return <PaperImportStatus {...props} datasetId="papers" onOpenPaper={props.onOpenPaper || vi.fn()} open={open} onOpenChange={setOpen} />;
+}
+const openNotice = () => fireEvent.click(screen.getByRole('button', { name: /^论文导入通知：/ }));
+describe('paper import operations', () => {
+  it('keeps an empty notification entry and closes its panel', () => {
+    render(<Notice canWrite onRetry={vi.fn()} page={emptyImportBatchPage()} />); openNotice();
+    expect(screen.getByText('暂无论文导入记录')).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭导入通知' }));
+    expect(screen.getByRole('button', { name: /^论文导入通知：/ })).toHaveAttribute('aria-expanded', 'false');
   });
-  it('retries a batch once and leaves its successful items alone', async () => {
-    let finish!: () => void;
-    const retry = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
-    render(<PaperImportStatus canWrite onRetry={retry} items={[item('1'), item('2', 'other', { batch_id: '1' }), item('3', 'ready', { batch_id: '1', status: 'succeeded' })]} />);
-    fireEvent.click(screen.getByText('论文导入：2 篇待处理 · 0 篇进行中'));
-    const button = screen.getByRole('button', { name: '重试本批次失败项（2 篇）' });
-    fireEvent.click(button); fireEvent.click(button);
-    await waitFor(() => expect(retry).toHaveBeenCalledTimes(1));
-    expect(retry).toHaveBeenCalledWith('1');
-    expect(button).toBeDisabled();
-    await act(async () => { finish(); });
+  it('shows one operation and links paper titles without misreporting skipped results', async () => {
+    const batch = operation('batch');
+    vi.mocked(getAcademicImportBatch).mockResolvedValue({ operation: batch, items: [paper('flash'), paper('qlora', { status: 'succeeded', result_kind: 'imported', current_state: 'ready' })], next_cursor: '' });
+    render(<Notice canWrite onRetry={vi.fn()} page={{ ...emptyImportBatchPage(), items: [batch] }} />); openNotice();
+    expect(screen.getByText('研究方向 · 2 篇')).toBeInTheDocument(); expect(screen.queryByText('Paper flash')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
+    expect(await screen.findByRole('link', { name: 'Paper flash' })).toHaveAttribute('href', '/lib/knowledge/knowledge/papers/flash');
+    expect(screen.getByText('本次跳过，复用已有 PDF')).toBeInTheDocument();
+    expect(screen.queryByText('查看文档')).not.toBeInTheDocument(); expect(screen.queryByText(/历史记录/)).not.toBeInTheDocument();
   });
-  it('keeps processing failures visible and does not offer retries to a read-only user', () => {
-    render(<PaperImportStatus canWrite={false} onRetry={vi.fn()} items={[item('1', 'lora', { current_document: { document_id: 'pdf', processing_status: 'failed', processing_error: '解析失败' } })]} />);
-    fireEvent.click(screen.getByText('论文导入：1 篇待处理 · 0 篇进行中'));
-    expect(screen.getByText('PDF 已保存，处理失败')).toBeInTheDocument();
-    expect(screen.getByText('解析失败')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '查看文档' })).toHaveAttribute('href', '/lib/knowledge/knowledge/papers/pdf');
-    expect(screen.queryByRole('button', { name: /重试本批次/ })).not.toBeInTheDocument();
+  it('opens metadata details and disables links for deleted documents', async () => {
+    const batch = operation('metadata'); const onOpen = vi.fn();
+    vi.mocked(getAcademicImportBatch).mockResolvedValue({ operation: batch, items: [paper('metadata', { current_document: undefined, library_paper_id: 'local-paper', current_state: 'metadata_only', result_kind: 'metadata_only' }), paper('deleted', { current_document: undefined, document_deleted: true, current_state: 'deleted' })], next_cursor: '' });
+    render(<Notice canWrite onRetry={vi.fn()} onOpenPaper={onOpen} page={{ ...emptyImportBatchPage(), items: [batch] }} />); openNotice();
+    fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ })); const title = await screen.findByRole('button', { name: 'Paper metadata' });
+    expect(screen.queryByRole('link', { name: 'Paper deleted' })).not.toBeInTheDocument(); expect(screen.getByText('文档已删除')).toBeInTheDocument();
+    fireEvent.click(title); expect(onOpen).toHaveBeenCalledWith('local-paper');
   });
-  it('treats a submitted retry as active before the worker changes item status', () => {
-    render(<PaperImportStatus canWrite onRetry={vi.fn()} items={[item('1', 'lora', { batch_status: 'pending' })]} />);
-    fireEvent.click(screen.getByText('论文导入：0 篇待处理 · 1 篇进行中'));
-    expect(screen.getByText('导入中')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /重试本批次/ })).not.toBeInTheDocument();
+  it('retries only the selected operation once', async () => {
+    let finish!: () => void; const retry = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    const batch = operation('failed'); batch.summary.retryable = 1; batch.summary.needs_action = 1;
+    render(<Notice canWrite onRetry={retry} page={{ ...emptyImportBatchPage(), items: [batch], notification: { active: 0, needs_action: 1 } }} />); openNotice();
+    const button = screen.getByRole('button', { name: '重试失败项（1）' }); fireEvent.click(button); fireEvent.click(button);
+    expect(retry).toHaveBeenCalledOnce(); expect(retry).toHaveBeenCalledWith('failed'); expect(button).toBeDisabled(); await act(async () => finish());
+  });
+  it('uses complete notification totals and keeps resolved historical failures visible to read-only users', async () => {
+    const batch = operation('failed', { status: 'failed' });
+    batch.summary = { ...batch.summary, total: 1, ready: 0, skipped: 0, failed: 1, resolved_later: 1 };
+    vi.mocked(getAcademicImportBatch).mockResolvedValue({ operation: batch, items: [paper('failed', { status: 'failed', current_state: 'failed', resolved_later: true, error_message: 'HTTP 503', can_retry: false })], next_cursor: '' });
+    render(<Notice canWrite={false} onRetry={vi.fn()} page={{ ...emptyImportBatchPage(), items: [batch], notification: { active: 2, needs_action: 0 } }} />);
+    expect(screen.getByRole('button', { name: '论文导入通知：2 项进行中 · 0 项待处理' })).toBeInTheDocument(); openNotice();
+    expect(screen.getByRole('status')).toHaveTextContent('2 项进行中');
+    expect(screen.getByRole('status')).not.toHaveTextContent('待处理');
+    expect(screen.queryByRole('button', { name: /重试失败项/ })).not.toBeInTheDocument(); fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
+    expect(await screen.findByText('已通过后续操作入库')).toBeInTheDocument();
+    expect(screen.getByText('失败（已解决）')).toBeInTheDocument();
+    expect(screen.getByText('导入失败（已解决）')).toBeInTheDocument();
+  });
+  it('loads more operations and papers while keeping the complete batch count', async () => {
+    const batch = operation('batch'); batch.summary.total = 205;
+    vi.mocked(listAcademicImportBatches).mockResolvedValue({ ...emptyImportBatchPage(), items: [operation('second', { entry_type: 'pdf_upload', source: { file_name: 'study.pdf' } })] });
+    vi.mocked(getAcademicImportBatch).mockResolvedValueOnce({ operation: batch, items: [paper('first')], next_cursor: 'papers-next' }).mockResolvedValueOnce({ operation: batch, items: [paper('second')], next_cursor: '' });
+    render(<Notice canWrite onRetry={vi.fn()} page={{ ...emptyImportBatchPage(), items: [batch], next_cursor: 'batches-next' }} />); openNotice();
+    fireEvent.click(screen.getByRole('button', { name: '加载更多记录' })); expect(await screen.findByText('study.pdf · 2 篇')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /^展开导入记录/ })[0]).not.toBeDisabled());
+    fireEvent.click(screen.getAllByRole('button', { name: /^展开导入记录/ })[0]);
+    await screen.findByRole('link', { name: 'Paper first' });
+    expect(getAcademicImportBatch).toHaveBeenCalledTimes(1);
+    fireEvent.click(await screen.findByRole('button', { name: '加载更多论文' }));
+    expect(await screen.findByRole('link', { name: 'Paper second' })).toBeInTheDocument(); expect(screen.getByText('研究方向 · 205 篇')).toBeInTheDocument();
+    expect(getAcademicImportBatch).toHaveBeenLastCalledWith('batch', 'papers-next');
   });
 });

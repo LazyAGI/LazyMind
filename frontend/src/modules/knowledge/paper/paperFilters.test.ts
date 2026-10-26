@@ -14,7 +14,7 @@ const attachment = (paperId: string, extra: Partial<Attachment> = {}): Attachmen
 const ids = (papers: PaperItem[]) => papers.map((item) => item.id);
 
 describe("paper filters", () => {
-  it("combines star, reading, folder, year and citation filters without mutating papers", () => {
+  it("combines star, reading, folder, year filters without mutating papers", () => {
     const papers = [
       paper("match", { important: true, status: "reading", folderId: "folder", citationCount: 18, year: 2022 }),
       paper("unstarred", { status: "reading", folderId: "folder", citationCount: 18, year: 2022 }),
@@ -23,7 +23,7 @@ describe("paper filters", () => {
       paper("unread", { important: true, folderId: "folder", citationCount: 18, year: 2022 }),
     ];
     const before = JSON.stringify(papers);
-    const filtered = filterPaperRecords(papers, [], { ...DEFAULT_PAPER_FILTERS, star: "starred", status: "reading", folder: "filed", yearRange: [2020, 2024], minCitations: 10 });
+    const filtered = filterPaperRecords(papers, [], { ...DEFAULT_PAPER_FILTERS, star: "starred", status: "reading", folder: "filed", yearRange: [2020, 2024] });
     expect(ids(filtered)).toEqual(["match"]);
     expect(JSON.stringify(papers)).toBe(before);
   });
@@ -53,11 +53,6 @@ describe("paper filters", () => {
     expect(ids(filterPaperRecords(papers, attachments, { ...DEFAULT_PAPER_FILTERS, pdf: "uploaded" }))).toEqual(["uploaded"]);
   });
 
-  it("keeps unknown citations in the default view but excludes them when a minimum is set", () => {
-    const papers = [paper("unknown"), paper("zero", { citationCount: 0 }), paper("ten", { citationCount: 10 }), paper("invalid", { citationCount: Number.NaN })];
-    expect(ids(filterPaperRecords(papers, [], DEFAULT_PAPER_FILTERS))).toEqual(["unknown", "zero", "ten", "invalid"]);
-    expect(ids(filterPaperRecords(papers, [], { ...DEFAULT_PAPER_FILTERS, minCitations: 1 }))).toEqual(["ten"]);
-  });
 
   it("supports unstarred, unfiled and read filters", () => {
     const papers = [paper("match", { status: "read" }), paper("starred", { important: true, status: "read" }), paper("folder", { folderId: "f", status: "read" })];
@@ -65,14 +60,14 @@ describe("paper filters", () => {
   });
 
   it("derives only known bounds and handles empty or single-year libraries", () => {
-    expect(getFilterBounds([])).toEqual({ years: null, maxCitations: 0 });
-    expect(getFilterBounds([paper("one")])).toEqual({ years: [2024, 2024], maxCitations: 0 });
-    expect(getFilterBounds([paper("old", { year: 2018, citationCount: 5 }), paper("new", { year: 2026, citationCount: 120 }), paper("unknown", { year: 0, citationCount: -10 })])).toEqual({ years: [2018, 2026], maxCitations: 120 });
+    expect(getFilterBounds([])).toEqual({ years: null });
+    expect(getFilterBounds([paper("one")])).toEqual({ years: [2024, 2024] });
+    expect(getFilterBounds([paper("old", { year: 2018, citationCount: 5 }), paper("new", { year: 2026, citationCount: 120 }), paper("unknown", { year: 0, citationCount: -10 })])).toEqual({ years: [2018, 2026] });
   });
 
   it("reports each non-default filter and clears them with the default state", () => {
     expect(hasPaperFilters(DEFAULT_PAPER_FILTERS)).toBe(false);
-    for (const change of [{ star: "starred" }, { pdf: "uploaded" }, { folder: "filed" }, { status: "read" }, { yearRange: [2020, 2024] }, { minCitations: 1 }] as const) {
+    for (const change of [{ star: "starred" }, { pdf: "uploaded" }, { folder: "filed" }, { status: "read" }, { yearRange: [2020, 2024] }] as const) {
       expect(hasPaperFilters({ ...DEFAULT_PAPER_FILTERS, ...change } as Parameters<typeof hasPaperFilters>[0])).toBe(true);
     }
   });

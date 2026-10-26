@@ -1,3 +1,4 @@
+import type { LibraryImportContext } from "../api/academicReferences";
 import { emptyLibrary, normalizeLibrary, sampleLibrary, type PaperLibraryData } from "./model";
 import { asLegacyLibrary, migratePaperLibrary, type PaperLibraryDataV3 } from "./libraryModel";
 import { computeTextSha256 } from '../utils/fileHash';
@@ -130,11 +131,11 @@ async function fetchPersistedLibrary(datasetId: string): Promise<PersistedPaperL
 }
 
 /** Production writes never fall back to browser storage. A revision conflict must be resolved by reloading. */
-export async function savePersistedPaperLibrary(datasetId: string, data: PaperLibraryDataV3, revision: number): Promise<PersistedPaperLibrary> {
+export async function savePersistedPaperLibrary(datasetId: string, data: PaperLibraryDataV3, revision: number, importContext?: LibraryImportContext): Promise<PersistedPaperLibrary> {
   validateLibrary(data);
   const { axiosInstance, BASE_URL } = await import('@/components/request');
   try {
-    const response = await axiosInstance.put(`${BASE_URL}/api/core/academic/library`, { data, revision }, {
+    const response = await axiosInstance.put(`${BASE_URL}/api/core/academic/library`, { data, revision, ...(importContext ? { import_context: importContext } : {}) }, {
       params: { target_dataset_id: datasetId }, timeout: 30_000, ...{ silentError: true },
     });
     return decodePersistedLibrary(response.data);
