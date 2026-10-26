@@ -30,6 +30,8 @@ class GitHubCLIError(RuntimeError):
 
 
 class GitHubCLIRunner:
+    supported_platform = 'darwin'
+
     def __init__(self, *, binary_path, expected_sha256, runtime_dir):
         self.binary = Path(binary_path)
         self.digest = expected_sha256
@@ -38,12 +40,18 @@ class GitHubCLIRunner:
 
     @classmethod
     def from_runtime(cls):
-        runtime = Path(os.environ.get('LAZYMIND_RUNTIME_RESOURCES_ROOT') or Path(__file__).resolve().parents[4])
+        # Walking parents also handles Docker's shallow /app layout without indexing past the root.
+        runtime = Path(os.environ.get('LAZYMIND_RUNTIME_RESOURCES_ROOT') or
+                       Path(__file__).resolve().parent.parent.parent.parent.parent)
         binary = Path(os.environ.get('LAZYMIND_GITHUB_CLI_PATH') or runtime / 'bin/gh')
         try:
             digest = binary.with_name('gh.sha256').read_text().strip()
         except OSError:
             digest = ''
+        if sys.platform == 'linux' and os.environ.get('LAZYMIND_GITHUB_CLI_CONTAINER_ENABLED') == '1':
+            from services.github_cli_linux_runner import LinuxGitHubCLIRunner
+            return LinuxGitHubCLIRunner(binary_path=binary, expected_sha256=digest,
+                                        runtime_dir=Path('/run/lazymind-github-cli'))
         state = Path(os.environ.get('LAZYMIND_STATE_SQLITE_DIR') or Path.home() / '.lazymind/auth-state')
         return cls(binary_path=binary, expected_sha256=digest, runtime_dir=state / 'github-cli')
 
@@ -131,8 +139,8 @@ class GitHubCLIRunner:
         except (KeyError, ValueError):
             raise GitHubCLIError('GITHUB_CREDENTIAL_UNREADABLE') from None
 
-    def _verify_binary(self):
-        if sys.platform != 'darwin':
+    def _verify_binary(self, env=None, pass_fds=()):
+        if sys.platform != self.supported_platform:
             raise GitHubCLIError('GITHUB_CLI_PLATFORM_UNSUPPORTED')
         try:
             valid = re.fullmatch('[0-9a-f]{64}', self.digest) and (
@@ -142,7 +150,10 @@ class GitHubCLIRunner:
             valid = False
         if not valid:
             raise GitHubCLIError('GITHUB_CLI_INTEGRITY_MISMATCH')
-        result = self._command([str(self.binary), '--version'])
+        options = {'env': env} if env is not None else {}
+        if pass_fds:
+            options['pass_fds'] = pass_fds
+        result = self._command([str(self.binary), '--version'], **options)
         if result.returncode or not result.stdout.startswith(f'gh version {GH_VERSION} '):
             raise GitHubCLIError('GITHUB_CLI_VERSION_UNSUPPORTED')
 

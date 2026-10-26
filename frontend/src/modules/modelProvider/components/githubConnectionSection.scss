@@ -14,11 +14,13 @@
     }
   }
 
-  .github-connection-actions {
-    display: flex;
-    flex-wrap: wrap;
-    margin: 8px 0 8px 48px;
+  &.github-connection-summary .github-connection-header {
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
   }
+
+  &.github-account-management { border: 0; }
+  .github-connection-accounts { margin-top: 20px; }
+  > .ant-alert { margin-top: 12px; }
 
   .github-connection-account {
     display: flex;
@@ -38,6 +40,7 @@
     font-size: 14px;
 
     strong { overflow-wrap: anywhere; }
+    .github-connection-id { overflow-wrap: anywhere; font-size: 12px; }
   }
 
   .github-connection-chat {
@@ -49,9 +52,10 @@
   }
 
   @media (max-width: 640px) {
-    .github-connection-header { grid-template-columns: 44px minmax(0, 1fr); }
+    .github-connection-header,
+    &.github-connection-summary .github-connection-header { grid-template-columns: 44px minmax(0, 1fr); }
+    .github-connection-header > .ant-tag { grid-column: 2; justify-self: start; }
     .github-connection-header > button { grid-column: 2; justify-self: start; }
-    .github-connection-actions { margin-inline-start: 0; }
   }
 }
 

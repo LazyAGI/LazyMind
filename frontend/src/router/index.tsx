@@ -39,6 +39,7 @@ const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/
 const DocumentDirectoriesPage = lazy(() => import("@/modules/documentDirectories/DirectoryPage"));
 const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
 const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
+const GitHubAccountPage = lazy(() => import("@/modules/modelProvider/pages/GitHubAccountPage"));
 const WeChatOfficialAccountPage = lazy(() => import("@/modules/modelProvider/pages/WeChatOfficialAccountPage"));
 const GoogleDriveConnectionPage = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveConnectionPage"));
 const EmailConnectionPage = lazy(() => import("@/modules/modelProvider/pages/EmailConnectionPage"));
@@ -216,6 +217,7 @@ export default function AppRouter() {
             <Route path="mail" element={<EmailConnectionPage />} />
             <Route path="local" element={<LocalDataSourcePage />} />
             <Route path="feishu" element={<FeishuAccountPage />} />
+            <Route path="github" element={<GitHubAccountPage />} />
             <Route path="wechat-official-account" element={<WeChatOfficialAccountPage />} />
             <Route path="google-drive" element={<GoogleDriveConnectionPage />} />
             <Route path="docs/feishu-setup" element={<FeishuSetupGuide />} />

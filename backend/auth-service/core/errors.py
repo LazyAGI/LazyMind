@@ -16,7 +16,7 @@ class ErrorCodes:
     GITHUB_CLI_NETWORK_UNAVAILABLE: ErrorTuple = (503, 1001208, 'GitHub is temporarily unavailable')
     GITHUB_CLI_FORBIDDEN: ErrorTuple = (403, 1001209, 'GitHub denied access')
     GITHUB_CLI_DISABLED: ErrorTuple = (
-        503, 1001210, 'GitHub CLI connections require the single-process macOS Desktop runtime',
+        503, 1001210, 'GitHub CLI connections require a configured single-process runtime',
     )
     MCP_OAUTH_AUTHORIZATION_REQUIRED: ErrorTuple = (401, 1001101, 'MCP authorization required')
     MCP_OAUTH_INVALID_REQUEST: ErrorTuple = (400, 1001102, 'Invalid MCP OAuth request or state')

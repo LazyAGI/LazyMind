@@ -331,10 +331,20 @@ services:
     volumes:
       - internal-service-credentials:/run/secrets/internal-service:ro
       - ./api/backend:/openapi-export
+    tmpfs:
+      - /run/lazymind-github-cli:rw,noexec,nosuid,nodev,size=32m,mode=0700
+    mem_limit: ${LAZYMIND_AUTH_SERVICE_MEMORY_LIMIT:-512m}
+    memswap_limit: ${LAZYMIND_AUTH_SERVICE_MEMORY_LIMIT:-512m}
+    ulimits:
+      core:
+        soft: 0
+        hard: 0
     expose:
       - "8000"
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     environment:
+      WEB_CONCURRENCY: "1"
+      LAZYMIND_GITHUB_CLI_CONTAINER_ENABLED: "1"
       LAZYMIND_DATABASE_URL: postgresql+psycopg://root:123456@db:5432/authservice
       LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
       LAZYMIND_JWT_SECRET: dev-secret-change-me

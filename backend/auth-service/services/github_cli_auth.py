@@ -33,12 +33,15 @@ class _Session:
 
 
 class GitHubCLIAuthService:
-    def __init__(self, *, runner, connections, executor=None, clock=time.monotonic, host_credentials_enabled=True):
+    def __init__(self, *, runner, connections, executor=None, clock=time.monotonic, host_credentials_enabled=True,
+                 web_authorization_enabled=None):
         self.runner = runner
         self.connections = connections
         self.executor = executor
         self.clock = clock
         self.host_credentials_enabled = host_credentials_enabled
+        self.web_authorization_enabled = (host_credentials_enabled if web_authorization_enabled is None
+                                          else web_authorization_enabled)
         self._lock = threading.RLock()
         self._sessions = {}
         self._recovery_ready = threading.Event()
@@ -48,7 +51,7 @@ class GitHubCLIAuthService:
         self._recovery_failed = False
 
     def start_recovery(self):
-        if not self.host_credentials_enabled or self._recovery_thread is not None:
+        if not self.web_authorization_enabled or self._recovery_thread is not None:
             return
         self._recovery_ready.clear()
 
@@ -115,10 +118,10 @@ class GitHubCLIAuthService:
         owner = (owner_user_id or '').strip()
         if not owner:
             raise_error(ErrorCodes.UNAUTHORIZED)
-        if not self.host_credentials_enabled:
+        if not self.web_authorization_enabled:
             raise_error(ErrorCodes.GITHUB_CLI_DISABLED)
         if self._recovery_failed:
-            raise_error(ErrorCodes.GITHUB_CLI_FAILED)
+            raise_error(ErrorCodes.GITHUB_CLI_FAILED if self.host_credentials_enabled else ErrorCodes.GITHUB_CLI_DISABLED)
         if not self._recovery_ready.is_set():
             raise_error(ErrorCodes.GITHUB_CLI_BUSY)
         if not isinstance(attempt_id, str) or not 1 <= len(attempt_id) <= 128:
@@ -205,7 +208,7 @@ class GitHubCLIAuthService:
                             session.connection_id = result['connection_id']
                             self._finish(session, 'COMPLETED')
                     return
-            credential = None if force_web else self.runner.probe()
+            credential = None if force_web or not self.host_credentials_enabled else self.runner.probe()
 
             def on_device(code, uri, expires_in):
                 if uri != DEVICE_URL or not re.fullmatch('[A-Z0-9]{4}-[A-Z0-9]{4}', code):
@@ -249,8 +252,12 @@ class GitHubCLIAuthService:
                     self._finish(session, 'EXPIRED' if code == 'GITHUB_AUTH_TIMEOUT' else 'FAILED', code)
 
 
+_single_worker = os.environ.get('WEB_CONCURRENCY', '1') == '1'
+_host_credentials_enabled = sys.platform == 'darwin' and os.environ.get('LAZYMIND_RUNTIME_MODE') == 'local'
+_container_web_enabled = sys.platform == 'linux' and os.environ.get('LAZYMIND_GITHUB_CLI_CONTAINER_ENABLED') == '1'
+
 github_cli_auth_service = GitHubCLIAuthService(
     runner=GitHubCLIRunner.from_runtime(), connections=cloud_oauth_service,
-    host_credentials_enabled=(sys.platform == 'darwin' and os.environ.get('LAZYMIND_RUNTIME_MODE') == 'local'
-                              and os.environ.get('WEB_CONCURRENCY', '1') == '1'),
+    host_credentials_enabled=_host_credentials_enabled and _single_worker,
+    web_authorization_enabled=(_host_credentials_enabled or _container_web_enabled) and _single_worker,
 )

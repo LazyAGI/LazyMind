@@ -62,6 +62,8 @@ test("release metadata retains the independently verified official version and b
     version: "2.102.1", archive_sha256: {
       "darwin-arm64": "08bfef98b50c553df122bb34ee8dcf415cae7d3b108891488964a0df07aa2aeb",
       "darwin-amd64": "91c5fbd493274b545b03ef32a89c2a21238393c0c0b1108210967199b3230d9d",
+      "linux-arm64": "5019b3cc6e8a03bb4d88600f8dbda2add8e6407705c159b0c63151036e77a1af",
+      "linux-amd64": "77b9e297e94c50336823d0f84de7ef1be60cba704601fa0d98f129f47a94987b",
     },
   });
 });

@@ -38,6 +38,7 @@ import {
 } from "@/modules/dataSource/mappers/dataSourceConnection";
 import {
   CLOUD_DOCUMENTS_FEISHU_PATH,
+  CLOUD_DOCUMENTS_GITHUB_PATH,
   CLOUD_DOCUMENTS_GOOGLE_DRIVE_PATH,
   CLOUD_DOCUMENTS_LOCAL_PATH,
   CLOUD_DOCUMENTS_MAIL_PATH,
@@ -81,6 +82,8 @@ export function useCloudDocumentProviders() {
     Boolean(loadNotionAppSetup()?.appSecret.trim()),
   );
   const [githubSecretConfigured, setGitHubSecretConfigured] = useState(false);
+  const [githubDialogOpen, setGitHubDialogOpen] = useState(false);
+  const [githubDialogMode, setGitHubDialogMode] = useState<"quick" | "manual">("quick");
   const [notionOauthConnection, setNotionOauthConnection] =
     useState<ManagementContext["notionOauthConnection"]>(null);
   const [notionAuthAccounts, setNotionAuthAccounts] = useState<
@@ -378,6 +381,10 @@ export function useCloudDocumentProviders() {
     intent: CloudSetupIntent = "auth",
     account?: FeishuAuthAccount | null,
   ) => {
+    if (provider === "github") {
+      setGitHubDialogMode("manual");
+      setGitHubDialogOpen(true);
+    }
     const activeSetup =
       provider === "feishu"
         ? null
@@ -426,6 +433,7 @@ export function useCloudDocumentProviders() {
         setGitHubSecretConfigured(true);
       }
       setFeishuSetupModalOpen(false);
+      if (provider === "github") setGitHubDialogOpen(false);
       setFeishuSetupIntent(null);
       setEditingFeishuAccountId(null);
       message.success(
@@ -553,10 +561,13 @@ export function useCloudDocumentProviders() {
   };
 
   const handleOpenGitHubSetup = () => {
-    void github.start();
+    setGitHubDialogMode("quick");
+    setGitHubDialogOpen(true);
   };
+  const handleManageGitHubAuth = () => navigate(CLOUD_DOCUMENTS_GITHUB_PATH);
   const handleReauthorizeGitHub = async (connection: CloudConnectionResponse) => {
     if (connection.token_source === "github_cli") {
+      setGitHubDialogMode("quick");
       await github.start(connection.connection_id);
     } else {
       await ctx.startCloudOAuth("github", { reauthorizeConnectionId: connection.connection_id,
@@ -709,6 +720,11 @@ export function useCloudDocumentProviders() {
     notionOauthConnection,
     githubConnection,
     github,
+    githubDialogOpen,
+    setGitHubDialogOpen,
+    githubDialogMode,
+    setGitHubDialogMode,
+    handleManageGitHubAuth,
     handleReauthorizeGitHub,
     googleDriveConnection,
     mailAccounts,

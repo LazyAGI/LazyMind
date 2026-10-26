@@ -10,12 +10,16 @@ describe("GitHub authorization focus", () => {
     let finish: (status: string) => void = () => {};
     function Harness() {
       const [sessionStatus, setSessionStatus] = useState("");
+      const [githubDialogOpen, setGitHubDialogOpen] = useState(false);
       finish = setSessionStatus;
       const labels: Record<string, string> = {
         connect: "Connect GitHub", cancel: "Cancel authorization", authorizationTitle: "Connect GitHub",
+        start: "Start connecting",
       };
       const vm = {
         t: (key: string) => labels[key.split(".").pop()!] || key,
+        githubDialogOpen, setGitHubDialogOpen, githubDialogMode: "quick",
+        handleOpenGitHubSetup: () => setGitHubDialogOpen(true),
         github: {
           accounts: [], updating: [], notice: "", retryCreate: false, browserBlocked: false,
           active: sessionStatus === "WAITING_USER",
@@ -38,6 +42,7 @@ describe("GitHub authorization focus", () => {
     const trigger = screen.getByRole("button", { name: "Connect GitHub" });
     trigger.focus();
     fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("button", { name: "Start connecting" }));
     await waitFor(() => expect(screen.getByText("TEST-CODE")).toBeVisible());
     const cancel = screen.getByRole("button", { name: "Cancel authorization" });
     cancel.focus();

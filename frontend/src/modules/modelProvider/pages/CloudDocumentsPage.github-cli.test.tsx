@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ConfigProvider, message, Modal } from "antd";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudConnectionResponse, GitHubCLISessionResponse } from "@/api/generated/auth-client";
 import i18n from "@/i18n";
 import CloudDocumentsPage from "./CloudDocumentsPage";
+import GitHubAccountPage from "./GitHubAccountPage";
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(), detail: vi.fn(), credentials: vi.fn(), saveCredentials: vi.fn(), authorize: vi.fn(),
@@ -49,10 +50,17 @@ const session = (status: string, extra: Partial<GitHubCLISessionResponse> = {}):
 });
 const waiting = () => session("WAITING_USER", { user_code: CODE, verification_uri: URL });
 // jsdom does not run CSS keyframes; real animations are checked in the packaged UI acceptance.
-const page = (query = "") => render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={[`/cloud-documents${query}`]}><CloudDocumentsPage /></MemoryRouter></ConfigProvider>);
+const page = (query = "") => render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={[`/cloud-documents${query}`]}><Routes><Route path="/cloud-documents" element={<CloudDocumentsPage />} /><Route path="/cloud-documents/github" element={<GitHubAccountPage />} /></Routes></MemoryRouter></ConfigProvider>);
 
+async function openConnectionDialog() {
+  fireEvent.click(await screen.findByRole("button", { name: /^(连接 GitHub|添加账号)$/ }));
+  const dialog = await screen.findByRole("dialog", { name: "连接 GitHub" });
+  await waitFor(() => expect(dialog).toBeVisible());
+  return dialog;
+}
 async function connect(timed = false) {
-  const button = await screen.findByRole("button", { name: /^连接 GitHub$/ });
+  const dialog = await openConnectionDialog();
+  const button = within(dialog).getByRole("button", { name: "开始连接" });
   if (timed) vi.useFakeTimers();
   await act(async () => { fireEvent.click(button); });
   await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
@@ -67,6 +75,9 @@ function storageValues() {
 
 beforeEach(async () => {
   vi.resetAllMocks();
+  const confirm = Modal.confirm;
+  // Static confirmation dialogs do not inherit the page ConfigProvider in jsdom.
+  vi.spyOn(Modal, "confirm").mockImplementation(options => confirm({ ...options, transitionName: "", maskTransitionName: "" }));
   vi.stubEnv("VITE_LAZYMIND_MODE", "desktop");
   localStorage.clear(); sessionStorage.clear();
   localStorage.setItem("lazymind.cloud-documents.onboarding.v2", "seen");
@@ -96,11 +107,61 @@ afterEach(() => {
 });
 
 describe("GitHub CLI from the real cloud-documents page", () => {
+  it("opens two connection modes without starting authorization on open or tab changes", async () => {
+    page();
+    const dialog = await openConnectionDialog();
+    expect(within(dialog).getByRole("tab", { name: "快捷授权" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(within(dialog).getByRole("tab", { name: /手动.*OAuth/ }));
+    expect(await screen.findByLabelText("App Secret")).toBeVisible();
+    fireEvent.click(within(dialog).getByRole("tab", { name: "快捷授权" }));
+    expect(within(dialog).getByRole("button", { name: "开始连接" })).toBeVisible();
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.authorize).not.toHaveBeenCalled();
+    expect(mocks.saveCredentials).not.toHaveBeenCalled();
+    expect(mocks.open).not.toHaveBeenCalled();
+  });
+
+  it("keeps the hub compact and opens a separate account page with a return path", async () => {
+    connections = [manual, cli];
+    page();
+    expect(await screen.findByRole("button", { name: "管理账号" })).toBeVisible();
+    expect(screen.queryByRole("group", { name: /Fixture CLI/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /聊天/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /手动.*OAuth|网页授权.*GitHub/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "管理账号" }));
+    expect(await screen.findByRole("heading", { name: "GitHub 账号管理" })).toBeVisible();
+    expect(await screen.findByRole("group", { name: /Fixture CLI/ })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /返回.*云文档|返回.*服务/ }));
+    expect(await screen.findByRole("heading", { name: "云文档", level: 1 })).toBeVisible();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("keeps an expired unnamed account manageable without using its connection ID as its name", async () => {
+    connections = [{ ...manual, display_name: "", provider_account_id: "", status: "EXPIRED" }];
+    page();
+    fireEvent.click(await screen.findByRole("button", { name: "管理账号" }));
+    const account = await screen.findByRole("group", { name: "未命名 GitHub 账号" });
+    expect(within(account).getByText(manual.connection_id)).toBeVisible();
+    expect(within(account).getByRole("switch", { name: /聊天/ })).toBeDisabled();
+    expect(within(account).getByRole("button", { name: /断开/ })).toBeEnabled();
+  });
+
+  it("prevents switching authentication mode while a CLI session is active", async () => {
+    page(); await connect();
+    await waitFor(() => expect(screen.getByText(CODE)).toBeVisible());
+    expect(screen.getByRole("tab", { name: /手动.*OAuth/ })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("tab", { name: /手动.*OAuth/ }));
+    expect(screen.queryByLabelText("App Secret")).not.toBeInTheDocument();
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(mocks.authorize).not.toHaveBeenCalled();
+  });
+
   it("starts without OAuth App credentials or Cloud login; double click uses one attempt", async () => {
     page();
-    const button = await connect();
-    fireEvent.click(button);
-    expect(mocks.start).toHaveBeenCalledTimes(1);
+    const dialog = await openConnectionDialog();
+    const button = within(dialog).getByRole("button", { name: "开始连接" });
+    await act(async () => { fireEvent.click(button); fireEvent.click(button); });
+    await waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
     expect(mocks.start.mock.calls[0][0].gitHubCLISessionCreateBody).toMatchObject({ attempt_id: expect.any(String) });
     expect(mocks.start.mock.calls[0][0].gitHubCLISessionCreateBody.attempt_id.length).toBeGreaterThan(0);
     expect(mocks.authorize).not.toHaveBeenCalled();
@@ -112,8 +173,9 @@ describe("GitHub CLI from the real cloud-documents page", () => {
 
   it("keeps the manual OAuth App form reachable from an explicitly named advanced action", async () => {
     page();
-    fireEvent.click(await screen.findByRole("button", { name: /手动.*OAuth/ }));
-    await waitFor(() => expect(screen.getByRole("dialog", { name: "配置 GitHub OAuth App" })).toBeVisible());
+    await openConnectionDialog();
+    fireEvent.click(screen.getByRole("tab", { name: /手动.*OAuth/ }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "连接 GitHub" })).toBeVisible());
     expect(screen.getByLabelText("App ID")).toBeVisible();
     expect(screen.getByLabelText("App Secret")).toBeVisible();
     expect(screen.getByRole("button", { name: "保存并授权" })).toBeEnabled();
@@ -140,7 +202,7 @@ describe("GitHub CLI from the real cloud-documents page", () => {
   it("shows only the completed connection returned by AuthService and does not auto-enable chat", async () => {
     connections = [manual];
     mocks.start.mockImplementation(async () => { connections = [manual, cli]; return { data: session("COMPLETED", { connection_id: cli.connection_id }) }; });
-    page(); await connect();
+    page("/github"); await connect();
     expect(await screen.findByText("Fixture CLI", { exact: false })).toBeVisible();
     expect(screen.getByText("Fixture manual", { exact: false })).toBeVisible();
     expect(screen.queryByText(CODE)).not.toBeInTheDocument();
@@ -238,7 +300,7 @@ describe("GitHub CLI from the real cloud-documents page", () => {
 
   it("does not merge same-UID sources and changes chat preference only for the selected CLI ID", async () => {
     connections = [manual, cli];
-    page();
+    page("/github");
     const row = await screen.findByRole("group", { name: /Fixture CLI/ });
     const legacy = screen.getByRole("group", { name: /Fixture manual/ });
     expect(within(row).getByText(/GitHub CLI/)).toBeVisible();
@@ -250,7 +312,7 @@ describe("GitHub CLI from the real cloud-documents page", () => {
 
   it("reauthorizes the selected CLI connection with its own connection ID", async () => {
     connections = [manual, cli];
-    page();
+    page("/github");
     const row = await screen.findByRole("group", { name: /Fixture CLI/ });
     fireEvent.click(within(row).getByRole("button", { name: /重新连接|重新授权/ }));
     await waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
@@ -260,7 +322,7 @@ describe("GitHub CLI from the real cloud-documents page", () => {
 
   it("disconnects the selected CLI connection without removing the same-UID manual account", async () => {
     connections = [manual, cli];
-    page();
+    page("/github");
     const row = await screen.findByRole("group", { name: /Fixture CLI/ });
     fireEvent.click(within(row).getByRole("button", { name: /断开/ }));
     await waitFor(() => expect(screen.queryByRole("dialog") || mocks.remove.mock.calls.length).toBeTruthy());
@@ -275,7 +337,8 @@ describe("GitHub CLI from the real cloud-documents page", () => {
   it("submits the manual OAuth form through the original save/authorize endpoints", async () => {
     vi.spyOn(window, "open").mockReturnValue({ closed: false, close: vi.fn(), focus: vi.fn() } as unknown as Window);
     page();
-    fireEvent.click(await screen.findByRole("button", { name: /手动.*OAuth/ }));
+    await openConnectionDialog();
+    fireEvent.click(screen.getByRole("tab", { name: /手动.*OAuth/ }));
     fireEvent.change(await screen.findByLabelText("App ID"), { target: { value: "fixture-client" } });
     fireEvent.change(screen.getByLabelText("App Secret"), { target: { value: "fixture-manual-secret" } });
     fireEvent.click(screen.getByRole("button", { name: "保存并授权" }));
@@ -288,7 +351,7 @@ describe("GitHub CLI from the real cloud-documents page", () => {
   it("keeps a manual account on the original reauthorization path", async () => {
     vi.spyOn(window, "open").mockReturnValue({ closed: false, close: vi.fn(), focus: vi.fn() } as unknown as Window);
     connections = [manual, cli];
-    page();
+    page("/github");
     const row = await screen.findByRole("group", { name: /Fixture manual/ });
     fireEvent.click(within(row).getByRole("button", { name: /重新授权|重新连接/ }));
     await waitFor(() => expect(mocks.authorize).toHaveBeenCalledTimes(1));
@@ -298,8 +361,9 @@ describe("GitHub CLI from the real cloud-documents page", () => {
   });
 
   it("starts a fresh web flow only after the user explicitly chooses it", async () => {
-    connections = [manual]; page();
-    fireEvent.click(await screen.findByRole("button", { name: /网页授权.*GitHub|GitHub.*网页授权/ }));
+    connections = [manual]; page("/github");
+    await openConnectionDialog();
+    fireEvent.click(screen.getByRole("button", { name: /网页授权.*GitHub|GitHub.*网页授权/ }));
     await waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
     expect(mocks.start.mock.calls[0][0].gitHubCLISessionCreateBody).toMatchObject({ force_web: true });
   });
@@ -338,6 +402,7 @@ describe("GitHub CLI from the real cloud-documents page", () => {
   it("provides English labels for the new connect and cancel controls", async () => {
     await i18n.changeLanguage("en-US"); page();
     fireEvent.click(await screen.findByRole("button", { name: /^Connect GitHub$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start connecting" }));
     await waitFor(() => expect(screen.getByText(CODE)).toBeVisible());
     expect(screen.getByRole("button", { name: /Cancel authorization/i })).toBeEnabled();
     expect(document.body.textContent).not.toMatch(/modelProvider\.cloudDocuments\.github/);
