@@ -108,7 +108,10 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
         const nodes = payload?.projection?.nodes ?? {};
         setPlannedSteps(order.filter((id) => id !== '__start__' && id !== '__end__').map((id) => ({
           step_id: payload?.graph?.nodes?.[id]?.label || id,
-          status: nodes[id]?.execution || 'pending',
+          // Branch selection explains an unexecuted node; preserve actual execution results.
+          status: nodes[id]?.execution === 'none' && ['pruned', 'bypassed'].includes(nodes[id]?.branch)
+            ? nodes[id].branch
+            : nodes[id]?.execution || 'pending',
         })));
       })
       .catch(() => { if (active) setPlannedSteps(null); });
