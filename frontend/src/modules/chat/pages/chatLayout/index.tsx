@@ -175,7 +175,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     return () => window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
   }, []);
   const [panelView, setPanelView] = useState<"overview" | "sidechat">("overview");
-  const [sideChatGeneration, setSideChatGeneration] = useState(0);
   const [conversationIntent, setConversationIntent] = useState<Record<string, unknown> | null>(null);
   const [sideChats, setSideChats] = useState<Record<string, SideChatSource>>({});
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
@@ -735,7 +734,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     );
   }, []);
 
-  const handleOpenSideChat = useCallback((source: SideChatSource = {}, replace = Boolean(source.selectedText)) => {
+  const handleOpenSideChat = useCallback((source: SideChatSource = {}) => {
     if (!sessionIdRef.current) return;
     sideChatReturnFocusRef.current =
       document.activeElement instanceof HTMLElement &&
@@ -746,7 +745,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     setWorkflowPanelExpanded(false);
     setIsTaskPanelCollapsed(false);
     setPanelView("sidechat");
-    if (replace) setSideChatGeneration(value => value + 1);
     setSideChats((current) => ({ ...current, [sessionIdRef.current]: source }));
   }, []);
 
@@ -1128,7 +1126,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
                 ],
                 onClick: ({ key }: { key: string }) => {
                   if (key === "overview") openTaskPanel();
-                  else handleOpenSideChat(sideChats[sessionId] || {}, false);
+                  else handleOpenSideChat(sideChats[sessionId] || {});
                 },
               }}>
                 <button type="button" className="context-workbench-switch" aria-label={t("chat.sidebar.switch", "切换侧面面板")}>
@@ -1164,13 +1162,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           )}
           {hasActiveSideChat && sessionId && (
             <SideChatPanel
-              key={`${sessionId}:${sideChatGeneration}`}
+              key={sessionId}
               embedded
               open
               visible={showingSideChat}
               parentConversationId={sessionId}
               source={sideChats[sessionId]}
               onClose={() => {
+                setIsTaskPanelCollapsed(true);
                 setPanelView("overview");
                 setSideChats((current) => {
                   const next = { ...current };

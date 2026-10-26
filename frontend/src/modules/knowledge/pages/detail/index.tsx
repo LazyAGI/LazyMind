@@ -74,7 +74,6 @@ import {
 import { DetailPageHeader } from "@/components/ui";
 import KnowledgeBaseSyncNow from "@/modules/knowledge/components/KnowledgeBaseSyncNow";
 import {
-  effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
 import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
@@ -418,21 +417,15 @@ const Detail = () => {
   async function onUpdate(
     data: Dataset & { processing_level?: ProcessingLevel },
   ): Promise<void> {
-    const { processing_level: nextLevel, ...dataset } = data;
-    const currentLevel = effectiveProcessingLevel(detail?.processing_level);
-    if (nextLevel && nextLevel !== currentLevel) {
-      await axiosInstance.patch(
-        `${BASE_URL}/api/core/datasets/${encodeURIComponent(id)}/processing-level`,
-        { processing_level: nextLevel },
-      );
-    }
     return KnowledgeBaseServiceApi()
       .datasetServiceUpdateDataset({
         dataset: data.dataset_id || "",
-        dataset2: dataset,
+        dataset2: data,
       })
-      .then(() => {
-        message.success(t("knowledge.editSuccess"));
+      .then((response) => {
+        const errors = response.data.operation_result?.items?.flatMap(item => item.error ? [item.error.message] : []) || [];
+        if (errors.length) message.warning(`配置已保存，但后续同步失败：${errors.join("；")}`);
+        else message.success(t("knowledge.editSuccess"));
         getDetail();
       });
   }

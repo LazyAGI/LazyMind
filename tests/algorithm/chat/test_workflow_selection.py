@@ -60,7 +60,9 @@ def _tool_names(contribution):
     return names
 
 
-@pytest.mark.parametrize('workflow_id', ['writer-workflow', 'image-workflow', 'ppt-workflow', 'product_solution_delivery'])
+@pytest.mark.parametrize('workflow_id', [
+    'writer-workflow', 'image-workflow', 'ppt-workflow', 'product_solution_delivery',
+])
 def test_manager_never_injects_domain_navigation_tools(workflow_id):
     with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
         client_factory.return_value.get_state.return_value = {
@@ -79,20 +81,28 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
         'revision_id': 'revision-1',
         'name': 'AI image generation',
     }]
-    contribution = resolve_workflow_injection(
-        None,
-        current_query='run it now',
-        workflow_catalog=catalog,
-        allowed_workflow_refs=['builtin:image-workflow'],
-        workflow_activations=[{
-            'workflow_ref': 'builtin:image-workflow',
-            'workflow_id': 'image-workflow',
-            'revision_id': 'revision-1',
-            'tool_name': 'trigger_image_workflow',
-            'tool_description': "Load the exact 'AI image generation' Workflow",
-            'prompt': 'Call the bound trigger; do not call list_workflows.',
-        }],
-    )
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.httpx.get',
+    ) as http_get:
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'image-workflow', 'revision_id': 'revision-1',
+        }
+        contribution = resolve_workflow_injection(
+            None,
+            current_query='run it now',
+            workflow_catalog=catalog,
+            allowed_workflow_refs=['builtin:image-workflow'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:image-workflow',
+                'workflow_id': 'image-workflow',
+                'revision_id': 'revision-1',
+                'tool_name': 'trigger_image_workflow',
+                'tool_description': "Load the exact 'AI image generation' Workflow",
+                'prompt': 'Call the bound trigger; do not call list_workflows.',
+            }],
+        )
+    client_factory.return_value.get_workflow.assert_called_once_with('image-workflow', 'revision-1')
+    http_get.assert_not_called()
 
     assert 'builtin:image-workflow' in contribution.runtime_context
     assert 'revision-1' in contribution.runtime_context
@@ -333,23 +343,31 @@ def test_selected_workflow_declares_missing_only_startup_clarification():
              'type': 'single', 'choices': ['3 页', '5 页'], 'allow_other': False},
         ],
     }
-    contribution = resolve_workflow_injection(
-        None,
-        current_query='给协和医院做一份科技风 PPT',
-        workflow_catalog=[{
-            'workflow_ref': 'builtin:ppt-workflow',
-            'workflow_id': 'ppt-workflow',
-            'revision_id': 'revision-1',
-            'runtime': runtime,
-        }],
-        allowed_workflow_refs=['builtin:ppt-workflow'],
-        workflow_activations=[{
-            'workflow_ref': 'builtin:ppt-workflow',
-            'workflow_id': 'ppt-workflow',
-            'revision_id': 'revision-1',
-            'tool_name': 'trigger_ppt_workflow',
-        }],
-    )
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.httpx.get',
+    ) as http_get:
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'ppt-workflow', 'revision_id': 'revision-1', 'runtime': runtime,
+        }
+        contribution = resolve_workflow_injection(
+            None,
+            current_query='给协和医院做一份科技风 PPT',
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:ppt-workflow',
+                'workflow_id': 'ppt-workflow',
+                'revision_id': 'revision-1',
+                'runtime': runtime,
+            }],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:ppt-workflow',
+                'workflow_id': 'ppt-workflow',
+                'revision_id': 'revision-1',
+                'tool_name': 'trigger_ppt_workflow',
+            }],
+        )
+    client_factory.return_value.get_workflow.assert_called_once_with('ppt-workflow', 'revision-1')
+    http_get.assert_not_called()
 
     assert contribution.runtime_policy == runtime
     assert 'startup_clarification_fields' in contribution.runtime_context

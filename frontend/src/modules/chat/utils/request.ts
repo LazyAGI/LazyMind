@@ -929,13 +929,14 @@ export function ChatServiceApi() {
     conversationServiceSaveAskAnswers(
       conversationId: string,
       historyId: string,
+      askId: string,
       answers: Record<string, any>,
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:ask-answers`,
-        { history_id: historyId, answers },
-        withJsonOptions(options),
+        { history_id: historyId, ask_id: askId, answers },
+        withJsonOptions({ silentError: true, ...options } as RawAxiosRequestConfig),
       );
     },
     conversationServiceListConversations(

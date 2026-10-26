@@ -1237,27 +1237,34 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.sideChatMounted).toHaveBeenCalledTimes(1);
   });
 
-  it("starts a new side chat for each selection invocation, including the same text", async () => {
+  it("updates the selected quote without remounting the side chat or losing its draft", async () => {
     render(<ChatLayout {...sidebarProps} />);
     await screen.findByRole("button", { name: "chat.sidebar.open" });
-    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "同一段选文", historyId: "h1" }));
+    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "第一段选文", historyId: "h1" }));
     const first = screen.getByTestId("side-chat-panel");
-    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "同一段选文", historyId: "h1" }));
-    expect(screen.getByTestId("side-chat-panel")).not.toBe(first);
-    expect(screen.getByTestId("side-chat-panel")).toHaveAttribute("data-selected-text", "同一段选文");
-    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(2);
+    fireEvent.change(screen.getByLabelText("Side chat draft"), { target: { value: "unfinished follow-up" } });
+    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "第二段选文", historyId: "h2" }));
+    expect(screen.getByTestId("side-chat-panel")).toBe(first);
+    expect(first).toHaveAttribute("data-selected-text", "第二段选文");
+    expect(screen.getByLabelText("Side chat draft")).toHaveValue("unfinished follow-up");
+    act(() => mocks.latestChatContainerProps.onOpenSideChat({ selectedText: "第二段选文", historyId: "h2" }));
+    expect(screen.getByTestId("side-chat-panel")).toBe(first);
+    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByTestId("conversation-menu-overview"));
     fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
-    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("Side chat draft")).toHaveValue("unfinished follow-up");
+    expect(mocks.sideChatMounted).toHaveBeenCalledTimes(1);
   });
 
-  it("returns to overview after discarding side chat", async () => {
+  it("closes the entire right panel after discarding side chat", async () => {
     render(<ChatLayout {...sidebarProps} />);
     await openOverview();
     fireEvent.click(screen.getByTestId("conversation-menu-sidechat"));
     fireEvent.click(screen.getByRole("button", { name: "Close side chat" }));
     expect(screen.queryByTestId("side-chat-panel")).not.toBeInTheDocument();
-    expect(screen.getByTestId("artifact-panel")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "chat.sidebar.open" })).toHaveAttribute("aria-expanded", "false");
+    expect(document.getElementById("conversation-context-panel")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByTestId("artifact-panel")).not.toBeInTheDocument();
   });
 
   it("leaves references to message popovers without routing them into the sidebar", async () => {

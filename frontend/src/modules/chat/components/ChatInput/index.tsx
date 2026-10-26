@@ -20,12 +20,12 @@ import {
   CommentOutlined,
   EditOutlined,
   PaperClipOutlined,
+  PlusOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
 import SkillRecordingPanel from "../SkillRecording";
 import SendIcon from "../../assets/icons/send_icon.svg?react";
-import AddIcon from "../../assets/icons/add.svg?react";
 
 import ImageUpload, {
   allowedImageTypes,
@@ -722,6 +722,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       return () => { window.removeEventListener('resize', updateHeight); window.removeEventListener('scroll', updateHeight, true); };
     }, [activeMenu]);
     const addMenuOpen = activeMenu === "add";
+    const addMenuId = useId();
     const setAddMenuOpen = (open: boolean) => setActiveMenu(open ? "add" : null);
     const [knowledgeToolsEnabled, setKnowledgeToolsEnabled] = useState<{
       kb: boolean | null;
@@ -1579,7 +1580,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       styles={{ body: { height: menuHeight } }}
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
-                        <div className="chat-add-resource-menu">
+                        <div id={addMenuId} className="chat-add-resource-menu">
                           <button type="button" onClick={() => { setAddMenuOpen(false); setRecordingOpen(true); }}>
                             <span aria-hidden="true">◉</span>{t("recording.title")}
                           </button>
@@ -1662,13 +1663,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     >
                       <Tooltip title={t(allowKnowledgeBaseSelection ? "chat.addResourceTooltip" : "chat.addFileTooltip")}>
                         <button type="button"
-                          className={`input-bottom-actions-left-item${addMenuOpen ? " selected" : ""}${disabled || isPromptPolishing ? " is-disabled" : ""}`}
-                          role="button"
+                          className="chat-add-resource-trigger"
                           tabIndex={disabled || isPromptPolishing ? -1 : 0}
+                          aria-label={t("chat.addResource")}
+                          aria-expanded={addMenuOpen}
+                          aria-controls={addMenuOpen ? addMenuId : undefined}
                           aria-disabled={disabled || isPromptPolishing}
                         >
-                          <AddIcon />
-                          {t("chat.addResource")}
+                          <PlusOutlined className="chat-add-resource-icon" aria-hidden="true" />
                         </button>
                       </Tooltip>
                     </Popover>

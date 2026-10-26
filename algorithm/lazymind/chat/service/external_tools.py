@@ -94,14 +94,11 @@ def run_external_tools(payload: dict, *, execute: bool = False) -> dict:
     try:
         inject_model_config(payload.get('llm_config') or {})
         inject_tool_config(payload.get('tool_config') or {})
-        disabled = set(payload.get('disabled_tools') or [])
         if execute:
-            return _execute(payload, disabled)
+            return _execute(payload)
         items = []
         for config in DEFAULT_TOOLS:
             _, methods, reason = _resolve(config)
-            if config.name in disabled:
-                reason = 'Tool is disabled in LazyMind settings'
             items.append({
                 'name': config.name, 'description': config.description,
                 'input_schema': _schema(methods), 'available': not reason, 'reason': reason,
@@ -111,10 +108,10 @@ def run_external_tools(payload: dict, *, execute: bool = False) -> dict:
         lazyllm.globals.clear()
 
 
-def _execute(payload, disabled):
+def _execute(payload):
     name = str(payload.get('tool_name') or '')
     config = next((item for item in DEFAULT_TOOLS if item.name == name), None)
-    if config is None or name in disabled:
+    if config is None:
         raise ValueError('Tool is unavailable or disabled')
     manager, methods, reason = _resolve(config)
     if reason:

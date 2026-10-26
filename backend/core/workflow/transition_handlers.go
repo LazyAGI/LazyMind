@@ -580,8 +580,21 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 		// The execution mode is a session creation decision. Never allow a later
 		// chat request or transition command to change it.
 		req.WorkflowMode = normalizeSessionWorkflowMode(session.WorkflowMode)
+		// Resolve the requested target before admission: a failed run may retry
+		// within its budget, but may not start another step or rewind autonomously.
+		if req.Operation == "advance" {
+			resolved, resolveErr := resolveAdvanceOperation(ctx, tx, session.ID, targets[0].TargetStepID)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			req.Operation = resolved
+		}
 		if controlstore.Controlled(session) && !req.controlAuthorized {
-			if err := controlstore.GuardBegin(tx, session); err != nil {
+			guard := controlstore.GuardBegin
+			if req.Operation == "retry" {
+				guard = controlstore.GuardRetryBegin
+			}
+			if err := guard(tx, session); err != nil {
 				var rejected *controlstore.Error
 				if errors.As(err, &rejected) {
 					return rejectTransition(req.CommandID, &session, graphengine.Projection{}, http.StatusConflict, rejected.Code, rejected.Message, false, nil)
@@ -637,13 +650,6 @@ func applyWorkflowTransition(ctx context.Context, tx *gorm.DB, sessionID string,
 			fmt.Printf("[plugin.transition] rejected code=GRAPH_REVISION_MISMATCH command=%s session=%s target=%s operation=%s expected_hash=%s actual_hash=%s state_version=%d\n",
 				req.CommandID, session.ID, req.TargetStepID, req.Operation, req.GraphHash, graph.GraphHash, session.StateVersion)
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "GRAPH_REVISION_MISMATCH", "session graph revision does not match the command", false, map[string]any{"expected": req.GraphHash, "actual": graph.GraphHash})
-		}
-		if req.Operation == "advance" {
-			resolved, resolveErr := resolveAdvanceOperation(ctx, tx, session.ID, targets[0].TargetStepID)
-			if resolveErr != nil {
-				return resolveErr
-			}
-			req.Operation = resolved
 		}
 		if req.Operation == "retry" || req.Operation == "rewind" ||
 			(req.Operation == "execute" && projection.Nodes[targets[0].TargetStepID].Validity == "stale") {

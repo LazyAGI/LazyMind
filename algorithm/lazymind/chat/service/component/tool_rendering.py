@@ -538,6 +538,8 @@ def _render_preview_template(
     if output:
         context['output'] = f'**{output}**'
     count = _tool_result_count(business_value)
+    if _tool_name_is(tool_name, 'search_tools') and isinstance(business_value, list):
+        count = len(business_value)
     if count is not None:
         context['count'] = f'**{count}**'
         requested = count
@@ -550,7 +552,30 @@ def _render_preview_template(
     return _ensure_trailing_newline(template.format_map(_SafeFormatContext(context)))
 
 
-def _tool_call_preview(tool_name: str, preview_value: str, language: str = 'en') -> str:
+def _load_tools_preview(operations: dict[str, Any], state: str, language: str) -> str:
+    profile = TOOL_RENDER_PROFILES['load_tools']
+    loaded, unloaded = operations.get('loaded'), operations.get('unloaded')
+    if loaded and unloaded:
+        variant = 'mixed'
+    elif loaded:
+        variant = 'load'
+    elif unloaded:
+        variant = 'unload'
+    else:
+        variant = ''
+    templates = profile['variants'].get(variant, profile)
+    template = templates[state]['zh' if language == 'zh' else 'en']
+    return _render_preview_template('load_tools', '', {'load_tools': template}, '', operations)
+
+
+def _tool_call_preview(
+    tool_name: str, preview_value: str, language: str = 'en', arguments: Any = None,
+) -> str:
+    if _tool_name_is(tool_name, 'load_tools') and isinstance(arguments, dict):
+        return _load_tools_preview({
+            'loaded': arguments.get('tool_names'),
+            'unloaded': arguments.get('unload_tool_names'),
+        }, 'call', language)
     return _render_preview_template(
         tool_name,
         preview_value,
@@ -618,6 +643,8 @@ def _tool_result_count(value: Any) -> int | None:
 
 
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
+    if _tool_name_is(tool_name, 'search_tools') or _tool_name_is(tool_name, 'load_tools'):
+        result = _normalized_success_business_value(result)
     status = _tool_result_status(result)
     if _tool_name_starts(tool_name, 'MailToolkit_'):
         payload = _normalized_success_business_value(result)
@@ -672,6 +699,11 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             result,
         )
     business_value = _normalized_success_business_value(result)
+    if _tool_name_is(tool_name, 'load_tools') and isinstance(business_value, dict):
+        return _load_tools_preview(business_value, 'success', language)
+    if _tool_name_is(tool_name, 'search_tools') and business_value == []:
+        templates = TOOL_RENDER_PROFILES['search_tools']['empty']
+        return _ensure_trailing_newline(templates['zh' if language == 'zh' else 'en'])
     if (
         isinstance(business_value, dict)
         and business_value.get('total') == 0
@@ -717,7 +749,7 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
         'name': tool_name,
         'arguments': arguments if isinstance(arguments, dict) else {},
     }
-    preview = _tool_call_preview(tool_name, preview_value, language)
+    preview = _tool_call_preview(tool_name, preview_value, language, arguments)
     text = (
         f'<{_TOOL_PREVIEW_TAG} id="{escape(tool_call_id, quote=True)}">{preview}</{_TOOL_PREVIEW_TAG}>'
         f'<{_TOOL_CALL_TAG}>{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}</{_TOOL_CALL_TAG}>'

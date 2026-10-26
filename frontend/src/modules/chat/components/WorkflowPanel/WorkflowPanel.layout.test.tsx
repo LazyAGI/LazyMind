@@ -255,7 +255,9 @@ describe('shared workflow compact layout', () => {
     fixture.session.status = status;
     fixture.session.projection!.display!.status = status;
     const send = vi.fn();
-    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    // Let the asynchronous UI load and editor-action registration settle before
+    // asserting the save-before-rerun contract.
+    await act(async () => { render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />); });
     await screen.findByRole('button', { name: '发布' });
     const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
     expect(shortcuts).toBeVisible();
@@ -271,7 +273,7 @@ describe('shared workflow compact layout', () => {
   it('does not rerun when saving the current edits fails', async () => {
     fixture.flush.mockResolvedValue(false);
     const send = vi.fn();
-    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await act(async () => { render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />); });
     await screen.findByRole('button', { name: '发布' });
     fireEvent.click(within(screen.getByRole('group', { name: '回退到步骤：' })).getByRole('button', { name: '成稿' }));
     await waitFor(() => expect(fixture.flush).toHaveBeenCalledOnce());

@@ -56,7 +56,7 @@ func notificationReviewRun(t *testing.T, db *gorm.DB, config *string, workflowID
 func TestNotificationReviewChatWriteFailureRecoversWithoutRerun(t *testing.T) {
 	for _, failureEnabled := range []bool{false, true} {
 		t.Run(fmt.Sprint(failureEnabled), func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newChatNotificationTestDB(t).DB
 			config := fmt.Sprintf(`{"events":{"succeeded":{"enabled":true,"content":"summary"},"failed":{"enabled":%t,"content":"summary"}},"channels":{"desktop":{"enabled":true}}}`, failureEnabled)
 			notificationReviewRun(t, db, &config, nil)
 			// Database-native failure leaves PostgreSQL's transaction aborted too.
@@ -135,7 +135,7 @@ func TestNotificationReviewChatWriteFailureRecoversWithoutRerun(t *testing.T) {
 }
 
 func TestNotificationReviewLegacyAsyncWorkflowCompletesWithDesktopOnly(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+	db := newChatNotificationTestDB(t).DB
 	sessionID := "review-workflow"
 	session := orm.WorkflowSession{ID: sessionID, ConversationID: "review-conv", WorkflowID: "writer", Status: "active", CreateUserID: "owner"}
 	if err := db.Create(&session).Error; err != nil {

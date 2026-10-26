@@ -421,11 +421,19 @@
 
 .chat-source-panel-header {
   display: flex;
+  flex-shrink: 0;
   min-height: 64px;
   border-bottom: 1px solid #e6edf6;
   padding: 16px 18px;
   align-items: center;
   justify-content: space-between;
+}
+
+.chat-source-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .chat-source-panel-title {

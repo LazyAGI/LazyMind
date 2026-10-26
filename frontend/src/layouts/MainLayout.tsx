@@ -152,7 +152,7 @@ export default function MainLayout() {
       const request = ++sequence;
       try {
         const prefs = await fetchUserUiPreferences({ silentError: true } as never);
-        if (!disposed && request === sequence) setDirectoryPreference({ user: directoryUser, enabled: prefs.document_directories_enabled ?? true });
+        if (!disposed && request === sequence) setDirectoryPreference({ user: directoryUser, enabled: prefs.document_directories_enabled ?? false });
       } catch { /* Keep the feature unavailable until preferences can be read. */ }
     };
     const changed = (event: Event) => {

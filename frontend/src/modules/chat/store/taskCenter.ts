@@ -10,6 +10,7 @@ import UIUtils from "@/modules/chat/utils/ui";
 import { WORKFLOW_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
+  CHAT_KNOWLEDGE_CONFIRMATION_EVENT,
   CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
   CHAT_MEDIA_CAPABILITY_MISSING_EVENT,
   CHAT_WORKFLOW_STEP_FEEDBACK_EVENT,
@@ -1292,6 +1293,12 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             }
             scheduleWorkflowSessionRefresh(conversationId);
           } else if (type === 'ask_pending') {
+            if (payload.history_id && payload.confirmation_id) {
+              window.dispatchEvent(new CustomEvent(CHAT_KNOWLEDGE_CONFIRMATION_EVENT, {
+                detail: { conversationId, historyId: payload.history_id, confirmationId: payload.confirmation_id },
+              }));
+              return;
+            }
             if (replayed) return;
             // ask_pending is persisted in chat history. Resuming the chat turn
             // reuses the normal message reducer and renders the AskCard.

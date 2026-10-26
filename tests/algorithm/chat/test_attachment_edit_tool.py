@@ -38,6 +38,13 @@ def test_attachment_tools_register_string_replace_only_when_files_exist():
     assert names == {'find_user_attachment', 'read_user_attachment', 'string_replace'}
 
 
+def test_attachment_registration_obeys_each_disabled_tool():
+    disabled = {'find_user_attachment', 'string_replace'}
+    tools = chat_service._build_user_attachment_tools(True, disabled)
+    assert [tool.__name__ for tool in tools] == ['read_user_attachment']
+    assert chat_service._build_user_attachment_tools(True, disabled | {'read_user_attachment'}) == []
+
+
 def test_string_replace_publishes_edited_copy_and_preserves_upload(monkeypatch, tmp_path):
     source = _attachment(
         monkeypatch, tmp_path, 'deepseek2.txt', b'before\ntarget value\nafter\n',

@@ -154,6 +154,20 @@ components:
                     items:
                         type: string
                     type: array
+                match:
+                    type: string
+                name:
+                    type: string
+                parent_id:
+                    type: string
+                path:
+                    type: string
+                recursive:
+                    type: boolean
+                resource_ids:
+                    items:
+                        type: string
+                    type: array
                 tags:
                     items:
                         type: string
@@ -636,14 +650,10 @@ components:
                     type: string
                 driver_session_id:
                     type: string
-                generation:
-                    format: int64
-                    type: integer
                 provider:
                     type: string
             required:
                 - bound
-                - generation
             type: object
         BulkUpdateServerEnabledRequest:
             properties:
@@ -708,6 +718,27 @@ components:
                 - missing
                 - required
                 - status
+            type: object
+        CapabilityRef:
+            properties:
+                display_order:
+                    type: integer
+                enabled:
+                    type: boolean
+                key:
+                    type: string
+                settings:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                version:
+                    type: integer
+            required:
+                - display_order
+                - enabled
+                - key
+                - version
             type: object
         ChatChunkResponse:
             properties:
@@ -3810,6 +3841,12 @@ components:
                     type: array
                 algo:
                     $ref: '#/components/schemas/Algo'
+                algo_id:
+                    type: string
+                allowed_actions:
+                    items:
+                        type: string
+                    type: array
                 capabilities:
                     $ref: '#/components/schemas/DatasetCapabilities'
                 cover_image:
@@ -3841,6 +3878,8 @@ components:
                     type: boolean
                 name:
                     type: string
+                operation_result:
+                    $ref: '#/components/schemas/ResourceOperationResult'
                 parsers:
                     items:
                         $ref: '#/components/schemas/ParserConfig'
@@ -3850,8 +3889,19 @@ components:
                 processing_revision:
                     format: int64
                     type: integer
+                profile_id:
+                    type: string
                 reader_fallback_accepted:
                     type: boolean
+                reading_capabilities:
+                    items:
+                        $ref: '#/components/schemas/CapabilityRef'
+                    type: array
+                resource_version:
+                    format: int64
+                    type: integer
+                scene:
+                    type: string
                 segment_count:
                     format: int64
                     type: integer
@@ -4207,6 +4257,10 @@ components:
                     type: string
                 pdf_convert_result:
                     type: string
+                processing_error:
+                    $ref: '#/components/schemas/ProcessingDiagnostic'
+                processing_status:
+                    type: string
                 recursive_document_count:
                     format: int64
                     type: integer
@@ -4218,6 +4272,8 @@ components:
                     type: integer
                 rel_path:
                     type: string
+                retained_only:
+                    type: boolean
                 tags:
                     items:
                         type: string
@@ -4244,6 +4300,7 @@ components:
                 - name
                 - p_id
                 - rel_path
+                - retained_only
                 - type
                 - update_time
                 - uri
@@ -6560,6 +6617,45 @@ components:
                 visibility:
                     type: string
             type: object
+        KnowledgeOperation:
+            properties:
+                action:
+                    type: string
+                call_id:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/ResourceOperationItem'
+                    type: array
+                processing_summary:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                status:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/ResourceOperationSummary'
+            required:
+                - action
+                - call_id
+                - status
+                - summary
+            type: object
+        KnowledgeOperationError:
+            properties:
+                code:
+                    type: string
+                details:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
         LearningBookRequest:
             properties:
                 capability_key:
@@ -7523,6 +7619,10 @@ components:
                     type: string
                 execution_id:
                     type: string
+                knowledge_operations:
+                    items:
+                        $ref: '#/components/schemas/KnowledgeOperation'
+                    type: array
                 order:
                     type: integer
                 pages:
@@ -7605,6 +7705,8 @@ components:
             type: object
         Pages:
             properties:
+                knowledge_operations:
+                    $ref: '#/components/schemas/CollectionPage'
                 process_steps:
                     $ref: '#/components/schemas/CollectionPage'
                 sources:
@@ -7612,6 +7714,7 @@ components:
                 stage_artifacts:
                     $ref: '#/components/schemas/CollectionPage'
             required:
+                - knowledge_operations
                 - process_steps
                 - sources
                 - stage_artifacts
@@ -7881,6 +7984,24 @@ components:
                 - code
                 - message
                 - data
+            type: object
+        ProcessingDiagnostic:
+            properties:
+                code:
+                    type: string
+                message:
+                    type: string
+                recovery:
+                    type: string
+                stage:
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - code
+                - message
+                - recovery
+                - stage
             type: object
         ProjectionError:
             properties:
@@ -8314,6 +8435,123 @@ components:
             properties:
                 deleted_count:
                     type: integer
+            type: object
+        ResourceError:
+            properties:
+                code:
+                    type: string
+                details:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+            type: object
+        ResourceOperationItem:
+            properties:
+                after:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                before:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+                cleanup_status:
+                    type: string
+                document_count:
+                    type: integer
+                error:
+                    $ref: '#/components/schemas/ResourceError'
+                folder_count:
+                    type: integer
+                id_mapping:
+                    additionalProperties:
+                        type: string
+                    type: object
+                input_index:
+                    type: integer
+                name:
+                    type: string
+                parent_id:
+                    type: string
+                previous_ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                processing_error:
+                    $ref: '#/components/schemas/ProcessingDiagnostic'
+                processing_status:
+                    type: string
+                resource_ref:
+                    $ref: '#/components/schemas/ResourceRef'
+                resource_status:
+                    type: string
+                task_id:
+                    type: string
+            required:
+                - name
+                - parent_id
+                - resource_ref
+                - resource_status
+            type: object
+        ResourceOperationResult:
+            properties:
+                action:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/ResourceOperationItem'
+                    type: array
+                processing_summary:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                status:
+                    type: string
+                summary:
+                    $ref: '#/components/schemas/ResourceOperationSummary'
+            required:
+                - action
+                - status
+                - summary
+            type: object
+        ResourceOperationSummary:
+            properties:
+                failed:
+                    type: integer
+                skipped:
+                    type: integer
+                succeeded:
+                    type: integer
+                total:
+                    type: integer
+                unconfirmed:
+                    type: integer
+            required:
+                - failed
+                - skipped
+                - succeeded
+                - total
+                - unconfirmed
+            type: object
+        ResourceRef:
+            properties:
+                document_id:
+                    type: string
+                folder_id:
+                    type: string
+                kind:
+                    type: string
+                knowledge_base_id:
+                    type: string
+            required:
+                - kind
+                - knowledge_base_id
             type: object
         Result:
             properties:
@@ -10057,9 +10295,6 @@ components:
                 accepted_at:
                     format: date-time
                     type: string
-                binding_generation:
-                    format: int64
-                    type: integer
                 command_id:
                     type: string
                 connector_id:
@@ -10094,7 +10329,6 @@ components:
                     format: date-time
                     type: string
             required:
-                - binding_generation
                 - command_id
                 - connector_id
                 - created_at
@@ -10116,6 +10350,8 @@ components:
             type: object
         WorkflowHostBindingRequest:
             properties:
+                cancellation:
+                    type: string
                 connector_id:
                     type: string
                 credential:
@@ -13852,6 +14088,103 @@ components:
                 - code
                 - message
             type: object
+        skillOrganizeApprovalItemOpenAPIResponse:
+            properties:
+                content:
+                    type: string
+                delete_keys:
+                    items:
+                        type: string
+                    type: array
+                depends_on:
+                    items:
+                        type: string
+                    type: array
+                id:
+                    type: string
+                source_keys:
+                    items:
+                        type: string
+                    type: array
+                source_skill_ids:
+                    items:
+                        type: string
+                    type: array
+                status:
+                    type: string
+                target_name:
+                    type: string
+                target_skill_id:
+                    type: string
+                target_source_key:
+                    type: string
+                type:
+                    type: string
+            required:
+                - id
+                - status
+                - target_name
+                - target_skill_id
+                - target_source_key
+                - type
+            type: object
+        skillOrganizeApprovalListOpenAPIResponse:
+            properties:
+                tasks:
+                    items:
+                        $ref: '#/components/schemas/skillOrganizeApprovalTaskOpenAPIResponse'
+                    type: array
+            type: object
+        skillOrganizeApprovalResolveItemOpenAPIResponse:
+            properties:
+                error:
+                    type: string
+                id:
+                    type: string
+                status:
+                    type: string
+            required:
+                - id
+                - status
+            type: object
+        skillOrganizeApprovalResolveOpenAPIRequest:
+            properties:
+                action:
+                    enum:
+                        - accept
+                        - reject
+                        - revoke
+                    type: string
+                item_ids:
+                    items:
+                        type: string
+                    type: array
+                request_id:
+                    type: string
+            required:
+                - action
+                - request_id
+            type: object
+        skillOrganizeApprovalResolveOpenAPIResponse:
+            properties:
+                results:
+                    items:
+                        $ref: '#/components/schemas/skillOrganizeApprovalResolveItemOpenAPIResponse'
+                    type: array
+            type: object
+        skillOrganizeApprovalTaskOpenAPIResponse:
+            properties:
+                error:
+                    type: string
+                items:
+                    items:
+                        $ref: '#/components/schemas/skillOrganizeApprovalItemOpenAPIResponse'
+                    type: array
+                request_id:
+                    type: string
+            required:
+                - request_id
+            type: object
         skillOrganizeOpenAPIRequest:
             properties:
                 artifact_dir:
@@ -14598,6 +14931,15 @@ components:
                 - name
                 - verify
             type: object
+        updateSidechatSourceOpenAPIRequest:
+            properties:
+                selected_text:
+                    type: string
+                source_history_id:
+                    type: string
+                source_seq:
+                    type: integer
+            type: object
         userChatSettingsOpenAPIResponse:
             properties:
                 default_permission_mode:
@@ -15280,6 +15622,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/references:resolve
+    /api/core/academic/source-targets:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /academic/source-targets
+    /api/core/academic/sources:inspect:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/sources:inspect
     /api/core/academic/works:presence:
         post:
             responses:
@@ -18558,6 +18912,30 @@ paths:
             summary: Discard an ephemeral side conversation
             tags:
                 - conversations
+        patch:
+            description: Freezes the selected parent history boundary as the existing side conversation's read-only model context. Preserves its messages, identity, settings, and retained status. Rejects updates while the conversation is busy.
+            parameters:
+                - in: path
+                  name: child_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateSidechatSourceOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/sidechatConversationOpenAPIResponse'
+                    description: Updated side conversation source
+            summary: Update a side conversation's source
+            tags:
+                - conversations
     /api/core/conversations/{conversation_id}/artifact-projection:
         get:
             parameters:
@@ -20951,6 +21329,23 @@ paths:
                 "200":
                     description: OK
             summary: GET /datasets/{dataset}/documents/{document}:read
+    /api/core/datasets/{dataset}/documents/{document}:reparse:
+        post:
+            parameters:
+                - in: path
+                  name: dataset
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: document
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /datasets/{dataset}/documents/{document}:reparse
     /api/core/datasets/{dataset}/documents:batchUpdateTags:
         post:
             parameters:
@@ -23282,6 +23677,43 @@ paths:
             summary: List background knowledge market tasks
             tags:
                 - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}:
+        delete:
+            description: Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskDeletedOpenAPIResponse'
+                    description: Deleted task
+            summary: Delete terminal knowledge market task history
+            tags:
+                - knowledge-market
+        get:
+            description: Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskDetailOpenAPIResponse'
+                    description: Background install task detail
+            summary: Get background knowledge market task detail
+            tags:
+                - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}/files:
         get:
             description: Returns the current user's job-owned file page and all four counts. Historical file snapshots are immutable. Unknown states are unfinished. Aggregate-only history reports file_details_available=false. Page numbers are clamped; page and page_size must be positive integers, page_size at most 100.
@@ -23321,43 +23753,6 @@ paths:
                                 $ref: '#/components/schemas/knowledgeMarketTaskFilesOpenAPIResponse'
                     description: Task file page
             summary: List files for one knowledge market task
-            tags:
-                - knowledge-market
-    /api/core/knowledge-market/tasks/{job_id}:
-        delete:
-            description: Deletes only the current user's terminal task record; keeps the knowledge base and documents. Active submissions or parsing return 409.
-            parameters:
-                - in: path
-                  name: job_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/knowledgeMarketTaskDeletedOpenAPIResponse'
-                    description: Deleted task
-            summary: Delete terminal knowledge market task history
-            tags:
-                - knowledge-market
-        get:
-            description: Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
-            parameters:
-                - in: path
-                  name: job_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/knowledgeMarketTaskDetailOpenAPIResponse'
-                    description: Background install task detail
-            summary: Get background knowledge market task detail
             tags:
                 - knowledge-market
     /api/core/knowledge-market/tasks/{job_id}:cancel:
@@ -23441,6 +23836,19 @@ paths:
             summary: One-click update of all installed official knowledge bases
             tags:
                 - knowledge-market
+    /api/core/knowledge/options:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Knowledge options
+            summary: Available knowledge configuration and upload limits
+            tags:
+                - datasets
     /api/core/learning/books:
         get:
             responses:
@@ -27615,6 +28023,38 @@ paths:
             summary: Submit skill organize task
             tags:
                 - skills
+    /api/core/skill_organize/approvals:
+        get:
+            description: Returns pending and accepted plan items after the organize task has finished writing. Items from a running task are omitted.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillOrganizeApprovalListOpenAPIResponse'
+                    description: Skill organize approvals
+            summary: List completed skill organize approvals
+            tags:
+                - skills
+    /api/core/skill_organize/approvals:resolve:
+        post:
+            description: Applies one plan item at a time. A merge updates the target skill and removes its source skills together. Reject discards a pending item. Revoke restores an accepted item when no later edit exists.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/skillOrganizeApprovalResolveOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillOrganizeApprovalResolveOpenAPIResponse'
+                    description: Skill organize approval results
+            summary: Accept, reject, or revoke skill organize items
+            tags:
+                - skills
     /api/core/skill_organize:cancel:
         post:
             responses:
@@ -29823,6 +30263,36 @@ paths:
             summary: Compare revision; closing requires the exact current affected run IDs
             tags:
                 - TaskNotifications
+    /api/core/user/ui-preferences:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
+                    description: Current user's UI preferences
+            summary: Get current user's UI preferences
+            tags:
+                - user
+        patch:
+            description: Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/userUIPreferencesPatchOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
+                    description: Updated current user's UI preferences
+            summary: Partially update current user's UI preferences
+            tags:
+                - user
     /api/core/user/wechat-notification-targets:
         get:
             description: List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity. Configuration bodies are limited to 16 KiB; errors include stable data.detail.reason and request_id.
@@ -29889,36 +30359,6 @@ paths:
             summary: List unique confirmed WeChat recipients from owned saved schedule notification rules; does not check connectivity
             tags:
                 - TaskNotifications
-    /api/core/user/ui-preferences:
-        get:
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
-                    description: Current user's UI preferences
-            summary: Get current user's UI preferences
-            tags:
-                - user
-        patch:
-            description: Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/userUIPreferencesPatchOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/userUIPreferencesOpenAPIResponse'
-                    description: Updated current user's UI preferences
-            summary: Partially update current user's UI preferences
-            tags:
-                - user
     /api/core/v1/internal/provider-connections/{auth_connection_id}/access-token:report:
         post:
             parameters:
@@ -31326,6 +31766,63 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-sessions/{session_id}/input-bindings
+    /api/core/workflow-sessions/{session_id}/product-artifacts/{stage}:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: stage
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/product-artifacts/{stage}
+    /api/core/workflow-sessions/{session_id}/product-decisions/{decision_id}:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: decision_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/product-decisions/{decision_id}
+    /api/core/workflow-sessions/{session_id}/product-stage-relay:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions/{session_id}/product-stage-relay
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/product-stage-relay
     /api/core/workflow-sessions/{session_id}/projection:
         get:
             description: view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.

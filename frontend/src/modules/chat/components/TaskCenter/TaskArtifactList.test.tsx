@@ -1,9 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PublicArtifact } from "@/modules/chat/types/ordinaryTask";
+import { MemoryRouter } from "react-router-dom";
+import * as sourceAPI from "../SourceImports/api";
 import { TaskArtifactList } from "./TaskArtifactList";
 import { downloadArtifactFile } from "@/modules/chat/utils/artifactFileActions";
 
+vi.mock("../SourceImports/api", () => ({ inspectSources: vi.fn(), listSourceImports: vi.fn(), sourceTargets: vi.fn(), submitSourceImport: vi.fn() }));
 vi.mock("@/modules/knowledge/components/FileViewer", () => ({ default: () => <div>File viewer</div> }));
 vi.mock("@/modules/chat/utils/artifactFileActions", () => ({ downloadArtifactFile: vi.fn() }));
 vi.mock("react-i18next", async importOriginal => ({ ...(await importOriginal<typeof import("react-i18next")>()), useTranslation: () => ({ t: (key: string) => key }) }));
@@ -15,6 +18,31 @@ const file = (overrides: Partial<PublicArtifact> = {}): PublicArtifact => ({
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("ordinary stage artifacts", () => {
+  it("uses the producing Work task for actual citation import in a result preview", async () => {
+    const source = { source_type: "external" as const, citation_id: "1.1", title: "ReAct", url: "https://arxiv.org/abs/2210.03629" };
+    vi.mocked(sourceAPI.inspectSources).mockResolvedValue([{ source_id: "1.1", title: "ReAct", url: source.url, eligible: true, paper_key: "arxiv:2210.03629" }]);
+    vi.mocked(sourceAPI.listSourceImports).mockResolvedValue([]);
+    render(<MemoryRouter><TaskArtifactList artifacts={[file({ inline_content: "ReAct [1](#source-1.1)" })]} sourceContexts={{ "task-1": { context: { task_id: "task-1" }, sources: [source] } }} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
+    expect(sourceAPI.inspectSources).not.toHaveBeenCalled();
+    const citation = document.querySelector(".md-source-chip")!;
+    expect(citation).toBeTruthy();
+    fireEvent.focus(citation);
+    await waitFor(() => expect(sourceAPI.inspectSources).toHaveBeenCalledWith({ task_id: "task-1" }));
+    expect(await screen.findByRole("button", { name: /加入(?:知识库|资料库)/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开原文" })).toBeInTheDocument();
+  });
+  it("passes durable operation receipts into the Work preview", async () => {
+    render(<MemoryRouter><TaskArtifactList artifacts={[file()]} sourceContexts={{ "task-1": {
+      context: { task_id: "task-1" }, sources: [], operations: [{ call_id: "operation", action: "knowledge.create", status: "success", items: [
+        { name: "Created library", resource_ref: { kind: "knowledge_base", knowledge_base_id: "created" }, resource_status: "created" },
+      ] }],
+    } }} /></MemoryRouter>);
+    fireEvent.click(screen.getByRole("button", { name: "Report.md" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Agent 执行结果" }));
+    expect(await screen.findByRole("link", { name: "Created library" })).toHaveAttribute("href", "/lib/knowledge/detail/created");
+    expect(sourceAPI.inspectSources).not.toHaveBeenCalled();
+  });
   it("hides an empty collection and deduplicates repeated IDs", () => {
     const { rerender } = render(<TaskArtifactList artifacts={[]} />);
     expect(screen.queryByRole("region")).not.toBeInTheDocument();

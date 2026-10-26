@@ -28,9 +28,13 @@ type Principal struct {
 }
 
 type InvocationContext struct {
-	Principal     Principal
-	ExternalAgent string
-	InvocationID  string
+	ExecutionKey      string
+	OperationKey      string
+	ExpectedSnapshot  string
+	AllowedDatasetIDs []string
+	Principal         Principal
+	ExternalAgent     string
+	InvocationID      string
 }
 
 type ExternalModelSummary struct {
@@ -261,19 +265,30 @@ type GetSkillResult struct {
 }
 
 type ListKnowledgeInput struct {
-	Keyword string      `json:"keyword,omitempty" jsonschema:"optional knowledge base metadata keyword"`
-	Tags    []string    `json:"tags,omitempty" jsonschema:"optional tags; every tag must match"`
-	Page    PageRequest `json:"page,omitempty"`
+	Source               string      `json:"source,omitempty" jsonschema:"manual, cloud, official_installed; empty/unknown: all sources."`
+	OrderBy              string      `json:"order_by,omitempty" jsonschema:"latest_updated, most_used, recent_used; or create_time/created_at, update_time/updated_at, display_name with optional asc (default) or desc. Omitted/invalid: updated_at desc."`
+	IncludeConfiguration bool        `json:"include_configuration,omitempty" jsonschema:"Default false; true includes actual scene/preset, algorithm, processing and reading configuration."`
+	KnowledgeBaseIDs     []string    `json:"knowledge_base_ids,omitempty" jsonschema:"1-20 Core library IDs, max 256 bytes each. Omitted/null: accessible libraries within execution scope; [] invalid."`
+	Match                string      `json:"match,omitempty" jsonschema:"contains (default): case-insensitive keyword in name/description/tags; exact: stored display name equals keyword."`
+	Scene                string      `json:"scene,omitempty" jsonschema:"general, academic_papers, chinese_modern, chinese_classical, english_learning, legal, technical, historical, custom; paper_collection aliases academic_papers. Omitted/empty: all."`
+	RequiredAction       string      `json:"required_action,omitempty" jsonschema:"read (default), upload or write: permission required on returned libraries."`
+	Keyword              string      `json:"keyword,omitempty" jsonschema:"Max 256 bytes; interpreted by match. Empty disables contains filtering; exact still compares the name."`
+	Tags                 []string    `json:"tags,omitempty" jsonschema:"All must match; max 20 entries, 64 bytes per trimmed tag. Drop blanks/deduplicate; omitted/[]: unrestricted."`
+	Page                 PageRequest `json:"page,omitempty" jsonschema:"Default 20 results (also page_size=0); otherwise 1-100. Reuse next_page_token with unchanged filters, sorting and page size."`
 }
 
 type KnowledgeSummary struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	Description       string    `json:"description,omitempty"`
-	Tags              []string  `json:"tags,omitempty"`
-	UpdatedAt         time.Time `json:"updated_at"`
-	DocumentSizeBytes int64     `json:"document_size_bytes"`
-	DocumentCount     int64     `json:"document_count"`
+	Configuration     map[string]any `json:"configuration,omitempty"`
+	ResourceRef       ResourceRef    `json:"resource_ref"`
+	Scene             string         `json:"scene"`
+	AllowedActions    []string       `json:"allowed_actions"`
+	ID                string         `json:"id"`
+	Name              string         `json:"name"`
+	Description       string         `json:"description,omitempty"`
+	Tags              []string       `json:"tags,omitempty"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	DocumentSizeBytes int64          `json:"document_size_bytes"`
+	DocumentCount     int64          `json:"document_count"`
 }
 
 type ListKnowledgeResult struct {
@@ -282,24 +297,46 @@ type ListKnowledgeResult struct {
 }
 
 type ListKnowledgeDocumentsInput struct {
-	KnowledgeID string      `json:"knowledge_id" jsonschema:"stable LazyMind knowledge base ID"`
-	Name        string      `json:"name,omitempty" jsonschema:"case-insensitive literal substring of the ingested file display name"`
-	Path        string      `json:"path,omitempty" jsonschema:"case-insensitive literal substring of the upload relative directory; not a host filesystem path"`
-	Page        PageRequest `json:"page,omitempty"`
+	OrderBy      string      `json:"order_by,omitempty" jsonschema:"updated_at desc (default), updated_at asc, create_time desc, created_at desc, display_name asc, display_name desc. Invalid values fail; IDs break ties."`
+	KnowledgeIDs []string    `json:"knowledge_ids,omitempty" jsonschema:"1-20 readable Core library IDs, max 256 bytes each; [] invalid. Exclusive with knowledge_id; supply one of the two."`
+	ResourceIDs  []string    `json:"resource_ids,omitempty" jsonschema:"Up to 100 document/folder IDs within selected libraries, max 256 bytes each; omitted/[]: unrestricted."`
+	ResourceType string      `json:"resource_type,omitempty" jsonschema:"document (default), folder or all."`
+	ParentID     *string     `json:"parent_id,omitempty" jsonschema:"Omitted/null: whole library; empty: root; otherwise folder ID. Supplying this requires one library. ID max 256 bytes."`
+	Recursive    *bool       `json:"recursive,omitempty" jsonschema:"Default true: all descendants of parent_id; false: direct children. Ignored without parent_id."`
+	Match        string      `json:"match,omitempty" jsonschema:"contains (default): case-insensitive literal substring; exact: stored name/path equality."`
+	KnowledgeID  string      `json:"knowledge_id,omitempty" jsonschema:"Single readable Core library ID, max 256 bytes; exclusive with knowledge_ids."`
+	Name         string      `json:"name,omitempty" jsonschema:"Display name using match; max 256 bytes; omitted/empty: unrestricted."`
+	Path         string      `json:"path,omitempty" jsonschema:"Original upload relative_path using match, not host/logical-folder path; max 1024 bytes; omitted/empty: unrestricted."`
+	Page         PageRequest `json:"page,omitempty" jsonschema:"Default 20 results (also page_size=0); otherwise 1-100. Reuse next_page_token with unchanged filters, sorting and page size."`
+}
+
+type ProcessingDiagnostic struct {
+	Stage    string `json:"stage"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	TaskID   string `json:"task_id,omitempty"`
+	Recovery string `json:"recovery"`
 }
 
 type KnowledgeDocumentSummary struct {
-	ID           string    `json:"id"`
-	KnowledgeID  string    `json:"knowledge_id"`
-	Name         string    `json:"name"`
-	RelativePath string    `json:"relative_path,omitempty"`
-	Tags         []string  `json:"tags,omitempty"`
-	ParseStatus  string    `json:"parse_status,omitempty"`
-	MIMEType     string    `json:"mime_type,omitempty"`
-	SizeBytes    int64     `json:"size_bytes"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	CreatedBy    string    `json:"created_by,omitempty"`
+	ProcessingError  *ProcessingDiagnostic `json:"processing_error,omitempty"`
+	ResourceRef      ResourceRef           `json:"resource_ref"`
+	ResourceType     string                `json:"resource_type"`
+	ParentID         string                `json:"parent_id"`
+	LogicalPath      string                `json:"logical_path"`
+	AllowedActions   []string              `json:"allowed_actions"`
+	ProcessingStatus string                `json:"processing_status,omitempty"`
+	ID               string                `json:"id"`
+	KnowledgeID      string                `json:"knowledge_id"`
+	Name             string                `json:"name"`
+	RelativePath     string                `json:"relative_path,omitempty"`
+	Tags             []string              `json:"tags,omitempty"`
+	ParseStatus      string                `json:"parse_status,omitempty"`
+	MIMEType         string                `json:"mime_type,omitempty"`
+	SizeBytes        int64                 `json:"size_bytes"`
+	CreatedAt        time.Time             `json:"created_at"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+	CreatedBy        string                `json:"created_by,omitempty"`
 }
 
 type ListKnowledgeDocumentsResult struct {

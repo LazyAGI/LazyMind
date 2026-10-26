@@ -10,11 +10,12 @@ describe('subagent source surface', () => {
   it('keeps sources on the current task and renders ranked reference sources', () => {
     const store = read('frontend/src/modules/chat/store/taskCenter.ts');
     const panel = read('frontend/src/modules/chat/components/TaskCenter/index.tsx');
+    const references = read('frontend/src/modules/chat/components/SourceImports/ReferenceSources.tsx');
 
     expect(store).toMatch(/sources:\s*ChatSource\[\]/);
     expect(store).toMatch(/case "sources":[\s\S]*?task\.sources =/);
     expect(store).toMatch(/sources:\s*t\.sources \?\? \[\]/);
-    expect(panel).toMatch(/getReferenceSources\(sources\)/);
+    expect(references).toMatch(/getCitationSources\(sources\)/);
     expect(panel).toMatch(/<ReferenceSources sources=\{task\.sources\} \/>/);
   });
 });

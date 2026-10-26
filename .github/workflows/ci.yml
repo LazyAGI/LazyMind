@@ -28,6 +28,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+          cache-dependency-path: backend/core/go.sum
       - name: Test Skill lock verification selection
         run: python3 -m unittest discover -s scripts/tests -p test_skill_lock_verification_mode.py
       - name: Verify pinned SkillHub packages and lock artifacts
@@ -35,10 +36,13 @@ jobs:
         run: |
           verify_args=(--verify-lock-artifacts)
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # Checkout tests a synthetic merge commit. Its first parent is the
+            # actual target revision, which may be newer than the event base.
+            base_sha=$(git rev-parse HEAD^1)
             # An unrelated PR cannot change the pinned Skill archives. Keep
             # Featured Workflow validation, without downloading every remote
             # SkillHub package on every CI run.
-            if git -C ../.. diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
+            if git -C ../.. diff --quiet "$base_sha" HEAD -- \
               skills/builtin-sources.yaml skills/builtin-skills.lock.json \
               skills/patches skills/featured skills/search \
               backend/core/cmd/builtin-skill-bundle \
@@ -50,13 +54,13 @@ jobs:
                 --check-featured
               exit 0
             fi
-            mode=$(python3 ../../scripts/skill_lock_verification_mode.py "${{ github.event.pull_request.base.sha }}")
+            mode=$(python3 ../../scripts/skill_lock_verification_mode.py "$base_sha")
             if [[ "$mode" == "local" ]]; then
               # Rebuild and hash-check local packages using the existing frozen
               # catalog path; unchanged remote packages need no download.
               verify_args=(--catalog-only --frozen-lockfile)
             else
-              git show "${{ github.event.pull_request.base.sha }}:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
+              git show "$base_sha:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
               verify_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
             fi
           fi
@@ -88,6 +92,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+          cache-dependency-path: |
+            backend/core/go.sum
+            backend/scan-control-plane/go.sum
+            backend/file-watcher/go.sum
+            local/local-proxy/go.sum
+            local/local-runtime-manager/go.sum
+            local/lazymind-cli/go.sum
+            tests/backend/core/go.sum
 
       - name: Lint
         run: make lint
@@ -146,9 +158,10 @@ jobs:
           npx c8 check-coverage --lines 10 --functions 10 --branches 10
 
   test-workflow-panel:
+    needs: [lint, doc_check]
     name: Test Workflow Panel boundaries
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -167,9 +180,9 @@ jobs:
       - name: Type-check workflow panel integration
         working-directory: frontend
         run: pnpm typecheck
-      - name: Test native and external workflow panel boundaries
+      - name: Test frontend application including workflow panel boundaries
         working-directory: frontend
-        run: pnpm test:workflow-panel
+        run: pnpm test --maxWorkers=2 --minWorkers=1
 
   test-local-runtime:
     needs: [lint, doc_check]
@@ -187,6 +200,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+          cache-dependency-path: |
+            local/local-proxy/go.sum
+            local/local-runtime-manager/go.sum
+            local/lazymind-cli/go.sum
       - uses: pnpm/action-setup@v4
         if: runner.os == 'Linux'
         with:
@@ -204,8 +221,29 @@ jobs:
         working-directory: local/local-runtime-manager
         run: go test ./... -v
       - name: Test LazyMind Agent Connector
+        if: runner.os != 'Windows'
         working-directory: local/lazymind-cli
         run: go test ./... -v
+      - name: Test LazyMind Agent Connector with build diagnostics
+        if: runner.os == 'Windows'
+        working-directory: local/lazymind-cli
+        shell: pwsh
+        env:
+          GODEBUG: gocachetest=1
+        run: |
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'go-cli-diagnostics'
+          New-Item -ItemType Directory -Force -Path $diagnostics | Out-Null
+          go test ./... -json "-debug-actiongraph=$diagnostics/actions.json" 2> "$diagnostics/cache.log" |
+            Tee-Object -FilePath "$diagnostics/tests.jsonl"
+          $testExitCode = $LASTEXITCODE
+          Get-Content "$diagnostics/cache.log"
+          exit $testExitCode
+      - name: Upload Windows Go diagnostics
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-cli-diagnostics-windows
+          path: ${{ runner.temp }}/go-cli-diagnostics
       - name: Test and verify the bundled DSH plugin
         if: runner.os == 'Linux'
         working-directory: integrations/dsh-workflow
@@ -317,28 +355,31 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.11'
+          cache-dependency-path: |
+            backend/core/go.sum
+            tests/backend/core/go.sum
 
       - name: Verify migration and target-upgrade paths
         env:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
         run: bash scripts/test_migration_upgrade.sh
 
-      - name: Test backend core (SQLite)
-        run: cd backend/core && go test ./... -v -timeout 40m
+      - name: Test backend core (SQLite) with coverage
+        run: cd backend/core && go test ./... -v -timeout 40m -coverprofile=coverage-core.out
 
       - name: Test backend core (PostgreSQL)
         env:
           TEST_DB_DRIVER: postgres
           TEST_DB_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
-        run: cd backend/core && go test ./... -v -timeout 40m
+        # Match SQLite instrumentation to reuse database-independent test results.
+        run: cd backend/core && go test ./... -v -timeout 40m -cover
 
       - name: Test backend core integration module
         run: cd tests/backend/core && go mod tidy && go test ./... -v -timeout 40m
 
-      - name: Generate coverage for backend-core
+      - name: Generate coverage reports for backend-core
         run: |
           cd backend/core
-          go test ./... -timeout 40m -coverprofile=coverage-core.out
           go tool cover -html=coverage-core.out -o coverage-core.html
           go tool cover -func=coverage-core.out
 
@@ -389,15 +430,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            algorithm/lazyllm/pyproject.toml
+            evo/requirements.txt
 
       - name: Install deps + coverage tools
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq cmake
-          pip install scikit-build-core pybind11 coverage diff-cover
-          CMAKE_POLICY_VERSION_MINIMUM=3.5 pip install --no-cache-dir algorithm/lazyllm
+          CMAKE_POLICY_VERSION_MINIMUM=3.5 python -m pip install algorithm/lazyllm -r evo/requirements.txt scikit-build-core pybind11 coverage diff-cover pytest httpx
           cp algorithm/lazyllm/pyproject.toml "$(python -c 'import lazyllm; print(lazyllm.__path__[0])')/"
-          pip install -r evo/requirements.txt
-          pip install pytest httpx
 
       - name: Test with coverage
         run: |
@@ -438,8 +480,25 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
+        id: python
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            algorithm/lazyllm/pyproject.toml
+            algorithm/requirements.txt
+            tests/algorithm/requirements-test.txt
+
+      - name: Read LazyLLM revision
+        id: lazyllm
+        run: echo "revision=$(git rev-parse HEAD:algorithm/lazyllm)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache LazyLLM wheel
+        uses: actions/cache@v4
+        id: lazyllm-wheel
+        with:
+          path: ${{ runner.temp }}/lazyllm-wheels
+          key: lazyllm-wheel-v1-${{ runner.os }}-${{ runner.arch }}-py${{ steps.python.outputs.python-version }}-${{ steps.lazyllm.outputs.revision }}
 
       - uses: pandoc/actions/setup@v1
         with:
@@ -466,15 +525,32 @@ jobs:
           fi
           rg --version
 
-      - name: Install deps + coverage tools
+      - name: Build LazyLLM wheel
+        if: steps.lazyllm-wheel.outputs.cache-hit != 'true'
         env:
           CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+        run: python -m pip wheel --no-deps --wheel-dir "$RUNNER_TEMP/lazyllm-wheels" algorithm/lazyllm
+
+      - name: Install deps + coverage tools
+        shell: python
         run: |
-          pip install scikit-build-core pybind11 coverage diff-cover
-          pip install --no-cache-dir algorithm/lazyllm
-          python -c "import lazyllm, pathlib, shutil; shutil.copy2('algorithm/lazyllm/pyproject.toml', pathlib.Path(lazyllm.__path__[0]) / 'pyproject.toml')"
-          pip install -r algorithm/requirements.txt
-          pip install -r tests/algorithm/requirements-test.txt
+          import importlib.util
+          import os
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import sys
+
+          wheels = list((Path(os.environ['RUNNER_TEMP']) / 'lazyllm-wheels').glob('lazyllm-*.whl'))
+          if len(wheels) != 1:
+              raise RuntimeError(f'Expected one LazyLLM wheel, found {len(wheels)}')
+          subprocess.run([
+              sys.executable, '-m', 'pip', 'install', str(wheels[0]),
+              '-r', 'algorithm/requirements.txt', '-r', 'tests/algorithm/requirements-test.txt',
+              'scikit-build-core', 'pybind11', 'coverage', 'diff-cover',
+          ], check=True)
+          package = Path(importlib.util.find_spec('lazyllm').origin).parent
+          shutil.copy2('algorithm/lazyllm/pyproject.toml', package / 'pyproject.toml')
 
       - name: Verify lazyllm install
         run: |
@@ -492,7 +568,7 @@ jobs:
           import sys
 
           for arguments in [
-              ['run', '--source=algorithm', '-m', 'pytest', 'tests/algorithm/', '-v'],
+              ['run', '--source=algorithm', '-m', 'pytest', 'tests/algorithm/', '-v', '--durations=50'],
               ['html', '-d', 'htmlcov-algorithm'],
               ['xml', '-o', 'coverage-algorithm.xml'],
           ]:

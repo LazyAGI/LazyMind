@@ -58,18 +58,19 @@ type BindingView struct {
 }
 
 type Snapshot struct {
-	Protocol           string                         `json:"protocol"`
-	SessionID          string                         `json:"session_id"`
-	StateVersion       int64                          `json:"state_version"`
-	Continuation       string                         `json:"continuation"`
-	Admission          controlpolicy.Admission        `json:"admission"`
-	Reviews            []orm.WorkflowReviewCheckpoint `json:"reviews"`
-	Binding            BindingView                    `json:"binding"`
-	Delivery           *orm.WorkflowHostAction        `json:"delivery"`
-	ActiveExecutions   int64                          `json:"active_executions"`
-	NativeExecutionIDs []string                       `json:"native_execution_ids"`
-	ActiveExecutionIDs []string                       `json:"active_execution_ids"`
-	AvailableActions   []string                       `json:"available_actions"`
+	Protocol            string                         `json:"protocol"`
+	SessionID           string                         `json:"session_id"`
+	StateVersion        int64                          `json:"state_version"`
+	Continuation        string                         `json:"continuation"`
+	Admission           controlpolicy.Admission        `json:"admission"`
+	Reviews             []orm.WorkflowReviewCheckpoint `json:"reviews"`
+	Binding             BindingView                    `json:"binding"`
+	Delivery            *orm.WorkflowHostAction        `json:"delivery"`
+	ActiveExecutions    int64                          `json:"active_executions"`
+	NativeExecutionIDs  []string                       `json:"native_execution_ids"`
+	ActiveExecutionIDs  []string                       `json:"active_execution_ids"`
+	AvailableActions    []string                       `json:"available_actions"`
+	AutomaticRetrySteps []string                       `json:"automatic_retry_steps"`
 }
 
 func Hash(value []byte) string { h := sha256.Sum256(value); return hex.EncodeToString(h[:]) }
@@ -169,9 +170,22 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 		return nil, err
 	}
 	result.ActiveExecutions = int64(len(result.ActiveExecutionIDs))
+	result.AutomaticRetrySteps = []string{}
+	if session.Status == "failed" && result.ActiveExecutions == 0 {
+		exhausted := tx.Model(&orm.WorkflowTransitionCommand{}).Select("target_step_id").
+			Where("session_id = ? AND operation IN ? AND retry_origin = ? AND status = ?",
+				session.ID, []string{"execute", "retry"}, "automatic", "accepted").
+			Group("target_step_id").Having("COUNT(*) >= ?", controlpolicy.MaxAutomaticStepAttempts)
+		if err := tx.Model(&orm.WorkflowSessionStep{}).Distinct("step_id").
+			Where("session_id = ? AND validity = ? AND status IN ? AND step_id NOT IN (?)",
+				session.ID, "effective", []string{"failed", "interrupted", "cancelled", "canceled"}, exhausted).
+			Order("step_id ASC").Pluck("step_id", &result.AutomaticRetrySteps).Error; err != nil {
+			return nil, err
+		}
+	}
 	result.Continuation, result.Admission = controlpolicy.Decide(controlpolicy.Facts{Status: session.Status,
 		Dismissed: session.Dismissed, PendingReviews: pending, ActiveAttempts: result.ActiveExecutions, NativeAttempts: int64(len(result.NativeExecutionIDs)),
-		BindingRequired: binding.Required, Bound: result.Binding.Bound})
+		BindingRequired: binding.Required, Bound: result.Binding.Bound, AutomaticRetryAvailable: len(result.AutomaticRetrySteps) > 0})
 	if binding.EditPaused && session.Status != "stopped" {
 		result.Continuation = "awaiting_user"
 		result.Admission = controlpolicy.Admission{Reason: "edits_pending_continue"}
@@ -210,6 +224,16 @@ func Read(tx *gorm.DB, session orm.WorkflowSession) (*Snapshot, error) {
 }
 
 func GuardBegin(tx *gorm.DB, session orm.WorkflowSession) error {
+	return guardBegin(tx, session, false)
+}
+
+// GuardRetryBegin permits recovery admission, leaving the per-target budget to
+// the transition transaction. It never bypasses binding, review or stop barriers.
+func GuardRetryBegin(tx *gorm.DB, session orm.WorkflowSession) error {
+	return guardBegin(tx, session, true)
+}
+
+func guardBegin(tx *gorm.DB, session orm.WorkflowSession, retry bool) error {
 	if EditPaused(session) {
 		return Reject("EDITS_PENDING_CONTINUE", "continue explicitly after saving edits")
 	}
@@ -219,6 +243,14 @@ func GuardBegin(tx *gorm.DB, session orm.WorkflowSession) error {
 	state, err := Read(tx, session)
 	if err != nil || state == nil {
 		return err
+	}
+	if session.Status == "failed" {
+		if retry && state.ActiveExecutions == 0 && (state.Admission.CanBegin || state.Admission.Reason == "recovery_required") {
+			return nil
+		}
+		if state.Admission.CanBegin {
+			return Reject("WORKFLOW_ADMISSION_DENIED", "recovery_required")
+		}
 	}
 	if !state.Admission.CanBegin {
 		return Reject("WORKFLOW_ADMISSION_DENIED", state.Admission.Reason)
