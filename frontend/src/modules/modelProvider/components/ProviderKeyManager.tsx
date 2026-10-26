@@ -56,6 +56,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
   const [inlineSaving, setInlineSaving] = useState(false);
   const inlineErrorId = useId();
   const inlineRequest = useRef<{ context: string; promise: Promise<boolean> } | null>(null);
+  const revealGeneration = useRef(0);
   const [editing, setEditing] = useState<{ id: string; number: number }>();
   const [secrets, setSecrets] = useState<{
     context: string;
@@ -76,12 +77,16 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
       inlineSaving,
   );
   useEffect(() => {
+    revealGeneration.current += 1;
     setSecrets({ context, values: {} });
     setPending("");
     setEditing(undefined);
     setInlineValue("");
     setInlineError("");
     form.resetFields();
+    return () => {
+      revealGeneration.current += 1;
+    };
   }, [context, form]);
   useEffect(() => {
     setOpen(false);
@@ -94,6 +99,7 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
   }, [context]);
 
   const close = () => {
+    revealGeneration.current += 1;
     setOpen(false);
     setSecrets({ context, values: {} });
   };
@@ -141,13 +147,14 @@ export function ProviderKeyManager(props: ProviderKeyManagerProps) {
       return;
     }
     setPending(keyId);
+    const generation = revealGeneration.current;
     try {
       const value = await revealProviderKey(
         props.providerId,
         props.groupId,
         keyId,
       );
-      if (currentContext.current !== context) return;
+      if (generation !== revealGeneration.current || currentContext.current !== context) return;
       if (copy) {
         await navigator.clipboard.writeText(value);
         message.success(text("copied"));

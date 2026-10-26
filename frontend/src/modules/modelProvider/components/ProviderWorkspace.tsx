@@ -99,6 +99,12 @@ interface Props {
     group: ProviderConnectionGroup,
     model: ProviderModel,
   ) => void | Promise<boolean>;
+  onSetEnabled?: (
+    provider: AddedProvider,
+    group: ProviderConnectionGroup,
+    model: ProviderModel,
+    enabled: boolean,
+  ) => void | Promise<boolean>;
   onCheck: (provider: AddedProvider, group: ProviderConnectionGroup) => void;
   checking: Record<string, boolean>;
   onReload: () => Promise<void>;
@@ -798,7 +804,9 @@ export function ProviderWorkspace(props: Props) {
                     aria-label={label("suppliers")}
                     icon={<ArrowLeftOutlined aria-hidden="true" />}
                     onClick={returnToSuppliers}
-                  />
+                  >
+                    {label("suppliers")}
+                  </Button>
                   <Logo provider={provider} />
                   <div className="provider-workspace-supplier-identity">
                     <h2 title={providerDisplayName}>
@@ -1082,6 +1090,7 @@ export function ProviderWorkspace(props: Props) {
                     onEdit={(model) => {
                       if (group) props.onEditModel(provider, group, model);
                     }}
+                    onSetEnabled={props.onSetEnabled && group ? (model, enabled) => props.onSetEnabled!(provider, group, model, enabled) : undefined}
                     onRemove={(model) => {
                       if (group) return props.onDeleteModel(provider, group, model);
                     }}

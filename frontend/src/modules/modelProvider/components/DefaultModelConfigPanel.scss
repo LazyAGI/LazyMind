@@ -252,9 +252,36 @@
   border-radius: 8px;
   box-shadow: 0 6px 20px rgb(16 24 40 / 10%);
 
+  .ant-select-item-group { padding: 0; }
+  .model-provider-supplier-group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 38px;
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: #f5f7fa;
+    color: #465365;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+    &:hover { background: #edf1f7; }
+    &:focus-visible { outline: 2px solid #2f6df6; outline-offset: -2px; }
+    > .anticon { flex-shrink: 0; font-size: 10px; transition: transform 150ms ease; }
+    > .anticon.is-collapsed { transform: rotate(-90deg); }
+  }
+  .model-provider-supplier-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+  .model-provider-supplier-group-count { color: #697586; font-size: 11px; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) {
+    .model-provider-supplier-group-toggle > .anticon { transition: none; }
+  }
+
   .ant-select-item-option,
   .ant-select-item-option .model-provider-select-option { border-radius: 6px; }
   .ant-select-item-option .model-provider-select-option { box-sizing: border-box; gap: 8px; padding: 8px; }
+  .ant-select-item-option .model-provider-select-option.is-child { padding-inline-start: 36px; }
   .model-provider-select-copy { flex: 1; }
   .model-provider-select-copy strong { color: #202735; font-size: 13px; font-weight: 500; }
   .model-provider-select-copy small { color: #697586; font-size: 11px; }

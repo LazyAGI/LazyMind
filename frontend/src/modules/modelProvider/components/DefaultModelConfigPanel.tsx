@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
 import { Alert, Button, Select, Skeleton, Switch, Tag, Tooltip } from "antd";
 import {
   CheckCircleOutlined,
@@ -33,6 +33,7 @@ import {
   type VerifiedCloudServiceResponse,
 } from "../hooks/useDefaultModelConfig";
 import { formatContextWindow } from "../maxInputTokens";
+import { probeHealthVersion, readModelProbeHealth, subscribeProbeHealth } from "../modelProbeHealth";
 import "./DefaultModelConfigPanel.scss";
 
 export type {
@@ -210,6 +211,7 @@ export default function DefaultModelConfigPanel({
   const { t, i18n } = useTranslation();
   const focusModality = useFocusModality();
   const language = i18n?.resolvedLanguage || i18n?.language;
+  const probeHealth = useSyncExternalStore(subscribeProbeHealth, probeHealthVersion, () => 0);
   const {
     visibleModuleConfigs,
     isAdmin,
@@ -251,6 +253,7 @@ export default function DefaultModelConfigPanel({
   const [cloudServiceSearchKeywords, setCloudServiceSearchKeywords] = useState<
     Partial<Record<CloudServiceSlotKey, string>>
   >({});
+  const [collapsedSuppliers, setCollapsedSuppliers] = useState<Partial<Record<ModelCapability, string[]>>>({});
   const [keyboardNavigation, setKeyboardNavigation] = useState(false);
   const groupId = useId();
   const highlightedGroup = getDefaultCapabilityGroup(highlightTarget);
@@ -311,6 +314,23 @@ export default function DefaultModelConfigPanel({
     const keyword = (moduleModelSearchKeywords[module.key] || "").trim().toLowerCase();
     const visibleOptions = options.filter((option) =>
       !keyword || `${option.model.name} ${getProviderSearchText(option.provider, language)}`.toLowerCase().includes(keyword),
+    );
+    const supplierGroups = new Map<string, { provider: ProviderOption; options: typeof options }>();
+    for (const option of visibleOptions) {
+      const key = `${option.source}:${option.provider.id || normalizeProviderKey(option.provider.name)}`;
+      const group = supplierGroups.get(key);
+      if (group) group.options.push(option);
+      else supplierGroups.set(key, { provider: option.provider, options: [option] });
+    }
+    const renderModelValue = (option: typeof options[number]) => (
+      <span className="model-provider-select-value">
+        <ProviderLogo provider={option.provider} logoUrl={option.model.logoDataUrl} compact />
+        <span className="model-provider-select-value-text">
+          {module.key === "image_generator"
+            ? formatUnifiedImageDisplayName(option, t("modelProvider.editableModelSuffix"))
+            : option.model.name} · {getProviderDisplayName(option.provider, language)}
+        </span>
+      </span>
     );
     const moduleTitle = t(module.titleKey);
     const moduleSubtitle = t(module.subtitleKey);
@@ -422,7 +442,12 @@ export default function DefaultModelConfigPanel({
           filterOption={false}
           id={`model-provider-${module.key.toLowerCase()}`}
           listHeight={340}
+          virtual={false}
           optionLabelProp="label"
+          labelRender={({ value, label }) => {
+            const option = options.find((item) => item.value === value);
+            return option ? renderModelValue(option) : label;
+          }}
           placeholder={
             (modelReadyStatus[module.key]?.model_name && modelReadyStatus[module.key]?.logo_data_url
               ? <span className="model-provider-select-value">
@@ -454,6 +479,9 @@ export default function DefaultModelConfigPanel({
           value={selectedModels[module.key]}
           onChange={(value) => handleModelSelection(module.key, value)}
           onSearch={(value) => {
+            if (value.trim()) {
+              setCollapsedSuppliers((current) => ({ ...current, [module.key]: [] }));
+            }
             setModuleModelSearchKeywords((current) => ({
               ...current,
               [module.key]: value,
@@ -476,61 +504,77 @@ export default function DefaultModelConfigPanel({
                 </div>
           }
         >
-          {visibleOptions.map((option) => {
-            const { provider, model, value } = option;
-            const supplierDisplayName = getProviderDisplayName(provider, language);
-            const displayName =
-              module.key === "image_generator"
-                ? formatUnifiedImageDisplayName(
-                    option,
-                    t("modelProvider.editableModelSuffix"),
-                  )
-                : model.name;
+          {Array.from(supplierGroups, ([supplierKey, supplier]) => {
+            const collapsed = collapsedSuppliers[module.key]?.includes(supplierKey) ?? false;
+            const supplierName = getProviderDisplayName(supplier.provider, language);
             return (
-              <Select.Option
-                key={value}
-                title={`${displayName} · ${supplierDisplayName}`}
-                disabled={
-                  model.availability === "unavailable" ||
-                  model.lifecycle === "deprecated" ||
-                  model.lifecycle === "retired"
-                }
-                label={
-                  <span className="model-provider-select-value">
-                    <ProviderLogo provider={provider} logoUrl={model.logoDataUrl} compact />
-                    <span className="model-provider-select-value-text">
-                      {displayName} · {supplierDisplayName}
-                    </span>
-                  </span>
-                }
-                value={value}
-              >
-                <Tooltip
-                  title={`${displayName} · ${supplierDisplayName}`}
-                  placement="right"
-                  overlayClassName="model-provider-option-tooltip"
-                >
-                  <span className="model-provider-select-option" title="">
-                    <ProviderLogo provider={provider} logoUrl={model.logoDataUrl} compact />
-                    <span className="model-provider-select-copy">
-                      <strong>{displayName}</strong>
-                      <small>
-                        {option.source === "cloud"
-                          ? t("modelProvider.cloudSystemReadOnly")
-                          : supplierDisplayName}
-                        {option.source === "cloud"
-                          ? ""
-                          : model.builtIn
-                          ? t("modelProvider.builtInModelSuffix")
-                          : t("modelProvider.customModelSuffix")}
-                      </small>
-                    </span>
-                    {formatContextWindow(model.maxInputTokens) ? (
-                      <span className="model-provider-context-badge">{formatContextWindow(model.maxInputTokens)}</span>
-                    ) : null}
-                  </span>
-                </Tooltip>
-              </Select.Option>
+              <Select.OptGroup key={supplierKey} label={
+                <button type="button" className="model-provider-supplier-group-toggle"
+                  aria-expanded={!collapsed}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setCollapsedSuppliers((current) => {
+                      const keys = current[module.key] || [];
+                      return { ...current, [module.key]: collapsed
+                        ? keys.filter((key) => key !== supplierKey) : [...keys, supplierKey] };
+                    });
+                  }}>
+                  <ProviderLogo provider={supplier.provider} compact />
+                  <span className="model-provider-supplier-group-name">{supplierName}</span>
+                  <span className="model-provider-supplier-group-count">{supplier.options.length}</span>
+                  <DownOutlined className={collapsed ? "is-collapsed" : ""} aria-hidden="true" />
+                </button>
+              }>
+                {(collapsed ? [] : supplier.options).map((option) => {
+                  const { provider, model, value } = option;
+                  const supplierDisplayName = getProviderDisplayName(provider, language);
+                  const displayName =
+                    module.key === "image_generator"
+                      ? formatUnifiedImageDisplayName(
+                          option,
+                          t("modelProvider.editableModelSuffix"),
+                        )
+                      : model.name;
+                  return (
+                    <Select.Option
+                      key={value}
+                      title={`${displayName} · ${supplierDisplayName}`}
+                      disabled={
+                        model.availability === "unavailable" ||
+                        model.enabled === false ||
+                        model.lifecycle === "deprecated" ||
+                        model.lifecycle === "retired" ||
+                        (probeHealth >= 0 && readModelProbeHealth(model.id)?.status === "failed")
+                      }
+                      label={renderModelValue(option)}
+                      value={value}
+                    >
+                      <Tooltip
+                        title={`${displayName} · ${supplierDisplayName}`}
+                        placement="right"
+                        overlayClassName="model-provider-option-tooltip"
+                      >
+                        <span className="model-provider-select-option is-child" title="">
+                          <ProviderLogo provider={provider} logoUrl={model.logoDataUrl} compact />
+                          <span className="model-provider-select-copy">
+                            <strong>{displayName}</strong>
+                            <small>
+                              {option.source === "cloud"
+                                ? t("modelProvider.cloudSystemReadOnly")
+                                : supplierDisplayName}
+                            </small>
+                          </span>
+                          {formatContextWindow(model.maxInputTokens) ? (
+                            <span className="model-provider-context-badge">{formatContextWindow(model.maxInputTokens)}</span>
+                          ) : null}
+                        </span>
+                      </Tooltip>
+                    </Select.Option>
+                  );
+                })}
+              </Select.OptGroup>
             );
           })}
         </Select>}

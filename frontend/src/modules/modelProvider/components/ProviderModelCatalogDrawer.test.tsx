@@ -428,6 +428,17 @@ describe("provider model catalog drawer", () => {
     expect(props.onRemove).toHaveBeenLastCalledWith(selected[0]);
   });
 
+  it("keeps the last successful catalog when the same supplier refresh fails", async () => {
+    const props = fixture();
+    draw(props);
+    await screen.findByText("deepseek-v3");
+    mocks.remote.mockRejectedValueOnce(new Error("rate limited"));
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.refresh" }));
+    expect(await screen.findByText("rate limited")).toBeInTheDocument();
+    expect(screen.getByText("deepseek-v3")).toBeInTheDocument();
+    expect(screen.getByText("BAAI/bge-large")).toBeInTheDocument();
+  });
+
   it("allows removing saved models without mislabeling them when discovery fails", async () => {
     mocks.remote.mockRejectedValue(new Error("discovery offline"));
     draw(fixture());

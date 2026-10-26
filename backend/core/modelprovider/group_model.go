@@ -40,6 +40,7 @@ type addGroupModelResponse struct {
 	MaxInputTokens           *string        `json:"max_input_tokens,omitempty"`
 	InputTokenLimit          *string        `json:"input_token_limit"`
 	MaxOutputTokens          *string        `json:"max_output_tokens"`
+	Enabled                  bool           `json:"enabled"`
 }
 
 type updateGroupModelRequest struct {
@@ -51,6 +52,7 @@ type updateGroupModelRequest struct {
 	InputTokenLimit *string        `json:"input_token_limit"`
 	MaxOutputTokens *string        `json:"max_output_tokens"`
 	Customize       bool           `json:"customize"`
+	Enabled         *bool          `json:"enabled"`
 }
 
 type groupModelListItem struct {
@@ -77,6 +79,7 @@ type groupModelListItem struct {
 	InputTokenLimit          *string        `json:"input_token_limit"`
 	MaxOutputTokens          *string        `json:"max_output_tokens"`
 	Availability             string         `json:"availability"`
+	Enabled                  bool           `json:"enabled"`
 	Lifecycle                string         `json:"lifecycle"`
 	ReadOnly                 bool           `json:"read_only"`
 	Capabilities             []string       `json:"capabilities"`
@@ -285,7 +288,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == nil && req.ModelType == nil && req.Vision == nil && req.MaxInputTokens == nil && req.InputTokenLimit == nil && req.MaxOutputTokens == nil && req.ModelSettings == nil && !req.Customize {
+	if req.Name == nil && req.ModelType == nil && req.Vision == nil && req.MaxInputTokens == nil && req.InputTokenLimit == nil && req.MaxOutputTokens == nil && req.ModelSettings == nil && req.Enabled == nil && !req.Customize {
 		common.ReplyErr(w, "max_input_tokens is required", http.StatusBadRequest)
 		return
 	}
@@ -378,6 +381,9 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		if req.MaxOutputTokens != nil {
 			next.MaxOutputTokens = req.MaxOutputTokens
 		}
+		if req.Enabled != nil {
+			next.Enabled = *req.Enabled
+		}
 		if !supportsUserMaxInputTokens(next.ModelType) {
 			if nonemptyTokenLimit(req.InputTokenLimit) || nonemptyTokenLimit(req.MaxOutputTokens) {
 				return modelMetadataValidationError{errors.New("model token limits are only supported for llm or vlm models")}
@@ -396,23 +402,41 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		if next.MaxInputTokens != nil {
 			nextTokens = *next.MaxInputTokens
 		}
-		changed := next.ModelSettings != before.ModelSettings || next.Name != before.Name || next.ModelType != before.ModelType || next.Vision != before.Vision || nextTokens != beforeTokens || tokenLimitString(next.InputTokenLimit) != tokenLimitString(before.InputTokenLimit) || tokenLimitString(next.MaxOutputTokens) != tokenLimitString(before.MaxOutputTokens)
-		if !changed {
+		metadataChanged := next.ModelSettings != before.ModelSettings || next.Name != before.Name || next.ModelType != before.ModelType || next.Vision != before.Vision || nextTokens != beforeTokens || tokenLimitString(next.InputTokenLimit) != tokenLimitString(before.InputTokenLimit) || tokenLimitString(next.MaxOutputTokens) != tokenLimitString(before.MaxOutputTokens)
+		enabledChanged := next.Enabled != before.Enabled
+		if !metadataChanged && !enabledChanged {
 			return nil
 		}
-		if row.IsDefault && !req.Customize {
+		if metadataChanged && row.IsDefault && !req.Customize {
 			return modelMetadataValidationError{errors.New("catalog model max_input_tokens cannot be updated")}
 		}
-		if req.Customize {
+		if metadataChanged && req.Customize {
 			next.IsDefault = false
 		}
-		if err := validateModelEditReferences(tx, before, next, connectionBaseURL(parent, group.BaseURL)); err != nil {
-			return err
+		if metadataChanged {
+			if err := validateModelEditReferences(tx, before, next, connectionBaseURL(parent, group.BaseURL)); err != nil {
+				return err
+			}
+			if err := ensureEditedModelNameAvailable(tx, before, next.Name); err != nil {
+				return err
+			}
 		}
-		if err := ensureEditedModelNameAvailable(tx, before, next.Name); err != nil {
-			return err
+		updates := map[string]any{"updated_at": now, "enabled": next.Enabled}
+		if metadataChanged {
+			updates["model_settings"] = next.ModelSettings
+			updates["name"] = next.Name
+			updates["model_type"] = next.ModelType
+			updates["vision"] = next.Vision
+			updates["max_input_tokens"] = next.MaxInputTokens
+			updates["input_token_limit"] = next.InputTokenLimit
+			updates["max_output_tokens"] = next.MaxOutputTokens
+			updates["is_default"] = next.IsDefault
 		}
-		updates := map[string]any{"model_settings": next.ModelSettings, "name": next.Name, "model_type": next.ModelType, "vision": next.Vision, "max_input_tokens": next.MaxInputTokens, "input_token_limit": next.InputTokenLimit, "max_output_tokens": next.MaxOutputTokens, "is_default": next.IsDefault, "updated_at": now}
+		if enabledChanged && !next.Enabled {
+			if err := tx.Where("user_model_provider_group_model_id = ?", before.ID).Delete(&orm.UserSelectedModel{}).Error; err != nil {
+				return err
+			}
+		}
 		if before.IsDefault && !next.IsDefault {
 			updates["free_auto_select_priority"] = 0
 			updates["free_auto_select_base_urls"] = ""
@@ -458,7 +482,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		BrandKey:    identity.BrandKey, ServiceKey: identity.ServiceKey, IsCustom: identity.IsCustom,
 		UserModelProviderID: row.UserModelProviderID, UserModelProviderGroupID: row.UserModelProviderGroupID,
 		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ModelSettings: modelSettingsResponse(row.ModelSettings), ProviderName: row.ProviderName, GroupName: group.Name,
-		BaseURL: connectionBaseURL(parent, group.BaseURL), IsDefault: row.IsDefault, IsEditable: strings.EqualFold(row.ModelType, "image_editing"), MaxInputTokens: row.MaxInputTokens, InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens, Availability: availability, Lifecycle: "active", Capabilities: []string{},
+		BaseURL: connectionBaseURL(parent, group.BaseURL), IsDefault: row.IsDefault, IsEditable: strings.EqualFold(row.ModelType, "image_editing"), MaxInputTokens: row.MaxInputTokens, InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens, Availability: availability, Enabled: row.Enabled, Lifecycle: "active", Capabilities: []string{},
 	})
 }
 
@@ -557,6 +581,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 			MaxInputTokens:           m.MaxInputTokens,
 			InputTokenLimit:          m.InputTokenLimit, MaxOutputTokens: m.MaxOutputTokens,
 			Availability: availability,
+			Enabled:      m.Enabled,
 			Lifecycle:    "active",
 			Capabilities: []string{},
 		})
@@ -658,7 +683,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		m := rows[i]
 		grp, ok := groupByID[m.UserModelProviderGroupID]
 		identity := identities[m.UserModelProviderID]
-		if !ok || !grp.available {
+		if !ok || !grp.available || !m.Enabled {
 			continue
 		}
 		if !RuntimeSupportsModelType(m.ProviderName, m.ModelType) {
@@ -692,6 +717,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			MaxInputTokens:           m.MaxInputTokens,
 			InputTokenLimit:          m.InputTokenLimit, MaxOutputTokens: m.MaxOutputTokens,
 			Availability: "available",
+			Enabled:      true,
 			Lifecycle:    "active",
 			Capabilities: []string{},
 		})
@@ -710,7 +736,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 				ID: model.ModelKey, Source: "cloud", ProviderID: catalog.ProviderID,
 				Name: model.DisplayName, ModelType: model.ModelType, ProviderName: catalog.ProviderName,
 				IsDefault: model.DefaultForType, IsEditable: model.ModelType == "image_editing",
-				Availability: model.Status, Lifecycle: model.Lifecycle, ReadOnly: true,
+				Availability: model.Status, Enabled: true, Lifecycle: model.Lifecycle, ReadOnly: true,
 				Capabilities: append([]string(nil), model.Capabilities...),
 			})
 		}

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ModelProviderPage, { type AddedProvider, type ProviderConnectionGroup } from "./ModelProvidersPage";
 
 const mocks = vi.hoisted(() => ({
-  providers: vi.fn(), withGroups: vi.fn(), groups: vi.fn(), models: vi.fn(), remote: vi.fn(), add: vi.fn(), addBatch: vi.fn(), remove: vi.fn(), update: vi.fn(),
+  providers: vi.fn(), withGroups: vi.fn(), groups: vi.fn(), models: vi.fn(), remote: vi.fn(), add: vi.fn(), addBatch: vi.fn(), remove: vi.fn(), update: vi.fn(), setEnabled: vi.fn(),
   translate: (key: string, options?: { name?: string }) => options?.name ? `${key}:${options.name}` : key,
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "zh-CN" }, t: mocks.translate }) }));
@@ -20,6 +20,7 @@ vi.mock("../api", () => ({
   },
   modelProvidersDefaultApi: {},
   listRemoteGroupModels: mocks.remote,
+  setGroupModelEnabled: mocks.setEnabled,
   updateGroupModel: mocks.update,
   addGroupModels: mocks.addBatch,
   unwrapModelProviderData: (data: unknown) => data,
@@ -48,6 +49,7 @@ beforeEach(() => {
   mocks.remote.mockResolvedValue({ models: [{ id: "qwen-plus", name: "qwen-plus", model_type: "llm", added: false }] });
   mocks.add.mockResolvedValue({ data: { id: "saved-model-id", name: "qwen-plus", model_type: "llm", is_default: false } });
   mocks.remove.mockResolvedValue({ data: {} });
+  mocks.setEnabled.mockResolvedValue({ id: "saved-model-id", enabled: false });
 });
 
 describe("model catalog integration", () => {
@@ -72,7 +74,7 @@ describe("model catalog integration", () => {
     expect(mocks.addBatch.mock.calls.every(([provider, group]) => provider === "supplier" && group === "store")).toBe(true);
     expect(mocks.addBatch.mock.calls[1][2]).toContainEqual({ name: "model-204", model_type: "", vision: false, max_input_tokens: "262144" });
     expect(mocks.add).not.toHaveBeenCalled();
-    expect(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:model-204" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "modelProvider.catalog.disableModel:model-204" })).toBeInTheDocument();
     await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
   }, 20000);
 
@@ -99,7 +101,7 @@ describe("model catalog integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
     expect(await screen.findByText("modelProvider.catalog.partialFailure")).toBeInTheDocument();
     expect(screen.getByLabelText("Configured model count")).toHaveTextContent("1001");
-    const manual = screen.getByRole("button", { name: "modelProvider.catalog.removeModel:manual" }).closest(".provider-model-catalog-row");
+    const manual = screen.getByRole("button", { name: "modelProvider.catalog.disableModel:manual" }).closest(".provider-model-catalog-row");
     expect(manual?.querySelector('[data-model-type="unknown"]')).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:broken" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -153,28 +155,36 @@ describe("model catalog integration", () => {
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:qwen-plus" }));
     await waitFor(() => expect(mocks.add).toHaveBeenCalledTimes(1));
     expect(mocks.add).toHaveBeenCalledWith({ modelProviderId: "supplier", groupId: "store", addModelProviderGroupModelOpenAPIRequest: { name: "qwen-plus", model_type: "llm", vision: false } });
-    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:qwen-plus" }));
-    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith({ modelProviderId: "supplier", groupId: "store", modelId: "saved-model-id" }, undefined));
-    expect(screen.queryByRole("button", { name: "common.delete" })).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:qwen-plus" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.disableModel:qwen-plus" }));
+    await waitFor(() => expect(mocks.setEnabled).toHaveBeenCalledWith("supplier", "store", "saved-model-id", false));
+    expect(mocks.remove).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "modelProvider.catalog.enableModel:qwen-plus" })).toBeInTheDocument();
   });
 
-  it("directly removes an embedding while retaining the indexed-downgrade request contract", async () => {
+  it("confirms knowledge-base downgrade before deleting an embedding model", async () => {
     mocks.remote.mockResolvedValue({ models: [{ id: "bge", name: "BAAI/bge-large", model_type: "embed", added: false }] });
     mocks.add.mockResolvedValue({ data: { id: "saved-vector-id", name: "BAAI/bge-large", model_type: "embed", is_default: false } });
+    mocks.remove.mockRejectedValueOnce({
+      response: { status: 409, data: { detail: "removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked" } },
+    }).mockResolvedValueOnce({ data: {} });
     render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
     const sync = await screen.findByRole("button", { name: "Sync models" });
     await waitFor(() => expect(sync).toBeEnabled());
     fireEvent.click(sync);
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" }));
-    const remove = await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:BAAI/bge-large" });
-    await waitFor(() => expect(remove).toBeEnabled());
-    fireEvent.click(remove);
+    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.disableModel:BAAI/bge-large" }));
+    await waitFor(() => expect(mocks.setEnabled).toHaveBeenCalledWith("supplier", "store", "saved-vector-id", false));
+    expect(mocks.remove).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.deleteModel:BAAI/bge-large" }));
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
+      { modelProviderId: "supplier", groupId: "store", modelId: "saved-vector-id" },
+      undefined,
+    ));
+    expect(await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
       { modelProviderId: "supplier", groupId: "store", modelId: "saved-vector-id" },
       { params: { confirm_indexed_downgrade: true } },
     ));
-    expect(screen.queryByRole("button", { name: "common.delete" })).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" })).toBeInTheDocument();
   });
 });

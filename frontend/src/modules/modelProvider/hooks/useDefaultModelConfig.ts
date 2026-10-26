@@ -116,6 +116,7 @@ interface ApiModel {
   vision?: boolean;
   model_settings?: ModelSettings;
   is_default?: boolean;
+  enabled?: boolean;
   max_input_tokens?: string;
   source?: "own" | "cloud";
   provider_id?: string;
@@ -156,6 +157,7 @@ interface SelectedModelApiItem {
   availability?: "available" | "degraded" | "unavailable";
   unavailable_reason?: string;
   read_only?: boolean;
+  enabled?: boolean;
   max_input_tokens?: string;
 }
 
@@ -707,7 +709,7 @@ export function useDefaultModelConfig({
           modelSettings: selection.model_settings,
           capability,
           builtIn: Boolean(selection.is_default),
-          enabled: true,
+          enabled: selection.enabled !== false,
           maxInputTokens: selection.max_input_tokens,
           // Cloud availability comes from the gateway, whose provider label is
           // independent of the host's local LazyLLM adapter registry.
@@ -923,7 +925,7 @@ export function useDefaultModelConfig({
               modelSettings: model.model_settings,
               capability,
               builtIn: Boolean(model.is_default),
-              enabled: true,
+              enabled: model.enabled !== false,
               maxInputTokens: model.max_input_tokens,
               availability: source === "cloud" || isModelTypeSupportedByProtocol(model.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
                 ? model.availability : "unavailable",

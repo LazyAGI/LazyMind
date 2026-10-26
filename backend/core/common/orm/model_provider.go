@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // RawJSON keeps JSON payloads as json.RawMessage while supporting both the
@@ -143,7 +145,13 @@ type UserModelProviderGroupModel struct {
 	FreeAutoSelectPriority   int     `gorm:"column:free_auto_select_priority;type:integer;not null;default:0"`
 	FreeAutoSelectBaseURLs   string  `gorm:"column:free_auto_select_base_urls;type:text;not null;default:''"`
 	IsDefault                bool    `gorm:"column:is_default;type:boolean;not null;default:false"`
+	Enabled                  bool    `gorm:"column:enabled;type:boolean;not null;default:true"`
 	BaseModel
+}
+
+func (m *UserModelProviderGroupModel) BeforeCreate(*gorm.DB) error {
+	m.Enabled = true
+	return nil
 }
 
 func (UserModelProviderGroupModel) TableName() string { return "user_model_provider_group_models" }

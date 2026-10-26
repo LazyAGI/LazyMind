@@ -329,6 +329,21 @@ export interface UpdateGroupModelInput {
   model_settings?: ModelSettings;
 }
 
+export async function setGroupModelEnabled(
+  providerId: string,
+  groupId: string,
+  modelId: string,
+  enabled: boolean,
+) {
+  const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch({
+    modelProviderId: providerId,
+    groupId,
+    modelId,
+    updateModelProviderGroupModelOpenAPIRequest: { enabled },
+  });
+  return unwrapModelProviderData<{ id: string; enabled?: boolean }>(response.data);
+}
+
 export async function updateGroupModel(
   providerId: string,
   groupId: string,

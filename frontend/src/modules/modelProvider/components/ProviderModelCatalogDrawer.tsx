@@ -11,6 +11,7 @@ import {
 } from "antd";
 import {
   DownOutlined,
+  DeleteOutlined,
   MinusOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -61,6 +62,7 @@ interface Props {
   onAdd: (model: CatalogModelChoice) => Promise<void>;
   onAddMany?: (models: CatalogModelChoice[]) => Promise<{ succeeded: number; failed: number }>;
   onRemove: (model: ProviderModel) => Promise<boolean>;
+  onSetEnabled?: (model: ProviderModel, enabled: boolean) => Promise<boolean>;
   onChanged?: () => void;
 }
 
@@ -111,17 +113,22 @@ export function ProviderModelCatalogDrawer(props: Props) {
   const [messageApi, messageContext] = message.useMessage();
   const sequence = useRef(0);
   const consumedRemoteModels = useRef<RemoteGroupModel[]>();
+  const succeededCatalog = useRef("");
   const filterId = useId();
   const tabRefs = useRef(new Map<Category, HTMLButtonElement>());
 
   useEffect(() => {
     if (!props.open) return;
     const request = ++sequence.current;
+    const catalogKey = `${props.providerId}\0${props.groupId}`;
+    const keepResults = succeededCatalog.current === catalogKey;
     setSearch("");
     setCategory("all");
     setCollapsed(new Set());
-    setRemote([]);
-    setLoaded(false);
+    if (!keepResults) {
+      setRemote([]);
+      setLoaded(false);
+    }
     setLoading(true);
     setError("");
     if (props.requiresVerification) {
@@ -132,6 +139,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     }
     if (props.initialRemoteModels && consumedRemoteModels.current !== props.initialRemoteModels) {
       consumedRemoteModels.current = props.initialRemoteModels;
+      succeededCatalog.current = catalogKey;
       setRemote(props.initialRemoteModels);
       setLoaded(true);
       setLoading(false);
@@ -140,8 +148,10 @@ export function ProviderModelCatalogDrawer(props: Props) {
     void listRemoteGroupModels(props.providerId, props.groupId)
       .then((data) => {
         if (request !== sequence.current) return;
+        succeededCatalog.current = catalogKey;
         setRemote(data.models || []);
         setLoaded(true);
+        setError("");
       })
       .catch((cause) => {
         if (request === sequence.current)
@@ -269,7 +279,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
   );
 
   const runChanges = async (requested: Candidate[], remove: boolean) => {
-    const items = remove ? requested : requested.filter((model) => !model.unsupportedType);
+    const enabling = !remove && Boolean(props.onSetEnabled) && requested.some((model) => model.existing?.enabled === false);
+    const items = remove || enabling ? requested : requested.filter((model) => !model.unsupportedType);
     if (busyRequest.current || props.modelsLoading || !items.length) return;
     busyRequest.current = true;
     setBusy(true);
@@ -283,7 +294,13 @@ export function ProviderModelCatalogDrawer(props: Props) {
         setPending((current) => new Set(current).add(key));
         try {
           if (remove && model.existing) {
-            if (!(await props.onRemove(model.existing)))
+            const disabled = props.onSetEnabled
+              ? await props.onSetEnabled(model.existing, false)
+              : await props.onRemove(model.existing);
+            if (!disabled)
+              throw new Error(copy("removeFailed"));
+          } else if (model.existing?.enabled === false && props.onSetEnabled) {
+            if (!(await props.onSetEnabled(model.existing, true)))
               throw new Error(copy("removeFailed"));
           } else {
             await props.onAdd({
@@ -592,25 +609,38 @@ export function ProviderModelCatalogDrawer(props: Props) {
                           <Button
                             type="text"
                             aria-label={copy(
-                              model.existing ? "removeModel" : "addModel",
+                              model.existing?.enabled === false && props.onSetEnabled
+                                ? "enableModel"
+                                : model.existing
+                                  ? (props.onSetEnabled ? "disableModel" : "removeModel")
+                                  : "addModel",
                               { name: model.name },
                             )}
                             loading={pending.has(key)}
                             disabled={working || (!model.existing && model.unsupportedType)}
                             title={!model.existing && model.unsupportedType ? copy(getModelTaskType(model.model_type) === "unknown" ? "unclassifiedType" : "unsupportedType") : undefined}
                             icon={
-                              model.existing ? (
+                              model.existing && !(model.existing.enabled === false && props.onSetEnabled) ? (
                                 <MinusOutlined aria-hidden="true" />
                               ) : (
                                 <PlusOutlined aria-hidden="true" />
                               )
                             }
                             onClick={() =>
-                              model.existing
+                              model.existing && !(model.existing.enabled === false && props.onSetEnabled)
                                 ? void runChanges([model], true)
                                 : void runChanges([model], false)
                             }
                           />
+                          {model.existing && props.onSetEnabled ? (
+                            <Button
+                              type="text"
+                              aria-label={copy("deleteModel", { name: model.name })}
+                              disabled={working}
+                              icon={<DeleteOutlined aria-hidden="true" />}
+                              onClick={() => void props.onRemove(model.existing as ProviderModel)}
+                            />
+                          ) : null}
                         </div>
                       );
                     })

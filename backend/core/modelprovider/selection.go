@@ -79,6 +79,7 @@ type selectedModelItem struct {
 	ReadOnly                 bool           `json:"read_only" gorm:"-"`
 	TechnicalModelType       string         `json:"model_type,omitempty" gorm:"column:technical_model_type"`
 	IsDefault                bool           `json:"is_default" gorm:"column:is_default"`
+	Enabled                  bool           `json:"enabled" gorm:"column:enabled"`
 }
 
 type selectedModelsResponse struct {
@@ -569,6 +570,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.provider_name, "+
 				"m.model_type AS technical_model_type, "+
 				"m.is_default, "+
+				"m.enabled, "+
 				"m.max_input_tokens, "+
 				"g.name AS group_name, "+
 				"g.base_url",
@@ -610,7 +612,10 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		item.ProviderID = item.UserModelProviderID
 		item.ProviderGroupID = item.UserModelProviderGroupID
 		item.Availability = "available"
-		if !RuntimeSupportsModelType(item.ProviderName, item.TechnicalModelType) {
+		if !item.Enabled {
+			item.Availability = "unavailable"
+			item.UnavailableReason = "disabled"
+		} else if !RuntimeSupportsModelType(item.ProviderName, item.TechnicalModelType) {
 			item.Availability = "unavailable"
 			item.UnavailableReason = "runtime_unsupported"
 		} else if baseURL, _, credentialErr := ResolveProviderRuntimeCredential(ctx, db, item.UserModelProviderGroupID); credentialErr != nil {

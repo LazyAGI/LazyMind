@@ -41,6 +41,7 @@ import {
   setCredentialBackupEnabled,
   startCredentialRestore,
   listRemoteGroupModels,
+  setGroupModelEnabled,
   unwrapModelProviderData,
   updateGroupModel,
   withModelProviderJsonOptions,
@@ -382,6 +383,7 @@ interface ApiModel {
   max_input_tokens?: string;
   input_token_limit?: string | null;
   max_output_tokens?: string | null;
+  enabled?: boolean;
 }
 
 function mapApiProvider(
@@ -453,7 +455,7 @@ function mapApiGroup(
       vision: model.vision,
       modelSettings: model.model_settings,
       builtIn: Boolean(model.is_default),
-      enabled: true,
+      enabled: model.enabled !== false,
       maxInputTokens: model.max_input_tokens,
       inputTokenLimit: model.input_token_limit || undefined,
       maxOutputTokens: model.max_output_tokens || undefined,
@@ -1539,11 +1541,56 @@ export default function ModelProviderPage({
     }
   };
 
+  const setSavedModelEnabled = (
+    providerId: string,
+    groupId: string,
+    model: ProviderModel,
+    enabled: boolean,
+  ) => {
+    const operationKey = `enabled:${providerId}:${groupId}:${model.id}`;
+    const existing = modelDeleteRequests.current.get(operationKey);
+    if (existing) return existing;
+    const operation = Promise.resolve().then(async () => {
+      try {
+        await setGroupModelEnabled(providerId, groupId, model.id, enabled);
+        setAddedProviderList((current) =>
+          current.map((provider) =>
+            provider.id === providerId
+              ? {
+                  ...provider,
+                  groups: provider.groups.map((group) =>
+                    group.id === groupId
+                      ? {
+                          ...group,
+                          models: group.models.map((item) =>
+                            item.id === model.id ? { ...item, enabled } : item,
+                          ),
+                        }
+                      : group,
+                  ),
+                }
+              : provider,
+          ),
+        );
+        void onConfigurationChanged?.();
+        return true;
+      } catch (error) {
+        message.error(getLocalizedErrorMessage(error));
+        return false;
+      } finally {
+        modelDeleteRequests.current.delete(operationKey);
+      }
+    });
+    modelDeleteRequests.current.set(operationKey, operation);
+    return operation;
+  };
+
   const deleteCustomModel = (
     providerId: string,
     groupId: string,
     model: ProviderModel,
     notify = true,
+    confirmIndexedDowngrade = false,
   ) => {
     const operationKey = `${providerId}:${groupId}:${model.id}`;
     const existing = modelDeleteRequests.current.get(operationKey);
@@ -1556,7 +1603,7 @@ export default function ModelProviderPage({
             groupId,
             modelId: model.id,
           },
-          model.capability === "EMBEDDING"
+          model.capability === "EMBEDDING" && confirmIndexedDowngrade
             ? { params: { confirm_indexed_downgrade: true } }
             : undefined,
         );
@@ -1588,7 +1635,21 @@ export default function ModelProviderPage({
         }
         return true;
       } catch (error) {
-        if (notify) message.error(getLocalizedErrorMessage(error));
+        const response = (error as { response?: { status?: number; data?: { detail?: unknown; message?: unknown } } })?.response;
+        const detail = String(response?.data?.detail || response?.data?.message || "");
+        const needsEmbeddingConfirmation = model.capability === "EMBEDDING" &&
+          response?.status === 409 && detail.includes("requires confirmation to downgrade");
+        if (needsEmbeddingConfirmation) {
+          Modal.confirm({
+            centered: true,
+            title: t("modelProvider.confirmDeleteModel", { name: model.name }),
+            content: t("modelProvider.confirmDeleteEmbeddingDesc"),
+            okText: t("common.delete"),
+            cancelText: t("common.cancel"),
+            okButtonProps: { danger: true },
+            onOk: () => deleteCustomModel(providerId, groupId, model, notify, true),
+          });
+        } else if (notify) message.error(getLocalizedErrorMessage(error));
         return false;
       } finally {
         modelDeleteRequests.current.delete(operationKey);
@@ -1630,6 +1691,9 @@ export default function ModelProviderPage({
         onEditModel={openEditModelWindowModal}
         onDeleteModel={(provider, group, model) =>
           deleteCustomModel(provider.id, group.id, model)
+        }
+        onSetEnabled={(provider, group, model, enabled) =>
+          setSavedModelEnabled(provider.id, group.id, model, enabled)
         }
         onCheck={(provider, group) =>
           void verifyProviderGroup(provider, group, "")
@@ -1690,6 +1754,7 @@ export default function ModelProviderPage({
         onRefreshModels={() => void loadGroupModels(catalogProvider.id, catalogGroup.id)}
         onAdd={(model) => addCatalogModel(catalogProvider.id, catalogGroup.id, model)}
         onAddMany={(models) => addCatalogModels(catalogProvider.id, catalogGroup.id, models)}
+        onSetEnabled={(model, enabled) => setSavedModelEnabled(catalogProvider.id, catalogGroup.id, model, enabled)}
         onRemove={(model) => deleteCustomModel(catalogProvider.id, catalogGroup.id, model, false)}
         onChanged={() => void onConfigurationChanged?.()}
       /> : null}

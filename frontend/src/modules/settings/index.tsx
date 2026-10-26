@@ -958,8 +958,18 @@ function SettingsPageContent() {
     {settingsChange.dialog}
     <aside className="settings-reference-sidebar">
       <button className="settings-back-button" type="button" onClick={() => navigate(returnTo || CHAT_HOME_PATH)}>
-        <ArrowLeftOutlined />{t(returnTo ? "settingsPage.backToConversation" : "settingsPage.backToHome")}
+        <ArrowLeftOutlined aria-hidden="true" />{t(returnTo ? "settingsPage.backToConversation" : "settingsPage.backToHome")}
       </button>
+      <label className="settings-mobile-navigation">
+        <span>{t("settingsPage.navAria")}</span>
+        <select value={section} onChange={(event) => selectSection(event.target.value as SectionID)}>
+          {navigationGroups.map((group) => (
+            <optgroup key={group.title} label={group.title}>
+              {group.items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+            </optgroup>
+          ))}
+        </select>
+      </label>
       <div className="settings-reference-search">
         <Input
           prefix={<SearchOutlined />}

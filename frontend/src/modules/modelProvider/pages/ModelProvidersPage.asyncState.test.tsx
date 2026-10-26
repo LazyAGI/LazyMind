@@ -437,4 +437,26 @@ describe("model provider asynchronous state", () => {
     await waitFor(() => expect(mocks.deleteModel).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(currentGroup().models).toEqual([]));
   });
+
+  it("requires explicit confirmation before deleting an embedding model", async () => {
+    mocks.getModels.mockResolvedValue({ data: { models: [{ ...originalModels[0], model_type: "embed", name: "embedding-model" }] } });
+    mocks.deleteModel.mockRejectedValueOnce({
+      response: { status: 409, data: { detail: "removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked" } },
+    }).mockResolvedValueOnce({ data: {} });
+    draw();
+    await loadInitialModels();
+    fireEvent.click(screen.getByRole("button", { name: "Delete first model" }));
+    await waitFor(() => expect(mocks.deleteModel).toHaveBeenCalledWith(
+      { modelProviderId: "supplier", groupId: "group", modelId: "chat" },
+      undefined,
+    ));
+    expect(currentGroup().models).toHaveLength(1);
+    expect(await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    await waitFor(() => expect(mocks.deleteModel).toHaveBeenCalledWith(
+      { modelProviderId: "supplier", groupId: "group", modelId: "chat" },
+      { params: { confirm_indexed_downgrade: true } },
+    ));
+    await waitFor(() => expect(currentGroup().models).toEqual([]));
+  });
 });

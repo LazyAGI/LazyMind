@@ -253,6 +253,7 @@ describe("supplier navigation accessibility", () => {
     const title = within(screen.getByRole("heading", { name: "OpenAI", level: 2 })).getByRole("button");
     expect(title).toHaveFocus();
     const back = screen.getByRole("button", { name: "modelProvider.workspace.suppliers" });
+    expect(back).toHaveTextContent("modelProvider.workspace.suppliers");
     back.focus();
     fireEvent.click(back);
     expect(supplier).toHaveFocus();

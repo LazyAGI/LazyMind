@@ -85,6 +85,7 @@ type availableChatModel struct {
 	BaseURL             string   `gorm:"column:base_url"`
 	APIKey              string   `gorm:"column:api_key"`
 	APIKeyCiphertext    string   `gorm:"column:api_key_ciphertext"`
+	GroupVerified       bool     `gorm:"column:group_verified"`
 	MaxInputTokens      *string  `gorm:"column:max_input_tokens"`
 	InputTokenLimit     *string  `gorm:"column:input_token_limit"`
 	MaxOutputTokens     *string  `gorm:"column:max_output_tokens"`
@@ -228,21 +229,20 @@ func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 				"m.user_model_provider_group_id AS provider_group_id, "+
 				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, p.logo_data_url, "+
 				"p.name AS provider_display_name, p.is_custom AS provider_is_custom, "+
-				"m.model_type, m.vision, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.name AS group_name, g.base_url, "+
+				"m.model_type, m.vision, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.name AS group_name, g.base_url, g.is_verified AS group_verified, "+
 				"g.api_key, g.api_key_ciphertext",
 		).
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND g.create_user_id = m.create_user_id "+
-				"AND g.deleted_at IS NULL AND g.is_verified = ?",
-			true,
+				"AND g.deleted_at IS NULL",
 		).
 		Joins(
 			"JOIN user_model_providers p ON "+
 				"p.id = m.user_model_provider_id AND p.create_user_id = m.create_user_id "+
 				"AND p.deleted_at IS NULL",
 		).
-		Where("m.deleted_at IS NULL AND LOWER(TRIM(m.model_type)) = ?", "llm").
+		Where("m.deleted_at IS NULL AND m.enabled = ? AND LOWER(TRIM(m.model_type)) = ?", true, "llm").
 		Where(
 			"(m.create_user_id = ? OR EXISTS ("+
 				"SELECT 1 FROM user_selected_models shared "+
@@ -257,16 +257,37 @@ func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([
 	if err != nil {
 		return nil, err
 	}
+	available := rows[:0]
 	for index := range rows {
 		if rows[index].OwnerUserID == userID {
 			rows[index].Source = "own"
 		} else {
 			rows[index].Source = "shared"
 		}
+		// Verification is a discovery signal. A selected, owner-scoped model may
+		// still be usable after key or advanced-request changes invalidate the
+		// probe result, so admit it when the runtime credential resolver can
+		// produce a valid endpoint/configuration. Shared models retain the
+		// explicit verification boundary.
+		if !rows[index].GroupVerified && rows[index].OwnerUserID == userID {
+			var selected int64
+			if err := db.WithContext(ctx).Table("user_selected_models").
+				Where("user_id = ? AND user_model_provider_group_model_id = ? AND model_type = ?", userID, rows[index].ID, "llm").
+				Count(&selected).Error; err != nil || selected == 0 {
+				continue
+			}
+			if _, err := modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, rows[index].ProviderGroupID); err != nil {
+				continue
+			}
+		} else if !rows[index].GroupVerified {
+			continue
+		}
 		rows[index].Availability = chatModelAvailabilityAvailable
 		rows[index].Lifecycle = "active"
 		rows[index].Capabilities = []string{"chat"}
+		available = append(available, rows[index])
 	}
+	rows = available
 	catalog, _ := modelprovider.ResolveCloudModelCatalog(ctx)
 	for _, item := range catalog.Models {
 		if item.ModelType != "llm" || item.Lifecycle == "retired" {

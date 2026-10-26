@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { ConfigProvider } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelProbeButton } from "./ModelProbeButton";
+import { resetProbeHealthForTests } from "../modelProbeHealth";
 
 const mocks = vi.hoisted(() => ({ probe: vi.fn() }));
 vi.mock("../modelProbe", () => ({ probeModel: mocks.probe, probeFailureCode: () => "connection_error" }));
@@ -16,7 +17,7 @@ function setup(configurationKey = "config-1", disabledReason?: string) {
   const view = render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProbeButton {...props} /></ConfigProvider>);
   return { ...view, props, pending };
 }
-beforeEach(() => { vi.clearAllMocks(); mocks.probe.mockResolvedValue({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 24 }); });
+beforeEach(() => { resetProbeHealthForTests(); vi.clearAllMocks(); mocks.probe.mockResolvedValue({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 24 }); });
 
 describe("model inference probe", () => {
   it("announces measured embedding dimensions in the result tooltip", async () => {
@@ -98,6 +99,17 @@ describe("model inference probe", () => {
     fireEvent.click(failed);
     await screen.findByRole("button", { name: "modelProvider.probe.passed:qwen-test" });
     expect(mocks.probe).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a confirmed failure when the row leaves and returns", async () => {
+    mocks.probe.mockResolvedValueOnce({ status: "failed", code: "model_not_found", model_type: "", elapsed_ms: 8 });
+    const view = setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.probe.action:qwen-test" }));
+    await screen.findByRole("button", { name: "modelProvider.probe.failed:qwen-test" });
+    view.unmount();
+    setup();
+    expect(screen.getByRole("button", { name: "modelProvider.probe.failed:qwen-test" })).toHaveAttribute("data-probe-status", "failed");
+    expect(mocks.probe).toHaveBeenCalledTimes(1);
   });
 
   it("does not start a request for a disabled model", async () => {

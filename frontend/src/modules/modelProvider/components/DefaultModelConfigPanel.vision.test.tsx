@@ -93,7 +93,8 @@ describe("compact default model options", () => {
     expect(within(option).queryByLabelText("modelProvider.modality.outputAria")).not.toBeInTheDocument();
     expect(option.querySelector(".model-provider-logo img")).toBeInTheDocument();
     expect(option.querySelector("small")).toHaveTextContent("Private gateway");
-    expect(option.querySelector("small")).toHaveTextContent("modelProvider.customModelSuffix");
+    expect(option).not.toHaveTextContent("modelProvider.customModelSuffix");
+    expect(option).not.toHaveTextContent("modelProvider.builtInModelSuffix");
   });
 
   it("keeps refreshed options compact and saves UUID identity without display metadata", async () => {

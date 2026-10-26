@@ -20,6 +20,7 @@ vi.mock("antd", async (importOriginal) => {
     <button aria-label={id} onClick={() => onChange("own:provider:group:model")}>Select</button>
   );
   Select.Option = actual.Select.Option;
+  Select.OptGroup = actual.Select.OptGroup;
   return { ...actual, Select };
 });
 

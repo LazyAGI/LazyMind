@@ -61,7 +61,7 @@ func groupModelAdditionResponse(row orm.UserModelProviderGroupModel, group orm.U
 	return addGroupModelResponse{
 		ID: row.ID, UserModelProviderID: row.UserModelProviderID, UserModelProviderGroupID: row.UserModelProviderGroupID,
 		Name: row.Name, ModelType: row.ModelType, Vision: row.Vision, ModelSettings: modelSettingsResponse(row.ModelSettings), ProviderName: row.ProviderName, GroupName: group.Name,
-		BaseURL: group.BaseURL, IsDefault: row.IsDefault, MaxInputTokens: row.MaxInputTokens,
+		BaseURL: group.BaseURL, IsDefault: row.IsDefault, Enabled: row.Enabled, MaxInputTokens: row.MaxInputTokens,
 		InputTokenLimit: row.InputTokenLimit, MaxOutputTokens: row.MaxOutputTokens,
 	}
 }

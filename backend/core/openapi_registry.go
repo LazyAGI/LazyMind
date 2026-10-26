@@ -1415,6 +1415,7 @@ type updateModelProviderGroupModelOpenAPIRequest struct {
 	InputTokenLimit *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 	MaxOutputTokens *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 	Customize       bool                    `json:"customize,omitempty" desc:"Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it."`
+	Enabled         *bool                   `json:"enabled,omitempty" desc:"Optional saved-model enablement. Disabled models keep their UUID and configuration and stay out of default selection."`
 }
 
 type listModelProviderGroupModelsOpenAPIItem struct {
@@ -1441,6 +1442,7 @@ type listModelProviderGroupModelsOpenAPIItem struct {
 	InputTokenLimit          *string                 `json:"input_token_limit,omitempty" desc:"Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 	MaxOutputTokens          *string                 `json:"max_output_tokens,omitempty" desc:"Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior." nullable:"true"`
 	Availability             string                  `json:"availability" enum:"available,degraded,unavailable"`
+	Enabled                  bool                    `json:"enabled" desc:"False when the saved model is disabled. Disabled models keep their configuration."`
 	Lifecycle                string                  `json:"lifecycle" enum:"active,deprecated,retired"`
 	ReadOnly                 bool                    `json:"read_only"`
 	Capabilities             []string                `json:"capabilities"`

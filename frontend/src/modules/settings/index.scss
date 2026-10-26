@@ -27,7 +27,8 @@
 
 .settings-reference button:focus-visible,
 .settings-reference a:focus-visible,
-.settings-reference input:focus-visible {
+.settings-reference input:focus-visible,
+.settings-reference select:focus-visible {
   outline: 3px solid rgba(22, 119, 255, .2);
   outline-offset: 2px;
 }
@@ -61,6 +62,8 @@
 }
 
 .settings-back-button:hover { color: var(--settings-blue-strong); border-color: #91caff; background: #f7fbff; }
+
+.settings-mobile-navigation { display: none; }
 
 .settings-reference-search { padding: 16px 14px 10px; }
 .settings-reference-search .ant-input-affix-wrapper {
@@ -1367,21 +1370,46 @@
 
 @media (max-width: 800px) {
   .settings-reference { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .settings-reference-sidebar { max-height: 156px; border-right: 0; border-bottom: 1px solid var(--settings-line); }
-  .settings-back-button { display: none; }
-  .settings-reference-search { padding: 10px 12px 7px; }
-  .settings-reference-nav { display: flex; gap: 6px; flex: none; overflow-x: auto; padding: 6px 12px 10px; }
-  .settings-reference-nav-group { display: contents; }
-  .settings-reference-nav-group > p,
+  .settings-reference-sidebar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: end;
+    gap: 12px;
+    padding: 10px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--settings-line);
+  }
+  .settings-back-button { width: auto; max-width: 112px; min-height: 44px; margin: 0; padding-inline: 10px; }
+  .settings-mobile-navigation {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--settings-muted);
+    font-size: 11px;
+    font-weight: 600;
+    select {
+      width: 100%;
+      min-width: 0;
+      min-height: 44px;
+      padding: 0 10px;
+      border: 1px solid #d5dfeb;
+      border-radius: 8px;
+      color: var(--settings-ink);
+      background: #fff;
+      font: inherit;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  }
+  .settings-reference-search,
+  .settings-reference-nav,
   .settings-reference-sidebar-foot { display: none; }
-  .settings-reference-nav-group > button { display: inline-flex; width: auto; min-width: max-content; min-height: 38px; gap: 8px; padding: 0 11px; }
   .settings-integrated-surface.is-organization { min-height: 0; padding: 14px; }
   .settings-integrated-surface.is-organization .admin-page-toolbar { align-items: stretch; flex-direction: column; }
   .settings-integrated-surface.is-organization .admin-page-toolbar-left { align-items: stretch; flex-direction: column; gap: 10px; }
   .settings-integrated-surface.is-organization .admin-page-search.ant-input-search { width: 100%; }
   .settings-integrated-surface.is-organization .admin-page-primary-button.ant-btn { align-self: flex-start; }
-  .settings-reference-nav-group > button em { display: none; }
-  .settings-reference-nav-icon { font-size: 15px; }
   .settings-dashboard,
   .settings-detail-page { padding: 16px 14px 32px; }
   .settings-page-heading,

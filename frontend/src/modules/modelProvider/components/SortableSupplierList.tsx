@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { Dropdown } from "antd";
 import { HolderOutlined } from "@ant-design/icons";
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type Modifier } from "@dnd-kit/core";
@@ -51,29 +51,6 @@ export function SortableSupplierList<T extends OrderedSupplier>({ items, disable
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const ids = items.map((item) => item.id);
-  const container = useRef<HTMLDivElement>(null);
-  const positions = useRef(new Map<string, number>());
-  const orderKey = JSON.stringify(ids);
-  const previousOrder = useRef(orderKey);
-  useLayoutEffect(() => {
-    const changed = previousOrder.current !== orderKey;
-    previousOrder.current = orderKey;
-    const rows = container.current?.querySelectorAll<HTMLElement>(".provider-workspace-sortable-row");
-    const origin = container.current?.getBoundingClientRect().top || 0;
-    const next = new Map<string, number>();
-    rows?.forEach(row => {
-      const id = row.dataset.providerId!;
-      const top = row.getBoundingClientRect().top - origin;
-      next.set(id, top);
-      const previous = positions.current.get(id);
-      if (changed && previous !== undefined && previous !== top && !row.classList.contains("is-dragging") &&
-          !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        row.animate?.([{ transform: `translateY(${previous - top}px)` }, { transform: "translateY(0)" }],
-          { duration: 360, easing: "cubic-bezier(.22, 1, .36, 1)" });
-      }
-    });
-    positions.current = next;
-  });
   const displayName = (id: string | number) => {
     const item = items.find((candidate) => candidate.id === id);
     return item ? (item.isBrandGroup ? getProviderBrandDisplayName : getProviderDisplayName)(item, i18n?.resolvedLanguage || i18n?.language) : "";
@@ -82,7 +59,6 @@ export function SortableSupplierList<T extends OrderedSupplier>({ items, disable
     if (!disabled && over) onReorder(ids, String(active.id), String(over.id));
   };
   return <DndContext id={contextId} sensors={sensors} modifiers={[restrictToVerticalAxis]} collisionDetection={closestCenter} onDragEnd={dragEnd}
-    onDragStart={() => container.current?.querySelectorAll<HTMLElement>(".provider-workspace-sortable-row").forEach(row => row.getAnimations?.().forEach(animation => animation.cancel()))}
     accessibility={{
       screenReaderInstructions: { draggable: t("modelProvider.workspace.reorderSupplierHint") },
       announcements: {
@@ -92,7 +68,7 @@ export function SortableSupplierList<T extends OrderedSupplier>({ items, disable
         onDragCancel: () => t("modelProvider.workspace.reorderSupplierCanceled"),
       },
     }}>
-    <div ref={container} className="provider-workspace-sortable-list">
+    <div className="provider-workspace-sortable-list">
     <SortableContext items={ids} strategy={verticalListSortingStrategy}>
       {items.map((item) => <SortableSupplierRow key={item.id} item={item}
         disabled={disabled} onVisibilityChange={onVisibilityChange} restoring={restoring}>

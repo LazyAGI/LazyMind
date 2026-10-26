@@ -6,8 +6,10 @@ import {
   within,
 } from "@testing-library/react";
 import { ConfigProvider } from "antd";
-import { MemoryRouter } from "react-router-dom";
+import { useState } from "react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useSettingsDraft } from "./SettingsNavigationGuard";
 import SettingsPage from "./index";
 
 const mocks = vi.hoisted(() => ({ overview: vi.fn(), preferences: vi.fn() }));
@@ -42,6 +44,7 @@ vi.mock("@/modules/modelProvider/pages/ModelProvidersPage", () => ({
   default: ({ onBack, highlightProviderId }: { onBack?: () => void; highlightProviderId?: string }) => (
     <div>
       <nav aria-label="suppliers" data-provider-id={highlightProviderId}>Existing suppliers</nav>
+      <ProviderDraft />
       {onBack ? <button onClick={onBack}>Back to settings</button> : null}
     </div>
   ),
@@ -59,6 +62,19 @@ vi.mock("./QuickModelSettings", () => ({
   default: () => <span>Quick model defaults</span>,
 }));
 
+function ProviderDraft() {
+  const [value, setValue] = useState("");
+  useSettingsDraft({ dirty: Boolean(value), discard: () => setValue("") });
+  return <input aria-label="Provider draft" value={value} onChange={(event) => setValue(event.target.value)} />;
+}
+
+function mobileNavigation() {
+  // jsdom does not evaluate media queries; expose the mobile control for interaction coverage.
+  const selector = screen.getByLabelText("settingsPage.navAria", { selector: "select" });
+  selector.parentElement!.style.display = "flex";
+  return screen.getByRole("combobox", { name: "settingsPage.navAria" });
+}
+
 describe("separate supplier and default model settings", () => {
   beforeEach(() => {
     mocks.overview.mockResolvedValue({
@@ -69,14 +85,43 @@ describe("separate supplier and default model settings", () => {
     });
     mocks.preferences.mockResolvedValue({});
   });
-  const renderAt = (url: string) =>
+  const renderAt = (url: string) => {
+    const router = createMemoryRouter([{ path: "/settings", element: <SettingsPage /> }], { initialEntries: [url] });
     render(
       <ConfigProvider theme={{ token: { motion: false } }}>
-        <MemoryRouter initialEntries={[url]}>
-          <SettingsPage />
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ConfigProvider>,
     );
+    return router;
+  };
+  it.each(["models", "model_defaults"])("offers all settings in a labeled page selector from %s", async (section) => {
+    renderAt(`/settings?section=${section}`);
+    await screen.findByText(section === "models" ? "Existing suppliers" : "Default model choices");
+    const selector = mobileNavigation();
+    expect(selector).toHaveValue(section);
+    expect(within(selector).getByRole("group", { name: "settingsPage.navGroups.management" })).toBeInTheDocument();
+    expect(within(selector).getByRole("option", { name: "settingsPage.sections.recovery" })).toBeInTheDocument();
+    selector.focus();
+    expect(selector).toHaveFocus();
+    fireEvent.change(selector, { target: { value: section === "models" ? "model_defaults" : "models" } });
+    expect(await screen.findByText(section === "models" ? "Default model choices" : "Existing suppliers")).toBeVisible();
+  });
+  it("keeps the current page and draft when leaving through the page selector is cancelled", async () => {
+    const router = renderAt("/settings?section=models&view=providers&return_to=%2Fagent%2Fchat%2Fexample");
+    fireEvent.change(await screen.findByLabelText("Provider draft"), { target: { value: "unsaved endpoint" } });
+    const selector = mobileNavigation();
+    fireEvent.change(selector, { target: { value: "model_defaults" } });
+    fireEvent.click(await screen.findByRole("button", { name: "settingsPage.unsaved.stay" }));
+    expect(selector).toHaveValue("models");
+    expect(screen.getByLabelText("Provider draft")).toHaveValue("unsaved endpoint");
+    expect(new URLSearchParams(router.state.location.search).get("section")).toBe("models");
+
+    fireEvent.change(selector, { target: { value: "model_defaults" } });
+    fireEvent.click(await screen.findByRole("button", { name: "settingsPage.unsaved.discard" }));
+    expect(await screen.findByText("Default model choices")).toBeVisible();
+    expect(selector).toHaveValue("model_defaults");
+    expect(new URLSearchParams(router.state.location.search).get("return_to")).toBe("/agent/chat/example");
+  });
   it("embeds model services beside the persistent settings navigation", async () => {
     renderAt("/settings?section=models");
     expect(

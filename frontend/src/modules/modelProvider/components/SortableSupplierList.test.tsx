@@ -67,11 +67,10 @@ describe("supplier drag handles", () => {
     })).toEqual({ x: 0, y: 72, scaleX: 1, scaleY: 1 });
   });
 
-  it.each([false, true])("animates a changed order unless reduced motion is %s", (reduced) => {
+  it("does not animate neighboring rows after the order is committed", () => {
     const originalAnimate = HTMLElement.prototype.animate;
     const animate = vi.fn();
     HTMLElement.prototype.animate = animate;
-    const media = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: reduced } as MediaQueryList);
     const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       const index = this.classList.contains("provider-workspace-sortable-row") ? [...this.parentElement!.children].indexOf(this) : 0;
       return { top: index * 44, left: 0, width: 200, height: 44 } as DOMRect;
@@ -81,11 +80,9 @@ describe("supplier drag handles", () => {
       const view = render(<SortableSupplierList items={items} disabled={false} onReorder={vi.fn()}>{child}</SortableSupplierList>);
       expect(animate).not.toHaveBeenCalled();
       view.rerender(<SortableSupplierList items={[items[2], items[0], items[1]]} disabled={false} onReorder={vi.fn()}>{child}</SortableSupplierList>);
-      if (reduced) expect(animate).not.toHaveBeenCalled();
-      else expect(animate).toHaveBeenCalledWith(expect.any(Array), { duration: 360, easing: "cubic-bezier(.22, 1, .36, 1)" });
+      expect(animate).not.toHaveBeenCalled();
     } finally {
       HTMLElement.prototype.animate = originalAnimate;
-      media.mockRestore();
       rect.mockRestore();
     }
   });

@@ -151,6 +151,21 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultChatLLMConfigAllowsSelectedOwnerModelWithUsableUnverifiedGroup(t *testing.T) {
+	database := newChatModelTestDB(t)
+	db := database.DB
+	model := seedAvailableChatModel(t, db, "user-1", "provider-private", "group-private", "model-private", "Private", "私有 API", "private-chat", "llm", false, "private-secret")
+	seedSelectedChatModel(t, db, "user-1", model.ID, false)
+
+	config, err := LoadDefaultChatLLMConfig(context.Background(), db, "user-1")
+	if err != nil {
+		t.Fatalf("load default config for selected unverified model: %v", err)
+	}
+	if config["model"] != "private-chat" || config["api_key"] != "private-secret" {
+		t.Fatalf("config=%#v, want selected private model and key", config)
+	}
+}
+
 func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	database := newChatModelTestDB(t)
 	db := database.DB

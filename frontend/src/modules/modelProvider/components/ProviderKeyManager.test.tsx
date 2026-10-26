@@ -247,6 +247,20 @@ describe("provider key controls", () => {
       expect(current.onToggle).toHaveBeenCalledWith("other", true),
     );
   });
+  it("drops an in-flight reveal when the key drawer closes", async () => {
+    let resolve!: (value: string) => void;
+    mocks.reveal.mockReturnValue(new Promise<string>((done) => { resolve = done; }));
+    render(<ProviderKeyManager {...props()} />);
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.keyManager.manage" }));
+    const drawer = within(await screen.findByRole("dialog"));
+    fireEvent.click(drawer.getByRole("button", { name: "modelProvider.keyManager.reveal" }));
+    fireEvent.click(drawer.getByRole("button", { name: "Close" }));
+    await act(async () => resolve("late-drawer-secret"));
+    expect(screen.queryByText("late-drawer-secret")).not.toBeInTheDocument();
+    mocks.reveal.mockResolvedValueOnce("main-page-secret");
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.keyManager.reveal" }));
+    expect(await screen.findByText("main-page-secret")).toBeInTheDocument();
+  });
   it("does not expose a stale reveal response after switching suppliers", async () => {
     let resolve!: (value: string) => void;
     mocks.reveal.mockReturnValue(

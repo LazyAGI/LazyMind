@@ -3,6 +3,7 @@ import { ApiOutlined, CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutli
 import { Button, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import { probeFailureCode, probeModel, type ModelProbeIdentity, type ModelProbeResult } from "../modelProbe";
+import { saveProbeHealth, takeProbeHealth } from "../modelProbeHealth";
 import "./ModelProbeButton.scss";
 
 interface ModelProbeButtonProps extends ModelProbeIdentity {
@@ -26,7 +27,7 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
   const requestKey = JSON.stringify([props.providerId, props.groupId, props.modelId, props.modelName, props.configurationKey]);
 
   useEffect(() => {
-    setResult(undefined);
+    setResult(takeProbeHealth(props.modelId, props.configurationKey));
     setPending(false);
     return () => {
       sequence.current += 1;
@@ -48,9 +49,16 @@ export function ModelProbeButton(props: ModelProbeButtonProps) {
     reportPending.current?.(true);
     try {
       const next = await probeModel({ providerId: props.providerId, groupId: props.groupId, modelId: props.modelId }, abort.signal);
-      if (request === sequence.current && !abort.signal.aborted) setResult(next);
+      if (request === sequence.current && !abort.signal.aborted) {
+        saveProbeHealth(props.modelId, props.configurationKey, next);
+        setResult(next);
+      }
     } catch (error) {
-      if (request === sequence.current && !abort.signal.aborted) setResult({ status: "failed", code: probeFailureCode(error), elapsed_ms: Math.max(0, Date.now() - started), model_type: "" });
+      if (request === sequence.current && !abort.signal.aborted) {
+        const failed: ModelProbeResult = { status: "failed", code: probeFailureCode(error), elapsed_ms: Math.max(0, Date.now() - started), model_type: "" };
+        saveProbeHealth(props.modelId, props.configurationKey, failed);
+        setResult(failed);
+      }
     } finally {
       if (request === sequence.current) {
         running.current = false;

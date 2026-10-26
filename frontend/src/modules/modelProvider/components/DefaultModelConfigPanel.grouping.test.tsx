@@ -159,6 +159,47 @@ describe("default capability configuration groups", () => {
     expect(mocks.configureService).toHaveBeenCalledWith("cloudParsing");
   });
 
+  it("groups models by supplier, supports collapsing, and keeps the selected label", async () => {
+    mocks.providers.mockResolvedValue({ data: { providers: [
+      { id: "provider", name: "Demo", protocol_name: "SiliconFlow", is_custom: true },
+      { id: "other", name: "Other", protocol_name: "SiliconFlow", is_custom: true },
+    ] } });
+    mocks.models.mockResolvedValue({ data: { models: [
+      { ...availableModel, is_default: true },
+      { ...availableModel, id: "other-model", name: "Other model", user_model_provider_id: "other", user_model_provider_group_id: "other-group" },
+    ] } });
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    fireEvent.mouseDown(select);
+    const supplier = await screen.findByRole("button", { name: /^Demo\s*1$/ });
+    expect(supplier).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByText("modelProvider.builtInModelSuffix")).not.toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.customModelSuffix")).not.toBeInTheDocument();
+    fireEvent.click(supplier);
+    expect(supplier).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Demo model", { selector: "strong" })).not.toBeInTheDocument();
+    expect(within(group("modelProvider.module.llmChatTitle")).getByText("Demo model · Demo")).toBeInTheDocument();
+    expect(screen.getByText("Other model", { selector: "strong" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Other model", { selector: "strong" }));
+    await waitFor(() => expect(mocks.saveModel).toHaveBeenCalled());
+    expect(mocks.saveModel.mock.calls[0][0].setSelectedModelsOpenAPIRequest.selections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ model_key: "llm", model_id: "other-model" }),
+    ]));
+  });
+
+  it("reveals collapsed supplier models when searching", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const select = await readyToSelect("modelProvider.module.llmChatTitle");
+    fireEvent.mouseDown(select);
+    fireEvent.click(await screen.findByRole("button", { name: /^Demo\s*1$/ }));
+    expect(screen.queryByText("Demo model", { selector: "strong" })).not.toBeInTheDocument();
+    fireEvent.change(select, { target: { value: "Demo model" } });
+    expect(await screen.findByText("Demo model", { selector: "strong" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Demo\s*1$/ })).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("shows two basic selectors on entry and keeps optional categories collapsed", async () => {
     renderPanel();
     await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
@@ -185,6 +226,7 @@ describe("default capability configuration groups", () => {
     expect(within(group("modelProvider.module.llmChatTitle")).getByText("Demo model · My gateway").closest(".ant-select-selection-item")?.querySelector("img")).toHaveAttribute("src", "/provider-icons/custom.svg");
     fireEvent.mouseDown(select);
     await waitFor(()=>expect(document.querySelector(".model-provider-select-option small")).toHaveTextContent("My gateway"));
+    expect(document.querySelector(".model-provider-select-option")).toHaveClass("is-child");
     expect(screen.queryByText(/Legacy connection/)).not.toBeInTheDocument();
     expect(screen.queryByText("My gateway / My gateway")).not.toBeInTheDocument();
   });
