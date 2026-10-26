@@ -56,9 +56,10 @@ import {
 } from "@/modules/knowledge/utils/request";
 import { ALL_TAGS } from "@/modules/knowledge/constants/common";
 import {
-  Dataset,
+  Dataset as LegacyDataset,
 } from "@/api/generated/knowledge-client";
 import type { Dataset as CoreDataset } from "@/api/generated/core-client";
+type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment_count">;
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
@@ -1347,10 +1348,12 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       },
     },
     {
-      title: t("knowledge.documentCountLabel"),
+      title: t("knowledge.resourceCountLabel"),
       dataIndex: "document_count",
-      width: 88,
-      render: (count: number) => t("knowledge.documentCount", { count: count || 0 }),
+      width: 180,
+      render: (count: number, dataset: Dataset) => isPaperLibrary(dataset.scene)
+        ? t('knowledge.paperCollectionCount', { paperCount: dataset.paper_count ?? 0, pdfCount: dataset.pdf_attachment_count ?? 0 })
+        : t("knowledge.documentCount", { count: count || 0 }),
     },
     {
       title: t("knowledge.updateDate"),

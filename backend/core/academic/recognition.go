@@ -356,6 +356,7 @@ func UpdateDocumentIdentity(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "INVALID_KIND", "kind must be paper, other or unknown")
 		return
 	}
+	updatedWorkID := ""
 	err := store.DB().Transaction(func(tx *gorm.DB) error {
 		state := orm.AcademicDocumentState{DocumentID: id, DatasetID: row.DatasetID, Kind: "unknown", Status: "pending", Revision: 1, UpdatedAt: time.Now().UTC()}
 		if e := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&state).Error; e != nil {
@@ -394,13 +395,14 @@ func UpdateDocumentIdentity(w http.ResponseWriter, r *http.Request) {
 				return e
 			}
 		}
+		updatedWorkID = workID
 		return tx.Model(&state).Updates(map[string]any{"kind": req.Kind, "status": "succeeded", "manual": true, "metadata_json": metadata, "revision": state.Revision + 1, "paper_id": workID, "error": "", "updated_at": time.Now().UTC()}).Error
 	})
 	if err != nil {
 		replyError(w, 500, "UPDATE_FAILED", err.Error())
 		return
 	}
-	common.ReplyJSON(w, map[string]string{"status": "succeeded"})
+	common.ReplyJSON(w, map[string]string{"status": "succeeded", "paper_id": updatedWorkID})
 }
 func SetImportance(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireUser(w, r)

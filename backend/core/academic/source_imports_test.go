@@ -189,7 +189,7 @@ func TestSourceImportIdempotencyReservationAndInvalidTarget(t *testing.T) {
 
 func TestSourceTargetsOnlyWritablePaperCollections(t *testing.T) {
 	db := sourceTestDB(t)
-	if err := db.AutoMigrate(&orm.Dataset{}, &orm.ACLModel{}, &orm.UserGroupModel{}, &orm.KnowledgeMarketInstall{}, &orm.DefaultDataset{}); err != nil {
+	if err := db.AutoMigrate(&orm.Dataset{}, &orm.ACLModel{}, &orm.UserGroupModel{}, &orm.KnowledgeMarketInstall{}, &orm.DefaultDataset{}, &orm.PaperLibrary{}, &orm.AcademicDocumentState{}, &orm.AcademicWorkDocument{}, &orm.DocumentProcessingState{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}); err != nil {
 		t.Fatal(err)
 	}
 	previousACL := acl.GetStore()

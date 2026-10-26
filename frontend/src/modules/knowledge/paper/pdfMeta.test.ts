@@ -9,14 +9,15 @@ const file = { name: "research.pdf", arrayBuffer: async () => new ArrayBuffer(0)
 beforeEach(() => vi.resetAllMocks());
 
 describe("PDF import errors", () => {
-  it("propagates DOI lookup failure instead of saving a pending-metadata paper", async () => {
+  it("keeps a locally readable PDF available for manual review when DOI verification fails", async () => {
     vi.mocked(pdfjs.getDocument).mockReturnValue({ promise: Promise.resolve({
+      destroy: vi.fn(),
       getMetadata: async () => ({ info: { Title: "Research" } }),
       getPage: async () => ({ getTextContent: async () => ({ items: [{ str: "10.1234/research 2024" }] }) }),
     }) } as never);
     const failure = new Error("Crossref HTTP 503");
     vi.mocked(lookupDoi).mockRejectedValue(failure);
-    await expect(paperFromPdf(file)).rejects.toBe(failure);
+    await expect(paperFromPdf(file)).resolves.toMatchObject({ title: "Research", identityVerified: false, identificationError: "Crossref HTTP 503" });
   });
   it("propagates corrupt PDF errors", async () => {
     const failure = new Error("Invalid PDF structure");

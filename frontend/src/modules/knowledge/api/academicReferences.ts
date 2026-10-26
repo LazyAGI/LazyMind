@@ -202,6 +202,7 @@ export interface PaperUploadContext {
   idempotency_key: string;
   library_paper_id: string;
   title: string;
+  paper?: import('../paper/model').PaperItem;
 }
 export interface LibraryImportContext {
   idempotency_key: string;
@@ -214,10 +215,13 @@ export interface LibraryImportContext {
 export interface ImportOperationItem extends AcademicImportQueueItem {
   library_paper_id?: string;
   result_kind: string;
-  current_state: 'importing' | 'processing' | 'ready' | 'metadata_only' | 'skipped' | 'failed' | 'processing_failed' | 'canceled' | 'deleted';
+  current_state: 'importing' | 'processing' | 'ready' | 'metadata_only' | 'skipped' | 'failed' | 'processing_failed' | 'canceled' | 'deleted' | 'awaiting_association';
   document_deleted: boolean;
   resolved_later: boolean;
   can_retry: boolean;
+  upload_request_key?: string;
+  pending_paper?: import('../paper/model').PaperItem;
+  content_sha256?: string;
 }
 export interface ImportOperation {
   id: string;

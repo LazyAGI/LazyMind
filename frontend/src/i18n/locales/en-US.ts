@@ -4563,6 +4563,8 @@ const enUS = {
     viewSquareDetail: "View {{name}} details",
     documentCount: "{{count}} documents",
     documentCountLabel: "Documents",
+    resourceCountLabel: "Count",
+    paperCollectionCount: "{{paperCount}} papers · {{pdfCount}} PDFs",
     updatedShort: "updated",
     onlineQuery: "Query Online",
     onlineQueryUnavailable: "Online query is not available for this knowledge base",

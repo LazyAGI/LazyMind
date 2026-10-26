@@ -1,5 +1,5 @@
 export type ReadingStatus = "unread" | "reading" | "read";
-export type LibraryView = "all" | "important" | "incomplete";
+export type LibraryView = "all" | "important" | "incomplete" | "directory";
 export type ImportSource = "local" | "zotero" | "google_scholar" | "semantic_scholar" | "doi" | "arxiv" | "web" | "unknown";
 export type PaperImportMethod = "upload" | "link" | "bibliography" | "expansion" | "references";
 export type ParseState = "ready" | "parsing" | "failed";
@@ -9,6 +9,7 @@ export type CitationStyle = "gbt" | "apa" | "mla";
 export interface PaperFolder {
   id: string;
   name: string;
+  parentId?: string | null;
 }
 
 export interface PaperItem {
@@ -33,6 +34,30 @@ export interface PaperItem {
   academicWorkId?: string;
   processingError?: string;
   incomplete?: boolean;
+  associationConflict?: string;
+}
+
+export function descendantFolderIds(folders: PaperFolder[], parentId: string): Set<string> {
+  const ids = new Set([parentId]);
+  const children = new Map<string, string[]>();
+  for (const folder of folders) if (folder.parentId) children.set(folder.parentId, [...(children.get(folder.parentId) || []), folder.id]);
+  const pending = [parentId];
+  while (pending.length) for (const child of children.get(pending.pop()!) || []) if (!ids.has(child)) { ids.add(child); pending.push(child); }
+  return ids;
+}
+
+export function paperFolderPath(folders: PaperFolder[], folderId?: string | null): string {
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  const byId = new Map(folders.map(folder => [folder.id, folder]));
+  while (folderId && !seen.has(folderId)) {
+    seen.add(folderId);
+    const folder = byId.get(folderId);
+    if (!folder) break;
+    parts.unshift(folder.name);
+    folderId = folder.parentId;
+  }
+  return parts.join(' / ');
 }
 
 export interface PaperLibraryData {
@@ -52,7 +77,7 @@ export interface ImportPlan {
 }
 
 const doiPattern = /10\.\d{4,9}\/[-._;()/:A-Z0-9]+/i;
-const arxivPattern = /(?:arxiv(?:\.org)?\/(?:abs|pdf)\/|arxiv:\s*)?((?:\d{4}\.\d{4,5}|[a-z-]+\/\d{7})(?:v\d+)?)/i;
+const arxivPattern = /(?:arxiv(?:\.org)?\/(?:abs|pdf)\/|arxiv[.:]\s*)?((?:\d{4}\.\d{4,5}|[a-z-]+\/\d{7})(?:v\d+)?)/i;
 
 export const sourceLabel: Record<ImportSource, string> = {
   local: "本地",
@@ -121,11 +146,12 @@ export function normalizeArxiv(value: string) {
 
 export function identifiersInText(text: string) {
   const doi = text.match(doiPattern)?.[0];
-  const arxiv = text.match(/(?:arxiv:\s*)?(\d{4}\.\d{4,5})(?:v\d+)?/i)?.[1];
+  const arxiv = text.match(/(?:arxiv(?:\.org)?\/(?:abs|pdf)\/|arxiv[.:]\s*)((?:\d{4}\.\d{4,5}|[a-z-]+\/\d{7})(v\d+)?)/i);
   const year = Number(text.match(/\b(?:19|20)\d{2}\b/)?.[0] || 0);
   return {
     doi: doi ? normalizeDoi(doi) : undefined,
-    arxiv: arxiv ? normalizeArxiv(arxiv) : undefined,
+    arxiv: arxiv?.[1] ? normalizeArxiv(arxiv[1]) : undefined,
+    arxivVersion: arxiv?.[2]?.toLowerCase(),
     year: year || undefined,
   };
 }
@@ -511,7 +537,7 @@ export function assignFolders(data: PaperLibraryData, papers: PaperItem[], folde
   const next = papers.map((item, index) => {
     const name = folderNames[index]?.trim();
     if (!name) return { ...item, folderId: item.folderId ?? fallbackFolderId };
-    let folder = folders.find((entry) => entry.name === name);
+    let folder = folders.find((entry) => entry.name === name && !entry.parentId);
     if (!folder) {
       folder = { id: `folder-${name}-${folders.length}`, name };
       folders.push(folder);

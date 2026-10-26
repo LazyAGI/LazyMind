@@ -28,6 +28,7 @@ export interface Attachment {
   sourceVersion?: string;
   sourceUrl?: string;
   contentHash?: string;
+  available?: boolean;
 }
 
 export interface Note {
@@ -92,6 +93,7 @@ export interface PaperLibraryDataV3 {
   relations: PaperRelation[];
   mergeSnapshots: MergeSnapshot[];
   hiddenDocumentIds?: string[];
+  hiddenFolderIds?: string[];
   hiddenArxivWorkIds?: string[];
   hiddenArxivPapers?: PaperRecord[];
 }

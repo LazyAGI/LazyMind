@@ -16,6 +16,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 )
 
@@ -23,9 +24,28 @@ const maxPaperLibraryBytes = 20 << 20
 const emptyPaperLibrary = `{"schemaVersion":3,"folders":[],"collections":[],"papers":[],"attachments":[],"notes":[],"annotations":[],"relations":[],"mergeSnapshots":[]}`
 
 type paperLibraryResponse struct {
-	Data     json.RawMessage `json:"data"`
-	Revision int64           `json:"revision"`
-	CanWrite bool            `json:"can_write"`
+	Data               json.RawMessage `json:"data"`
+	Revision           int64           `json:"revision"`
+	CanWrite           bool            `json:"can_write"`
+	PaperCount         int64           `json:"paper_count"`
+	PDFAttachmentCount int64           `json:"pdf_attachment_count"`
+	PaperImportance    map[string]bool `json:"paper_importance"`
+	Active             bool            `json:"active"`
+}
+
+func resolvePaperLibrary(ctx context.Context, db *gorm.DB, datasetID, userID string) (paperLibraryResponse, error) {
+	result, err := readPaperLibrary(ctx, db, datasetID)
+	if err != nil {
+		return result, err
+	}
+	views, err := paperlibrary.LoadMany(ctx, db, []string{datasetID}, userID)
+	if err != nil {
+		return result, err
+	}
+	view := views[datasetID]
+	result.Data, result.PaperCount, result.PDFAttachmentCount = view.Data, view.PaperCount, view.PDFAttachmentCount
+	result.PaperImportance, result.Active = view.PaperImportance, view.Active
+	return result, nil
 }
 
 // The complete graph is stored together so imports, folders, annotations and
@@ -86,7 +106,7 @@ func GetPaperLibrary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := readPaperLibrary(r.Context(), store.DB(), datasetID)
+	result, err := resolvePaperLibrary(r.Context(), store.DB(), datasetID, store.UserID(r))
 	if err != nil {
 		replyError(w, 500, "PAPER_LIBRARY_LOAD_FAILED", "论文库读取失败，已保存的数据未被修改")
 		return
@@ -106,9 +126,10 @@ func PutPaperLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Revision      *int64                `json:"revision"`
-		ImportContext *LibraryImportContext `json:"import_context,omitempty"`
-		Data          json.RawMessage       `json:"data"`
+		Revision          *int64                    `json:"revision"`
+		ImportContext     *LibraryImportContext     `json:"import_context,omitempty"`
+		Data              json.RawMessage           `json:"data"`
+		AttachmentContext *LibraryAttachmentContext `json:"attachment_context,omitempty"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPaperLibraryBytes))
 	decoder.DisallowUnknownFields()
@@ -173,13 +194,18 @@ func PutPaperLibrary(w http.ResponseWriter, r *http.Request) {
 		defer guard.release()
 		r = r.WithContext(guard.ctx)
 	}
-	saved, replay, err := savePaperLibraryImport(r.Context(), store.DB(), datasetID, store.UserID(r), *request.Revision, request.Data, request.ImportContext)
+	saved, replay, err := saveLibraryMutation(r.Context(), store.DB(), datasetID, store.UserID(r), *request.Revision, request.Data, request.ImportContext, request.AttachmentContext)
 	if err != nil {
+		var invalid *libraryMutationError
+		if errors.As(err, &invalid) {
+			replyError(w, invalid.Status, invalid.Code, invalid.Error())
+			return
+		}
 		replyError(w, 500, "PAPER_LIBRARY_SAVE_FAILED", "论文库保存失败，请重试；已保存的数据未被修改")
 		return
 	}
 	if replay {
-		result, loadErr := readPaperLibrary(r.Context(), store.DB(), datasetID)
+		result, loadErr := resolvePaperLibrary(r.Context(), store.DB(), datasetID, store.UserID(r))
 		if loadErr != nil {
 			replyError(w, 500, "PAPER_LIBRARY_LOAD_FAILED", loadErr.Error())
 			return
@@ -199,7 +225,13 @@ func PutPaperLibrary(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": "PAPER_LIBRARY_CONFLICT", "message": "论文库已在其他窗口更新，请加载最新内容后重试", "data": current.Data, "revision": current.Revision, "can_write": canWrite})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(paperLibraryResponse{Data: request.Data, Revision: *request.Revision + 1, CanWrite: canWrite})
+	result, err := resolvePaperLibrary(r.Context(), store.DB(), datasetID, store.UserID(r))
+	if err != nil {
+		replyError(w, 500, "PAPER_LIBRARY_LOAD_FAILED", "数据已保存，但无法读取最新论文库，请重新加载")
+		return
+	}
+	result.CanWrite = canWrite
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 // Compare-and-swap is performed by the database, including the first save.
@@ -267,6 +299,9 @@ func validatePaperLibrary(raw json.RawMessage) (map[string]bool, error) {
 	}
 	documents := map[string]bool{}
 	if err := validatePaperLibraryObject(root, documents); err != nil {
+		return nil, err
+	}
+	if err := paperlibrary.ValidateRelations(paperlibrary.Graph(root.(map[string]any))); err != nil {
 		return nil, err
 	}
 	return documents, nil
@@ -367,6 +402,9 @@ func validatePaperLibraryObject(value any, documents map[string]bool) error {
 				}
 			}
 		}
+	}
+	if err := paperStringArray(root, "hiddenFolderIds", false); err != nil {
+		return err
 	}
 	if err := paperStringArray(root, "hiddenDocumentIds", false); err != nil {
 		return err

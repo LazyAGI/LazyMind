@@ -28,16 +28,17 @@ describe("paper filters", () => {
     expect(JSON.stringify(papers)).toBe(before);
   });
 
-  it("only counts usable PDF attachments, including PDFs classified as supplements", () => {
-    const papers = [paper("stored"), paper("remote"), paper("placeholder"), paper("snapshot"), paper("none")];
+  it("counts stored PDFs separately from external PDF links", () => {
+    const papers = [paper("stored"), paper("remote"), paper("placeholder"), paper("snapshot"), paper("material"), paper("none")];
     const attachments = [
-      attachment("stored", { kind: "supplement", mimeType: "application/pdf" }),
+      attachment("stored"),
+      attachment("material", { kind: "supplement", mimeType: "application/pdf" }),
       attachment("remote", { contentRef: undefined, sourceUrl: "https://arxiv.org/pdf/2404.06654v3" }),
       attachment("placeholder", { contentRef: undefined }),
       attachment("snapshot", { kind: "snapshot", mimeType: "text/html" }),
     ];
-    expect(ids(filterPaperRecords(papers, attachments, { ...DEFAULT_PAPER_FILTERS, pdf: "has-pdf" }))).toEqual(["stored", "remote"]);
-    expect(ids(filterPaperRecords(papers, attachments, { ...DEFAULT_PAPER_FILTERS, pdf: "needs-pdf" }))).toEqual(["placeholder", "snapshot", "none"]);
+    expect(ids(filterPaperRecords(papers, attachments, { ...DEFAULT_PAPER_FILTERS, pdf: "has-pdf" }))).toEqual(["stored"]);
+    expect(ids(filterPaperRecords(papers, attachments, { ...DEFAULT_PAPER_FILTERS, pdf: "needs-pdf" }))).toEqual(["remote", "placeholder", "snapshot", "material", "none"]);
   });
 
   it("rejects missing and unsafe remote attachment destinations", () => {

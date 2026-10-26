@@ -4482,6 +4482,8 @@ const zhCN = {
     viewSquareDetail: "查看{{name}}详情",
     documentCount: "{{count}} 份文档",
     documentCountLabel: "文档数",
+    resourceCountLabel: "数量",
+    paperCollectionCount: "{{paperCount}} 篇论文 · {{pdfCount}} 份 PDF",
     updatedShort: "更新",
     onlineQuery: "在线查询",
     onlineQueryUnavailable: "该知识库暂未提供在线查询入口",

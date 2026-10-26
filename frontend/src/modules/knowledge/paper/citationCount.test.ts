@@ -5,10 +5,7 @@ import { loadPaperLibraryForExport } from './exportLibrary';
 
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: api }));
-vi.mock('./libraryDocuments', async original => ({
-  ...await original<typeof import('./libraryDocuments')>(),
-  loadLibraryDocuments: vi.fn().mockResolvedValue({ documents: [], states: [] }),
-}));
+
 
 it('preserves known, zero, and unknown citation counts through server persistence and export loading', async () => {
   const data = libraryFixture({ papers: [

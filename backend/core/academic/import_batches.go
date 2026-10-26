@@ -19,13 +19,16 @@ import (
 
 type ImportOperationItem struct {
 	ImportQueueItem
-	LibraryPaperID  string `json:"library_paper_id,omitempty"`
-	ResultKind      string `json:"result_kind"`
-	CurrentState    string `json:"current_state"`
-	DocumentDeleted bool   `json:"document_deleted"`
-	ResolvedLater   bool   `json:"resolved_later"`
-	CanRetry        bool   `json:"can_retry"`
-	taskID          string
+	LibraryPaperID   string          `json:"library_paper_id,omitempty"`
+	ResultKind       string          `json:"result_kind"`
+	CurrentState     string          `json:"current_state"`
+	DocumentDeleted  bool            `json:"document_deleted"`
+	ResolvedLater    bool            `json:"resolved_later"`
+	CanRetry         bool            `json:"can_retry"`
+	UploadRequestKey string          `json:"upload_request_key,omitempty"`
+	PendingPaper     json.RawMessage `json:"pending_paper,omitempty"`
+	ContentSHA256    string          `json:"content_sha256,omitempty"`
+	taskID           string
 }
 
 type ImportOperationSummary struct {
@@ -178,7 +181,18 @@ func loadImportOperations(ctx context.Context, db *gorm.DB, batches []orm.PaperI
 			row.CurrentDocument = current
 			row.ResolvedLater = item.Status == "failed" && current != nil && current.ProcessingStatus == "ready"
 			row.CurrentState = item.Status
+			if item.Stage == "awaiting_association" {
+				row.ContentSHA256 = item.ContentSHA256
+				row.UploadRequestKey = batch.IdempotencyKey
+				var source struct {
+					Paper json.RawMessage `json:"paper"`
+				}
+				_ = json.Unmarshal(batch.SourceContextJSON, &source)
+				row.PendingPaper = source.Paper
+			}
 			switch {
+			case item.Stage == "awaiting_association":
+				row.CurrentState = "awaiting_association"
 			case row.ResultKind == "metadata_only":
 				row.CurrentState = "metadata_only"
 			case item.Status == "failed":
@@ -223,6 +237,8 @@ func loadImportOperations(ctx context.Context, db *gorm.DB, batches []orm.PaperI
 				if !row.ResolvedLater {
 					summary.NeedsAction++
 				}
+			case "awaiting_association":
+				summary.NeedsAction++
 			case "canceled":
 				summary.Canceled++
 			case "deleted":
@@ -238,6 +254,8 @@ func loadImportOperations(ctx context.Context, db *gorm.DB, batches []orm.PaperI
 		}
 		s := operation.Summary
 		switch {
+		case s.NeedsAction > 0 && s.Failed == 0 && s.Active == 0:
+			operation.Status = "awaiting_association"
 		case s.Active > 0:
 			operation.Status = "running"
 		case s.Failed > 0:

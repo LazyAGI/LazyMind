@@ -15,17 +15,22 @@ export const DEFAULT_PAPER_FILTERS: PaperFilters = {
 
 /** Metadata-only migration placeholders do not mean a PDF is available. */
 export function isReadablePdfAttachment(attachment: Attachment): boolean {
+  if (attachment.available === false) return false;
   const isPdf = attachment.kind === "pdf" || attachment.mimeType?.toLowerCase() === "application/pdf";
   if (!isPdf) return false;
   if (attachment.contentRef?.trim()) return true;
   return !!safePaperUrl(attachment.sourceUrl);
 }
 
+export function isStoredPdfAttachment(attachment: Attachment): boolean {
+  return attachment.kind === "pdf" && isReadablePdfAttachment(attachment) && !!attachment.contentRef?.trim();
+}
+
 export function filterPaperRecords<T extends PaperItem>(papers: T[], attachments: Attachment[], filters: PaperFilters): T[] {
   const withPdf = new Set<string>();
   const uploaded = new Set<string>();
   for (const attachment of attachments) {
-    if (!isReadablePdfAttachment(attachment)) continue;
+    if (!isStoredPdfAttachment(attachment)) continue;
     withPdf.add(attachment.paperId);
     if (attachment.importMethod === "upload" || (!attachment.importMethod && attachment.source === "local")) uploaded.add(attachment.paperId);
   }

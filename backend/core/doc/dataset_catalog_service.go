@@ -11,6 +11,7 @@ import (
 
 	"lazymind/core/acl"
 	"lazymind/core/common/orm"
+	"lazymind/core/paperlibrary"
 )
 
 type DatasetServiceErrorCode string
@@ -222,6 +223,9 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 	}
 
 	out := s.datasetsFromRows(ctx, page, userID, groupIDs, pageSourceMap, pageSourceTypeMap)
+	if err := s.addPaperStatistics(ctx, page, out); err != nil {
+		return DatasetListResult{}, err
+	}
 	s.addAllowedActions(ctx, caller, out)
 	end := offset + len(page)
 	return DatasetListResult{
@@ -273,6 +277,9 @@ func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRe
 	cloudMap := map[string]bool{ds.ID: createdByDataSource}
 	sourceTypeMap := buildDatasetSourceTypeMap([]string{ds.ID}, cloudMap, installedMap)
 	out := []Dataset{s.datasetFromRow(ctx, ds, userID, datasetACL, calcDatasetStatsWithDB(ctx, s.db, ds.ID), createdByDataSource, sourceTypeMap[ds.ID], nil)}
+	if err := s.addPaperStatistics(ctx, []orm.Dataset{ds}, out); err != nil {
+		return Dataset{}, err
+	}
 	if req.IncludeConfiguration {
 		var refs []learning.KnowledgeBaseCapability
 		if err := s.db.WithContext(ctx).Where("dataset_id = ? AND enabled = ?", ds.ID, true).Order("display_order ASC").Find(&refs).Error; err != nil {
@@ -308,6 +315,30 @@ func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm
 		out = append(out, s.datasetFromRow(ctx, ds, userID, datasetACL, statsMap[ds.ID], sourceMap[ds.ID], sourceTypeMap[ds.ID], liveParsers))
 	}
 	return out
+}
+
+func (s *DatasetCatalogService) addPaperStatistics(ctx context.Context, rows []orm.Dataset, out []Dataset) error {
+	ids := []string{}
+	for _, row := range rows {
+		if canonicalKnowledgeScene(row.Scene) == "academic_papers" {
+			ids = append(ids, row.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	views, err := paperlibrary.LoadMany(ctx, s.db, ids, "")
+	if err != nil {
+		return &DatasetServiceError{Code: DatasetServiceUnavailable, Message: "query paper library statistics failed", Err: err}
+	}
+	for i := range out {
+		if view, ok := views[out[i].DatasetID]; ok {
+			count, pdfCount := view.PaperCount, view.PDFAttachmentCount
+			out[i].PaperCount, out[i].PDFAttachmentCount = &count, &pdfCount
+			out[i].IsEmpty = count == 0
+		}
+	}
+	return nil
 }
 
 func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Dataset, userID string, datasetACL []string, stats datasetStats, createdByDataSource bool, sourceType string, liveParsers []ParserConfig) Dataset {

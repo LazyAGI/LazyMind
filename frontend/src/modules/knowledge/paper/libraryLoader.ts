@@ -1,21 +1,18 @@
-import { loadLibraryDocuments, mergeLibraryDocuments, personalLibrary } from './libraryDocuments';
+import { documentAcademicStates } from '../api/paperWorkflows';
 import type { PaperLibraryDataV3 } from './libraryModel';
 import { loadPersistedPaperLibrary } from './store';
 
-// Documents and their academic states cover local, arXiv and Workflow imports.
-// Keep this join shared by the workbench and all citation exports.
-export async function loadPaperLibrarySources(dataset: string, current: PaperLibraryDataV3) {
-  const documents = await loadLibraryDocuments(dataset);
-  if (!Array.isArray(documents.documents) || !Array.isArray(documents.states)) throw new Error('附件同步返回的数据不完整');
-  return {
-    data: mergeLibraryDocuments(current, documents), states: documents.states,
-    active: documents.states.some(item => ['pending', 'processing'].includes(item.state.status)
-        || item.processing_status === 'parsing'),
-  };
+// Core owns the merged graph; recognition details only enrich task controls.
+export async function loadPaperLibrarySources(dataset: string, _current?: PaperLibraryDataV3) {
+  const saved = await loadPersistedPaperLibrary(dataset);
+  const active = new Set(saved.data.papers.flatMap(paper => paper.attachmentIds));
+  const documents = [...new Set(saved.data.attachments.filter(item => active.has(item.id) && item.available !== false).map(item => item.contentRef).filter((id): id is string => !!id))];
+  const states = [] as Awaited<ReturnType<typeof documentAcademicStates>>;
+  for (let offset = 0; offset < documents.length; offset += 100) states.push(...await documentAcademicStates(dataset, documents.slice(offset, offset + 100)));
+  return { ...saved, states, active: saved.active || states.some(item => ['pending', 'processing'].includes(item.state.status) || item.processing_status === 'parsing') };
 }
 
 export async function loadPaperLibrary(dataset: string) {
   const saved = await loadPersistedPaperLibrary(dataset);
-  const source = await loadPaperLibrarySources(dataset, saved.data);
-  return { ...saved, ...source, data: personalLibrary(source.data, source.states) };
+  return { ...saved, data: { ...saved.data, papers: saved.data.papers.map(paper => ({ ...paper, important: !!saved.paperImportance?.[paper.id] })) } };
 }

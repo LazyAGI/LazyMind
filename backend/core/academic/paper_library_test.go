@@ -109,7 +109,7 @@ func TestPaperLibraryBodyLimitAndScanWritePolicy(t *testing.T) {
 func paperLibraryTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := importErrorDB(t)
-	if err := db.AutoMigrate(&orm.PaperLibrary{}, &orm.Dataset{}, &orm.Document{}, &orm.ACLModel{}, &orm.ACLGroupModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); err != nil {
+	if err := db.AutoMigrate(&orm.PaperLibrary{}, &orm.AcademicUserPaperState{}, &orm.Dataset{}, &orm.Document{}, &orm.ACLModel{}, &orm.ACLGroupModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); err != nil {
 		t.Fatal(err)
 	}
 	acl.InitStore(&orm.DB{DB: db})
@@ -160,6 +160,12 @@ func TestPaperLibraryPersistsFullGraphAndRejectsStaleWrites(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
+	var acknowledged struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &acknowledged); err != nil {
+		t.Fatal(err)
+	}
 	// A fresh handler/service reads only database state, independent of the writer.
 	w = paperLibraryRequest(t, "GET", "papers", "owner", "")
 	var result struct {
@@ -171,7 +177,7 @@ func TestPaperLibraryPersistsFullGraphAndRejectsStaleWrites(t *testing.T) {
 	}
 	var got, want any
 	json.Unmarshal(result.Data, &got)
-	json.Unmarshal([]byte(fixture), &want)
+	json.Unmarshal(acknowledged.Data, &want)
 	gotJSON, _ := json.Marshal(got)
 	wantJSON, _ := json.Marshal(want)
 	if w.Code != 200 || result.Revision != 1 || string(gotJSON) != string(wantJSON) {

@@ -9,6 +9,19 @@ export interface PersistedPaperLibrary {
   data: PaperLibraryDataV3;
   revision: number;
   canWrite: boolean;
+  paperCount?: number;
+  pdfAttachmentCount?: number;
+  paperImportance?: Record<string, boolean>;
+  active?: boolean;
+}
+
+export interface LibraryAttachmentContext {
+  operation: 'attach' | 'detach';
+  paper_id: string;
+  document_id: string;
+  attachment_id: string;
+  confirmed: boolean;
+  idempotency_key: string;
 }
 
 const entityKeys = ['folders', 'collections', 'papers', 'attachments', 'notes', 'annotations', 'relations', 'mergeSnapshots'] as const;
@@ -28,7 +41,7 @@ function validateLibrary(value: unknown): asserts value is PaperLibraryDataV3 {
     && ['attachmentIds', 'noteIds', 'annotationIds', 'collectionIds', 'relatedPaperIds'].every((key) => Array.isArray(item[key])))) {
     throw new Error('服务器文献条目格式无效，已停止加载以保护原数据');
   }
-  for (const key of ['hiddenDocumentIds', 'hiddenArxivWorkIds', 'hiddenArxivPapers']) {
+  for (const key of ['hiddenDocumentIds', 'hiddenFolderIds', 'hiddenArxivWorkIds', 'hiddenArxivPapers']) {
     if (value[key] !== undefined && !Array.isArray(value[key])) throw new Error('服务器文献库关联数据格式无效');
   }
 }
@@ -38,7 +51,12 @@ function decodePersistedLibrary(value: unknown): PersistedPaperLibrary {
     throw new Error('服务器文献库响应格式无效，请重试');
   }
   validateLibrary(value.data);
-  return { data: value.data, revision: value.revision as number, canWrite: value.can_write };
+  return { data: value.data, revision: value.revision as number, canWrite: value.can_write,
+    paperCount: typeof value.paper_count === 'number' ? value.paper_count : undefined,
+    pdfAttachmentCount: typeof value.pdf_attachment_count === 'number' ? value.pdf_attachment_count : undefined,
+    paperImportance: object(value.paper_importance) ? value.paper_importance as Record<string, boolean> : undefined,
+    active: value.active === true,
+  };
 }
 
 function persistenceError(error: unknown): Error {
@@ -60,11 +78,11 @@ async function fetchPersistedLibrary(datasetId: string): Promise<PersistedPaperL
 }
 
 /** Production writes never fall back to browser storage. A revision conflict must be resolved by reloading. */
-export async function savePersistedPaperLibrary(datasetId: string, data: PaperLibraryDataV3, revision: number, importContext?: LibraryImportContext): Promise<PersistedPaperLibrary> {
+export async function savePersistedPaperLibrary(datasetId: string, data: PaperLibraryDataV3, revision: number, importContext?: LibraryImportContext, attachmentContext?: LibraryAttachmentContext): Promise<PersistedPaperLibrary> {
   validateLibrary(data);
   const { axiosInstance, BASE_URL } = await import('@/components/request');
   try {
-    const response = await axiosInstance.put(`${BASE_URL}/api/core/academic/library`, { data, revision, ...(importContext ? { import_context: importContext } : {}) }, {
+    const response = await axiosInstance.put(`${BASE_URL}/api/core/academic/library`, { data, revision, ...(importContext ? { import_context: importContext } : {}), ...(attachmentContext ? { attachment_context: attachmentContext } : {}) }, {
       params: { target_dataset_id: datasetId }, timeout: 30_000, ...{ silentError: true },
     });
     return decodePersistedLibrary(response.data);
@@ -73,4 +91,12 @@ export async function savePersistedPaperLibrary(datasetId: string, data: PaperLi
 
 export async function loadPersistedPaperLibrary(datasetId: string): Promise<PersistedPaperLibrary> {
   return fetchPersistedLibrary(datasetId);
+}
+
+export async function setLibraryPaperImportance(datasetId: string, paperId: string, revision: number, important: boolean): Promise<PersistedPaperLibrary> {
+  const { axiosInstance, BASE_URL } = await import('@/components/request');
+  try {
+    const response = await axiosInstance.put(`${BASE_URL}/api/core/academic/library/papers/${encodeURIComponent(paperId)}/importance`, { revision, is_important: important }, { params: { target_dataset_id: datasetId }, silentError: true } as never);
+    return decodePersistedLibrary(response.data);
+  } catch (error) { throw persistenceError(error); }
 }

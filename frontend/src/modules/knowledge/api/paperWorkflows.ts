@@ -123,7 +123,8 @@ export async function updatePaperIdentity(id: string, input: {
   kind?: string; reidentify?: boolean;
   paper?: { title?: string; authors?: string[]; year?: number; venue?: string; abstract?: string; doi?: string; arxiv_id?: string };
 }) {
-  await axiosInstance.patch(`${core}/documents/${encodeURIComponent(id)}/identity`, input);
+  const response = await axiosInstance.patch(`${core}/documents/${encodeURIComponent(id)}/identity`, input);
+  return unwrap<{ status: string; paper_id?: string }>(response.data);
 }
 export async function retryPaperContent(id: string, expansionId: string) {
   await axiosInstance.post(`${core}/paper-contents:retry`, { paper_id: id, expansion_id: expansionId });

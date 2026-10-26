@@ -351,6 +351,8 @@ func manualSchemas() map[string]any {
 			prop("state", strSchema()),
 			prop("is_empty", boolSchema()),
 			prop("document_count", int64Schema()),
+			prop("paper_count", int64Schema()),
+			prop("pdf_attachment_count", int64Schema()),
 			prop("document_size", int64Schema()),
 			prop("segment_count", int64Schema()),
 			prop("token_count", int64Schema()),
@@ -518,7 +520,7 @@ func manualSchemas() map[string]any {
 			prop("upload_file_id", strSchema()),
 			prop("content_hash", strSchema()),
 		),
-		"CreateTaskRequest": objReq([]string{"items"}, prop("paper_import", objReq([]string{"idempotency_key", "library_paper_id", "title"}, prop("idempotency_key", strSchema()), prop("library_paper_id", strSchema()), prop("title", strSchema()))), prop("parent", strSchema()), prop("items", array(refSchema("CreateTaskItem")))),
+		"CreateTaskRequest": objReq([]string{"items"}, prop("paper_import", objReq([]string{"idempotency_key", "library_paper_id", "title"}, prop("idempotency_key", strSchema()), prop("library_paper_id", strSchema()), prop("title", strSchema()), prop("paper", obj()))), prop("parent", strSchema()), prop("items", array(refSchema("CreateTaskItem")))),
 		"TaskResponse": obj(
 			prop("name", strSchema()),
 			prop("task_id", strSchema()),

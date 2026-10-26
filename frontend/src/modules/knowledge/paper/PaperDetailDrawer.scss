@@ -10,3 +10,5 @@
   .paper-detail-summary > .paper-detail-count:first-of-type { padding-left: 0; border-left: 0; }
 }
 .paper-detail-error { margin-bottom: 14px; }
+.paper-detail-tab-link { border: 0; background: transparent; padding: 0; color: #2858b8; text-align: left; cursor: pointer; }
+.paper-detail-attachment-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

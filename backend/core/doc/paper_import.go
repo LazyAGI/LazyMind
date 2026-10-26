@@ -19,9 +19,10 @@ import (
 // PaperUploadContext associates the existing single-PDF task with one import
 // operation. It does not change the normal document upload execution path.
 type PaperUploadContext struct {
-	IdempotencyKey string `json:"idempotency_key"`
-	LibraryPaperID string `json:"library_paper_id"`
-	Title          string `json:"title"`
+	IdempotencyKey string          `json:"idempotency_key"`
+	LibraryPaperID string          `json:"library_paper_id"`
+	Title          string          `json:"title"`
+	Paper          json.RawMessage `json:"paper,omitempty"`
 }
 type paperUploadKey struct{}
 type paperUploadScope struct {
@@ -38,6 +39,15 @@ func preparePaperUpload(r *http.Request, dataset *orm.Dataset, req CreateTaskReq
 	input.Title = strings.TrimSpace(input.Title)
 	if len(req.Items) != 1 || input.IdempotencyKey == "" || len(input.IdempotencyKey) > 128 || input.LibraryPaperID == "" || len(input.LibraryPaperID) > 255 || input.Title == "" || len(input.Title) > 4096 {
 		return r, "", nil, errors.New("invalid paper upload context")
+	}
+	if len(input.Paper) > 0 {
+		var paper struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		if len(input.Paper) > 65536 || json.Unmarshal(input.Paper, &paper) != nil || paper.ID != input.LibraryPaperID || paper.Title != input.Title {
+			return r, "", nil, errors.New("invalid upload paper snapshot")
+		}
 	}
 	if dataset.Scene != "academic_papers" {
 		return r, "", nil, errors.New("paper upload requires a paper library")
@@ -86,9 +96,9 @@ func recordPaperUpload(ctx context.Context, tx *gorm.DB, task orm.Task, uploaded
 		return errors.New("paper upload only supports PDF")
 	}
 	now := time.Now().UTC()
-	source, _ := json.Marshal(map[string]string{"file_name": name})
-	batch := orm.PaperImportBatch{ID: scope.BatchID, EntryType: "pdf_upload", TargetDatasetID: scope.DatasetID, SourceContextJSON: source, SourceDocumentIDsJSON: json.RawMessage(`[]`), PolicySnapshotJSON: json.RawMessage(`{}`), Status: "succeeded", TotalItems: 1, CompletedItems: 1, IdempotencyKey: scope.IdempotencyKey, CreatedBy: scope.UserID, CreatedAt: now, UpdatedAt: now}
-	item := orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, TitleSnapshot: scope.Title, LibraryPaperID: scope.LibraryPaperID, ResultKind: "imported", Status: "succeeded", Stage: "done", DocumentID: task.DocID, DocumentTaskID: task.ID, ContentSHA256: uploaded.ContentHash, ReferenceIDsJSON: json.RawMessage(`[]`), PresenceSnapshotJSON: json.RawMessage(`{}`), SelectedCandidateJSON: json.RawMessage(`{"source_provider":"local"}`), ErrorDetailsJSON: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}
+	source, _ := json.Marshal(map[string]any{"file_name": name, "paper": scope.Paper})
+	batch := orm.PaperImportBatch{ID: scope.BatchID, EntryType: "pdf_upload", TargetDatasetID: scope.DatasetID, SourceContextJSON: source, SourceDocumentIDsJSON: json.RawMessage(`[]`), PolicySnapshotJSON: json.RawMessage(`{}`), Status: "awaiting_association", TotalItems: 1, NeedsActionItems: 1, IdempotencyKey: scope.IdempotencyKey, CreatedBy: scope.UserID, CreatedAt: now, UpdatedAt: now}
+	item := orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, TitleSnapshot: scope.Title, LibraryPaperID: scope.LibraryPaperID, ResultKind: "imported", Status: "succeeded", Stage: "awaiting_association", DocumentID: task.DocID, DocumentTaskID: task.ID, ContentSHA256: uploaded.ContentHash, ReferenceIDsJSON: json.RawMessage(`[]`), PresenceSnapshotJSON: json.RawMessage(`{}`), SelectedCandidateJSON: json.RawMessage(`{"source_provider":"local"}`), ErrorDetailsJSON: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}
 	if err := tx.Create(&batch).Error; err != nil {
 		return fmt.Errorf("record paper upload: %w", err)
 	}
