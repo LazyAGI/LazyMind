@@ -1232,11 +1232,13 @@ type modelProviderSavedKeyPathParams struct {
 }
 
 type providerRequestProtocolOpenAPIItem struct {
-	Protocol       string `json:"protocol" enum:"openai,anthropic,gemini,openai-responses"`
-	Name           string `json:"name"`
-	BaseURL        string `json:"base_url"`
-	DefaultBaseURL string `json:"default_base_url"`
-	Supported      bool   `json:"supported" desc:"False when the current runtime has no adapter for this protocol."`
+	Protocol          string `json:"protocol" enum:"openai,anthropic,gemini,openai-responses"`
+	Name              string `json:"name"`
+	BaseURL           string `json:"base_url"`
+	DefaultBaseURL    string `json:"default_base_url"`
+	Supported         bool   `json:"supported" desc:"Whether this protocol can be configured: declared for the built-in service (or user-configurable custom service) and supported by the current runtime."`
+	ProviderSupported *bool  `json:"provider_supported,omitempty" desc:"Official protocol declaration for this built-in service. False means undeclared, not proven vendor rejection. Omitted for custom suppliers."`
+	RuntimeSupported  bool   `json:"runtime_supported" desc:"Whether the current runtime adapter implements this protocol for this service, independently of the official declaration."`
 }
 
 type providerRequestConfigOpenAPIResponse struct {

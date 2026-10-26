@@ -393,6 +393,8 @@ export interface ProviderRequestConfig {
     base_url: string;
     default_base_url: string;
     supported: boolean;
+    provider_supported?: boolean;
+    runtime_supported?: boolean;
   }>;
 }
 

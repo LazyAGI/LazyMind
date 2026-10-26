@@ -1,12 +1,13 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ExportOutlined, InfoCircleOutlined, RightOutlined } from "@ant-design/icons";
-import { Button, Collapse, Drawer } from "antd";
+import { CheckOutlined, ExportOutlined, InfoCircleOutlined, RightOutlined } from "@ant-design/icons";
+import { Button, Collapse, Drawer, Tooltip } from "antd";
 import { useTranslation } from "react-i18next";
 import { isCustomLogoDataUrl } from "../customLogo";
 import { useFocusModality } from "../hooks/useFocusModality";
 import { getProviderLogoUrl } from "../providerBranding";
 import { getProviderDisplayName, getProviderServiceDisplayName } from "../providerDisplayNames";
 import { getProviderInformation } from "../providerInformation";
+import { getProviderProtocols } from "../providerProtocols";
 import { getProviderInformationCopy } from "../providerInformationCopy";
 import { resolveSupplierService } from "../supplierServices";
 import type { AddedProvider } from "../pages/ModelProvidersPage";
@@ -29,7 +30,6 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
   const sectionId = useId();
   const [readingId, setReadingId] = useState(provider.id);
   const [helpOpen, setHelpOpen] = useState(false);
-  const contentRef = useRef<HTMLElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const pendingReadingFocus = useRef(false);
 
@@ -58,14 +58,8 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
     setHelpOpen(false);
   }, [open, readingProvider.id]);
 
-  const resetReadingScroll = () => {
-    const body = contentRef.current?.parentElement;
-    if (body) body.scrollTop = 0;
-  };
-
   useEffect(() => {
     if (!open) return;
-    resetReadingScroll();
     if (pendingReadingFocus.current) {
       pendingReadingFocus.current = false;
       headingRef.current?.focus({ preventScroll: true });
@@ -74,7 +68,6 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
 
   const readService = (providerId: string) => {
     if (providerId === readingProvider.id) {
-      resetReadingScroll();
       headingRef.current?.focus({ preventScroll: true });
     } else {
       pendingReadingFocus.current = true;
@@ -83,6 +76,7 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
   };
 
   const guide = getProviderInformation(readingProvider, language);
+  const protocols = getProviderProtocols(readingProvider, language);
   const name = getProviderDisplayName(readingProvider, language);
   const resourceCounts = new Map<string, number>();
   for (const link of guide.links) resourceCounts.set(link.kind, (resourceCounts.get(link.kind) || 0) + 1);
@@ -101,19 +95,19 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
           if (event.currentTarget.getAttribute("src") !== fallbackLogo) event.currentTarget.src = fallbackLogo;
         }} />
       </span>
-      <div><h2 ref={headingRef} tabIndex={-1}>{name}</h2><span className="provider-information-title-separator"> · </span><p>{copy.title}</p></div>
+      <div><h2 ref={headingRef} tabIndex={-1}>{name}</h2></div>
     </div>}
     open={open}
     width="min(720px, 100vw)"
     placement="right"
     onClose={onClose}
-    afterOpenChange={(visible) => { if (visible) resetReadingScroll(); else onAfterClose?.(); }}
+    afterOpenChange={(visible) => { if (!visible) onAfterClose?.(); }}
     footer={<div className="provider-information-footer">
       <Button onClick={onClose}>{copy.returnToConfiguration}</Button>
       {readingProvider.id !== provider.id ? <Button type="primary" onClick={() => onConfigure(readingProvider.id)}>{copy.configure}</Button> : null}
     </div>}
   >
-    <article ref={contentRef} className="provider-information-content">
+    <article className="provider-information-content">
       <header className="provider-information-introduction">
         <p className="provider-information-summary">{guide.profile?.introduction || guide.summary}</p>
       </header>
@@ -146,6 +140,15 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
         </ul>
       </section> : null}
 
+      {protocols.status === "documented" ? <section className="provider-information-section provider-information-protocols" aria-label={copy.protocols}>
+        <h3>{copy.protocols}</h3>
+        <ul aria-label={copy.protocols}>{protocols.protocols.map(protocol => <li key={protocol.id}>{protocol.label}</li>)}</ul>
+        <p className="provider-information-note">{copy.protocolScope}</p>
+        <details><summary>{copy.sources}</summary><p>{protocols.note}</p>
+          {protocols.sources.map(source => <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer">{source.label}<ExportOutlined aria-hidden="true" /></a>)}
+        </details>
+      </section> : null}
+
       {siblings.length > 1 ? <section className="provider-information-section" aria-labelledby={`${sectionId}-compare`}>
         <div className="provider-information-section-title">
           <h3 id={`${sectionId}-compare`}>{copy.compare}</h3>
@@ -162,7 +165,11 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
                   onClick={() => readService(sibling.id)}>
                   {getProviderServiceDisplayName(sibling, language)}
                 </button>
-                {sibling.id === provider.id ? <span className="provider-information-current">{copy.currentlyConfigured}</span> : null}
+                {sibling.id === provider.id ? <Tooltip title={copy.currentlyEditing} trigger={["hover", "focus"]}>
+                  <span className="provider-information-current" role="img" aria-label={copy.currentlyEditing} tabIndex={0}>
+                    <CheckOutlined aria-hidden="true" />
+                  </span>
+                </Tooltip> : null}
               </div></th>
               <td data-label={copy.purpose}>{information.profile?.serviceSummary || information.summary}</td>
             </tr>;
@@ -212,7 +219,6 @@ export function ProviderInformationDrawer({ open, provider, providers, onClose, 
             </div>,
           }]} />
       </section>
-      {guide.verifiedAt ? <p className="provider-information-verified">{copy.verifiedAt(guide.verifiedAt)}</p> : null}
     </article>
   </Drawer>;
 }

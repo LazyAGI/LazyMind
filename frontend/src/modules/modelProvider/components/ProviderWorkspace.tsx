@@ -7,7 +7,6 @@ import {
   DownOutlined,
   EditOutlined,
   InfoCircleOutlined,
-  MoreOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -17,7 +16,6 @@ import {
   Alert,
   Button,
   Drawer,
-  Dropdown,
   Empty,
   Form,
   Input,
@@ -110,6 +108,7 @@ interface Props {
     isCurrent: () => boolean,
   ) => Promise<void>;
   cloudContent: ReactNode;
+  verificationEvent?: { providerId: string; account: string | null; sequence: number };
 }
 
 function Logo({ provider }: { provider: ProviderOption }) {
@@ -145,6 +144,7 @@ export function ProviderWorkspace(props: Props) {
   const [search, setSearch] = useState("");
   const [modelSearch, setModelSearch] = useState("");
   const [modelType, setModelType] = useState<ModelTaskFilter>("all");
+  const [showHidden, setShowHidden] = useState(false);
   const [configuredOnly, setConfiguredOnly] = useState(false);
   const [cloudOpen, setCloudOpen] = useState(false);
   const [requestConfigOpen, setRequestConfigOpen] = useState(false);
@@ -211,7 +211,16 @@ export function ProviderWorkspace(props: Props) {
     [props.providers, props.configuredProviders],
   );
   const projectedNavigation = useMemo(() => projectSupplierNavigation(mergedProviders), [mergedProviders]);
-  const { providers: navigation, reorder: reorderSuppliers } = useSupplierOrder(projectedNavigation);
+  const { providers: navigation, reorder: reorderSuppliers, promote, hiddenIds, hide, restore, scope } = useSupplierOrder(projectedNavigation);
+  const lastVerification = useRef<Props["verificationEvent"]>();
+  useEffect(() => {
+    const event = props.verificationEvent;
+    if (!event || event === lastVerification.current) return;
+    lastVerification.current = event;
+    if (event.account !== localStorage.getItem("lazymind:user")) return;
+    const node = navigation.find(item => item.children.some(child => child.id === event.providerId));
+    if (node) promote(node.id);
+  }, [props.verificationEvent, navigation, promote]);
   const providers = useMemo(() => navigation.flatMap((node) => node.children), [navigation]);
   const provider =
     providers.find((item) => item.id === selectedId) || providers[0];
@@ -610,8 +619,22 @@ export function ProviderWorkspace(props: Props) {
       setInitializing(false);
     }
   };
-  const visibleNavigation = filterSupplierNavigation(navigation, search, configuredOnly, hasProviderConfiguration, language);
-  const configuredCount = filterSupplierNavigation(navigation, search, true, hasProviderConfiguration, language).length;
+  const availableNavigation = navigation.filter(node => showHidden ? hiddenIds.includes(node.id) : !hiddenIds.includes(node.id));
+  const visibleNavigation = filterSupplierNavigation(availableNavigation, search, configuredOnly, hasProviderConfiguration, language);
+  const configuredCount = filterSupplierNavigation(navigation.filter(node => !hiddenIds.includes(node.id)), search, true, hasProviderConfiguration, language).length;
+  const changeVisibility = (id: string) => confirmEndpointLeave(() => {
+    if (showHidden) {
+      restore(id);
+      if (hiddenIds.filter(hidden => navigation.some(node => node.id === hidden)).length <= 1) setShowHidden(false);
+    } else {
+      hide(id);
+      const node = navigation.find(item => item.id === id);
+      if (node?.children.some(item => item.id === provider?.id)) {
+        const next = navigation.find(item => item.id !== id && !hiddenIds.includes(item.id));
+        if (next) selectProvider(next.children[0].id);
+      }
+    }
+  });
   const statusMark = (items: AddedProvider[], includeModels = false) => items.some((item) => includeModels ? hasProviderConfiguration(item) : item.groups.some((candidate) => candidate.apiKeyConfigured || candidate.keys.length > 0)) ? (
     <i className={items.some((item) => item.groups.some((candidate) => candidate.verified &&
       (candidate.keys.some((key) => key.enabled) || (!candidate.keys.length && candidate.apiKeyConfigured) || canDiscoverWithoutApiKey(item, candidate)))) ? "is-ready" : ""}
@@ -680,30 +703,36 @@ export function ProviderWorkspace(props: Props) {
           <div className="provider-workspace-filters">
             <button
               aria-label={label("all")}
-              aria-pressed={!configuredOnly}
-              className={!configuredOnly ? "is-active" : ""}
+              aria-pressed={!configuredOnly && !showHidden}
+              className={!configuredOnly && !showHidden ? "is-active" : ""}
               type="button"
-              onClick={() => setConfiguredOnly(false)}
+              onClick={() => { setConfiguredOnly(false); setShowHidden(false); }}
             >
-              {label("all")} <span>{navigation.length}</span>
+              {label("all")} <span>{navigation.length - hiddenIds.filter(id => navigation.some(node => node.id === id)).length}</span>
             </button>
             <button
               aria-label={label("configured")}
-              aria-pressed={configuredOnly}
-              className={configuredOnly ? "is-active" : ""}
+              aria-pressed={configuredOnly && !showHidden}
+              className={configuredOnly && !showHidden ? "is-active" : ""}
               type="button"
-              onClick={() => setConfiguredOnly(true)}
+              onClick={() => { setConfiguredOnly(true); setShowHidden(false); }}
             >
               {label("configured")} <span>{configuredCount}</span>
             </button>
+            {hiddenIds.some(id => navigation.some(node => node.id === id)) ? <button type="button"
+              aria-label={label("hiddenSuppliers")} aria-pressed={showHidden}
+              className={showHidden ? "is-active" : ""}
+              onClick={() => { setShowHidden(true); setConfiguredOnly(false); }}>
+              {label("hiddenSuppliers")} <span>{hiddenIds.filter(id => navigation.some(node => node.id === id)).length}</span>
+            </button> : null}
           </div>
           <nav
             className="provider-workspace-provider-list"
             aria-label={label("suppliers")}
           >
-            <SortableSupplierList items={visibleNavigation}
+            <SortableSupplierList key={scope} items={visibleNavigation}
               disabled={initializing || providerSaving || providerDeleting}
-              onReorder={reorderSuppliers}>
+              onReorder={reorderSuppliers} onVisibilityChange={changeVisibility} restoring={showHidden}>
             {(node) => {
               if (!node.isBrandGroup) return leafButton(node.children[0]);
               const expanded = Boolean(search.trim()) || expandedBrands.has(node.id);
@@ -1006,38 +1035,7 @@ export function ProviderWorkspace(props: Props) {
                           }
                         />
                       </Tooltip>
-                      <Tooltip title={label("moreModelActions")}>
-                        <Dropdown
-                          trigger={["click"]}
-                          menu={{
-                            items: [
-                              {
-                                key: "refresh",
-                                label: label("refreshSavedModels"),
-                                icon: <ReloadOutlined aria-hidden="true" />,
-                                disabled: !group || initializing || props.modelsLoading[groupKey],
-                                onClick: () => {
-                                  if (group) props.onLoadModels(provider, group);
-                                },
-                              },
-                              {
-                                key: "request-config",
-                                label: t("modelProvider.requestConfig.title"),
-                                icon: <SettingOutlined aria-hidden="true" />,
-                                disabled: endpointSaving || Boolean(changingActiveKey),
-                                onClick: () => confirmEndpointLeave(() => setRequestConfigOpen(true)),
-                              },
-                            ],
-                          }}
-                        >
-                          <Button
-                            type="text"
-                            className="provider-workspace-icon-button"
-                            aria-label={label("moreModelActions")}
-                            icon={<MoreOutlined aria-hidden="true" />}
-                          />
-                        </Dropdown>
-                      </Tooltip>
+
                     </div>
                   </div>
                   <ModelTaskTabs models={searchedModels} value={modelType} onChange={setModelType} />

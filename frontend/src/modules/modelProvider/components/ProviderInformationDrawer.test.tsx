@@ -81,7 +81,8 @@ describe("provider information drawer", () => {
       expect(link.getAttribute("href")).toMatch(/^https:\/\//);
       expect(link.textContent?.trim()).not.toBe("");
     }
-    expect(dialog.getByText(/2026-10-23/)).toBeInTheDocument();
+    expect(dialog.queryByText(/Sources checked|2026-10-23/)).not.toBeInTheDocument();
+    expect(dialog.queryByText("Provider information")).not.toBeInTheDocument();
     expect(props.onConfigure).not.toHaveBeenCalled();
   });
 
@@ -97,7 +98,7 @@ describe("provider information drawer", () => {
       "Read Alibaba Cloud Model Studio · Token Plan",
     ]);
     fireEvent.click(comparison.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
-    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Coding Plan · Provider information" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Coding Plan" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("button", { name: "Connection help" }));
     expect(screen.getByRole("region", { name: "Saved API address" })).toHaveTextContent("https://coding.example.test/v1");
@@ -107,6 +108,22 @@ describe("provider information drawer", () => {
     expect(props.onConfigure).toHaveBeenCalledOnce();
     expect(props.onConfigure).toHaveBeenCalledWith("qwen-coding");
     expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+  it("marks the service being edited separately from its name and keeps that marker while browsing", async () => {
+    draw(fixture());
+    const comparison = within(await screen.findByRole("region", { name: "Services from this provider" }));
+    const currentService = comparison.getByRole("rowheader", { name: /Standard API/ });
+    const marker = within(currentService).getByRole("img", { name: "Currently editing this service" });
+    expect(marker).toBeVisible();
+    expect(currentService).toHaveTextContent("Standard API");
+    expect(currentService).not.toHaveTextContent("Current configuration");
+    fireEvent.focus(marker);
+    await waitFor(() => expect(screen.getByRole("tooltip", { name: "Currently editing this service" })).toBeVisible());
+    fireEvent.blur(marker);
+    fireEvent.click(comparison.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
+    expect(within(currentService).getByRole("img", { name: "Currently editing this service" })).toBeVisible();
+    expect(within(comparison.getByRole("rowheader", { name: /Coding Plan/ })).queryByRole("img", { name: "Currently editing this service" })).not.toBeInTheDocument();
   });
 
   it("closes connection help when reading another service and when reopening the drawer", async () => {
@@ -138,14 +155,22 @@ describe("provider information drawer", () => {
     expect(props.onConfigure).not.toHaveBeenCalled();
   });
 
-  it("starts an explicitly browsed guide at the top and focuses its heading without disturbing incidental refreshes", async () => {
+  it("preserves reading position when browsing a different or current service and focuses the heading without scrolling", async () => {
     const props = fixture();
     const view = draw(props);
     const body = document.querySelector<HTMLElement>(".provider-information-drawer .ant-drawer-body")!;
     body.scrollTop = 650;
     fireEvent.click(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
-    expect(body.scrollTop).toBe(0);
-    expect(screen.getByRole("heading", { name: "Alibaba Cloud Model Studio · Coding Plan" })).toHaveFocus();
+    expect(body.scrollTop).toBe(650);
+    const heading = screen.getByRole("heading", { name: "Alibaba Cloud Model Studio · Coding Plan" });
+    expect(heading).toHaveFocus();
+    body.scrollTop = 420;
+    const focus = vi.spyOn(heading, "focus");
+    fireEvent.click(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
+    expect(body.scrollTop).toBe(420);
+    expect(heading).toHaveFocus();
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    focus.mockRestore();
     body.scrollTop = 180;
     const close = screen.getByRole("button", { name: "Return to configuration" });
     close.focus();
@@ -162,10 +187,10 @@ describe("provider information drawer", () => {
     view.rerenderDrawer({ ...props, open: false });
     await waitFor(() => expect(props.onAfterClose).toHaveBeenCalledOnce());
     view.rerenderDrawer(props);
-    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API · Provider information" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
     view.rerenderDrawer({ ...props, provider: token });
-    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Token Plan · Provider information" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Token Plan" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Configure this service" })).not.toBeInTheDocument();
     expect(props.onConfigure).not.toHaveBeenCalled();
   });
@@ -175,7 +200,7 @@ describe("provider information drawer", () => {
     const view = draw(props);
     fireEvent.click(screen.getByRole("button", { name: "Read Alibaba Cloud Model Studio · Coding Plan" }));
     view.rerenderDrawer({ ...props, providers: [standard, token] });
-    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API · Provider information" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Alibaba Cloud Model Studio · Standard API" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Configure this service" })).not.toBeInTheDocument();
     view.rerenderDrawer({ ...props, providers: [] });
     expect(screen.getByRole("heading", { name: "Alibaba Cloud Model Studio · Standard API" })).toBeInTheDocument();
@@ -186,7 +211,7 @@ describe("provider information drawer", () => {
     const logo = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
     const custom = { ...standard, id: "custom", name: "Qwen", isCustom: true, protocolName: "Qwen", logoDataUrl: logo, baseUrl: "" };
     draw({ ...fixture(), provider: custom, providers: [coding, custom, standard] });
-    const dialog = within(await screen.findByRole("dialog", { name: "Qwen · Provider information" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Qwen" }));
     expect(dialog.getByRole("heading", { name: "Qwen" })).toBeInTheDocument();
     expect(document.querySelector(".provider-information-logo img")).toHaveAttribute("src", logo);
     expect(dialog.queryByRole("region", { name: "Services from this provider" })).not.toBeInTheDocument();
@@ -207,7 +232,7 @@ describe("provider information drawer", () => {
     const unknown = { ...standard, id: "unknown", name: "Private Gateway", brandKey: undefined, serviceKey: undefined, protocolName: "Qwen" };
     const props = { ...fixture(), provider: unknown, providers: [unknown, coding] };
     const view = draw(props);
-    const dialog = within(await screen.findByRole("dialog", { name: "Private Gateway · Provider information" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Private Gateway" }));
     expect(dialog.queryByRole("link")).not.toBeInTheDocument();
     expect(dialog.queryByRole("region", { name: "Product highlights" })).not.toBeInTheDocument();
     expect(dialog.queryByRole("region", { name: "Services from this provider" })).not.toBeInTheDocument();
@@ -224,8 +249,12 @@ describe("provider information drawer", () => {
   it("localizes the reading page and safe source labels in Chinese", async () => {
     locale.language = "zh-CN";
     draw(fixture());
-    expect(await screen.findByRole("dialog", { name: "阿里云百炼 · 标准API · 供应商简介" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "阿里云百炼 · 标准API" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /官方网站/ })).toBeVisible();
+    expect(screen.queryByText("供应商简介")).not.toBeInTheDocument();
+    expect(screen.queryByText(/资料核验于|2026-10-23/)).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "正在编辑此服务" })).toBeInTheDocument();
+    expect(screen.queryByText("当前配置", { exact: true })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "接入帮助" }));
     expect(screen.getByRole("region", { name: "已保存的API地址" })).toHaveTextContent("https://saved.example.test/v1");
     expect(screen.getByRole("button", { name: "查看阿里云百炼 · Coding Plan说明" })).toBeInTheDocument();

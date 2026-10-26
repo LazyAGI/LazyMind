@@ -48,9 +48,7 @@ func ProviderServiceIdentity(provider orm.UserModelProvider) (brandKey, serviceK
 }
 
 func serviceSupportsRequestProtocol(provider orm.UserModelProvider, protocol string) bool {
-	// Token Plan documents Authorization: Bearer for Messages, whereas the
-	// current Claude adapter sends only x-api-key. Do not advertise that route.
-	return protocol == "openai" || protocol == "anthropic" && (provider.IsCustom || provider.Name != "SenseNovaTokenPlan")
+	return (provider.IsCustom || providerDeclaresProtocol(provider, protocol)) && runtimeSupportsRequestProtocol(provider, protocol)
 }
 
 // CatalogCredentialKey keeps built-in service credential namespaces separate,

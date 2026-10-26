@@ -3957,6 +3957,7 @@
 }
 .provider-workspace-filters {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   padding: 0 8px 8px;
   button {

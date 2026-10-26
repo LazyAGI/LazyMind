@@ -76,6 +76,7 @@ func init() {
 		{2005077, http.StatusConflict, "The supplier configuration changed during synchronization; reload and retry", []string{"provider configuration changed during service synchronization"}},
 		{2005078, http.StatusBadRequest, "Token limits must be positive integers and may use a K or M suffix", []string{"model token limits must be positive integers or use a k or m suffix"}},
 		{2005079, http.StatusBadRequest, "Input and output token limits must not exceed the context window", []string{"model input and output token limits must not exceed the context window"}},
+		{2005080, http.StatusBadRequest, "This request protocol is not declared for the supplier service", []string{"request protocol is not declared for this supplier service"}},
 	} {
 		for _, source := range group.sources {
 			if strings.Contains(source, "%") {

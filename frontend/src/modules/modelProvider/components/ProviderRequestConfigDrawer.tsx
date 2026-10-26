@@ -175,7 +175,7 @@ export function ProviderRequestConfigDrawer({
               {supported ? <Form.Item name={["endpoints", item.protocol]} rules={[{validator: validateEndpoint}]}>
                 <Input id={fieldId} aria-label={item.name} autoComplete="off" placeholder={item.default_base_url} maxLength={512} />
               </Form.Item> : <Input id={fieldId} aria-label={item.name} disabled value={item.base_url || item.default_base_url} />}
-              <p className="provider-request-config-hint">{text(supported ? "endpointHint" : "unsupported")}</p>
+              <p className="provider-request-config-hint">{text(supported ? "endpointHint" : item.provider_supported === false ? "providerUndeclared" : item.provider_supported === true && item.runtime_supported === false ? "runtimeUnavailable" : "unsupported")}</p>
               {supported && item.default_base_url ? <p className="provider-request-config-default-address">{text("defaultAddress", {address: item.default_base_url})}</p> : null}
             </section>;
           })}

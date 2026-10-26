@@ -521,6 +521,8 @@ const zhCN = {
       "replaceHint": "输入新秘钥替换此项；停用的秘钥不会自动启用。"
     },
     "requestConfig": {
+      providerUndeclared: "此服务未声明支持该协议。",
+      runtimeUnavailable: "供应商支持该协议，当前运行时暂未实现。",
       advanced: "高级请求选项",
       advancedHint: "应用于此供应商的请求。认证及必要请求字段由 LazyMind 管理。自进化暂不支持这些选项。",
       headers: "自定义 Headers",
@@ -635,6 +637,9 @@ const zhCN = {
       "syncModels": "同步模型",
       getModelList: "获取模型列表",
       refreshSavedModels: "刷新已添加模型",
+      hideSupplier: "隐藏",
+      restoreSupplier: "恢复显示",
+      hiddenSuppliers: "已隐藏",
       moreModelActions: "更多模型操作",
       syncModelsEmpty: "点击同步模型以获取模型列表",
       noMatchingModels: "没有符合条件的模型",

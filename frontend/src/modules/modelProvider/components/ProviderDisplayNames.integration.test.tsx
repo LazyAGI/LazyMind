@@ -167,14 +167,14 @@ describe("localized supplier names in real configuration components", () => {
     const sidebar = screen.getByRole("navigation", { name: "供应商" });
     const search = screen.getByRole("textbox", { name: "搜索供应商或模型" });
     fireEvent.change(search, { target: { value: "深度求索" } });
-    expect(within(sidebar).getAllByRole("button")).toHaveLength(1);
+    expect(within(sidebar).getAllByRole("button").filter(button => button.classList.contains("provider-workspace-provider"))).toHaveLength(1);
     expect(within(sidebar).getByRole("button", { name: "深度求索" })).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "moonshot" } });
     expect(within(sidebar).getByRole("button", { name: "月之暗面 · Kimi开放平台" })).toBeInTheDocument();
     await act(async () => { await locale.changeLanguage("en-US"); });
     expect(screen.getByRole("button", { name: "Kimi · Kimi Open Platform" })).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "深度求索" } });
-    expect(within(sidebar).getAllByRole("button")).toHaveLength(1);
+    expect(within(sidebar).getAllByRole("button").filter(button => button.classList.contains("provider-workspace-provider"))).toHaveLength(1);
     expect(within(sidebar).getByRole("button", { name: "DeepSeek" })).toBeInTheDocument();
   });
 

@@ -114,6 +114,18 @@ describe("provider request configuration drawer", () => {
     saveConfig.mockResolvedValue(config());
   });
 
+  it("distinguishes provider declarations from missing runtime adapters", async () => {
+    const value = config();
+    fetchConfig.mockResolvedValue({ ...value, protocols: value.protocols.map(item => ({
+      ...item, provider_supported: item.protocol !== "gemini", runtime_supported: item.protocol !== "openai-responses",
+    })) });
+    render(<ProviderRequestConfigDrawer {...props()} />, { wrapper: harness });
+    expect(await screen.findByText("modelProvider.requestConfig.providerUndeclared")).toBeInTheDocument();
+    expect(await screen.findByText("modelProvider.requestConfig.runtimeUnavailable")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Gemini" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "OpenAI Responses" })).toBeDisabled();
+  });
+
   it("loads protocol overrides and makes unsupported protocols read-only", async () => {
     render(<ProviderRequestConfigDrawer {...props()} />, { wrapper: harness });
     const openai = await screen.findByRole("textbox", { name: "OpenAI" });

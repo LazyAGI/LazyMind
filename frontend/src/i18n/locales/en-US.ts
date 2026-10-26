@@ -523,6 +523,8 @@ const enUS = {
       "replaceHint": "Enter a replacement key. Disabled keys stay disabled."
     },
     "requestConfig": {
+      providerUndeclared: "This service does not declare support for this protocol.",
+      runtimeUnavailable: "The provider supports this protocol; its runtime adapter is not implemented yet.",
       advanced: "Advanced request options",
       advancedHint: "Applied to this supplier’s requests. Authentication and required request fields are managed by LazyMind. Self-evolution currently does not support these options.",
       headers: "Custom headers",
@@ -637,6 +639,9 @@ const enUS = {
       "syncModels": "Sync models",
       getModelList: "Get model list",
       refreshSavedModels: "Refresh added models",
+      hideSupplier: "Hide",
+      restoreSupplier: "Show supplier",
+      hiddenSuppliers: "Hidden",
       moreModelActions: "More model actions",
       syncModelsEmpty: "Click Sync models to fetch the model list",
       noMatchingModels: "No matching models",

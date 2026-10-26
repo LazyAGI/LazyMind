@@ -5644,7 +5644,15 @@ export interface ProviderRequestProtocolOpenAPIItem {
     'name': string;
     'protocol': ProviderRequestProtocolOpenAPIItemProtocolEnum;
     /**
-     * False when the current runtime has no adapter for this protocol.
+     * Official protocol declaration for this built-in service. False means undeclared, not proven vendor rejection. Omitted for custom suppliers.
+     */
+    'provider_supported'?: boolean;
+    /**
+     * Whether the current runtime adapter implements this protocol for this service, independently of the official declaration.
+     */
+    'runtime_supported': boolean;
+    /**
+     * Whether this protocol can be configured: declared for the built-in service (or user-configurable custom service) and supported by the current runtime.
      */
     'supported': boolean;
 }

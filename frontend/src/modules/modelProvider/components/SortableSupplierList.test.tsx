@@ -30,7 +30,7 @@ describe("supplier drag handles", () => {
     render(<SortableSupplierList items={items} disabled={false} onReorder={reorder}>
       {(item) => <button onClick={() => select(item.id)}>{item.name}</button>}
     </SortableSupplierList>);
-    expect(screen.queryByRole("button", { name: "Move SenseNova" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Move SenseNova/ })).toBeInTheDocument();
     const handle = screen.getByRole("button", { name: "Move OpenAI" });
     expect(handle).toHaveAttribute("tabindex", "0");
     expect(handle).toHaveAttribute("aria-describedby");
@@ -45,6 +45,16 @@ describe("supplier drag handles", () => {
     expect(reorder).toHaveBeenCalledWith(["sense", "claude", "openai"], "openai", "claude");
   });
 
+  it("opens a hide action from the drag handle, including a single supplier", async () => {
+    const hide = vi.fn();
+    render(<SortableSupplierList items={[items[0]]} disabled={false} onReorder={vi.fn()} onVisibilityChange={hide}>
+      {item => <button>{item.name}</button>}
+    </SortableSupplierList>);
+    fireEvent.click(screen.getByRole("button", { name: /Move SenseNova/ }));
+    fireEvent.click(await screen.findByText("modelProvider.workspace.hideSupplier"));
+    expect(hide).toHaveBeenCalledWith("sense");
+  });
+
   it.each([100, -100])("locks horizontal drag movement at %s while retaining vertical movement", (x) => {
     render(<SortableSupplierList items={items} disabled={false} onReorder={vi.fn()}>
       {(item) => <button>{item.name}</button>}
@@ -55,6 +65,29 @@ describe("supplier drag handles", () => {
       overlayNodeRect: null, scrollableAncestors: [], scrollableAncestorRects: [],
       windowRect: null, transform: { x, y: 72, scaleX: 1, scaleY: 1 },
     })).toEqual({ x: 0, y: 72, scaleX: 1, scaleY: 1 });
+  });
+
+  it.each([false, true])("animates a changed order unless reduced motion is %s", (reduced) => {
+    const originalAnimate = HTMLElement.prototype.animate;
+    const animate = vi.fn();
+    HTMLElement.prototype.animate = animate;
+    const media = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: reduced } as MediaQueryList);
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const index = this.classList.contains("provider-workspace-sortable-row") ? [...this.parentElement!.children].indexOf(this) : 0;
+      return { top: index * 44, left: 0, width: 200, height: 44 } as DOMRect;
+    });
+    try {
+      const child = (item: typeof items[number]) => <button>{item.name}</button>;
+      const view = render(<SortableSupplierList items={items} disabled={false} onReorder={vi.fn()}>{child}</SortableSupplierList>);
+      expect(animate).not.toHaveBeenCalled();
+      view.rerender(<SortableSupplierList items={[items[2], items[0], items[1]]} disabled={false} onReorder={vi.fn()}>{child}</SortableSupplierList>);
+      if (reduced) expect(animate).not.toHaveBeenCalled();
+      else expect(animate).toHaveBeenCalledWith(expect.any(Array), { duration: 360, easing: "cubic-bezier(.22, 1, .36, 1)" });
+    } finally {
+      HTMLElement.prototype.animate = originalAnimate;
+      media.mockRestore();
+      rect.mockRestore();
+    }
   });
 
   it("does not reorder suppliers while actions are disabled", () => {

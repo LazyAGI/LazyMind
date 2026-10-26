@@ -31,9 +31,7 @@
   overflow-wrap: anywhere;
   > div { min-width: 0; }
   h2 { margin: 0; color: var(--provider-information-text); font-size: 18px; font-weight: 600; line-height: 1.45; }
-  p { margin: 2px 0 0; color: var(--provider-information-secondary); font-size: 12px; font-weight: 400; line-height: 1.5; }
 }
-.provider-information-title-separator { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .provider-information-logo {
   display: flex;
   align-items: center;
@@ -171,7 +169,8 @@
     &[aria-current="page"] { background: #edf3fc; color: #2e5e9a; }
   }
 }
-.provider-information-current { display: inline-block; margin: 0; color: #6e7a8d; font-size: 11px; font-weight: 400; line-height: 1.5; }
+.provider-information-current { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; width: 18px; height: 18px; border-radius: 3px; color: #56745f; font-size: 11px; line-height: 1; }
+.provider-information-current:focus-visible { outline: 2px solid var(--provider-blue, #2f6df6); outline-offset: 2px; }
 .provider-information-faq {
   .ant-collapse { margin-top: -3px; }
   .ant-collapse > .ant-collapse-item { border-bottom: 1px solid var(--provider-information-line); }
@@ -219,7 +218,6 @@
   > .provider-information-section > h4 { margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
   h5 { margin-bottom: 3px; font-size: 13px; font-weight: 600; line-height: 1.7; }
 }
-.provider-information-verified { margin-top: 13px !important; color: #6b7687; font-size: 11px; }
 .provider-information-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
 .model-provider-focus-pointer .provider-information-drawer [role="button"]:focus { outline: none; }
 .model-provider-focus-keyboard .provider-information-drawer [role="button"]:focus-visible { outline: 2px solid var(--provider-blue, #2f6df6); outline-offset: 2px; }
@@ -250,4 +248,12 @@
   .provider-information-current { margin: 0; }
   .provider-information-sources a { min-height: 44px; align-items: center; }
   .provider-information-footer .ant-btn { min-height: 38px; }
+}
+
+.provider-information-protocols {
+  ul { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 8px 0; list-style: none; }
+  li { padding: 3px 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 12px; }
+  details { margin-top: 6px; font-size: 12px; color: #667085; }
+  summary { cursor: pointer; }
+  details a { display: inline-flex; gap: 4px; margin: 6px 12px 0 0; }
 }

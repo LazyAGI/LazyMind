@@ -13334,14 +13334,21 @@ components:
                         - gemini
                         - openai-responses
                     type: string
+                provider_supported:
+                    description: Official protocol declaration for this built-in service. False means undeclared, not proven vendor rejection. Omitted for custom suppliers.
+                    type: boolean
+                runtime_supported:
+                    description: Whether the current runtime adapter implements this protocol for this service, independently of the official declaration.
+                    type: boolean
                 supported:
-                    description: False when the current runtime has no adapter for this protocol.
+                    description: 'Whether this protocol can be configured: declared for the built-in service (or user-configurable custom service) and supported by the current runtime.'
                     type: boolean
             required:
                 - base_url
                 - default_base_url
                 - name
                 - protocol
+                - runtime_supported
                 - supported
             type: object
         replaceModelProviderKeyOpenAPIRequest:

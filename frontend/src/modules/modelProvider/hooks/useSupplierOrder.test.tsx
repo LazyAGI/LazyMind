@@ -24,6 +24,26 @@ describe("saved supplier sidebar order", () => {
     expect(second.result.current.providers.map((item) => item.id)).toEqual(["c", "b", "a"]);
   });
 
+  it("persists hidden suppliers and restores them without changing order", () => {
+    const view = renderHook(() => useSupplierOrder(suppliers));
+    act(() => view.result.current.hide("b"));
+    expect(view.result.current.hiddenIds).toEqual(["b"]);
+    view.unmount();
+    const next = renderHook(() => useSupplierOrder(suppliers));
+    expect(next.result.current.hiddenIds).toEqual(["b"]);
+    act(() => next.result.current.restore("b"));
+    expect(next.result.current.hiddenIds).toEqual([]);
+    expect(next.result.current.providers.map(item => item.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("moves a verified supplier to the front and permits subsequent manual movement", () => {
+    const view = renderHook(() => useSupplierOrder(suppliers));
+    act(() => view.result.current.promote("c"));
+    expect(view.result.current.providers.map(item => item.id)).toEqual(["c", "a", "b"]);
+    act(() => view.result.current.reorder(["a", "b", "c"], "c", "b"));
+    expect(view.result.current.providers.map(item => item.id)).toEqual(["a", "b", "c"]);
+  });
+
   it("isolates saved order by user and tenant and resets immediately when the account changes", () => {
     const view = renderHook(() => useSupplierOrder(suppliers));
     act(() => view.result.current.reorder(["a", "b", "c"], "c", "a"));

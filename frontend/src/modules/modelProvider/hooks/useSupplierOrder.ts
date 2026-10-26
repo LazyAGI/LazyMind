@@ -3,6 +3,8 @@ import type { UserInfo } from "@/components/auth";
 import { orderSuppliers, reorderSuppliers, type OrderedSupplier } from "../supplierOrdering";
 
 const storagePrefix = "lazymind:supplier-order:";
+const hiddenPrefix = "lazymind:supplier-hidden:";
+const hiddenKey = (scope: string) => scope ? scope.replace(storagePrefix, hiddenPrefix) : "";
 const userStorageKey = "lazymind:user";
 const userChangeEvent = "lazymind:user-change";
 
@@ -29,17 +31,17 @@ function readOrder(key: string): string[] {
 
 export function useSupplierOrder<T extends OrderedSupplier>(suppliers: readonly T[]) {
   const scope = storageKey();
-  const [saved, setSaved] = useState(() => ({ scope, ids: readOrder(scope) }));
+  const [saved, setSaved] = useState(() => ({ scope, ids: readOrder(scope), hidden: readOrder(hiddenKey(scope)) }));
   const providers = useMemo(() => orderSuppliers(suppliers,
     saved.scope === scope ? saved.ids : readOrder(scope)), [suppliers, scope, saved]);
 
   useEffect(() => {
     const refresh = () => {
       const nextScope = storageKey();
-      setSaved({ scope: nextScope, ids: readOrder(nextScope) });
+      setSaved({ scope: nextScope, ids: readOrder(nextScope), hidden: readOrder(hiddenKey(nextScope)) });
     };
     const changed = (event: StorageEvent) => {
-      if (!event.key || event.key === userStorageKey || event.key.startsWith(storagePrefix)) refresh();
+      if (!event.key || event.key === userStorageKey || (event.key.startsWith(storagePrefix) || event.key.startsWith(hiddenPrefix))) refresh();
     };
     window.addEventListener(userChangeEvent, refresh);
     window.addEventListener("storage", changed);
@@ -60,8 +62,28 @@ export function useSupplierOrder<T extends OrderedSupplier>(suppliers: readonly 
       if (scope) {
         try { localStorage.setItem(scope, JSON.stringify(ids)); } catch { /* Keep the order for this page when storage is unavailable. */ }
       }
-      return { scope, ids };
+      return { ...current, scope, ids, hidden: current.scope === scope ? current.hidden : readOrder(hiddenKey(scope)) };
     });
   };
-  return { providers, reorder };
+  const promote = (id: string) => {
+    if (storageKey() !== scope || !suppliers.some(item => item.id === id)) return;
+    setSaved(current => {
+      const ordered = orderSuppliers(suppliers, current.scope === scope ? current.ids : readOrder(scope));
+      const ids = [id, ...ordered.map(item => item.id).filter(item => item !== id)];
+      if (scope) { try { localStorage.setItem(scope, JSON.stringify(ids)); } catch { /* Session fallback. */ } }
+      return { scope, ids, hidden: current.scope === scope ? current.hidden : readOrder(hiddenKey(scope)) };
+    });
+  };
+  const setHidden = (id: string, hide: boolean) => {
+    if (storageKey() !== scope || !suppliers.some(item => item.id === id)) return;
+    setSaved(current => {
+      const previous = current.scope === scope ? current.hidden : readOrder(hiddenKey(scope));
+      const hidden = hide ? [...new Set([...previous, id])] : previous.filter(item => item !== id);
+      if (scope) { try { localStorage.setItem(hiddenKey(scope), JSON.stringify(hidden)); } catch { /* Session fallback. */ } }
+      return { scope, ids: current.scope === scope ? current.ids : readOrder(scope), hidden };
+    });
+  };
+  return { providers, reorder, promote, hiddenIds: saved.scope === scope ? saved.hidden : readOrder(hiddenKey(scope)),
+    hide: (id: string) => setHidden(id, true), restore: (id: string) => setHidden(id, false), scope };
+
 }

@@ -1,44 +1,48 @@
-import { useId, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, type ReactNode } from "react";
+import { Dropdown } from "antd";
 import { HolderOutlined } from "@ant-design/icons";
-import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type CollisionDetection, type DragEndEvent, type Modifier } from "@dnd-kit/core";
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent, type Modifier } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import { getProviderBrandDisplayName, getProviderDisplayName } from "../providerDisplayNames";
-import { supplierOrderGroup, type OrderedSupplier } from "../supplierOrdering";
+import { type OrderedSupplier } from "../supplierOrdering";
 import "./SortableSupplierList.scss";
 
 const restrictToVerticalAxis: Modifier = ({ transform }) => ({ ...transform, x: 0 });
 
-function SortableSupplierRow({ item, disabled, children }: {
-  item: OrderedSupplier; disabled: boolean; children: ReactNode;
+function SortableSupplierRow({ item, disabled, children, onVisibilityChange, restoring }: {
+  item: OrderedSupplier; disabled: boolean; children: ReactNode; onVisibilityChange?: (id: string) => void; restoring?: boolean;
 }) {
   const { t, i18n } = useTranslation();
-  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: item.id, disabled, data: { supplierGroup: supplierOrderGroup(item) } });
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: item.id, disabled });
   return <div
     ref={setNodeRef}
     className={`provider-workspace-sortable-row${isDragging ? " is-dragging" : ""}`}
     data-provider-id={item.id}
     style={{ transform: CSS.Transform.toString(transform), transition }}
   >
-    {!disabled ? <button
+    {!disabled ? <Dropdown trigger={onVisibilityChange ? ["click"] : []} disabled={isDragging} menu={{ items: [{ key: "visibility", label: t(`modelProvider.workspace.${restoring ? "restoreSupplier" : "hideSupplier"}`), onClick: () => onVisibilityChange?.(item.id) }] }}>
+    <button
       ref={setActivatorNodeRef}
       {...attributes}
       {...listeners}
       type="button"
       className="provider-workspace-drag-handle"
       aria-label={t("modelProvider.workspace.reorderSupplier", { name: (item.isBrandGroup ? getProviderBrandDisplayName : getProviderDisplayName)(item, i18n?.resolvedLanguage || i18n?.language) })}
-      onClick={(event) => event.stopPropagation()}
-    ><HolderOutlined aria-hidden="true" /></button> : null}
+      onClick={(event) => { if (isDragging) event.preventDefault(); event.stopPropagation(); }}
+    ><HolderOutlined aria-hidden="true" /></button></Dropdown> : null}
     {children}
   </div>;
 }
 
-export function SortableSupplierList<T extends OrderedSupplier>({ items, disabled, onReorder, children }: {
+export function SortableSupplierList<T extends OrderedSupplier>({ items, disabled, onReorder, children, onVisibilityChange, restoring }: {
   items: T[];
   disabled: boolean;
   onReorder: (visibleIds: string[], movedId: string, targetId: string) => void;
   children: (item: T) => ReactNode;
+  onVisibilityChange?: (id: string) => void;
+  restoring?: boolean;
 }) {
   const { t, i18n } = useTranslation();
   const contextId = useId();
@@ -47,10 +51,28 @@ export function SortableSupplierList<T extends OrderedSupplier>({ items, disable
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const ids = items.map((item) => item.id);
-  const counts = items.reduce((result, item) => result.set(supplierOrderGroup(item), (result.get(supplierOrderGroup(item)) || 0) + 1), new Map<number, number>());
-  const sameSection: CollisionDetection = (args) => closestCenter({
-    ...args,
-    droppableContainers: args.droppableContainers.filter((candidate) => candidate.data.current?.supplierGroup === args.active.data.current?.supplierGroup),
+  const container = useRef<HTMLDivElement>(null);
+  const positions = useRef(new Map<string, number>());
+  const orderKey = JSON.stringify(ids);
+  const previousOrder = useRef(orderKey);
+  useLayoutEffect(() => {
+    const changed = previousOrder.current !== orderKey;
+    previousOrder.current = orderKey;
+    const rows = container.current?.querySelectorAll<HTMLElement>(".provider-workspace-sortable-row");
+    const origin = container.current?.getBoundingClientRect().top || 0;
+    const next = new Map<string, number>();
+    rows?.forEach(row => {
+      const id = row.dataset.providerId!;
+      const top = row.getBoundingClientRect().top - origin;
+      next.set(id, top);
+      const previous = positions.current.get(id);
+      if (changed && previous !== undefined && previous !== top && !row.classList.contains("is-dragging") &&
+          !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        row.animate?.([{ transform: `translateY(${previous - top}px)` }, { transform: "translateY(0)" }],
+          { duration: 360, easing: "cubic-bezier(.22, 1, .36, 1)" });
+      }
+    });
+    positions.current = next;
   });
   const displayName = (id: string | number) => {
     const item = items.find((candidate) => candidate.id === id);
@@ -59,7 +81,8 @@ export function SortableSupplierList<T extends OrderedSupplier>({ items, disable
   const dragEnd = ({ active, over }: DragEndEvent) => {
     if (!disabled && over) onReorder(ids, String(active.id), String(over.id));
   };
-  return <DndContext id={contextId} sensors={sensors} modifiers={[restrictToVerticalAxis]} collisionDetection={sameSection} onDragEnd={dragEnd}
+  return <DndContext id={contextId} sensors={sensors} modifiers={[restrictToVerticalAxis]} collisionDetection={closestCenter} onDragEnd={dragEnd}
+    onDragStart={() => container.current?.querySelectorAll<HTMLElement>(".provider-workspace-sortable-row").forEach(row => row.getAnimations?.().forEach(animation => animation.cancel()))}
     accessibility={{
       screenReaderInstructions: { draggable: t("modelProvider.workspace.reorderSupplierHint") },
       announcements: {
@@ -69,11 +92,13 @@ export function SortableSupplierList<T extends OrderedSupplier>({ items, disable
         onDragCancel: () => t("modelProvider.workspace.reorderSupplierCanceled"),
       },
     }}>
+    <div ref={container} className="provider-workspace-sortable-list">
     <SortableContext items={ids} strategy={verticalListSortingStrategy}>
       {items.map((item) => <SortableSupplierRow key={item.id} item={item}
-        disabled={disabled || supplierOrderGroup(item) === 1 || (counts.get(supplierOrderGroup(item)) || 0) < 2}>
+        disabled={disabled} onVisibilityChange={onVisibilityChange} restoring={restoring}>
         {children(item)}
       </SortableSupplierRow>)}
     </SortableContext>
+    </div>
   </DndContext>;
 }

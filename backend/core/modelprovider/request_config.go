@@ -27,11 +27,13 @@ type savedProviderRequestConfig struct {
 }
 
 type providerRequestProtocol struct {
-	Protocol       string `json:"protocol"`
-	Name           string `json:"name"`
-	BaseURL        string `json:"base_url"`
-	DefaultBaseURL string `json:"default_base_url"`
-	Supported      bool   `json:"supported"`
+	Protocol          string `json:"protocol"`
+	Name              string `json:"name"`
+	BaseURL           string `json:"base_url"`
+	DefaultBaseURL    string `json:"default_base_url"`
+	Supported         bool   `json:"supported"`
+	ProviderSupported *bool  `json:"provider_supported,omitempty"`
+	RuntimeSupported  bool   `json:"runtime_supported"`
 }
 
 type providerRequestConfigResponse struct {
@@ -164,8 +166,7 @@ func requestConfigResponse(db *gorm.DB, parent orm.UserModelProvider) providerRe
 	response := providerRequestConfigResponse{DefaultProtocol: config.DefaultProtocol, Protocols: []providerRequestProtocol{}}
 	for _, item := range []struct {
 		key, name string
-		supported bool
-	}{{"openai", "OpenAI", true}, {"anthropic", "Anthropic", true}, {"gemini", "Gemini", false}, {"openai-responses", "OpenAI Responses", false}} {
+	}{{"openai", "OpenAI"}, {"anthropic", "Anthropic"}, {"gemini", "Gemini"}, {"openai-responses", "OpenAI Responses"}} {
 		base := config.Endpoints[item.key]
 		if base == "" {
 			base = config.Defaults[item.key]
@@ -173,7 +174,12 @@ func requestConfigResponse(db *gorm.DB, parent orm.UserModelProvider) providerRe
 		if item.key == config.DefaultProtocol {
 			base = parent.BaseURL
 		}
-		response.Protocols = append(response.Protocols, providerRequestProtocol{Protocol: item.key, Name: item.name, BaseURL: base, DefaultBaseURL: config.Defaults[item.key], Supported: item.supported && serviceSupportsRequestProtocol(parent, item.key)})
+		var declared *bool
+		if !parent.IsCustom {
+			supported := providerDeclaresProtocol(parent, item.key)
+			declared = &supported
+		}
+		response.Protocols = append(response.Protocols, providerRequestProtocol{Protocol: item.key, Name: item.name, BaseURL: base, DefaultBaseURL: config.Defaults[item.key], Supported: serviceSupportsRequestProtocol(parent, item.key), ProviderSupported: declared, RuntimeSupported: runtimeSupportsRequestProtocol(parent, item.key)})
 	}
 	return response
 }
@@ -242,7 +248,11 @@ func SetProviderRequestConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !serviceSupportsRequestProtocol(parent, req.DefaultProtocol) {
+	if !parent.IsCustom && !providerDeclaresProtocol(parent, req.DefaultProtocol) {
+		common.ReplyErr(w, "request protocol is not declared for this supplier service", 400)
+		return
+	}
+	if !runtimeSupportsRequestProtocol(parent, req.DefaultProtocol) {
 		common.ReplyErr(w, "request protocol is not supported by the current runtime", 400)
 		return
 	}

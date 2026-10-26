@@ -120,7 +120,9 @@ function setup(
   let updateConfiguredProviders: (
     providers: AddedProvider[],
   ) => void = () => {};
+  let updateVerification: (id: string, account?: string | null) => void = () => {};
   const callbacks = {
+    verified: (id: string, account?: string | null) => updateVerification(id, account),
     setProvider: (next: AddedProvider) => updateConfiguredProviders([next]),
     onReload: vi.fn().mockResolvedValue(undefined),
     onDeleteModel: vi.fn(),
@@ -130,9 +132,12 @@ function setup(
     const [drawer, setDrawer] = useState(false);
     const [configuredProviders, setConfiguredProviders] = useState([provider]);
     updateConfiguredProviders = setConfiguredProviders;
+    const [verificationEvent, setVerificationEvent] = useState<{ providerId: string; account: string | null; sequence: number }>();
+    updateVerification = (id, account = localStorage.getItem("lazymind:user")) => setVerificationEvent(current => ({ providerId: id, account, sequence: (current?.sequence || 0) + 1 }));
     return (
       <>
         <ProviderWorkspace
+          verificationEvent={verificationEvent}
           providers={[provider]}
           configuredProviders={configuredProviders}
           loading={false}
@@ -732,10 +737,39 @@ describe("compact provider workspace", () => {
     expect(onAddModel).toHaveBeenCalledTimes(1);
     expect(onAddModel).toHaveBeenCalledWith(provider, provider.groups[0]);
     onLoadModels.mockClear();
-    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.moreModelActions" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "modelProvider.workspace.refreshSavedModels" }));
-    expect(onLoadModels).toHaveBeenCalledWith(provider, provider.groups[0]);
+    expect(screen.queryByRole("button", { name: "modelProvider.workspace.moreModelActions" })).not.toBeInTheDocument();
   });
+  it("hides and restores a supplier from its handle without deleting configuration", async () => {
+    const callbacks = setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.reorderSupplier" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "modelProvider.workspace.hideSupplier" }));
+    const nav = screen.getByRole("navigation", { name: "modelProvider.workspace.suppliers" });
+    expect(within(nav).queryByRole("button", { name: "OpenAI" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.hiddenSuppliers" }));
+    expect(within(nav).getByRole("button", { name: "OpenAI" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.reorderSupplier" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "modelProvider.workspace.restoreSupplier" }));
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.all" }));
+    expect(within(nav).getByRole("button", { name: "OpenAI" })).toBeInTheDocument();
+    expect(callbacks.onReload).not.toHaveBeenCalled();
+  });
+
+  it("promotes only a new verification transition, keeping initial verified order", async () => {
+    const sense = { ...provider, id: "sense", name: "SenseNova" };
+    const callbacks = setup({ providers: [sense, provider] });
+    const order = () => [...document.querySelectorAll('.provider-workspace-sortable-row')].map(row => row.getAttribute('data-provider-id'));
+    expect(order()).toEqual(["sense", "openai"]);
+    act(() => callbacks.verified(provider.id));
+    await waitFor(() => expect(order()).toEqual(["openai", "sense"]));
+  });
+
+  it("ignores verification responses captured under a different account", () => {
+    const sense = { ...provider, id: "sense", name: "SenseNova" };
+    const callbacks = setup({ providers: [sense, provider] });
+    act(() => callbacks.verified(provider.id, "old-account"));
+    expect(document.querySelector('.provider-workspace-sortable-row')).toHaveAttribute('data-provider-id', 'sense');
+  });
+
   it("keeps a supplier logo when its request protocol changes", () => {
     const supplier = { ...provider, name: "DeepSeek", protocolName: "Claude", source: "Claude" };
     setup({ providers: [supplier], configuredProviders: [supplier] });
@@ -913,7 +947,7 @@ describe("compact provider workspace", () => {
       }),
     ).toBeEnabled();
   });
-  it("pins custom suppliers and their manually added models before catalog entries", () => {
+  it("allows a normal initial supplier order while retaining manually added model priority", () => {
     const custom = {
       ...provider,
       id: "custom-supplier",
@@ -938,9 +972,10 @@ describe("compact provider workspace", () => {
     setup({
       providers: [provider, custom],
       configuredProviders: [provider, custom],
+      highlightProviderId: custom.id,
     });
     const suppliers = document.querySelectorAll(".provider-workspace-provider");
-    expect(suppliers[0]).toHaveTextContent("Zulu Custom");
+    expect(suppliers[0]).toHaveTextContent("OpenAI");
     const rows = document.querySelectorAll(".saved-provider-model-row");
     expect(rows[0]).toHaveTextContent("zulu-custom-model");
   });
