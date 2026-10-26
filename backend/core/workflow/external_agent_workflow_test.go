@@ -473,6 +473,38 @@ func TestExternalTaskIdempotencyRejectsChangedRequest(t *testing.T) {
 	}
 }
 
+func TestExternalWorkflowTaskDraftCreationIsIdempotentForStaleSnapshots(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedSkillForWorkflowConversion(t, db, "owner", "skill-draft-race", "# Draft Race Skill\n\nCreate a short report from the supplied input.")
+	now := time.Now().UTC()
+	task := orm.ExternalAgentWorkflowTask{
+		ID: "task-draft-race", OwnerUserID: "owner", IdempotencyKey: "draft-race",
+		AgentType: "codex", SkillID: "skill-draft-race", Status: externalTaskStatusQueued,
+		Stage: "preflight", RequestJSON: json.RawMessage(`{"config":{}}`),
+		ResultSummaryJSON: json.RawMessage(`{}`), ResultArtifactsJSON: json.RawMessage(`[]`),
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	stale := task
+	first := ensureExternalWorkflowTaskWorkflow(t.Context(), db.DB, task)
+	if first.DraftID == "" {
+		t.Fatalf("first conversion did not create a draft: %#v", first)
+	}
+	second := ensureExternalWorkflowTaskWorkflow(t.Context(), db.DB, stale)
+	if second.DraftID != first.DraftID {
+		t.Fatalf("stale retry created a different draft: first=%q second=%q", first.DraftID, second.DraftID)
+	}
+	var drafts int64
+	if err := db.Model(&orm.WorkflowDraft{}).Where("source_skill_id=?", task.SkillID).Count(&drafts).Error; err != nil {
+		t.Fatal(err)
+	}
+	if drafts != 1 {
+		t.Fatalf("stale retry created %d workflow drafts, want 1", drafts)
+	}
+}
+
 func TestExternalSkillSameNameDifferentSourceDoesNotReuse(t *testing.T) {
 	db := newHandlerTestDB(t)
 	t.Setenv("LAZYMIND_SKILL_OBJECT_ROOT", t.TempDir())

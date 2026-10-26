@@ -208,11 +208,14 @@ func findExternalAgentSkillBySource(ctx context.Context, db *gorm.DB, ownerUserI
 		ID  string
 		Ext []byte
 	}
-	if err := db.WithContext(ctx).Table("skills").Select("id, ext").Where("owner_user_id=? AND category=? AND deleted_at IS NULL", ownerUserID, skillmetadata.ExternalCategory).Find(&skills).Error; err == nil {
-		for _, skill := range skills {
-			ext := decodeJSONMap(skill.Ext)
-			if canonicalExternalSkillURL(stringFromMap(ext, "import_source_url")) == canonicalExternalSkillURL(source.SourceURL) {
-				return skill.ID
+	if source.SourceURL != "" {
+		if err := db.WithContext(ctx).Table("skills").Select("id, ext").Where("owner_user_id=? AND category=? AND deleted_at IS NULL", ownerUserID, skillmetadata.ExternalCategory).Find(&skills).Error; err == nil {
+			for _, skill := range skills {
+				ext := decodeJSONMap(skill.Ext)
+				storedURL := strings.TrimSpace(stringFromMap(ext, "import_source_url"))
+				if storedURL != "" && canonicalExternalSkillURL(storedURL) == canonicalExternalSkillURL(source.SourceURL) {
+					return skill.ID
+				}
 			}
 		}
 	}

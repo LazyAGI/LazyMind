@@ -299,14 +299,36 @@ func ensureExternalWorkflowTaskWorkflow(ctx context.Context, db *gorm.DB, task o
 			return persistExternalTask(db, task, updates)
 		}
 		if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			draft := createExternalWorkflowDraft(ctx, tx, task, snapshot)
+			// The worker may be retrying with a stale task snapshot. Lock and
+			// re-read the task before creating a draft so two workers cannot
+			// enqueue one idempotency key for different draft IDs.
+			var current orm.ExternalAgentWorkflowTask
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("id=? AND owner_user_id=?", task.ID, task.OwnerUserID).
+				First(&current).Error; err != nil {
+				return err
+			}
+			if current.DraftID != "" {
+				task = current
+				return nil
+			}
+			draft := createExternalWorkflowDraft(ctx, tx, current, snapshot)
 			if draft.ID == "" {
 				return errors.New("create workflow draft failed")
 			}
-			if err := enqueueExternalWorkflowGeneration(ctx, tx, task, draft, snapshot); err != nil {
+			if err := enqueueExternalWorkflowGeneration(ctx, tx, current, draft, snapshot); err != nil {
 				return err
 			}
-			return tx.Model(&task).Updates(map[string]any{"draft_id": draft.ID, "skill_revision_id": snapshot.RevisionID, "status": externalTaskStatusConverting, "stage": "generate", "lazymind_url": externalWorkflowURL(draft.ID, ""), "updated_at": time.Now().UTC()}).Error
+			if err := tx.Model(&current).Updates(map[string]any{"draft_id": draft.ID, "skill_revision_id": snapshot.RevisionID, "status": externalTaskStatusConverting, "stage": "generate", "lazymind_url": externalWorkflowURL(draft.ID, ""), "updated_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+			current.DraftID = draft.ID
+			current.SkillRevisionID = snapshot.RevisionID
+			current.Status = externalTaskStatusConverting
+			current.Stage = "generate"
+			current.LazyMindURL = externalWorkflowURL(draft.ID, "")
+			task = current
+			return nil
 		}); err != nil {
 			return failExternalTask(db, task, "WORKFLOW_GENERATION_ENQUEUE_FAILED", err.Error(), "请稍后重试，或在 LazyMind 中打开草稿继续处理。")
 		}
