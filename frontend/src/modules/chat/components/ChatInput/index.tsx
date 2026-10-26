@@ -796,7 +796,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       uri: file.uri, filename: file.name,
     }))], value);
     useEffect(() => { setActiveMenu(null); }, [runInBackground, sessionId]);
-    useEffect(() => {
+    // Keep synchronous mode-switch capture aligned with the committed composer.
+    // Async uploads can commit before passive effects update the old listener.
+    useLayoutEffect(() => {
       const transferDraft = (event: Event) => {
         const detail = (event as CustomEvent).detail;
         if (!allowMentions || !allowLocalWorkspace || detail?.runInBackground === undefined || detail.runInBackground === runInBackground
