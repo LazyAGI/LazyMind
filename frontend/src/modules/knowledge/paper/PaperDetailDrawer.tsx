@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Alert, Button, Input, Modal, Tabs, Tag, Tooltip } from 'antd';
-import { ExclamationCircleOutlined } from '@ant-design/icons';
+import { Alert, Button, Dropdown, Input, Modal, Tabs, Tag, Tooltip } from 'antd';
+import { CloseOutlined, DownOutlined, ExclamationCircleOutlined, InfoCircleOutlined, ReadOutlined } from '@ant-design/icons';
 import type { PaperLibraryDataV3, PaperRecord, Attachment } from './libraryModel';
 import { createNote, readingSummary } from './libraryModel';
 import { importMethodLabel, safePaperUrl, type PaperEdits } from './model';
@@ -55,6 +55,12 @@ export default function PaperDetailDrawer({ paper, data, initialTab = 'overview'
   const method = primary?.importMethod || current.importMethod;
   const sourceUrl = safePaperUrl(primary?.sourceUrl);
   const identifyStatus = academic?.state.manual ? '已手动确认' : ({ pending: '待识别', processing: '识别中', succeeded: '识别成功', failed: '识别失败' }[academic?.state.status || ''] || '未记录');
+  const readButton = <Button
+    type="primary"
+    icon={<ReadOutlined />}
+    disabled={!pdfs.length || !onOpenAttachment}
+    onClick={pdfs.length === 1 ? () => onOpenAttachment?.(pdfs[0].contentRef!) : undefined}
+  >阅读{pdfs.length > 1 && <DownOutlined />}</Button>;
 
   const run = async (action: () => Promise<void>, fallback: string) => {
     if (disabled || savingRef.current) return;
@@ -75,7 +81,23 @@ export default function PaperDetailDrawer({ paper, data, initialTab = 'overview'
   };
   return <div className="paper-detail-mask" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
     <aside className="paper-detail-drawer" role="dialog" aria-modal="true" aria-label="文献详情">
-      <header className="paper-detail-head"><div><span className="paper-detail-kicker">文献档案</span><h2>{current.title}</h2><p>{current.authors} · {current.venue} {current.year || ''}</p><div className="paper-detail-facts"><span>{current.status === 'read' ? '已读' : current.status === 'reading' ? '阅读中' : '未读'}</span></div></div><Button type="text" disabled={saving || (editing && disabled)} onClick={onClose}>关闭</Button></header>
+      <header className="paper-detail-head">
+        <div className="paper-detail-toolbar">
+          <span className="paper-detail-kicker">文献档案</span>
+          <div className="paper-detail-head-actions">
+            {pdfs.length > 1 ? <Dropdown placement="bottomRight" trigger={['click']} menu={{ items: pdfs.map(attachment => ({
+              key: attachment.id,
+              label: `${attachment.name} · ${attachment.sourceVersion || '版本未知'}${attachment.isPrimary ? ' · 主附件' : ''}`,
+              onClick: () => onOpenAttachment?.(attachment.contentRef!),
+            })) }}>{readButton}</Dropdown> : <Tooltip title={!pdfs.length ? '请先在附件中添加 PDF' : undefined}>{readButton}</Tooltip>}
+            <Button type="text" aria-label="关闭" icon={<CloseOutlined />} disabled={saving || (editing && disabled)} onClick={onClose} />
+          </div>
+        </div>
+        <h2>{current.title}</h2>
+        <p>{current.authors} · {current.venue} {current.year || ''}</p>
+        <div className="paper-detail-facts"><span>{current.status === 'read' ? '已读' : current.status === 'reading' ? '阅读中' : '未读'}</span></div>
+      </header>
+      {!pdfs.length && <p className="paper-detail-read-hint"><InfoCircleOutlined /><span>请先在<button type="button" className="paper-detail-tab-link" disabled={saving || editing} onClick={() => setTab('attachments')}>附件</button>中添加 PDF</span></p>}
       <div className="paper-detail-summary">
         <div className="paper-detail-attachment-summary">
           <span><b>{summary.attachments}</b> 个附件</span>
@@ -111,7 +133,7 @@ export default function PaperDetailDrawer({ paper, data, initialTab = 'overview'
             <dl><dt>标题</dt><dd>{current.title}</dd><dt>作者</dt><dd>{current.authors || '未填写'}</dd><dt>年份</dt><dd>{current.year || '未填写'}</dd><dt>会议／期刊</dt><dd>{current.venue || '未填写'}</dd><dt>DOI</dt><dd>{current.doi || '未填写'}</dd><dt>arXiv</dt><dd>{current.arxiv ? `${current.arxiv}${current.arxivVersion || ''}` : '未填写'}</dd><dt>摘要</dt><dd>{current.abstract ?? current.metadata.abstract ?? '未填写'}</dd></dl>
             <div className="paper-detail-tags">{current.tags.filter(tag => tag !== 'paper' && !tag.startsWith('arxiv:')).map(tag => <Tag key={tag}>{tag}</Tag>)}</div>
           </>}
-          <div className="paper-detail-section-head"><h3>全文附件</h3>{onAddPdf && <Button size="small" disabled={disabled || saving || editing} onClick={onAddPdf}>添加 PDF</Button>}</div>
+          <div className="paper-detail-section-head"><h3>全文附件</h3></div>
           <p className="paper-detail-muted">{pdfs.length ? <button type="button" className="paper-detail-tab-link" onClick={() => setTab('attachments')}>PDF · {pdfs.length} 份，查看附件与版本</button> : attachments.length ? '尚未添加入库 PDF，可在附件页查看其他材料。' : '仅题录，尚未添加 PDF。'}</p>
           <div className="paper-detail-section-head"><h3>来源</h3></div>
           <dl><dt>导入方式</dt><dd>{method ? importMethodLabel[method] || '未记录' : '未记录'}</dd><dt>原文来源</dt><dd>{sourceName(primary)}</dd><dt>原始链接</dt><dd>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer">{sourceUrl}</a> : '未记录'}</dd><dt>来源版本</dt><dd>{primary?.sourceVersion || '未记录'}</dd></dl>

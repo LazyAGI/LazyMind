@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ChangeEvent, type DragEvent, type DragEventHandler } from "react";
 import { Alert, Button, Dropdown, Input, Modal, Popover, Radio, Select, Spin, Tooltip, Upload, message, type RadioChangeEvent } from "antd";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
-import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, InfoCircleOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined, ReadOutlined } from "@ant-design/icons";
+import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, InfoCircleOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
 import { v4 as uuidv4 } from "uuid";
 import {
   applyPaperEdits,
@@ -790,13 +790,6 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
   };
 
   const openDocument = (documentId: string) => window.open(`/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(documentId)}`, "_blank", "noopener");
-  const readButton = (paperId: string) => {
-    const attachments = materialByPaper.get(paperId)?.pdfs || [];
-    const href = (attachment: Attachment) => `/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(attachment.contentRef!)}`;
-    if (!attachments.length) return <Button size="small" type="text" disabled={disabled} onClick={() => openImport('upload', paperId)}>添加 PDF</Button>;
-    if (attachments.length === 1) return <Button size="small" type="text" icon={<ReadOutlined />} href={href(attachments[0])} target="_blank" rel="noopener noreferrer">阅读</Button>;
-    return <Dropdown trigger={['click']} menu={{ items: attachments.map(attachment => ({ key: attachment.id, label: <a href={href(attachment)} target="_blank" rel="noopener noreferrer">{attachment.name} · {attachment.sourceVersion || '版本未知'}{attachment.isPrimary ? ' · 主附件' : ''}</a> })) }}><Button size="small" type="text" icon={<ReadOutlined />}>阅读<DownOutlined /></Button></Dropdown>;
-  };
 
   const primaryAttachment = (paperId: string) => {
     const paper = modernData.papers.find(item => item.id === paperId);
@@ -990,7 +983,6 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
               <td className="paper-library-year">{item.year || "—"}</td>
               <td className="paper-library-venue"><span title={venueName(item)}>{item.venue?.trim() ? venueName(item) : "—"}</span></td>
               <td><div className="paper-library-row-actions">
-                    {readButton(item.id)}
                     <Select
                       className="paper-library-status"
                       size="small"

@@ -2294,11 +2294,6 @@ export function WorkflowPanel({
 
       </div>
 
-      <div className='workflow-panel__trust-notice' role='note'>
-        <InfoCircleOutlined aria-hidden='true' />
-        <span>{t('chat.workflowFullTrustNotice')}</span>
-      </div>
-
       {!collapsed && externalPresentation && runningTasks.length > 0 && <div className='workflow-external-activity'>
         <div className='workflow-external-activity__text' role='status'>
           {latestActivity?.kind ? t(`chat.workflowActivity_${latestActivity.kind}`, { tool: latestActivity.tool }) : t('chat.workflowActivity_working')}

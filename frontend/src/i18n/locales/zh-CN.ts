@@ -3539,7 +3539,6 @@ const zhCN = {
     workflowGenerationProcess: "生成过程",
     workflowStatusRunning: "执行中",
     workflowStatusDone: "已完成",
-    workflowFullTrustNotice: "此工作流以完全信任模式运行，可在服务进程的系统权限范围内读取、修改文件和执行代码，不受 Workspace 权限限制，无需逐次审批。",
     workflowStatusReady: "待执行",
     workflowStatusPaused: "待继续",
     workflowStatusBlocked: "等待输入",

@@ -226,8 +226,14 @@ describe("paper library navigation and import", () => {
     vi.mocked(paperFromPdf).mockResolvedValueOnce({ ...makePaper('wrong', 'Another paper', null), doi: '10.1000/other', identityVerified: true });
     const upload = vi.fn();
     await renderLibrary({ onUploadPdf: upload });
+    const row = within(screen.getByRole('heading', { name: 'Unfiled paper' }).closest('tr')!);
+    expect(row.queryByRole('button', { name: /阅读|添加 PDF/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Unfiled paper' }));
     const detail = within(screen.getByRole('dialog', { name: '文献详情' }));
+    expect(detail.getByRole('button', { name: /阅读/ })).toBeDisabled();
+    expect(detail.queryByRole('button', { name: '添加 PDF' })).not.toBeInTheDocument();
+    fireEvent.click(detail.getByRole('button', { name: '附件' }));
+    expect(detail.getByRole('tab', { name: '附件 1' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(detail.getByRole('button', { name: '添加 PDF' }));
     const dialog = await screen.findByRole('dialog', { name: '上传文献' });
     fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['pdf'], 'wrong.pdf')] } });
@@ -273,22 +279,27 @@ describe("paper library navigation and import", () => {
   });
 
   it("opens paper details consistently and lets readers choose among PDF attachments", async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     const data = readLibrary(datasetId);
     data.attachments.push({ ...data.attachments[0], id: "second-pdf", contentRef: "second-doc", isPrimary: false, sourceVersion: 'v1' });
     data.papers[0].attachmentIds.push('second-pdf');
     writeLibrary(datasetId, data);
     await renderLibrary();
+    const row = within(screen.getByRole('heading', { name: 'Folder paper' }).closest('tr')!);
+    expect(row.queryByRole('button', { name: /阅读|添加 PDF/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Folder paper' }));
     const detail = within(screen.getByRole('dialog', { name: '文献详情' }));
     fireEvent.click(detail.getByRole('tab', { name: '附件 2' }));
     expect(detail.getAllByRole('button', { name: '打开 PDF' })).toHaveLength(2);
     expect(detail.getByText(/v1/)).toBeInTheDocument();
-    fireEvent.click(detail.getByRole('button', { name: '关闭' }));
-    const row = within(screen.getByRole('heading', { name: 'Folder paper' }).closest('tr')!);
-    fireEvent.click(row.getByRole('button', { name: /阅读/ }));
+    fireEvent.click(detail.getByRole('button', { name: /阅读/ }));
     const menu = within(await screen.findByRole('menu'));
-    expect(menu.getByRole('link', { name: /v1/ })).toHaveAttribute('href', `/lib/knowledge/knowledge/${datasetId}/second-doc`);
-    expect(menu.getByRole('link', { name: /版本未知.*主附件/ })).toHaveAttribute('href', `/lib/knowledge/knowledge/${datasetId}/stored-pdf-a`);
+    expect(menu.getByRole('menuitem', { name: /版本未知.*主附件/ })).toBeInTheDocument();
+    fireEvent.click(menu.getByRole('menuitem', { name: /v1/ }));
+    expect(open).toHaveBeenLastCalledWith(`/lib/knowledge/knowledge/${datasetId}/second-doc`, '_blank', 'noopener');
+    fireEvent.click(detail.getByRole('button', { name: /阅读/ }));
+    fireEvent.click((await screen.findAllByRole('menuitem')).find(item => /版本未知.*主附件/.test(item.textContent || ''))!);
+    expect(open).toHaveBeenLastCalledWith(`/lib/knowledge/knowledge/${datasetId}/stored-pdf-a`, '_blank', 'noopener');
   });
 
   it("keeps metadata accessible separately and uses it when there is no readable attachment", async () => {
@@ -656,6 +667,7 @@ describe("paper library navigation and import", () => {
   });
 
   it.each([false, true])("attaches a confirmed PDF to the existing paper and preserves its research data (retry: %s)", async (retry) => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     const before = readLibrary(datasetId);
     before.attachments = before.attachments.filter((item) => item.paperId !== "a");
     before.papers[0].attachmentIds = [];
@@ -664,7 +676,12 @@ describe("paper library navigation and import", () => {
     vi.mocked(paperFromPdf).mockResolvedValueOnce({ ...makePaper("extracted-pdf", "Different PDF title", null), doi: "10.1234/existing", identityVerified: true });
     const upload = vi.fn().mockResolvedValue("attached-document");
     await renderLibrary({ onUploadPdf: upload });
-    const dialog = await openImportDialog("直接上传", "上传文献");
+    fireEvent.click(screen.getByRole('button', { name: 'Folder paper' }));
+    const detail = within(screen.getByRole('dialog', { name: '文献详情' }));
+    expect(detail.getByRole('button', { name: /阅读/ })).toBeDisabled();
+    fireEvent.click(detail.getByRole('button', { name: '附件' }));
+    fireEvent.click(detail.getByRole('button', { name: '添加 PDF' }));
+    const dialog = await screen.findByRole('dialog', { name: '上传文献' });
     fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(["pdf"], "existing.pdf")] } });
     const confirm = await within(dialog).findByRole("button", { name: "添加 PDF" });
     await confirmPdfOwnership(dialog);
@@ -679,7 +696,7 @@ describe("paper library navigation and import", () => {
       await waitFor(() => expect(confirm).toBeEnabled());
       fireEvent.click(confirm);
     }
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '上传文献' })).not.toBeInTheDocument());
     const saved = readLibrary(datasetId);
     const attachment = saved.attachments.find((item) => item.contentRef === "attached-document")!;
     expect(attachment).toMatchObject({ paperId: "a", name: "existing.pdf", isPrimary: true });
@@ -688,6 +705,9 @@ describe("paper library navigation and import", () => {
     expect(saved.notes).toEqual(before.notes);
     expect(saved.annotations).toEqual(before.annotations);
     expect(upload).toHaveBeenCalledOnce();
+    expect(detail.getByRole('button', { name: /阅读/ })).toBeEnabled();
+    fireEvent.click(detail.getByRole('button', { name: /阅读/ }));
+    expect(open).toHaveBeenCalledWith(`/lib/knowledge/knowledge/${datasetId}/attached-document`, '_blank', 'noopener');
   });
 
   it("cancels a staged PDF attachment without uploading or changing its existing paper", async () => {
@@ -1212,11 +1232,13 @@ describe("paper library backend arXiv import", () => {
   }
 
   it('hydrates arXiv documents and authoritative errors without saving derived state', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     vi.mocked(loadPaperLibrarySources).mockResolvedValue(backendSource('failed'));
     await renderLibrary();
     expect(await screen.findByRole('heading', { name: result.paper.title })).toBeInTheDocument();
-    const row = within(screen.getByRole('heading', { name: result.paper.title }).closest('tr')!);
-    expect(row.getByRole('link', { name: /阅读/ })).toHaveAttribute('href', `/lib/knowledge/knowledge/${datasetId}/${result.document_id}`);
+    fireEvent.click(screen.getByRole('button', { name: result.paper.title }));
+    fireEvent.click(within(screen.getByRole('dialog', { name: '文献详情' })).getByRole('button', { name: /阅读/ }));
+    expect(open).toHaveBeenCalledWith(`/lib/knowledge/knowledge/${datasetId}/${result.document_id}`, '_blank', 'noopener');
     expect(savePersistedPaperLibrary).not.toHaveBeenCalled();
   });
 
