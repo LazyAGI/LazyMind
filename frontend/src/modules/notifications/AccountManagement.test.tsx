@@ -24,7 +24,11 @@ const original = { id: 'ca-original', provider: 'feishu', label: 'Work assistant
   identity: { app_id: 'cli_original', authorized_name: 'Alice', authorized_id: 'ou_original' } } as ChannelAccount;
 let rows: ChannelAccount[];
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.groups.mockResolvedValue({ items: [], next_cursor: '' }); rows = [{ ...original }];
+  vi.clearAllMocks();
+  vi.spyOn(message, 'success').mockImplementation(() => undefined as never);
+  vi.spyOn(message, 'info').mockImplementation(() => undefined as never);
+  vi.spyOn(message, 'error').mockImplementation(() => undefined as never);
+  mocks.groups.mockResolvedValue({ items: [], next_cursor: '' }); rows = [{ ...original }];
   mocks.accounts.mockImplementation((p: string) => Promise.resolve({ items: rows.filter(row => row.provider === p) }));
   mocks.detail.mockImplementation((id: string) => Promise.resolve({ ...rows.find(row => row.id === id), primary_recipient: null, notification_reference_count: 1 }));
   mocks.refs.mockResolvedValue({ items: [{ id: 'task', kind: 'schedule', name: 'Daily summary', enabled: true }], total: 1, next_cursor: '' });
@@ -262,7 +266,7 @@ it('keeps WeCom permission recovery open when the original bot remains unauthori
   mocks.resume.mockResolvedValue(account);
   mocks.targets.mockRejectedValue({ response: { data: { error: { code: 'WECOM_CAPABILITY_REAUTH_REQUIRED' } } } });
   const onConnected = vi.fn();
-  const errorToast = vi.spyOn(message, 'error');
+  const errorToast = vi.mocked(message.error);
   render(<MemoryRouter><ChannelConnectionPage provider="wecom" accountId={original.id} onConnected={onConnected} /></MemoryRouter>);
   fireEvent.click(screen.getByRole('button', { name: 'notifications.wecomRefreshAuthorization' }));
   expect(await screen.findByText('notifications.WECOM_CAPABILITY_REAUTH_REQUIRED')).toBeVisible();
