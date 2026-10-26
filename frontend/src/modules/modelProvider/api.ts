@@ -4,6 +4,7 @@ import {
   ModelProvidersApiFactory,
   type AddModelProviderGroupModelOpenAPIRequest,
   type AddModelProviderGroupModelsOpenAPIResponse,
+  type UpdateModelProviderGroupModelOpenAPIRequest,
 } from "@/api/generated/core-client";
 import { BASE_URL, axiosInstance } from "@/components/request";
 import type { CredentialBackupStatus } from "./credentialBackupModel";
@@ -339,7 +340,7 @@ export async function setGroupModelEnabled(
     modelProviderId: providerId,
     groupId,
     modelId,
-    updateModelProviderGroupModelOpenAPIRequest: { enabled },
+    updateModelProviderGroupModelOpenAPIRequest: { enabled } as UpdateModelProviderGroupModelOpenAPIRequest,
   });
   return unwrapModelProviderData<{ id: string; enabled?: boolean }>(response.data);
 }

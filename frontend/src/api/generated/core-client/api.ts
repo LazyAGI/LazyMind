@@ -7429,10 +7429,6 @@ export interface UpdateModelProviderGroupModelOpenAPIRequest {
      * Optional image-input support for chat models.
      */
     'vision'?: boolean;
-    /**
-     * Optional saved-model enablement. Disabled models keep their UUID and configuration.
-     */
-    'enabled'?: boolean;
 }
 export interface UpdateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
