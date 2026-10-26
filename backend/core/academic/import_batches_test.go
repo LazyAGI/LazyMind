@@ -3,6 +3,7 @@ package academic
 import (
 	"encoding/json"
 	"lazymind/core/common/orm"
+	"lazymind/core/common/readonlyorm"
 	"os"
 	"path/filepath"
 	"testing"
@@ -72,6 +73,100 @@ func TestImportOperationViewsPageInDatabaseAndKeepDefaultContract(t *testing.T) 
 		t.Fatal("main batch status contract changed", w.Body.String())
 	}
 }
+
+func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
+	t.Setenv("LAZYMIND_READONLY_SCHEMA", "")
+	db := paperLibraryTestDB(t)
+	if err := db.AutoMigrate(&readonlyorm.LazyLLMDocServiceTaskRow{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Model(&orm.Dataset{}).Where("id='papers'").Updates(map[string]any{"kb_id": "remote-papers", "processing_level": "chunked", "processing_revision": 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	paper := importDraft(t, "papers", "bibliography", libraryDraft("paper", "Paper", "10.1234/current")).Data.Papers[0]
+	path := filepath.Join(t.TempDir(), "paper.pdf")
+	if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []any{
+		&orm.Document{ID: "pdf", DatasetID: "papers", LazyllmDocID: "remote-pdf", DisplayName: "paper.pdf", Ext: marshal(map[string]string{"stored_path": path})},
+		&orm.PaperLibraryAttachment{DatasetID: "papers", PaperID: paper.ID, ID: "attachment", DocumentID: "pdf", Name: "paper.pdf", Kind: "pdf", IsPrimary: true},
+		&orm.DocumentProcessingState{DatasetID: "papers", DocumentID: "pdf", ParseStatus: "pending", ChunkStatus: "pending", IndexStatus: "pending", UpdatedAt: now},
+		&orm.Task{ID: "task", DatasetID: "papers", DocID: "pdf", LazyllmTaskID: "remote-task", Ext: marshal(map[string]any{"processing_level": "chunked", "processing_revision": 1}), BaseModel: orm.BaseModel{CreatedAt: now}},
+		&readonlyorm.LazyLLMDocServiceTaskRow{TaskID: "remote-task", DocID: "remote-pdf", KbID: "remote-papers", Status: "SUCCESS", CreatedAt: now, UpdatedAt: now},
+		&orm.PaperImportBatch{ID: "upload", EntryType: "pdf_upload", TargetDatasetID: "papers", CreatedBy: "owner", Status: "succeeded", SourceContextJSON: marshal(map[string]any{}), SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{}), CreatedAt: now},
+		&orm.PaperImportItem{ID: "upload-item", BatchID: "upload", LibraryPaperID: paper.ID, AcademicWorkID: paper.AcademicWorkID, DocumentID: "pdf", Status: "succeeded", Stage: "done", ResultKind: "imported", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{})},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(parse string, active int) {
+		t.Helper()
+		view := readLibrary(t, "papers")
+		if view.Data.Papers[0].Parse != parse || view.Active != (active > 0) {
+			t.Fatalf("library missed latest task: %+v", view)
+		}
+		w := libraryRequest(t, "GET", "/imports?view=operations", "papers", "owner", nil)
+		var list struct {
+			Notification struct{ Active int } `json:"notification"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != 200 || list.Notification.Active != active {
+			t.Fatalf("notification disagrees with document task: %d %s", w.Code, w.Body.String())
+		}
+		w = libraryRequest(t, "GET", "/imports/upload?view=operations", "papers", "owner", nil)
+		var detail struct {
+			Items []ImportOperationItem `json:"items"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil || w.Code != 200 || len(detail.Items) != 1 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		state, documentState := "ready", "ready"
+		if active > 0 {
+			state = "processing"
+			documentState = "running"
+		}
+		if parse == "failed" {
+			state, documentState = "processing_failed", "failed"
+		}
+		if detail.Items[0].CurrentState != state || detail.Items[0].CurrentDocument.ProcessingStatus != documentState {
+			t.Fatalf("operation disagrees with latest task: %+v", detail.Items[0])
+		}
+	}
+	check("ready", 0)
+	// A newer attempt wins even when an older successful callback arrives late.
+	if err := db.Create(&orm.Task{ID: "retry", DatasetID: "papers", DocID: "pdf", LazyllmTaskID: "retry-remote", Ext: marshal(map[string]any{"processing_level": "chunked", "processing_revision": 1}), BaseModel: orm.BaseModel{CreatedAt: now.Add(time.Minute)}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&readonlyorm.LazyLLMDocServiceTaskRow{TaskID: "retry-remote", DocID: "remote-pdf", KbID: "remote-papers", Status: "WORKING", CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	check("parsing", 1)
+	if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Update("status", "FAILED").Error; err != nil {
+		t.Fatal(err)
+	}
+	check("failed", 0)
+	if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Update("status", "SUCCESS").Error; err != nil {
+		t.Fatal(err)
+	}
+	check("ready", 0)
+	// Resuming the same task must also supersede a persisted failure.
+	if err := db.Model(&orm.DocumentProcessingState{}).Where("document_id='pdf'").Updates(map[string]any{"parse_status": "failed", "chunk_status": "failed", "updated_at": now.Add(2 * time.Minute)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.Task{}).Where("id='retry'").Update("updated_at", now.Add(3*time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&readonlyorm.LazyLLMDocServiceTaskRow{}).Where("task_id='retry-remote'").Update("status", "WORKING").Error; err != nil {
+		t.Fatal(err)
+	}
+	check("parsing", 1)
+	var state orm.DocumentProcessingState
+	if err := db.Where("document_id='pdf'").Take(&state).Error; err != nil || state.ParseStatus != "failed" {
+		t.Fatal("read projection changed persisted stage facts", state, err)
+	}
+}
 func TestImportOperationsPreserveFailureAndRecognizeLaterResolution(t *testing.T) {
 	db := paperLibraryTestDB(t)
 	path := filepath.Join(t.TempDir(), "paper.pdf")
@@ -100,5 +195,34 @@ func TestImportOperationsPreserveFailureAndRecognizeLaterResolution(t *testing.T
 	json.Unmarshal(w.Body.Bytes(), &detail)
 	if len(detail.Items) != 1 || detail.Items[0].ResultKind != "failed" || !detail.Items[0].ResolvedLater || detail.Items[0].CanRetry || detail.Operation.Summary.NeedsAction != 0 {
 		t.Fatalf("historical failure or current resolution lost: %+v", detail)
+	}
+}
+
+func TestImportOperationPostgresProcessingProjection(t *testing.T) {
+	db := libraryPostgresDB(t)
+	if err := db.AutoMigrate(&orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{}, &orm.AcademicWorkDocument{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []any{
+		&orm.Dataset{ID: "papers", ProcessingLevel: "chunked"},
+		&orm.Document{ID: "pdf", DatasetID: "papers"},
+		&orm.DocumentProcessingState{DatasetID: "papers", DocumentID: "pdf", ParseStatus: "pending", ChunkStatus: "pending"},
+		&orm.PaperImportBatch{ID: "batch", TargetDatasetID: "papers", CreatedBy: "owner", Status: "succeeded", SourceContextJSON: marshal(map[string]any{}), SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{})},
+		&orm.PaperImportItem{ID: "item", BatchID: "batch", DocumentID: "pdf", Status: "succeeded", Stage: "done", ResultKind: "imported", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{})},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, status := range []string{"ready", "processing", "failed"} {
+		var rows []struct{ CurrentState string }
+		err := operationStates(db, "owner", "papers", nil, nil, []operationProcessing{{DocumentID: "pdf", State: status}}).Scan(&rows).Error
+		want := status
+		if status == "failed" {
+			want = "processing_failed"
+		}
+		if err != nil || len(rows) != 1 || rows[0].CurrentState != want {
+			t.Fatalf("PostgreSQL processing observation lost: %+v %v", rows, err)
+		}
 	}
 }

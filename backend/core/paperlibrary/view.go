@@ -109,17 +109,14 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 	docByID := map[string]orm.Document{}
 	linkByID := map[string]orm.AcademicWorkDocument{}
 	stateByID := map[string]orm.AcademicDocumentState{}
-	processingByID := map[string]orm.DocumentProcessingState{}
 	if len(documents) > 0 {
 		var docs []orm.Document
 		var links []orm.AcademicWorkDocument
 		var states []orm.AcademicDocumentState
-		var processing []orm.DocumentProcessingState
 		for _, q := range []*gorm.DB{
 			db.Where("dataset_id=? AND id IN ? AND deleted_at IS NULL", dataset, documents).Find(&docs),
 			db.Where("dataset_id=? AND document_id IN ?", dataset, documents).Find(&links),
 			db.Where("dataset_id=? AND document_id IN ?", dataset, documents).Find(&states),
-			db.Where("dataset_id=? AND document_id IN ?", dataset, documents).Find(&processing),
 		} {
 			if q.Error != nil {
 				return view, q.Error
@@ -133,9 +130,6 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		}
 		for _, s := range states {
 			stateByID[s.DocumentID] = s
-		}
-		for _, p := range processing {
-			processingByID[p.DocumentID] = p
 		}
 	}
 	origins := map[string]orm.PaperImportBatch{}
@@ -219,10 +213,6 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 			view.Data.Notes = append(view.Data.Notes, Note{ID: n.ID, PaperID: n.PaperID, Title: n.Title, Content: n.Content, Kind: n.Kind, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt})
 		}
 	}
-	var ds orm.Dataset
-	if err := db.Select("processing_level").Where("id=?", dataset).Take(&ds).Error; err != nil {
-		return view, err
-	}
 	for i := range view.Data.Papers {
 		p := &view.Data.Papers[i]
 		index, exists := primaryByPaper[p.ID]
@@ -231,20 +221,6 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		}
 		primary := &view.Data.Attachments[index]
 		primary.IsPrimary = true
-		if ds.ProcessingLevel == "stored" {
-			continue
-		}
-		if state, ok := processingByID[primary.ContentRef]; ok {
-			switch state.ParseStatus {
-			case "failed":
-				p.Parse = "failed"
-				p.ProcessingError = state.ParseErrorMessage
-			case "succeeded", "success", "ready":
-			default:
-				p.Parse = "parsing"
-				view.Active = true
-			}
-		}
 	}
 	return view, nil
 }

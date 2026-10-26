@@ -1,7 +1,6 @@
 package academic
 
 import (
-	"context"
 	"errors"
 	"gorm.io/gorm"
 	"lazymind/core/common"
@@ -65,7 +64,7 @@ func GetPaperLibrary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := paperlibrary.Load(r.Context(), store.DB(), dataset, store.UserID(r), nil, true)
+	view, err := loadLibraryView(r, store.DB(), dataset, nil, true)
 	if err == nil {
 		var counts map[string]paperlibrary.Counts
 		counts, err = paperlibrary.Statistics(r.Context(), store.DB(), []string{dataset})
@@ -98,8 +97,8 @@ type libraryChanges struct {
 	RemovedFolderIDs []string          `json:"removedFolderIds,omitempty"`
 }
 
-func libraryResult(ctx context.Context, db *gorm.DB, dataset, user string, ids []string) (libraryChanges, error) {
-	view, err := paperlibrary.Load(ctx, db, dataset, user, ids, false)
+func libraryResult(r *http.Request, db *gorm.DB, dataset string, ids []string) (libraryChanges, error) {
+	view, err := loadLibraryView(r, db, dataset, ids, false)
 	return libraryChanges{Data: view.Data}, err
 }
 func replyLibraryChanges(w http.ResponseWriter, r *http.Request, dataset string, ids []string, err error) {
@@ -107,7 +106,7 @@ func replyLibraryChanges(w http.ResponseWriter, r *http.Request, dataset string,
 		replyLibraryError(w, err)
 		return
 	}
-	out, e := libraryResult(r.Context(), store.DB(), dataset, store.UserID(r), ids)
+	out, e := libraryResult(r, store.DB(), dataset, ids)
 	if e != nil {
 		replyLibraryError(w, e)
 		return

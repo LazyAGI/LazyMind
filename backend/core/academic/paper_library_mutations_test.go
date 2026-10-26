@@ -184,7 +184,8 @@ func TestLibraryLocalCorrectionsDoNotEnrichSharedBibliography(t *testing.T) {
 	}
 }
 
-func TestLibraryPostgresConcurrentIdentityResolution(t *testing.T) {
+func libraryPostgresDB(t *testing.T) *gorm.DB {
+	t.Helper()
 	raw := os.Getenv("MIGRATION_TEST_POSTGRES_DSN")
 	if raw == "" {
 		t.Skip("set MIGRATION_TEST_POSTGRES_DSN for PostgreSQL integrity checks")
@@ -194,12 +195,12 @@ func TestLibraryPostgresConcurrentIdentityResolution(t *testing.T) {
 		t.Fatal(e)
 	}
 	adminPool, _ := admin.DB()
-	defer adminPool.Close()
+	t.Cleanup(func() { adminPool.Close() })
 	schema := "paper_library_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if e = admin.Exec("CREATE SCHEMA " + schema).Error; e != nil {
 		t.Fatal(e)
 	}
-	defer admin.Exec("DROP SCHEMA " + schema + " CASCADE")
+	t.Cleanup(func() { admin.Exec("DROP SCHEMA " + schema + " CASCADE") })
 	target, e := url.Parse(raw)
 	if e != nil {
 		t.Fatal(e)
@@ -212,8 +213,13 @@ func TestLibraryPostgresConcurrentIdentityResolution(t *testing.T) {
 		t.Fatal(e)
 	}
 	pool, _ := db.DB()
-	defer pool.Close()
-	if e = db.AutoMigrate(&orm.AcademicWork{}); e != nil {
+	t.Cleanup(func() { pool.Close() })
+	return db
+}
+
+func TestLibraryPostgresConcurrentIdentityResolution(t *testing.T) {
+	db := libraryPostgresDB(t)
+	if e := db.AutoMigrate(&orm.AcademicWork{}); e != nil {
 		t.Fatal(e)
 	}
 	errors := make(chan error, 8)
@@ -249,7 +255,7 @@ func TestLibraryPostgresConcurrentIdentityResolution(t *testing.T) {
 		t.Fatal("concurrent imports created distinct canonical identities", unique)
 	}
 	var count int64
-	if e = db.Model(&orm.AcademicWork{}).Count(&count).Error; e != nil || count != 1 {
+	if e := db.Model(&orm.AcademicWork{}).Count(&count).Error; e != nil || count != 1 {
 		t.Fatal("duplicate shared work", count, e)
 	}
 }

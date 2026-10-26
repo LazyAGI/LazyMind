@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
 	"lazymind/core/store"
 )
 
@@ -86,8 +87,7 @@ func nextImportCursor(created time.Time, id string) string {
 	return base64.RawURLEncoding.EncodeToString(marshal(importCursor{created, id}))
 }
 
-// Status aggregation uses the persisted processing facts; only a requested page probes files.
-func operationStates(db *gorm.DB, user, dataset string, batchIDs, itemIDs []string) *gorm.DB {
+func operationDocuments(db *gorm.DB, user, dataset string, batchIDs, itemIDs []string) *gorm.DB {
 	provider, version := "json_extract(i.selected_candidate_json,'$.source_provider')", "json_extract(i.selected_candidate_json,'$.version')"
 	if db.Dialector.Name() == "postgres" {
 		provider = "(CAST(i.selected_candidate_json AS jsonb)->>'source_provider')"
@@ -104,7 +104,67 @@ func operationStates(db *gorm.DB, user, dataset string, batchIDs, itemIDs []stri
 	if itemIDs != nil {
 		source = source.Where("i.id IN ?", itemIDs)
 	}
-	joined := db.Table("(?) x", source).Select("x.*,CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END AS document_available,CASE WHEN ds.processing_level='stored' THEN 'ready' WHEN p.parse_status='failed' OR (ds.processing_level IN ('chunked','indexed') AND p.chunk_status='failed') OR (ds.processing_level='indexed' AND p.index_status='failed') THEN 'failed' WHEN p.document_id IS NULL THEN 'ready' WHEN p.parse_status IN ('succeeded','success','ready') AND (ds.processing_level NOT IN ('chunked','indexed') OR p.chunk_status IN ('succeeded','success','ready')) AND (ds.processing_level<>'indexed' OR p.index_status IN ('succeeded','success','ready')) THEN 'ready' ELSE 'processing' END AS processing_state").Joins("LEFT JOIN documents d ON d.id=x.effective_document_id AND d.dataset_id=x.target_dataset_id AND d.deleted_at IS NULL").Joins("LEFT JOIN datasets ds ON ds.id=x.target_dataset_id").Joins("LEFT JOIN document_processing_states p ON p.document_id=d.id AND p.dataset_id=d.dataset_id")
+	return source
+}
+
+type operationProcessing struct {
+	DocumentID string `json:"document_id"`
+	State      string `json:"processing_state"`
+}
+
+// Observe distinct active documents, not every historical import receipt.
+// Terminal stages need no external query unless a task was created or resumed.
+func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, batchIDs []string) ([]operationProcessing, error) {
+	var ids []string
+	source := operationDocuments(db, store.UserID(r), dataset, batchIDs, nil)
+	err := db.Table("(?) x", source).Select("DISTINCT d.id").
+		Joins("JOIN documents d ON d.id=x.effective_document_id AND d.dataset_id=x.target_dataset_id AND d.deleted_at IS NULL").
+		Joins("JOIN datasets ds ON ds.id=d.dataset_id").
+		Joins("LEFT JOIN document_processing_states p ON p.document_id=d.id AND p.dataset_id=d.dataset_id").
+		Where(`ds.processing_level <> 'stored' AND (p.document_id IS NULL OR p.parse_status NOT IN ('succeeded','failed') OR (ds.processing_level IN ('chunked','indexed') AND p.chunk_status NOT IN ('succeeded','failed')) OR (ds.processing_level='indexed' AND p.index_status NOT IN ('succeeded','failed')) OR EXISTS (SELECT 1 FROM tasks t WHERE t.dataset_id=d.dataset_id AND t.doc_id=d.id AND t.deleted_at IS NULL AND (t.created_at>p.updated_at OR t.updated_at>p.updated_at)))`).
+		Pluck("d.id", &ids).Error
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	metadata, err := processingMetadata(r, db, dataset, ids)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]operationProcessing, 0, len(metadata))
+	for id, current := range metadata {
+		status := doc.DocumentProcessingStatus(current.ProcessingLevel, current.ProcessingState)
+		if status == "not_requested" {
+			status = "ready"
+		}
+		if status != "ready" && status != "failed" {
+			status = "processing"
+		}
+		result = append(result, operationProcessing{DocumentID: id, State: status})
+	}
+	return result, nil
+}
+
+// Counts stay in SQL; only active task observations cross the read-only database boundary.
+func operationStates(db *gorm.DB, user, dataset string, batchIDs, itemIDs []string, observed []operationProcessing) *gorm.DB {
+	source := operationDocuments(db, user, dataset, batchIDs, itemIDs)
+	state := "CASE WHEN ds.processing_level='stored' THEN 'ready' WHEN p.parse_status='failed' OR (ds.processing_level IN ('chunked','indexed') AND p.chunk_status='failed') OR (ds.processing_level='indexed' AND p.index_status='failed') THEN 'failed' WHEN p.document_id IS NULL THEN 'ready' WHEN p.parse_status IN ('succeeded','success','ready') AND (ds.processing_level NOT IN ('chunked','indexed') OR p.chunk_status IN ('succeeded','success','ready')) AND (ds.processing_level<>'indexed' OR p.index_status IN ('succeeded','success','ready')) THEN 'ready' ELSE 'processing' END"
+	joined := db.Table("(?) x", source).Joins("LEFT JOIN documents d ON d.id=x.effective_document_id AND d.dataset_id=x.target_dataset_id AND d.deleted_at IS NULL").Joins("LEFT JOIN datasets ds ON ds.id=x.target_dataset_id").Joins("LEFT JOIN document_processing_states p ON p.document_id=d.id AND p.dataset_id=d.dataset_id")
+	if len(observed) > 0 {
+		var projection *gorm.DB
+		if db.Dialector.Name() == "postgres" {
+			projection = db.Table("jsonb_to_recordset(CAST(? AS jsonb)) AS observed(document_id text,processing_state text)", string(marshal(observed))).Select("document_id,processing_state")
+		} else {
+			// Materialize once so SQLite can index the document join instead of
+			// scanning the JSON array for each historical receipt.
+			projection = db.Raw(`WITH observed AS MATERIALIZED (
+ SELECT json_extract(value,'$.document_id') AS document_id,
+        json_extract(value,'$.processing_state') AS processing_state FROM json_each(?)
+) SELECT * FROM observed`, string(marshal(observed)))
+		}
+		joined = joined.Joins("LEFT JOIN (?) observed ON observed.document_id=d.id", projection)
+		state = "COALESCE(observed.processing_state," + state + ")"
+	}
+	joined = joined.Select("x.*,CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END AS document_available," + state + " AS processing_state")
 	return db.Table("(?) state", joined).Select(`state.id,state.batch_id,
  CASE WHEN state.status='failed' AND state.document_available=1 AND state.processing_state='ready' THEN 1 ELSE 0 END AS resolved_later,
  CASE WHEN state.stage='awaiting_association' THEN 'awaiting_association'
@@ -120,12 +180,12 @@ func operationStates(db *gorm.DB, user, dataset string, batchIDs, itemIDs []stri
  WHEN COALESCE(state.effective_document_id,'')<>'' AND state.document_available=0 THEN 'deleted'
  WHEN state.status='skipped' THEN 'skipped' ELSE 'ready' END AS current_state`)
 }
-func operationSummaryQuery(db *gorm.DB, user, dataset string, batchIDs []string, canWrite bool) *gorm.DB {
+func operationSummaryQuery(db *gorm.DB, user, dataset string, batchIDs []string, canWrite bool, observed []operationProcessing) *gorm.DB {
 	retry := 0
 	if canWrite {
 		retry = 1
 	}
-	return db.Table("(?) s", operationStates(db, user, dataset, batchIDs, nil)).Select(`s.batch_id,COUNT(*) AS total,
+	return db.Table("(?) s", operationStates(db, user, dataset, batchIDs, nil, observed)).Select(`s.batch_id,COUNT(*) AS total,
  SUM(CASE WHEN current_state='ready' THEN 1 ELSE 0 END) AS ready,
  SUM(CASE WHEN current_state='metadata_only' THEN 1 ELSE 0 END) AS metadata_only,
  SUM(CASE WHEN current_state='skipped' THEN 1 ELSE 0 END) AS skipped,
@@ -158,7 +218,7 @@ func operationStatus(s ImportOperationSummary) string {
 		return "succeeded"
 	}
 }
-func loadOperationSummaries(ctx context.Context, db *gorm.DB, user, dataset string, batches []orm.PaperImportBatch, canWrite bool) ([]ImportOperation, error) {
+func loadOperationSummaries(ctx context.Context, db *gorm.DB, user, dataset string, batches []orm.PaperImportBatch, canWrite bool, observed []operationProcessing) ([]ImportOperation, error) {
 	result := []ImportOperation{}
 	if len(batches) == 0 {
 		return result, nil
@@ -171,7 +231,7 @@ func loadOperationSummaries(ctx context.Context, db *gorm.DB, user, dataset stri
 		BatchID string
 		ImportOperationSummary
 	}
-	if err := operationSummaryQuery(db.WithContext(ctx), user, dataset, ids, canWrite).Scan(&rows).Error; err != nil {
+	if err := operationSummaryQuery(db.WithContext(ctx), user, dataset, ids, canWrite, observed).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	summaries := map[string]ImportOperationSummary{}
@@ -214,7 +274,12 @@ func ListImportOperations(w http.ResponseWriter, r *http.Request) {
 		last := batches[len(batches)-1]
 		next = nextImportCursor(last.CreatedAt, last.ID)
 	}
-	operations, err := loadOperationSummaries(r.Context(), db, store.UserID(r), dataset, batches, canWrite)
+	observed, err := observeOperationProcessing(r, db, dataset, nil)
+	if err != nil {
+		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
+		return
+	}
+	operations, err := loadOperationSummaries(r.Context(), db, store.UserID(r), dataset, batches, canWrite, observed)
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
@@ -223,7 +288,7 @@ func ListImportOperations(w http.ResponseWriter, r *http.Request) {
 		Active      int `json:"active"`
 		NeedsAction int `json:"needs_action"`
 	}
-	err = db.Table("(?) totals", operationSummaryQuery(db, store.UserID(r), dataset, nil, canWrite)).Select("COALESCE(SUM(CASE WHEN active>0 THEN 1 ELSE 0 END),0) AS active,COALESCE(SUM(CASE WHEN needs_action>0 THEN 1 ELSE 0 END),0) AS needs_action").Scan(&totals).Error
+	err = db.Table("(?) totals", operationSummaryQuery(db, store.UserID(r), dataset, nil, canWrite, observed)).Select("COALESCE(SUM(CASE WHEN active>0 THEN 1 ELSE 0 END),0) AS active,COALESCE(SUM(CASE WHEN needs_action>0 THEN 1 ELSE 0 END),0) AS needs_action").Scan(&totals).Error
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
@@ -271,19 +336,24 @@ func GetImportOperation(w http.ResponseWriter, r *http.Request) {
 		last := raw[len(raw)-1]
 		next = nextImportCursor(last.CreatedAt, last.ID)
 	}
-	rows, err := loadOperationPage(r.Context(), db, batch, raw, canWrite)
+	observed, err := observeOperationProcessing(r, db, batch.TargetDatasetID, []string{batch.ID})
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
 	}
-	operations, err := loadOperationSummaries(r.Context(), db, user, batch.TargetDatasetID, []orm.PaperImportBatch{batch}, canWrite)
+	rows, err := loadOperationPage(r.Context(), db, batch, raw, canWrite, observed)
+	if err != nil {
+		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
+		return
+	}
+	operations, err := loadOperationSummaries(r.Context(), db, user, batch.TargetDatasetID, []orm.PaperImportBatch{batch}, canWrite, observed)
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
 	}
 	common.ReplyJSON(w, map[string]any{"batch": batch, "operation": operations[0], "items": rows, "next_cursor": next})
 }
-func loadOperationPage(ctx context.Context, db *gorm.DB, batch orm.PaperImportBatch, raw []orm.PaperImportItem, canWrite bool) ([]ImportOperationItem, error) {
+func loadOperationPage(ctx context.Context, db *gorm.DB, batch orm.PaperImportBatch, raw []orm.PaperImportItem, canWrite bool, observed []operationProcessing) ([]ImportOperationItem, error) {
 	result := []ImportOperationItem{}
 	if len(raw) == 0 {
 		return result, nil
@@ -359,7 +429,7 @@ func loadOperationPage(ctx context.Context, db *gorm.DB, batch orm.PaperImportBa
 		CurrentState  string
 		ResolvedLater int
 	}
-	if err := operationStates(db.WithContext(ctx), batch.CreatedBy, batch.TargetDatasetID, []string{batch.ID}, ids).Scan(&states).Error; err != nil {
+	if err := operationStates(db.WithContext(ctx), batch.CreatedBy, batch.TargetDatasetID, []string{batch.ID}, ids, observed).Scan(&states).Error; err != nil {
 		return nil, err
 	}
 	byID := map[string]int{}

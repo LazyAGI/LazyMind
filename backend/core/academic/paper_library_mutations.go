@@ -495,7 +495,7 @@ func DeleteLibraryFolder(w http.ResponseWriter, r *http.Request) {
 		replyLibraryError(w, err)
 		return
 	}
-	out, e := libraryResult(r.Context(), store.DB(), dataset, store.UserID(r), affected)
+	out, e := libraryResult(r, store.DB(), dataset, affected)
 	if e != nil {
 		replyLibraryError(w, e)
 		return

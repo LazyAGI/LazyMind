@@ -334,7 +334,7 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 		replyLibraryError(w, err)
 		return
 	}
-	out, e := libraryResult(r.Context(), store.DB(), input.TargetDatasetID, user, ids)
+	out, e := libraryResult(r, store.DB(), input.TargetDatasetID, ids)
 	if e != nil {
 		replyLibraryError(w, e)
 		return
