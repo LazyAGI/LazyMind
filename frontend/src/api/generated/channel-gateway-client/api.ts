@@ -187,7 +187,24 @@ export interface NotificationTarget {
     'label': string;
     'available': boolean;
     'kind'?: string;
+    /**
+     * Last read-only connection check state for this confirmed WeChat recipient.
+     */
+    'connection_check_status'?: NotificationTargetConnectionCheckStatusEnum;
+    'connection_checked_at'?: string | null;
+    'connection_error_code'?: string;
 }
+
+export const NotificationTargetConnectionCheckStatusEnum = {
+    Unknown: 'unknown',
+    Checking: 'checking',
+    Connected: 'connected',
+    ActivationRequired: 'activation_required',
+    Unavailable: 'unavailable'
+} as const;
+
+export type NotificationTargetConnectionCheckStatusEnum = typeof NotificationTargetConnectionCheckStatusEnum[keyof typeof NotificationTargetConnectionCheckStatusEnum];
+
 export interface QRCodeView {
     'payload': string;
     'version': number;
@@ -319,10 +336,11 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
          *
          * @summary List channel accounts
          * @param {string} provider External chat channel provider identifier.
+         * @param {boolean} [checkConnection] Perform a bounded read-only WeChat connection check before listing accounts. A successful check does not establish notification send eligibility.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listChannelAccounts: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listChannelAccounts: async (provider: string, checkConnection?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'provider' is not null or undefined
             assertParamExists('listChannelAccounts', 'provider', provider)
             const localVarPath = `/api/channel-gateway/v1/channel-accounts`;
@@ -339,6 +357,10 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
 
             if (provider !== undefined) {
                 localVarQueryParameter['provider'] = provider;
+            }
+
+            if (checkConnection !== undefined) {
+                localVarQueryParameter['check_connection'] = checkConnection;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -446,11 +468,12 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
          * @param {string} accountId
          * @param {string} [cursor]
          * @param {string} [recipientId]
+         * @param {boolean} [checkConnection] Perform a bounded read-only WeChat connection check for the known recipient_id. Requires a nonempty recipient_id and never chooses a recipient or sends a message.
          * @param {number} [limit]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        listNotificationTargets: async (accountId: string, cursor?: string, recipientId?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        listNotificationTargets: async (accountId: string, cursor?: string, recipientId?: string, checkConnection?: boolean, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'accountId' is not null or undefined
             assertParamExists('listNotificationTargets', 'accountId', accountId)
             const localVarPath = `/api/channel-gateway/v1/channel-accounts/{account_id}/notification-targets`
@@ -472,6 +495,10 @@ export const ChannelAccountsApiAxiosParamCreator = function (configuration?: Con
 
             if (recipientId !== undefined) {
                 localVarQueryParameter['recipient_id'] = recipientId;
+            }
+
+            if (checkConnection !== undefined) {
+                localVarQueryParameter['check_connection'] = checkConnection;
             }
 
             if (limit !== undefined) {
@@ -687,11 +714,12 @@ export const ChannelAccountsApiFp = function(configuration?: Configuration) {
          *
          * @summary List channel accounts
          * @param {string} provider External chat channel provider identifier.
+         * @param {boolean} [checkConnection] Perform a bounded read-only WeChat connection check before listing accounts. A successful check does not establish notification send eligibility.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listChannelAccounts(provider: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AccountListView>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listChannelAccounts(provider, options);
+        async listChannelAccounts(provider: string, checkConnection?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AccountListView>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listChannelAccounts(provider, checkConnection, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.listChannelAccounts']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -732,12 +760,13 @@ export const ChannelAccountsApiFp = function(configuration?: Configuration) {
          * @param {string} accountId
          * @param {string} [cursor]
          * @param {string} [recipientId]
+         * @param {boolean} [checkConnection] Perform a bounded read-only WeChat connection check for the known recipient_id. Requires a nonempty recipient_id and never chooses a recipient or sends a message.
          * @param {number} [limit]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async listNotificationTargets(accountId: string, cursor?: string, recipientId?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.listNotificationTargets(accountId, cursor, recipientId, limit, options);
+        async listNotificationTargets(accountId: string, cursor?: string, recipientId?: string, checkConnection?: boolean, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<any>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listNotificationTargets(accountId, cursor, recipientId, checkConnection, limit, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ChannelAccountsApi.listNotificationTargets']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -843,7 +872,7 @@ export const ChannelAccountsApiFactory = function (configuration?: Configuration
          * @throws {RequiredError}
          */
         listChannelAccounts(requestParameters: ChannelAccountsApiListChannelAccountsRequest, options?: RawAxiosRequestConfig): AxiosPromise<AccountListView> {
-            return localVarFp.listChannelAccounts(requestParameters.provider, options).then((request) => request(axios, basePath));
+            return localVarFp.listChannelAccounts(requestParameters.provider, requestParameters.checkConnection, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -873,7 +902,7 @@ export const ChannelAccountsApiFactory = function (configuration?: Configuration
          * @throws {RequiredError}
          */
         listNotificationTargets(requestParameters: ChannelAccountsApiListNotificationTargetsRequest, options?: RawAxiosRequestConfig): AxiosPromise<any> {
-            return localVarFp.listNotificationTargets(requestParameters.accountId, requestParameters.cursor, requestParameters.recipientId, requestParameters.limit, options).then((request) => request(axios, basePath));
+            return localVarFp.listNotificationTargets(requestParameters.accountId, requestParameters.cursor, requestParameters.recipientId, requestParameters.checkConnection, requestParameters.limit, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -953,6 +982,11 @@ export interface ChannelAccountsApiListChannelAccountsRequest {
      * External chat channel provider identifier.
      */
     readonly provider: string
+
+    /**
+     * Perform a bounded read-only WeChat connection check before listing accounts. A successful check does not establish notification send eligibility.
+     */
+    readonly checkConnection?: boolean
 }
 
 /**
@@ -989,6 +1023,11 @@ export interface ChannelAccountsApiListNotificationTargetsRequest {
     readonly cursor?: string
 
     readonly recipientId?: string
+
+    /**
+     * Perform a bounded read-only WeChat connection check for the known recipient_id. Requires a nonempty recipient_id and never chooses a recipient or sends a message.
+     */
+    readonly checkConnection?: boolean
 
     readonly limit?: number
 }
@@ -1082,7 +1121,7 @@ export class ChannelAccountsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public listChannelAccounts(requestParameters: ChannelAccountsApiListChannelAccountsRequest, options?: RawAxiosRequestConfig) {
-        return ChannelAccountsApiFp(this.configuration).listChannelAccounts(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+        return ChannelAccountsApiFp(this.configuration).listChannelAccounts(requestParameters.provider, requestParameters.checkConnection, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1115,7 +1154,7 @@ export class ChannelAccountsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public listNotificationTargets(requestParameters: ChannelAccountsApiListNotificationTargetsRequest, options?: RawAxiosRequestConfig) {
-        return ChannelAccountsApiFp(this.configuration).listNotificationTargets(requestParameters.accountId, requestParameters.cursor, requestParameters.recipientId, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+        return ChannelAccountsApiFp(this.configuration).listNotificationTargets(requestParameters.accountId, requestParameters.cursor, requestParameters.recipientId, requestParameters.checkConnection, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

@@ -1,3 +1,4 @@
+import { SourceImportProvider } from "../SourceImports";
 import { useState, useEffect } from "react";
 import { Space, Radio } from "antd";
 import type { RadioChangeEvent } from "antd";
@@ -20,6 +21,7 @@ export type PreferenceType =
   | "neither";
 
 interface MultiAnswerDisplayProps {
+  conversationId?: string;
   answers: Answer[];
   renderText: (
     content: string,
@@ -41,6 +43,7 @@ interface MultiAnswerDisplayProps {
 
 const MultiAnswerDisplay: React.FC<MultiAnswerDisplayProps> = ({
   answers,
+  conversationId,
   renderText,
   onSelectAnswer,
   disabled = false,
@@ -96,7 +99,7 @@ const MultiAnswerDisplay: React.FC<MultiAnswerDisplayProps> = ({
     return (
       <div className="multi-answer-container">
         {}
-        <div className="selected-answer">
+        <SourceImportProvider context={{ conversation_id: conversationId, history_id: selectedAnswerData.history_id }} sources={selectedAnswerData.sources}><div className="selected-answer">
           <div className="answer-content">
             {renderText(
               selectedAnswerData.content,
@@ -110,7 +113,7 @@ const MultiAnswerDisplay: React.FC<MultiAnswerDisplayProps> = ({
 
           {}
           {renderFooter && renderFooter(selectedAnswer, true)}
-        </div>
+        </div></SourceImportProvider>
       </div>
     );
   }
@@ -119,7 +122,7 @@ const MultiAnswerDisplay: React.FC<MultiAnswerDisplayProps> = ({
       {}
       <div className={`answers-wrapper ${isStreaming ? "streaming" : ""}`}>
         {answers.map((answer, index) => (
-          <div
+          <SourceImportProvider key={answer.history_id || index} context={{ conversation_id: conversationId, history_id: answer.history_id }} sources={answer.sources}><div
             key={answer.history_id || index}
             className={`answer-item ${selectedAnswer === index ? "selected" : ""}`}
           >
@@ -138,7 +141,7 @@ const MultiAnswerDisplay: React.FC<MultiAnswerDisplayProps> = ({
 
             {}
             {renderFooter && renderFooter(index, false)}
-          </div>
+          </div></SourceImportProvider>
         ))}
       </div>
 

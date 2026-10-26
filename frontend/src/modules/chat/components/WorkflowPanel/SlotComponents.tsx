@@ -1,4 +1,5 @@
 import { ArtifactSourceButton } from './ArtifactSourceButton';
+import { downloadWorkflowFile, getWorkflowDownloadHost } from '@/modules/chat/utils/workflowDownload';
 import { WriterProviderChoice } from "./DocumentProviderChoice";
 export { WriterProviderChoice } from "./DocumentProviderChoice";
 import { DocumentArtifactEditor } from "./DocumentArtifactEditor";
@@ -3942,6 +3943,12 @@ function SlotJsonFile({
       return;
     }
     if (!url) return;
+    if (getWorkflowDownloadHost()) {
+      void downloadWorkflowFile({ href: url, filename: name }).catch(error => {
+        Modal.error({ title: tr('chat.writer.downloadFormatFailed'), content: String(error.message ?? error) });
+      });
+      return;
+    }
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = name;

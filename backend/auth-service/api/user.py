@@ -96,6 +96,16 @@ def get_user_role_internal(
     }
 
 
+@router.get('/{user_id}/identity/internal')
+def get_user_identity_internal(
+    user_id: str,
+    _internal: None = Depends(require_internal_service_token),  # noqa: B008
+):
+    from core.current_identity import current_identity
+
+    return current_identity(_parse_user_id(user_id))
+
+
 @router.patch('/role', response_model=OkResponse)
 @permission_required('user.admin')
 def set_user_roles_batch(body: UserRoleBatchBody, _: User = Depends(current_user)):  # noqa: B008

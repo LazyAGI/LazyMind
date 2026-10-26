@@ -35,9 +35,17 @@ const (
 	scheduledResultModelSummaryAttemptKey = "notification_summary_model_attempted_at"
 	scheduledResultSummaryValueKey        = "notification_summary_resolved"
 	scheduledResultSummarySourceKey       = "notification_summary_source"
+	scheduledResultSummaryOccurrenceKey   = "notification_summary_occurrence"
 )
 
 var scheduledResultFinalizationGroup singleflight.Group
+var errScheduledSummaryOccurrenceChanged = errors.New("scheduled summary execution changed")
+
+type scheduledSummaryScope struct {
+	task    orm.TaskCenterTask
+	session *orm.WorkflowSession
+	key     string
+}
 
 func FinalizeScheduledOutput(ctx context.Context, db *gorm.DB, taskID, convID string) string {
 	status, err := finalizeScheduledOutput(ctx, db, taskID, convID)
@@ -77,14 +85,36 @@ func finalizeScheduledOutputOnce(ctx context.Context, db *gorm.DB, taskID, convI
 	} else if done {
 		return task.Status, nil
 	}
+	var sourceSession *orm.WorkflowSession
+	if task.WorkflowSessionID != nil && *task.WorkflowSessionID != "" {
+		session, state, err := reconcileScheduledWorkflowState(ctx, db, task)
+		if err != nil || session == nil || session.Status != "completed" {
+			return state, err
+		}
+		sourceSession = session
+	}
+	var completedAt time.Time
+	if sourceSession != nil {
+		var err error
+		completedAt, err = WorkflowNotificationCompletedAt(ctx, db, *sourceSession)
+		if err != nil {
+			return task.Status, err
+		}
+	}
+	failFinalization := func(cause error) (string, error) {
+		return failScheduledResult(ctx, db, task, sourceSession, completedAt, "最终结果保存失败，请重试任务", cause)
+	}
 	var history orm.ChatHistory
 	if err := db.WithContext(ctx).Where("conversation_id = ?", convID).Order("seq DESC").First(&history).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return "failed", errors.Join(err, UpdateTaskFailure(ctx, db, taskID, "最终结果保存失败，请重试任务"))
+		return failFinalization(err)
 	}
-	if history.RunStatus == "failed" || history.RunStatus == "interrupted" {
-		return "failed", UpdateTaskFailure(ctx, db, taskID, "任务执行失败，请打开任务查看详情。")
+	if sourceSession == nil {
+		completedAt = NotificationHistoryCompletedAt(history.CreateTime, history.UpdateTime, history.Ext)
 	}
-	if history.RunStatus == "cancelled" {
+	if sourceSession == nil && (history.RunStatus == "failed" || history.RunStatus == "interrupted") {
+		return failScheduledResult(ctx, db, task, nil, completedAt, "任务执行失败，请打开任务查看详情。", nil)
+	}
+	if sourceSession == nil && history.RunStatus == "cancelled" {
 		return "canceled", UpdateTaskStatus(ctx, db, taskID, "canceled")
 	}
 	var ext struct {
@@ -97,7 +127,7 @@ func finalizeScheduledOutputOnce(ctx context.Context, db *gorm.DB, taskID, convI
 			} `json:"questions"`
 		} `json:"ask_pending"`
 	}
-	if json.Unmarshal(history.Ext, &ext) == nil && ext.Pending.ID != "" && !ext.Answered {
+	if sourceSession == nil && json.Unmarshal(history.Ext, &ext) == nil && ext.Pending.ID != "" && !ext.Answered {
 		action := ext.Pending.Title
 		if len(ext.Pending.Questions) > 0 {
 			action = ext.Pending.Questions[0].Text
@@ -105,27 +135,15 @@ func finalizeScheduledOutputOnce(ctx context.Context, db *gorm.DB, taskID, convI
 		if action == "" {
 			action = "请打开任务，确认待处理事项。"
 		}
-		if err := WaitScheduledTask(ctx, db, taskID, ext.Pending.ID, action); err != nil {
+		if err := waitScheduledTaskAt(ctx, db, taskID, ext.Pending.ID, action, completedAt); err != nil {
 			return "", err
 		}
 		return "waiting", nil
 	}
-	if task.WorkflowSessionID != nil && *task.WorkflowSessionID != "" {
-		var session orm.WorkflowSession
-		if err := db.WithContext(ctx).First(&session, "id = ?", *task.WorkflowSessionID).Error; err != nil {
-			return task.Status, err
-		}
-		if session.Status == "active" || session.Status == "waiting" {
-			return session.Status, nil
-		}
-		if session.Status == "failed" {
-			return "failed", UpdateTaskFailure(ctx, db, taskID, "任务执行失败，请打开任务查看详情。")
-		}
-	}
 	manifest := make([]artifactManifestItem, 0)
 	var convArts []orm.ConversationArtifact
 	if err := db.WithContext(ctx).Where("conversation_id = ?", convID).Order("created_at ASC").Find(&convArts).Error; err != nil {
-		return "failed", errors.Join(err, UpdateTaskFailure(ctx, db, taskID, "最终结果保存失败，请重试任务"))
+		return failFinalization(err)
 	}
 	for _, a := range convArts {
 		manifest = append(manifest, artifactManifestItem{ArtifactID: a.ID, Name: a.Filename, MIMEType: a.ContentType, SourceTaskID: taskID, Revision: 1})
@@ -135,7 +153,7 @@ func finalizeScheduledOutputOnce(ctx context.Context, db *gorm.DB, taskID, convI
 		Seq                   int
 	}
 	if err := db.WithContext(ctx).Table("sub_agent_artifacts sa").Select("sa.id, sa.slot, sa.content_type, sa.seq").Joins("JOIN sub_agent_tasks st ON st.id = sa.task_id").Where("st.conversation_id = ? AND sa.hidden = false", convID).Order("sa.created_at ASC").Scan(&subArts).Error; err != nil {
-		return "failed", errors.Join(err, UpdateTaskFailure(ctx, db, taskID, "最终结果保存失败，请重试任务"))
+		return failFinalization(err)
 	}
 	for _, a := range subArts {
 		manifest = append(manifest, artifactManifestItem{ArtifactID: a.ID, Name: a.Slot, MIMEType: a.ContentType, SourceTaskID: taskID, Revision: a.Seq})
@@ -147,11 +165,16 @@ func finalizeScheduledOutputOnce(ctx context.Context, db *gorm.DB, taskID, convI
 		status = "empty"
 	}
 	h := sha256.Sum256(append([]byte(answer), manifestJSON...))
+	summaryScope := scheduledSummaryScope{task: task, session: sourceSession,
+		key: hex.EncodeToString(h[:]) + ":" + completedAt.UTC().Format(time.RFC3339Nano)}
+	if sourceSession != nil {
+		summaryScope.key += fmt.Sprintf(":%s:%d:%s", sourceSession.ID, sourceSession.StateVersion, sourceSession.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	}
 	now := time.Now().UTC()
 	summary := scheduledResultSummary(answer)
 	if shouldGenerateScheduledResultModelSummary(task) {
 		started := time.Now()
-		if generated, modelCalled, err := scheduledResultModelSummary(ctx, db, task, answer); err == nil && generated != "" {
+		if generated, modelCalled, err := scheduledResultModelSummary(ctx, db, task, answer, summaryScope); err == nil && generated != "" {
 			summary = generated
 			event := "scheduled_result_model_summary_reused"
 			if modelCalled {
@@ -164,26 +187,19 @@ func finalizeScheduledOutputOnce(ctx context.Context, db *gorm.DB, taskID, convI
 				event = "scheduled_result_model_summary_timeout"
 			}
 			log.Logger.Warn().Err(err).Str("task_id", task.ID).Dur("duration", time.Since(started)).Msg(event)
-			if persistErr := persistScheduledSummaryResolution(ctx, db, task.ID, summary, "fallback"); persistErr != nil {
+			if persistErr := persistScheduledSummaryResolution(ctx, db, task.ID, summary, "fallback", summaryScope); persistErr != nil {
 				log.Logger.Warn().Err(persistErr).Str("task_id", task.ID).Msg("scheduled_result_summary_resolution_persist_failed")
 			}
 			log.Logger.Info().Str("task_id", task.ID).Dur("duration", time.Since(started)).Msg("scheduled_result_summary_fallback_used")
 		} else {
-			if persistErr := persistScheduledSummaryResolution(ctx, db, task.ID, summary, "fallback"); persistErr != nil {
+			if persistErr := persistScheduledSummaryResolution(ctx, db, task.ID, summary, "fallback", summaryScope); persistErr != nil {
 				log.Logger.Warn().Err(persistErr).Str("task_id", task.ID).Msg("scheduled_result_summary_resolution_persist_failed")
 			}
 			log.Logger.Info().Str("task_id", task.ID).Dur("duration", time.Since(started)).Msg("scheduled_result_summary_fallback_used")
 		}
 	}
 	out := orm.TaskRunOutput{ID: common.GeneratePrefixedID("out_", 36), TaskID: taskID, ConversationID: convID, FinalAnswerText: answer, SummaryText: summary, ArtifactManifestJSON: manifestJSON, OutputStatus: status, ContentHash: hex.EncodeToString(h[:]), CreatedAt: now, UpdatedAt: now}
-	err := notificationTx(ctx, db, func(tx *gorm.DB) error {
-		var current orm.TaskCenterTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", taskID).Error; err != nil {
-			return err
-		}
-		if current.ArchivedAt != nil {
-			return nil
-		}
+	applied, currentState, err := scheduledSessionTaskTransaction(ctx, db, task, sourceSession, func(tx *gorm.DB, _ *orm.WorkflowSession, current *orm.TaskCenterTask) error {
 		if isTerminal(current.Status) {
 			if current.Status == "succeeded" {
 				// Legacy dependency materialization must not replay notifications or
@@ -198,21 +214,104 @@ func finalizeScheduledOutputOnce(ctx context.Context, db *gorm.DB, taskID, convI
 			return err
 		}
 		if status == "ready" {
-			return UpdateTaskStatus(ctx, tx, taskID, "succeeded")
+			return updateTaskStatusAt(ctx, tx, taskID, "succeeded", false, completedAt)
 		}
-		return UpdateTaskFailure(ctx, tx, taskID, "聊天服务未生成可用结果")
+		return updateTaskFailureAt(ctx, tx, taskID, "聊天服务未生成可用结果", completedAt)
 	})
 	if err != nil {
 		var notificationErr *notificationPersistenceError
-		if errors.As(err, &notificationErr) {
+		if errors.As(err, &notificationErr) || common.IsSQLiteBusy(err) {
 			// History is already durable. Leave this run recoverable without
 			// turning a notification storage outage into a business failure.
 			return task.Status, err
 		}
-		failureErr := UpdateTaskFailure(ctx, db, taskID, "最终结果保存失败，请重试任务")
-		return "failed", errors.Join(err, failureErr)
+		return failFinalization(err)
+	}
+	if !applied {
+		return currentState, nil
 	}
 	return status, nil
+}
+
+// Read the session before its tracked task, matching retry admission's lock
+// order. Expensive output collection and model work happen outside this short
+// transaction; their final write must still match the captured occurrence.
+func scheduledSessionTaskTransaction(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask, expected *orm.WorkflowSession, apply func(*gorm.DB, *orm.WorkflowSession, *orm.TaskCenterTask) error) (bool, string, error) {
+	matched, state := false, task.Status
+	err := notificationTx(ctx, db, func(tx *gorm.DB) error {
+		matched = false
+		var session *orm.WorkflowSession
+		if task.WorkflowSessionID != nil && *task.WorkflowSessionID != "" {
+			session = &orm.WorkflowSession{}
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(session, "id = ?", *task.WorkflowSessionID).Error; err != nil {
+				return err
+			}
+			state = session.Status
+			if expected != nil && (session.ID != expected.ID || session.Status != expected.Status ||
+				session.StateVersion != expected.StateVersion || !session.UpdatedAt.Equal(expected.UpdatedAt)) {
+				return nil
+			}
+		}
+		var current orm.TaskCenterTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", task.ID).Error; err != nil {
+			return err
+		}
+		state = current.Status
+		if current.ArchivedAt != nil || isTerminal(current.Status) && current.Status != "succeeded" {
+			return nil
+		}
+		if session != nil && (current.WorkflowSessionID == nil || *current.WorkflowSessionID != session.ID) {
+			return nil
+		}
+		matched = true
+		return apply(tx, session, &current)
+	})
+	return matched, state, err
+}
+
+func failScheduledResult(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask, expected *orm.WorkflowSession, completedAt time.Time, reason string, cause error) (string, error) {
+	if common.IsSQLiteBusy(cause) {
+		return task.Status, cause
+	}
+	applied, state, err := scheduledSessionTaskTransaction(ctx, db, task, expected, func(tx *gorm.DB, _ *orm.WorkflowSession, _ *orm.TaskCenterTask) error {
+		return updateTaskFailureAt(ctx, tx, task.ID, reason, completedAt)
+	})
+	if applied {
+		state = "failed"
+	}
+	return state, errors.Join(cause, err)
+}
+
+func reconcileScheduledWorkflowState(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask) (*orm.WorkflowSession, string, error) {
+	var source *orm.WorkflowSession
+	matched, state, err := scheduledSessionTaskTransaction(ctx, db, task, nil, func(tx *gorm.DB, session *orm.WorkflowSession, _ *orm.TaskCenterTask) error {
+		copy := *session
+		source = &copy
+		switch session.Status {
+		case "failed":
+			completedAt, err := WorkflowNotificationCompletedAt(ctx, tx, *session)
+			if err != nil {
+				return err
+			}
+			return updateTaskFailureAt(ctx, tx, task.ID, "任务执行失败，请打开任务查看详情。", completedAt)
+		case "waiting":
+			var step orm.WorkflowSessionStep
+			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID, session.CurrentStepID, "effective").
+				Order("attempt DESC").Order("created_at DESC").Limit(1).Find(&step).Error; err != nil {
+				return err
+			}
+			if step.ID != "" && (session.WorkflowMode == "dynamic" || step.Status == "interrupted") {
+				return waitScheduledTaskAt(ctx, tx, task.ID, step.ID, "请打开任务，确认当前步骤并继续执行。", step.UpdatedAt)
+			}
+		}
+		return nil
+	})
+	if !matched {
+		source = nil
+	} else if source != nil {
+		state = source.Status
+	}
+	return source, state, err
 }
 
 func scheduledResultAlreadyFinalized(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask) (bool, error) {
@@ -232,7 +331,7 @@ func scheduledResultAlreadyFinalized(ctx context.Context, db *gorm.DB, task orm.
 // scheduledResultModelSummary asks the configured model to summarize the full
 // task result. It is deliberately best-effort: a summary outage must never
 // turn an otherwise successful task into a failed task.
-func scheduledResultModelSummary(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask, answer string) (string, bool, error) {
+func scheduledResultModelSummary(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask, answer string, scope ...scheduledSummaryScope) (string, bool, error) {
 	if strings.TrimSpace(answer) == "" || db == nil || strings.TrimSpace(task.UserID) == "" {
 		return "", false, nil
 	}
@@ -264,13 +363,13 @@ func scheduledResultModelSummary(ctx context.Context, db *gorm.DB, task orm.Task
 	if err != nil {
 		return "", false, err
 	}
-	claimed, err := claimScheduledResultModelSummary(summaryCtx, db, task.ID)
+	claimed, err := claimScheduledResultModelSummary(summaryCtx, db, task.ID, scope...)
 	if err != nil {
 		return "", false, err
 	}
 	if !claimed {
 		log.Logger.Info().Str("task_id", task.ID).Msg("scheduled_result_model_summary_already_attempted")
-		summary, err := waitForScheduledSummaryResolution(summaryCtx, db, task.ID)
+		summary, err := waitForScheduledSummaryResolution(summaryCtx, db, task.ID, scope...)
 		return summary, false, err
 	}
 	generated, err := requestScheduledResultModelSummary(summaryCtx, answer, config, algo.GenerateLearning)
@@ -278,14 +377,24 @@ func scheduledResultModelSummary(ctx context.Context, db *gorm.DB, task orm.Task
 		return "", true, err
 	}
 	if generated != "" {
-		if err := persistScheduledSummaryResolution(summaryCtx, db, task.ID, generated, "model"); err != nil {
+		if err := persistScheduledSummaryResolution(summaryCtx, db, task.ID, generated, "model", scope...); err != nil {
 			return "", true, err
 		}
 	}
 	return generated, true, nil
 }
 
-func loadScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID string) (string, string, bool, error) {
+func loadScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID string, scope ...scheduledSummaryScope) (string, string, bool, error) {
+	if len(scope) > 0 && scope[0].session != nil {
+		var current orm.WorkflowSession
+		expected := scope[0].session
+		if err := db.WithContext(ctx).First(&current, "id = ?", expected.ID).Error; err != nil {
+			return "", "", false, err
+		}
+		if current.Status != expected.Status || current.StateVersion != expected.StateVersion || !current.UpdatedAt.Equal(expected.UpdatedAt) {
+			return "", "", false, errScheduledSummaryOccurrenceChanged
+		}
+	}
 	var task orm.TaskCenterTask
 	if err := db.WithContext(ctx).Select("progress_json").First(&task, "id = ?", taskID).Error; err != nil {
 		return "", "", false, err
@@ -294,17 +403,20 @@ func loadScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID str
 	if len(task.ProgressJSON) == 0 || json.Unmarshal(task.ProgressJSON, &progress) != nil {
 		return "", "", false, nil
 	}
+	if len(scope) > 0 && progress[scheduledResultSummaryOccurrenceKey] != scope[0].key {
+		return "", "", false, errScheduledSummaryOccurrenceChanged
+	}
 	value, _ := progress[scheduledResultSummaryValueKey].(string)
 	source, _ := progress[scheduledResultSummarySourceKey].(string)
 	value = normalizeScheduledModelSummary(value)
 	return value, source, value != "", nil
 }
 
-func waitForScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID string) (string, error) {
+func waitForScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID string, scope ...scheduledSummaryScope) (string, error) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		summary, _, resolved, err := loadScheduledSummaryResolution(ctx, db, taskID)
+		summary, _, resolved, err := loadScheduledSummaryResolution(ctx, db, taskID, scope...)
 		if err != nil || resolved {
 			return summary, err
 		}
@@ -316,16 +428,22 @@ func waitForScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID 
 	}
 }
 
-func persistScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID, summary, source string) error {
-	return notificationTx(ctx, db, func(tx *gorm.DB) error {
-		var task orm.TaskCenterTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "progress_json").First(&task, "id = ?", taskID).Error; err != nil {
-			return err
-		}
+func persistScheduledSummaryResolution(ctx context.Context, db *gorm.DB, taskID, summary, source string, scope ...scheduledSummaryScope) error {
+	return scheduledSummaryTransaction(ctx, db, taskID, scope, func(tx *gorm.DB, task *orm.TaskCenterTask) error {
 		progress := map[string]any{}
 		if len(task.ProgressJSON) > 0 && strings.TrimSpace(string(task.ProgressJSON)) != "null" {
 			if err := json.Unmarshal(task.ProgressJSON, &progress); err != nil {
 				return err
+			}
+		}
+		if len(scope) > 0 {
+			if key, exists := progress[scheduledResultSummaryOccurrenceKey]; exists && key != scope[0].key {
+				return nil
+			}
+			if progress[scheduledResultSummaryOccurrenceKey] != scope[0].key {
+				delete(progress, scheduledResultSummaryValueKey)
+				delete(progress, scheduledResultSummarySourceKey)
+				progress[scheduledResultSummaryOccurrenceKey] = scope[0].key
 			}
 		}
 		if existing, _ := progress[scheduledResultSummaryValueKey].(string); strings.TrimSpace(existing) != "" {
@@ -345,18 +463,21 @@ func scheduledResultSummaryContext(parent context.Context) (context.Context, con
 	return context.WithTimeout(parent, scheduledResultSummaryTimeout)
 }
 
-func claimScheduledResultModelSummary(ctx context.Context, db *gorm.DB, taskID string) (bool, error) {
+func claimScheduledResultModelSummary(ctx context.Context, db *gorm.DB, taskID string, scope ...scheduledSummaryScope) (bool, error) {
 	claimed := false
-	err := notificationTx(ctx, db, func(tx *gorm.DB) error {
-		var task orm.TaskCenterTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "progress_json").First(&task, "id = ?", taskID).Error; err != nil {
-			return err
-		}
+	err := scheduledSummaryTransaction(ctx, db, taskID, scope, func(tx *gorm.DB, task *orm.TaskCenterTask) error {
+		claimed = false
 		progress := map[string]any{}
 		if len(task.ProgressJSON) > 0 && strings.TrimSpace(string(task.ProgressJSON)) != "null" {
 			if err := json.Unmarshal(task.ProgressJSON, &progress); err != nil {
 				return err
 			}
+		}
+		if len(scope) > 0 && progress[scheduledResultSummaryOccurrenceKey] != scope[0].key {
+			delete(progress, scheduledResultModelSummaryAttemptKey)
+			delete(progress, scheduledResultSummaryValueKey)
+			delete(progress, scheduledResultSummarySourceKey)
+			progress[scheduledResultSummaryOccurrenceKey] = scope[0].key
 		}
 		if progress[scheduledResultModelSummaryAttemptKey] != nil {
 			return nil
@@ -373,6 +494,25 @@ func claimScheduledResultModelSummary(ctx context.Context, db *gorm.DB, taskID s
 		return nil
 	})
 	return claimed, err
+}
+
+func scheduledSummaryTransaction(ctx context.Context, db *gorm.DB, taskID string, scope []scheduledSummaryScope, apply func(*gorm.DB, *orm.TaskCenterTask) error) error {
+	if len(scope) > 0 {
+		matched, _, err := scheduledSessionTaskTransaction(ctx, db, scope[0].task, scope[0].session, func(tx *gorm.DB, _ *orm.WorkflowSession, task *orm.TaskCenterTask) error {
+			return apply(tx, task)
+		})
+		if err == nil && !matched {
+			return errScheduledSummaryOccurrenceChanged
+		}
+		return err
+	}
+	return notificationTx(ctx, db, func(tx *gorm.DB) error {
+		var task orm.TaskCenterTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "progress_json").First(&task, "id = ?", taskID).Error; err != nil {
+			return err
+		}
+		return apply(tx, &task)
+	})
 }
 
 type scheduledResultSummaryGenerator func(context.Context, algo.LearningGenerateRequest) (string, error)
@@ -646,35 +786,16 @@ func ReconcileScheduledNotifications(ctx context.Context, db *gorm.DB, after str
 	var recoveryErr error
 	for _, task := range tasks {
 		if task.WorkflowSessionID != nil && *task.WorkflowSessionID != "" {
-			var session orm.WorkflowSession
-			if err := db.WithContext(ctx).First(&session, "id = ?", *task.WorkflowSessionID).Error; err != nil {
+			session, _, err := reconcileScheduledWorkflowState(ctx, db, task)
+			if err != nil {
 				recoveryErr = errors.Join(recoveryErr, err)
 				continue
 			}
-			switch session.Status {
-			case "failed":
-				if err := UpdateTaskFailure(ctx, db, task.ID, "任务执行失败，请打开任务查看详情。"); err != nil {
-					recoveryErr = errors.Join(recoveryErr, err)
-				}
-				continue
-			case "completed":
+			if session != nil && session.Status == "completed" {
 				_, err := finalizeScheduledOutput(ctx, db, task.ID, task.ConversationID)
 				recoveryErr = errors.Join(recoveryErr, err)
-				continue
-			case "waiting":
-				var step orm.WorkflowSessionStep
-				result := db.WithContext(ctx).Where("session_id = ? AND step_id = ?", session.ID, session.CurrentStepID).Order("created_at DESC").Limit(1).Find(&step)
-				if result.Error != nil {
-					recoveryErr = errors.Join(recoveryErr, result.Error)
-					continue
-				}
-				if step.ID != "" && (session.WorkflowMode == "dynamic" || step.Status == "interrupted") {
-					if err := WaitScheduledTask(ctx, db, task.ID, step.ID, "请打开任务，确认当前步骤并继续执行。"); err != nil {
-						recoveryErr = errors.Join(recoveryErr, err)
-					}
-				}
-				continue
 			}
+			continue
 		}
 		var history orm.ChatHistory
 		result := db.WithContext(ctx).Where("conversation_id = ?", task.ConversationID).Order("seq DESC").Limit(1).Find(&history)

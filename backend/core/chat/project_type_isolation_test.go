@@ -17,11 +17,15 @@ import (
 
 func TestProjectTypesHaveIndependentLifecycle(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	db := orm.MigrateAllModelsForTest(t)
+	db := newConversationTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	const uid = "project-types"
-	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "shared", CanonicalPath: t.TempDir(), Source: "local"})
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := localworkspace.Register(t.Context(), db.DB, uid, localworkspace.RegisterInput{DisplayName: "shared", CanonicalPath: root, Source: "local"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,11 +139,14 @@ func TestProjectTypesHaveIndependentLifecycle(t *testing.T) {
 
 func TestSameNameProjectsUseDirectoryIdentity(t *testing.T) {
 	t.Setenv("LAZYMIND_RUNTIME_MODE", "local")
-	db := orm.MigrateAllModelsForTest(t)
+	db := newConversationTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	const uid = "same-name-projects"
-	root := t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	projectIDs := map[string]bool{}
 	for _, parent := range []string{"work", "personal"} {
 		path := filepath.Join(root, parent, "foo")

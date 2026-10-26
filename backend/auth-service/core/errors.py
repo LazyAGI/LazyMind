@@ -153,6 +153,11 @@ class ErrorCodes:
         1000832,
         'cloud connection must be verified before it can be enabled',
     )
+    CLOUD_CONNECTION_REAUTH_REQUIRED: ErrorTuple = (
+        409,
+        1000833,
+        'cloud connection requires reauthorization',
+    )
     MAIL_SERVER_UNREACHABLE: ErrorTuple = (400, 1000829, 'mailbox server unreachable')
     MAIL_SMTP_VERIFY_FAILED: ErrorTuple = (400, 1000830, 'mailbox SMTP login failed')
 

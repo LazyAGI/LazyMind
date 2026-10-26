@@ -9,6 +9,7 @@ import email
 import hashlib
 import imaplib
 import json
+from html.parser import HTMLParser
 import mimetypes
 import os
 import re
@@ -946,31 +947,64 @@ def _uid_tokens(data: Any) -> list[str]:
     return [token for token in text.split() if token.isdigit()]
 
 
-def _search_criteria_with_uid_ceiling(criteria: list[str], ceiling: int | None) -> list[str]:
+class _IMAPSearchLiterals:
+    """Continuation responder for imaplib's multi-literal command transport."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = iter(chunks)
+
+    def respond(self, _continuation: bytes) -> bytes:
+        try:
+            return next(self.chunks)
+        except StopIteration as exc:
+            raise imaplib.IMAP4.error('Unexpected SEARCH literal continuation') from exc
+
+
+def _imap_uid_search(client, criteria: list[str | bytes]):
+    if not any(isinstance(arg, bytes) for arg in criteria):
+        return client.uid('SEARCH', *criteria)
+    # Strings are protocol syntax; bytes are unquoted UTF-8 values. Each literal
+    # waits for the server's continuation, including when multiple fields filter
+    # the same search. Keep UID/date constraints in that one command.
+    chunks = [b'']
+    for arg in criteria:
+        if isinstance(arg, bytes):
+            chunks[-1] += b' {' + str(len(arg)).encode('ascii') + b'}'
+            chunks.append(arg)
+        else:
+            chunks[-1] += b' ' + arg.encode('ascii')
+    client.literal = _IMAPSearchLiterals(chunks[1:]).respond
+    try:
+        return client.uid('SEARCH', chunks[0].lstrip())
+    finally:
+        client.literal = None
+
+
+def _search_criteria_with_uid_ceiling(criteria: list[str | bytes], ceiling: int | None) -> list[str | bytes]:
     if ceiling is None:
         return list(criteria)
     return [*criteria, 'UID', f'1:{ceiling}']
 
 
-def _collect_matching_uids(client, criteria: list[str], limit: int) -> tuple[list[str], bool, bool]:
-    """Page UID SEARCH toward older mail until `limit` is filled or the server stops.
+def _collect_matching_uids(client, criteria: list[str | bytes], limit: int) -> tuple[list[str], bool, bool]:
+    """Return matching UIDs, known additional matches, and incomplete search status.
 
-    Returns UIDs to fetch (ascending, at most `limit`), whether older matches
-    remain, and whether the visible IMAP window was exhausted before `limit`.
+    An empty successful SEARCH ends this query; it cannot prove that the server
+    hides older mail. Only a failed request or non-progressing pagination is a gap.
     """
     collected: list[str] = []
     seen: set[str] = set()
     ceiling: int | None = None
     has_more = False
-    exhausted = False
+    incomplete = False
     for _page in range(_SEARCH_PAGE_GUARD):
-        status, data = client.uid('SEARCH', *_search_criteria_with_uid_ceiling(criteria, ceiling))
+        status, data = _imap_uid_search(client, _search_criteria_with_uid_ceiling(criteria, ceiling))
         if status != 'OK':
-            exhausted = True
-            break
-        fresh = [uid for uid in _uid_tokens(data) if uid not in seen]
+            _fail('IMAP SEARCH failed; search coverage is unknown.')
+        tokens = _uid_tokens(data)
+        fresh = [uid for uid in tokens if uid not in seen and (ceiling is None or int(uid) <= ceiling)]
         if not fresh:
-            exhausted = True
+            incomplete = bool(tokens)
             break
         seen.update(fresh)
         collected.extend(fresh)
@@ -979,31 +1013,25 @@ def _collect_matching_uids(client, criteria: list[str], limit: int) -> tuple[lis
             has_more = True
             break
         if oldest <= 1:
-            exhausted = len(collected) <= limit
-            has_more = False
             break
         if len(collected) == limit:
-            probe_status, probe_data = client.uid(
-                'SEARCH',
-                *_search_criteria_with_uid_ceiling(criteria, oldest - 1),
+            probe_status, probe_data = _imap_uid_search(
+                client, _search_criteria_with_uid_ceiling(criteria, oldest - 1),
             )
-            probe_fresh = []
-            if probe_status == 'OK':
-                probe_fresh = [uid for uid in _uid_tokens(probe_data) if uid not in seen]
-            has_more = bool(probe_fresh)
-            exhausted = not has_more
+            if probe_status != 'OK':
+                _fail('IMAP SEARCH failed; search coverage is unknown.')
+            tokens = _uid_tokens(probe_data)
+            has_more = any(uid not in seen and int(uid) < oldest for uid in tokens)
+            incomplete = bool(tokens) and not has_more
             break
         ceiling = oldest - 1
     else:
-        exhausted = len(collected) < limit
-        has_more = len(collected) > limit
+        incomplete = True
     ordered = sorted(collected, key=lambda item: int(item))
     if len(ordered) > limit:
         ordered = ordered[-limit:]
         has_more = True
-        exhausted = False
-    short = exhausted and len(ordered) < limit and not has_more
-    return ordered, has_more, short
+    return ordered, has_more, incomplete
 
 
 def _iter_uid_fetch_payloads(fetched: Any) -> list[tuple[str, bytes]]:
@@ -1040,7 +1068,7 @@ def _fetch_header_messages(client, uids: list[str]) -> dict[str, email.message.M
     return found
 
 
-def _imap_search_args(filters: dict[str, str]) -> list[str]:
+def _imap_search_args(filters: dict[str, str]) -> list[str | bytes]:
     fields: list[tuple[str, str]] = []
     for key, atom in (
         ('sender', 'FROM'),
@@ -1054,12 +1082,12 @@ def _imap_search_args(filters: dict[str, str]) -> list[str]:
     since = _imap_date(str(filters.get('after') or ''))
     before = _imap_date(str(filters.get('before') or ''), before=True)
     needs_charset = any(not value.isascii() for _atom, value in fields)
-    args: list[str] = []
+    args: list[str | bytes] = []
     if needs_charset:
         args.extend(['CHARSET', 'UTF-8'])
     args.append('ALL')
     for atom, value in fields:
-        args.extend([atom, _quote_imap_string(value)])
+        args.extend([atom, _quote_imap_string(value) if value.isascii() else value.encode('utf-8')])
     if since:
         args.extend(['SINCE', since])
     if before:
@@ -1526,6 +1554,31 @@ def _resolve_imap_endpoint(provider: str, email: str) -> dict[str, Any]:
     }
 
 
+class _MailTextParser(HTMLParser):
+    """Render email HTML as text without loading resources or exposing scripts."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.hidden = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {'script', 'style', 'head'}:
+            self.hidden += 1
+        if not self.hidden and tag in {'br', 'p', 'div', 'tr', 'li', 'hr'}:
+            self.parts.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag in {'script', 'style', 'head'}:
+            self.hidden = max(0, self.hidden - 1)
+        if not self.hidden and tag in {'p', 'div', 'tr', 'li'}:
+            self.parts.append('\n')
+
+    def handle_data(self, data):
+        if not self.hidden:
+            self.parts.append(data)
+
+
 class _IMAPBackend:
     def __init__(self, cred: dict[str, str]) -> None:
         self.provider = cred['provider']
@@ -1566,26 +1619,23 @@ class _IMAPBackend:
         client = self._connect()
         try:
             criteria = _imap_search_args(filters)
-            if any(isinstance(item, str) and not item.isascii() for item in criteria):
-                client._encoding = 'utf-8'
             folders = _resolve_search_folders(client, filters.get('folder', ''))
             items = []
             limit = _clamp_limit(filters.get('limit', _LIST_DEFAULT_LIMIT))
             has_more = False
-            searched_folders = 0
-            exhausted_folders = 0
+            search_incomplete = False
             for folder in folders:
                 if not _select_mailbox(client, folder, readonly=True):
+                    search_incomplete = True
                     continue
-                uids, folder_more, folder_exhausted = _collect_matching_uids(client, criteria, limit)
-                searched_folders += 1
-                if folder_exhausted:
-                    exhausted_folders += 1
+                uids, folder_more, folder_incomplete = _collect_matching_uids(client, criteria, limit)
+                search_incomplete = search_incomplete or folder_incomplete
                 has_more = has_more or folder_more
                 headers = _fetch_header_messages(client, list(reversed(uids)))
                 for token in reversed(uids):
                     msg = headers.get(token)
                     if msg is None:
+                        search_incomplete = True
                         continue
                     items.append({
                         'id': _mail_ref(folder, token),
@@ -1600,13 +1650,6 @@ class _IMAPBackend:
             items.sort(key=lambda row: str(row.get('date') or ''), reverse=True)
             capped = items[:limit]
             dates = [str(row.get('date') or '') for row in capped if row.get('date')]
-            window_exhausted = (
-                searched_folders > 0
-                and exhausted_folders == searched_folders
-                and len(capped) < limit
-                and not has_more
-                and len(items) <= limit
-            )
             payload = {
                 'provider': self.provider,
                 'mailbox': self.email,
@@ -1615,7 +1658,7 @@ class _IMAPBackend:
                 'requested': limit,
                 'returned': len(capped),
                 'has_more': has_more or len(items) > limit,
-                'window_exhausted': window_exhausted,
+                'search_incomplete': search_incomplete,
             }
             if dates:
                 payload['oldest_date'] = min(dates)
@@ -1662,21 +1705,47 @@ class _IMAPBackend:
             return []
         return _attachments_from_bodystructure(_imap_fetch_text(fetched))
 
+    def read_preview(self, message_id: str, expected_message_id: str) -> dict[str, Any]:
+        """Read a bounded original for the UI, verifying identity before the body."""
+        client = self._connect()
+        try:
+            header = self._fetch_raw(message_id, '(BODY.PEEK[HEADER])', client)
+            actual = str(email.message_from_bytes(header).get('Message-ID') or '').strip()
+            if not expected_message_id or actual != expected_message_id:
+                raise ValueError('mail_location_changed')
+            # One lookahead byte distinguishes exactly-at-limit from truncated text.
+            body = self._fetch_raw(message_id, '(BODY.PEEK[TEXT]<0.20001>)', client)
+            raw = header.rstrip(b'\r\n') + b'\r\n\r\n' + body[:20000]
+            result = self._read_parsed_message(message_id, raw, retry_full=False,
+                                               client=client, plain_only=True,
+                                               body_truncated=len(body) > 20000)
+            result['attachments'] = self._list_structure_attachments(message_id, client)
+            result['mailbox'] = self.email
+            return result
+        finally:
+            try:
+                client.logout()
+            except Exception:
+                pass
+
     def _read_message(self, message_id: str, client=None) -> dict[str, Any]:
         own = client is None
         if own:
             client = self._connect()
         try:
             attachments = self._list_structure_attachments(message_id, client)
-            raw = self._fetch_raw(
-                message_id,
-                '(BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.20000>)',
-                client,
-                required=False,
-            )
-            if not raw:
+            # FETCH sections may arrive in a different order than requested.
+            # Read them separately, as the preview does, before assembling MIME.
+            header = self._fetch_raw(message_id, '(BODY.PEEK[HEADER])', client, required=False)
+            body = self._fetch_raw(message_id, '(BODY.PEEK[TEXT]<0.20001>)', client, required=False)
+            body_truncated = False
+            if header and body:
+                raw = header.rstrip(b'\r\n') + b'\r\n\r\n' + body[:20000]
+                body_truncated = len(body) > 20000
+            else:
                 raw = self._fetch_raw(message_id, '(RFC822)', client)
-            parsed = self._read_parsed_message(message_id, raw, client=client)
+            parsed = self._read_parsed_message(message_id, raw, client=client,
+                                               body_truncated=body_truncated)
             if attachments:
                 parsed['attachments'] = attachments
             return parsed
@@ -1694,6 +1763,8 @@ class _IMAPBackend:
         *,
         retry_full: bool = True,
         client=None,
+        plain_only: bool = False,
+        body_truncated: bool = False,
     ) -> dict[str, Any]:
         msg = email.message_from_bytes(raw)
         attachments = []
@@ -1723,8 +1794,12 @@ class _IMAPBackend:
                 body_parts.append(text)
             elif part.get_content_type() == 'text/html':
                 html_parts.append(text)
-                if not body_parts:
+                if not plain_only and not body_parts:
                     body_parts.append(re.sub(r'<[^>]+>', ' ', text))
+        if plain_only and not body_parts:
+            parser = _MailTextParser()
+            parser.feed('\n'.join(html_parts))
+            body_parts = [''.join(parser.parts).strip()]
         transfer_links = []
         for html in html_parts:
             transfer_links.extend(_extract_transfer_links(html))
@@ -1735,7 +1810,16 @@ class _IMAPBackend:
             full = self._fetch_raw(message_id, '(RFC822)', client, required=False)
             if full and full != raw:
                 return self._read_parsed_message(message_id, full, retry_full=False)
-        return self._message_payload(message_id, msg, body_parts, attachments, transfer_links)
+        result = self._message_payload(message_id, msg, body_parts, attachments, transfer_links)
+        if body_truncated:
+            # A clipped HTML alternative or attachment does not truncate an earlier,
+            # complete plain-text body. Only the final MIME leaf can be clipped.
+            parts = [part for _, part in _mime_section_parts(msg)]
+            text_parts = [part for part in parts if not part.get_filename()
+                          and part.get_content_type() in {'text/plain', 'text/html'}]
+            shown = [part for part in text_parts if part.get_content_type() == 'text/plain'] or text_parts
+            result['truncated'] = result['truncated'] or not shown or parts[-1] in shown
+        return result
 
     def _message_payload(
         self,
@@ -1763,6 +1847,7 @@ class _IMAPBackend:
             'date': _display_mail_date(msg.get('Date')),
             'folder': _split_mail_ref(message_id)[0],
             'body': '\n'.join(body_parts)[:20000],
+            'truncated': len('\n'.join(body_parts)) > 20000,
             'attachments': attachments,
             'transfer_links': unique_links,
             'cite': f'email:{message_id}',
@@ -2128,10 +2213,10 @@ class MailToolkit:
                 Result ids are folder::UID; pass that exact id to read.
                 Use inbox when the user asked for inbox mail.
 
-        When returned is less than requested and reason is imap_window_exhausted,
-        the server did not expose older mail. Say that in one sentence and stop.
-        Do not issue another search to hunt for those missing messages.
-        A further search is only for mail the user still wants when has_more is true.
+        A successful zero result means no matches for these filters in the searched folders.
+        Fewer results than limit do not prove that older mail is unavailable.
+        reason=search_incomplete indicates an access or pagination gap; disclose it.
+        Follow next_before only when has_more is true.
         """
         requested = str(mailbox or '').strip()
         if requested:
@@ -2144,8 +2229,7 @@ class MailToolkit:
         errors: list[dict[str, Any]] = []
         capped = _clamp_limit(limit)
         has_more = False
-        searched_accounts = 0
-        exhausted_accounts = 0
+        search_incomplete = False
         kwargs = {
             'keyword': str(keyword or '').strip(),
             'sender': str(sender or '').strip(),
@@ -2167,9 +2251,7 @@ class MailToolkit:
                 })
                 continue
             has_more = has_more or bool(result.get('has_more'))
-            searched_accounts += 1
-            if result.get('window_exhausted'):
-                exhausted_accounts += 1
+            search_incomplete = search_incomplete or bool(result.get('search_incomplete'))
             items.extend(item for item in (result.get('items') or []) if isinstance(item, dict))
         if not items and errors and len(errors) == len(accounts):
             _fail(errors[0]['error'])
@@ -2189,19 +2271,14 @@ class MailToolkit:
             continue_before = _search_continue_before(str(payload.get('oldest_date') or ''))
             if continue_before:
                 payload['next_before'] = continue_before
-        if (
-            payload['returned'] < capped
-            and not payload['has_more']
-            and searched_accounts > 0
-            and exhausted_accounts == searched_accounts
-            and not errors
-        ):
-            payload['reason'] = 'imap_window_exhausted'
+        if search_incomplete or errors:
+            payload['status'] = 'partial'
+            payload['reason'] = 'search_incomplete'
             payload['message'] = (
-                f'The mailbox only exposed {payload["returned"]} of the requested '
-                f'{capped} messages. Older mail is not available over IMAP. '
-                'Do not search again for the missing messages.'
-            )
+                'Some folders/accounts, search pages, or matching message headers could not be fully checked.')
+        elif not returned_items:
+            payload['reason'] = 'no_matches'
+            payload['message'] = 'No matching messages in the searched folders for these filters.'
         if errors:
             payload['errors'] = errors
         return payload

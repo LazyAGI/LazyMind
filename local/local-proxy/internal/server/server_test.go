@@ -1143,6 +1143,110 @@ func TestAPIProxy_UpstreamTimeoutReturns504(t *testing.T) {
 	}
 }
 
+func TestAPIProxy_ChannelGatewayTransportErrorsHaveDedicatedCodes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{
+			name:   "connection refused",
+			err:    fmt.Errorf("dial tcp 127.0.0.1:8085: connect: connection refused"),
+			status: http.StatusServiceUnavailable,
+			code:   "CHANNEL_GATEWAY_UNAVAILABLE",
+		},
+		{
+			name:   "DNS failure",
+			err:    fmt.Errorf("lookup private.internal: no such host"),
+			status: http.StatusServiceUnavailable,
+			code:   "CHANNEL_GATEWAY_UNAVAILABLE",
+		},
+		{
+			name:   "timeout",
+			err:    fmt.Errorf("private.internal: %w", context.DeadlineExceeded),
+			status: http.StatusGatewayTimeout,
+			code:   "CHANNEL_GATEWAY_TIMEOUT",
+		},
+		{
+			name:   "other transport error",
+			err:    io.EOF,
+			status: http.StatusBadGateway,
+			code:   "CHANNEL_GATEWAY_UNAVAILABLE",
+		},
+	}
+	for _, stripPath := range []bool{false, true} {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("%s/stripPath=%t", tc.name, stripPath), func(t *testing.T) {
+				t.Parallel()
+				rt := &roundTripper{errorByHost: map[string]error{"private.internal": tc.err}}
+				cfg := config.Config{Routes: []config.RouteConfig{{
+					Name: "channel-gateway", Prefix: "/api/channel-gateway",
+					Upstream: "http://private.internal/backend", StripPath: stripPath,
+					Enabled: true, Public: true,
+				}}}
+				resp := httptest.NewRecorder()
+				newAPIProxyHandler(cfg, rt).ServeHTTP(resp, httptest.NewRequest(
+					http.MethodGet, "/api/channel-gateway/v1/channel-accounts", nil,
+				))
+				if resp.Code != tc.status {
+					t.Fatalf("status = %d, want %d", resp.Code, tc.status)
+				}
+				var payload map[string]string
+				if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+					t.Fatalf("decode json: %v", err)
+				}
+				if payload["code"] != tc.code || !strings.Contains(payload["error"], "restart the local service") {
+					t.Fatalf("unexpected error payload: %#v", payload)
+				}
+				for _, detail := range []string{"private.internal", "127.0.0.1", "8085", tc.err.Error()} {
+					if strings.Contains(payload["error"], detail) {
+						t.Fatalf("error payload leaked transport detail %q: %#v", detail, payload)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestAPIProxy_OtherRouteTransportErrorsKeepExistingPayload(t *testing.T) {
+	t.Parallel()
+	for _, prefix := range []string{"/api/core", "/api/channel-gateway-other"} {
+		for _, tc := range []struct {
+			name    string
+			err     error
+			status  int
+			message string
+		}{
+			{"unreachable", fmt.Errorf("connection refused"), http.StatusServiceUnavailable, "upstream unavailable"},
+			{"timeout", context.DeadlineExceeded, http.StatusGatewayTimeout, "upstream timeout"},
+			{"other", io.EOF, http.StatusBadGateway, "upstream unavailable"},
+		} {
+			t.Run(prefix+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+				rt := &roundTripper{errorByHost: map[string]error{"upstream": tc.err}}
+				cfg := config.Config{Routes: []config.RouteConfig{{
+					Name: "other", Prefix: prefix, Upstream: "http://upstream/api/channel-gateway",
+					StripPath: true, Enabled: true, Public: true,
+				}}}
+				resp := httptest.NewRecorder()
+				newAPIProxyHandler(cfg, rt).ServeHTTP(resp, httptest.NewRequest(http.MethodGet, prefix+"/resource", nil))
+				if resp.Code != tc.status {
+					t.Fatalf("status = %d, want %d", resp.Code, tc.status)
+				}
+				var payload map[string]string
+				if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+					t.Fatalf("decode json: %v", err)
+				}
+				if len(payload) != 1 || payload["error"] != tc.message {
+					t.Fatalf("unexpected error payload: %#v", payload)
+				}
+			})
+		}
+	}
+}
+
 func TestStatusSanitizesUpstreamCredentials(t *testing.T) {
 	redacted := sanitizeUpstream("http://alice:super-secret-token@127.0.0.1:8001")
 	if strings.Contains(redacted, "alice") || strings.Contains(redacted, "super-secret-token") {

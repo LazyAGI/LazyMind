@@ -11,6 +11,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/taskcenter"
 )
 
 const maxEditableBlockBytes = 2 * 1024 * 1024
@@ -86,7 +87,9 @@ func PatchEditableBlock(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusConflict
 			return forkFail("SOURCE_CHANGED")
 		}
-		result := tx.Model(&orm.ChatHistory{}).Where("id = ? AND conversation_id = ? AND result = ?", history.ID, body.ConversationID, history.Result).Updates(map[string]any{"result": nextResult, "update_time": time.Now()})
+		ext := taskcenter.WithNotificationCompletionTimeForRun(history.Ext,
+			taskcenter.NotificationHistoryCompletedAt(history.CreateTime, history.UpdateTime, history.Ext), history.RunID)
+		result := tx.Model(&orm.ChatHistory{}).Where("id = ? AND conversation_id = ? AND result = ?", history.ID, body.ConversationID, history.Result).Updates(map[string]any{"result": nextResult, "ext": ext, "update_time": time.Now()})
 		if result.Error != nil {
 			return result.Error
 		}

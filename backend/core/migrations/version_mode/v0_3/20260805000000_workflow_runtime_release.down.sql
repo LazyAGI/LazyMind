@@ -1,3 +1,31 @@
+DROP TABLE IF EXISTS document_folder_nodes;
+DROP TABLE IF EXISTS document_folder_inventories;
+
+-- +migrate Dialect *
+DROP TABLE IF EXISTS task_attempt_timings;
+DROP TABLE IF EXISTS task_execution_timings;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE rejected_document_publications;
+DROP TABLE document_ownership_backfills;
+
+-- +migrate Dialect postgres
+DROP TRIGGER knowledge_dataset_membership_version ON documents;
+DROP TRIGGER knowledge_document_version ON documents;
+DROP FUNCTION knowledge_dataset_membership_version();
+DROP FUNCTION knowledge_document_version();
+-- +migrate Dialect sqlite
+DROP TRIGGER knowledge_dataset_membership_update;
+DROP TRIGGER knowledge_dataset_membership_delete;
+DROP TRIGGER knowledge_dataset_membership_insert;
+DROP TRIGGER knowledge_document_version;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE resource_operation_receipts;
+ALTER TABLE documents DROP COLUMN resource_version;
+ALTER TABLE datasets DROP COLUMN resource_version;
+ALTER TABLE datasets DROP COLUMN scene;
+
 -- +migrate Dialect postgres,sqlite
 DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
 DROP INDEX IF EXISTS idx_user_env_user_enabled;
@@ -163,6 +191,8 @@ ALTER TABLE user_ui_preferences
     DROP COLUMN IF EXISTS performance_stats_enabled,
     DROP COLUMN IF EXISTS sensitive_word_filter_enabled,
     DROP COLUMN IF EXISTS document_parsing_enabled,
+    DROP COLUMN IF EXISTS document_directories_enabled,
+    DROP COLUMN IF EXISTS document_directories_generation,
     DROP COLUMN IF EXISTS workflows_enabled,
     DROP COLUMN IF EXISTS mcp_enabled,
     DROP COLUMN IF EXISTS skills_enabled,
@@ -349,6 +379,8 @@ ALTER TABLE conversations DROP COLUMN chat_executor;
 ALTER TABLE user_ui_preferences DROP COLUMN performance_stats_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN sensitive_word_filter_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN document_directories_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN document_directories_generation;
 ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN skills_enabled;
@@ -761,3 +793,17 @@ ALTER TABLE sub_agent_tasks DROP COLUMN finished_at;
 ALTER TABLE sub_agent_tasks DROP COLUMN started_at;
 ALTER TABLE sub_agent_tasks DROP COLUMN display_revision;
 ALTER TABLE sub_agent_tasks DROP COLUMN execution_id;
+
+-- +migrate Dialect postgres
+DROP TABLE IF EXISTS document_directory_batches;
+DROP TABLE IF EXISTS document_observations;
+DROP TABLE IF EXISTS document_directory_entries;
+DROP TABLE IF EXISTS document_directory_groups;
+DROP TABLE IF EXISTS document_directories;
+
+-- +migrate Dialect sqlite
+DROP TABLE IF EXISTS document_directory_batches;
+DROP TABLE IF EXISTS document_observations;
+DROP TABLE IF EXISTS document_directory_entries;
+DROP TABLE IF EXISTS document_directory_groups;
+DROP TABLE IF EXISTS document_directories;

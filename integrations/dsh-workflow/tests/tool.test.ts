@@ -28,7 +28,7 @@ function definition(continuation = 'awaiting_user'): ToolDefinition {
     output: { schema: { type: 'object' }, render: () => [{ type: 'text', text: 'success' }] },
     async execute() {
       return { structuredContent: {
-        session_id: 'run-1', interaction_url: 'http://localhost:8090/workflow-runs/run-1',
+        session_id: 'run-1',
         control: { protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 3,
           continuation, admission: { can_begin: continuation !== 'awaiting_user' } },
       } }
@@ -48,7 +48,8 @@ describe('released DSH tool contract', () => {
     expect(result.isError).toBe(false)
     expect(result).toMatchObject({ concludesTurn: true, content: [{ type: 'text', text: 'original rich content' }] })
     expect(finalize).toHaveBeenCalledOnce()
-    expect(presentationRun(result.meta)).toEqual({ runId: 'run-1', url: 'http://localhost:8090/workflow-runs/run-1' })
+    expect(presentationRun(result.meta, 'http://localhost:8090')).toEqual({ runId: 'run-1', url: 'http://localhost:8090/workflow-runs/run-1' })
+    expect(JSON.stringify(result)).not.toContain('http://localhost:8090')
     expect(Object.isFrozen(result)).toBe(true)
   })
 

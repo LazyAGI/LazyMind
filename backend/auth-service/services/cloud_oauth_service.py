@@ -2102,6 +2102,8 @@ class CloudOAuthService:
 
     @staticmethod
     def _ensure_connection_active(row) -> None:
+        if (getattr(row, 'status', '') or '').strip().upper() == 'EXPIRED':
+            raise_error(ErrorCodes.CLOUD_CONNECTION_REAUTH_REQUIRED)
         if (getattr(row, 'status', '') or '').strip().upper() != 'ACTIVE':
             raise_error(ErrorCodes.CLOUD_CONNECTION_NOT_FOUND)
 
@@ -2345,6 +2347,8 @@ class CloudOAuthService:
                             'status': 'ACTIVE',
                         }
                 self._record_refresh_failure(db, row, exc)
+                if row.status == 'EXPIRED':
+                    raise_error(ErrorCodes.CLOUD_CONNECTION_REAUTH_REQUIRED)
                 if isinstance(exc, AppException):
                     raise
                 raise_error(ErrorCodes.CLOUD_TOKEN_UNAVAILABLE, extra_msg=_truncate_error(exc))

@@ -20,7 +20,11 @@ func TestSubagentCreateAndResumePersistAuthoritativeWorkspaceParams(t *testing.T
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "offline", 503) }))
 	t.Cleanup(server.Close)
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-	db := orm.MigrateAllModelsForTest(t)
+	db := orm.MigrateTestDB(t,
+		&orm.Conversation{}, &orm.ConversationToolGrant{}, &orm.ConversationWorkspaceBinding{}, &orm.LocalWorkspace{},
+		&orm.SubAgentArtifact{}, &orm.SubAgentStep{}, &orm.SubAgentTask{}, &orm.UserEnvironmentVariable{},
+		&orm.TaskAttemptTiming{}, &orm.TaskExecutionTiming{}, &orm.WorkflowEvent{}, &orm.WorkflowSessionStep{},
+	)
 	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)

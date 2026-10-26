@@ -5,6 +5,31 @@ package common
 import "net/http"
 
 func init() {
+	for _, source := range []string{
+		"failed to resolve background task",
+		"failed to create background task",
+		"failed to bind background execution",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusServiceUnavailable, 2000000)
+	}
+	registerAdditionalErrorAlias("duplicate background execution part", "Invalid request", http.StatusBadRequest, 2000103)
+	for _, source := range []string{
+		"background task is not scoped",
+		"background execution rebinding rejected",
+		"background task is terminal",
+	} {
+		registerAdditionalErrorAlias(source, "Conflict", http.StatusConflict, 2000107)
+	}
+	for _, source := range []string{
+		"cancellation store unavailable",
+		"chat execution store unavailable",
+		"task cancellation is not configured",
+		"removal cancellation has no execution snapshot",
+		"workflow stop pending",
+		"chat stop unavailable",
+	} {
+		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
+	}
 	registerAdditionalErrorPattern("SKILL.md frontmatter field %q conflicts with compatibility normalization", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("verified source name has an unsupported runtime path character", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorPattern("%w in subdirectory %q", "Invalid request", http.StatusBadRequest, 2000103)
@@ -858,4 +883,5 @@ func init() {
 	registerAdditionalError("query preference organizer task failed", http.StatusInternalServerError, 2002363)
 	registerAdditionalError("preference organizer task lease was lost", http.StatusInternalServerError, 2002364)
 	registerAdditionalError("async job lease lost", http.StatusInternalServerError, 2002503)
+	registerAdditionalErrorAlias("scheduled summary execution changed", "Conflict", http.StatusConflict, 2000107)
 }

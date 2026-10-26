@@ -26,6 +26,9 @@ cryptography==45.0.5
 pymysql
 pyahocorasick
 jieba==0.42.1
+# Temporary attachment retrieval is available without the optional RAG bundle.
+bm25s>=0.1.10,<0.2.0
+pystemmer>=2.2.0.3
 autocorrect-py==2.14.0
 rapidfuzz==3.14.3
 regex>=2024.0.0

@@ -5,12 +5,13 @@ import (
 	"errors"
 	"flag"
 	"io"
-	"lazymind/agentconnector/internal/assistantbridge"
-	"lazymind/agentconnector/internal/codexplugin"
-	"lazymind/agentconnector/internal/mcpbridge"
 	"path/filepath"
 
+	"lazymind/agentconnector/internal/assistantbridge"
+	"lazymind/agentconnector/internal/codexplugin"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/mcpbridge"
 	"lazymind/agentconnector/internal/workflowhost"
 )
 
@@ -49,7 +50,11 @@ func runCodexWorkflowMCP(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := assistantbridge.Start(ctx, assistantbridge.DefaultAddress); err != nil {
+	address, err := connectorconfig.BridgeAddress()
+	if err != nil {
+		return err
+	}
+	if _, err := assistantbridge.Start(ctx, address); err != nil {
 		return err
 	}
 	stop, err := codexplugin.StartWorker(ctx, store.Directory())

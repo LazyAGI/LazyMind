@@ -1,280 +1,148 @@
-import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Empty, Modal, Popconfirm, Progress, Space, Table, Tag, Typography } from "antd";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { Button, Empty, Modal, Popconfirm, Progress, Table, Typography, message } from "antd";
+import { MinusOutlined, PlusOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
+import type { KnowledgeMarketTaskListItemOpenAPIResponse } from "@/api/generated/core-client";
+import { cancelKnowledgeMarketTask, deleteKnowledgeMarketTask, retryKnowledgeMarketTask } from "@/modules/knowledge/api/knowledgeMarket";
+import type { KnowledgeMarketTasksQuery } from "./useKnowledgeMarketTasks";
+import { getKnowledgeMarketTaskPercent, isKnowledgeMarketTaskCompleted, isKnowledgeMarketTaskFailed, isKnowledgeMarketTaskPartiallyFailed } from "./knowledgeMarketTaskState";
+import KnowledgeMarketTaskFiles from "./KnowledgeMarketTaskFiles";
+import KnowledgeMarketTaskPagination from "./KnowledgeMarketTaskPagination";
+import "./KnowledgeMarketTaskModal.scss";
 
-import type {
-  KnowledgeMarketTaskDetailOpenAPIResponse,
-  KnowledgeMarketTaskListItemOpenAPIResponse,
-} from "@/api/generated/core-client";
-import {
-  cancelKnowledgeMarketTask,
-  getKnowledgeMarketTask,
-  deleteKnowledgeMarketTask,
-  retryKnowledgeMarketTask,
-  listKnowledgeMarketTasks,
-} from "@/modules/knowledge/api/knowledgeMarket";
-import {
-  getKnowledgeMarketTaskPercent,
-  isKnowledgeMarketTaskCompleted,
-  isKnowledgeMarketTaskFailed,
-  isKnowledgeMarketTaskPartiallyFailed,
-  isKnowledgeMarketTaskTerminal,
-} from "./knowledgeMarketTaskState";
-
-const JOB_TYPES = [
-  "knowledge_market_install",
-  "knowledge_market_update",
-  "knowledge_market_update_all",
-] as const;
-
-type TaskRow = KnowledgeMarketTaskListItemOpenAPIResponse &
-  Partial<KnowledgeMarketTaskDetailOpenAPIResponse>;
-
+type TaskRow = KnowledgeMarketTaskListItemOpenAPIResponse;
 interface KnowledgeMarketTaskModalProps {
   open: boolean;
-  refreshKey: string;
+  query: KnowledgeMarketTasksQuery;
   onClose: () => void;
-  onTasksChanged: () => void;
+  onTasksChanged: (retriedTask?: { name: string }) => void;
 }
-
 function toTaskState(task: TaskRow) {
-  return {
-    jobType: task.job_type,
-    jobStatus: task.job_status,
-    stage: task.stage,
-    overallPercent: task.overall_percent,
-    progress: task.progress,
-    displayState: task.display_state,
-  };
+  return { jobType: task.job_type, jobStatus: task.job_status, stage: task.stage, overallPercent: task.overall_percent, progress: task.progress, displayState: task.display_state };
+}
+function displayState(task: TaskRow) {
+  const value = toTaskState(task);
+  return task.display_state || (isKnowledgeMarketTaskPartiallyFailed(value) ? "partial_failed" : isKnowledgeMarketTaskFailed(value) ? "failed" : isKnowledgeMarketTaskCompleted(value) ? "done" : task.job_status === "pending" ? "pending" : "processing");
 }
 
-export default function KnowledgeMarketTaskModal({
-  open,
-  refreshKey,
-  onClose,
-  onTasksChanged,
-}: KnowledgeMarketTaskModalProps) {
+export default function KnowledgeMarketTaskModal({ open, query, onClose, onTasksChanged }: KnowledgeMarketTaskModalProps) {
   const { t } = useTranslation();
-  const [tasks, setTasks] = useState<TaskRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [revision, setRevision] = useState(0);
+  const [messageApi, messageHolder] = message.useMessage();
+  const { data, setPage, refresh, loading, queryFailed } = query;
+  const [expanded, setExpanded] = useState<string>();
   const [busyJob, setBusyJob] = useState<string>();
-  const [feedback, setFeedback] = useState<string>();
-  const [queryFailed, setQueryFailed] = useState(false);
-  const previousTasks = useRef<TaskRow[]>([]);
-  const lastChecked = useRef<string>();
-  const unknownTask = (task: TaskRow): TaskRow => ({ ...task, display_state: "unknown", can_cancel: false, can_retry: false, can_delete: false });
+  const [bodyHeight, setBodyHeight] = useState(440);
+  const [table, setTable] = useState<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLDivElement | null>(null);
+  const busy = useRef(false);
+  const mounted = useRef(false);
+  const session = useRef(0);
+  const followJob = useRef<string>();
+  const warned = useRef(false);
+  const tasks = (data?.items || []).map((task) => queryFailed ? { ...task, display_state: "unknown", can_cancel: false, can_retry: false, can_delete: false } : task);
+  const queryFailedHint = t(data ? "knowledge.taskQueryFailedHint" : "knowledge.taskInitialQueryFailedHint");
+
+  useEffect(() => { tableRef.current = table; }, [table]);
+  useEffect(() => { mounted.current = open; session.current += 1; if (!open) setBusyJob(undefined); return () => { mounted.current = false; session.current += 1; }; }, [open]);
+  useEffect(() => {
+    if (!open || !data || queryFailed) return;
+    if (followJob.current && (data.items || []).some((task) => task.job_id === followJob.current)) {
+      setExpanded(followJob.current);
+      followJob.current = undefined;
+      tableRef.current?.querySelector(".ant-table-body")?.scrollTo?.({ top: 0 });
+    } else {
+      setExpanded((value) => value && (data.items || []).some((task) => task.job_id === value) ? value : undefined);
+    }
+  }, [open, data, queryFailed]);
 
   useEffect(() => {
-    if (!open) return;
+    if (open && queryFailed && !warned.current) void messageApi.warning(queryFailedHint);
+    warned.current = open && queryFailed;
+  }, [open, queryFailed, queryFailedHint, messageApi]);
 
-    const controller = new AbortController();
-    let timer: number | undefined;
-    let firstLoad = true;
-
-    const refresh = async () => {
-      if (firstLoad) setLoading(true);
-      try {
-        const taskLists = await Promise.all(
-          JOB_TYPES.map((jobType) =>
-            listKnowledgeMarketTasks(jobType, {
-              signal: controller.signal,
-              silentError: true,
-            }),
-          ),
-        );
-        const listItems = taskLists.flatMap((list) => list.items || [])
-          .sort((a, b) => b.created_at.localeCompare(a.created_at));
-        const details = await Promise.all(
-          listItems.map(async (item) => {
-            try {
-              const detail = await getKnowledgeMarketTask(item.job_id, {
-                signal: controller.signal,
-                silentError: true,
-              });
-              if (detail.display_state === "unknown") {
-                return unknownTask(previousTasks.current.find((old) => old.job_id === item.job_id) || { ...item, ...detail });
-              }
-              return { ...item, ...detail };
-            } catch {
-              return unknownTask({ ...previousTasks.current.find((old) => old.job_id === item.job_id), ...item });
-            }
-          }),
-        );
-        if (!controller.signal.aborted) {
-          const visibleTasks = details;
-          previousTasks.current = visibleTasks;
-          setTasks(visibleTasks);
-          const hasUnknown = visibleTasks.some((task) => task.display_state === "unknown");
-          setQueryFailed(hasUnknown);
-          if (!hasUnknown) lastChecked.current = new Date().toLocaleString();
-          if (
-            visibleTasks.some(
-              (task) => !isKnowledgeMarketTaskTerminal(toTaskState(task)),
-            )
-          ) {
-            timer = window.setTimeout(refresh, 2000);
-          }
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setQueryFailed(true);
-          setTasks(previousTasks.current.map(unknownTask));
-          timer = window.setTimeout(refresh, 2000);
-        }
-      } finally {
-        firstLoad = false;
-        if (!controller.signal.aborted) setLoading(false);
-      }
+  useEffect(() => {
+    if (!open || !table) return;
+    const content = table.closest<HTMLElement>(".ant-modal-content");
+    const footer = content?.querySelector<HTMLElement>(".ant-modal-footer");
+    if (!content || !footer) return;
+    const measure = () => {
+      const maxHeight = Math.min(704, window.innerHeight - (window.innerHeight <= 740 ? 64 : 124));
+      const top = table.getBoundingClientRect().top - content.getBoundingClientRect().top;
+      setBodyHeight(Math.max(0, maxHeight - top - footer.offsetHeight - 44));
     };
-
-    void refresh();
-    return () => {
-      controller.abort();
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [open, refreshKey, revision]);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    observer.observe(table);
+    observer.observe(footer);
+    window.addEventListener("resize", measure);
+    return () => { observer.disconnect(); window.removeEventListener("resize", measure); };
+  }, [open, table]);
 
   const runAction = async (task: TaskRow, action: "delete" | "retry" | "cancel") => {
+    if (busy.current) return;
+    const actionSession = session.current;
+    const isCurrent = () => mounted.current && session.current === actionSession;
+    busy.current = true;
     setBusyJob(task.job_id);
     try {
-      if (action === "delete") await deleteKnowledgeMarketTask(task.job_id);
-      else if (action === "retry") await retryKnowledgeMarketTask(task.job_id);
-      else {
+      if (action === "delete") {
+        await deleteKnowledgeMarketTask(task.job_id);
+      } else if (action === "retry") {
+        const next = await retryKnowledgeMarketTask(task.job_id);
+        if (!isCurrent()) return;
+        followJob.current = next.job_id;
+        setExpanded(undefined);
+        setPage(1);
+      } else {
         const result = await cancelKnowledgeMarketTask(task.job_id);
-        setFeedback(result.stop_requested ? t("knowledge.taskStopRequested") : t("knowledge.taskCancelResult", { canceled: result.canceled, running: result.running, unknown: result.unknown }));
+        if (!isCurrent()) return;
+        void messageApi.info(result.stop_requested ? t("knowledge.taskStopRequested") : t("knowledge.taskCancelResult", { canceled: result.canceled, running: result.running, unknown: result.unknown }));
       }
-      setRevision((value) => value + 1);
-      onTasksChanged();
+      if (!isCurrent()) return;
+      if (action === "delete") void messageApi.success(t("knowledge.taskDeleteSuccess"));
+      onTasksChanged(action === "retry" ? { name: task.name || t("knowledge.taskTypeUpdateAll") } : undefined);
     } catch {
-      if (action === "cancel") setFeedback(t("knowledge.taskCancelUnavailable"));
-    } finally { setBusyJob(undefined); }
+      if (isCurrent()) void messageApi.warning(t(action === "cancel" ? "knowledge.taskCancelUnavailable" : "knowledge.taskActionFailed"));
+    } finally {
+      busy.current = false;
+      if (isCurrent()) setBusyJob(undefined);
+    }
   };
-
   const columns: ColumnsType<TaskRow> = [
-    {
-      title: t("knowledge.taskName"),
-      dataIndex: "name",
-      width: 180,
-      render: (name: string, task) => {
-        const label = name || (task.job_type === "knowledge_market_update_all" ? t("knowledge.taskTypeUpdateAll") : "-");
-        return task.dataset_id ? <Typography.Link href={`/lib/knowledge/detail/${encodeURIComponent(task.dataset_id)}`}>{label}</Typography.Link> : label;
-      },
-    },
-    {
-      title: t("knowledge.taskType"),
-      dataIndex: "job_type",
-      width: 90,
-      render: (jobType: string) =>
-        t(
-          jobType === "knowledge_market_install"
-            ? "knowledge.taskTypeInstall"
-            : jobType === "knowledge_market_update"
-              ? "knowledge.taskTypeUpdate"
-              : "knowledge.taskTypeUpdateAll",
-        ),
-    },
-    {
-      title: t("knowledge.status"),
-      key: "status",
-      width: 170,
-      render: (_, task) => {
-        const taskState = toTaskState(task);
-        const failed = isKnowledgeMarketTaskFailed(taskState);
-        const partiallyFailed = isKnowledgeMarketTaskPartiallyFailed(taskState);
-        const done = isKnowledgeMarketTaskCompleted(taskState);
-        const state = task.display_state;
-        const label = state ? t(`knowledge.taskState_${state}`) : partiallyFailed
-          ? t("knowledge.taskCompletedWithFailures") : failed ? t("knowledge.failed") : done ? t("knowledge.processed") : t("knowledge.processing");
-        return <Tag style={{ maxWidth: "100%", whiteSpace: "normal" }} color={failed ? "error" : ["blocked", "unknown", "partial_failed", "partial_canceled"].includes(state || "") ? "warning" : done ? "success" : state === "processing" ? "processing" : "default"}>{label}</Tag>;
-      },
-    },
-    {
-      title: t("knowledge.taskProgress"),
-      key: "progress",
-      width: 130,
-      render: (_, task) => (
-        <Progress
-          percent={Math.min(
-            100,
-            Math.max(0, getKnowledgeMarketTaskPercent(toTaskState(task))),
-          )}
-          size="small"
-          status={
-            isKnowledgeMarketTaskFailed(toTaskState(task))
-              ? "exception"
-              : isKnowledgeMarketTaskCompleted(toTaskState(task)) ? "success" : "normal"
-          }
-        />
-      ),
-    },
-    {
-      title: t("knowledge.taskCreatedAt"),
-      dataIndex: "created_at",
-      width: 150,
-      render: (value: string) => (value ? new Date(value).toLocaleString() : "-"),
-    },
-    {
-      title: t("common.actions"),
-      key: "actions",
-      width: 250,
-      render: (_, task) => {
-        const canCancel = task.can_cancel === true;
-        const canRetry = task.can_retry === true;
-        const canDelete = task.can_delete === true;
-        const recheck = ["blocked", "unknown"].includes(task.display_state || "") || !!feedback || (task.parse?.failed && !canRetry);
-        return <Space wrap>
-          {canCancel && <Popconfirm title={t("knowledge.taskCancelTitle")} description={t("knowledge.taskCancelHint")} disabled={!!busyJob} onConfirm={() => runAction(task, "cancel")}>
-            <Button size="small" disabled={!!busyJob} loading={busyJob === task.job_id}>{t(["pending", "running"].includes(task.job_status) ? "knowledge.taskStopFollowing" : "knowledge.taskCancelWaiting")}</Button>
-          </Popconfirm>}
-          {canRetry && <Button size="small" loading={busyJob === task.job_id} disabled={!!busyJob} onClick={() => void runAction(task, "retry")}>{t("knowledge.taskRetryFailed")}</Button>}
-          {!!recheck && <Button size="small" disabled={!!busyJob} onClick={() => setRevision((value) => value + 1)}>{t("knowledge.taskRecheck")}</Button>}
-          {canDelete && <Popconfirm title={t("knowledge.taskDeleteConfirm")} description={t("knowledge.taskDeleteHint")} disabled={!!busyJob} onConfirm={() => runAction(task, "delete")}>
-            <Button size="small" danger disabled={!!busyJob}>{t("common.delete")}</Button>
-          </Popconfirm>}
-        </Space>;
-      },
-    },
+    { title: t("knowledge.taskName"), dataIndex: "name", ellipsis: true, render: (name: string, task) => {
+      const label = name || (task.job_type === "knowledge_market_update_all" ? t("knowledge.taskTypeUpdateAll") : "-");
+      return task.dataset_id ? <Typography.Link className="market-task-name" title={label} href={`/lib/knowledge/detail/${encodeURIComponent(task.dataset_id)}`}>{label}</Typography.Link> : <span title={label}>{label}</span>;
+    } },
+    { title: t("knowledge.taskType"), dataIndex: "job_type", width: 96, render: (kind: string) => t(kind === "knowledge_market_install" ? "knowledge.taskTypeInstall" : kind === "knowledge_market_update" ? "knowledge.taskTypeUpdate" : "knowledge.taskTypeUpdateAll") },
+    { title: t("knowledge.status"), width: 176, render: (_, task) => <span className={`market-task-state ${displayState(task)}`}>{t(`knowledge.taskState_${displayState(task)}`)}</span> },
+    { title: t("knowledge.taskProgress"), width: 136, render: (_, task) => {
+      const state = displayState(task);
+      const percent = Math.min(100, Math.max(0, getKnowledgeMarketTaskPercent(toTaskState(task))));
+      const color = state === "failed" ? "#f54a45" : ["partial_failed", "partial_canceled", "blocked"].includes(state) ? "#faad14" : ["unknown", "canceled"].includes(state) ? "#8f959e" : "#1677ff";
+      return <div className="market-task-progress"><Progress percent={percent} showInfo={false} size="small" strokeColor={color} /><span>{percent}%</span></div>;
+    } },
+    { title: t("knowledge.taskCreatedAt"), dataIndex: "created_at", width: 184, render: (value: string) => value ? new Date(value).toLocaleString() : "-" },
+    { title: t("common.actions"), width: 210, align: "center", render: (_, task) => <div className="market-task-actions">
+      <div>{task.can_cancel === true ? <Popconfirm title={t("knowledge.taskCancelTitle")} description={t("knowledge.taskCancelHint")} disabled={!!busyJob} onConfirm={() => runAction(task, "cancel")}>
+        <Button size="small" disabled={!!busyJob} loading={busyJob === task.job_id} aria-label={t(["pending", "running"].includes(task.job_status) ? "knowledge.taskStopFollowing" : "knowledge.taskCancelWaiting")}>{t("knowledge.taskFileStatus_canceled")}</Button>
+      </Popconfirm> : task.can_delete === true && <Popconfirm title={t("knowledge.taskDeleteConfirm")} description={t("knowledge.taskDeleteHint")} disabled={!!busyJob} onConfirm={() => runAction(task, "delete")}>
+        <Button size="small" danger disabled={!!busyJob}>{t("common.delete")}</Button>
+      </Popconfirm>}</div>
+      <div>{task.can_retry === true && <Button size="small" loading={busyJob === task.job_id} disabled={!!busyJob} onClick={() => void runAction(task, "retry")}>{t("knowledge.taskRetry")}</Button>}</div>
+    </div> },
   ];
-
-  return (
-    <Modal
-      width={1100}
-      open={open}
-      title={t("knowledge.backgroundTasks")}
-      footer={null}
-      onCancel={onClose}
-      destroyOnHidden
-    >
-      {feedback && <Alert type="info" showIcon message={<span role="status">{feedback}</span>} />}
-      {queryFailed && <Alert type="warning" showIcon message={t("knowledge.taskQueryFailedHint")} description={<Space wrap>
-        {lastChecked.current && <span>{t("knowledge.taskLastChecked", { time: lastChecked.current })}</span>}
-        {tasks.length === 0 && <Button onClick={() => setRevision((value) => value + 1)}>{t("knowledge.taskRecheck")}</Button>}
-      </Space>} />}
-      <Table<TaskRow>
-        rowKey="job_id"
-        columns={columns}
-        dataSource={tasks}
-        loading={loading}
-        locale={{ emptyText: <Empty description={t("knowledge.taskEmpty")} /> }}
-        expandable={{
-          rowExpandable: (task) => Boolean(task.display_state === "blocked" || task.parse?.total || task.error_message || isKnowledgeMarketTaskFailed(toTaskState(task))),
-          expandedRowRender: (task) => <Space direction="vertical">
-            {task.display_state === "blocked" && <>
-              <Typography.Text>{t("knowledge.taskBlockedHint")}</Typography.Text>
-              <Typography.Text copyable={{ text: JSON.stringify({ job_id: task.job_id, state: task.display_state, stage: task.stage, total: task.parse?.total, done: task.parse?.done, failed: task.parse?.failed, canceled: task.parse?.canceled, pending: task.parse?.pending, processing: task.parse?.parsing }) }}>{t("knowledge.taskCopyDiagnostics")}</Typography.Text>
-            </>}
-            {task.parse && <Typography.Text>{t("knowledge.taskControlCounts", { total: task.parse.total, done: task.parse.done, failed: task.parse.failed, canceled: task.parse.canceled || 0, unfinished: task.parse.pending + task.parse.parsing + (task.parse.unknown || 0) })}</Typography.Text>}
-            {(task.parse?.failures || []).map((failure, index) => <Typography.Text key={`${failure.task_id || failure.name}-${index}`} type="danger">
-              {failure.name}：{t(`knowledge.taskFileFailure_${failure.reason}`)}
-            </Typography.Text>)}
-            {(!task.parse?.failures?.length && (task.error_message || isKnowledgeMarketTaskFailed(toTaskState(task)))) && <Typography.Text type="danger">{t("knowledge.taskFailedHint")}</Typography.Text>}
-          </Space>,
-        }}
-        pagination={{ pageSize: 10, showSizeChanger: false }}
-        scroll={{ x: 1040, y: 480 }}
-      />
-    </Modal>
-  );
+  return <Modal className="knowledge-market-task-modal" width={1100} open={open} title={t("knowledge.backgroundTasks")} onCancel={onClose} destroyOnHidden footer={<KnowledgeMarketTaskPagination scope="tasks" page={data?.page || 1} total={data?.total || 0} disabled={loading || !!busyJob} onChange={(value) => { setPage(value); setExpanded(undefined); refresh(); }} />}>
+    {messageHolder}
+    <div className="market-task-table" ref={setTable}>
+      <Table<TaskRow> rowKey="job_id" columns={columns} dataSource={tasks} loading={loading} pagination={false} tableLayout="fixed" locale={{ emptyText: <Empty description={queryFailed ? queryFailedHint : t("knowledge.taskEmpty")} /> }} rowClassName={(task: TaskRow) => expanded === task.job_id ? "market-task-selected" : ""} scroll={{ x: 1030, y: bodyHeight }} expandable={{
+        columnWidth: 48,
+        expandedRowKeys: expanded ? [expanded] : [],
+        onExpand: (value: boolean, task: TaskRow) => setExpanded(value ? task.job_id : undefined),
+        expandIcon: ({ expanded: isExpanded, onExpand, record }: { expanded: boolean; onExpand: (record: TaskRow, event: MouseEvent<HTMLElement>) => void; record: TaskRow }) => <button type="button" className="market-task-expand" aria-label={`${t(isExpanded ? "knowledge.taskCollapse" : "knowledge.taskExpand")} ${record.name || t("knowledge.taskTypeUpdateAll")}`} aria-expanded={isExpanded} onClick={(event) => onExpand(record, event)}>{isExpanded ? <MinusOutlined /> : <PlusOutlined />}</button>,
+        expandedRowRender: (task: TaskRow) => <KnowledgeMarketTaskFiles key={task.job_id} task={task} height={Math.max(358, bodyHeight - tasks.length * 48)} busy={!!busyJob} onRetry={() => void runAction(task, "retry")} />,
+      }} />
+    </div>
+  </Modal>;
 }

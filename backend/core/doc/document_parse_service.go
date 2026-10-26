@@ -29,8 +29,9 @@ type EnsureDocumentParsedRequest struct {
 }
 
 type EnsureDocumentParsedResult struct {
-	Status string `json:"status"`
-	TaskID string `json:"task_id,omitempty"`
+	Error  *ProcessingDiagnostic `json:"error,omitempty"`
+	Status string                `json:"status"`
+	TaskID string                `json:"task_id,omitempty"`
 }
 
 func isRetryableParseObservation(uploadStatus, taskStatus string) bool {
@@ -96,6 +97,24 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	if err != nil {
 		return EnsureDocumentParsedResult{}, err
 	}
+	// Native reader artifacts remain usable while deferred indexing runs or fails.
+	if artifact, err := readBaseArtifact(r.Context(), rec); err != nil {
+		return EnsureDocumentParsedResult{}, err
+	} else if artifact != nil {
+		return EnsureDocumentParsedResult{Status: "parsed"}, nil
+	}
+	if rec.processing.ParseStatus == "failed" || NormalizeTaskStateForUI(rec.taskStat) == "FAILED" {
+		diagnostic := rec.diagnostic
+		if diagnostic == nil {
+			diagnostic = &ProcessingDiagnostic{Stage: "parse", Code: "PROCESSING_FAILED", Message: SafeProcessingMessage(""), Recovery: "请明确发起重新解析。"}
+		}
+		return EnsureDocumentParsedResult{Status: "failed", TaskID: diagnostic.TaskID, Error: diagnostic}, nil
+	}
+	if rec.processing.ParseStatus == "running" {
+		var active orm.Task
+		_ = s.db.WithContext(r.Context()).Where("dataset_id = ? AND doc_id = ? AND deleted_at IS NULL", req.DatasetID, req.DocumentID).Order("created_at DESC, id DESC").Take(&active).Error
+		return EnsureDocumentParsedResult{Status: "parsing", TaskID: active.ID}, nil
+	}
 	if rec.lazy != nil {
 		status := strings.ToUpper(strings.TrimSpace(rec.lazy.UploadStatus))
 		taskStatus := strings.ToUpper(strings.TrimSpace(rec.taskStat))
@@ -117,15 +136,15 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "succeeded", "", "")
 			return EnsureDocumentParsedResult{Status: "parsed"}, nil
 		case "FAILED", "ERROR":
-			// Failed parses are retryable. Fall through to the same task creation
-			// path used for a document that has never been parsed.
+			return EnsureDocumentParsedResult{Status: "failed", Error: rec.diagnostic}, nil
 		default:
 			if isRetryableParseObservation(status, taskStatus) {
-				// The document service has not published a terminal artifact, while
-				// the prior Core task has failed. Start a fresh shared retry below.
-				break
+				return EnsureDocumentParsedResult{Status: "failed", Error: rec.diagnostic}, nil
 			}
-			return EnsureDocumentParsedResult{Status: "parsing"}, nil
+			if rec.processing.ParseStatus == "running" {
+				return EnsureDocumentParsedResult{Status: "parsing"}, nil
+			}
+			return EnsureDocumentParsedResult{Status: "unknown"}, nil
 		}
 	}
 

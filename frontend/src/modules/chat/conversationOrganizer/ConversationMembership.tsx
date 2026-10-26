@@ -1,6 +1,7 @@
 import { Button, Dropdown, Modal, message } from "antd";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import ArchiveConversationModal from "@/modules/chat/components/ArchiveConversationModal";
+import ConversationTrashConfirmContent from "@/modules/chat/components/ConversationTrashConfirmContent";
 import { conversationGroupSubmenu } from "./ConversationGroupPicker";
 import ConversationMembershipModal from "./ConversationMembershipModal";
 import { useState } from "react";
@@ -9,8 +10,9 @@ import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { useTranslation } from "react-i18next";
 import { emitConversationGroupsChanged } from "./api";
 
-export default function ConversationMembership({ conversationId, groupId, groupKind, isTaskConv = false, title, disabled = false, pinned = false, onRename }: {
+export default function ConversationMembership({ conversationId, groupId, groupKind, isTaskConv = false, title, disabled = false, pinned = false, onRename, menuOpen, onMenuOpenChange }: {
   conversationId: string; isTaskConv?: boolean; groupId?: string | null; groupKind?: string; title?: string; disabled?: boolean; pinned?: boolean; onRename: () => void;
+  menuOpen?: boolean; onMenuOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -21,14 +23,16 @@ export default function ConversationMembership({ conversationId, groupId, groupK
   const [archiveOpen, setArchiveOpen] = useState(false);
   return <>
     {modalContextHolder}
-    <Dropdown destroyPopupOnHide trigger={["click"]} menu={{ items: [
+    <Dropdown destroyPopupOnHide trigger={["hover", "click", "contextMenu"]} open={menuOpen} onOpenChange={onMenuOpenChange} menu={{ onClick: ({ domEvent }) => { domEvent.stopPropagation(); onMenuOpenChange?.(false); }, items: [
       ...(!groupId || groupKind === "project" ? [{ key: "pin", label: t(pinned ? "chat.unpinConversation" : "chat.pinConversation"), onClick: async () => { await ChatServiceApi().conversationServiceSetPinned(conversationId, !pinned); emitConversationGroupsChanged(); } }] : []),
       { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: onRename },
       ...(groupKind === "project" ? [] : [{ key: "move", label: t("conversationOrganizer.adjustMembership"), disabled, children: conversationGroupSubmenu({ conversationId, groupId, title, isTaskConv }, () => setOpen(true)) }]),
       { key: "archive", label: t("settingsPage.recovery.archiveAction"), disabled, onClick: () => setArchiveOpen(true) },
       { key: "trash", label: t("common.delete"), disabled, danger: true, onClick: async () => { await modal.confirm({
+        className: "conversation-trash-confirm",
+        width: 420,
         title: t("settingsPage.recovery.moveToTrashTitle"),
-        content: t("settingsPage.recovery.moveToTrashDescription") + " " + t("chat.fork.deleteNotice"),
+        content: <ConversationTrashConfirmContent name={title} showForkNotice />,
         okText: t("common.delete"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },

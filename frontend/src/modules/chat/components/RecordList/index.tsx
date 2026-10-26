@@ -1,10 +1,13 @@
+import { TASKS_REMOVED_EVENT } from '@/modules/taskCenter/events';
 import { getLocalizedErrorMessage } from "@/components/request";
 import {
   DndContext, PointerSensor, KeyboardSensor, closestCenter, pointerWithin, useSensor, useSensors,
-  type DragEndEvent, type DragStartEvent, type DragOverEvent, type CollisionDetection,
+  type DragEndEvent, type DragStartEvent, type DragOverEvent, type DragMoveEvent, type CollisionDetection,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import SortableConversationRow from "./SortableConversationRow";
+import ScopedConversationList from "./ScopedConversationList";
+import { conversationDropPlacement, moveConversationItems, type ConversationPlacement } from "./conversationReorder";
 import ConversationRunningIndicator from "./ConversationRunningIndicator";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
 import { applyConversationOrder, isConversationPinned, sortConversationHistory, type SidebarConversation } from "./conversationHistory";
@@ -46,6 +49,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useId,
@@ -69,6 +73,7 @@ import {
 } from "@/modules/chat/utils/request";
 import {
   bumpConversationToTop,
+  emitConversationListRefresh,
 } from "@/modules/chat/utils/conversationActivity";
 import {
   CHAT_CONVERSATION_ACTIVITY_EVENT,
@@ -83,6 +88,8 @@ import {
 import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
 import ArchiveConversationModal from "../ArchiveConversationModal";
+import { showBatchArchiveFeedback } from "../BatchArchiveFeedback";
+import ConversationTrashConfirmContent from "../ConversationTrashConfirmContent";
 import { unarchiveConversation } from "@/modules/settings/recoveryApi";
 import {
   CONVERSATION_GROUPS_CHANGED_EVENT,
@@ -153,31 +160,11 @@ export interface RecordListImperativeProps {
 
 const { Search } = Input;
 
-type ConversationGroup = "pinned" | "today" | "yesterday" | "recentWeek" | "earlier";
-
 type SidebarConversationNode = {
   conversation: SidebarConversation;
   children: SidebarConversation[];
   isPlaceholderParent?: boolean;
 };
-
-function getConversationGroup(updateTime?: string): Exclude<ConversationGroup, "pinned"> {
-  const parsedTime = dayjs(updateTime);
-  if (!parsedTime.isValid()) {
-    return "earlier";
-  }
-  const todayStart = dayjs().startOf("day");
-  if (parsedTime.isSame(todayStart, "day")) {
-    return "today";
-  }
-  if (parsedTime.isSame(todayStart.subtract(1, "day"), "day")) {
-    return "yesterday";
-  }
-  if (parsedTime.isAfter(todayStart.subtract(7, "day"))) {
-    return "recentWeek";
-  }
-  return "earlier";
-}
 
 const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
   (props, ref) => {
@@ -198,6 +185,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     } = props;
     const [historyList, setHistoryList] = useState<SidebarConversation[]>([]);
     const [renamingId, setRenamingId] = useState<string | null>(null);
+    const [openMenuId, setOpenMenuId] = useState<string | null>(null);
     const [movingConversation, setMovingConversation] = useState<SidebarConversation | null>(null);
     const statusWatcherId = useId();
     useEffect(() => {
@@ -263,8 +251,35 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const pinningConversationRef = useRef(false);
     const historyRequestRef = useRef(0);
     const historyRefreshRequiredRef = useRef(false);
+    const historyViewToRestore = useRef<{ scrollTop: number; focusId?: string } | null>(null);
+    useLayoutEffect(() => {
+      const view = historyViewToRestore.current;
+      if (!view) return;
+      historyViewToRestore.current = null;
+      const container = document.getElementById(scrollableTargetId);
+      if (!container) return;
+      container.scrollTop = view.scrollTop;
+      if (view.focusId) {
+        const row = Array.from(container.querySelectorAll<HTMLElement>(".record-sortable"))
+          .find(item => item.dataset.conversationId === view.focusId);
+        row?.querySelector<HTMLButtonElement>(".record-drag-handle")?.focus({ preventScroll: true });
+      }
+    }, [historyRevision, scrollableTargetId]);
     const [reorderingConversationId, setReorderingConversationId] = useState("");
     const reorderingConversationRef = useRef(false);
+    const [pendingOrder, setPendingOrder] = useState<ConversationPlacement | null>(null);
+    const [dropPlacement, setDropPlacement] = useState<ConversationPlacement | null>(null);
+    const [activeDragId, setActiveDragId] = useState("");
+    const orderRequestRef = useRef(0);
+    const orderView = JSON.stringify([conversationFilters, keyword]);
+    const orderViewRef = useRef(orderView);
+    orderViewRef.current = orderView;
+    useEffect(() => {
+      ++orderRequestRef.current;
+      reorderingConversationRef.current = false;
+      setPendingOrder(null); setDropPlacement(null); setActiveDragId(""); setReorderingConversationId("");
+      return () => { ++orderRequestRef.current; };
+    }, [orderView]);
     const sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
       useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -276,7 +291,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         ...args,
         droppableContainers: args.droppableContainers.filter((container) =>
           container.data.current?.kind !== 'conversation-group' &&
-          container.data.current?.pinned === args.active.data.current?.pinned,
+          container.data.current?.scope === args.active.data.current?.scope,
         ),
       });
     };
@@ -329,7 +344,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     useEffect(() => {
       const refresh = () => getHistory({ isFirst: true, searchText: keyword });
       window.addEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
-      return () => window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh);
+      window.addEventListener(TASKS_REMOVED_EVENT, refresh);
+      return () => { window.removeEventListener(CONVERSATION_GROUPS_CHANGED_EVENT, refresh); window.removeEventListener(TASKS_REMOVED_EVENT, refresh); };
     }, [keyword, conversationFilters]);
 
     useEffect(() => {
@@ -345,8 +361,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       return () => window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
     }, []);
 
+    const orderedHistory = useMemo(() => pendingOrder ? moveConversationItems(historyList, pendingOrder) : historyList, [historyList, pendingOrder]);
     const conversationTree = useMemo(() => {
-      const visibleHistory = historyList.filter(
+      const visibleHistory = orderedHistory.filter(
         (item) => (showBatchExport && !(compact && groupSection)) || isConversationPinned(item) || !item.group_id,
       );
       const conversationsById = new Map(
@@ -397,7 +414,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         });
       });
       return nodes;
-    }, [historyList, showBatchExport, compact, groupSection]);
+    }, [orderedHistory, showBatchExport, compact, groupSection]);
 
     useEffect(() => {
       if (!keyword.trim()) {
@@ -423,49 +440,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       });
     }, [conversationTree, keyword]);
 
-    const groupedHistoryList = useMemo(() => {
-      const groups: Record<ConversationGroup, SidebarConversationNode[]> = {
-        pinned: [],
-        today: [],
-        yesterday: [],
-        recentWeek: [],
-        earlier: [],
-      };
-      conversationTree.forEach((node) => {
-        if (isConversationPinned(node.conversation)) {
-          groups.pinned.push(node);
-          return;
-        }
-        groups[getConversationGroup(node.conversation.update_time)].push(node);
-      });
-      return [
-        {
-          key: "pinned" as const,
-          title: t("chat.conversationGroupPinned"),
-          items: groups.pinned,
-        },
-        {
-          key: "today" as const,
-          title: t("chat.conversationGroupToday"),
-          items: groups.today,
-        },
-        {
-          key: "yesterday" as const,
-          title: t("chat.conversationGroupYesterday"),
-          items: groups.yesterday,
-        },
-        {
-          key: "recentWeek" as const,
-          title: t("chat.conversationGroupRecentWeek"),
-          items: groups.recentWeek,
-        },
-        {
-          key: "earlier" as const,
-          title: t("chat.conversationGroupEarlier"),
-          items: groups.earlier,
-        },
-      ].filter((group) => group.items.length > 0);
-    }, [conversationTree, t]);
+    const groupedHistoryList = useMemo(() => [
+      { key: "pinned", title: t("chat.conversationGroupPinned"), items: conversationTree.filter(node => isConversationPinned(node.conversation)) },
+      { key: "recent", title: t("chat.conversationGroupRecent"), items: conversationTree.filter(node => !isConversationPinned(node.conversation)) },
+    ].filter(group => group.items.length > 0), [conversationTree, t]);
 
     const batchSelectableConversationIds = useMemo(
       () =>
@@ -573,57 +551,57 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       return () => window.clearTimeout(timer);
     }, [searchText]);
 
-    function getHistory(params?: {
+    async function getHistory(params?: {
       isMore?: boolean;
       isFirst?: boolean;
       searchText?: string;
+      preserveWindow?: boolean;
     }) {
-      const { isMore = false, isFirst = false, searchText } = params ?? {};
+      const { isMore = false, isFirst = false, searchText, preserveWindow = false } = params ?? {};
       const activeFilter = conversationFiltersRef.current;
       const requestId = ++historyRequestRef.current;
       const replaceHistory = isFirst || historyRefreshRequiredRef.current;
+      const visibleCount = preserveWindow ? Math.max(1, historyList.length) : 50;
+      const rememberView = () => {
+        if (!preserveWindow) return;
+        const container = document.getElementById(scrollableTargetId);
+        const focused = document.activeElement as HTMLElement | null;
+        historyViewToRestore.current = {
+          scrollTop: container?.scrollTop || 0,
+          focusId: focused?.matches(".record-drag-handle") && container?.contains(focused)
+            ? focused.closest<HTMLElement>(".record-sortable")?.dataset.conversationId : undefined,
+        };
+      };
       if (replaceHistory) historyRefreshRequiredRef.current = true;
       setIsHistoryLoading(true);
-
-      ChatServiceApi()
-        .conversationServiceListConversations(
-          {
-            keyword: searchText ?? keyword,
-            pageToken: replaceHistory ? "" : pageToken,
-            pageSize: 50,
-          },
-          {
-            params: {
-              is_task_conv: activeFilter.filter === "task" ? "true" : "false",
-              ...(activeFilter.sources
-                ? { assistants: activeFilter.sources.join(",") }
-                : {}),
-            },
-          },
-        )
-        .then((res) => {
-          const conversations: SidebarConversation[] =
-            res?.data?.conversations ?? [];
+      try {
+        let token = replaceHistory ? "" : pageToken;
+        const conversations: SidebarConversation[] = [];
+        do {
+          const res = await ChatServiceApi().conversationServiceListConversations(
+            { keyword: searchText ?? keyword, pageToken: token, pageSize: 50 },
+            { params: { is_task_conv: activeFilter.filter === "task" ? "true" : "false", ...(activeFilter.sources ? { assistants: activeFilter.sources.join(",") } : {}) } },
+          );
           if (requestId !== historyRequestRef.current) return;
-          setKnownSources(rememberConversationSources(conversations.map((conversation) => conversation.assistant || "lazymind")));
-          setHistoryList((previous) => sortConversationHistory(
-            [...new Map((isMore && !replaceHistory ? [...previous, ...conversations] : conversations)
-              .map((item) => [item.conversation_id, item])).values()],
-          ));
-          setPageToken(res.data.next_page_token || "");
-          historyRefreshRequiredRef.current = false;
-          if (replaceHistory) setHistoryRevision((revision) => revision + 1);
-        })
-        .catch(() => {
-          if (requestId !== historyRequestRef.current) return;
-          message.error(t("chat.fork.historyLoadFailed"));
-          // Reset InfiniteScroll's pending-load latch even when the row count
-          // stays the same, so a failed refresh can retry from the first page.
-          setHistoryRevision((revision) => revision + 1);
-        })
-        .finally(() => {
-          if (requestId === historyRequestRef.current) setIsHistoryLoading(false);
-        });
+          conversations.push(...(res?.data?.conversations ?? []));
+          const next = res.data.next_page_token || "";
+          if (next === token) { token = ""; break; }
+          token = next;
+        } while (preserveWindow && token && conversations.length < visibleCount);
+        rememberView();
+        setKnownSources(rememberConversationSources(conversations.map(conversation => conversation.assistant || "lazymind")));
+        setHistoryList(previous => sortConversationHistory([...new Map((isMore && !replaceHistory ? [...previous, ...conversations] : conversations).map(item => [item.conversation_id, item])).values()]));
+        setPageToken(token);
+        historyRefreshRequiredRef.current = false;
+        if (replaceHistory) setHistoryRevision(revision => revision + 1);
+      } catch {
+        if (requestId !== historyRequestRef.current) return;
+        rememberView();
+        message.error(t("chat.fork.historyLoadFailed"));
+        setHistoryRevision(revision => revision + 1);
+      } finally {
+        if (requestId === historyRequestRef.current) setIsHistoryLoading(false);
+      }
     }
 
     function removeHistoryItems(ids: string[]) {
@@ -713,7 +691,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         });
     }
 
-    async function handleReorder({ active, over }: DragEndEvent) {
+    async function handleReorder(event: DragEndEvent) {
+      const { active, over } = event;
       if (!over || showBatchExport || keyword || active.id === over.id || reorderingConversationRef.current || pinningConversationRef.current) return;
       const moved = historyList.find((item) => item.conversation_id === active.id);
       const targetGroupId = over.data?.current?.kind === 'conversation-group' ? over.data.current.groupId as string : '';
@@ -729,25 +708,29 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         finally { reorderingConversationRef.current = false; setReorderingConversationId(''); }
         return;
       }
-      const target = historyList.find((item) => item.conversation_id === over.id);
+      const target = historyList.find(item => item.conversation_id === over.id);
       if (!moved || !target || isConversationPinned(moved) !== isConversationPinned(target)) return;
-      const sourceIndex = historyList.indexOf(moved);
-      const targetIndex = historyList.indexOf(target);
+      const move = conversationDropPlacement(event, historyList.map(item => item.conversation_id || ""));
+      if (!move) return;
+      const token = ++orderRequestRef.current;
+      const view = orderViewRef.current;
       reorderingConversationRef.current = true;
       ++historyRequestRef.current;
       setIsHistoryLoading(false);
       setReorderingConversationId(String(active.id));
+      setPendingOrder(move);
       try {
-        const response = await ChatServiceApi().conversationServiceReorder(
-          String(active.id), String(over.id), sourceIndex < targetIndex ? "after" : "before",
-        );
-        setHistoryList((previous) => applyConversationOrder(previous, response.data));
-        getHistory({ isFirst: true });
+        const response = await ChatServiceApi().conversationServiceReorder(move.movedId, move.targetId, move.position);
+        if (token !== orderRequestRef.current || view !== orderViewRef.current) return;
+        setHistoryList(previous => applyConversationOrder(previous, response.data));
       } catch {
-        message.error(t("chat.reorderConversationFailed"));
+        if (token === orderRequestRef.current && view === orderViewRef.current) message.error(t("chat.reorderConversationFailed"));
       } finally {
-        reorderingConversationRef.current = false;
-        setReorderingConversationId("");
+        if (token === orderRequestRef.current && view === orderViewRef.current) {
+          reorderingConversationRef.current = false;
+          setReorderingConversationId(""); setPendingOrder(null);
+          void getHistory({ isFirst: true, preserveWindow: true });
+        }
       }
     }
 
@@ -762,8 +745,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         hasForks = Boolean((response.data.conversation as { has_fork_descendants?: boolean })?.has_fork_descendants);
       } catch { message.error(t("chat.fork.historyLoadFailed")); return; }
       await modal.confirm({
+        className: "conversation-trash-confirm",
+        width: 420,
         title: t("settingsPage.recovery.moveToTrashTitle"),
-        content: t("settingsPage.recovery.moveToTrashDescription") + (hasForks ? " " + t("chat.fork.deleteNotice") : ""),
+        content: <ConversationTrashConfirmContent name={data.display_name} showForkNotice={hasForks} />,
         okText: t("common.delete"),
         cancelText: t("common.cancel"),
         okButtonProps: { danger: true },
@@ -786,6 +771,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 .then(() => {
                   message.destroy(messageKey);
                   message.success(t("settingsPage.recovery.unarchived"));
+                  emitConversationListRefresh();
                   emitConversationGroupsChanged();
                   getHistory({ isFirst: true });
                 })
@@ -972,19 +958,24 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         setNewMessage(false);
       };
       return (
-        <ConversationPreview conversationId={conversationId} title={conversationTitle} summary={item.summary} updateTime={item.update_time} isTask={Boolean(item.is_task_conv)} relation={relationDescription} disabled={showBatchExport || renamingId === conversationId}>
+        <ConversationPreview conversationId={conversationId} title={conversationTitle} summary={item.summary} updateTime={item.update_time} isTask={Boolean(item.is_task_conv)} relation={relationDescription} disabled={showBatchExport || renamingId === conversationId || openMenuId === conversationId}>
         <div
           aria-busy={item.metadata_pending || undefined}
           data-title-revision={item.title_revision}
           className={classnames("record", {
             selected,
             "record-child": isChild,
-            "record-renaming": renamingId === conversationId,
           })}
           key={item.conversation_id}
           role={showBatchExport || renamingId === conversationId ? undefined : "button"}
           tabIndex={showBatchExport ? undefined : 0}
           aria-current={selected ? "page" : undefined}
+          onContextMenu={(event) => {
+            if (showBatchExport || hideActions || renamingId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setOpenMenuId(conversationId);
+          }}
           onClick={(e) => {
             e.preventDefault();
             activateConversation();
@@ -1039,7 +1030,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               </button>
             </Tooltip>
           ) : null}
-          {renamingId === conversationId ? <ConversationTitleEditor key={conversationId} conversationId={conversationId} initialTitle={conversationTitle} onClose={() => setRenamingId(null)} /> : <span className="title">{conversationTitle}</span>}
+          <span className="title">{conversationTitle}</span>
           <ConversationRunningIndicator conversationId={conversationId} />
           {source.source_type === "pdf_preview" ? (
             <Tooltip title={source.source_display_name || t("knowledge.pdfChatSavedSource")}>
@@ -1052,9 +1043,11 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           {!showBatchExport && !hideActions ? (
             <Dropdown
               destroyPopupOnHide
-              trigger={["click"]}
+              trigger={["hover", "click", "contextMenu"]}
+              open={!renamingId && openMenuId === conversationId}
+              onOpenChange={open => setOpenMenuId(current => open && !renamingId ? conversationId : current === conversationId ? null : current)}
               menu={{
-                onClick: ({ domEvent }) => domEvent.stopPropagation(),
+                onClick: ({ domEvent }) => { domEvent.stopPropagation(); setOpenMenuId(null); },
                 items: [
                   { key: "rename", label: t("conversationOrganizer.renameConversation"), onClick: () => setRenamingId(conversationId) },
                   ...ownershipActionItems,
@@ -1127,9 +1120,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             key={conversationId}
             id={conversationId}
             title={item.display_name || conversationId}
-            pinned={isConversationPinned(item)}
-            hideDragHandle={item.group_kind === "project" || showBatchExport || renamingId === conversationId}
-            disabled={item.group_kind === "project" || showBatchExport || Boolean(renamingId) || isHistoryLoading || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
+            hideDragHandle={showBatchExport || renamingId === conversationId}
+            scope={`${Boolean(item.is_task_conv)}:${isConversationPinned(item) ? "pinned" : item.group_id || "recent"}`}
+            dropPosition={dropPlacement?.targetId === conversationId ? dropPlacement.position : undefined}
+            disabled={showBatchExport || Boolean(renamingId) || (isHistoryLoading && !activeDragId) || Boolean(keyword || pinningConversationId || reorderingConversationId || item.organizing_run_id) || Boolean(node.isPlaceholderParent)}
           >
             <Col span={24} draggable={item.group_kind !== "project" && renamingId !== conversationId && !showBatchExport && !keyword && !item.organizing_run_id && !isChildConversation(item) && !node.isPlaceholderParent} onDragStart={(e: React.DragEvent<HTMLElement>) => startConversationDrag(e, conversationId, item.group_id, Boolean(item.is_task_conv))}>{record}</Col>
             {childrenExpanded && node.children.length > 0 ? (
@@ -1142,29 +1136,17 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                     parent: item.display_name || conversationId,
                   })}
                 >
-                  {node.children.map((child) => {
-                    const childSelected =
-                      child.conversation_id === currentSessionId;
-                    return showBatchExport ? (
-                      <Checkbox
-                        key={child.conversation_id}
-                        className="export-checkbox-item record-child-checkbox"
-                        disabled
-                      >
-                        {renderItemText({
-                          item: child,
-                          selected: childSelected,
-                          isChild: true,
-                        })}
-                      </Checkbox>
-                    ) : (
-                      renderItemText({
-                        item: child,
-                        selected: childSelected,
-                        isChild: true,
-                      })
-                    );
-                  })}
+                  {showBatchExport ? node.children.map(child => <Checkbox key={child.conversation_id} className="export-checkbox-item record-child-checkbox" disabled>
+                    {renderItemText({ item: child, selected: child.conversation_id === currentSessionId, isChild: true })}
+                  </Checkbox>) : <ScopedConversationList items={node.children.filter((child): child is SidebarConversation & { conversation_id: string } => Boolean(child.conversation_id))}
+                    scope={`${orderView}:children:${conversationId}`} disabled={Boolean(keyword || renamingId || pinningConversationId || reorderingConversationId || isHistoryLoading)}
+                    isItemDisabled={child => Boolean(child.organizing_run_id)}
+                    onSavingChange={saving => { if (saving) ++historyRequestRef.current; reorderingConversationRef.current = saving; setReorderingConversationId(saving ? conversationId : ""); }}
+                    onCommitted={(_move, result) => setHistoryList(previous => applyConversationOrder(previous, result))}
+                    onRefresh={() => getHistory({ isFirst: true, preserveWindow: true })}>
+                    {child => renderItemText({ item: child, selected: child.conversation_id === currentSessionId, isChild: true })}
+                  </ScopedConversationList>}
+
                 </div>
               </Col>
             ) : null}
@@ -1172,19 +1154,13 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         );
       };
 
-      const normalNodes = conversationTree.filter(node => !isConversationPinned(node.conversation));
-      const dateOrderedNodes = groupedHistoryList.filter(group => group.key !== "pinned").flatMap(group => group.items);
-      const hasCrossDateOrder = normalNodes.some((node, index) => node !== dateOrderedNodes[index]);
-      const sections = hasCrossDateOrder && normalNodes.some(node => node.conversation.history_order != null)
-        ? [...groupedHistoryList.filter(group => group.key === "pinned"), { key: "manual", title: t("chat.recentConversations"), items: normalNodes }]
-        : groupedHistoryList;
-      const visibleSections = sections.filter(group => group.items.length > 0 && (pinnedOnly === undefined || (group.key === "pinned") === pinnedOnly));
+      const visibleSections = groupedHistoryList.filter(group => pinnedOnly === undefined || (group.key === "pinned") === pinnedOnly);
       const content = compact ? (
         <SortableContext items={visibleSections.flatMap(group => group.items.map(node => node.conversation.conversation_id || ""))} strategy={verticalListSortingStrategy}>
           <div className="record-groups">
             {visibleSections.map((group) => (
               <div className="record-group" key={group.key}>
-                <div className="record-group-title">{group.title}</div>
+                {(group.key !== "recent" || hideHeader) && <div className="record-group-title">{group.title}</div>}
                 <Row>
                   {group.items.map((node) => renderNode(node))}
                 </Row>
@@ -1202,7 +1178,11 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
 
     const showOrganizerEntry = compact && !showBatchExport && conversationFilters.filter === "normal";
     return (
-      <DndContext sensors={sensors} collisionDetection={sameSectionCollision} onDragEnd={handleReorder}
+      <DndContext sensors={sensors} collisionDetection={sameSectionCollision} onDragEnd={(event: DragEndEvent) => { setActiveDragId(""); setDropPlacement(null); return handleReorder(event); }}
+        onDragStart={(event: DragStartEvent) => setActiveDragId(String(event.active.id))}
+        onDragCancel={() => { setActiveDragId(""); setDropPlacement(null); }}
+        onDragMove={(event: DragMoveEvent) => setDropPlacement(conversationDropPlacement(event, historyList.map(item => item.conversation_id || "")))}
+        onDragOver={(event: DragOverEvent) => setDropPlacement(conversationDropPlacement(event, historyList.map(item => item.conversation_id || "")))}
         accessibility={{
           screenReaderInstructions: { draggable: t("chat.reorderConversationHint") },
           announcements: {
@@ -1214,6 +1194,9 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         }}>
       <div id={compact && groupSection ? scrollableTargetId : undefined} className={classnames("record-container", { compact, "grouped-sidebar": compact && groupSection })} onDragOver={e => { if (!showBatchExport && !keyword && e.dataTransfer.types.includes(CONVERSATION_DRAG)) e.preventDefault(); }} onDrop={async e => { const item = readConversationDrag(e); if (!item || keyword || showBatchExport) return; e.preventDefault(); if (item.groupId) { await removeConversation(item.groupId, item.id); emitConversationGroupsChanged(); } }}>
         {modalContextHolder}
+        {renamingId && <ConversationTitleEditor key={renamingId} conversationId={renamingId}
+          initialTitle={historyList.find(item => item.conversation_id === renamingId)?.display_name}
+          onClose={() => { setOpenMenuId(null); setRenamingId(null); }} />}
         <ArchiveConversationModal
           open={Boolean(archiveItem)}
           conversationId={archiveItem?.conversation_id}
@@ -1232,19 +1215,18 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           open={batchArchiveIds !== null}
           conversationIds={batchArchiveIds || []}
           onCancel={() => setBatchArchiveIds(null)}
-          onArchived={(archivedIds, failedIds) => {
+          onArchived={(archivedIds, failedIds, batch) => {
             setBatchArchiveIds(null);
-            removeHistoryItems(archivedIds);
+            removeHistoryItems([...archivedIds, ...(batch?.skippedIds || [])]);
             setCheckedList(failedIds);
             if (!failedIds.length) setShowBatchExport(false);
-            message.open({
-              type: "success",
-              duration: 8,
-              content: <span className="archive-feedback">
-                {t("chat.batchArchiveSuccess", { count: archivedIds.length })}
-                <Button type="link" size="small" onClick={() => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog"))}>{t("settingsPage.recovery.viewArchived")}</Button>
-              </span>,
-            });
+            if (archivedIds.length) {
+              showBatchArchiveFeedback({
+                count: archivedIds.length,
+                receipts: batch?.receipts || [],
+                onViewArchived: () => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog")),
+              });
+            } else message.info(t("chat.batchArchiveStateChanged"));
           }}
         />
         <ConversationMembershipModal conversation={movingConversation?.conversation_id ? { conversationId: movingConversation.conversation_id, groupId: movingConversation.group_id, title: movingConversation.display_name, isTaskConv: Boolean(movingConversation.is_task_conv) } : null} onClose={() => setMovingConversation(null)} />
@@ -1254,7 +1236,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             {(!compact || showBatchActions || showOrganizerEntry) && (
               <div className={classnames("record-header-top", { "record-header-top--organizer": showOrganizerEntry })}>
                 <div className="list-title">
-                  {compact ? t("chat.recentConversations") : title || t("chat.chatHistory")}
+                  {compact ? t("chat.conversationGroupRecent") : title || t("chat.chatHistory")}
                 </div>
                 {showOrganizerEntry && <ConversationGroups mode="organizer" onChanged={emitConversationGroupsChanged} />}
                 {showBatchActions && (

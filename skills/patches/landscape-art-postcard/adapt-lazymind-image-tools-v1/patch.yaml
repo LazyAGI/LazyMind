@@ -1,0 +1,12 @@
+schema_version: 1
+id: landscape-art-postcard/adapt-lazymind-image-tools-v1
+description: Adapt image references, image editing and result rendering to LazyMind while preserving the upstream visual instructions
+target:
+  uid: bsk_7ACB2BAAC101D36CAF1EC99AD1F8
+  version: 2.0.0
+  origin_tree_sha256: a46e98667e184830063e7d85474cdc76c21132ba46d2cc7ea228a8dd23179fea
+operations:
+  - op: upsert
+    path: SKILL.md
+    file: files/SKILL.md
+    before_sha256: 7340035caba51055c385abca8c35740127e9860afd97fa428b5d92904ab16ab1

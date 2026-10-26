@@ -6,11 +6,15 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/log"
+	"lazymind/core/systemdeps"
 )
 
 const imageNodeGroupName = "image"
 
 func setImageGroupLazyMode(ctx context.Context, lazyMode *string) error {
+	if !systemdeps.PythonComponentActive("rag") {
+		return nil
+	}
 	url := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/ng/"+imageNodeGroupName+"/lazy_mode")
 	if lazyMode != nil {
 		url += "?lazy_mode=" + *lazyMode

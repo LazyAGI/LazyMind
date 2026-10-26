@@ -79,6 +79,9 @@ class MessageWorkerRepository(
 
 
 class OutboxWorkRepository(Protocol):
+    def invalidate_wechat_notification_context(self, outbound: ClaimedOutbound, claim_owner: str) -> bool:
+        ...
+
     def claim_next_outbound(
         self,
         claim_owner: str,

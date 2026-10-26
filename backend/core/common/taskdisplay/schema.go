@@ -13,9 +13,10 @@ type CollectionPage struct {
 	Revision   int64   `json:"revision"`
 }
 type Pages struct {
-	ProcessSteps   CollectionPage `json:"process_steps"`
-	Sources        CollectionPage `json:"sources"`
-	StageArtifacts CollectionPage `json:"stage_artifacts"`
+	KnowledgeOperations CollectionPage `json:"knowledge_operations"`
+	ProcessSteps        CollectionPage `json:"process_steps"`
+	Sources             CollectionPage `json:"sources"`
+	StageArtifacts      CollectionPage `json:"stage_artifacts"`
 }
 type Timing struct {
 	StartedAt          *time.Time `json:"started_at" nullable:"true" required:"true"`
@@ -68,34 +69,46 @@ type PublicArtifact struct {
 	CreatedAt          time.Time    `json:"created_at"`
 }
 type OrdinaryTaskView struct {
-	SchemaVersion    int                 `json:"schema_version" enum:"1"`
-	DisplayKey       string              `json:"display_key"`
-	TaskID           *string             `json:"task_id" nullable:"true" required:"true"`
-	SessionID        *string             `json:"session_id" nullable:"true" required:"true"`
-	WorkflowStepID   *string             `json:"workflow_step_id" nullable:"true" required:"true"`
-	AttemptID        *string             `json:"attempt_id" nullable:"true" required:"true"`
-	ConversationID   string              `json:"conversation_id"`
-	TriggerHistoryID string              `json:"trigger_history_id,omitempty"`
-	AgentType        string              `json:"agent_type,omitempty"`
-	RunID            string              `json:"run_id"`
-	ExecutionID      string              `json:"execution_id"`
-	ParallelGroupID  *string             `json:"parallel_group_id" nullable:"true" required:"true"`
-	Order            int                 `json:"order"`
-	Title            string              `json:"title"`
-	Status           string              `json:"status"`
-	Revision         int64               `json:"revision"`
-	ProcessState     string              `json:"process_state"`
-	ProcessSteps     []PublicProcessStep `json:"process_steps"`
-	PlanSteps        []string            `json:"plan_steps,omitempty"`
-	ProgressPct      *int                `json:"progress_pct,omitempty"`
-	Sources          []PublicSource      `json:"sources"`
-	StageArtifacts   []PublicArtifact    `json:"stage_artifacts"`
-	Pages            Pages               `json:"pages"`
-	Timing           Timing              `json:"timing"`
+	KnowledgeOperations []KnowledgeOperation `json:"knowledge_operations"`
+	SchemaVersion       int                  `json:"schema_version" enum:"1"`
+	DisplayKey          string               `json:"display_key"`
+	TaskID              *string              `json:"task_id" nullable:"true" required:"true"`
+	SessionID           *string              `json:"session_id" nullable:"true" required:"true"`
+	WorkflowStepID      *string              `json:"workflow_step_id" nullable:"true" required:"true"`
+	AttemptID           *string              `json:"attempt_id" nullable:"true" required:"true"`
+	ConversationID      string               `json:"conversation_id"`
+	TriggerHistoryID    string               `json:"trigger_history_id,omitempty"`
+	AgentType           string               `json:"agent_type,omitempty"`
+	RunID               string               `json:"run_id"`
+	ExecutionID         string               `json:"execution_id"`
+	ParallelGroupID     *string              `json:"parallel_group_id" nullable:"true" required:"true"`
+	Order               int                  `json:"order"`
+	Title               string               `json:"title"`
+	Status              string               `json:"status"`
+	Revision            int64                `json:"revision"`
+	ProcessState        string               `json:"process_state"`
+	ProcessSteps        []PublicProcessStep  `json:"process_steps"`
+	PlanSteps           []string             `json:"plan_steps,omitempty"`
+	ProgressPct         *int                 `json:"progress_pct,omitempty"`
+	Sources             []PublicSource       `json:"sources"`
+	StageArtifacts      []PublicArtifact     `json:"stage_artifacts"`
+	Pages               Pages                `json:"pages"`
+	Timing              Timing               `json:"timing"`
 
 	CapabilityDependency *CapabilityDependency `json:"capability_dependency,omitempty"`
 }
+type RunTiming struct {
+	RequestedAt           time.Time  `json:"requested_at"`
+	FinishedAt            *time.Time `json:"finished_at" nullable:"true" required:"true"`
+	MeasuredAt            time.Time  `json:"measured_at"`
+	ElapsedMS             *int64     `json:"elapsed_ms" nullable:"true" required:"true"`
+	CumulativeExecutionMS *int64     `json:"cumulative_execution_ms" nullable:"true" required:"true"`
+	RunningAttemptCount   int        `json:"running_attempt_count"`
+}
 type OrdinaryRunView struct {
+	ExecutionID     string           `json:"execution_id,omitempty"`
+	Status          string           `json:"status,omitempty"`
+	Timing          *RunTiming       `json:"timing,omitempty"`
 	RunID           string           `json:"run_id"`
 	Revision        int64            `json:"revision"`
 	FinalOutputRefs []string         `json:"final_output_refs"`
@@ -118,5 +131,5 @@ func String(value string) *string {
 	return &value
 }
 func NewTask() OrdinaryTaskView {
-	return OrdinaryTaskView{SchemaVersion: SchemaVersion, ProcessState: "not_provided", ProcessSteps: []PublicProcessStep{}, Sources: []PublicSource{}, StageArtifacts: []PublicArtifact{}, Timing: Timing{MeasuredAt: time.Now().UTC()}}
+	return OrdinaryTaskView{KnowledgeOperations: []KnowledgeOperation{}, SchemaVersion: SchemaVersion, ProcessState: "not_provided", ProcessSteps: []PublicProcessStep{}, Sources: []PublicSource{}, StageArtifacts: []PublicArtifact{}, Timing: Timing{MeasuredAt: time.Now().UTC()}}
 }

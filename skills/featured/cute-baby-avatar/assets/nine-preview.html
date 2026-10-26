@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>九宫格套装 · 九款风格预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff8f3; color: #352e2b; font: 15px/1.75 system-ui, -apple-system, "PingFang SC", sans-serif; }
+    main { max-width: 1040px; margin: auto; padding: 28px 24px; }
+    .label { color: #9c563f; font-size: 12px; letter-spacing: .12em; }
+    h1 { margin: 8px 0; font-size: 28px; line-height: 1.3; }
+    .intro { color: #746962; margin: 0 0 22px; }
+    .comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    figure, section { margin: 0; padding: 18px; background: white; border: 1px solid #ecdfd5; border-radius: 20px; }
+    .step { display: inline-block; margin-bottom: 12px; padding: 3px 10px; border-radius: 99px; color: #746962; background: #f6f3ef; font-size: 12px; }
+    .output .step { color: #90543a; background: #fff1e6; }
+    img { display: block; width: 100%; max-width: 340px; height: auto; aspect-ratio: 1; object-fit: contain; margin: auto; border-radius: 12px; }
+    figcaption { margin-top: 12px; }
+    figcaption strong { display: block; font-size: 16px; }
+    figcaption span { color: #746962; font-size: 13px; }
+    h2 { font-size: 17px; margin: 0 0 10px; }
+    .prompt { margin-top: 20px; }
+    .prompt p { margin: 0; }
+    .comparison.nine { grid-template-columns: minmax(0, .65fr) minmax(0, 1.35fr); align-items: start; }
+    .comparison.nine .wide { margin-top: 0; }
+    @media (max-width: 600px) { .comparison.nine { grid-template-columns: 1fr; } }
+    .wide { margin-top: 18px; }
+    .wide img { max-width: 680px; }
+    .style-list { columns: 3; padding-left: 22px; }
+    @media (max-width: 600px) { .style-list { columns: 2; } }
+    .note { color: #746962; font-size: 12px; margin: 16px 0 0; }
+    @media (max-width: 420px) { main { padding: 20px 12px; } .comparison { gap: 10px; } figure { padding: 10px; border-radius: 14px; } h1 { font-size: 23px; } figcaption strong { font-size: 14px; } }
+  </style>
+</head>
+<body>
+<main>
+  <span class="label">九宫格套装 / NINE STYLES</span>
+  <h1>同一个孩子 · 九种头像风格</h1>
+  <p class="intro">同一张儿童照片，尝试九种配饰与表情。统一人物特征、可见年龄和白底纯头部构图。</p>
+  <div class="comparison nine" aria-label="输入照片和九款风格预览对照">
+  <figure>
+    <span class="step">01 · 输入 / INPUT</span>
+    <img src="{{asset_url:input_photo}}" alt="输入儿童照片：黑色短发、黄色上衣，保留原背景与上半身">
+    <figcaption><strong>同一张原始照片</strong><span>每张生成都直接使用原始照片作为身份参照</span></figcaption>
+  </figure>
+  <figure class="output wide">
+    <span class="step">02 · 九款风格预览 / STYLE PREVIEW</span>
+    <img src="{{asset_url:nine_preview_image}}" alt="同一儿童的九款头像预览，依次为自然俏皮、苹果头、甜系配饰、水果糖果、生日款、Y2K耳机、复古潮童、贝雷帽和萌宠帽">
+    <figcaption><strong>九种风格，一次看全</strong><span>从左到右、从上到下对应下方款式顺序</span></figcaption>
+  </figure>
+  </div>
+  <section class="prompt">
+    <h2>九款顺序</h2>
+    <ol class="style-list"><li>自然俏皮</li><li>苹果头</li><li>甜系配饰</li><li>水果糖果</li><li>生日款</li><li>Y2K 耳机</li><li>复古潮童</li><li>贝雷帽</li><li>萌宠帽</li></ol>
+    <h2>本例提示词</h2>
+    <p>以输入儿童照片为身份参照，按以上顺序展示九种头像风格。每种均保持同一人物、可见年龄、脸型、五官比例、肤色及黑色短发，按款式变化配饰与表情。使用自然写实质感、白底纯头部构图，完整保留头发和头饰，四周留白。制作 3×3 套装风格预览，每格恰好一个头部，不含脖子、肩膀、身体、手、文字、水印或边框。</p>
+  </section>
+  <section class="prompt">
+    <h2>实际任务交付</h2>
+    <p>9 张独立的 1:1 头像文件，编号 01–09；每张附可复用提示词；另附一张 3×3 九宫格预览。每张均使用同一原始照片作参照，逐张检查人物与款式。</p>
+  </section>
+  <p class="note">本页输出是一张 AI 生成的九款风格预览图，用于展示套装效果。它不代表已完成 9 张独立文件的执行验收；实际使用时按任务要求逐张生成并交付，拼图不替代独立文件。</p>
+</main>
+</body>
+</html>

@@ -61,7 +61,7 @@ async function fixture({ history, native = false }: { history?: 'start' | 'compl
     session_id: 'unrelated-run', interaction_url: 'http://localhost:8090/workflow-runs/unrelated-run',
   } })))
   ctx.tools.register(definition('mcp__lazymind__workflow_start', async () => ({ structuredContent: {
-    session_id: 'run-1', interaction_url: 'http://localhost:8090/workflow-runs/run-1', control,
+    session_id: 'run-1', state: { control },
   } })))
   const begin = vi.fn<ToolDefinition['execute']>(async () => {
     control = { ...control, state_version: 2, active_execution_ids: ['attempt-1'], active_executions: 1, ...(native ? { native_execution_ids: ['attempt-1'], continuation: 'awaiting_executor', admission: { can_begin: false } } : {}) }
@@ -84,7 +84,7 @@ async function fixture({ history, native = false }: { history?: 'start' | 'compl
       rootCallId: 'code' as ToolExecutionInput['callId'], parentCallId: 'code' as ToolExecutionInput['callId'],
       subCallId: 'code:1' as ToolExecutionInput['callId'], name: publicName('mcp__lazymind__workflow_step_complete'),
       arguments: {}, isError: false, content: [{type: 'text', text: JSON.stringify({lazymind_workflow: {
-        runId: 'run-1', url: 'http://localhost:8090/workflow-runs/run-1', hostSessionId: 'native-root',
+        runId: 'run-1', hostSessionId: 'native-root',
         operation: 'step_complete', executionId: 'attempt-1',
       }})}],
     })
@@ -93,7 +93,7 @@ async function fixture({ history, native = false }: { history?: 'start' | 'compl
     rootCallId: 'start' as ToolExecutionInput['callId'], parentCallId: 'start' as ToolExecutionInput['callId'],
     subCallId: 'start:1' as ToolExecutionInput['callId'], name: publicName('mcp__lazymind__workflow_start'),
     arguments: {}, isError: false, content: [{ type: 'text', text: JSON.stringify({ lazymind_workflow: {
-      runId: 'run-1', url: 'http://localhost:8090/workflow-runs/run-1', hostSessionId: root.session.id, operation: 'start',
+      runId: 'run-1', hostSessionId: root.session.id, operation: 'start',
     } }) }],
   })
   const installed = ctx.inject(['tools', 'agents'], injected => {

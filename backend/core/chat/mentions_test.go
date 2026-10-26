@@ -54,6 +54,23 @@ func TestApplyChatMentionsRejectsRemovedPluginWireType(t *testing.T) {
 	}
 }
 
+func TestApplyChatMentionsIgnoresKnowledgeBaseWhenRAGIsInactive(t *testing.T) {
+	t.Setenv("LAZYMIND_RAG_ENABLED", "0")
+	raw := map[string]any{"mentions": []any{
+		map[string]any{"mention_id": "m1", "type": "knowledge_base", "resource_id": "missing-kb", "display_name": "Missing"},
+	}}
+	db := orm.MigrateTestDB(t)
+	_, resolved, err := applyChatMentions(
+		context.Background(), db.DB, raw, "user-1", "conversation-1", "session-1", "ask", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.KnowledgeBaseIDs) != 0 || len(resolved.ResourceMentions) != 0 {
+		t.Fatalf("resolved = %#v, want no knowledge-base resources", resolved)
+	}
+}
+
 func TestApplyChatMentionsResolvesWorkflowWireType(t *testing.T) {
 	raw := map[string]any{"mentions": []any{
 		map[string]any{"mention_id": "m1", "type": "workflow", "resource_id": "builtin:test-workflow", "display_name": "Workflow Runtime End-to-End Self-Test"},
@@ -270,6 +287,17 @@ func TestMentionIsDeniedHandlesConjunctionsAndCommonDenialWords(t *testing.T) {
 		if got := mentionIsDenied(test.query, mention); got != test.denied {
 			t.Errorf("mentionIsDenied(%q, %q) = %v, want %v", test.query, test.name, got, test.denied)
 		}
+	}
+}
+
+func TestRetiredDirectoryMentionDoesNotBindChatResources(t *testing.T) {
+	db := orm.MigrateTestDB(t)
+	raw := map[string]any{"mentions": []any{
+		map[string]any{"type": "document_directory", "resource_id": "old-directory", "display_name": "Old directory"},
+	}}
+	query, resolved, err := applyChatMentions(context.Background(), db.DB, raw, "user-1", "conversation-1", "session-1", "question", nil)
+	if err != nil || query != "question" || len(resolved.ResourceMentions) != 0 {
+		t.Fatalf("retired reference should not bind resources: query=%q, resolved=%#v, err=%v", query, resolved, err)
 	}
 }
 

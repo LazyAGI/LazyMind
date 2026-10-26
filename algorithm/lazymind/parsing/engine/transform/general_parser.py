@@ -71,7 +71,8 @@ class GeneralParser(NodeTransform):
         self._len_split = len(split_by)
 
     def sig_fields(self) -> dict:
-        return {'max_length': self._max_length, 'split_by': self._split_by}
+        return {'max_length': self._max_length, 'split_by': self._split_by,
+                'embed_max_input_tokens': _runtime_embed_max_input_tokens(), 'budget_version': 1}
 
     def _image_path_transform(self, text: str) -> str:
         def _replace(match: re.Match) -> str:
@@ -179,6 +180,26 @@ class GeneralParser(NodeTransform):
 
         ppl = pipeline(self._image_path_transform, lambda text: self._split(text, max_length=max_length))
         content = ppl(document.text or '')
+        if max_input_tokens is not None:
+            # Conservative byte budget for byte-based tokenizers, including
+            # Chinese/emoji. Leave room for model prefixes and node metadata.
+            # Character count alone is not an embedding input bound.
+            budget = max(1, max_input_tokens - min(128, max_input_tokens // 4))
+            fitted = []
+            for text in content:
+                part, used = [], 0
+                for char in text:
+                    size = len(char.encode('utf-8'))
+                    if size > budget:
+                        raise ValueError('embedding input limit is too small for a Unicode character')
+                    if used + size > budget:
+                        fitted.append(''.join(part))
+                        part, used = [], 0
+                    part.append(char)
+                    used += size
+                if part:
+                    fitted.append(''.join(part))
+            content = fitted
 
         return [
             spawn_child_doc_node(

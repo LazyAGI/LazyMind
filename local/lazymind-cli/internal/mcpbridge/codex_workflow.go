@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workflowhost"
 )
@@ -17,7 +18,7 @@ import (
 // Binding occurs within workflow.start, using the same paired connector as
 // the queue dispatcher. Revalidate the account and pairing on every bind.
 func (b *Bridge) bindCodexController(ctx context.Context, runID, threadID string) error {
-	path := os.Getenv("LAZYMIND_WORKFLOW_PAIRING_FILE")
+	path := connectorconfig.Value("LAZYMIND_WORKFLOW_PAIRING_FILE")
 	if path == "" {
 		return errors.New("set LAZYMIND_WORKFLOW_PAIRING_FILE to the queue dispatcher's pairing file")
 	}
@@ -50,7 +51,7 @@ func (b *Bridge) bindCodexController(ctx context.Context, runID, threadID string
 	if err != nil {
 		return err
 	}
-	profile := os.Getenv("CODEX_HOME")
+	profile := connectorconfig.Value("CODEX_HOME")
 	if profile == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

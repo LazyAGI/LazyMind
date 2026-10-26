@@ -1,3 +1,5 @@
+import { knowledgeCreationDefaults, knowledgeCreationMetadata } from "../../utils/creation";
+import { useRAGComponent } from "@/modules/modelProvider/contexts/RAGComponentContext";
 import {
   forwardRef,
   useCallback,
@@ -11,28 +13,28 @@ import { QuestionCircleOutlined, SettingOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
 import type { Dataset as CoreDataset } from "@/api/generated/core-client";
-import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
+import { KnowledgeBaseServiceApi, getKnowledgeOptions } from "@/modules/knowledge/utils/request";
 import {
   KNOWLEDGE_BASE_NAME_MAX_LENGTH,
+  KNOWLEDGE_BASE_DESCRIPTION_MAX_LENGTH,
+  KNOWLEDGE_BASE_TAG_MAX_LENGTH,
+  KNOWLEDGE_BASE_TAG_MAX_COUNT,
   KNOWLEDGE_BASE_NAME_PATTERN,
 } from "@/modules/knowledge/constants/validation";
 import DataSourceProviderPicker from "@/modules/dataSource/components/management/DataSourceProviderPicker";
 import type { SyncKnowledgeBaseCreationVm } from "@/modules/knowledge/hooks/useSyncKnowledgeBaseCreation";
 import TagSelect from "../TagSelect";
-import { fetchUserUiPreferences } from "@/modules/user/uiPreferencesApi";
 import { isDeveloperModeActive } from "@/utils/developerMode";
 import {
-  highestSupportedProcessingLevel,
   PROCESSING_LEVEL_ORDER,
 } from "@/modules/knowledge/utils/processingLevel";
 import "@/modules/dataSource/index.scss";
 import "./index.scss";
-import { createCapabilityProfile, getLearningCatalog, listCapabilityProfiles, saveKnowledgeBaseCapabilities, type CustomCapabilityProfile, type LearningCatalog } from "@/modules/learning/api";
+import { createCapabilityProfile, type CapabilityRef, type CustomCapabilityProfile, type LearningCatalog } from "@/modules/learning/api";
 import CapabilitySettings, { capabilityRefsFromForm } from "@/modules/learning/CapabilitySettings";
 
 const { TextArea } = Input;
 const { Paragraph } = Typography;
-const KNOWLEDGE_TAG_MAX_LENGTH = 20;
 const CREATE_MODAL_WIDTH = 720;
 
 type CreateTab = "direct" | "cloud";
@@ -51,8 +53,10 @@ export interface CreateKnowledgeBaseModalRef {
 const CreateKnowledgeBaseModal = forwardRef<
   CreateKnowledgeBaseModalRef,
   CreateKnowledgeBaseModalProps
->(({ onCreate, syncCreateVm, embeddingReady }, ref) => {
+>(({ onCreate, syncCreateVm }, ref) => {
   const { t } = useTranslation();
+  const { availability } = useRAGComponent();
+  const ragReady = availability === "ready";
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<CreateTab>("direct");
@@ -60,6 +64,7 @@ const CreateKnowledgeBaseModal = forwardRef<
   const [algorithm, setAlgorithm] = useState<Algo[]>([]);
   const [hasTagLengthError, setHasTagLengthError] = useState(false);
   const [learningCatalog, setLearningCatalog] = useState<LearningCatalog>();
+  const [processingLevels, setProcessingLevels] = useState<string[]>([]);
   const [customProfiles,setCustomProfiles]=useState<CustomCapabilityProfile[]>([]);
   const [form] = Form.useForm();
   const pendingCloudTabRestoreRef = useRef(false);
@@ -120,48 +125,26 @@ const CreateKnowledgeBaseModal = forwardRef<
   ]);
 
   function loadFormData() {
-    const catalogRequest = getLearningCatalog().then((catalog) => {
-      setLearningCatalog(catalog);
-      form.setFieldsValue({ learning_profile_key: "general", learning_capability_keys: catalog.profiles.find((item) => item.key === "general")?.capabilities || ["general_translation"] });
+    const optionsRequest = getKnowledgeOptions().then(options => {
+      setLearningCatalog({ capabilities: options.capabilities, profiles: options.scenes,
+        question_types: [], local_available: options.local_available });
+      setCustomProfiles(options.profiles);
+      setAlgorithm(options.algorithms);
+      setProcessingLevels(options.processing_levels);
+      const defaults = knowledgeCreationDefaults(options);
+      form.setFieldsValue({
+        learning_profile_key: defaults.scene,
+        learning_capability_keys: options.scenes.find(item => item.key === options.default_scene)?.capabilities || [],
+        processing_level: defaults.processing_level,
+        algo_id: defaults.algo_id,
+      });
     });
-    void listCapabilityProfiles().then(result=>setCustomProfiles(result.custom));
-    KnowledgeBaseServiceApi()
-      .datasetServiceAllDatasetTags()
-      .then((res) => {
-        setTags(res.data.tags || []);
-      });
-
-    const algorithmsRequest = KnowledgeBaseServiceApi()
-      .datasetServiceListAlgos()
-      .then((res) => {
-        const list = res.data.algos;
-        setAlgorithm(list || []);
-        if (list?.length === 1 || (!developerModeActive && list?.length)) {
-          form.setFieldsValue({ algo_id: list[0].algo_id });
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to load algorithm list:", err);
-      });
-
-    const preferencesRequest = fetchUserUiPreferences({ silentError: true } as never)
-      .then((preferences) => preferences.document_parsing_enabled)
-      .catch(() => null);
-
-    return Promise.all([algorithmsRequest, preferencesRequest, catalogRequest]).then(
-      ([, documentParsingEnabled]) => {
-        form.setFieldsValue({
-          processing_level: highestSupportedProcessingLevel(
-            documentParsingEnabled,
-            embeddingReady,
-          ),
-        });
-      },
-    );
+    const tagsRequest = KnowledgeBaseServiceApi().datasetServiceAllDatasetTags().then(res => setTags(res.data.tags || []));
+    return Promise.all([optionsRequest, tagsRequest]);
   }
 
   function onOpen(tab: CreateTab = "direct") {
-    setActiveTab(tab);
+    setActiveTab(ragReady ? tab : "direct");
     setHasTagLengthError(false);
     form.resetFields();
     loadFormData().then(() => {
@@ -177,6 +160,29 @@ const CreateKnowledgeBaseModal = forwardRef<
     setHasTagLengthError(false);
     setActiveTab("direct");
     setVisible(false);
+  }
+
+  function onSceneChange(key: string) {
+    const builtin = learningCatalog?.profiles.find(item => item.key === key);
+    if (builtin) {
+      form.setFieldsValue({
+        learning_capability_keys: builtin.capabilities,
+        learning_capability_settings: {},
+      });
+      return;
+    }
+    const preset = customProfiles.find(item => item.id === key);
+    if (!preset) return;
+    try {
+      const refs: CapabilityRef[] = JSON.parse(preset.capability_refs_json);
+      form.setFieldsValue({
+        learning_capability_keys: refs.filter(item => item.enabled).map(item => item.key),
+        learning_capability_settings: Object.fromEntries(refs.map(item => [item.key, item.settings || {}])),
+      });
+    } catch (error) {
+      console.error("Invalid capability preset:", error);
+      form.setFieldsValue({ learning_capability_keys: [], learning_capability_settings: {} });
+    }
   }
 
   const handleTagLengthErrorChange = useCallback(
@@ -234,10 +240,16 @@ const CreateKnowledgeBaseModal = forwardRef<
         delete params.learning_capability_settings;
         delete params.learning_profile_key;
         delete params.learning_profile_name;
-        if(profileKey==="custom"&&customProfileName) await createCapabilityProfile(customProfileName,"",capabilityKeys);
-        const created = await onCreate(params);
-        const datasetId = created?.dataset_id;
-        if (datasetId) await saveKnowledgeBaseCapabilities(datasetId, capabilityRefsFromForm(capabilityKeys,capabilitySettings,learningCatalog?.capabilities));
+        if (profileKey === "custom" && customProfileName) {
+          const profile = await createCapabilityProfile(customProfileName, "", capabilityKeys);
+          params.profile_id = profile.id;
+        }
+        params.scene = learningCatalog?.profiles.some(item => item.key === profileKey) ? profileKey : "custom";
+        if (customProfiles.some(item => item.id === profileKey)) params.profile_id = profileKey;
+        params.reading_capabilities = capabilityRefsFromForm(capabilityKeys, capabilitySettings, learningCatalog?.capabilities);
+        const metadata = knowledgeCreationMetadata(params.display_name || "", params.desc, params.tags);
+        Object.assign(params, { display_name: metadata.name, desc: metadata.description, tags: metadata.tags });
+        await onCreate(params);
         message.success(t("knowledge.createSuccess"));
         onCancel();
       } catch (error) {
@@ -319,7 +331,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                   <TextArea
                     placeholder={t("knowledge.maxLength300Chars")}
                     showCount
-                    maxLength={300}
+                    maxLength={KNOWLEDGE_BASE_DESCRIPTION_MAX_LENGTH}
                     autoSize={{ minRows: 2, maxRows: 3 }}
                   />
                 </Form.Item>
@@ -329,13 +341,16 @@ const CreateKnowledgeBaseModal = forwardRef<
                   rules={[
                     {
                       required: true,
+                      type: "array",
+                      min: 1,
+                      max: KNOWLEDGE_BASE_TAG_MAX_COUNT,
                       message: t("knowledge.selectKnowledgeTags"),
                     },
                     {
                       validator: (_, value?: string[]) => {
                         const hasOverLengthTag = (value || []).some(
                           (tag) =>
-                            Array.from(tag).length > KNOWLEDGE_TAG_MAX_LENGTH,
+                            Array.from(tag).length > KNOWLEDGE_BASE_TAG_MAX_LENGTH,
                         );
                         return hasOverLengthTag
                           ? Promise.reject(
@@ -354,7 +369,7 @@ const CreateKnowledgeBaseModal = forwardRef<
                 >
                   <TagSelect
                     tags={tags}
-                    maxTagLength={KNOWLEDGE_TAG_MAX_LENGTH}
+                    maxTagLength={KNOWLEDGE_BASE_TAG_MAX_LENGTH}
                     maxTagLengthMessage={t("knowledge.knowledgeTagMaxLength")}
                     showOverLengthInputError
                     onLengthErrorChange={handleTagLengthErrorChange}
@@ -362,9 +377,9 @@ const CreateKnowledgeBaseModal = forwardRef<
                 </Form.Item>
                 <Form.Item name="learning_profile_key" label={t("learning.capabilityProfile")}>
                   <Select options={[...(learningCatalog?.profiles || []).map((profile) => ({ value:profile.key, label:t(profile.name_i18n_key) })),...customProfiles.map(profile=>({value:profile.id,label:profile.custom_name})), ...(developerModeActive ? [{value:"custom",label:t("learning.customProfile")}] : [])]}
-                    onChange={(key) => { const profile=learningCatalog?.profiles.find((item)=>item.key===key); if(profile) form.setFieldValue("learning_capability_keys",profile.capabilities); const custom=customProfiles.find(item=>item.id===key);if(custom){try{form.setFieldValue("learning_capability_keys",JSON.parse(custom.capability_refs_json).map((x:{key:string})=>x.key))}catch{/* invalid server profile */}} }} />
+                    onChange={onSceneChange} />
                 </Form.Item>
-                <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_profile_key!==b.learning_profile_key}>{({getFieldValue})=>getFieldValue("learning_profile_key")==="custom"?<Form.Item name="learning_profile_name" label={t("learning.customProfileName")} rules={[{required:true,message:t("learning.customProfileNameRequired")}]}><Input/></Form.Item>:null}</Form.Item>
+                <Form.Item noStyle shouldUpdate={(a,b)=>a.learning_profile_key!==b.learning_profile_key}>{({getFieldValue})=>getFieldValue("learning_profile_key")==="custom"?<Form.Item name="learning_profile_name" label={t("learning.customProfileName")} ><Input/></Form.Item>:null}</Form.Item>
                 {developerModeActive && <Collapse
                   className="knowledge-create-advanced"
                   ghost
@@ -379,10 +394,10 @@ const CreateKnowledgeBaseModal = forwardRef<
                         <Select options={PROCESSING_LEVEL_ORDER.map((level) => ({
                           value: level,
                           label: t(`knowledge.processing${level[0].toUpperCase()}${level.slice(1)}`),
-                          disabled: level === "indexed" && embeddingReady !== true,
+                          disabled: !processingLevels.includes(level),
                         }))} />
                       </Form.Item>
-                      {algorithm.length !== 1 && (
+                      {ragReady && algorithm.length !== 1 && (
                         <Form.Item
                           name="algo_id"
                           label={t("knowledge.parseAlgorithm")}
@@ -411,6 +426,7 @@ const CreateKnowledgeBaseModal = forwardRef<
           },
           {
             key: "cloud",
+            disabled: !ragReady,
             label: t("knowledge.createFromCloudDisk"),
             children: (
               <div className="knowledge-create-modal-cloud">

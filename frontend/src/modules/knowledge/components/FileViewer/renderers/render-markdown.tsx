@@ -1,16 +1,17 @@
 import { Segmented } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import MarkdownViewer from "@/modules/knowledge/components/MarkdownViewer";
 
 interface RenderMarkdownProps {
   fileData: ArrayBuffer;
+  renderMarkdown?: (markdown: string) => ReactNode;
 }
 
 type MarkdownView = "preview" | "source";
 
-const RenderMarkdown = ({ fileData }: RenderMarkdownProps) => {
+const RenderMarkdown = ({ fileData, renderMarkdown }: RenderMarkdownProps) => {
   const { t } = useTranslation();
   const [view, setView] = useState<MarkdownView>("preview");
   const markdown = useMemo(() => new TextDecoder().decode(fileData), [fileData]);
@@ -25,8 +26,8 @@ const RenderMarkdown = ({ fileData }: RenderMarkdownProps) => {
         <Segmented<MarkdownView>
           aria-label={t("knowledge.markdownViewMode")}
           options={[
-            { label: t("markdownRender"), value: "preview" },
-            { label: t("markdownSource"), value: "source" },
+            { label: t("chat.markdownRender"), value: "preview" },
+            { label: t("chat.markdownSource"), value: "source" },
           ]}
           value={view}
           onChange={setView}
@@ -34,7 +35,7 @@ const RenderMarkdown = ({ fileData }: RenderMarkdownProps) => {
       </div>
       <div className="file-viewer-markdown-content">
         {view === "preview" ? (
-          <MarkdownViewer>{markdown}</MarkdownViewer>
+          renderMarkdown ? renderMarkdown(markdown) : <MarkdownViewer>{markdown}</MarkdownViewer>
         ) : (
           <pre className="file-viewer-markdown-source">{markdown}</pre>
         )}

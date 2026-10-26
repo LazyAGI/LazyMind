@@ -3,11 +3,14 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -30,15 +33,19 @@ def _subprocess_env():
 
 
 def _run_probe(script: str, timeout: float = 35) -> dict:
-    completed = subprocess.run(
-        [sys.executable, '-c', script],
-        cwd=_REPO_ROOT,
-        env=_subprocess_env(),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        check=True,
-    )
+    with tempfile.TemporaryDirectory(prefix='runtime-probe-traces-') as trace_dir:
+        env = _subprocess_env()
+        env['LAZYLLM_TRACE_LOCAL_STORAGE_DIR'] = trace_dir
+        completed = subprocess.run(
+            [sys.executable, '-c', script],
+            cwd=_REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 
@@ -114,19 +121,126 @@ def test_chat_service_starts_under_three_seconds_without_rag():
 import json
 import sys
 import time
+loader_started = time.perf_counter()
 from lazymind.chat.runtime_loader import ensure_chat_runtime
+loader_elapsed = time.perf_counter() - loader_started
+cpu_started = time.process_time()
 started = time.perf_counter()
 ensure_chat_runtime()
-print(json.dumps({
-    "elapsed": time.perf_counter() - started,
+elapsed = time.perf_counter() - started
+cpu_elapsed = time.process_time() - cpu_started
+result = {
+    "elapsed": elapsed,
     "rag_loaded": "lazyllm.tools.rag" in sys.modules,
+    "sql_runtime_loaded": "lazyllm.tools.sql" in sys.modules,
     "runtime_docs_loaded": any(name.startswith("lazyllm.docs.tools") for name in sys.modules),
+    "phase_seconds": {
+        "runtime_loader_import": loader_elapsed,
+        "chat_runtime_import": elapsed,
+        "chat_runtime_cpu": cpu_elapsed,
+        "total_imports": loader_elapsed + elapsed,
+    },
+}
+# Collect metadata after the measured imports; never dump the process environment.
+import os
+import platform
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+versions = {}
+for package in ("lazyllm", "fastapi", "starlette", "pydantic", "dashscope"):
+    try:
+        versions[package] = version(package)
+    except PackageNotFoundError:
+        versions[package] = "not installed"
+result["environment"] = {
+    "python_version": platform.python_version(),
+    "python_implementation": platform.python_implementation(),
+    "python_executable": sys.executable,
+    "os": platform.system(),
+    "os_release": platform.release(),
+    "architecture": platform.machine(),
+    "cpu_count": os.cpu_count(),
+    "installed_dependency_versions": versions,
+    "module_paths": {
+        name: str(Path(sys.modules[name].__file__).resolve())
+        for name in ("lazyllm", "fastapi", "lazymind.chat.runtime_loader", "lazymind.chat.service.chat_service")
+    },
+}
+print(json.dumps(result))
+''')
+
+    # Pytest only renders this captured report if a startup requirement fails.
+    diagnostics = 'Chat startup diagnostics:\n' + json.dumps(result, indent=2, sort_keys=True)
+    assert result['elapsed'] < 3.0, diagnostics
+    assert result['rag_loaded'] is False, diagnostics
+    assert result['sql_runtime_loaded'] is False, diagnostics
+    assert result['runtime_docs_loaded'] is False, diagnostics
+
+
+def test_external_database_runtime_loads_on_first_query():
+    result = _run_probe('''
+import json
+import sys
+from lazymind.chat.engine.tools.external_db import ExternalDatabaseToolkit
+loaded_before = "lazyllm.tools.sql" in sys.modules
+toolkit = ExternalDatabaseToolkit()
+toolkit._connection = lambda _: {"db_type": "sqlite", "database_name": ":memory:"}
+manager = toolkit._manager("test-connection")
+try:
+    rows = manager.execute_readonly_query("SELECT 1 AS value")
+    try:
+        manager.execute_readonly_query("DELETE FROM example")
+    except ValueError:
+        write_rejected = True
+    else:
+        write_rejected = False
+finally:
+    manager.dispose()
+print(json.dumps({
+    "loaded_before": loaded_before,
+    "loaded_after": "lazyllm.tools.sql" in sys.modules,
+    "rows": rows,
+    "write_rejected": write_rejected,
 }))
 ''')
 
-    assert result['elapsed'] < 3.0
-    assert result['rag_loaded'] is False
-    assert result['runtime_docs_loaded'] is False
+    assert result == {
+        'loaded_before': False,
+        'loaded_after': True,
+        'rows': [{'value': 1}],
+        'write_rejected': True,
+    }
+
+
+def test_slow_chat_startup_reports_diagnostics_without_environment_secrets(monkeypatch, capsys):
+    real_probe = _run_probe
+
+    def slow_probe(script, timeout=35):
+        result = real_probe(script, timeout)
+        result['elapsed'] = 3.25
+        return result
+
+    monkeypatch.setenv('STARTUP_DIAGNOSTIC_SECRET', 'private-fixture-value')
+    monkeypatch.setattr(sys.modules[__name__], '_run_probe', slow_probe)
+    with pytest.raises(AssertionError) as raised:
+        test_chat_service_starts_under_three_seconds_without_rag()
+
+    message = str(raised.value)
+    marker = 'Chat startup diagnostics:\n'
+    assert marker in message
+    diagnostics, _ = json.JSONDecoder().raw_decode(message.split(marker, 1)[1].lstrip())
+    assert diagnostics['elapsed'] == 3.25
+    assert diagnostics['phase_seconds']['runtime_loader_import'] >= 0
+    assert diagnostics['phase_seconds']['chat_runtime_import'] >= 0
+    assert diagnostics['phase_seconds']['chat_runtime_cpu'] >= 0
+    assert diagnostics['environment']['python_version'] == sys.version.split()[0]
+    assert diagnostics['environment']['installed_dependency_versions']['fastapi']
+    source = Path(diagnostics['environment']['module_paths']['lazymind.chat.service.chat_service'])
+    assert source == _REPO_ROOT / 'algorithm/lazymind/chat/service/chat_service.py'
+    assert 'STARTUP_DIAGNOSTIC_SECRET' not in message
+    assert 'private-fixture-value' not in message
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ''
 
 
 def test_trace_maintenance_registers_its_config_without_runtime_docs():
@@ -202,34 +316,23 @@ dependency_gate.set()
     assert result['dependencies_released'] is False
 
 
-def test_temporary_attachment_retrieval_triggers_rag_immediately():
-    result = _run_probe('''
+def test_temporary_mode_persists_without_importing_rag(tmp_path):
+    script = r'''
+import importlib.abc
 import json
-import threading
-import time
-import lazymind.chat.runtime_loader as loader
-from lazymind.chat.engine.tools.lazy_kb import kb_tmp_search
-dependency_gate = threading.Event()
-loader._wait_for_kb_runtime = lambda: dependency_gate.wait(30)
-loader.start_background_chat_runtime_warmup()
-real_ensure = loader.ensure_rag_runtime
-def load_then_stop():
-    real_ensure()
-    raise RuntimeError("stop after loading")
-loader.ensure_rag_runtime = load_then_stop
-started = time.perf_counter()
-try:
-    kb_tmp_search("search attachment")
-except RuntimeError as exc:
-    assert str(exc) == "stop after loading"
-print(json.dumps({
-    "elapsed": time.perf_counter() - started,
-    "rag": loader.rag_runtime_status(),
-    "dependencies_released": dependency_gate.is_set(),
-}))
-dependency_gate.set()
-''')
-
-    assert result['elapsed'] < 30
-    assert result['rag'] == 'ready'
-    assert result['dependencies_released'] is False
+import sys
+class NoRAG(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == 'lazyllm.tools.rag' or fullname.startswith('lazyllm.tools.rag.'):
+            raise AssertionError('Session initialization imported RAG: ' + fullname)
+sys.meta_path.insert(0, NoRAG())
+from lazymind.chat.engine.tools import temporary_retrieval_session as session
+session.workspace_for_request = lambda **kwargs: TEST_ROOT
+session.is_model_role_available = lambda role: AVAILABLE
+mode = session.initialize_temporary_retrieval({'user_id': 'alice', 'conversation_id': 'chat'})
+assert 'lazyllm.tools.rag' not in sys.modules
+print(json.dumps({'use_embed': mode}))
+'''.replace('TEST_ROOT', repr(str(tmp_path)))
+    assert _run_probe(script.replace('AVAILABLE', 'False')) == {'use_embed': False}
+    # A fresh process and changed configuration still use the saved choice.
+    assert _run_probe(script.replace('AVAILABLE', 'True')) == {'use_embed': False}

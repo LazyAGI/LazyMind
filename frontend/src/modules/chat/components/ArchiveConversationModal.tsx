@@ -9,7 +9,13 @@ import {
   archiveConversation,
   createArchiveFolder,
   listArchiveFolders,
+  type ConversationArchiveReceipt,
 } from "@/modules/settings/recoveryApi";
+
+interface ArchiveBatchResult {
+  receipts: ConversationArchiveReceipt[];
+  skippedIds: string[];
+}
 
 interface ArchiveConversationModalProps {
   conversationId?: string;
@@ -18,7 +24,7 @@ interface ArchiveConversationModalProps {
   itemKind?: "dialog" | "task";
   open: boolean;
   onCancel: () => void;
-  onArchived: (archivedIds: string[], failedIds: string[]) => void;
+  onArchived: (archivedIds: string[], failedIds: string[], batch?: ArchiveBatchResult) => void;
 }
 
 export default function ArchiveConversationModal({
@@ -76,12 +82,26 @@ export default function ArchiveConversationModal({
     setLoading(true);
     const archivedIds: string[] = [];
     const failedIds: string[] = [];
+    const receipts: ConversationArchiveReceipt[] = [];
+    const skippedIds: string[] = [];
     try {
       // Keep requests bounded and retain failed items for an explicit retry.
       for (const id of ids) {
         try {
-          await archiveConversation(id, folderId === "unfiled" ? null : folderId);
+          const destination = folderId === "unfiled" ? null : folderId;
+          const receipt = conversationIds
+            ? await archiveConversation(id, destination, true)
+            : await archiveConversation(id, destination);
+          if (conversationIds && receipt?.newly_archived === false) {
+            skippedIds.push(id);
+            continue;
+          }
           archivedIds.push(id);
+          // Older servers may acknowledge without a version. Never undo those unconditionally.
+          if (receipt?.conversation_id === id && receipt.newly_archived === true &&
+              typeof receipt.archived_at === "string" && Number.isFinite(Date.parse(receipt.archived_at))) {
+            receipts.push({ conversation_id: id, archived_at: receipt.archived_at });
+          }
         } catch (error) {
           if (ids.length === 1) message.error(getLocalizedErrorMessage(error));
           failedIds.push(id);
@@ -90,7 +110,10 @@ export default function ArchiveConversationModal({
       if (failedIds.length && ids.length > 1) {
         message.error(t(archivedIds.length ? "chat.batchArchivePartialFailure" : "settingsPage.recovery.operationFailed", { count: failedIds.length }));
       }
-      if (archivedIds.length) onArchived(archivedIds, failedIds);
+      if (archivedIds.length || skippedIds.length) {
+        if (conversationIds) onArchived(archivedIds, failedIds, { receipts, skippedIds });
+        else onArchived(archivedIds, failedIds);
+      }
     } finally {
       submittingRef.current = false;
       setLoading(false);

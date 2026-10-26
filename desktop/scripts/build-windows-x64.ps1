@@ -286,6 +286,9 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot 'desktop\cache'),
         (Join-Path $repoRoot 'desktop\dist'),
         (Join-Path $repoRoot 'history-injection'),
+        (Join-Path $repoRoot 'integrations\workbuddy-workflow\cdp-demo'),
+        (Join-Path $repoRoot 'integrations\workbuddy-workflow\panel-demo'),
+        (Join-Path $repoRoot 'integrations\workbuddy-workflow\panel'),
         (Join-Path $repoRoot 'skills\.runtime'),
         (Join-Path $repoRoot 'skills\research'),
         (Join-Path $repoRoot 'skills\review'),
@@ -405,7 +408,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\stage-pdf-font.mjs'), $runtimeRoot)
     Write-Host '==> Materializing locked Skill previews and featured catalog'
     Materialize-OfflineSkills
-    Invoke-Native (Join-Path $runtimeRoot 'deps\python\algorithm\Scripts\python.exe') @((Join-Path $repoRoot 'desktop\scripts\stage-featured-assets.py'), $runtimeRoot, '--quiet')
+    Invoke-Native (Join-Path $runtimeRoot 'deps\python\algorithm\Scripts\python.exe') @((Join-Path $repoRoot 'desktop\scripts\stage-featured-assets.py'), $runtimeRoot, '--quiet', '--bundle-unpublished')
     Write-Host '==> Preparing workflow example metadata (download during warmup by default)'
     Invoke-Native 'node.exe' @(
         (Join-Path $repoRoot 'desktop\scripts\stage-history-injection-package.mjs'),
@@ -520,6 +523,8 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'
     Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') $desktopManager -WindowsGUI
     Assert-WindowsGUISubsystem $desktopManager
+    Invoke-Native 'pnpm.cmd' @('install', '--frozen-lockfile', '--prefer-offline') (Join-Path $repoRoot 'integrations\workbuddy-workflow\connector')
+    Invoke-Native 'pnpm.cmd' @('build') (Join-Path $repoRoot 'integrations\workbuddy-workflow\connector')
     Build-GoBinary (Join-Path $repoRoot 'local\lazymind-cli') (Join-Path $runtimeRoot 'bin\lazymind.exe') @('.\cmd\lazymind')
     Build-GoBinary (Join-Path $repoRoot 'local\local-proxy') (Join-Path $runtimeRoot 'bin\local-proxy.exe') @('.\cmd\local-proxy')
     Build-GoBinary (Join-Path $repoRoot 'backend\core') (Join-Path $runtimeRoot 'bin\core.exe')
@@ -571,6 +576,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
         '-r', (Join-Path $repoRoot 'algorithm\requirements-local.txt')
     )
     Invoke-Native $algorithmPython @('-c', "import importlib.metadata as m; assert m.version('lazyllm') == '$lazyLLMVersion'")
+    Invoke-Native $algorithmPython @((Join-Path $repoRoot 'desktop\scripts\patch-reader-imports.py'))
     Invoke-Native $algorithmPython @('-B', '-m', 'unittest', 'discover', '-s', (Join-Path $repoRoot 'tests'), '-p', 'test_desktop_windows_milvus.py', '-v')
     Write-Host '==> Applying the verified Windows Milvus storage fixes'
     Invoke-Native $algorithmPython @((Join-Path $repoRoot 'desktop\scripts\patch-windows-milvus.py'), $runtimeRoot)

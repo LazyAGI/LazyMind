@@ -402,3 +402,19 @@ def test_refresh_disk_commit_failure_preserves_real_state_store(tmp_path, monkey
     assert manager.tools_description == description
     assert lazyllm.globals.config['dynamic_tool_auth'] == {'bing': 'old'}
     assert not list(tmp_path.glob('.tools-*'))
+
+
+def test_refresh_reports_mcp_naming_error_without_changing_catalog():
+    from lazyllm.tools.mcp.tool_adaptor import MCPToolNameError
+
+    host, manager = runtime()
+    before = manager.atomic_tool_catalog()
+
+    def invalid_catalog(_):
+        raise MCPToolNameError('MCP tool name collision: foo.bar and foo-bar map to mcp_docs_foo_bar')
+
+    host.loader = invalid_catalog
+    host.before_request()
+    assert host.services['mcp:one']['status'] == 'naming_error'
+    assert 'MCP tool name collision' in host.pending['mcp:one'][1]
+    assert manager.atomic_tool_catalog() == before

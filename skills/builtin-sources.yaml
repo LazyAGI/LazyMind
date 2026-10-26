@@ -4,7 +4,7 @@ bundled_skills:
   - uid: bsk_01KPERSONALDOCSEARCH20260923
     path: search/personal-document-search
     category: search
-    version: 1.0.0
+    version: 1.0.8
     provider: LazyMind
 skills:
   - source_url: 'https://modelscope.cn/api/v1/datasets/CarlosShaoting/lazymind-cst/repo?Revision=3935b84a094ab2da3473e8f29267cbe2a8834f41&FilePath=deep-research.zip'

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -44,6 +45,32 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	manager.SetOutput(c.out, c.errOut)
 
 	switch args[0] {
+	case "install-rag":
+		opts, err := parseCommonArgs("install-rag", args[1:], c.errOut)
+		if err != nil {
+			return err
+		}
+		cfg, paths, err := NewRuntimeConfigWithOptions(opts)
+		if err != nil {
+			return err
+		}
+		if cfg.Profile != "local" {
+			return fmt.Errorf("source RAG installation requires local profile")
+		}
+		release, err := acquireAlgorithmPythonLock(ctx, paths)
+		if err != nil {
+			return err
+		}
+		defer release()
+		// Do not recreate a live virtualenv if dependency installation fails.
+		if err := NewAlgorithmServiceManager(c.runner).installAlgorithmPythonDeps(ctx, paths, cfg.Algorithm.EnableEvo, true); err != nil {
+			return err
+		}
+		marker := filepath.Join(paths.RuntimeRoot, "deps", "python-components", "rag", "source.ready")
+		if err := os.MkdirAll(filepath.Dir(marker), 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(marker, []byte(paths.AlgorithmPython), 0644)
 	case "shell":
 		return runProcessComposeShell(ctx, args[1:], c.out, c.errOut)
 	case "up":

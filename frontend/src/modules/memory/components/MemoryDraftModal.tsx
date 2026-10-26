@@ -5,6 +5,7 @@ import {
   Input,
   Modal,
   Select,
+  Switch,
   Tooltip,
   Upload,
   message,
@@ -386,6 +387,26 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
                 </div>
               ))}
               <span className="memory-form-hint memory-form-field-full">{t("admin.memorySkillSearchMetadataHint")}</span>
+              <div className="memory-form-field memory-form-field-full memory-skill-auto-update-field">
+                <label htmlFor="skill-auto-update">{t("admin.memoryAutoUpdate")}</label>
+                {draft.hasPendingRemoveSuggestion ? (
+                  <Tooltip title={t("admin.memorySkillAutoEvoDisabledByRemove")}>
+                    <Switch id="skill-auto-update" checked={false} disabled />
+                  </Tooltip>
+                ) : (
+                  <Switch
+                    id="skill-auto-update"
+                    checked={Boolean(draft.autoEvo)}
+                    disabled={isReadOnly}
+                    onChange={(checked) =>
+                      setDraft((previous: any) => ({
+                        ...previous,
+                        autoEvo: checked,
+                      }))
+                    }
+                  />
+                )}
+              </div>
             </>
           ) : null}
           {isSkillCreateModal ? (

@@ -43,6 +43,7 @@ import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { getLocalizedErrorMessage, axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
 import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import { taskStatusDescription } from './taskStatusDescription';
+import { TASKS_REMOVED_EVENT } from './events';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
 interface KnowledgeSelectProps {
@@ -419,7 +420,11 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   }, [t, statusFilter]);
 
   useEffect(() => {
-    if (active) void fetchSchedules();
+    if (!active) return;
+    void fetchSchedules();
+    const removed = () => void fetchSchedules();
+    window.addEventListener(TASKS_REMOVED_EVENT, removed);
+    return () => window.removeEventListener(TASKS_REMOVED_EVENT, removed);
   }, [active, fetchSchedules]);
 
   // Client-side filter: status tab + keyword search

@@ -19,6 +19,40 @@ spec.loader.exec_module(featured)
 
 
 class FeaturedAssetsEncodingTests(unittest.TestCase):
+    def test_unpublished_case_is_local_but_changed_published_case_still_fails(self):
+        for existing in (False, True):
+            with self.subTest(existing=existing), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                assets = root / 'featured-skills/assets'
+                assets.mkdir(parents=True)
+                data = b'<h1>New upstream case</h1>'
+                (assets / 'demo.html').write_bytes(data)
+                record = {'sha256': featured.digest(data), 'size': len(data),
+                          'role': 'preview', 'url': '/showcase-assets/demo.html'}
+                catalog = {'cases': [{'id': 'new-case', 'version': '1', 'assets': {'preview': record}}]}
+                (assets.parent / 'catalog.json').write_bytes(featured.encoded(catalog))
+                published = root / 'published.json'
+                entries = {'new-case/1': {'filename': 'old.zip', 'files': {}}} if existing else {}
+                published.write_bytes(featured.encoded({'bundles': entries}))
+                before = published.read_bytes()
+                if existing:
+                    with self.assertRaisesRegex(ValueError, 'Featured assets changed'):
+                        featured.stage(root, published, bundle_unpublished=True)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'Featured assets changed'):
+                        featured.stage(root, published)
+                    messages = io.StringIO()
+                    with contextlib.redirect_stdout(messages):
+                        featured.stage(root, published, bundle_unpublished=True)
+                    self.assertIn('::warning::Featured assets not published for new-case/1', messages.getvalue())
+                    self.assertIn('non-blocking', messages.getvalue())
+                    downloads = json.loads((assets.parent / 'downloads.json').read_text())
+                    self.assertEqual(downloads['bundles'], {})
+                    self.assertEqual(downloads['local']['demo.html'],
+                                     {'sha256': featured.digest(data), 'sizeBytes': len(data)})
+                self.assertEqual((assets / 'demo.html').read_bytes(), data)
+                self.assertEqual(published.read_bytes(), before)
+
     def test_windows_git_checkout_preserves_published_asset_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

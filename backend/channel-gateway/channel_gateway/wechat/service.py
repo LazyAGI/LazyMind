@@ -65,6 +65,7 @@ class WeChatConnectionService:
         client: WeChatLoginClient,
         on_account_connected: Callable[[str], None] | None = None,
         on_account_disconnected: Callable[[str], None] | None = None,
+        connection_probe=None,
     ):
         self._config = config
         self._store = store
@@ -72,6 +73,7 @@ class WeChatConnectionService:
         self._on_account_connected = on_account_connected
         self._on_account_disconnected = on_account_disconnected
         self._wechat = client
+        self._connection_probe = connection_probe
         self._lock = threading.Lock()
         self._workers: dict[tuple[str, int], _LoginWorker] = {}
         self._shutdown = threading.Event()
@@ -282,6 +284,11 @@ class WeChatConnectionService:
     def list_accounts(self, owner_user_id: str) -> dict[str, Any]:
         rows = self._store.list_accounts(owner_user_id, 'wechat')
         return {'items': [account_view(row) for row in rows]}
+
+    def check_connection(self, owner_user_id: str) -> None:
+        if self._connection_probe is not None:
+            self._connection_probe.check_accounts(
+                self._store.list_accounts(owner_user_id, 'wechat'), force=True, wait=True)
 
     def disconnect_account(self, owner_user_id: str, account_id: str) -> None:
         account = self._store.get_account(owner_user_id, account_id)

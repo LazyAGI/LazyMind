@@ -126,6 +126,37 @@ describe("TaskCenter display modes", () => {
     });
   });
 
+  it("shows authoritative initialization timing before the first child exists", () => {
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [task("previous-turn", 1, "succeeded")] }, runsByConversation: { "conversation-1": [{
+      run_id: "accepted", execution_id: "round", revision: 1, status: "waiting", final_output_refs: [],
+      timing: { requested_at: iso(0), finished_at: null, measured_at: iso(10), elapsed_ms: 10000, cumulative_execution_ms: 0, running_attempt_count: 0 },
+    }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByText("taskCenter.ordinaryInitializing")).toBeInTheDocument();
+    expect(screen.getByText(/Elapsed 10/)).toBeInTheDocument();
+    expect(screen.getByText(/Subtasks 0/)).toBeInTheDocument();
+  });
+
+  it("shows a resumed ordinary task associated with the new chat round", () => {
+    const resumed = { ...task("resumed", 1, "running"), agent_type: "research", trigger_history_id: "new-history",
+      ordinary: ordinary("resumed", { title: "Resumed research", status: "running", run_id: "new-history", execution_id: "new-attempt" }) };
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [resumed] }, runsByConversation: { "conversation-1": [{
+      run_id: "new-history", execution_id: "new-root", revision: 1, status: "running", final_output_refs: [],
+      timing: { requested_at: iso(20), finished_at: null, measured_at: iso(25), elapsed_ms: 5000, cumulative_execution_ms: 0, running_attempt_count: 0 },
+    }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByText("Resumed research")).toBeInTheDocument();
+    expect(screen.queryByText("taskCenter.ordinaryInitializing")).not.toBeInTheDocument();
+  });
+
+  it("shows real workflow completion progress without counting retries twice", () => {
+    const view = ordinary("collect-3", { session_id: "session-1", workflow_step_id: "collect", status: "failed" });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("collect-3", 1, "failed"), ordinary: view }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("value", "0");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("max", "1");
+  });
+
   it("shows the designed progress bar and estimated timeline for a completed plan", () => {
     const planned = {
       ...task("planned", 1, "succeeded"), agent_type: "research", progress_pct: 100,
@@ -504,11 +535,12 @@ describe("TaskCenter display modes", () => {
     expect(panel).toHaveAttribute("role", "region");
     expect(trigger).toHaveAttribute("aria-controls", panel?.id);
     expect(panel).toHaveAttribute("aria-labelledby", trigger?.id);
-    expect(panel?.querySelectorAll("button")).toHaveLength(0);
+    expect(panel?.querySelectorAll("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /chat.references/ })).toBeInTheDocument();
     expect(panel?.querySelector(".ant-progress")).not.toBeInTheDocument();
     expect(panel?.querySelector(".ordinary-thinking-item.is-running")).not.toBeInTheDocument();
     expect(screen.getByText("taskCenter.ordinaryThinking")).toBeInTheDocument();
-    expect(screen.getByText("taskCenter.ordinarySources")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /chat.references/ })).toBeInTheDocument();
   });
 
   it("does not read private task fields in the ordinary process projection", () => {
@@ -529,7 +561,7 @@ describe("TaskCenter display modes", () => {
       .toBeInTheDocument();
   });
 
-  it("uses native links for public sources and summarizes dependencies", () => {
+  it("opens public sources through the shared reference panel and summarizes dependencies", () => {
     useTaskCenterStore.setState({
       tasksByConversation: {
         "conversation-1": [{
@@ -552,14 +584,9 @@ describe("TaskCenter display modes", () => {
 
     expect(screen.getByText("taskCenter.ordinaryDependencyCount"))
       .toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("href", "https://example.com/article");
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("target", "_blank");
-    expect(screen.queryByRole("link", { name: /Unsafe source/ }))
-      .not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /chat.references/ }));
+    expect(screen.getByRole("button", { name: /Example source/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Unsafe source/ })).not.toBeInTheDocument();
     expect(screen.getByText("Unsafe source")).toBeInTheDocument();
   });
 

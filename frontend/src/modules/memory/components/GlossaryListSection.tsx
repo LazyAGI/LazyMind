@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Empty, Space, Table } from "antd";
+import { Button, Empty, Space, Table } from "antd";
+import { PlusOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import type { TFunction } from "i18next";
 import type { GlossaryAsset, GlossarySource } from "../shared";
+import ExpandableTitleSearch from "./SkillManagementSection/ExpandableTitleSearch";
+import SkillModuleState from "./SkillManagementSection/SkillModuleState";
+import "./SkillManagementSection/index.scss";
 
 interface GlossaryListSectionProps {
   t: TFunction;
@@ -16,9 +20,18 @@ interface GlossaryListSectionProps {
   glossaryLoadError: string;
   glossaryLoading: boolean;
   glossarySource?: GlossarySource;
+  availableGlossarySourceOptions: Array<{ value: GlossarySource; label: string }>;
+  searchInput: string;
+  query: string;
+  inboxCount: number;
+  showInbox: boolean;
+  onSearchInputChange: (value: string) => void;
+  onSearch: (value: string) => void;
+  onSourceChange: (value?: GlossarySource) => void;
+  onCreate: () => void;
+  onOpenInbox: () => void;
   handleBatchDeleteGlossary: () => void;
   handleBatchMergeGlossary: () => void;
-  query: string;
   refreshGlossaryAssets: (options?: {
     keyword?: string;
     page?: number;
@@ -33,6 +46,8 @@ interface GlossaryListSectionProps {
   setSelectedGlossaryAssetIds: (ids: string[]) => void;
 }
 
+const defaultPageSizeOptions = [20, 50, 100];
+
 export default function GlossaryListSection(props: GlossaryListSectionProps) {
   const {
     t,
@@ -45,9 +60,18 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
     glossaryLoadError,
     glossaryLoading,
     glossarySource,
+    availableGlossarySourceOptions,
+    searchInput,
+    query,
+    inboxCount,
+    showInbox,
+    onSearchInputChange,
+    onSearch,
+    onSourceChange,
+    onCreate,
+    onOpenInbox,
     handleBatchDeleteGlossary,
     handleBatchMergeGlossary,
-    query,
     refreshGlossaryAssets,
     selectedGlossaryAssetIds,
     selectedGlossaryAssets,
@@ -102,98 +126,148 @@ export default function GlossaryListSection(props: GlossaryListSectionProps) {
     : { x: 1120 };
 
   return (
-    <div className="memory-glossary-section" ref={sectionRef}>
-      {glossaryLoadError ? (
-        <Alert
-          type="error"
-          showIcon
-          className="memory-skill-share-alert"
-          message={glossaryLoadError}
-          action={
-            <Button
-              size="small"
-              onClick={() =>
-                refreshGlossaryAssets({
-                  keyword: query,
-                  page: glossaryListPage,
-                  pageSize: glossaryListPageSize,
-                  source: glossarySource,
-                })
-              }
-            >
-              {t("common.retry")}
-            </Button>
-          }
-        />
-      ) : null}
-
-      <div className="memory-glossary-batch-toolbar">
-        <span>
-          {t("admin.memoryGlossaryBatchStats", {
-            selected: selectedGlossaryAssets.length,
-            total: glossaryListTotal || assets.length,
-          })}
-        </span>
-        <Space size={8} wrap>
-          <Button
-            type="primary"
-            disabled={!selectedGlossaryAssets.length || glossaryLoading}
-            onClick={handleBatchMergeGlossary}
+    <div className="memory-glossary-shell">
+      <div className="memory-skill-toolbar">
+        <div className="memory-skill-heading-group">
+          <h2>{t("admin.memoryTabGlossary")}</h2>
+          <ExpandableTitleSearch
+            value={searchInput}
+            placeholder={t("admin.memorySearchPlaceholder")}
+            onChange={onSearchInputChange}
+            onSearch={onSearch}
+          />
+        </div>
+        <div className="memory-skill-toolbar-actions">
+          {showInbox ? (
+            <button type="button" className="memory-skill-review-drafts" onClick={onOpenInbox}>
+              {t("admin.memoryGlossaryInboxButton", { count: inboxCount })}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="memory-skill-create-split is-single"
+            onClick={onCreate}
           >
-            {t("admin.memoryGlossaryBatchMerge")}
-          </Button>
-          <Button
-            danger
-            disabled={!selectedGlossaryAssets.length || glossaryLoading}
-            onClick={handleBatchDeleteGlossary}
-          >
-            {t("admin.memoryGlossaryBatchDelete")}
-          </Button>
-        </Space>
+            <span className="memory-skill-create-split__main">
+              <PlusOutlined aria-hidden="true" />
+              {t("admin.memoryCreateGlossaryButton")}
+            </span>
+          </button>
+        </div>
       </div>
 
-      <Table<GlossaryAsset>
-        className="admin-page-table memory-table memory-glossary-table"
-        rowKey="id"
-        loading={glossaryLoading}
-        dataSource={filteredItems}
-        columns={columns}
-        rowSelection={{
-          selectedRowKeys: selectedGlossaryAssetIds,
-          preserveSelectedRowKeys: true,
-          onChange: (selectedRowKeys) =>
-            setSelectedGlossaryAssetIds(selectedRowKeys.map((key) => String(key))),
-        }}
-        tableLayout="fixed"
-        pagination={getLocalizedTablePagination(
-          {
-            current: glossaryListPage,
-            pageSize: glossaryListPageSize,
-            total: glossaryListTotal,
-            showSizeChanger: true,
-            pageSizeOptions: [4, 8, 12, 20],
-            showTotal: (total: number) => t("common.totalItems", { total }),
-            onChange: (page: number, nextPageSize: number) => {
-              setGlossaryListPage(page);
-              setGlossaryListPageSize(nextPageSize);
+      <div className="memory-skill-installed-filters">
+        <div className="memory-skill-source-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!glossarySource}
+            className={!glossarySource ? "is-active" : undefined}
+            onClick={() => onSourceChange(undefined)}
+          >
+            {t("admin.memoryAllSources")}
+          </button>
+          {availableGlossarySourceOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="tab"
+              aria-selected={glossarySource === option.value}
+              className={glossarySource === option.value ? "is-active" : undefined}
+              onClick={() => onSourceChange(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="memory-glossary-section" ref={sectionRef}>
+        {glossaryLoadError ? (
+          <SkillModuleState
+            tone="error"
+            retryLabel={t("common.retry")}
+            onRetry={() =>
+              refreshGlossaryAssets({
+                keyword: query,
+                page: glossaryListPage,
+                pageSize: glossaryListPageSize,
+                source: glossarySource,
+              })
+            }
+          >
+            {glossaryLoadError}
+          </SkillModuleState>
+        ) : null}
+
+        <div className="memory-glossary-batch-toolbar">
+          <span>
+            {t("admin.memoryGlossaryBatchStats", {
+              selected: selectedGlossaryAssets.length,
+              total: glossaryListTotal || assets.length,
+            })}
+          </span>
+          <Space size={8} wrap>
+            <Button
+              type="primary"
+              disabled={!selectedGlossaryAssets.length || glossaryLoading}
+              onClick={handleBatchMergeGlossary}
+            >
+              {t("admin.memoryGlossaryBatchMerge")}
+            </Button>
+            <Button
+              danger
+              disabled={!selectedGlossaryAssets.length || glossaryLoading}
+              onClick={handleBatchDeleteGlossary}
+            >
+              {t("admin.memoryGlossaryBatchDelete")}
+            </Button>
+          </Space>
+        </div>
+
+        <Table<GlossaryAsset>
+          className="admin-page-table memory-table memory-glossary-table memory-skill-installed-table"
+          rowKey="id"
+          loading={glossaryLoading}
+          dataSource={filteredItems}
+          columns={columns}
+          rowSelection={{
+            selectedRowKeys: selectedGlossaryAssetIds,
+            preserveSelectedRowKeys: true,
+            onChange: (selectedRowKeys) =>
+              setSelectedGlossaryAssetIds(selectedRowKeys.map((key) => String(key))),
+          }}
+          tableLayout="fixed"
+          pagination={getLocalizedTablePagination(
+            {
+              current: glossaryListPage,
+              pageSize: glossaryListPageSize,
+              total: glossaryListTotal,
+              showSizeChanger: true,
+              pageSizeOptions: defaultPageSizeOptions,
+              showTotal: (total: number) => t("common.totalItems", { total }),
+              onChange: (page: number, nextPageSize: number) => {
+                setGlossaryListPage(page);
+                setGlossaryListPageSize(nextPageSize);
+              },
+              onShowSizeChange: (_current: number, nextPageSize: number) => {
+                setGlossaryListPage(1);
+                setGlossaryListPageSize(nextPageSize);
+              },
             },
-            onShowSizeChange: (_current: number, nextPageSize: number) => {
-              setGlossaryListPage(1);
-              setGlossaryListPageSize(nextPageSize);
-            },
-          },
-          t,
-        )}
-        locale={{
-          emptyText: (
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={t("admin.memoryEmpty")}
-            />
-          ),
-        }}
-        scroll={glossaryTableScroll}
-      />
+            t,
+          )}
+          locale={{
+            emptyText: (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t("admin.memoryEmpty")}
+              />
+            ),
+          }}
+          scroll={glossaryTableScroll}
+        />
+      </div>
     </div>
   );
 }

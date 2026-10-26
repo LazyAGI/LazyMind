@@ -12,7 +12,9 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/log"
 	"lazymind/core/store"
+	"lazymind/core/taskcenter"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/controlstore"
 	"lazymind/core/workflow/executor"
@@ -394,6 +396,78 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 // LazyMind's managed ChatAgent after a Host-neutral Attempt reaches terminal
 // state. Host transport and product names never enter the graph algorithm.
 func FinalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, attemptID, status string) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		// Retry admission uses the same lock. Recheck the callback's identity
+		// after acquiring it so an obsolete attempt cannot end its replacement.
+		if _, err := artifactgraph.LockSession(tx, sessionID); err != nil {
+			return err
+		}
+		var current orm.WorkflowSessionStep
+		err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", sessionID, stepID, "effective").
+			Order("attempt DESC").Order("created_at DESC").Order("id DESC").First(&current).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if current.ID != attemptID || current.Status != status {
+			return nil
+		}
+		if err := finalizeHostAttempt(ctx, tx, sessionID, stepID, attemptID, status); err != nil {
+			return err
+		}
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return err
+		}
+		// Sessions without a conversation have no TaskCenter record.
+		if session.ConversationID == "" {
+			return nil
+		}
+		var taskStatus string
+		switch session.Status {
+		case SessionStatusCompleted:
+			taskStatus = "succeeded"
+		case SessionStatusFailed:
+			taskStatus = "failed"
+		default:
+			return nil
+		}
+		// A task and its notice are one optional projection of durable session
+		// state. The savepoint also clears PostgreSQL's aborted transaction state
+		// before returning to a caller that owns an enclosing transaction.
+		savepoint := "workflow_notice_" + common.GenerateID()
+		if err := tx.SavePoint(savepoint).Error; err != nil {
+			return err
+		}
+		completedAt, err := taskcenter.WorkflowNotificationCompletedAt(ctx, tx, session)
+		if err == nil {
+			err = taskcenter.UpdateTaskStatusBySessionAt(ctx, tx, sessionID, taskStatus, completedAt)
+		}
+		if err != nil {
+			if rollbackErr := tx.RollbackTo(savepoint).Error; rollbackErr != nil {
+				return errors.Join(err, rollbackErr)
+			}
+		}
+		if releaseErr := tx.Exec("RELEASE SAVEPOINT " + savepoint).Error; releaseErr != nil {
+			return errors.Join(err, releaseErr)
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		if common.IsSQLiteBusy(err) {
+			return err
+		}
+		if err != nil {
+			log.Logger.Warn().Err(err).Str("session_id", sessionID).
+				Msg("workflow task notification projection deferred to recovery")
+		}
+		return nil
+	})
+}
+
+func finalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, attemptID, status string) error {
 	var session orm.WorkflowSession
 	if err := db.WithContext(ctx).Where("id = ?", sessionID).First(&session).Error; err != nil {
 		return err

@@ -1,4 +1,4 @@
-"""PostgreSQL helpers for backend-managed vocabulary and chat tables.
+"""Database helpers for backend-managed vocabulary and chat tables.
 
 Vocabulary rows are now read from ``core.public.words`` and filtered by
 ``deleted_at IS NULL`` so soft-deleted words are excluded from both vocab
@@ -156,6 +156,12 @@ def _get_core_conn(*, db_dsn: Optional[str] = None, db_url: Optional[str] = None
     )
 
 
+def _vocab_table_name(engine: Engine) -> str:
+    # sqliteproxy uses SQLAlchemy's SQLite dialect as well. Core owns this
+    # table; do not create a separate public.words table in local runtimes.
+    return VOCAB_TABLE if engine.dialect.name == 'sqlite' else VOCAB_TABLE_QUALIFIED
+
+
 # ---------------------------------------------------------------------------
 # Table bootstrap
 # ---------------------------------------------------------------------------
@@ -168,20 +174,26 @@ def ensure_vocab_table(db_url: Optional[str] = None) -> None:
     try:
         engine = _get_vocab_conn(db_url=db_url)
         with engine.connect() as conn:
-            exists = conn.execute(
-                text(
-                    """SELECT 1
+            if engine.dialect.name == 'sqlite':
+                exists = conn.execute(
+                    text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table_name LIMIT 1"),
+                    {'table_name': VOCAB_TABLE},
+                ).scalar()
+            else:
+                exists = conn.execute(
+                    text(
+                        """SELECT 1
                            FROM information_schema.tables
                           WHERE table_schema = :table_schema
                             AND table_name = :table_name
                           LIMIT 1"""
-                ),
-                {'table_schema': VOCAB_SCHEMA, 'table_name': VOCAB_TABLE},
-            ).scalar()
+                    ),
+                    {'table_schema': VOCAB_SCHEMA, 'table_name': VOCAB_TABLE},
+                ).scalar()
         if exists:
-            LOG.info(f'[VocabDB] verified table {VOCAB_TABLE_QUALIFIED} is available.')
+            LOG.info(f'[VocabDB] verified table {_vocab_table_name(engine)} is available.')
             return
-        LOG.warning(f'[VocabDB] table {VOCAB_TABLE_QUALIFIED} not found in configured vocab database.')
+        LOG.warning(f'[VocabDB] table {_vocab_table_name(engine)} not found in configured vocab database.')
     except Exception as exc:
         LOG.error(f'[VocabDB] ensure_vocab_table failed: {exc}')
 
@@ -219,7 +231,7 @@ def fetch_vocab_for_user_id(user_id: str) -> List[Dict[str, Any]]:
             rows = conn.execute(
                 text(
                     f"""SELECT word, group_id
-                          FROM {VOCAB_TABLE_QUALIFIED}
+                          FROM {_vocab_table_name(engine)}
                          WHERE create_user_id = :user_id
                            AND deleted_at IS NULL"""
                 ),
@@ -252,7 +264,7 @@ def fetch_vocab_groups_for_user_id(
                                word,
                                COALESCE(description, '') AS description,
                                COALESCE({VOCAB_REFERENCE_COLUMN}, '') AS reference
-                          FROM {VOCAB_TABLE_QUALIFIED}
+                          FROM {_vocab_table_name(engine)}
                                                  WHERE create_user_id = :user_id
                            AND deleted_at IS NULL
                          ORDER BY group_id, id"""

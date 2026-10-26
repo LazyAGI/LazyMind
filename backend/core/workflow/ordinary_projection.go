@@ -19,6 +19,7 @@ import (
 	"lazymind/core/common/taskdisplay"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
@@ -210,6 +211,13 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 		}
 		view.StageArtifacts = deduplicateOrdinaryArtifacts(view.StageArtifacts)
 		out.Tasks = append(out.Tasks, view)
+	}
+	timed, timingErr := tasktiming.Snapshot(ctx, db, session.CreateUserID, session.ConversationID, session.ID, time.Now().UTC())
+	if timingErr != nil {
+		return out, timingErr
+	}
+	if timed != nil {
+		run.ExecutionID, run.Status, run.Timing, run.Revision = timed.ExecutionID, timed.Status, timed.Timing, timed.Revision
 	}
 	out.Runs = append(out.Runs, run)
 	return out, nil
@@ -482,11 +490,16 @@ func paginateOrdinaryProjection(out *ordinaryProjection, r *http.Request) error 
 			return err
 		}
 		view.StageArtifacts, view.Pages.StageArtifacts = view.StageArtifacts[start:end], metadata
+		start, end, metadata, err = page("knowledge_operations", len(view.KnowledgeOperations))
+		if err != nil {
+			return err
+		}
+		view.KnowledgeOperations, view.Pages.KnowledgeOperations = view.KnowledgeOperations[start:end], metadata
 	}
 	if !found {
 		return errOrdinaryCursor
 	}
-	if collection := q.Get("collection"); collection != "" && collection != "process_steps" && collection != "sources" && collection != "stage_artifacts" {
+	if collection := q.Get("collection"); collection != "" && collection != "process_steps" && collection != "sources" && collection != "stage_artifacts" && collection != "knowledge_operations" {
 		return errOrdinaryCursor
 	}
 	return nil
@@ -572,4 +585,26 @@ func ordinaryHiddenSlots(ctx context.Context, db *gorm.DB, revisionID string) (m
 		}
 	}
 	return hidden, nil
+}
+
+// ReadOrdinaryTaskSources exposes the same authorized, persisted public projection
+// used by Work. It does not execute a workflow or resolve sources externally.
+func ReadOrdinaryTaskSources(ctx context.Context, db *gorm.DB, owner, sessionID, displayKey string) ([]taskdisplay.PublicSource, error) {
+	if err := workflowstore.New(db).AuthorizeSession(ctx, sessionID, owner); err != nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var session orm.WorkflowSession
+	if err := db.WithContext(ctx).Where("id = ? AND dismissed = false", sessionID).Take(&session).Error; err != nil {
+		return nil, err
+	}
+	projection, err := projectOrdinarySession(ctx, db, &session)
+	if err != nil {
+		return nil, err
+	}
+	for _, task := range projection.Tasks {
+		if task.DisplayKey == displayKey {
+			return task.Sources, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
 }

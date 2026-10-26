@@ -525,7 +525,7 @@ export function TerminalConnectionPage({ initialProvider, embedded = false, onUs
   useEffect(() => {
     let active = true;
     setLoading(true); setError(false);
-    Promise.all(providers.map(listChannelAccounts)).then(results => { if (active) setAccounts(results.flatMap(r => r.items)); }).catch(() => { if (active) setError(true); }).finally(() => { if (active) setLoading(false); });
+    Promise.all(providers.map(provider => listChannelAccounts(provider))).then(results => { if (active) setAccounts(results.flatMap(r => r.items)); }).catch(() => { if (active) setError(true); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [refresh]);
   useEffect(() => {

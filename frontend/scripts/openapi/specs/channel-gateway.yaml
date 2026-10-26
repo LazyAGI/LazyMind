@@ -84,6 +84,13 @@ paths:
             maxLength: 256
             default: ''
             title: Recipient Id
+        - name: check_connection
+          in: query
+          required: false
+          description: Perform a bounded read-only WeChat connection check for the known recipient_id. Requires a nonempty recipient_id and never chooses a recipient or sends a message.
+          schema:
+            type: boolean
+            default: false
         - name: limit
           in: query
           required: false
@@ -200,6 +207,13 @@ paths:
             type: string
             minLength: 1
             maxLength: 32
+        - name: check_connection
+          in: query
+          required: false
+          description: Perform a bounded read-only WeChat connection check before listing accounts. A successful check does not establish notification send eligibility.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: Connected accounts for the requested provider.
@@ -685,6 +699,16 @@ components:
         label: {type: string}
         available: {type: boolean}
         kind: {type: string}
+        connection_check_status:
+          type: string
+          description: Last read-only connection check state for this confirmed WeChat recipient.
+          enum: [unknown, checking, connected, activation_required, unavailable]
+        connection_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+        connection_error_code:
+          type: string
     AccountView:
       type: object
       required:

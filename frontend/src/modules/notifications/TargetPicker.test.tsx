@@ -12,6 +12,29 @@ beforeEach(() => {
   mocks.groups.mockResolvedValue({ items: [{ recipient_id: 'oc_daily', label: '产品日报群', available: true, kind: 'group' }], next_cursor: '' });
 });
 afterEach(cleanup);
+it('keeps recipient status isolated from the last failed recipient on the same WeChat account', async () => {
+  mocks.targets.mockResolvedValue({ items: [
+    { recipient_id: 'healthy', label: '正常接收人', available: true, connection_check_status: 'connected' },
+    { recipient_id: 'failed', label: '失败接收人', available: true, connection_check_status: 'unavailable' },
+  ], next_cursor: '' });
+  const wechat = { ...account, provider: 'wechat', runtime_status: 'running',
+    capabilities: { connection_check_status: 'unavailable' } } as ChannelAccount;
+  const view = render(<TargetPicker inline provider="wechat" accounts={[wechat]} current={{ enabled: true, account_id: 'a', recipient_id: 'healthy' }} onSave={() => {}} onClose={() => {}} />);
+  expect(await screen.findByText('正常接收人')).toBeVisible();
+  expect(screen.queryByText('正常接收人 · notifications.wechatConnectionUnavailable')).not.toBeInTheDocument();
+  view.rerender(<TargetPicker inline provider="wechat" accounts={[wechat]} current={{ enabled: true, account_id: 'a', recipient_id: 'failed' }} onSave={() => {}} onClose={() => {}} />);
+  expect(await screen.findByText('失败接收人 · notifications.wechatConnectionUnavailable')).toBeVisible();
+});
+it.each([
+  { status: 'disconnected', runtime_status: 'stopped', capabilities: {}, label: 'notConnected' },
+  { status: 'connected', runtime_status: 'running', capabilities: { connection_error_code: 'WECHAT_REAUTHORIZATION_REQUIRED' }, label: 'wechatReconnectRequired' },
+  { status: 'connected', runtime_status: 'degraded', capabilities: {}, label: 'wechatConnectionUnavailable' },
+])('retains account-wide $label even when the selected recipient was healthy', async ({ label, ...state }) => {
+  mocks.targets.mockResolvedValue({ items: [{ recipient_id: 'healthy', label: '接收人', available: true, connection_check_status: 'connected' }], next_cursor: '' });
+  const wechat = { ...account, provider: 'wechat', ...state } as ChannelAccount;
+  render(<TargetPicker inline provider="wechat" accounts={[wechat]} current={{ enabled: true, account_id: 'a', recipient_id: 'healthy' }} onSave={() => {}} onClose={() => {}} />);
+  expect(await screen.findByText('接收人 · notifications.' + label)).toBeVisible();
+});
 it('constrains long account labels inside the inline notification grid', () => {
   const longAccount = {
     ...account,

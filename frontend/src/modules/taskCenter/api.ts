@@ -1,6 +1,8 @@
+import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
 import type { AxiosRequestConfig } from 'axios';
 import type { NotificationUpdate } from '@/modules/notifications/api';
-import { Configuration, DefaultApi, TaskNotificationsApi } from '@/api/generated/core-client';
+import { WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, notificationEventScope, publishNotificationChange } from '@/modules/notifications/notificationEvents';
+import { Configuration, DefaultApi, TaskNotificationsApi, type TaskRemovalPreview } from '@/api/generated/core-client';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
 const defaultClient = new DefaultApi(new Configuration({ basePath: BASE_URL }), BASE_URL, axiosInstance);
@@ -140,8 +142,41 @@ export async function getTask(id: string): Promise<Task> {
   return response.data as unknown as Task;
 }
 
-export async function removeTask(id: string): Promise<void> {
-  await defaultClient.apiCoreTaskCenterTasksTaskIdRemovePost({ taskId: id });
+export async function getTaskGoal(task: Pick<Task, 'conversation_id' | 'title' | 'created_at'>, signal: AbortSignal): Promise<string | undefined> {
+  const prefix = task.title?.replace(/\.\.\.$/, '');
+  if (!prefix || !task.conversation_id) return;
+  // History timestamps are serialized to seconds, while task timestamps retain fractions.
+  const createdAt = Math.floor(Date.parse(task.created_at) / 1000) * 1000;
+  if (!Number.isFinite(createdAt)) return;
+  let pageToken: string | undefined;
+  let candidate: { text: string; time: number } | undefined;
+  do {
+    const { data } = await defaultClient.apiCoreConversationsNameHistoryGet({
+      name: task.conversation_id, pageSize: 50, pageToken,
+    }, { signal, silentError: true } as AxiosRequestConfig & { silentError: boolean });
+    const history = data.history ?? [];
+    for (const item of history) {
+      const time = Date.parse(item.create_time ?? '');
+      if (time >= createdAt && item.query?.startsWith(prefix) && (!candidate || time < candidate.time)) {
+        candidate = { text: item.query, time };
+      }
+    }
+    // Pages run newest first. Stop once we have reached this execution's start.
+    if (history.some(item => Date.parse(item.create_time ?? '') <= createdAt)) break;
+    pageToken = data.next_page_token;
+  } while (pageToken && !signal.aborted);
+  return candidate?.text;
+}
+
+export type { TaskRemovalPreview } from '@/api/generated/core-client';
+export async function getTaskRemovalPreview(id: string, signal?: AbortSignal): Promise<TaskRemovalPreview> {
+  return (await defaultClient.apiCoreTaskCenterTasksTaskIdRemovalPreviewGet({ taskId: id }, { signal })).data;
+}
+export async function removeTask(id: string, impactVersion?: string): Promise<TasksRemovedDetail> {
+  const { data } = await defaultClient.apiCoreTaskCenterTasksTaskIdRemovePost({ taskId: id, taskRemovalRequest: impactVersion ? { impact_version: impactVersion } : undefined });
+  const result = { removed_task_ids: data?.removed_task_ids ?? [id], trashed_conversation_ids: data?.trashed_conversation_ids ?? [], cancellation_pending: Boolean(data?.cancellation_pending) };
+  window.dispatchEvent(new CustomEvent(TASKS_REMOVED_EVENT, { detail: result }));
+  return result;
 }
 
 export async function listSchedules(includeDisabled = false): Promise<ScheduleListResponse> {
@@ -152,7 +187,9 @@ export async function listSchedules(includeDisabled = false): Promise<ScheduleLi
 }
 
 export async function createSchedule(req: CreateScheduleRequest): Promise<Schedule> {
+  const scope = notificationEventScope();
   const response = await notificationClient.apiCoreSchedulesPost({ apiCoreSchedulesPostRequest: req });
+  if (req.notification) publishNotificationChange(WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, scope);
   return response.data;
 }
 
@@ -171,15 +208,19 @@ export async function runScheduleNow(id: string): Promise<{ task_id: string; con
 }
 
 export async function updateSchedule(id: string, req: Partial<CreateScheduleRequest>): Promise<Schedule> {
+  const scope = notificationEventScope();
   const response = await notificationClient.apiCoreSchedulesScheduleIdPut({
     scheduleId: id,
     apiCoreSchedulesPostRequest: req,
   });
+  if (req.notification) publishNotificationChange(WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, scope);
   return response.data;
 }
 
 export async function deleteSchedule(id: string): Promise<void> {
+  const scope = notificationEventScope();
   await defaultClient.apiCoreSchedulesScheduleIdDelete({ scheduleId: id });
+  publishNotificationChange(WECHAT_NOTIFICATION_CONFIG_CHANGED_EVENT, scope);
 }
 
 export async function listScheduleTasks(

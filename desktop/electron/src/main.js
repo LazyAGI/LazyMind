@@ -25,6 +25,7 @@ const { createInputRecorder } = require("./input-recording");
 const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
+const { revealDirectoryFile } = require("./directory-file");
 const {
   desktopRuntimeReady,
   isRuntimeOwnershipConflict,
@@ -176,7 +177,9 @@ const agentConnectorActionTimeoutMs = 15 * 1000;
 const agentConnectorStatusTimeoutMs = 30 * 1000;
 const agentConnectorDisconnectTimeoutMs = 60 * 1000;
 const agentConnectorInstallTimeoutMs = 660 * 1000;
+const agentConnectorWorkBuddyInstallTimeoutMs = 120 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
+const agentConnectorLoginTimeoutMs = 2 * 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
 const startupMetricsRecorder = createStartupMetricsRecorder({
@@ -209,7 +212,7 @@ let agentHostProcess;
 let agentHostRestartTimer;
 let agentHostStableTimer;
 let agentHostRestartAttempts = 0;
-const agentLoginProcesses = new Map();
+const agentLogins = new Map();
 let runtimeProcessExit = null;
 let sidecarStderrTail = "";
 let sidecarStructuredFailure = "";
@@ -395,6 +398,7 @@ function sidecarEnv() {
     PYTHONDONTWRITEBYTECODE: "1",
     LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON: JSON.stringify(localFolderAccess.allowedRoots),
   };
+  delete env.LAZYMIND_CONNECTOR_CONFIG;
   Object.assign(
     env,
     buildObsidianRuntimeEnv(obsidianConfig.root, obsidianDisabledRoot),
@@ -721,46 +725,107 @@ function runAgentConnector(agent, action) {
   if (action === "login") {
     return startAgentLogin(agent);
   }
-  const installWorkflow = agent === "deepseek-harness" && action === "connect";
+  const installWorkflow = ["deepseek-harness", "workbuddy"].includes(agent) && action === "connect";
   const run = () => runConnectorJSON(
     ["internal", "agent", agent, action],
-    installWorkflow ? agentConnectorInstallTimeoutMs
+    installWorkflow ? (agent === "workbuddy" ? agentConnectorWorkBuddyInstallTimeoutMs : agentConnectorInstallTimeoutMs)
       : agent === "deepseek-harness" && action === "disconnect" ? agentConnectorDisconnectTimeoutMs
       : action === "status" ? agentConnectorStatusTimeoutMs : agentConnectorActionTimeoutMs,
   );
   if (installWorkflow) {
-    const address = new URL(process.env.LAZYMIND_ASSISTANT_BRIDGE_URL || "http://127.0.0.1:19091").host;
-    return runConnectorJSON(["assistant", "start", "--listen", address], agentConnectorActionTimeoutMs).then(run);
+    return runConnectorJSON(["assistant", "start"], agentConnectorActionTimeoutMs).then(run);
   }
-  return run();
+  return run().then((result) => withAgentLoginStatus(agent, result));
 }
 
 function startAgentLogin(agent) {
-  agentLoginProcesses.get(agent)?.kill();
-  const child = spawn(agentConnectorPath, ["internal", "agent", agent, "login"], {
-    env: sidecarEnv(),
-    stdio: ["ignore", "ignore", "pipe"],
-    detached: false,
-    windowsHide: isWindows,
-  });
-  agentLoginProcesses.set(agent, child);
-  child.stderr?.on("data", (chunk) => appendStartupLog(`agent-login:${agent}`, chunk));
-  child.once("error", (error) => {
-    appendStartupLog(`agent-login:${agent}`, serializeError(error));
-  });
-  child.once("close", (code, signal) => {
-    if (agentLoginProcesses.get(agent) === child) {
-      agentLoginProcesses.delete(agent);
-    }
-    appendStartupLog(`agent-login:${agent}`, `exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
-    if (!isQuitting) {
-      restartAgentHost();
-    }
-  });
-  return runConnectorJSON(
-    ["internal", "agent", agent, "status"],
-    agentConnectorActionTimeoutMs,
-  );
+  clearAgentLogin(agent);
+  const login = { status: { state: "running" }, child: null, timer: null };
+  agentLogins.set(agent, login);
+  const finish = (state, message = "") => {
+    if (agentLogins.get(agent) !== login || login.status.state !== "running") return;
+    clearTimeout(login.timer);
+    login.status = { state, ...(message ? { message: String(message).trim().slice(-8192) } : {}) };
+    if (!isQuitting) restartAgentHost();
+  };
+  let stdout = "";
+  let stderr = "";
+  try {
+    const child = spawn(agentConnectorPath, ["internal", "agent", agent, "login"], {
+      env: sidecarEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
+      windowsHide: isWindows,
+    });
+    login.child = child;
+    login.timer = setTimeout(() => {
+      finish("failed", "Login timed out. Try signing in again.");
+      stopAgentLoginProcess(child);
+    }, agentConnectorLoginTimeoutMs);
+    child.stdout?.on("data", (chunk) => { stdout = (stdout + chunk).slice(-65536); });
+    child.stderr?.on("data", (chunk) => { stderr = (stderr + chunk).slice(-8192); });
+    child.once("error", (error) => finish("failed", error.message));
+    child.once("close", (code, signal) => {
+      if (signal) {
+        finish("cancelled", "Login was cancelled.");
+        return;
+      }
+      if (code !== 0) {
+        finish("failed", stderr.trim() || `Login exited with code ${code ?? "unknown"}.`);
+        return;
+      }
+      try {
+        const status = JSON.parse(stdout);
+        if (!["requirements_missing", "ready", "action_required", "enabled", "conflict", "error"].includes(status?.state)) {
+          throw new Error("Invalid login status");
+        }
+        if (status.state === "error") {
+          finish("failed", status.message || stderr.trim() || "Login failed.");
+        } else {
+          finish("succeeded");
+        }
+      } catch {
+        finish("failed", stderr.trim() || "The connector returned an invalid login result.");
+      }
+    });
+  } catch (error) {
+    finish("failed", error.message);
+  }
+  return runAgentConnector(agent, "status");
+}
+
+function withAgentLoginStatus(agent, result) {
+  if (agent === "all") {
+    return {
+      ...result,
+      agents: Object.fromEntries(Object.entries(result.agents || {}).map(([name, status]) =>
+        [name, withAgentLoginStatus(name, status)])),
+    };
+  }
+  const login = agentLogins.get(agent)?.status;
+  return login ? { ...result, login: { ...login } } : result;
+}
+
+function clearAgentLogin(agent) {
+  const login = agentLogins.get(agent);
+  agentLogins.delete(agent);
+  if (!login) return;
+  clearTimeout(login.timer);
+  if (login.status.state === "running") stopAgentLoginProcess(login.child);
+}
+
+function stopAgentLoginProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  if (isWindows && Number.isInteger(child.pid) && child.pid > 0) {
+    execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      windowsHide: true,
+      timeout: 5000,
+    }, (error) => {
+      if (error) child.kill();
+    });
+  } else {
+    child.kill();
+  }
 }
 
 async function runExecutorConnector(provider, action) {
@@ -798,6 +863,10 @@ async function runAgentBinding(target, action, executablePath = "") {
     args.push("--path", executablePath);
   }
   const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
+  if (action !== "status") {
+    const loginAgent = target === "codebuddy-cli" ? "workbuddy" : target.split("-")[0];
+    clearAgentLogin(loginAgent);
+  }
   if (action !== "status" && target.endsWith("-cli") && target !== "deepseek-harness-cli") {
     restartAgentHost();
   }
@@ -1400,10 +1469,9 @@ function beginFastQuit(reason = "quit") {
   agentHostProcess = undefined;
   cloudOAuthCallbackRelay?.close();
   cloudOAuthCallbackRelay = null;
-  for (const child of agentLoginProcesses.values()) {
-    child.kill();
+  for (const agent of agentLogins.keys()) {
+    clearAgentLogin(agent);
   }
-  agentLoginProcesses.clear();
   const guardWillCleanUp = Boolean(guardPID || (!isWindows && guardProcess));
   if (!guardWillCleanUp) {
     spawnDetachedShutdownHelper(reason);
@@ -3046,6 +3114,20 @@ async function materializeArtifactFile(payload, destPath) {
 }
 
 ipcMain.handle("lazymind:showItemInFolder", async (_event, payload) => {
+  if (payload?.directoryEntry) {
+    return revealDirectoryFile(payload.directoryEntry, {
+      showItemInFolder: value => shell.showItemInFolder(value),
+      lookup: async ({ directoryId, entryId }) => {
+        const { corePort, userId } = await desktopWorkspaceRuntime();
+        const response = await fetch(`http://127.0.0.1:${corePort}/document-directories/${encodeURIComponent(directoryId)}/entries/${encodeURIComponent(entryId)}/local-file?metadata_only=true`, {
+          headers: { "X-User-Id": userId }, signal: AbortSignal.timeout(30_000),
+        });
+        const result = await response.json();
+        if (!response.ok || result.code !== 0) throw new Error("Directory file is unavailable");
+        return result.data;
+      },
+    });
+  }
   const source = typeof payload === "string" ? payload : String(payload?.source || "");
   const localPath = await resolveExistingArtifactPath(source);
   if (localPath) {

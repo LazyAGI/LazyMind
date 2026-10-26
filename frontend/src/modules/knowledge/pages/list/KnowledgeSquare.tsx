@@ -34,8 +34,11 @@ import {
   type KnowledgeSquareType,
   type OfficialKnowledgeBase,
 } from "./knowledgeSquareData";
+import type { KnowledgeListState } from "./knowledgeListState";
 
 interface KnowledgeSquareProps {
+  filters: KnowledgeListState;
+  onFiltersChange: (patch: Partial<KnowledgeListState>) => void;
   items: OfficialKnowledgeBase[];
   domains: Record<KnowledgeSquareType, string[]>;
   loading: boolean;
@@ -46,6 +49,8 @@ interface KnowledgeSquareProps {
   onOpen: (item: OfficialKnowledgeBase) => void;
   onQuery: (item: OfficialKnowledgeBase) => void;
   onLoadDetail: (item: OfficialKnowledgeBase) => Promise<OfficialKnowledgeBase>;
+  actionDisabled?: boolean;
+  actionDisabledReason?: ReactNode;
 }
 
 const iconByType: Record<string, ReactNode> = {
@@ -71,6 +76,8 @@ function formatDate(value: string) {
 }
 
 export default function KnowledgeSquare({
+  filters,
+  onFiltersChange,
   items,
   domains,
   loading,
@@ -81,12 +88,11 @@ export default function KnowledgeSquare({
   onOpen,
   onQuery,
   onLoadDetail,
+  actionDisabled = false,
+  actionDisabledReason,
 }: KnowledgeSquareProps) {
   const { t } = useTranslation();
-  const [type, setType] = useState<KnowledgeSquareType>("industry");
-  const [domain, setDomain] = useState("");
-  const [status, setStatus] = useState<KnowledgeSquareInstallStatus>("all");
-  const [keyword, setKeyword] = useState("");
+  const { squareType: type, squareDomain: domain, squareStatus: status, squareKeyword: keyword } = filters;
   const [detailItem, setDetailItem] = useState<OfficialKnowledgeBase | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState(false);
@@ -122,14 +128,11 @@ export default function KnowledgeSquare({
   );
 
   const setActiveType = (nextType: KnowledgeSquareType) => {
-    setType(nextType);
-    setDomain("");
+    onFiltersChange({ squareType: nextType, squareDomain: "" });
   };
 
   const resetFilters = () => {
-    setKeyword("");
-    setStatus("all");
-    setDomain("");
+    onFiltersChange({ squareKeyword: "", squareStatus: "all", squareDomain: "" });
   };
 
   const openDetail = (item: OfficialKnowledgeBase) => {
@@ -193,7 +196,7 @@ export default function KnowledgeSquare({
           placeholder={t("knowledge.squareSearchPlaceholder")}
           aria-label={t("knowledge.squareSearchPlaceholder")}
           onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            setKeyword(event.target.value)
+            onFiltersChange({ squareKeyword: event.target.value })
           }
         />
         <Select<KnowledgeSquareInstallStatus>
@@ -205,7 +208,7 @@ export default function KnowledgeSquare({
             { value: "installed", label: t("knowledge.installed") },
             { value: "updatable", label: t("knowledge.updateAvailable") },
           ]}
-          onChange={setStatus}
+          onChange={(squareStatus: KnowledgeSquareInstallStatus) => onFiltersChange({ squareStatus })}
         />
         <Button onClick={resetFilters}>{t("common.reset")}</Button>
       </div>
@@ -219,7 +222,7 @@ export default function KnowledgeSquare({
             key={item || "all"}
             className={domain === item ? "is-active" : ""}
             type="button"
-            onClick={() => setDomain(item)}
+            onClick={() => onFiltersChange({ squareDomain: item })}
           >
             {item || t("common.all")}
           </button>
@@ -325,7 +328,8 @@ export default function KnowledgeSquare({
                       size="small"
                       type="primary"
                       loading={active}
-                      disabled={active}
+                      disabled={active || actionDisabled}
+                      title={actionDisabled ? String(actionDisabledReason || "") : undefined}
                       onClick={(event: MouseEvent<HTMLElement>) => {
                         event.stopPropagation();
                         if (item.installed) onUpdate(item);
@@ -371,7 +375,8 @@ export default function KnowledgeSquare({
               {detailItem.catalogSource !== "cloud" ? <Button
                 type="primary"
                 loading={detailActive}
-                disabled={detailActive}
+                disabled={detailActive || actionDisabled}
+                title={actionDisabled ? String(actionDisabledReason || "") : undefined}
                 onClick={() => {
                   if (detailItem.installed) onUpdate(detailItem);
                   else onInstall(detailItem);

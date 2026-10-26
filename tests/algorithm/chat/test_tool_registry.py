@@ -83,7 +83,8 @@ def test_wikipedia_remains_available_without_web_provider():
     assert 'wikipedia' in _active_tool_names()
 
 
-def test_temp_kb_activates_when_files_are_present():
+def test_temp_kb_activates_when_files_are_present(monkeypatch):
+    monkeypatch.setenv('LAZYMIND_RAG_ENABLED', 'true')
     from lazyllm.tools.agent.toolsManager import ToolManager
 
     assert 'temp_kb' not in _active_tool_names()
@@ -107,6 +108,23 @@ def test_temp_kb_activates_when_files_are_present():
             'summary': 'Locate passages in this conversation\'s uploaded documents.',
         }
     ]
+
+
+@pytest.mark.parametrize('enabled', ['0', 'false'])
+def test_missing_rag_keeps_temporary_search_and_attachment_readers(monkeypatch, enabled):
+    from lazyllm.tools.agent.toolsManager import ToolManager
+    from lazymind.chat.service.component.tool_registry import USER_ATTACHMENT_TOOL_CONFIGS
+
+    monkeypatch.setenv('LAZYMIND_RAG_ENABLED', enabled)
+    lazyllm.globals['agentic_config'] = {'files': ['paper.pdf'], 'filters': {'kb_id': ['kb-1']}}
+    configs = filter_tools([*DEFAULT_TOOLS, *USER_ATTACHMENT_TOOL_CONFIGS], include_unready=True)
+    names = {cfg.name for cfg in configs}
+    assert 'kb' not in names
+    assert 'temp_kb' in names
+    assert {'read_user_attachment', 'find_user_attachment'} <= names
+    assert _tool_group('temp_kb')['active'] is True
+    cfg = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'temp_kb')
+    assert [d['function']['name'] for d in ToolManager([cfg.tool]).tools_description] == ['kb_tmp_search']
 
 
 def test_registry_key_source_activates_function_tool():
@@ -692,3 +710,15 @@ def test_search_credentials_do_not_survive_an_unconfigured_request():
     assert 'web_search' in _active_tool_names()
     inject_tool_config({})
     assert 'web_search' not in _active_tool_names()
+
+
+def test_management_group_is_separate_from_native_read_kb_and_requires_core_scope():
+    group = _tool_group('knowledge_management')
+    assert group['active'] is False
+    lazyllm.globals['agentic_config'] = {'system_mcp_config': [
+        {'id': 'lazymind-knowledge', 'allowed_tools': ['knowledge.create']}]}
+    group = _tool_group('knowledge_management')
+    assert group['active'] is True
+    assert group['provider_id'] == 'lazymind-knowledge'
+    lazyllm.globals['agentic_config']['system_mcp_config'][0]['allowed_tools'] = []
+    assert _tool_group('knowledge_management')['active'] is False

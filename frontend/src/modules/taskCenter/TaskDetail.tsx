@@ -4,12 +4,12 @@ import '@/modules/notifications/index.scss';
 import ScheduleRunHistory from './ScheduleRunHistory';
 import { describeCron } from './scheduleTime';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Drawer, Dropdown, Empty, Modal, Tag, Tooltip } from 'antd';
+import { Alert, Button, Drawer, Dropdown, Empty, Tag, Tooltip } from 'antd';
 import type { MenuProps } from 'antd';
 import { CheckCircleFilled, CloseCircleFilled, CloseOutlined, DeleteOutlined, EllipsisOutlined, FolderOutlined, SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { Task } from './api';
-import { getTask } from './api';
+import { getTask, getTaskGoal } from './api';
 import { CONVERSATION_TITLE_CHANGED_EVENT, type ConversationTitleChangedDetail } from '@/modules/chat/constants/chat';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
@@ -36,6 +36,25 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
   const [loadFailed, setLoadFailed] = useState(false);
   const [retryVersion, setRetryVersion] = useState(0);
   const task = detail?.id === selectedTask?.id ? detail : selectedTask;
+  const [goalOpen, setGoalOpen] = useState(false);
+  const [fullGoal, setFullGoal] = useState<{ taskId: string; text?: string; failed?: boolean }>();
+  const taskId = task?.id;
+  const goalTitle = task?.title;
+  const goalConversationId = task?.conversation_id;
+  const goalCreatedAt = task?.created_at;
+  const needsFullGoal = task?.task_type === 'background_chat' && Boolean(goalTitle?.endsWith('...') && goalConversationId);
+  useEffect(() => {
+    if (!goalOpen || !needsFullGoal || !taskId || !goalConversationId || !goalCreatedAt) return;
+    const controller = new AbortController();
+    setFullGoal({ taskId });
+    void getTaskGoal({ title: goalTitle, conversation_id: goalConversationId, created_at: goalCreatedAt }, controller.signal)
+      .then(text => { if (!controller.signal.aborted) setFullGoal({ taskId, text, failed: !text }); })
+      .catch(() => { if (!controller.signal.aborted) setFullGoal({ taskId, failed: true }); });
+    return () => controller.abort();
+  }, [goalOpen, needsFullGoal, taskId, goalTitle, goalConversationId, goalCreatedAt]);
+  const goalPreview = task?.title || task?.conversation_title || t('taskCenter.noDescription');
+  const loadedGoal = fullGoal?.taskId === taskId ? fullGoal : undefined;
+  const goalContent = needsFullGoal ? loadedGoal?.text || t(loadedGoal?.failed ? 'taskCenter.loadError' : 'common.loading') : goalPreview;
   const selectedID = selectedTask?.id;
   useEffect(() => {
     const renamed = (event: Event) => {
@@ -105,14 +124,7 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
       return;
     }
     if (key === 'trash' && onDelete) {
-      Modal.confirm({
-        title: t('taskCenter.trashTaskTitle', { name: taskName }),
-        content: t('taskCenter.trashTaskDescription'),
-        okText: t('settingsPage.recovery.moveToTrash'),
-        cancelText: t('common.cancel'),
-        okButtonProps: { danger: true },
-        onOk: () => onDelete(task),
-      });
+      void onDelete(task);
     }
   };
 
@@ -148,7 +160,9 @@ export default function TaskDetail({ task: initialTask, onClose, onOpenConversat
 
           <section className='task-detail-section task-detail-description'>
             <h3>{t(task.schedule_id ? 'taskCenter.scheduleDescription' : 'taskCenter.taskGoal')}</h3>
-            <p>{task.title || task.conversation_title || t('taskCenter.noDescription')}</p>
+            <Tooltip placement='bottomRight' title={<div style={{ maxHeight: 'min(60vh, 480px)', overflowY: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{goalContent}</div>} trigger={['hover', 'focus']} onOpenChange={setGoalOpen} styles={{ root: { maxWidth: 'min(560px, calc(100vw - 32px))' } }}>
+              <p tabIndex={0}>{goalPreview}</p>
+            </Tooltip>
           </section>
 
           {task.schedule_id && <>

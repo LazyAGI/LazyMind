@@ -56,7 +56,7 @@ func notificationReviewRun(t *testing.T, db *gorm.DB, config *string, workflowID
 func TestNotificationReviewChatWriteFailureRecoversWithoutRerun(t *testing.T) {
 	for _, failureEnabled := range []bool{false, true} {
 		t.Run(fmt.Sprint(failureEnabled), func(t *testing.T) {
-			db := orm.MigrateAllModelsForTest(t).DB
+			db := newChatNotificationTestDB(t).DB
 			config := fmt.Sprintf(`{"events":{"succeeded":{"enabled":true,"content":"summary"},"failed":{"enabled":%t,"content":"summary"}},"channels":{"desktop":{"enabled":true}}}`, failureEnabled)
 			notificationReviewRun(t, db, &config, nil)
 			// Database-native failure leaves PostgreSQL's transaction aborted too.
@@ -134,8 +134,8 @@ func TestNotificationReviewChatWriteFailureRecoversWithoutRerun(t *testing.T) {
 	}
 }
 
-func TestNotificationReviewLegacyAsyncWorkflowCompletesWithoutNotifications(t *testing.T) {
-	db := orm.MigrateAllModelsForTest(t).DB
+func TestNotificationReviewLegacyAsyncWorkflowCompletesWithDesktopOnly(t *testing.T) {
+	db := newChatNotificationTestDB(t).DB
 	sessionID := "review-workflow"
 	session := orm.WorkflowSession{ID: sessionID, ConversationID: "review-conv", WorkflowID: "writer", Status: "active", CreateUserID: "owner"}
 	if err := db.Create(&session).Error; err != nil {
@@ -175,8 +175,12 @@ func TestNotificationReviewLegacyAsyncWorkflowCompletesWithoutNotifications(t *t
 	if err := db.Model(&orm.TaskNotification{}).Count(&count).Error; err != nil {
 		t.Fatal(err)
 	}
-	if count != 0 || calls.Load() != 1 {
-		t.Fatalf("backfilled notifications or reran model: notices=%d calls=%d", count, calls.Load())
+	if count != 1 || calls.Load() != 1 {
+		t.Fatalf("legacy desktop completion missing or model reran: notices=%d calls=%d", count, calls.Load())
+	}
+	var notice orm.TaskNotification
+	if err := db.First(&notice, "task_id = ?", run.ID).Error; err != nil || notice.Channel != "desktop" {
+		t.Fatalf("legacy completion used an external policy: notice=%#v err=%v", notice, err)
 	}
 	notificationReviewConsumeDependency(t, db)
 }

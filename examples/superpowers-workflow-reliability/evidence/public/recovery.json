@@ -1,0 +1,408 @@
+{
+  "classification": "same-session authorized UI Retry + real Runtime/Codex after missing-brief injection",
+  "execution_source": [
+    "633ed8fe7b1d65ae410023af6efacef8817472e5",
+    "a3a227afb3096deb4ea4084b431bdc968a4d3754"
+  ],
+  "records": {
+    "result": {
+      "source": "evidence/rc/missing-brief/result.json",
+      "sha256": "82565000bb1cb5ffb1d5279ff88060478310eb258fe30dfb627cdd31b8ac30e8",
+      "format": "json",
+      "values": {
+        "/result": "PASS",
+        "/failure": null,
+        "/session_id": "d490f23fbc734ed4892fe309c46dee39",
+        "/launch_count": 1,
+        "/completed_at": "2026-10-20T08:00:33.828391+00:00",
+        "/control/session/status": "completed",
+        "/control/session/pinned_revision_id": "b6a4f724-0804-479a-986c-6c5043cb096d",
+        "/control/projection/completed": true,
+        "/control/projection/nodes/collect/execution": "succeeded",
+        "/control/projection/nodes/dispatch/execution": "succeeded",
+        "/control/projection/nodes/prepare/execution": "succeeded",
+        "/control/projection/nodes/record/execution": "succeeded",
+        "/control/projection/nodes/validate_completion/execution": "succeeded",
+        "/control/projection/nodes/validate_dispatch/execution": "succeeded",
+        "/control/session/steps/0/step_id": "prepare",
+        "/control/session/steps/0/attempt": 1,
+        "/control/session/steps/0/status": "succeeded",
+        "/control/session/steps/1/step_id": "validate_dispatch",
+        "/control/session/steps/1/attempt": 1,
+        "/control/session/steps/1/status": "failed",
+        "/control/session/steps/2/step_id": "validate_dispatch",
+        "/control/session/steps/2/attempt": 2,
+        "/control/session/steps/2/status": "succeeded",
+        "/control/session/steps/3/step_id": "dispatch",
+        "/control/session/steps/3/attempt": 1,
+        "/control/session/steps/3/status": "succeeded",
+        "/control/session/steps/4/step_id": "collect",
+        "/control/session/steps/4/attempt": 1,
+        "/control/session/steps/4/status": "succeeded",
+        "/control/session/steps/5/step_id": "validate_completion",
+        "/control/session/steps/5/attempt": 1,
+        "/control/session/steps/5/status": "succeeded",
+        "/control/session/steps/6/step_id": "record",
+        "/control/session/steps/6/attempt": 1,
+        "/control/session/steps/6/status": "succeeded",
+        "/artifacts/artifacts/0/slot_id": "admission",
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/step_id": "validate_dispatch",
+        "/artifacts/artifacts/1/slot_id": "completion",
+        "/artifacts/artifacts/1/selected": true,
+        "/artifacts/artifacts/1/step_id": "validate_completion",
+        "/artifacts/artifacts/1/value/coverage": [
+          {
+            "id": "quoted",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_quoted PASS; quoted commas and embedded newlines preserved."
+          },
+          {
+            "id": "headers",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_headers PASS; headers and cells trimmed, empty and duplicate normalized headers rejected."
+          },
+          {
+            "id": "ragged",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_ragged PASS; too few and too many cells raise ValueError."
+          },
+          {
+            "id": "empty",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_empty PASS; empty, whitespace-only, and header-only input return []."
+          }
+        ],
+        "/artifacts/artifacts/1/value/checks": [
+          {
+            "id": "csv-tests",
+            "argv": [
+              "python3",
+              "-m",
+              "unittest",
+              "-v",
+              "test_csv_records"
+            ],
+            "started_at": "2026-10-20T08:00:33.549582+00:00",
+            "completed_at": "2026-10-20T08:00:33.589145+00:00",
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "test_empty (test_csv_records.CSVRecordsTests) ... ok\ntest_headers (test_csv_records.CSVRecordsTests) ... ok\ntest_quoted (test_csv_records.CSVRecordsTests) ... ok\ntest_ragged (test_csv_records.CSVRecordsTests) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n"
+          }
+        ],
+        "/artifacts/artifacts/1/value/changed_files": [
+          "csv_records.py"
+        ],
+        "/artifacts/artifacts/1/value/head": "9d0f1eb249e01e745015f7ea8cd53d398250b6af",
+        "/artifacts/artifacts/1/value/diff": "diff --git a/csv_records.py b/csv_records.py\nindex 557e92c..59abcc7 100644\n--- a/csv_records.py\n+++ b/csv_records.py\n@@ -1,2 +1,25 @@\n-def read_records(text):\n-    raise NotImplementedError\n+import csv\n+import io\n+\n+\n+def read_records(text: str) -> list[dict[str, str]]:\n+    \"\"\"Read CSV records with normalized headers and trimmed cell values.\"\"\"\n+    if not text.strip():\n+        return []\n+\n+    reader = csv.reader(io.StringIO(text, newline=\"\"))\n+    headers = [header.strip() for header in next(reader)]\n+    if not headers or any(not header for header in headers):\n+        raise ValueError(\"CSV headers must not be empty\")\n+    if len(set(headers)) != len(headers):\n+        raise ValueError(\"CSV headers must be unique after trimming\")\n+\n+    records = []\n+    for row in reader:\n+        if len(row) != len(headers):\n+            raise ValueError(\n+                f\"CSV row ending at line {reader.line_num} has {len(row)} \"\n+                f\"cells; expected {len(headers)}\"\n+            )\n+        records.append(dict(zip(headers, (cell.strip() for cell in row))))\n+    return records",
+        "/artifacts/artifacts/2/slot_id": "evidence",
+        "/artifacts/artifacts/2/selected": true,
+        "/artifacts/artifacts/2/step_id": "collect",
+        "/artifacts/artifacts/2/value/coverage": [
+          {
+            "id": "quoted",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_quoted PASS; quoted commas and embedded newlines preserved."
+          },
+          {
+            "id": "headers",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_headers PASS; headers and cells trimmed, empty and duplicate normalized headers rejected."
+          },
+          {
+            "id": "ragged",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_ragged PASS; too few and too many cells raise ValueError."
+          },
+          {
+            "id": "empty",
+            "status": "DONE",
+            "evidence": "python3 -m unittest -v test_csv_records: test_empty PASS; empty, whitespace-only, and header-only input return []."
+          }
+        ],
+        "/artifacts/artifacts/3/slot_id": "execution",
+        "/artifacts/artifacts/3/selected": true,
+        "/artifacts/artifacts/3/step_id": "dispatch",
+        "/artifacts/artifacts/4/slot_id": "preparation",
+        "/artifacts/artifacts/4/selected": true,
+        "/artifacts/artifacts/4/step_id": "prepare",
+        "/artifacts/artifacts/5/slot_id": "result",
+        "/artifacts/artifacts/5/selected": true,
+        "/artifacts/artifacts/5/step_id": "record"
+      }
+    },
+    "events": {
+      "source": "evidence/rc/missing-brief/trace.jsonl",
+      "sha256": "5c4371fb225f8cf4e621a47d795c0711b59b5e05160125945f30337ae96ee5ac",
+      "format": "jsonl",
+      "values": {
+        "/7/at": "2026-10-20T07:52:13.215286+00:00",
+        "/7/event": "project_run_started",
+        "/7/task_id": "csv-records",
+        "/7/resume": false,
+        "/7/fault": "missing-brief",
+        "/7/requested_model": "gpt-6-astra",
+        "/7/actual_backend_model": "N/A",
+        "/11/at": "2026-10-20T07:52:13.239319+00:00",
+        "/11/event": "step_started",
+        "/11/step": "prepare",
+        "/11/attempt_id": "e15e1e2d-c908-4812-9041-743004e7b114",
+        "/12/at": "2026-10-20T07:52:13.286571+00:00",
+        "/12/event": "brief_generated",
+        "/12/started_at": "2026-10-20T07:52:13.279925+00:00",
+        "/12/returncode": 0,
+        "/12/task_id": "csv-records",
+        "/12/plan_sha256": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+        "/13/at": "2026-10-20T07:52:13.287331+00:00",
+        "/13/event": "todo_updated",
+        "/13/task_id": "csv-records",
+        "/13/status": "in_progress",
+        "/14/at": "2026-10-20T07:52:13.358742+00:00",
+        "/14/event": "fault_injected",
+        "/14/fault": "missing-brief",
+        "/17/at": "2026-10-20T07:52:13.381131+00:00",
+        "/17/event": "step_completed",
+        "/17/step": "prepare",
+        "/17/attempt_id": "e15e1e2d-c908-4812-9041-743004e7b114",
+        "/21/at": "2026-10-20T07:52:13.409612+00:00",
+        "/21/event": "step_started",
+        "/21/step": "validate_dispatch",
+        "/21/attempt_id": "2f6accd7-4a34-4699-ab9a-b8fdd81f43b9",
+        "/23/at": "2026-10-20T07:52:13.418335+00:00",
+        "/23/event": "step_failed",
+        "/23/step": "validate_dispatch",
+        "/23/error_code": "BRIEF_MISSING",
+        "/24/at": "2026-10-20T07:52:13.418464+00:00",
+        "/24/event": "run_blocked",
+        "/24/step": "validate_dispatch",
+        "/24/code": "BRIEF_MISSING",
+        "/24/launch_count": 0,
+        "/27/at": "2026-10-20T07:52:13.430325+00:00",
+        "/27/event": "project_run_completed",
+        "/27/result": "FAIL",
+        "/27/failure": "BRIEF_MISSING",
+        "/35/at": "2026-10-20T07:52:13.820816+00:00",
+        "/35/event": "brief_generated",
+        "/35/started_at": "2026-10-20T07:52:13.814843+00:00",
+        "/35/returncode": 0,
+        "/35/task_id": "csv-records",
+        "/35/plan_sha256": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+        "/47/at": "2026-10-20T07:59:40.520796+00:00",
+        "/47/event": "project_run_started",
+        "/47/task_id": "csv-records",
+        "/47/resume": true,
+        "/47/fault": null,
+        "/47/requested_model": "gpt-6-astra",
+        "/47/actual_backend_model": "N/A",
+        "/50/at": "2026-10-20T07:59:40.541287+00:00",
+        "/50/event": "step_started",
+        "/50/step": "validate_dispatch",
+        "/50/attempt_id": "7e079909-554d-4b6b-becf-64b573121506",
+        "/51/at": "2026-10-20T07:59:40.626573+00:00",
+        "/51/event": "dispatch_preconditions_passed",
+        "/51/binding": {
+          "task_id": "csv-records",
+          "manifest_sha256": "9e0b04a23f70b61cc3a7ce2e3287d4c837efd3b8b28f5884b7e588161069af33",
+          "plan": "docs/plans/csv.md",
+          "plan_task": 1,
+          "protected_sha256": {
+            "docs/plans/csv.md": "ee198b37c9084fc2592e0f4a9628326cceb60d99b0fbefe70658900eace89cac",
+            "test_csv_records.py": "456a875cd18a2ef87f3d08ca27046a8ffafc3246566bc5f259e3685b953cbd01"
+          },
+          "coverage_ids": [
+            "quoted",
+            "headers",
+            "ragged",
+            "empty"
+          ]
+        },
+        "/51/brief_sha256": "d6a6ac463ff92ad4e1a4a0df431fb1b9e867db40a25b4f44957a71ae62b672d6",
+        "/51/brief_bytes": 1929,
+        "/51/todo": {
+          "at": "2026-10-20T07:52:13.287331+00:00",
+          "event": "todo_updated",
+          "task_id": "csv-records",
+          "status": "in_progress"
+        },
+        "/51/git": {
+          "worktree": "<ACCEPTANCE_ROOT>/trial/missing-brief/worktree",
+          "head": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+          "git_dir": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git/worktrees/worktree",
+          "index": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git/worktrees/worktree/index",
+          "common_dir": "<ACCEPTANCE_ROOT>/trial/missing-brief/repository/.git"
+        },
+        "/51/expected_base": "89b69e7d63a2897ba5eb06f0f36cdb20d9f5ccb7",
+        "/54/at": "2026-10-20T07:59:40.648713+00:00",
+        "/54/event": "step_completed",
+        "/54/step": "validate_dispatch",
+        "/54/attempt_id": "7e079909-554d-4b6b-becf-64b573121506",
+        "/58/at": "2026-10-20T07:59:40.680972+00:00",
+        "/58/event": "step_started",
+        "/58/step": "dispatch",
+        "/58/attempt_id": "9afacdbd-790e-4138-8ea2-960aa6ec936d",
+        "/59/at": "2026-10-20T07:59:40.797244+00:00",
+        "/59/event": "dispatch_started",
+        "/59/brief_sha256": "d6a6ac463ff92ad4e1a4a0df431fb1b9e867db40a25b4f44957a71ae62b672d6",
+        "/60/at": "2026-10-20T07:59:40.799029+00:00",
+        "/60/event": "child_process_started",
+        "/60/pid": 60380,
+        "/60/requested_model": "gpt-6-astra",
+        "/61/at": "2026-10-20T08:00:33.291229+00:00",
+        "/61/event": "dispatch_completed",
+        "/61/result/started_at": "2026-10-20T07:59:40.797840+00:00",
+        "/61/result/completed_at": "2026-10-20T08:00:33.290796+00:00",
+        "/61/result/duration_seconds": 52.493,
+        "/61/result/returncode": 0,
+        "/61/result/turn_completed": true,
+        "/61/result/requested_model": "gpt-6-astra",
+        "/61/result/actual_backend_model": "N/A",
+        "/61/result/trace_sha256": "e779c69fad4cd5c7044ccdbd2305d021132d333962e08c6c0007fb0b91dddbfb",
+        "/64/at": "2026-10-20T08:00:33.325228+00:00",
+        "/64/event": "step_completed",
+        "/64/step": "dispatch",
+        "/64/attempt_id": "9afacdbd-790e-4138-8ea2-960aa6ec936d",
+        "/68/at": "2026-10-20T08:00:33.361569+00:00",
+        "/68/event": "step_started",
+        "/68/step": "collect",
+        "/68/attempt_id": "920b4aaf-c5af-4a8c-abc4-ec6777d15118",
+        "/71/at": "2026-10-20T08:00:33.453753+00:00",
+        "/71/event": "step_completed",
+        "/71/step": "collect",
+        "/71/attempt_id": "920b4aaf-c5af-4a8c-abc4-ec6777d15118",
+        "/75/at": "2026-10-20T08:00:33.487191+00:00",
+        "/75/event": "step_started",
+        "/75/step": "validate_completion",
+        "/75/attempt_id": "652863c3-a1d8-410a-8ef7-4f986e1fada3",
+        "/76/at": "2026-10-20T08:00:33.589185+00:00",
+        "/76/event": "acceptance_check",
+        "/76/id": "csv-tests",
+        "/76/argv": [
+          "python3",
+          "-m",
+          "unittest",
+          "-v",
+          "test_csv_records"
+        ],
+        "/76/started_at": "2026-10-20T08:00:33.549582+00:00",
+        "/76/completed_at": "2026-10-20T08:00:33.589145+00:00",
+        "/76/returncode": 0,
+        "/76/stdout": "",
+        "/76/stderr": "test_empty (test_csv_records.CSVRecordsTests) ... ok\ntest_headers (test_csv_records.CSVRecordsTests) ... ok\ntest_quoted (test_csv_records.CSVRecordsTests) ... ok\ntest_ragged (test_csv_records.CSVRecordsTests) ... ok\n\n----------------------------------------------------------------------\nRan 4 tests in 0.000s\n\nOK\n",
+        "/79/at": "2026-10-20T08:00:33.744087+00:00",
+        "/79/event": "step_completed",
+        "/79/step": "validate_completion",
+        "/79/attempt_id": "652863c3-a1d8-410a-8ef7-4f986e1fada3",
+        "/83/at": "2026-10-20T08:00:33.783067+00:00",
+        "/83/event": "step_started",
+        "/83/step": "record",
+        "/83/attempt_id": "0cd58af7-a7f9-4343-a38d-9db909925337",
+        "/84/at": "2026-10-20T08:00:33.783234+00:00",
+        "/84/event": "todo_updated",
+        "/84/task_id": "csv-records",
+        "/84/status": "completed",
+        "/87/at": "2026-10-20T08:00:33.805401+00:00",
+        "/87/event": "step_completed",
+        "/87/step": "record",
+        "/87/attempt_id": "0cd58af7-a7f9-4343-a38d-9db909925337",
+        "/90/at": "2026-10-20T08:00:33.829286+00:00",
+        "/90/event": "project_run_completed",
+        "/90/result": "PASS",
+        "/90/failure": null
+      }
+    },
+    "child": {
+      "source": "evidence/rc/missing-brief/child-trace.jsonl",
+      "sha256": "426aa92fed28ad11f9b8a05c27f806d0b1c68ba4b8e3d96197b984a1ab06cace",
+      "format": "jsonl",
+      "values": {
+        "/1/type": "turn.started",
+        "/15/type": "turn.completed"
+      }
+    },
+    "child_hashes": {
+      "source": "evidence/rc/manifest.json",
+      "sha256": "19b3f889695282ae3e4978848412fca6733a45da849b0679385b6b8f94f23296",
+      "format": "json",
+      "values": {
+        "/files/25/path": "missing-brief/child-trace.jsonl",
+        "/files/25/raw_sha256": "e779c69fad4cd5c7044ccdbd2305d021132d333962e08c6c0007fb0b91dddbfb",
+        "/files/25/export_sha256": "426aa92fed28ad11f9b8a05c27f806d0b1c68ba4b8e3d96197b984a1ab06cace"
+      }
+    },
+    "before": {
+      "source": "evidence/rc/missing-before-recovery.json",
+      "sha256": "845ae5984c466e41347e4a72616d41017a8bef4869356c63aace3d3ae0aa4106",
+      "format": "json",
+      "values": {
+        "/result": "FAIL",
+        "/failure": "BRIEF_MISSING",
+        "/session_id": "d490f23fbc734ed4892fe309c46dee39",
+        "/launch_count": 0,
+        "/completed_at": "2026-10-20T07:52:13.429806+00:00",
+        "/control/session/status": "failed",
+        "/control/session/pinned_revision_id": "b6a4f724-0804-479a-986c-6c5043cb096d",
+        "/control/projection/completed": false,
+        "/control/projection/nodes/collect/execution": "none",
+        "/control/projection/nodes/dispatch/execution": "none",
+        "/control/projection/nodes/prepare/execution": "succeeded",
+        "/control/projection/nodes/record/execution": "none",
+        "/control/projection/nodes/validate_completion/execution": "none",
+        "/control/projection/nodes/validate_dispatch/execution": "failed",
+        "/control/session/steps/0/step_id": "prepare",
+        "/control/session/steps/0/attempt": 1,
+        "/control/session/steps/0/status": "succeeded",
+        "/control/session/steps/1/step_id": "validate_dispatch",
+        "/control/session/steps/1/attempt": 1,
+        "/control/session/steps/1/status": "failed",
+        "/artifacts/artifacts/0/slot_id": "preparation",
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/step_id": "prepare"
+      }
+    },
+    "ui_retry": {
+      "source": "evidence/rc/ui-retry-receipts.json",
+      "sha256": "322190b0887bed0ea7684802cac242a1a6927be29b36b91d1587ffec0be1d672",
+      "format": "json",
+      "values": {
+        "": [
+          {
+            "timestamp": "2026-10-20T07:55:22.857Z",
+            "type": "tool_call",
+            "call_id": "call_47c29b08af69413cba1a7175f3c6a61e",
+            "name": "js",
+            "arguments": {
+              "code": "await rcRecoveryTab.getAXState();",
+              "title": "读取失败步骤及页面上的重试按钮"
+            },
+            "source_line_sha256": "19a1df4551fe274bde5c6fb5981637b98a85a597254bfa8c39b9e2303b5ca2a1"
+          },
+          {
+            "timestamp": "2026-10-20T07:55:25.117Z",
+            "type": "tool_result_excerpt",
+            "call_id": "call_47c29b08af69413cba1a7175f3c6a61e",
+            "excerpt": "Browser tab: 4, Title: \"LazyMind\", URL: \"http://127.0.0.1:8090/workflow-runs/d490f23fbc734ed4892fe309c46dee39\".\n\t\t\t\t\t92 tab (selected, settable, boolean) Validate dispatch preconditions Step status: failed, Description: Step status: failed, ID: workflow-tab-d490f23fbc734ed4892fe309c46dee39-validate_dispatch, Value: 1\n\t\t\t\t98 container Description: Validate dispatch preconditions Step status: failed, ID: workflow-tab-panel-validate_dispatch\n\t\t\t\t\t103 button 重试",
+            "source_line_sha256": "9abe52da973b7a55c9005e199bb3879fa945391089690a5e994be14c70a7c0c9"
+          },
+          {
+            "timestamp": "2026-10-20T07:59:23.268Z",
+            "type": "tool_call",
+            "call_id": "call_71e3602945a7425da44f33d29f5901ff",
+            "name": "js",
+            "arguments": {
+              "code": "await rcRecoveryTab.click(103); await rcRecoveryTab.getAXState();",
+              "title": "从授权页面重试 Brief 校验"
+            },
+            "source_line_sha256": "f18fb8e875bb45525d1e4db067189f9370507b3a60028d2cf5e9f571fc862b12"
+          },
+          {
+            "timestamp": "2026-10-20T07:59:23.652Z",
+            "type": "tool_result_excerpt",
+            "call_id": "call_71e3602945a7425da44f33d29f5901ff",
+            "excerpt": "Browser tab: 4, Title: \"LazyMind\", URL: \"http://127.0.0.1:8090/workflow-runs/d490f23fbc734ed4892fe309c46dee39\".\nRemoved element IDs: 103\n~\t\t\t\t\t92 tab (selected, settable, boolean) Validate dispatch preconditions Step status: queued, Description: Step status: queued, ID: workflow-tab-d490f23fbc734ed4892fe309c46dee39-validate_dispatch, Value: 1\n~\t\t\t\t98 container Description: Validate dispatch preconditions Step status: queued, ID: workflow-tab-panel-validate_dispatch\n~\t\t\t\t\t100 text 正在生成步骤结果…",
+            "source_line_sha256": "4b8dac56b39eb31d720e69d87f4677788deee6e9e7d3b50d15bd4059ef0b713a"
+          }
+        ]
+      }
+    }
+  }
+}

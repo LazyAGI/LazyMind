@@ -34,6 +34,7 @@ import (
 	"lazymind/core/credentialvault"
 	"lazymind/core/currentmemory"
 	"lazymind/core/doc"
+	"lazymind/core/documentdirectory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/externallease"
@@ -136,7 +137,14 @@ func runHistoryInjections(ctx context.Context, db *gorm.DB) error {
 }
 
 func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
+	moveBudget, err := doc.KnowledgeMoveBudget()
+	if err != nil {
+		return nil, err
+	}
 	return capabilitybootstrap.NewRuntime(capabilitybootstrap.Config{
+		EnableKnowledgeManagement: knowledgeManagementEnabled(),
+		MoveBudget:                moveBudget,
+		State:                     store.State(), ValidateKnowledgeExecution: validateKnowledgeExecution, ValidateKnowledgeCommit: validateKnowledgeCommit, PendingKnowledgeConfirmation: persistKnowledgeConfirmation, KnowledgeDecisionRecorded: persistKnowledgeDecision,
 		DB:                        store.DB(),
 		LazyDB:                    store.LazyLLMDB(),
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
@@ -269,7 +277,7 @@ func registerCoreRoutes(r *mux.Router) {
 }
 
 func registerCapabilityMCPRoute(r *mux.Router, handler http.Handler) {
-	handleAPI(r, "POST", "/mcp/capabilities/v1", []string{"qa.read"}, handler.ServeHTTP)
+	handleAPI(r, "POST", "/mcp/capabilities/v1", nil, handler.ServeHTTP)
 	r.Handle("/mcp/capabilities/v1", handler).Methods(http.MethodGet, http.MethodDelete)
 }
 
@@ -859,6 +867,9 @@ func run(ctx context.Context) error {
 	chat.RegisterConversationTitleJobs(store.DB())
 	conversationgroup.RegisterTitlePreparer(chat.OrganizerTitlePreparer{})
 	conversationgroup.RegisterAsyncJobs()
+	documentdirectory.RegisterJobs()
+	documentdirectory.LoadChatModel = chat.LoadOrganizerChatLLMConfig
+	resourceupdate.DirectoryIdleHandler = documentdirectory.QueueIdle
 	knowledge_market.RegisterAsyncJobs()
 	doc.RegisterPDFTranslationJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
@@ -885,6 +896,7 @@ func run(ctx context.Context) error {
 	// returns. asyncjob.Runner exposes Done() directly; the other Start funcs
 	// now return a done channel too.
 	var backgroundDone []<-chan struct{}
+	chat.RegisterTaskCenterEnvCleanup()
 	startBackgroundJobs := backgroundJobsEnabled()
 	var runner *asyncjob.Runner
 	if !startBackgroundJobs {
@@ -893,7 +905,7 @@ func run(ctx context.Context) error {
 		// History samples have already been downloaded and imported above.
 		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		excludedJobs := append([]string(nil), chat.ConversationTitleJobTypes...)
+		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, chat.ConversationTitleJobTypes...)
 		if !systemdeps.PythonComponentActive("rag") {
 			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
 				doc.MarketUpdateAllJobType, "document_pdf_translation")
@@ -905,9 +917,15 @@ func run(ctx context.Context) error {
 			LockTTL:         asyncConfig.LockTTL,
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
+		directoryRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+		backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
+		backgroundDone = append(backgroundDone, resourceupdate.StartIdle(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv()))
 		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
+		if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+			backgroundDone = append(backgroundDone, doc.StartDeferredIndexing(runtimeCtx))
+		}
 
 		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
 		backgroundDone = append(backgroundDone,
@@ -932,25 +950,10 @@ func run(ctx context.Context) error {
 
 	// Register plugin lifecycle hooks into the subagent EventHooks.
 	workflow.RegisterSubAgentHooks()
-	chat.RegisterTaskCenterEnvCleanup()
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
-	subagent.EventHooks.RegisterConversationEventHook(
-		func(_ context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) error {
-			enriched := make(map[string]any, len(payload)+2)
-			for k, v := range payload {
-				enriched[k] = v
-			}
-			enriched["event_type"] = eventType
-			if _, ok := enriched["conversation_id"]; !ok {
-				enriched["conversation_id"] = convID
-			}
-			return chat.AppendConvEvent(runtimeCtx, stateStore, convID, &chat.ConvEvent{
-				Type:    eventType,
-				Payload: enriched,
-			})
-		},
-	)
+	subagent.EventHooks.RegisterConversationEventHook(chat.PublishConversationEvent)
+
 	log.Logger.Info().Msg("plugin subagent hooks registered")
 
 	// Start the schedule ticker.
@@ -1008,6 +1011,17 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "initialize capability MCP", err: err}
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
+	if capabilityRuntime.KnowledgeInternal != nil {
+		for _, action := range []string{"credential", "prepare", "status", "claim"} {
+			r.Handle("/internal/knowledge-management:"+action, capabilityRuntime.KnowledgeInternal).Methods(http.MethodPost)
+		}
+		r.Handle("/internal/mcp/knowledge-management", capabilityRuntime.KnowledgeMCP).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)
+		handleAPI(r, "POST", "/knowledge-management/confirmations/{confirmation_id}/decision", []string{"document.write"}, capabilityRuntime.KnowledgeDecision)
+	}
+	if err := doc.InitializeDocumentVisibility(ctx, store.DB(), store.LazyLLMDB()); err != nil {
+		return &startupError{msg: "initialize document visibility", err: err}
+	}
+	handleAPI(r, "POST", "/documents:filterActive", []string{"document.read"}, doc.FilterDocumentVisibilityHTTP)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 	registerBrowserMCPRoute(r, browser.NewMCPHandler(browser.DefaultHub))
 	log.Logger.Info().Str("path", "/mcp/browser/v1").Msg("browser MCP enabled")

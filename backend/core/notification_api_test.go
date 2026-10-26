@@ -31,7 +31,16 @@ type notificationAPI struct {
 
 func newNotificationAPI(t *testing.T) *notificationAPI {
 	t.Helper()
-	db := orm.MigrateAllModelsForTest(t)
+	db := orm.MigrateTestDB(t,
+		&orm.TaskCenterTask{}, &orm.TaskNotification{}, &orm.UserNotificationPreferences{},
+		&orm.DesktopNotificationReceipt{}, &orm.UserSchedule{}, &orm.TaskRunInput{}, &orm.TaskRunOutput{},
+		&orm.ScheduleDependency{}, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{},
+		&orm.AutomationGroup{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{},
+		&orm.UserSelectedCloudModel{}, &orm.UserSelectedModel{},
+		&orm.Conversation{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{},
+		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{},
+		&orm.ConversationArtifact{}, &orm.SubAgentTask{}, &orm.SubAgentArtifact{}, &orm.ExternalChatRun{},
+	)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 	router := mux.NewRouter()
@@ -528,7 +537,7 @@ func TestNotificationGlobalDisableRequiresConfirmation(t *testing.T) {
 	}
 }
 
-func TestNotificationGlobalSwitchDoesNotAffectChatBackgroundTasks(t *testing.T) {
+func TestNotificationGlobalSwitchDoesNotStopChatBackgroundTasks(t *testing.T) {
 	a := newNotificationAPI(t)
 	run := orm.TaskCenterTask{ID: "chat-background-notification", UserID: "owner",
 		ConversationID: "chat-conversation", TaskType: "background_chat", Status: "running"}
@@ -537,7 +546,7 @@ func TestNotificationGlobalSwitchDoesNotAffectChatBackgroundTasks(t *testing.T) 
 	}
 	before := a.data("GET", "/user/notification-preferences", "owner", nil)
 	a.data("PATCH", "/user/notification-preferences", "owner",
-		map[string]any{"revision": before["revision"], "enabled": false})
+		map[string]any{"revision": before["revision"], "enabled": false, "confirm_running_task_ids": []string{run.ID}})
 	var persisted orm.TaskCenterTask
 	if err := a.db.First(&persisted, "id = ?", run.ID).Error; err != nil || persisted.Status != "running" {
 		t.Fatalf("scheduled notification preference changed chat background work: %v", err)

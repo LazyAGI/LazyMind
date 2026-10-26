@@ -51,14 +51,17 @@ func MarketListInstallTasks(w http.ResponseWriter, r *http.Request) {
 		jobType = defaultInstallJobType
 	}
 
-	if !isMarketJobType(jobType) {
+	if !isMarketJobType(jobType) && jobType != "all" {
 		common.ReplyErr(w, "invalid job type", http.StatusBadRequest)
 		return
 	}
 
 	base := db.WithContext(r.Context()).
 		Model(&orm.AsyncJob{}).
-		Where("job_type = ? AND create_user_id = ?", jobType, userID)
+		Where("job_type IN ? AND create_user_id = ?", marketJobTypes, userID)
+	if jobType != "all" {
+		base = base.Where("job_type = ?", jobType)
+	}
 	if status != "" {
 		base = base.Where("status = ?", status)
 	}
@@ -73,10 +76,18 @@ func MarketListInstallTasks(w http.ResponseWriter, r *http.Request) {
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	if r.URL.Query().Get("view") == "summary" {
+		var valid bool
+		page, pageSize, valid = taskPageQuery(w, r)
+		if !valid {
+			return
+		}
+		page = clampTaskPage(page, pageSize, int(total))
+	}
 
 	var jobs []orm.AsyncJob
 	if err := base.
-		Order("created_at DESC").
+		Order("created_at DESC, id DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&jobs).Error; err != nil {
@@ -88,7 +99,20 @@ func MarketListInstallTasks(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
-	common.ReplyOK(w, map[string]any{"items": items, "page": page, "page_size": pageSize, "total": total})
+	unfinished, err := unfinishedMarketTaskCount(r, db, userID)
+	if err != nil {
+		replyServiceError(w, err)
+		return
+	}
+	if r.URL.Query().Get("view") == "summary" {
+		for _, item := range items {
+			parse := item["parse"].(parseProgressInfo)
+			parse.Failures = nil
+			item["parse"] = parse
+			item["error_message"] = ""
+		}
+	}
+	common.ReplyOK(w, map[string]any{"items": items, "page": page, "page_size": pageSize, "total": total, "unfinished_count": unfinished})
 }
 
 // MarketGetInstallTask returns one background install task (polling target)
@@ -331,45 +355,56 @@ func isMarketJobType(value string) bool {
 // A task owns the files it submitted. Never borrow another run's parse result.
 // Legacy jobs can use the install config only while they are its latest run.
 func taskProgress(r *http.Request, db *gorm.DB, job orm.AsyncJob, current *orm.KnowledgeMarketInstall) (*orm.KnowledgeMarketInstall, parseProgressInfo) {
+	install, snapshot := taskProgressSource(job, current, func() bool {
+		return marketLatest(r.Context(), db, job)
+	})
+	if snapshot != nil {
+		return install, *snapshot
+	}
+	parse := parseProgress(r, db, install)
+	return installWithEffectiveState(install, parse), parse
+}
+
+// A nil snapshot means this job still needs its own live file states.
+func taskProgressSource(job orm.AsyncJob, current *orm.KnowledgeMarketInstall, latest func() bool) (*orm.KnowledgeMarketInstall, *parseProgressInfo) {
 	var result struct {
 		DatasetID string                  `json:"dataset_id"`
 		TaskIDs   []string                `json:"task_ids"`
 		Failures  []doc.MarketFileFailure `json:"failures"`
 		Parse     *parseProgressInfo      `json:"parse"`
+		Files     []doc.MarketTaskFile    `json:"file_snapshot"`
 		Reason    string                  `json:"reason"`
 	}
 	_ = json.Unmarshal(job.ResultJSON, &result)
 	if result.Reason == "stopped" {
-		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID}, parseProgressInfo{State: "canceled"}
+		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID}, &parseProgressInfo{State: "canceled"}
 	}
 	if result.Parse != nil {
-		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: result.Parse.State}, *result.Parse
+		if len(result.Files) == result.Parse.Total {
+			result.Parse.Files = result.Files
+		}
+		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: result.Parse.State}, result.Parse
 	}
 	if (job.Status == "pending" || job.Status == "running") && len(result.TaskIDs) == 0 {
 		// Download/import progress is useful, but terminal state belongs to the
 		// previous attempt until this worker finishes its submission.
 		if current != nil && (current.InstallState == "downloading" || current.InstallState == "importing") {
-			return current, parseProgressInfo{State: "pending"}
+			return current, &parseProgressInfo{State: "pending"}
 		}
-		return nil, parseProgressInfo{State: "pending"}
+		return nil, &parseProgressInfo{State: "pending"}
 	}
 	if len(result.TaskIDs) > 0 || len(result.Failures) > 0 {
 		cfg, _ := json.Marshal(installConfig{TaskIDs: result.TaskIDs, Failures: result.Failures})
 		own := &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: "done", Config: cfg}
-		parse := parseProgress(r, db, own)
-		return installWithEffectiveState(own, parse), parse
+		return own, nil
 	}
 	if result.Reason == "no_change" || result.Reason == "not_installed" || job.JobType == updateAllJobType {
-		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: "done"}, parseProgressInfo{State: "done"}
+		return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: "done"}, &parseProgressInfo{State: "done"}
 	}
-	var newer int64
-	err := db.WithContext(r.Context()).Model(&orm.AsyncJob{}).
-		Where("create_user_id = ? AND resource_id = ? AND job_type IN ? AND (created_at > ? OR (created_at = ? AND id > ?))", job.CreateUserID, job.ResourceID, marketJobTypes, job.CreatedAt, job.CreatedAt, job.ID).Count(&newer).Error
-	if err == nil && newer == 0 && current != nil {
-		parse := parseProgress(r, db, current)
-		return installWithEffectiveState(current, parse), parse
+	if current != nil && latest() {
+		return current, nil
 	}
-	return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: "done"}, parseProgressInfo{State: "done"}
+	return &orm.KnowledgeMarketInstall{DatasetID: result.DatasetID, InstallState: "done"}, &parseProgressInfo{State: "done"}
 }
 
 // loadMarketItemByID loads one item or returns nil when the id is missing
@@ -464,6 +499,7 @@ func marketResultDTO(raw json.RawMessage) map[string]any {
 		return nil
 	}
 	delete(m, "dispatched_task_ids")
+	delete(m, "file_snapshot")
 	return m
 }
 

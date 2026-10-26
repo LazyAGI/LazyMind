@@ -29,6 +29,23 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); message.destroy(); vi.restoreAllMocks(); });
 
+it("offers source RAG installation without a bundle URL", async () => {
+  mocks.get.mockResolvedValue([{ ...missing, url: undefined, installMethod: "source" }]);
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "安装组件" }));
+  expect(screen.getByLabelText("组件下载来源")).toHaveTextContent("当前本地 Python 包源");
+  expect(screen.getByRole("button", { name: /下载并安装/ })).toBeEnabled();
+});
+
+it("keeps source installation available for manual restart outside desktop", async () => {
+  mocks.install.mockResolvedValue({ ...installed, installMethod: "source" });
+  mocks.restart.mockResolvedValue({ ok: false, reason: "unavailable" });
+  await act(async () => { await runPythonComponentTask("rag"); });
+  expect(usePythonComponentTask.getState().phase).toBe("idle");
+  expect(message.error).not.toHaveBeenCalled();
+  expect(message.success).not.toHaveBeenCalled();
+});
+
 it("downloads in the background across navigation, deduplicates clicks, and waits for restart plus activation", async () => {
   let finishDownload!: () => void;
   let finishRestart!: () => void;

@@ -10,10 +10,46 @@ import (
 	"time"
 
 	"lazymind/core/common"
+	"lazymind/core/common/orm"
+	"lazymind/core/store"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow"
 )
 
 func RegisterTaskCenterEnvCleanup() {
+	taskcenter.OnRemovalCancelHook = func(ctx context.Context, owner, conversationID string, before time.Time, executionIDs []string) error {
+		db := store.DB()
+		if db == nil {
+			return fmt.Errorf("cancellation store unavailable")
+		}
+		var conversation orm.Conversation
+		if err := db.WithContext(ctx).Where("id=? AND create_user_id=?", conversationID, owner).Take(&conversation).Error; err != nil {
+			return err
+		}
+		if conversation.DeletedAt == nil {
+			return nil
+		}
+		if !isExternalChatProvider(conversation.ChatExecutor) {
+			if err := workflow.CancelRemovedTaskExecutions(ctx, db, store.State(), owner, conversationID, before, executionIDs); err != nil {
+				return err
+			}
+		}
+		var runs []orm.ExternalChatRun
+		if err := db.WithContext(ctx).Where("actor_user_id=? AND conversation_id=? AND created_at<=? AND status IN ?", owner, conversationID, before, []string{"pending", "running"}).Find(&runs).Error; err != nil {
+			return err
+		}
+		for _, run := range runs {
+			if err := newExternalChatApplication(db).requestStop(ctx, owner, conversationID, run.HistoryID); err != nil {
+				return err
+			}
+		}
+		for _, executionID := range executionIDs {
+			if err := taskcenter.FinishChatExecution(ctx, db, owner, conversationID, executionID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	taskcenter.OnConversationTrashHook = func(conversationID string) {
 		notifySessionEnvClear(conversationID)
 	}

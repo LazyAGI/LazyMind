@@ -1,12 +1,17 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { it, expect } from 'vitest';
+import { afterEach, it, expect, vi } from 'vitest';
 import type { ComponentType } from 'react';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import * as jsxRuntime from 'react/jsx-runtime';
 import clientBundle from '../../../../../../integrations/dsh-workflow/lib/client.js?raw';
 
+afterEach(() => vi.unstubAllGlobals());
+
 it('scrolls at the transcript tail and retains the iframe through messages, expansion and restoration', () => {
+  vi.stubGlobal('__LAZYMIND_WORKFLOW_PRESENTATION__', {
+    serverName: 'lazymind', webUrl: 'http://localhost:8090',
+  });
   const seats = new Map<string, ComponentType<any>>();
   const ctx = {
     effect: () => {},

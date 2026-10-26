@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
 
-from lazymind.chat.engine.tools import kb
+from lazymind.chat.engine.tools import temporary_files as kb
 from lazymind.chat.engine.tools.file_resources.store import FileResourceStore
 
 

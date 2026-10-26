@@ -2,6 +2,8 @@ package doc
 
 import (
 	"context"
+	"crypto/subtle"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -80,6 +82,9 @@ func scanSourceAccessByDataset(r *http.Request, datasetIDs []string, action stri
 }
 
 func scanSourceAccessByDatasetForCaller(ctx context.Context, caller DatasetCatalogCaller, datasetIDs []string, action string) (map[string]scanSourceAccessByDatasetItem, bool) {
+	if strings.TrimSpace(caller.UserID) == "" {
+		return nil, false
+	}
 	datasetIDs = uniqueNonEmptyStrings(datasetIDs)
 	if len(datasetIDs) == 0 {
 		return map[string]scanSourceAccessByDatasetItem{}, true
@@ -143,9 +148,14 @@ func scanSourceAccessHeadersForCaller(caller DatasetCatalogCaller) map[string]st
 }
 
 func datasetCatalogCallerFromRequest(r *http.Request) DatasetCatalogCaller {
+	caller, _ := resolveDatasetCatalogCallerFromRequest(r)
+	return caller
+}
+
+func resolveDatasetCatalogCallerFromRequest(r *http.Request) (DatasetCatalogCaller, error) {
 	caller := DatasetCatalogCaller{}
 	if r == nil {
-		return caller
+		return caller, errors.New("account identity unavailable or disabled")
 	}
 	caller.Authorization = strings.TrimSpace(r.Header.Get("Authorization"))
 	caller.UserID = strings.TrimSpace(r.Header.Get("X-User-ID"))
@@ -156,7 +166,19 @@ func datasetCatalogCallerFromRequest(r *http.Request) DatasetCatalogCaller {
 	}
 	caller.TenantID = strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
 	caller.UserRole = strings.TrimSpace(r.Header.Get("X-User-Role"))
-	return caller
+	if provided := strings.TrimSpace(r.Header.Get("X-LazyMind-Internal-Token")); provided != "" {
+		expected := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"))
+		if expected == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 {
+			return DatasetCatalogCaller{}, errors.New("account identity unavailable or disabled")
+		}
+		identity, err := common.GetCurrentIdentity(r.Context(), caller.UserID)
+		if err != nil {
+			return DatasetCatalogCaller{}, err
+		}
+		caller.TenantID, caller.UserRole = identity.TenantID, identity.Role
+		caller.Permissions = identity.Permissions
+	}
+	return caller, nil
 }
 
 func uniqueNonEmptyStrings(values []string) []string {

@@ -1,6 +1,6 @@
-import type { OrdinaryCollection, OrdinaryTaskView } from "../types/ordinaryTask";
+import type { OrdinaryCollection, OrdinaryTaskView, OrdinaryRunView } from "../types/ordinaryTask";
 
-const collections: OrdinaryCollection[] = ["process_steps", "sources", "stage_artifacts"];
+const collections = ["process_steps", "sources", "stage_artifacts"] as const;
 
 export function readOrdinaryTask(value: unknown): OrdinaryTaskView | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -44,5 +44,25 @@ export function mergeOrdinarySnapshot(
     Object.assign(result, { [key]: [...objects.values()] });
     result.pages[key] = key === appendedCollection ? incoming.pages[key] : current.pages[key];
   }
+  if (current.pages.knowledge_operations && incoming.pages.knowledge_operations
+    && current.pages.knowledge_operations.revision === incoming.pages.knowledge_operations.revision) {
+    const operations = new Map((current.knowledge_operations ?? []).map(item => [item.call_id, item]));
+    for (const item of incoming.knowledge_operations ?? []) operations.set(item.call_id, item);
+    result.knowledge_operations = [...operations.values()];
+    result.pages.knowledge_operations = appendedCollection === "knowledge_operations"
+      ? incoming.pages.knowledge_operations : current.pages.knowledge_operations;
+  }
   return result;
+}
+
+export function mergeRun(current: OrdinaryRunView | undefined, incoming: OrdinaryRunView): OrdinaryRunView {
+  if (!current?.timing && !incoming.timing) return current && incoming.revision < current.revision ? current : incoming;
+  if (!current?.timing || !incoming.timing) return incoming.timing ? incoming : current ?? incoming;
+  if (current.execution_id !== incoming.execution_id) {
+    return Date.parse(incoming.timing.requested_at) < Date.parse(current.timing.requested_at) ? current : incoming;
+  }
+  if (incoming.revision < current.revision || (incoming.revision === current.revision
+    && Date.parse(incoming.timing.measured_at) < Date.parse(current.timing.measured_at))) return current;
+  if (current.timing.finished_at && !incoming.timing.finished_at) return current;
+  return incoming;
 }

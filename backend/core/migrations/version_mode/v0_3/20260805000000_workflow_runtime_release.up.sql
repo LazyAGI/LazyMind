@@ -119,6 +119,11 @@ UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS document_directories_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+-- Preserve the enabled preference assigned to existing users by the dev upgrade.
+UPDATE user_ui_preferences SET document_directories_enabled = TRUE;
+ALTER TABLE user_ui_preferences ADD COLUMN IF NOT EXISTS document_directories_generation BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;
@@ -146,6 +151,10 @@ ALTER TABLE user_ui_preferences ADD COLUMN mcp_enabled BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE user_ui_preferences ADD COLUMN workflows_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences ADD COLUMN document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences ADD COLUMN document_directories_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+-- Preserve the enabled preference assigned to existing users by the dev upgrade.
+UPDATE user_ui_preferences SET document_directories_enabled = TRUE;
+ALTER TABLE user_ui_preferences ADD COLUMN document_directories_generation BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE user_ui_preferences ADD COLUMN sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_ui_preferences ADD COLUMN performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks ADD COLUMN sources JSON NOT NULL DEFAULT '[]';
@@ -2958,3 +2967,341 @@ ALTER TABLE sub_agent_steps ADD COLUMN execution_id VARCHAR(64) NOT NULL DEFAULT
 ALTER TABLE sub_agent_artifacts ADD COLUMN execution_id VARCHAR(64) NOT NULL DEFAULT '';
 CREATE INDEX idx_subagent_public_steps ON sub_agent_steps(task_id, execution_id, role, seq);
 CREATE INDEX idx_subagent_execution_artifacts ON sub_agent_artifacts(task_id, execution_id);
+
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE datasets ADD COLUMN scene VARCHAR(32) NOT NULL DEFAULT 'general';
+ALTER TABLE datasets ADD COLUMN resource_version BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE documents ADD COLUMN resource_version BIGINT NOT NULL DEFAULT 1;
+CREATE TABLE resource_operation_receipts (
+ tenant_id VARCHAR(36) NOT NULL,
+ user_id VARCHAR(255) NOT NULL,
+ operation_key VARCHAR(255) NOT NULL,
+ action VARCHAR(64) NOT NULL,
+ parameter_hash VARCHAR(64) NOT NULL,
+ result JSON NOT NULL,
+ created_at TIMESTAMP NOT NULL,
+ PRIMARY KEY (tenant_id,user_id,operation_key)
+);
+
+-- +migrate Dialect postgres
+CREATE FUNCTION knowledge_document_version() RETURNS trigger AS $$
+BEGIN
+ IF ROW(NEW.dataset_id,NEW.p_id,NEW.display_name,NEW.document_type,NEW.tags::text,NEW.file_id,NEW.ext::text,NEW.deleted_at)
+    IS DISTINCT FROM ROW(OLD.dataset_id,OLD.p_id,OLD.display_name,OLD.document_type,OLD.tags::text,OLD.file_id,OLD.ext::text,OLD.deleted_at) THEN
+   NEW.resource_version := GREATEST(NEW.resource_version, OLD.resource_version + 1);
+ END IF;
+ RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER knowledge_document_version BEFORE UPDATE ON documents FOR EACH ROW EXECUTE FUNCTION knowledge_document_version();
+CREATE FUNCTION knowledge_dataset_membership_version() RETURNS trigger AS $$
+BEGIN
+ IF TG_OP = 'INSERT' THEN
+   UPDATE datasets SET resource_version = resource_version + 1 WHERE id = NEW.dataset_id;
+ ELSIF TG_OP = 'DELETE' THEN
+   UPDATE datasets SET resource_version = resource_version + 1 WHERE id = OLD.dataset_id;
+ ELSIF NEW.resource_version <> OLD.resource_version OR NEW.dataset_id IS DISTINCT FROM OLD.dataset_id THEN
+   UPDATE datasets SET resource_version = resource_version + 1 WHERE id = OLD.dataset_id;
+   IF NEW.dataset_id IS DISTINCT FROM OLD.dataset_id THEN
+     UPDATE datasets SET resource_version = resource_version + 1 WHERE id = NEW.dataset_id;
+   END IF;
+ END IF;
+ RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER knowledge_dataset_membership_version AFTER INSERT OR UPDATE OR DELETE ON documents FOR EACH ROW EXECUTE FUNCTION knowledge_dataset_membership_version();
+
+-- +migrate Dialect sqlite
+CREATE TRIGGER knowledge_document_version AFTER UPDATE ON documents
+WHEN NEW.resource_version = OLD.resource_version AND (
+ NEW.dataset_id IS NOT OLD.dataset_id OR NEW.p_id IS NOT OLD.p_id OR NEW.display_name IS NOT OLD.display_name OR
+ NEW.document_type IS NOT OLD.document_type OR NEW.tags IS NOT OLD.tags OR NEW.file_id IS NOT OLD.file_id OR
+ NEW.ext IS NOT OLD.ext OR NEW.deleted_at IS NOT OLD.deleted_at)
+BEGIN
+ UPDATE documents SET resource_version = OLD.resource_version + 1 WHERE id = NEW.id;
+END;
+CREATE TRIGGER knowledge_dataset_membership_insert AFTER INSERT ON documents
+BEGIN UPDATE datasets SET resource_version = resource_version + 1 WHERE id = NEW.dataset_id; END;
+CREATE TRIGGER knowledge_dataset_membership_delete AFTER DELETE ON documents
+BEGIN UPDATE datasets SET resource_version = resource_version + 1 WHERE id = OLD.dataset_id; END;
+CREATE TRIGGER knowledge_dataset_membership_update AFTER UPDATE ON documents
+WHEN NEW.resource_version <> OLD.resource_version OR NEW.dataset_id IS NOT OLD.dataset_id
+BEGIN
+ UPDATE datasets SET resource_version = resource_version + 1 WHERE id = OLD.dataset_id;
+ UPDATE datasets SET resource_version = resource_version + 1 WHERE id = NEW.dataset_id AND NEW.dataset_id IS NOT OLD.dataset_id AND NEW.resource_version <> OLD.resource_version;
+END;
+
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE document_ownership_backfills (
+ dataset_id VARCHAR(255) PRIMARY KEY,
+ kb_id VARCHAR(255) NOT NULL,
+ tenant_id VARCHAR(128) NOT NULL,
+ max_association_id BIGINT NOT NULL,
+ completed_at TIMESTAMP,
+ created_at TIMESTAMP NOT NULL
+);
+CREATE TABLE rejected_document_publications (
+ dataset_id VARCHAR(255) NOT NULL,
+ external_doc_id VARCHAR(128) NOT NULL,
+ PRIMARY KEY (dataset_id,external_doc_id)
+);
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS document_directories (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    intent TEXT NOT NULL,
+    organization TEXT NOT NULL,
+    auto_add BOOLEAN NOT NULL DEFAULT true,
+    pinned BOOLEAN NOT NULL DEFAULT false,
+    ready BOOLEAN NOT NULL DEFAULT false,
+    version BIGINT NOT NULL DEFAULT 1,
+    last_used_at TIMESTAMP NOT NULL,
+    use_until TIMESTAMP,
+    organized_at TIMESTAMP,
+    deleted_at TIMESTAMP,
+    coverage_json JSON,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_directories_user_id ON document_directories(user_id);
+
+CREATE TABLE IF NOT EXISTS document_directory_groups (
+    id VARCHAR(36) PRIMARY KEY,
+    directory_id VARCHAR(36) NOT NULL,
+    parent_id VARCHAR(36) NOT NULL DEFAULT '',
+    name VARCHAR(255) NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_directory_groups_directory_id ON document_directory_groups(directory_id);
+
+CREATE TABLE IF NOT EXISTS document_directory_entries (
+    id VARCHAR(36) PRIMARY KEY,
+    directory_id VARCHAR(36) NOT NULL,
+    resource_key VARCHAR(64) NOT NULL,
+    group_id VARCHAR(36) NOT NULL DEFAULT '',
+    source VARCHAR(32) NOT NULL,
+    namespace TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    locator_json JSON,
+    title TEXT NOT NULL,
+    pinned BOOLEAN NOT NULL DEFAULT false,
+    excluded BOOLEAN NOT NULL DEFAULT false,
+    read_state VARCHAR(32) NOT NULL DEFAULT 'unread',
+    confirmed BOOLEAN NOT NULL DEFAULT false,
+    access_state VARCHAR(32) NOT NULL DEFAULT 'unknown',
+    content_version TEXT NOT NULL DEFAULT '',
+    content_state VARCHAR(32) NOT NULL DEFAULT 'unknown',
+    read_at TIMESTAMP,
+    evidence_json JSON,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_directory_resource ON document_directory_entries(directory_id, resource_key);
+
+CREATE TABLE IF NOT EXISTS document_observations (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(128) NOT NULL,
+    history_id VARCHAR(128) NOT NULL,
+    run_id VARCHAR(128) NOT NULL,
+    call_id VARCHAR(255) NOT NULL,
+    query TEXT NOT NULL,
+    payload_json JSON NOT NULL,
+    batch_id VARCHAR(36) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_observations_user_id ON document_observations(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_document_observation_pending ON document_observations(conversation_id, batch_id);
+
+CREATE TABLE IF NOT EXISTS document_directory_batches (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    parent_id VARCHAR(36) NOT NULL DEFAULT '',
+    directory_id VARCHAR(36) NOT NULL DEFAULT '',
+    job_id VARCHAR(64) NOT NULL DEFAULT '',
+    trigger_id VARCHAR(255) NOT NULL,
+    owner_key VARCHAR(255) NOT NULL,
+    input_json JSON NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    result_json JSON,
+    acknowledged BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_directory_batches_user_id ON document_directory_batches(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_document_directory_batches_parent_id ON document_directory_batches(parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_document_directory_batches_directory_id ON document_directory_batches(directory_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_directory_batch_trigger ON document_directory_batches(trigger_id, owner_key);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS document_directories (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    intent TEXT NOT NULL,
+    organization TEXT NOT NULL,
+    auto_add BOOLEAN NOT NULL DEFAULT true,
+    pinned BOOLEAN NOT NULL DEFAULT false,
+    ready BOOLEAN NOT NULL DEFAULT false,
+    version BIGINT NOT NULL DEFAULT 1,
+    last_used_at TIMESTAMP NOT NULL,
+    use_until TIMESTAMP,
+    organized_at TIMESTAMP,
+    deleted_at TIMESTAMP,
+    coverage_json JSON,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_directories_user_id ON document_directories(user_id);
+
+CREATE TABLE IF NOT EXISTS document_directory_groups (
+    id VARCHAR(36) PRIMARY KEY,
+    directory_id VARCHAR(36) NOT NULL,
+    parent_id VARCHAR(36) NOT NULL DEFAULT '',
+    name VARCHAR(255) NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_directory_groups_directory_id ON document_directory_groups(directory_id);
+
+CREATE TABLE IF NOT EXISTS document_directory_entries (
+    id VARCHAR(36) PRIMARY KEY,
+    directory_id VARCHAR(36) NOT NULL,
+    resource_key VARCHAR(64) NOT NULL,
+    group_id VARCHAR(36) NOT NULL DEFAULT '',
+    source VARCHAR(32) NOT NULL,
+    namespace TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    locator_json JSON,
+    title TEXT NOT NULL,
+    pinned BOOLEAN NOT NULL DEFAULT false,
+    excluded BOOLEAN NOT NULL DEFAULT false,
+    read_state VARCHAR(32) NOT NULL DEFAULT 'unread',
+    confirmed BOOLEAN NOT NULL DEFAULT false,
+    access_state VARCHAR(32) NOT NULL DEFAULT 'unknown',
+    content_version TEXT NOT NULL DEFAULT '',
+    content_state VARCHAR(32) NOT NULL DEFAULT 'unknown',
+    read_at TIMESTAMP,
+    evidence_json JSON,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_directory_resource ON document_directory_entries(directory_id, resource_key);
+
+CREATE TABLE IF NOT EXISTS document_observations (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    conversation_id VARCHAR(128) NOT NULL,
+    history_id VARCHAR(128) NOT NULL,
+    run_id VARCHAR(128) NOT NULL,
+    call_id VARCHAR(255) NOT NULL,
+    query TEXT NOT NULL,
+    payload_json JSON NOT NULL,
+    batch_id VARCHAR(36) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_observations_user_id ON document_observations(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_document_observation_pending ON document_observations(conversation_id, batch_id);
+
+CREATE TABLE IF NOT EXISTS document_directory_batches (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    parent_id VARCHAR(36) NOT NULL DEFAULT '',
+    directory_id VARCHAR(36) NOT NULL DEFAULT '',
+    job_id VARCHAR(64) NOT NULL DEFAULT '',
+    trigger_id VARCHAR(255) NOT NULL,
+    owner_key VARCHAR(255) NOT NULL,
+    input_json JSON NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    result_json JSON,
+    acknowledged BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_document_directory_batches_user_id ON document_directory_batches(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_document_directory_batches_parent_id ON document_directory_batches(parent_id);
+
+CREATE INDEX IF NOT EXISTS idx_document_directory_batches_directory_id ON document_directory_batches(directory_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_directory_batch_trigger ON document_directory_batches(trigger_id, owner_key);
+
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS document_folder_inventories (
+ id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(255) NOT NULL, conversation_id VARCHAR(128) NOT NULL,
+ source_json JSON NOT NULL, state_json JSON NOT NULL, status VARCHAR(32) NOT NULL, version BIGINT NOT NULL,
+ directory_id VARCHAR(36) NOT NULL DEFAULT '', batch_id VARCHAR(36) NOT NULL DEFAULT '',
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_document_folder_inventories_user_id ON document_folder_inventories(user_id);
+CREATE INDEX IF NOT EXISTS idx_document_folder_inventories_directory_id ON document_folder_inventories(directory_id);
+CREATE TABLE IF NOT EXISTS document_folder_nodes (
+ id VARCHAR(64) PRIMARY KEY, inventory_id VARCHAR(36) NOT NULL, node_key VARCHAR(64) NOT NULL,
+ parent_key VARCHAR(64) NOT NULL, path TEXT NOT NULL, name TEXT NOT NULL, kind VARCHAR(32) NOT NULL,
+ listed BOOLEAN NOT NULL, resource_key VARCHAR(64) NOT NULL DEFAULT '', candidate_json JSON
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_folder_node ON document_folder_nodes(inventory_id,node_key);
+CREATE INDEX IF NOT EXISTS idx_folder_parent ON document_folder_nodes(inventory_id,parent_key);
+
+-- +migrate Dialect postgres
+CREATE TABLE task_execution_timings (
+    id VARCHAR(128) PRIMARY KEY,
+    run_id VARCHAR(128) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    owner_user_id VARCHAR(255) NOT NULL,
+    history_id VARCHAR(128) NOT NULL,
+    workflow_session_id VARCHAR(36) NOT NULL DEFAULT '',
+    status VARCHAR(24) NOT NULL,
+    revision BIGINT NOT NULL DEFAULT 1,
+    requested_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX idx_task_execution_scope ON task_execution_timings(owner_user_id, conversation_id, run_id, requested_at);
+CREATE INDEX idx_task_execution_history ON task_execution_timings(history_id);
+CREATE INDEX idx_task_execution_workflow ON task_execution_timings(workflow_session_id, requested_at);
+CREATE TABLE task_attempt_timings (
+    id VARCHAR(255) PRIMARY KEY,
+    execution_id VARCHAR(128) NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ
+);
+CREATE INDEX idx_task_attempt_execution ON task_attempt_timings(execution_id);
+
+-- +migrate Dialect sqlite
+CREATE TABLE task_execution_timings (
+    id VARCHAR(128) PRIMARY KEY,
+    run_id VARCHAR(128) NOT NULL,
+    conversation_id VARCHAR(36) NOT NULL,
+    owner_user_id VARCHAR(255) NOT NULL,
+    history_id VARCHAR(128) NOT NULL,
+    workflow_session_id VARCHAR(36) NOT NULL DEFAULT '',
+    status VARCHAR(24) NOT NULL,
+    revision BIGINT NOT NULL DEFAULT 1,
+    requested_at DATETIME NOT NULL,
+    finished_at DATETIME
+);
+CREATE INDEX idx_task_execution_scope ON task_execution_timings(owner_user_id, conversation_id, run_id, requested_at);
+CREATE INDEX idx_task_execution_history ON task_execution_timings(history_id);
+CREATE INDEX idx_task_execution_workflow ON task_execution_timings(workflow_session_id, requested_at);
+CREATE TABLE task_attempt_timings (
+    id VARCHAR(255) PRIMARY KEY,
+    execution_id VARCHAR(128) NOT NULL,
+    started_at DATETIME NOT NULL,
+    finished_at DATETIME
+);
+CREATE INDEX idx_task_attempt_execution ON task_attempt_timings(execution_id);

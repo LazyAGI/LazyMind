@@ -16,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"lazymind/agentconnector/internal/agentcatalog"
+	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/coreapi"
 )
 
@@ -111,7 +112,7 @@ func invocationSource(
 	if provider == "cursor" || provider == "workbuddy" {
 		if source, ok := agentcatalog.ResolveInvocation(provider, toolName, time.Now().UTC()); ok {
 			return &coreapi.InvocationSource{
-				Provider: source.Provider, HostID: strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_HOST_ID")),
+				Provider: source.Provider, HostID: strings.TrimSpace(connectorconfig.Value("LAZYMIND_AGENT_HOST_ID")),
 				ThreadID: source.ThreadID, TurnID: source.TurnID,
 				ProjectKey: source.ProjectKey, ProjectName: source.ProjectName, Message: source.Message,
 			}
@@ -157,7 +158,7 @@ func invocationSource(
 		message = invocationSourceMessage(toolName, arguments)
 	}
 	return &coreapi.InvocationSource{
-		Provider: provider, HostID: strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_HOST_ID")),
+		Provider: provider, HostID: strings.TrimSpace(connectorconfig.Value("LAZYMIND_AGENT_HOST_ID")),
 		ThreadID: threadID, TurnID: turnID, ThreadSource: threadSource,
 		ProjectKey: projectKey, ProjectName: projectName, Message: message,
 	}

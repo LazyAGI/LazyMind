@@ -8,12 +8,15 @@ from fastapi import FastAPI
 from lazymind.config import config
 from lazymind.chat.api import (
     agent_control_routes,
+    base_ingestion_routes,
     chat_routes,
     document_routes,
     health_routes,
     knowledge_search_routes,
     llm_task_routes,
     model_check_routes,
+    mail_read_routes,
+    directory_file_routes,
     model_features_routes,
     workflow_routes,
     subagent_routes,
@@ -23,6 +26,7 @@ from lazymind.chat.runtime_loader import start_background_chat_runtime_warmup
 from lazymind.chat.workflow.remote_executor import start_remote_workflow_executor
 from lazymind.rewrite.api import rewrite_routes
 from lazymind.conversation.api import title_routes, grouping_routes
+from lazymind.directory import api as directory_routes
 from lazymind.review.api import (
     memory_review_routes,
     preference_organizer_routes,
@@ -42,8 +46,11 @@ logging.getLogger('httpx').setLevel(logging.WARNING)
 def register_chat_routers(app: FastAPI) -> FastAPI:
     # health is always available for liveness probes.
     app.include_router(health_routes.router)
+    app.include_router(base_ingestion_routes.router)
     # Agent control callbacks must remain available in both direct and router modes.
     app.include_router(agent_control_routes.router)
+    app.include_router(mail_read_routes.router)
+    app.include_router(directory_file_routes.router)
     # Workflow actions, Writer sync, and LazyMind task cancellation callbacks.
     app.include_router(workflow_routes.router)
 
@@ -56,6 +63,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     if not config['router_child_proxied_only']:
         app.include_router(title_routes.router)
         app.include_router(grouping_routes.router)
+        app.include_router(directory_routes.router)
         app.include_router(rewrite_routes.router)
         app.include_router(memory_review_routes.router)
         app.include_router(preference_organizer_routes.router)

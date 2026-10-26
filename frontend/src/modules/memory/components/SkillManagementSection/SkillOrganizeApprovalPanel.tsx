@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Checkbox, Empty, Tag } from "antd";
+import { Button, Checkbox, Empty } from "antd";
 import {
   listSkillOrganizeApprovals,
   resolveSkillOrganizeApprovals,
   type SkillOrganizeApprovalItem,
   type SkillOrganizeApprovalTask,
 } from "../../skillApi";
+import { StatusMark, type StatusKind } from "./OriginMark";
+import SkillModuleState from "./SkillModuleState";
 import "./skillDraftReview.scss";
 
 interface Props {
@@ -21,6 +23,12 @@ const typeLabel = (type: string) => {
   if (type === "merge") return "admin.memorySkillOrganizeApprovalMerge";
   if (type === "delete_duplicate") return "admin.memorySkillOrganizeApprovalDelete";
   return "admin.memorySkillOrganizeApprovalRefactor";
+};
+
+const typeKind = (type: string): StatusKind => {
+  if (type === "merge") return "merge";
+  if (type === "delete_duplicate") return "delete";
+  return "refactor";
 };
 
 export default function SkillOrganizeApprovalPanel({
@@ -136,7 +144,7 @@ export default function SkillOrganizeApprovalPanel({
           >
             {item.targetName || item.sourceKeys[0] || item.id}
           </Checkbox>
-          <Tag>{t(typeLabel(item.type))}</Tag>
+          <StatusMark kind={typeKind(item.type)}>{t(typeLabel(item.type))}</StatusMark>
           {item.deleteKeys.length ? <span>{t("admin.memorySkillOrganizeApprovalSources", { keys: item.deleteKeys.join("、") })}</span> : null}
           {item.dependsOn.length ? <span>{t("admin.memorySkillOrganizeApprovalDepends", { ids: item.dependsOn.join("、") })}</span> : null}
         </header>
@@ -171,14 +179,14 @@ export default function SkillOrganizeApprovalPanel({
           {t("admin.memorySkillOrganizeApprovalReject", { count: selectedPending.size })}
         </Button>
       </div>
-      {error ? <Alert type="error" showIcon message={error.startsWith("admin.") ? t(error) : error} /> : null}
-      {notice ? <Alert type={error ? "warning" : "success"} showIcon message={notice} /> : null}
-      {loading ? <div className="skill-draft-review__loading">{t("admin.memorySkillDraftReviewLoading")}</div> : null}
+      {error ? <SkillModuleState tone="error">{error.startsWith("admin.") ? t(error) : error}</SkillModuleState> : null}
+      {notice ? <SkillModuleState tone={error ? "warning" : "success"}>{notice}</SkillModuleState> : null}
+      {loading ? <SkillModuleState tone="loading">{t("admin.memorySkillDraftReviewLoading")}</SkillModuleState> : null}
       {!loading && !visible.length ? <Empty description={t("admin.memorySkillOrganizeApprovalEmpty")} /> : null}
       {visible.map((task) => (
-        <div key={task.requestId}>
+        <div key={task.requestId} className="skill-draft-review__task">
           <h4>{t("admin.memorySkillOrganizeApprovalTask", { id: task.requestId })}</h4>
-          {task.error ? <Alert type="error" showIcon message={task.error} /> : null}
+          {task.error ? <SkillModuleState tone="error">{task.error}</SkillModuleState> : null}
           {task.items.filter((item) => item.status !== "accepted").map((item) => renderItem(task, item, "pending"))}
         </div>
       ))}

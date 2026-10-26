@@ -7,7 +7,7 @@ import "encoding/json"
 func ordinaryConversationEvent(event *ConvEvent) *ConvEvent {
 	switch event.Type {
 	case "task_created", "task_updated", "artifact_created", "driver_input", "auto_chat_started",
-		"workflow_step_feedback", "workflow_runtime_updated", "step_waiting", "workflow_completed",
+		"task_run_updated", "workflow_step_feedback", "workflow_runtime_updated", "step_waiting", "workflow_completed",
 		"workflow_error", "step_partial_done", "intent_updated", "workflow_artifact_updated",
 		"workflow_session_created", "ask_pending", "max_retries_exceeded", "driver_fallback":
 	default:
@@ -22,7 +22,7 @@ func ordinaryConversationEvent(event *ConvEvent) *ConvEvent {
 		return nil
 	}
 	public := map[string]any{}
-	for _, key := range []string{"task_id", "session_id", "conversation_id", "history_id", "trigger_history_id", "step_id", "artifact_id", "agent_type", "status"} {
+	for _, key := range []string{"task_id", "session_id", "conversation_id", "history_id", "trigger_history_id", "confirmation_id", "step_id", "artifact_id", "agent_type", "status"} {
 		if value, ok := payload[key].(string); ok {
 			public[key] = value
 		}

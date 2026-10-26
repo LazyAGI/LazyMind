@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "task_id": "normalize-labels",
+  "plan": "docs/plan.md",
+  "plan_task": 7,
+  "expected_base": "REPLACE_WITH_YOUR_FULL_COMMIT_SHA",
+  "allowed_files": [
+    "标签.py"
+  ],
+  "protected_files": [
+    "test_labels.py"
+  ],
+  "coverage": [
+    {
+      "id": "normalize",
+      "description": "normalize",
+      "checks": [
+        "labels-tests"
+      ]
+    },
+    {
+      "id": "dedupe",
+      "description": "dedupe",
+      "checks": [
+        "labels-tests"
+      ]
+    },
+    {
+      "id": "validation",
+      "description": "validation",
+      "checks": [
+        "labels-tests"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "id": "labels-tests",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "-v",
+        "test_labels"
+      ]
+    }
+  ]
+}

@@ -166,6 +166,7 @@ func TestOpenAPIChatSelectionAndSidechatHaveOneClientOwner(t *testing.T) {
 		{"get", "/api/core/chat/models", "chat"},
 		{"patch", "/api/core/conversations/{conversation_id}/model", "conversations"},
 		{"post", "/api/core/conversations/{parent_id}/sidechat", "conversations"},
+		{"patch", "/api/core/conversations/{child_id}/sidechat", "conversations"},
 		{"post", "/api/core/conversations/{child_id}/retain", "conversations"},
 		{"delete", "/api/core/conversations/{child_id}/sidechat", "conversations"},
 	} {
@@ -616,6 +617,10 @@ func TestOpenAPISpecIncludesKnowledgeMarketSurface(t *testing.T) {
 
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	listProps := schemaPropertiesForTest(t, schemas, "knowledgeMarketListItemOpenAPIResponse")
+	taskListProps := schemaPropertiesForTest(t, schemas, "knowledgeMarketTaskListOpenAPIResponse")
+	if _, ok := taskListProps["unfinished_count"]; !ok {
+		t.Fatalf("task list must expose the global unfinished count")
+	}
 	if _, ok := listProps["version"]; !ok {
 		t.Fatalf("list item schema must document version")
 	}

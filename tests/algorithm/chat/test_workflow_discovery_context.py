@@ -1,8 +1,8 @@
 import json
+from unittest.mock import patch
 
 import lazyllm
 
-from lazymind.chat.workflow import workflow_manager
 from lazymind.chat.workflow.workflow_manager import (
     build_workflow_discovery_context,
     resolve_workflow_injection,
@@ -94,16 +94,24 @@ def test_selected_workflow_expands_trigger_and_execution_tools():
     previous = lazyllm.globals.get('agentic_config')
     lazyllm.globals['agentic_config'] = {'enable_workflow': True}
     try:
-        contribution = resolve_workflow_injection(
-            None,
-            conversation_id='conversation-1',
-            current_query='启动图片工作流',
-            workflow_catalog=_catalog(),
-            allowed_workflow_refs=['builtin:image-workflow'],
-            workflow_activations=[
-                build_workflow_discovery_context(_catalog()).activations[0],
-            ],
-        )
+        with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+            'lazymind.chat.workflow.workflow_manager.httpx.get',
+        ) as http_get:
+            client_factory.return_value.get_workflow.return_value.result = {
+                'workflow_id': 'image-workflow', 'revision_id': 'rev-image',
+            }
+            contribution = resolve_workflow_injection(
+                None,
+                conversation_id='conversation-1',
+                current_query='启动图片工作流',
+                workflow_catalog=_catalog(),
+                allowed_workflow_refs=['builtin:image-workflow'],
+                workflow_activations=[
+                    build_workflow_discovery_context(_catalog()).activations[0],
+                ],
+            )
+        client_factory.return_value.get_workflow.assert_called_once_with('image-workflow', 'rev-image')
+        http_get.assert_not_called()
     finally:
         if previous is None:
             lazyllm.globals.pop('agentic_config', None)
@@ -120,30 +128,37 @@ def test_selected_workflow_expands_trigger_and_execution_tools():
     assert 'Explicit Workflow Selection' in contribution.runtime_context
 
 
-def test_active_workflow_hides_triggers_and_resume(monkeypatch):
+def test_active_workflow_hides_triggers_and_resume():
     previous = lazyllm.globals.get('agentic_config')
     lazyllm.globals['agentic_config'] = {'enable_workflow': True}
-    monkeypatch.setattr(
-        workflow_manager,
-        '_state',
-        lambda _session_id: {'status': 'stopped', 'state_version': 4, 'projection': {}},
-    )
     try:
-        contribution = resolve_workflow_injection(
-            {
-                'session_id': 'workflow-session-1',
-                'workflow_id': 'image-workflow',
-                'workflow_ref': 'builtin:image-workflow',
-                'status': 'stopped',
-            },
-            conversation_id='conversation-1',
-            current_query='继续',
-            workflow_catalog=_catalog(),
-            allowed_workflow_refs=['builtin:image-workflow'],
-            workflow_activations=[
-                build_workflow_discovery_context(_catalog()).activations[0],
-            ],
-        )
+        with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+            'lazymind.chat.workflow.workflow_manager.httpx.get',
+        ) as http_get:
+            client_factory.return_value.get_workflow.return_value.result = {
+                'workflow_id': 'image-workflow', 'revision_id': 'rev-image',
+            }
+            client_factory.return_value.get_state.return_value = {
+                'status': 'stopped', 'state_version': 4, 'projection': {},
+            }
+            contribution = resolve_workflow_injection(
+                {
+                    'session_id': 'workflow-session-1',
+                    'workflow_id': 'image-workflow',
+                    'workflow_ref': 'builtin:image-workflow',
+                    'status': 'stopped',
+                },
+                conversation_id='conversation-1',
+                current_query='继续',
+                workflow_catalog=_catalog(),
+                allowed_workflow_refs=['builtin:image-workflow'],
+                workflow_activations=[
+                    build_workflow_discovery_context(_catalog()).activations[0],
+                ],
+            )
+        client_factory.return_value.get_workflow.assert_called_once_with('image-workflow', 'rev-image')
+        client_factory.return_value.get_state.assert_called_once_with('workflow-session-1')
+        http_get.assert_not_called()
     finally:
         if previous is None:
             lazyllm.globals.pop('agentic_config', None)

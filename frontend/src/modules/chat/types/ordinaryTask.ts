@@ -1,3 +1,4 @@
+import type { KnowledgeOperation } from "../utils/knowledgeOperations";
 import type { MediaCapabilityDependencyDetail } from "../utils/mediaCapabilityDependency";
 
 /** Public execution data. Raw agent reasoning and tool arguments are never part of this contract. */
@@ -42,7 +43,7 @@ export interface PublicArtifact {
   created_at: string;
 }
 
-export type OrdinaryCollection = "process_steps" | "sources" | "stage_artifacts";
+export type OrdinaryCollection = "process_steps" | "sources" | "stage_artifacts" | "knowledge_operations";
 
 export interface CollectionPage {
   total: number;
@@ -75,9 +76,10 @@ export interface OrdinaryTaskView {
   progress_pct?: number;
   /** Validated setup actions, without the raw task failure or tool logs. */
   capability_dependency?: Pick<MediaCapabilityDependencyDetail, "status" | "required" | "missing" | "message">;
+  knowledge_operations?: KnowledgeOperation[];
   sources: PublicSource[];
   stage_artifacts: PublicArtifact[];
-  pages: Record<OrdinaryCollection, CollectionPage>;
+  pages: Record<Exclude<OrdinaryCollection, "knowledge_operations">, CollectionPage> & { knowledge_operations?: CollectionPage };
   timing: {
     started_at: string | null;
     finished_at: string | null;
@@ -88,6 +90,16 @@ export interface OrdinaryTaskView {
 }
 
 export interface OrdinaryRunView {
+  execution_id?: string;
+  status?: string;
+  timing?: {
+    requested_at: string;
+    finished_at: string | null;
+    measured_at: string;
+    elapsed_ms: number | null;
+    cumulative_execution_ms: number | null;
+    running_attempt_count: number;
+  };
   run_id: string;
   revision: number;
   final_output_refs: string[];

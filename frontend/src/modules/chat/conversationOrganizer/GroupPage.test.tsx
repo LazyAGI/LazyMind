@@ -1,24 +1,45 @@
+import type { DragEndEvent } from "@dnd-kit/core";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { ConfigProvider } from "antd";
 import { beforeEach, expect, it, vi } from "vitest";
 import GroupPage from "./GroupPage";
 import * as api from "./api";
 import { readChatConversationFilters, CHAT_NEW_RUN_IN_BACKGROUND_KEY, CHAT_PENDING_CONVERSATION_GROUP_KEY } from "../constants/chat";
 
+const order = vi.hoisted(() => ({ save: vi.fn(), end: (_event: DragEndEvent): void | Promise<void> => {} }));
+vi.mock("@dnd-kit/core", async original => {
+  const actual = await original<typeof import("@dnd-kit/core")>();
+  return { ...actual, DndContext: (props: React.ComponentProps<typeof actual.DndContext>) => { order.end = props.onDragEnd!; return <actual.DndContext {...props} />; } };
+});
 const t = (key: string) => key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("../hooks/useChatModelProviderGuard", () => ({ useChatModelProviderGuard: () => ({ canChat: true }) }));
 vi.mock("../components/ChatInput", () => ({ default: ({ runInBackground, setIsChatContent }: any) => <button onClick={() => setIsChatContent(true)}>{runInBackground ? "Start task" : "Start chat"}</button> }));
 vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "", getLocalizedErrorMessage: () => "Save failed" }));
-vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({}) }));
-vi.mock("../components/ConversationTitleEditor", () => ({ default: () => null }));
+vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conversationServiceReorder: order.save, conversationServiceGetConversationDetail: vi.fn().mockResolvedValue({ data: { conversation: { display_name: "Member A", title_revision: 2 } } }) }) }));
 vi.mock("./useOrganizerNameLock", () => ({ default: () => false }));
-vi.mock("./ConversationMembership", () => ({ default: () => null }));
-vi.mock("./api", () => ({ getConversationGroup: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed", deleteConversationGroup: vi.fn(), updateConversationGroup: vi.fn(), updateGroupPlacement: vi.fn(), emitConversationGroupsChanged: vi.fn() }));
+vi.mock("./api", () => ({ getConversationGroup: vi.fn(), listConversationGroups: vi.fn().mockResolvedValue([]), CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed", deleteConversationGroup: vi.fn(), updateConversationGroup: vi.fn(), updateGroupPlacement: vi.fn(), emitConversationGroupsChanged: vi.fn(), renameGroupConversation: vi.fn() }));
 const detail = (id: string, task: boolean) => ({ group: { id, name: id, kind: "group", is_task_conv: task, member_count: 0 }, conversations: [], nextPageToken: "" }) as any;
 beforeEach(() => { vi.clearAllMocks(); sessionStorage.clear(); });
 function SwitchGroup() { const navigate = useNavigate(); return <button onClick={() => navigate('/groups/task')}>Switch to task</button>; }
-function view(id = 'chat') { return render(<MemoryRouter initialEntries={['/groups/' + id]}><SwitchGroup /><Routes><Route path="/groups/:groupId" element={<GroupPage />} /><Route path="/agent/chat/home" element={<div>Home</div>} /></Routes></MemoryRouter>); }
+function view(id = 'chat') { return render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={['/groups/' + id]}><SwitchGroup /><Routes><Route path="/groups/:groupId" element={<GroupPage />} /><Route path="/agent/chat/home" element={<div>Home</div>} /></Routes></MemoryRouter></ConfigProvider>); }
+it.each(["group", "project"])("opens the rename dialog by right-clicking a %s member", async kind => {
+  const response = detail("chat", false);
+  response.group.kind = kind;
+  response.conversations = [{ conversation_id: "a", display_name: "Member A", membership_revision: 2 }];
+  vi.mocked(api.getConversationGroup).mockResolvedValue(response);
+  view();
+  const title = await screen.findByText("Member A");
+  fireEvent.contextMenu(title.closest(".conversation-group-page-item")!);
+  fireEvent.click(await screen.findByRole("menuitem", { name: "conversationOrganizer.renameConversation" }));
+  const input = await screen.findByRole("textbox", { name: "conversationRename.name" });
+  await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  expect(input).toHaveValue("Member A");
+  expect(input.closest(".conversation-group-page-item")).toBeNull();
+  expect(title).toBeInTheDocument();
+});
 it.each([false, true])("saves ordinary group pin changes from pinned=%s in group detail", async pinned => {
   const response = detail("chat", false);
   response.group.pinned = pinned;
@@ -63,4 +84,24 @@ it("reloads group detail when the source filter changes", async () => {
   await screen.findByText('codex');
   expect(screen.queryByText('all')).not.toBeInTheDocument();
   expect(api.getConversationGroup).toHaveBeenLastCalledWith('chat', '', '', 'codex');
+});
+
+it.each(["group", "project"])("sorts %s members immediately and preserves membership", async kind => {
+  const first = { conversation_id: "a", display_name: "Member A", membership_revision: 7 };
+  const second = { conversation_id: "b", display_name: "Member B", membership_revision: 7 };
+  let saved = false;
+  vi.mocked(api.getConversationGroup).mockImplementation(async () => ({ ...detail("chat", false), group: { ...detail("chat", false).group, kind }, conversations: saved ? [second, first] : [first, second] }));
+  let finish!: (value: unknown) => void;
+  order.save.mockReturnValue(new Promise(resolve => { finish = value => { saved = true; resolve(value); }; }));
+  view();
+  await screen.findByText("Member A");
+  await act(async () => { void order.end({ active: { id: "b" }, over: { id: "a" } } as DragEndEvent); });
+  const titles = () => [...document.querySelectorAll(".conversation-group-page-item [data-conversation-title]")].map(node => node.textContent);
+  expect(titles()).toEqual(["Member B", "Member A"]);
+  expect(order.save).toHaveBeenCalledWith("b", "a", "before");
+  expect(api.updateConversationGroup).not.toHaveBeenCalled();
+  expect(api.updateGroupPlacement).not.toHaveBeenCalled();
+  await act(async () => finish({ data: { conversation_id: "b", history_order: 1, is_pinned: false, order_updates: [] } }));
+  await waitFor(() => expect(api.getConversationGroup).toHaveBeenCalledTimes(2));
+  expect(titles()).toEqual(["Member B", "Member A"]);
 });

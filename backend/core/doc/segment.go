@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
 	"lazymind/core/store"
+	"lazymind/core/systemdeps"
 )
 
 type SegmentItem struct {
@@ -250,6 +251,9 @@ func firstPositiveQueryInt(r *http.Request, fallback int, keys ...string) int {
 }
 
 func resolveSegmentGroup(r *http.Request, algoID string, body *segmentSearchInput) string {
+	if !systemdeps.PythonComponentActive("rag") {
+		return "block"
+	}
 	if group := parseSegmentGroup(r, body); group != "" {
 		log.Logger.Info().
 			Str("handler", "SearchSegments").
@@ -413,7 +417,29 @@ func prepareSegmentRequest(w http.ResponseWriter, r *http.Request, handler strin
 }
 
 func fetchChunksPage(r *http.Request, datasetID, kbID, documentID, lazyDocID, algoID, group string, page, pageSize int, handler string) (map[string]any, string, error) {
-	if strings.TrimSpace(lazyDocID) == "" {
+	if lazyDocID == "" || !systemdeps.PythonComponentActive("rag") || useBaseChunks(r.Context(), datasetID, documentID) {
+		var row orm.Document
+		if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", documentID, datasetID).Take(&row).Error; err == nil {
+			var ext documentExt
+			json.Unmarshal(row.Ext, &ext)
+			artifact, err := readBaseArtifact(r.Context(), documentServiceRecord{row: row, ext: ext})
+			if err != nil {
+				return nil, "", err
+			}
+			if artifact != nil {
+				chunks, err := baseDocumentChunks(artifact, strconv.Itoa((page-1)*pageSize), pageSize, group)
+				if err != nil {
+					return nil, "", err
+				}
+				items := []any{}
+				for _, chunk := range chunks.Chunks {
+					items = append(items, map[string]any{"id": chunk.ID, "text": chunk.Text, "number": chunk.Number})
+				}
+				return map[string]any{"items": items, "total_size": chunks.TotalSize}, "native-artifact", nil
+			}
+		}
+	}
+	if strings.TrimSpace(lazyDocID) == "" || !systemdeps.PythonComponentActive("rag") {
 		return map[string]any{"items": []any{}, "total_size": 0}, "", nil
 	}
 	queryURL := buildChunksURL(kbID, algoID, lazyDocID, group, page, pageSize)

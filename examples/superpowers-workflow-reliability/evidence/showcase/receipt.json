@@ -1,0 +1,925 @@
+{
+  "schema_version": 1,
+  "classification": "Real installed-plugin MCP + native Runtime + browser UI, with explicit fault injection and manual CLI continuation; not uninterrupted desktop E2E",
+  "captured_on": "2026-10-21",
+  "package_revision": "3d166c5b-9133-4556-9960-dec83b54c92b",
+  "merged_main": "5398ef079c9e3051fbd5d89ae7fbca9c13ebc5d0",
+  "codex_requested_model": "gpt-6-astra",
+  "native_configured_model": "deepseek-flash",
+  "backend_model_identity": "N/A",
+  "runtime_service_binary_sha": "N/A",
+  "full_trace": false,
+  "provenance": "Exact selected JSON-pointer values from local raw receipts; SSE entries retain line offsets. Original raw files stay private and are not checkout dependencies. Hashes identify sources, not third-party attestation. Opaque credentials, controller thread IDs and model thought text are omitted. state.yml was reformatted after execution; its parsed YAML is identical, checked separately from the preserved published-source byte hash.",
+  "package_source_sha256": {
+    "workflows/superpowers-brief-showcase/workflow.yaml": "b277644f17362ec32469a92c5b156f2b8f7101504a4408a8d0eb8d4a792d5714",
+    "workflows/superpowers-brief-showcase/scenario/scenario.md": "6e017a261efdb559ba6c384c2ed449c153c0ee74c32372823f8f31b28767f9e2",
+    "workflows/superpowers-brief-showcase/scenario/state.yml": "964dce4985a19ee4eb7697fc966737679748e1ea9fa1be480bacd8924c6567e9",
+    "workflows/superpowers-brief-showcase/scripts/brief.py": "aae5d2764cf4e40967c234f29e9707b98df9a0bd53e27253a0cab198481789c3"
+  },
+  "screenshots": {
+    "blocked.jpg": "2aec9dfc183f7d017512a361b6b6eb1161a557b4eec0af49fddf24935556f0cd",
+    "review.jpg": "d8ff1539b12087049363acc2b83592f94a9b452225c4925829d7f4123855b60b"
+  },
+  "outcomes": {
+    "normal_plugin_mcp_manual_continuation": "PASS",
+    "missing_brief_native_gate": "PASS",
+    "server_admission_rejection": "PASS",
+    "unchanged_input_ui_retry": "PASS (expected failure repeated)",
+    "edited_input_same_session_recovery": "BLOCKED",
+    "automatic_desktop_continuation": "BLOCKED",
+    "continuous_video": "NOT_RECORDED",
+    "fresh_checkout_advanced_normal_and_missing": "PASS (separate CLI path)"
+  },
+  "records": {
+    "normal-final-review.json": {
+      "source_sha256": "458faea0eaa1ab964438c1310366f2f14ace4e76e22f1675292c9303f9336ba3",
+      "format": "json",
+      "values": {
+        "/control/session/session_id": "mcp-7f30fc19c728c229145067ddb0b6d118",
+        "/control/session/pinned_revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/control/session/status": "waiting",
+        "/control/session/created_at": "2026-10-21T06:41:09.692394Z",
+        "/control/session/updated_at": "2026-10-21T06:42:43.320975Z",
+        "/control/session/steps": [
+          {
+            "step_id": "prepare",
+            "attempt": 1,
+            "task_id": "dff48d9b-ea26-4342-81b3-31f3a8eea873",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:41:24.252254Z"
+          },
+          {
+            "step_id": "validate_brief",
+            "attempt": 1,
+            "task_id": "611ac84f-01b7-4642-a267-3dfd5d532ff7",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:41:39.748108Z"
+          },
+          {
+            "step_id": "implement",
+            "attempt": 1,
+            "task_id": "2af3408e-75b5-41a6-8dec-9fe21fb86cfb",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:42:15.698682Z"
+          }
+        ],
+        "/control/control/continuation": "awaiting_user",
+        "/control/control/state_version": 20,
+        "/control/control/active_executions": 0,
+        "/control/control/admission": {
+          "can_begin": false,
+          "reason": "review_pending"
+        },
+        "/control/projection/nodes": {
+          "implement": {
+            "id": "implement",
+            "mode": "human",
+            "requires_approval": true,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "prepare": {
+            "id": "prepare",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "validate_brief": {
+            "id": "validate_brief",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          }
+        },
+        "/control/projection/completed": false,
+        "/artifacts/artifacts/0/slot_id": "admission",
+        "/artifacts/artifacts/0/revision": 1,
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/change_source": "host",
+        "/artifacts/artifacts/0/value": {
+          "data": {
+            "brief": "Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.",
+            "fault_injection": null
+          }
+        },
+        "/artifacts/artifacts/0/created_at": "2026-10-21T06:41:40.956621Z",
+        "/artifacts/artifacts/0/validity": "effective",
+        "/artifacts/artifacts/1/slot_id": "brief",
+        "/artifacts/artifacts/1/revision": 1,
+        "/artifacts/artifacts/1/selected": true,
+        "/artifacts/artifacts/1/change_source": "host",
+        "/artifacts/artifacts/1/value": {
+          "brief": "Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.",
+          "fault_injection": null
+        },
+        "/artifacts/artifacts/1/created_at": "2026-10-21T06:41:28.524851Z",
+        "/artifacts/artifacts/1/validity": "effective",
+        "/artifacts/artifacts/2/slot_id": "checks",
+        "/artifacts/artifacts/2/revision": 1,
+        "/artifacts/artifacts/2/selected": true,
+        "/artifacts/artifacts/2/change_source": "host",
+        "/artifacts/artifacts/2/value": {
+          "text": "Command: python3 -m unittest -v test_labels.py\nExit status: 0\nstdout:\n\nstderr:\ntest_ascii (test_labels.NormalizeLabelTests) ... ok\ntest_empty (test_labels.NormalizeLabelTests) ... ok\ntest_unicode (test_labels.NormalizeLabelTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n"
+        },
+        "/artifacts/artifacts/2/created_at": "2026-10-21T06:42:35.31399Z",
+        "/artifacts/artifacts/2/validity": "effective",
+        "/artifacts/artifacts/3/slot_id": "implementation",
+        "/artifacts/artifacts/3/revision": 1,
+        "/artifacts/artifacts/3/selected": true,
+        "/artifacts/artifacts/3/change_source": "host",
+        "/artifacts/artifacts/3/value": {
+          "text": "def normalize_label(value):\n    return value.strip().lower()\n"
+        },
+        "/artifacts/artifacts/3/created_at": "2026-10-21T06:42:31.78679Z",
+        "/artifacts/artifacts/3/validity": "effective"
+      }
+    },
+    "normal-final-completed.json": {
+      "source_sha256": "0f4cc5837bc17774871644716e14320d94a51a3e4337879be1f8ea34f7da1827",
+      "format": "json",
+      "values": {
+        "/control/session/session_id": "mcp-7f30fc19c728c229145067ddb0b6d118",
+        "/control/session/pinned_revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/control/session/status": "completed",
+        "/control/session/created_at": "2026-10-21T06:41:09.692394Z",
+        "/control/session/updated_at": "2026-10-21T06:44:20.127937Z",
+        "/control/session/steps": [
+          {
+            "step_id": "prepare",
+            "attempt": 1,
+            "task_id": "dff48d9b-ea26-4342-81b3-31f3a8eea873",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:41:24.252254Z"
+          },
+          {
+            "step_id": "validate_brief",
+            "attempt": 1,
+            "task_id": "611ac84f-01b7-4642-a267-3dfd5d532ff7",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:41:39.748108Z"
+          },
+          {
+            "step_id": "implement",
+            "attempt": 1,
+            "task_id": "2af3408e-75b5-41a6-8dec-9fe21fb86cfb",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:42:15.698682Z"
+          }
+        ],
+        "/control/control/continuation": "completed",
+        "/control/control/state_version": 22,
+        "/control/control/active_executions": 0,
+        "/control/control/admission": {
+          "can_begin": false,
+          "reason": "session_completed"
+        },
+        "/control/projection/nodes": {
+          "implement": {
+            "id": "implement",
+            "mode": "human",
+            "requires_approval": true,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "prepare": {
+            "id": "prepare",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "validate_brief": {
+            "id": "validate_brief",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          }
+        },
+        "/control/projection/completed": true,
+        "/artifacts/artifacts/0/slot_id": "admission",
+        "/artifacts/artifacts/0/revision": 1,
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/change_source": "host",
+        "/artifacts/artifacts/0/value": {
+          "data": {
+            "brief": "Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.",
+            "fault_injection": null
+          }
+        },
+        "/artifacts/artifacts/0/created_at": "2026-10-21T06:41:40.956621Z",
+        "/artifacts/artifacts/0/validity": "effective",
+        "/artifacts/artifacts/1/slot_id": "brief",
+        "/artifacts/artifacts/1/revision": 1,
+        "/artifacts/artifacts/1/selected": true,
+        "/artifacts/artifacts/1/change_source": "host",
+        "/artifacts/artifacts/1/value": {
+          "brief": "Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.",
+          "fault_injection": null
+        },
+        "/artifacts/artifacts/1/created_at": "2026-10-21T06:41:28.524851Z",
+        "/artifacts/artifacts/1/validity": "effective",
+        "/artifacts/artifacts/2/slot_id": "checks",
+        "/artifacts/artifacts/2/revision": 1,
+        "/artifacts/artifacts/2/selected": true,
+        "/artifacts/artifacts/2/change_source": "host",
+        "/artifacts/artifacts/2/value": {
+          "text": "Command: python3 -m unittest -v test_labels.py\nExit status: 0\nstdout:\n\nstderr:\ntest_ascii (test_labels.NormalizeLabelTests) ... ok\ntest_empty (test_labels.NormalizeLabelTests) ... ok\ntest_unicode (test_labels.NormalizeLabelTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n"
+        },
+        "/artifacts/artifacts/2/created_at": "2026-10-21T06:42:35.31399Z",
+        "/artifacts/artifacts/2/validity": "effective",
+        "/artifacts/artifacts/3/slot_id": "implementation",
+        "/artifacts/artifacts/3/revision": 1,
+        "/artifacts/artifacts/3/selected": true,
+        "/artifacts/artifacts/3/change_source": "host",
+        "/artifacts/artifacts/3/value": {
+          "text": "def normalize_label(value):\n    return value.strip().lower()\n"
+        },
+        "/artifacts/artifacts/3/created_at": "2026-10-21T06:42:31.78679Z",
+        "/artifacts/artifacts/3/validity": "effective"
+      }
+    },
+    "missing-final-blocked.json": {
+      "source_sha256": "225e0d72217cfb7029ea611af73c43de834b90c2328ca2b8862b01a48cc0fc30",
+      "format": "json",
+      "values": {
+        "/control/session/session_id": "mcp-10984a6c6c0976e1db8626759d6c8a19",
+        "/control/session/pinned_revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/control/session/status": "failed",
+        "/control/session/created_at": "2026-10-21T06:41:59.093276Z",
+        "/control/session/updated_at": "2026-10-21T06:42:24.132414Z",
+        "/control/session/steps": [
+          {
+            "step_id": "prepare",
+            "attempt": 1,
+            "task_id": "4d077557-d7de-4abe-9783-a753512c925e",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:42:10.827526Z"
+          },
+          {
+            "step_id": "validate_brief",
+            "attempt": 1,
+            "task_id": "ff8749ad-b9e7-496a-b287-da3f5f70ba32",
+            "status": "failed",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:42:22.411326Z"
+          }
+        ],
+        "/control/control/continuation": "failed",
+        "/control/control/state_version": 13,
+        "/control/control/active_executions": 0,
+        "/control/control/admission": {
+          "can_begin": false,
+          "reason": "recovery_required"
+        },
+        "/control/projection/nodes": {
+          "implement": {
+            "id": "implement",
+            "mode": "human",
+            "requires_approval": true,
+            "execution": "none",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "prepare": {
+            "id": "prepare",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "validate_brief": {
+            "id": "validate_brief",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "failed",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          }
+        },
+        "/control/projection/completed": false,
+        "/artifacts/artifacts/0/slot_id": "admission",
+        "/artifacts/artifacts/0/revision": 1,
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/change_source": "host",
+        "/artifacts/artifacts/0/value": {
+          "data": {
+            "brief": null,
+            "fault_injection": "FAULT_BRIEF_MISSING"
+          }
+        },
+        "/artifacts/artifacts/0/created_at": "2026-10-21T06:42:23.612768Z",
+        "/artifacts/artifacts/0/validity": "effective",
+        "/artifacts/artifacts/1/slot_id": "brief",
+        "/artifacts/artifacts/1/revision": 1,
+        "/artifacts/artifacts/1/selected": true,
+        "/artifacts/artifacts/1/change_source": "host",
+        "/artifacts/artifacts/1/value": {
+          "brief": null,
+          "fault_injection": "FAULT_BRIEF_MISSING"
+        },
+        "/artifacts/artifacts/1/created_at": "2026-10-21T06:42:14.475892Z",
+        "/artifacts/artifacts/1/validity": "effective"
+      }
+    },
+    "missing-final-retried.json": {
+      "source_sha256": "27a3a56842c9b10891c524a980f711c5ba50c0fc4d19ce9d7e5e0e7792af62e6",
+      "format": "json",
+      "values": {
+        "/control/session/session_id": "mcp-10984a6c6c0976e1db8626759d6c8a19",
+        "/control/session/pinned_revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/control/session/status": "failed",
+        "/control/session/created_at": "2026-10-21T06:41:59.093276Z",
+        "/control/session/updated_at": "2026-10-21T06:43:30.375415Z",
+        "/control/session/steps": [
+          {
+            "step_id": "prepare",
+            "attempt": 1,
+            "task_id": "4d077557-d7de-4abe-9783-a753512c925e",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:42:10.827526Z"
+          },
+          {
+            "step_id": "validate_brief",
+            "attempt": 1,
+            "task_id": "ff8749ad-b9e7-496a-b287-da3f5f70ba32",
+            "status": "failed",
+            "validity": "stale",
+            "created_at": "2026-10-21T06:42:22.411326Z"
+          },
+          {
+            "step_id": "validate_brief",
+            "attempt": 2,
+            "task_id": "85e6b7d7-a94b-4706-bfcf-3acf7385ea35",
+            "status": "failed",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:43:28.140104Z"
+          }
+        ],
+        "/control/control/continuation": "failed",
+        "/control/control/state_version": 18,
+        "/control/control/active_executions": 0,
+        "/control/control/admission": {
+          "can_begin": false,
+          "reason": "recovery_required"
+        },
+        "/control/projection/nodes": {
+          "implement": {
+            "id": "implement",
+            "mode": "human",
+            "requires_approval": true,
+            "execution": "none",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "prepare": {
+            "id": "prepare",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "validate_brief": {
+            "id": "validate_brief",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "failed",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          }
+        },
+        "/control/projection/completed": false,
+        "/artifacts/artifacts/0/slot_id": "admission",
+        "/artifacts/artifacts/0/revision": 2,
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/change_source": "host",
+        "/artifacts/artifacts/0/value": {
+          "data": {
+            "brief": null,
+            "fault_injection": "FAULT_BRIEF_MISSING"
+          }
+        },
+        "/artifacts/artifacts/0/created_at": "2026-10-21T06:43:30.260032Z",
+        "/artifacts/artifacts/0/validity": "effective",
+        "/artifacts/artifacts/1/slot_id": "brief",
+        "/artifacts/artifacts/1/revision": 1,
+        "/artifacts/artifacts/1/selected": true,
+        "/artifacts/artifacts/1/change_source": "host",
+        "/artifacts/artifacts/1/value": {
+          "brief": null,
+          "fault_injection": "FAULT_BRIEF_MISSING"
+        },
+        "/artifacts/artifacts/1/created_at": "2026-10-21T06:42:14.475892Z",
+        "/artifacts/artifacts/1/validity": "effective"
+      }
+    },
+    "missing-final-after-edit.json": {
+      "source_sha256": "3e5b6118e12a9cdd0d1de82ee2ae8b9d6f4c91c91f40faec663ee51b7f727373",
+      "format": "json",
+      "values": {
+        "/control/session/session_id": "mcp-10984a6c6c0976e1db8626759d6c8a19",
+        "/control/session/pinned_revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/control/session/status": "failed",
+        "/control/session/created_at": "2026-10-21T06:41:59.093276Z",
+        "/control/session/updated_at": "2026-10-21T06:44:22.270459Z",
+        "/control/session/steps": [
+          {
+            "step_id": "prepare",
+            "attempt": 1,
+            "task_id": "4d077557-d7de-4abe-9783-a753512c925e",
+            "status": "succeeded",
+            "validity": "effective",
+            "created_at": "2026-10-21T06:42:10.827526Z"
+          },
+          {
+            "step_id": "validate_brief",
+            "attempt": 1,
+            "task_id": "ff8749ad-b9e7-496a-b287-da3f5f70ba32",
+            "status": "failed",
+            "validity": "stale",
+            "created_at": "2026-10-21T06:42:22.411326Z"
+          },
+          {
+            "step_id": "validate_brief",
+            "attempt": 2,
+            "task_id": "85e6b7d7-a94b-4706-bfcf-3acf7385ea35",
+            "status": "failed",
+            "validity": "stale",
+            "created_at": "2026-10-21T06:43:28.140104Z"
+          }
+        ],
+        "/control/control/continuation": "failed",
+        "/control/control/state_version": 19,
+        "/control/control/active_executions": 0,
+        "/control/control/admission": {
+          "can_begin": false,
+          "reason": "recovery_required"
+        },
+        "/control/projection/nodes": {
+          "implement": {
+            "id": "implement",
+            "mode": "human",
+            "requires_approval": true,
+            "execution": "none",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "prepare": {
+            "id": "prepare",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "succeeded",
+            "validity": "effective",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            }
+          },
+          "validate_brief": {
+            "id": "validate_brief",
+            "mode": "auto",
+            "requires_approval": false,
+            "execution": "none",
+            "validity": "stale",
+            "reachability": "reachable",
+            "readiness": "ready",
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true,
+              "witnesses": [
+                {
+                  "material_id": "brief",
+                  "revision_id": "psr_fb6cd4e6ed48487db294ddba68e71021"
+                }
+              ]
+            }
+          }
+        },
+        "/control/projection/completed": false,
+        "/artifacts/artifacts/0/slot_id": "brief",
+        "/artifacts/artifacts/0/revision": 2,
+        "/artifacts/artifacts/0/selected": true,
+        "/artifacts/artifacts/0/change_source": "human",
+        "/artifacts/artifacts/0/value": {
+          "text": "{\"brief\":\"Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.\",\"fault_injection\":\"FAULT_BRIEF_MISSING\"}"
+        },
+        "/artifacts/artifacts/0/created_at": "2026-10-21T06:44:22.270459Z",
+        "/artifacts/artifacts/0/validity": "effective"
+      }
+    },
+    "normal-projection.json": {
+      "source_sha256": "28c854d3e653f9a58f131f94fdb1956f3ff8d9e2cb5d910186b49ee930cd452a",
+      "format": "json",
+      "values": {
+        "/session_id": "mcp-7f30fc19c728c229145067ddb0b6d118",
+        "/attempt_history": {
+          "implement": [
+            {
+              "attempt_id": "2af3408e-75b5-41a6-8dec-9fe21fb86cfb",
+              "attempt": 1,
+              "task_id": "2af3408e-75b5-41a6-8dec-9fe21fb86cfb",
+              "status": "succeeded",
+              "validity": "effective",
+              "duration_sec": 27.617091,
+              "artifact_count": 2,
+              "started_at": "2026-10-21T06:42:15Z",
+              "updated_at": "2026-10-21T06:42:43.315773Z"
+            }
+          ],
+          "prepare": [
+            {
+              "attempt_id": "dff48d9b-ea26-4342-81b3-31f3a8eea873",
+              "attempt": 1,
+              "task_id": "dff48d9b-ea26-4342-81b3-31f3a8eea873",
+              "status": "succeeded",
+              "validity": "effective",
+              "duration_sec": 11.598368,
+              "artifact_count": 1,
+              "started_at": "2026-10-21T06:41:24Z",
+              "updated_at": "2026-10-21T06:41:35.850622Z"
+            }
+          ],
+          "validate_brief": [
+            {
+              "attempt_id": "pss_eab05373113b4ac19a7f241455c01661",
+              "attempt": 1,
+              "task_id": "611ac84f-01b7-4642-a267-3dfd5d532ff7",
+              "status": "succeeded",
+              "validity": "effective",
+              "duration_sec": 1.241638,
+              "artifact_count": 1,
+              "started_at": "2026-10-21T06:41:39Z",
+              "updated_at": "2026-10-21T06:41:40.989746Z"
+            }
+          ]
+        }
+      }
+    },
+    "missing-projection.json": {
+      "source_sha256": "aa3fd331773ae91b84b2ef3a1370c304a8d24e152b243b820114407786805f2d",
+      "format": "json",
+      "values": {
+        "/session_id": "mcp-10984a6c6c0976e1db8626759d6c8a19",
+        "/attempt_history": {
+          "prepare": [
+            {
+              "attempt_id": "4d077557-d7de-4abe-9783-a753512c925e",
+              "attempt": 1,
+              "task_id": "4d077557-d7de-4abe-9783-a753512c925e",
+              "status": "succeeded",
+              "validity": "effective",
+              "duration_sec": 8.200137,
+              "artifact_count": 1,
+              "started_at": "2026-10-21T06:42:10Z",
+              "updated_at": "2026-10-21T06:42:19.027663Z"
+            }
+          ],
+          "validate_brief": [
+            {
+              "attempt_id": "pss_10435f01a7af49d9a63238046758adc5",
+              "attempt": 1,
+              "task_id": "ff8749ad-b9e7-496a-b287-da3f5f70ba32",
+              "status": "failed",
+              "validity": "stale",
+              "duration_sec": 65.714968,
+              "artifact_count": 1,
+              "started_at": "2026-10-21T06:42:22Z",
+              "updated_at": "2026-10-21T06:43:28.126294Z"
+            },
+            {
+              "attempt_id": "pss_c29044bc17cc4ba98cc11fb91a23b0de",
+              "attempt": 2,
+              "task_id": "85e6b7d7-a94b-4706-bfcf-3acf7385ea35",
+              "status": "failed",
+              "validity": "stale",
+              "duration_sec": 54.133328,
+              "artifact_count": 1,
+              "started_at": "2026-10-21T06:43:28Z",
+              "updated_at": "2026-10-21T06:44:22.273432Z"
+            }
+          ]
+        }
+      }
+    },
+    "ui-recovery.json": {
+      "source_sha256": "b69ad48d2ce820328a60fb8a3490e0cceb69445af02bdf08aa7e9c656f7c05d0",
+      "format": "json",
+      "values": {
+        "/captured_at": "2026-10-21T06:52:55.979Z",
+        "/state": "Browser tab: 6, Title: \"LazyMind\", URL: \"http://127.0.0.1:8090/workflow-runs/mcp-10984a6c6c0976e1db8626759d6c8a19/embed\".\n1 AXWebArea LazyMind, URL: 127.0.0.1:8090/workflow-runs/mcp-10984a6c6c0976e1db8626759d6c8a19/embed\n\t2 container 工作流面板\n\t\t3 text Superpowers Brief Gate Showcase\n\t\t4 button Description: 工作流状态：失败, Help: 查看工作流\n\t\t5 button 工作流操作\n\t\t\t6 image more\n\t\t7 button 展开工作流面板\n\t\t\t8 image fullscreen\n\t\t9 tab group 工作流阶段\n\t\t\t10 tab (selected, settable, boolean) Brief, Value: 1, ID: workflow-tab-mcp-10984a6c6c0976e1db8626759d6c8a19-brief\n\t\t\t11 tab (selectable, settable, boolean) Gate, Value: 0, ID: workflow-tab-mcp-10984a6c6c0976e1db8626759d6c8a19-admission\n\t\t\t12 tab (selectable, settable, boolean) Code and tests, Value: 0, ID: workflow-tab-mcp-10984a6c6c0976e1db8626759d6c8a19-implementation\n\t\t13 text 此工作流以完全信任模式运行，可在服务进程的系统权限范围内读取、修改文件和执行代码，不受 Workspace 权限限制，无需逐次审批。\n\t\t14 container Description: Brief, ID: workflow-tab-panel-brief\n\t\t\t15 text DISPATCH BRIEF\n\t\t\t16 button 内容项 0\n\t\t\t\t17 button Help: 点击编辑, {\"brief\":\"Implement normalize_label(value) in labels.py: strip surrounding whitespace and lowercase; test ASCII, Unicode and empty input in a disposable directory.\",\"fault_injection\":\"FAULT_BRIEF_MISSING\"}\n\t\t\t\t18 pop up button 展示源码\n\t\t\t\t19 button 版本历史（2 个版本）\n\t\t20 container 工作流会话操作\n\t\t\t21 button (disabled) 重试, Help: 步骤执行中，请稍候\n\t\t\t22 container 回退到步骤：\n\t\t\t\t23 text 回退到步骤：\n\t\t\t\t24 button (disabled) Brief, Help: 步骤执行中，请稍候\n\nThe focused UI element is 4 button Description: 工作流状态：失败, Help: 查看工作流"
+      }
+    },
+    "normal-independent.json": {
+      "source_sha256": "44b5a84ce9d6c762363675fe80fb01915bb2d851dbfc835bb1a781a0d2f6f836",
+      "format": "json",
+      "values": {
+        "/returncode": 0,
+        "/stdout": "",
+        "/stderr": "test_ascii (test_labels.NormalizeLabelTests) ... ok\ntest_empty (test_labels.NormalizeLabelTests) ... ok\ntest_unicode (test_labels.NormalizeLabelTests) ... ok\n\n----------------------------------------------------------------------\nRan 3 tests in 0.000s\n\nOK\n",
+        "/source_sha256": "0a8da21e949f8014d172e064a5f160ffeb63ad2eeb6b16a997f40fe4525194e2",
+        "/artifact_equals_file": true
+      }
+    },
+    "denied-implement-final.json": {
+      "source_sha256": "4fc562b97b2e0800d85f52bb54b7f4cf3afd8539cf441fa97aef90723b5ea993",
+      "format": "json",
+      "values": {
+        "/result": "REJECTED",
+        "/details": {
+          "status": 409,
+          "response": {
+            "error": {
+              "code": "WORKFLOW_ADMISSION_DENIED",
+              "message": "recovery_required"
+            },
+            "ok": false
+          }
+        }
+      }
+    },
+    "normal-final-codex.jsonl": {
+      "source_sha256": "b5ee2f91563ccdd0d72ca76d28bcc5453a502ccb56bf8970055720a2dc783e1d",
+      "format": "jsonl",
+      "values": {
+        "/8/item/tool": "workflow.list",
+        "/8/item/status": "completed",
+        "/10/item/tool": "workflow.get",
+        "/10/item/status": "completed",
+        "/10/item/result/structured_content/revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/12/item/tool": "workflow.start",
+        "/12/item/status": "completed",
+        "/12/item/result/structured_content/session_id": "mcp-7f30fc19c728c229145067ddb0b6d118",
+        "/12/item/result/structured_content/revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/12/item/result/structured_content/state/control/continuation": "continue",
+        "/14/item/tool": "workflow.state",
+        "/14/item/status": "completed",
+        "/14/item/result/structured_content/session_id": "mcp-7f30fc19c728c229145067ddb0b6d118",
+        "/17/item/tool": "workflow.step.begin",
+        "/17/item/status": "completed",
+        "/17/item/result/structured_content/execution/executor_host": "external-agent",
+        "/17/item/result/structured_content/execution/attempt_status": "claimed",
+        "/17/item/result/structured_content/execution/execution_id": "dff48d9b-ea26-4342-81b3-31f3a8eea873",
+        "/17/item/result/structured_content/execution/review_after_complete": false,
+        "/17/item/result/structured_content/state/control/continuation": "continue",
+        "/19/item/tool": "workflow.artifact.publish",
+        "/19/item/status": "completed",
+        "/19/item/result/structured_content/saved": true,
+        "/19/item/result/structured_content/seq": 1,
+        "/19/item/result/structured_content/slot": "brief",
+        "/21/item/tool": "workflow.step.complete",
+        "/21/item/status": "completed",
+        "/21/item/result/structured_content/attempt_status": "succeeded",
+        "/21/item/result/structured_content/execution_id": "dff48d9b-ea26-4342-81b3-31f3a8eea873",
+        "/21/item/result/structured_content/state/control/continuation": "continue",
+        "/23/item/tool": "workflow.step.begin",
+        "/23/item/status": "completed",
+        "/23/item/result/structured_content/execution/executor_host": "lazymind",
+        "/23/item/result/structured_content/execution/attempt_status": "queued",
+        "/23/item/result/structured_content/execution/execution_id": "pss_eab05373113b4ac19a7f241455c01661",
+        "/23/item/result/structured_content/execution/review_after_complete": false,
+        "/23/item/result/structured_content/state/control/continuation": "awaiting_executor"
+      }
+    },
+    "normal-final-implement.jsonl": {
+      "source_sha256": "6bd7b7f8b691c65b775058e4ee672a63ca695d446b0e766d1f367548ce3e5eb8",
+      "format": "jsonl",
+      "values": {
+        "/4/item/tool": "workflow.state",
+        "/4/item/status": "completed",
+        "/4/item/result/structured_content/session_id": "mcp-7f30fc19c728c229145067ddb0b6d118",
+        "/6/item/tool": "workflow.step.begin",
+        "/6/item/status": "completed",
+        "/6/item/result/structured_content/execution/executor_host": "external-agent",
+        "/6/item/result/structured_content/execution/attempt_status": "claimed",
+        "/6/item/result/structured_content/execution/execution_id": "2af3408e-75b5-41a6-8dec-9fe21fb86cfb",
+        "/6/item/result/structured_content/execution/review_after_complete": true,
+        "/6/item/result/structured_content/state/control/continuation": "continue",
+        "/10/item/tool": "workflow.artifact.publish",
+        "/10/item/status": "completed",
+        "/10/item/result/structured_content/saved": true,
+        "/10/item/result/structured_content/seq": 1,
+        "/10/item/result/structured_content/slot": "implementation",
+        "/12/item/tool": "workflow.artifact.publish",
+        "/12/item/status": "completed",
+        "/12/item/result/structured_content/saved": true,
+        "/12/item/result/structured_content/seq": 1,
+        "/12/item/result/structured_content/slot": "checks",
+        "/14/item/tool": "workflow.step.complete",
+        "/14/item/status": "completed",
+        "/14/item/result/structured_content/attempt_status": "succeeded",
+        "/14/item/result/structured_content/execution_id": "2af3408e-75b5-41a6-8dec-9fe21fb86cfb",
+        "/14/item/result/structured_content/state/control/continuation": "awaiting_user"
+      }
+    },
+    "missing-final-codex.jsonl": {
+      "source_sha256": "76f6a1f4e8d73c22e582c5bbd83fa4b35bdd6ecaa67f10cc8af92234e28eece0",
+      "format": "jsonl",
+      "values": {
+        "/8/item/tool": "workflow.list",
+        "/8/item/status": "completed",
+        "/10/item/tool": "workflow.get",
+        "/10/item/status": "completed",
+        "/10/item/result/structured_content/revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/12/item/tool": "workflow.start",
+        "/12/item/status": "completed",
+        "/12/item/result/structured_content/session_id": "mcp-10984a6c6c0976e1db8626759d6c8a19",
+        "/12/item/result/structured_content/revision_id": "3d166c5b-9133-4556-9960-dec83b54c92b",
+        "/12/item/result/structured_content/state/control/continuation": "continue",
+        "/15/item/tool": "workflow.state",
+        "/15/item/status": "completed",
+        "/15/item/result/structured_content/session_id": "mcp-10984a6c6c0976e1db8626759d6c8a19",
+        "/17/item/tool": "workflow.step.begin",
+        "/17/item/status": "completed",
+        "/17/item/result/structured_content/execution/executor_host": "external-agent",
+        "/17/item/result/structured_content/execution/attempt_status": "claimed",
+        "/17/item/result/structured_content/execution/execution_id": "4d077557-d7de-4abe-9783-a753512c925e",
+        "/17/item/result/structured_content/execution/review_after_complete": false,
+        "/17/item/result/structured_content/state/control/continuation": "continue",
+        "/19/item/tool": "workflow.artifact.publish",
+        "/19/item/status": "completed",
+        "/19/item/result/structured_content/saved": true,
+        "/19/item/result/structured_content/seq": 1,
+        "/19/item/result/structured_content/slot": "brief",
+        "/21/item/tool": "workflow.step.complete",
+        "/21/item/status": "completed",
+        "/21/item/result/structured_content/attempt_status": "succeeded",
+        "/21/item/result/structured_content/execution_id": "4d077557-d7de-4abe-9783-a753512c925e",
+        "/21/item/result/structured_content/state/control/continuation": "continue",
+        "/23/item/tool": "workflow.step.begin",
+        "/23/item/status": "completed",
+        "/23/item/result/structured_content/execution/executor_host": "lazymind",
+        "/23/item/result/structured_content/execution/attempt_status": "queued",
+        "/23/item/result/structured_content/execution/execution_id": "pss_10435f01a7af49d9a63238046758adc5",
+        "/23/item/result/structured_content/execution/review_after_complete": false,
+        "/23/item/result/structured_content/state/control/continuation": "awaiting_executor"
+      }
+    },
+    "missing-task.sse": {
+      "source_sha256": "a3242d54ec1c80e449f5cad348f166b961388422339826ee0f69cb809410f92d",
+      "format": "selected SSE data events",
+      "events": [
+        {
+          "source_line": 14,
+          "event": {
+            "type": "tool_calls",
+            "task_id": "ff8749ad-b9e7-496a-b287-da3f5f70ba32",
+            "tool_calls": [
+              {
+                "args": {
+                  "candidate": {
+                    "brief": null,
+                    "fault_injection": "FAULT_BRIEF_MISSING"
+                  }
+                },
+                "id": "post-step-check-1",
+                "name": "check_showcase_brief"
+              }
+            ]
+          }
+        },
+        {
+          "source_line": 16,
+          "event": {
+            "type": "tool_results",
+            "task_id": "ff8749ad-b9e7-496a-b287-da3f5f70ba32",
+            "tool_results": [
+              {
+                "name": "check_showcase_brief",
+                "result": {
+                  "ok": false,
+                  "value": "BRIEF_MISSING"
+                },
+                "tool_call_id": "post-step-check-1"
+              }
+            ]
+          }
+        },
+        {
+          "source_line": 20,
+          "event": {
+            "type": "error",
+            "task_id": "ff8749ad-b9e7-496a-b287-da3f5f70ba32",
+            "status": "failed",
+            "message": "BRIEF_MISSING"
+          }
+        }
+      ]
+    },
+    "advanced-normal": {
+      "source": "advanced/csv/run/result.json",
+      "source_sha256": "c7d9bf54c3bd444dbf592005e515524ee0274114987365e7a3021e7d3c083815",
+      "format": "json",
+      "values": {
+        "/result": "PASS",
+        "/failure": null,
+        "/session_id": "bfe9028f7fb34ef9bd72bfdd2c9a4ba5",
+        "/launch_count": 1,
+        "/control/session/status": "completed",
+        "/control/session/created_at": "2026-10-21T06:59:02.14123Z",
+        "/control/session/updated_at": "2026-10-21T06:59:58.106361Z"
+      }
+    },
+    "advanced-missing": {
+      "source": "advanced/missing/run/result.json",
+      "source_sha256": "43920db4f0a9f9d30c62a3e3a55d3d0c71d0df3df17b8133fe2d4502290eae00",
+      "format": "json",
+      "values": {
+        "/result": "FAIL",
+        "/failure": "BRIEF_MISSING",
+        "/session_id": "63f89ab813674cc1b6d73d60bfe54511",
+        "/launch_count": 0,
+        "/control/session/status": "failed",
+        "/control/session/created_at": "2026-10-21T07:00:11.968145Z",
+        "/control/session/updated_at": "2026-10-21T07:00:12.260632Z"
+      }
+    }
+  },
+  "format_only_yaml_semantics_sha256": {
+    "workflows/superpowers-brief-showcase/scenario/state.yml": "f05bece5ef26a010439f1bb116631389cc99ed37fc82f7fdbbb3a17c89702d04"
+  }
+}

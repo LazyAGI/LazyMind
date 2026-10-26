@@ -15,6 +15,7 @@ import { isLocalSessionEnabled } from "@/runtime/localSession";
 import { isVocabularyEnabled } from "@/runtime/mode";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 import SettingsPage from "@/modules/settings";
+import { RAGComponentProvider } from "@/modules/modelProvider/contexts/RAGComponentContext";
 
 const McpOAuthConnect = lazy(() => import("@/modules/modelProvider/pages/McpOAuthConnect"));
 const McpOAuthCallback = lazy(() => import("@/modules/modelProvider/pages/McpOAuthCallback"));
@@ -35,6 +36,7 @@ const GroupManagement = lazy(() => import("@/modules/admin/pages/group"));
 const GroupDetail = lazy(() => import("@/modules/admin/pages/group/detail.tsx"));
 const DatabaseConnectionsPage = lazy(() => import("@/modules/dataSource/database"));
 const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/feishuCallback"));
+const DocumentDirectoriesPage = lazy(() => import("@/modules/documentDirectories/DirectoryPage"));
 const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
 const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
 const WeChatOfficialAccountPage = lazy(() => import("@/modules/modelProvider/pages/WeChatOfficialAccountPage"));
@@ -155,7 +157,14 @@ export default function AppRouter() {
           }
         />
         <Route path="/workflow-runs/:sessionId/embed" element={<WorkflowRunPage embedded />} />
-        <Route path="/" element={<MainLayout />}>
+        <Route
+          path="/"
+          element={(
+            <RAGComponentProvider>
+              <MainLayout />
+            </RAGComponentProvider>
+          )}
+        >
           <Route path="workflow-runs/:sessionId" element={<WorkflowRunPage />} />
           <Route index element={<Navigate to="/agent/chat" replace />} />
           <Route path="agent/chat" element={<ChatApp />}>
@@ -200,6 +209,8 @@ export default function AppRouter() {
             path="channels/feishu"
             element={<Navigate to="/channels?provider=feishu" replace />}
           />
+          <Route path="document-directories" element={<DocumentDirectoriesPage />} />
+          <Route path="document-directories/:directoryId" element={<DocumentDirectoriesPage />} />
           <Route path="cloud-documents" element={<CloudDocumentsLayout />}>
             <Route index element={<CloudDocumentsPage />} />
             <Route path="mail" element={<EmailConnectionPage />} />

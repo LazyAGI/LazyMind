@@ -1,17 +1,18 @@
 import { act, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { ConfigProvider } from "antd";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SidebarGroups, { type GroupBatchSelection } from "./SidebarGroups";
 import * as api from "./api";
 import { CONVERSATION_DRAG, GROUP_DRAG } from "./drag";
+const reorder = vi.hoisted(() => vi.fn());
 const t = (key: string, values?: { name?: string }) => values?.name ? `${key} ${values.name}` : key;
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getUserInfo: () => ({ userId: "sidebar-owner" }) }, AUTH_USER_CHANGE_EVENT: "sidebar-user-change" }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "" }));
-vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conversationServiceGetConversationDetail: vi.fn().mockResolvedValue({ data: { conversation: { display_name: "a对话0", title_revision: 1 } } }) }) }));
-vi.mock("./ConversationMembership", () => ({ default: ({ title, onRename }: { title?: string; onRename: () => void }) => <button onClick={onRename}>重命名 {title}</button> }));
-vi.mock("./api", () => ({ getConversationGroup: vi.fn(), listConversationGroups: vi.fn(), updateGroupPlacement: vi.fn(), assignConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "group-change" }));
+vi.mock("@/modules/chat/utils/request", () => ({ ChatServiceApi: () => ({ conversationServiceReorder: reorder, conversationServiceGetConversationDetail: vi.fn().mockResolvedValue({ data: { conversation: { display_name: "a对话0", title_revision: 1 } } }) }) }));
+vi.mock("./api", () => ({ getConversationGroup: vi.fn(), listConversationGroups: vi.fn(), updateGroupPlacement: vi.fn(), assignConversation: vi.fn(), emitConversationGroupsChanged: vi.fn(), renameGroupConversation: vi.fn(), CONVERSATION_GROUPS_CHANGED_EVENT: "group-change" }));
 const groups = [{ id: "a", name: "旅行", pinned: false }, { id: "b", name: "学习", pinned: false }] as api.ConversationGroup[];
 function renderGroups(searchText = "") { return render(<MemoryRouter><SidebarGroups groups={groups} searchText={searchText} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>); }
 function transfer(type: string, payload: string) { return { types: [type], getData: (key: string) => key === type ? payload : "" }; }
@@ -22,6 +23,7 @@ function BatchGroups() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  reorder.mockResolvedValue({ data: {} });
   localStorage.clear();
   vi.mocked(api.updateGroupPlacement).mockImplementation(async (id, input) => groups.map(group => group.id === id ? { ...group, ...input } : group));
   vi.mocked(api.getConversationGroup).mockImplementation(async id => ({ group: groups.find(g => g.id === id)!, conversations: Array.from({ length: 6 }, (_, i) => ({ conversation_id: `${id}-${i}`, display_name: `${id}对话${i}`, pinned_at: "", membership_revision: 1 })), nextPageToken: "", total: 6 }));
@@ -130,13 +132,18 @@ describe("group sidebar", () => {
     expect(api.assignConversation).not.toHaveBeenCalled();
   });
 
-  it("replaces the selected conversation title with an inline editor", async () => {
-    renderGroups();
-    fireEvent.click(await screen.findByRole("button", { name: "重命名 a对话0" }));
+  it.each(["group", "project"])("opens the rename dialog from a %s member's context menu", async kind => {
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><SidebarGroups groups={[{ ...groups[0], kind }]} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter></ConfigProvider>);
+    const title = await screen.findByRole("button", { name: "a对话0", exact: true });
+    fireEvent.contextMenu(title.closest(".conversation-group-member")!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "conversationOrganizer.renameConversation" }));
     const input = await screen.findByRole("textbox", { name: "conversationRename.name" });
-    expect(input.closest(".conversation-group-member")).toHaveAttribute("draggable", "false");
-    expect(screen.queryByRole("button", { name: "a对话0", exact: true })).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(input.closest(".conversation-group-member")).toBeNull();
+    expect(title.closest(".conversation-group-member")).toHaveAttribute("draggable", "false");
+    expect(title).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(input).toHaveValue("a对话0");
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.getByRole("button", { name: "a对话0", exact: true })).toBeInTheDocument();
   });
@@ -253,14 +260,14 @@ describe("group sidebar", () => {
     fireEvent.dragOver(row, { clientY: 105, dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'a-0', groupId: 'a' })) });
     expect(row).toHaveClass('member-drop-before');
     fireEvent.drop(row, { clientY: 105, dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'a-0', groupId: 'a' })) });
-    await waitFor(() => expect(api.assignConversation).toHaveBeenCalledWith('a', 'a-0', { target_conversation_id: 'a-1', position: 'before' }));
+    await waitFor(() => expect(reorder).toHaveBeenCalledWith('a-0', 'a-1', 'before'));
     await waitFor(() => expect(row).toHaveAttribute('draggable', 'true'));
     const drop = createEvent.drop(row, { dataTransfer: transfer(CONVERSATION_DRAG, JSON.stringify({ id: 'b-0', groupId: 'b' })) });
     Object.defineProperty(drop, 'clientY', { value: 125 });
     fireEvent(row, drop);
     await waitFor(() => expect(api.assignConversation).toHaveBeenCalledWith('a', 'b-0', { target_conversation_id: 'a-1', position: 'after' }));
-    expect(api.assignConversation).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(api.emitConversationGroupsChanged).toHaveBeenCalledTimes(2));
+    expect(api.assignConversation).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.emitConversationGroupsChanged).toHaveBeenCalledTimes(1));
   });
   it('does not commit a failed drop or allow member drops in batch mode', async () => {
     vi.mocked(api.assignConversation).mockRejectedValueOnce(new Error('save failed'));
@@ -275,7 +282,7 @@ describe("group sidebar", () => {
     rerender(<MemoryRouter><SidebarGroups groups={groups} batchSelection={{ checkedIds: [], onToggle: vi.fn(), onToggleMany: vi.fn(), onMembersChange: vi.fn() }} onEdit={vi.fn()} onRemove={vi.fn()} /></MemoryRouter>);
     fireEvent.drop(await screen.findByRole('checkbox', { name: 'a对话1' }), { dataTransfer });
     expect(api.assignConversation).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('.conversation-member-drag-handle')).toBeNull();
+    expect(document.querySelector('.record-drag-handle')).toBeNull();
   });
   it("disables drag mutations while searching", async () => {
     renderGroups("旅行");

@@ -1,6 +1,15 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ChatMention } from "../components/ChatInput/MentionEditor";
+import type { FeaturedSelection } from "./featuredSelection";
+import type { ComposerFileCandidate } from '../components/ChatInput/composerReferences';
+
+export interface ChatModeDraft {
+  text: string;
+  mentions: ChatMention[];
+  files: ComposerFileCandidate[];
+  featuredSelection?: FeaturedSelection;
+}
 
 export interface ArtifactRef {
   slot: string;
@@ -12,6 +21,8 @@ export interface ArtifactRef {
 }
 
 interface ChatInputStore {
+  modeDraft?: ChatModeDraft;
+  setModeDraft: (draft?: ChatModeDraft) => void;
   inputContents: Record<string, string>;
   inputMentions: Record<string, ChatMention[]>;
   /** Pending artifact references to inject into the next message. Keyed by conversationId. */
@@ -30,6 +41,7 @@ interface ChatInputStore {
 export const useChatInputStore = create<ChatInputStore>()(
   persist(
     (set, get) => ({
+      setModeDraft: modeDraft => set({ modeDraft }),
       inputContents: {},
       inputMentions: {},
       artifactRefs: {},
@@ -60,7 +72,7 @@ export const useChatInputStore = create<ChatInputStore>()(
         });
       },
       clearAllInputContents: () => {
-        set({ inputContents: {}, inputMentions: {} });
+        set({ inputContents: {}, inputMentions: {}, modeDraft: undefined });
       },
       addArtifactRef: (conversationId: string, ref: ArtifactRef) => {
         set((state) => {

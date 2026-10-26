@@ -118,6 +118,8 @@ def _file_result_details(tool_name: str, content: Any, observation: Any = None) 
         'next_offset': payload.get('next_offset'),
         'total_lines': payload.get('total_lines'),
         'eof': payload.get('eof'),
+        'line_unit': payload.get('line_unit'),
+        'truncated_lines': payload.get('truncated_lines', []),
         'body': body,
     }
 
@@ -313,8 +315,14 @@ def compact_file_result(tool_name: str, content: Any, observation: Any = None) -
         )
     if eof is not None:
         lines.append(f'EOF: {bool(eof)}')
+    if details.get('line_unit'):
+        lines.append(f'Line unit: {details["line_unit"]}')
+    if details.get('truncated_lines'):
+        lines.append(f'Clipped physical lines: {details["truncated_lines"]}. '
+                     'Their omitted suffixes require authorized bounded Shell extraction; '
+                     'next_offset only reads later physical lines.')
     if next_offset is not None:
-        reader, argument = ('read', 'path') if tool_name == 'read' else ('read_file_resource', 'target')
+        reader, argument = ('read', 'file_path') if tool_name == 'read' else ('read_file_resource', 'target')
         lines.append(f'Continue with {reader}({argument}={locator!r}, offset={next_offset}).')
     lines.append('Content excerpt:')
     lines.append(_head_tail(body, head=500, tail=300))
@@ -450,7 +458,7 @@ def _spill_filename(tool_name: str, content: str) -> str:
 
 def _is_browser_tool(tool_name: str) -> bool:
     normalized = str(tool_name or '').strip().lower()
-    return normalized.startswith('browser_') or normalized.startswith('browser.')
+    return normalized.startswith(('mcp_browser_', 'browser_', 'browser.'))
 
 
 def _browser_json_envelope(text: str) -> tuple[str, Any, str] | None:
@@ -610,7 +618,8 @@ def format_spilled_tool_notice(
         f'File path: {workspace_spill_uri(rel_path)}',
         f'Size: {size_kb:.1f} KB',
         'Use read_file_resource(target="' + workspace_spill_uri(rel_path) + '", offset=1) '
-        'to read more. Continue with next_offset until End of file.',
+        'to inspect evidence. Continue with the returned next_offset only if more evidence is needed. '
+        'Omitting offset repeats the first window; turn is not a page number.',
     ]
     lines.extend(_browser_spill_metadata(tool_name, content))
     lines.extend([

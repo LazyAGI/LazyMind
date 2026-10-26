@@ -5,6 +5,7 @@ import pytest
 from lazyllm.tools.agent import ToolExecutionError
 from pydantic import ValidationError
 from lazyllm.tools.agent.toolsManager import ToolManager
+from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 from lazymind.chat.engine.subagent.tools import (
     _resolve_list_index_from_sort_order,
     _save_artifact,
@@ -17,9 +18,13 @@ def _save_tool():
 
 
 def test_save_artifacts_schema_exposes_required_item_fields():
-    schema = _save_tool().params_schema.model_json_schema()
-    item_ref = schema['properties']['artifacts']['items']['$ref']
-    item_schema = schema['$defs'][item_ref.rsplit('/', 1)[-1]]
+    ensure_lazyllm_tool_docs([save_artifacts])
+    schema = ToolManager([save_artifacts]).tools_description[0]['function']['parameters']
+    item_schema = schema['properties']['artifacts']['items']
+    # Kimi Coding rejects this item as recursive when it is a local $ref.
+    assert '$ref' not in item_schema
+    assert item_schema['type'] == 'object'
+    assert item_schema['additionalProperties'] is False
 
     assert item_schema['required'] == ['key', 'value']
     assert 'content' not in item_schema['properties']
