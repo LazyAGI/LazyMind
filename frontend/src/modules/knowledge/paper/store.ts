@@ -1,60 +1,8 @@
 import type { LibraryImportContext } from "../api/academicReferences";
-import { emptyLibrary, normalizeLibrary, sampleLibrary, type PaperLibraryData } from "./model";
-import { asLegacyLibrary, migratePaperLibrary, type PaperLibraryDataV3 } from "./libraryModel";
-
-const dataKey = (datasetId: string) => `lazymind.paper-library.data.v2.${datasetId}`;
-const dataKeyV3 = (datasetId: string) => `lazymind.paper-library.data.v3.${datasetId}`;
+import type { PaperLibraryDataV3 } from "./libraryModel";
 
 export function isPaperLibrary(scene?: string) {
   return scene === "academic_papers";
-}
-
-/** Read browser data only for the explicit demo. Production reads use loadPersistedPaperLibrary. */
-export function loadPreviewPaperLibrary(datasetId: string, preview = false): PaperLibraryDataV3 {
-  const modernRaw = localStorage.getItem(dataKeyV3(datasetId));
-  if (modernRaw) {
-    try {
-      const parsed = migratePaperLibrary(JSON.parse(modernRaw));
-      return parsed;
-    } catch { /* fall through */ }
-  }
-  const raw = localStorage.getItem(dataKey(datasetId));
-  if (raw) {
-    try {
-      return migratePaperLibrary(normalizeLibrary(JSON.parse(raw) as PaperLibraryData));
-    } catch {
-      /* fall through */
-    }
-  }
-  return migratePaperLibrary(preview ? sampleLibrary() : emptyLibrary());
-}
-
-/** Browser-only preview/legacy helper. Production mutations must use savePersistedPaperLibrary. */
-export function savePreviewPaperLibrary(datasetId: string, data: PaperLibraryDataV3) {
-  saveLibraryRecords(datasetId, JSON.stringify(data), JSON.stringify(asLegacyLibrary(data)));
-}
-
-function saveLibraryRecords(datasetId: string, modern: string, legacy: string) {
-  const records = [[dataKeyV3(datasetId), modern], [dataKey(datasetId), legacy]];
-  const previous = records.map(([key]) => localStorage.getItem(key));
-  const written: number[] = [];
-  try {
-    records.forEach(([key, value], index) => {
-      localStorage.setItem(key, value);
-      written.push(index);
-    });
-  } catch (error) {
-    const failures: unknown[] = [error];
-    written.reverse().forEach((index) => {
-      try {
-        const old = previous[index];
-        if (old === null) localStorage.removeItem(records[index][0]);
-        else localStorage.setItem(records[index][0], old);
-      } catch (rollbackError) { failures.push(rollbackError); }
-    });
-    if (failures.length > 1) throw Object.assign(new Error("文献保存失败，恢复原数据也失败，请检查浏览器存储空间"), { errors: failures });
-    throw error;
-  }
 }
 
 export interface PersistedPaperLibrary {

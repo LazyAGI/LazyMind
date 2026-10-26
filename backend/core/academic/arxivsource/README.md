@@ -42,7 +42,6 @@ paper, err := arxivsource.NewClient().Lookup(ctx, identifier.ID())
 
 ## 应用接口
 
-- `POST /api/core/academic/arxiv:lookup`：`{ "input": "..." }`，只查询真实题录。
 - `POST /api/core/academic/imports:preview`：解析编号或链接并确认目标论文与版本。
 - `POST /api/core/academic/imports`：提交预览回执、所选候选、目标知识库和幂等标识，进入统一导入队列。
 - `GET /api/core/academic/import-batches`：读取批次回执及文档处理状态。

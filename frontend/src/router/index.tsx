@@ -27,7 +27,6 @@ const KnowledgeApp = lazy(() => import("@/modules/knowledge/KnowledgeApp"));
 const KnowledgeList = lazy(() => import("@/modules/knowledge/pages/list"));
 const KnowledgeAuth = lazy(() => import("@/modules/knowledge/pages/auth"));
 const KnowledgeDetail = lazy(() => import("@/modules/knowledge/pages/detail"));
-const PaperPreview = lazy(() => import("@/modules/knowledge/pages/paperPreview"));
 const Knowledge = lazy(() => import("@/modules/knowledge/pages/knowledge"));
 const VocabularyPage = lazy(() => import("@/modules/vocabulary/VocabularyPage"));
 const AdminLayout = lazy(() => import("@/modules/admin/AdminLayout"));
@@ -188,7 +187,6 @@ export default function AppRouter() {
             ) : (
               <Route path="auth/:id" element={<KnowledgeAuth />} />
             )}
-            <Route path="paper-preview" element={<PaperPreview />} />
             <Route path="detail/:id" element={<KnowledgeDetail />} />
             <Route
               path="knowledge/:knowledgeBaseId/:knowledgeId"

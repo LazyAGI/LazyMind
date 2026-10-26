@@ -9,6 +9,7 @@ import (
 	"lazymind/core/store"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,72 @@ import (
 type sourceTransport func(*http.Request) (*http.Response, error)
 
 func (f sourceTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestListImportsPreservesSourceContextAndRetryContract(t *testing.T) {
+	db := sourceTestDB(t)
+	if err := db.AutoMigrate(&orm.Dataset{}); err != nil {
+		t.Fatal(err)
+	}
+	previous := store.DB()
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(previous, previous, nil) })
+	for _, row := range []any{
+		&orm.Dataset{ID: "papers", DisplayName: "Research papers", Scene: "academic_papers"},
+		&orm.Conversation{ID: "chat", BaseModel: orm.BaseModel{CreateUserID: "alice"}},
+		&orm.ChatHistory{ID: "answer", ConversationID: "chat", RetrievalResult: json.RawMessage(`{"sources":[]}`)},
+		&orm.SubAgentTask{ID: "task", CreateUserID: "alice", InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`), Sources: orm.RawJSON(`[]`)},
+		&orm.AcademicWork{ID: "paper", CanonicalTitle: "A saved paper", AuthorsJSON: json.RawMessage(`[]`), ExternalIDsJSON: json.RawMessage(`{}`), ProvenanceJSON: json.RawMessage(`{}`)},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	contexts := []struct {
+		name    string
+		context SourceContext
+		query   url.Values
+	}{
+		{"chat", SourceContext{ConversationID: "chat", HistoryID: "answer"}, url.Values{"conversation_id": {"chat"}, "history_id": {"answer"}}},
+		{"work", SourceContext{TaskID: "task"}, url.Values{"task_id": {"task"}}},
+	}
+	for _, test := range contexts {
+		batch := orm.PaperImportBatch{ID: test.name, CreatedBy: "alice", EntryType: "conversation_sources", TargetDatasetID: "papers", Status: "failed", SourceDocumentIDsJSON: json.RawMessage(`[]`), PolicySnapshotJSON: mustSourceJSON(sourceImportPolicy{OriginKey: test.context.key(), Context: test.context, CreatedLibrary: true})}
+		item := orm.PaperImportItem{ID: test.name + "-item", BatchID: batch.ID, AcademicWorkID: "paper", Status: "failed", Stage: "download", ReferenceIDsJSON: json.RawMessage(`[]`), PresenceSnapshotJSON: mustSourceJSON(map[string]string{"paper_key": "arxiv:2404.06654"}), SelectedCandidateJSON: json.RawMessage(`{}`), ErrorDetailsJSON: mustSourceJSON(map[string]string{"message": "Download failed"})}
+		for _, row := range []any{&batch, &item} {
+			if err := db.Create(row).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, test := range contexts {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/academic/imports?"+test.query.Encode(), nil)
+			request.Header.Set("X-User-Id", "alice")
+			response := httptest.NewRecorder()
+			ListImports(response, request)
+			var body struct {
+				Items []SourceImportView `json:"items"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+				t.Fatal(response.Code, response.Body.String(), err)
+			}
+			if len(body.Items) != 1 {
+				t.Fatalf("source query mixed records from another context: %+v", body.Items)
+			}
+			item := body.Items[0]
+			if item.BatchID != test.name || item.PaperKey != "arxiv:2404.06654" || item.TargetName != "Research papers" || !item.CreatedLibrary || item.Status != "failed" || item.Stage != "download" || item.ErrorMessage != "Download failed" || !item.Retryable || item.RetryBatchID != test.name || item.RetryItemID != test.name+"-item" {
+				t.Fatalf("source import response lost its status or retry contract: %+v", item)
+			}
+			request.Header.Set("X-User-Id", "bob")
+			denied := httptest.NewRecorder()
+			ListImports(denied, request)
+			if denied.Code != http.StatusForbidden {
+				t.Fatalf("cross-user source query was accepted: %d %s", denied.Code, denied.Body.String())
+			}
+		})
+	}
+}
+
 func TestSourceImportIdempotencyReservationAndInvalidTarget(t *testing.T) {
 	db := sourceTestDB(t)
 	if e := db.AutoMigrate(&orm.Dataset{}, &orm.ACLModel{}); e != nil {

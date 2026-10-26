@@ -237,6 +237,10 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 }
 
 func ListImports(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("history_id") != "" || r.URL.Query().Get("task_id") != "" || r.URL.Query().Get("workflow_session_id") != "" {
+		ListSourceImports(w, r)
+		return
+	}
 	userID, ok := requireUser(w, r)
 	if !ok {
 		return
@@ -507,16 +511,6 @@ func safePaperFilename(value string) string {
 		return fmt.Sprintf("paper-%d", time.Now().Unix())
 	}
 	return out
-}
-
-func validatePaperImportResult(imported doc.LocalFileImportResult, importErr error) error {
-	if importErr != nil {
-		return importErr
-	}
-	if imported.DocumentID == "" {
-		return errors.New("paper import did not return a document")
-	}
-	return nil
 }
 
 func activePaperImport(ctx context.Context, user, dataset, work, version string) (bool, error) {

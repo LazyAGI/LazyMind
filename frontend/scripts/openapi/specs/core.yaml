@@ -600,6 +600,50 @@ components:
                 - selected_directions
                 - papers
             type: object
+        AcademicSourceImportItem:
+            properties:
+                batch_id:
+                    type: string
+                created_library:
+                    type: boolean
+                document_id:
+                    type: string
+                error_message:
+                    type: string
+                item_id:
+                    type: string
+                paper_key:
+                    type: string
+                processing_status:
+                    type: string
+                retry_batch_id:
+                    type: string
+                retry_item_id:
+                    type: string
+                retryable:
+                    type: boolean
+                stage:
+                    type: string
+                status:
+                    type: string
+                target_dataset_id:
+                    type: string
+                target_name:
+                    type: string
+                title:
+                    type: string
+            required:
+                - item_id
+                - batch_id
+                - title
+                - paper_key
+                - target_dataset_id
+                - target_name
+                - created_library
+                - status
+                - stage
+                - retryable
+            type: object
         AcademicTaskLaunch:
             properties:
                 dataset_id:
@@ -16183,12 +16227,6 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
-    /api/core/academic/arxiv:lookup:
-        post:
-            responses:
-                "200":
-                    description: OK
-            summary: POST /academic/arxiv:lookup
     /api/core/academic/chat-context:
         get:
             parameters:
@@ -16548,21 +16586,58 @@ paths:
                   required: false
                   schema:
                     type: string
+                - in: query
+                  name: conversation_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: history_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: task_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: workflow_session_id
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: work_display_key
+                  required: false
+                  schema:
+                    type: string
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                properties:
-                                    items:
+                                oneOf:
+                                    - properties:
                                         items:
-                                            $ref: '#/components/schemas/AcademicImportQueueItem'
-                                        type: array
-                                    total:
-                                        type: integer
-                                type: object
-                    description: Read import history and matching current-collection PDF processing state
-            summary: Read import history and matching current-collection PDF processing state
+                                            items:
+                                                $ref: '#/components/schemas/AcademicImportQueueItem'
+                                            type: array
+                                        total:
+                                            type: integer
+                                      required:
+                                        - items
+                                        - total
+                                      type: object
+                                    - properties:
+                                        items:
+                                            items:
+                                                $ref: '#/components/schemas/AcademicSourceImportItem'
+                                            type: array
+                                      required:
+                                        - items
+                                      type: object
+                    description: Read source-scoped Chat/Work imports or current-collection import history
+            summary: Read source-scoped Chat/Work imports or current-collection import history
             tags:
                 - AcademicWorkflows
         post:

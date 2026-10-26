@@ -1,5 +1,6 @@
+import { paperFixture } from "./__tests__/fixtures";
 import { describe, expect, it } from "vitest";
-import { parseBibTeX, parseCSV, parseRIS, sampleLibrary, toBibTeX, toCSV, toRIS } from "./model";
+import { parseBibTeX, parseCSV, parseRIS, toBibTeX, toCSV, toRIS } from "./model";
 
 describe("bibliography import validation", () => {
   const validBib = '@article{one,\n title = {Valid paper}\n}';
@@ -33,9 +34,9 @@ describe("bibliography import validation", () => {
     expect(() => parseCSV(text)).toThrow(/CSV/);
   });
   it("round-trips multiline quoted CSV and all supported formats", () => {
-    const items = [{ ...sampleLibrary().papers[0], title: 'First line\nSecond "quoted" line' }];
+    const items = [paperFixture({ title: 'First line\nSecond "quoted" line' })];
     expect(parseCSV(toCSV(items, [])).papers[0].title).toBe(items[0].title);
     expect(parseBibTeX(toBibTeX(items), "local")).toHaveLength(1);
-    expect(parseRIS(toRIS(sampleLibrary().papers), "local")).toHaveLength(sampleLibrary().papers.length);
+    expect(parseRIS(toRIS([paperFixture()]), "local")).toHaveLength(1);
   });
 });

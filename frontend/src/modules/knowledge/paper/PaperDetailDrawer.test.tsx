@@ -1,10 +1,11 @@
+import type { PaperLibraryDataV3 } from "./libraryModel";
+import { libraryFixture } from "./__tests__/fixtures";
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { migratePaperLibrary, type PaperLibraryDataV3 } from './libraryModel';
 import PaperDetailDrawer from './PaperDetailDrawer';
 
-const fixture = () => migratePaperLibrary({ folders: [], papers: [{ id: 'paper', title: 'A study', authors: 'A. Author', year: 2026, venue: 'Journal', folderId: null, status: 'unread', important: false, tags: [], source: 'local', parse: 'ready' }] });
+const fixture = () => libraryFixture({ folders: [], papers: [{ id: 'paper', title: 'A study', authors: 'A. Author', year: 2026, venue: 'Journal', folderId: null, status: 'unread', important: false, tags: [], source: 'local', parse: 'ready' }] });
 
 afterEach(cleanup);
 

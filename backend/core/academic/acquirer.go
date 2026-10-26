@@ -67,11 +67,6 @@ func validateArxivPDFRedirect(candidate FulltextCandidate, target string) error 
 	return nil
 }
 
-func candidateOriginalURLs(candidate FulltextCandidate) []string {
-	urls, _ := canonicalPaperURLs(candidate)
-	return urls
-}
-
 func acquireCandidateOriginal(ctx context.Context, svc *doc.OriginalService, caller doc.DatasetCatalogCaller, candidate FulltextCandidate) (doc.OriginalRef, error) {
 	urls, err := canonicalPaperURLs(candidate)
 	if err != nil {

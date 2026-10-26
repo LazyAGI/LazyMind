@@ -4,33 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"lazymind/core/academic/arxivsource"
 	"net/http"
 	"strings"
-	"time"
-)
 
-func LookupArxiv(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireUser(w, r); !ok {
-		return
-	}
-	var req struct {
-		Input string `json:"input"`
-	}
-	if !parseJSON(r, &req) || strings.TrimSpace(req.Input) == "" {
-		replyError(w, 400, "INVALID_REQUEST", "请输入 arXiv 编号或链接")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
-	defer cancel()
-	paper, err := arxivsource.NewClient().Lookup(ctx, req.Input)
-	if err != nil {
-		replyArxivImportError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"paper": paper})
-}
+	"lazymind/core/academic/arxivsource"
+)
 
 func replyArxivImportError(w http.ResponseWriter, err error) {
 	code, status := "ARXIV_IMPORT_FAILED", http.StatusInternalServerError

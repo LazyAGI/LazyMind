@@ -339,7 +339,7 @@ describe("MainLayout resizable navigation", () => {
     expect(screen.getByTestId("record-list")).toBeVisible();
   });
 
-  it.each(["/lib/knowledge/paper-preview", "/lib/knowledge/detail/papers", "/lib/knowledge/knowledge/papers/paper-1"])("starts paper pages collapsed on %s but allows manual expansion", async (path) => {
+  it.each(["/lib/knowledge/detail/papers", "/lib/knowledge/knowledge/papers/paper-1"])("starts paper pages collapsed on %s but allows manual expansion", async (path) => {
     localStorage.setItem("lazymind.paper-library.ids", JSON.stringify(["papers"]));
     renderLayout(path);
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");

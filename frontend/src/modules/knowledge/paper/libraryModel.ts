@@ -102,25 +102,6 @@ export function emptyLibraryV3(): PaperLibraryDataV3 {
   return { schemaVersion: 3, folders: [], collections: [], papers: [], attachments: [], notes: [], annotations: [], relations: [], mergeSnapshots: [] };
 }
 
-export function migratePaperLibrary(raw: unknown): PaperLibraryDataV3 {
-  if (raw && typeof raw === 'object' && (raw as { schemaVersion?: number }).schemaVersion === 3) {
-    const value = raw as PaperLibraryDataV3;
-    return { ...emptyLibraryV3(), ...value, schemaVersion: 3 };
-  }
-  const legacy = (raw || {}) as Partial<PaperLibraryData>;
-  const attachments: Attachment[] = [];
-  const papers = (legacy.papers || []).map((item) => {
-    const attachmentId = `attachment-${item.id}`;
-    attachments.push({ id: attachmentId, paperId: item.id, name: `${item.title || 'paper'}.pdf`, kind: 'pdf', mimeType: 'application/pdf', source: item.source, addedAt: now(), isPrimary: true });
-    return ({
-    ...item,
-    metadata: { identifiers: { doi: item.doi, arxiv: item.arxiv }, confidence: {} },
-    attachmentIds: [attachmentId], noteIds: [], annotationIds: [], collectionIds: [], relatedPaperIds: [],
-  });
-  });
-  return { ...emptyLibraryV3(), folders: legacy.folders || [], papers, attachments };
-}
-
 export function createAttachment(input: Omit<Attachment, 'id' | 'addedAt'>): Attachment {
   return { ...input, id: `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, addedAt: now() };
 }

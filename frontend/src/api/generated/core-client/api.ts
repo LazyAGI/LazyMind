@@ -342,6 +342,23 @@ export interface AcademicReviewInput {
     'selected_directions': Array<string>;
     'user_instruction': string;
 }
+export interface AcademicSourceImportItem {
+    'batch_id': string;
+    'created_library': boolean;
+    'document_id'?: string;
+    'error_message'?: string;
+    'item_id': string;
+    'paper_key': string;
+    'processing_status'?: string;
+    'retry_batch_id'?: string;
+    'retry_item_id'?: string;
+    'retryable': boolean;
+    'stage': string;
+    'status': string;
+    'target_dataset_id': string;
+    'target_name': string;
+    'title': string;
+}
 export interface AcademicTaskLaunch {
     'dataset_id'?: string;
     'direction'?: string;
@@ -774,9 +791,17 @@ export interface ApiCoreAcademicImportBatchesGet200ResponseNotification {
     'active'?: number;
     'needs_action'?: number;
 }
-export interface ApiCoreAcademicImportsGet200Response {
-    'items'?: Array<AcademicImportQueueItem>;
-    'total'?: number;
+/**
+ * @type ApiCoreAcademicImportsGet200Response
+ */
+export type ApiCoreAcademicImportsGet200Response = ApiCoreAcademicImportsGet200ResponseOneOf | ApiCoreAcademicImportsGet200ResponseOneOf1;
+
+export interface ApiCoreAcademicImportsGet200ResponseOneOf {
+    'items': Array<AcademicImportQueueItem>;
+    'total': number;
+}
+export interface ApiCoreAcademicImportsGet200ResponseOneOf1 {
+    'items': Array<AcademicSourceImportItem>;
 }
 export interface ApiCoreAcademicImportsPost200Response {
     'batch_id'?: string;
@@ -8544,13 +8569,18 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Read import history and matching current-collection PDF processing state
+         * @summary Read source-scoped Chat/Work imports or current-collection import history
          * @param {string} [targetDatasetId]
          * @param {string} [sourceDocumentId]
+         * @param {string} [conversationId]
+         * @param {string} [historyId]
+         * @param {string} [taskId]
+         * @param {string} [workflowSessionId]
+         * @param {string} [workDisplayKey]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicImportsGet: async (targetDatasetId?: string, sourceDocumentId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicImportsGet: async (targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/academic/imports`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -8569,6 +8599,26 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
 
             if (sourceDocumentId !== undefined) {
                 localVarQueryParameter['source_document_id'] = sourceDocumentId;
+            }
+
+            if (conversationId !== undefined) {
+                localVarQueryParameter['conversation_id'] = conversationId;
+            }
+
+            if (historyId !== undefined) {
+                localVarQueryParameter['history_id'] = historyId;
+            }
+
+            if (taskId !== undefined) {
+                localVarQueryParameter['task_id'] = taskId;
+            }
+
+            if (workflowSessionId !== undefined) {
+                localVarQueryParameter['workflow_session_id'] = workflowSessionId;
+            }
+
+            if (workDisplayKey !== undefined) {
+                localVarQueryParameter['work_display_key'] = workDisplayKey;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -9120,14 +9170,19 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Read import history and matching current-collection PDF processing state
+         * @summary Read source-scoped Chat/Work imports or current-collection import history
          * @param {string} [targetDatasetId]
          * @param {string} [sourceDocumentId]
+         * @param {string} [conversationId]
+         * @param {string} [historyId]
+         * @param {string} [taskId]
+         * @param {string} [workflowSessionId]
+         * @param {string} [workDisplayKey]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicImportsGet(targetDatasetId?: string, sourceDocumentId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(targetDatasetId, sourceDocumentId, options);
+        async apiCoreAcademicImportsGet(targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -9379,13 +9434,13 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Read import history and matching current-collection PDF processing state
+         * @summary Read source-scoped Chat/Work imports or current-collection import history
          * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsGet200Response> {
-            return localVarFp.apiCoreAcademicImportsGet(requestParameters.targetDatasetId, requestParameters.sourceDocumentId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicImportsGet(requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -9586,6 +9641,16 @@ export interface AcademicWorkflowsApiApiCoreAcademicImportsGetRequest {
     readonly targetDatasetId?: string
 
     readonly sourceDocumentId?: string
+
+    readonly conversationId?: string
+
+    readonly historyId?: string
+
+    readonly taskId?: string
+
+    readonly workflowSessionId?: string
+
+    readonly workDisplayKey?: string
 }
 
 /**
@@ -9776,13 +9841,13 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Read import history and matching current-collection PDF processing state
+     * @summary Read source-scoped Chat/Work imports or current-collection import history
      * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.targetDatasetId, requestParameters.sourceDocumentId, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -16386,35 +16451,6 @@ export type ApiCoreDatasetsGetSourceEnum = typeof ApiCoreDatasetsGetSourceEnum[k
  */
 export const DefaultApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
-        /**
-         *
-         * @summary POST /academic/arxiv:lookup
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicArxivLookupPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/arxiv:lookup`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
         /**
          *
          * @summary POST /academic/documents/{document_id}/references:extract
@@ -29063,18 +29099,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
-         * @summary POST /academic/arxiv:lookup
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicArxivLookupPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicArxivLookupPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicArxivLookupPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /academic/documents/{document_id}/references:extract
          * @param {string} documentId
          * @param {*} [options] Override http request option.
@@ -33918,15 +33942,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
 export const DefaultApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
     const localVarFp = DefaultApiFp(configuration)
     return {
-        /**
-         *
-         * @summary POST /academic/arxiv:lookup
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicArxivLookupPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicArxivLookupPost(options).then((request) => request(axios, basePath));
-        },
         /**
          *
          * @summary POST /academic/documents/{document_id}/references:extract
@@ -39631,16 +39646,6 @@ export interface DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetForma
  * DefaultApi - object-oriented interface
  */
 export class DefaultApi extends BaseAPI {
-    /**
-     *
-     * @summary POST /academic/arxiv:lookup
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicArxivLookupPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicArxivLookupPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
     /**
      *
      * @summary POST /academic/documents/{document_id}/references:extract

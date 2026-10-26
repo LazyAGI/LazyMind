@@ -89,60 +89,6 @@ export const citationLabel: Record<CitationStyle, string> = {
   mla: "MLA",
 };
 
-export function emptyLibrary(): PaperLibraryData {
-  return { folders: [], papers: [] };
-}
-
-export function sampleLibrary(): PaperLibraryData {
-  return {
-    folders: [
-      { id: "ml", name: "机器学习" },
-      { id: "llm", name: "大模型" },
-      { id: "rag", name: "检索增强" },
-      { id: "eval", name: "评测" },
-    ],
-    papers: [
-      paper("p1", "Attention Is All You Need", "Vaswani 等", "NeurIPS", 2017, "llm", "reading", true, ["Transformer", "基线"], "zotero", "ready", "10.48550/arxiv.1706.03762", "1706.03762"),
-      paper("p2", "BERT: Pre-training of Deep Bidirectional Transformers", "Devlin 等", "NAACL", 2019, "llm", "read", true, ["预训练"], "zotero"),
-      paper("p3", "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks", "Lewis 等", "NeurIPS", 2020, "rag", "reading", false, ["RAG", "检索"], "local"),
-      paper("p4", "Self-RAG: Learning to Retrieve, Generate, and Critique", "Asai 等", "ICLR", 2024, "rag", "unread", true, ["RAG"], "semantic_scholar"),
-      paper("p5", "Lost in the Middle: How Language Models Use Long Contexts", "Liu 等", "TACL", 2024, "llm", "unread", false, ["长上下文"], "google_scholar", "failed"),
-      paper("p6", "Deep Residual Learning for Image Recognition", "He 等", "CVPR", 2016, "ml", "read", false, ["视觉"], "zotero"),
-      paper("p7", "Measuring Massive Multitask Language Understanding", "Hendrycks 等", "ICLR", 2021, "eval", "unread", false, ["评测"], "google_scholar"),
-    ],
-  };
-}
-
-function paper(
-  id: string,
-  title: string,
-  authors: string,
-  venue: string,
-  year: number,
-  folderId: string,
-  status: ReadingStatus,
-  important: boolean,
-  tags: string[],
-  source: ImportSource,
-  parse: ParseState = "ready",
-  doi?: string,
-  arxiv?: string,
-): PaperItem {
-  return { id, title, authors, venue, year, folderId, status, important, tags, source, parse, doi, arxiv };
-}
-
-type StoredFolder = PaperFolder & { parentId?: string | null };
-
-export function normalizeLibrary(raw: Partial<PaperLibraryData> & { folders?: StoredFolder[] }): PaperLibraryData {
-  const folders = (raw.folders || []).map((folder) => ({ id: folder.id, name: folder.name }));
-  const known = new Set(folders.map((folder) => folder.id));
-  const papers = (raw.papers || []).map((item) => ({
-    ...item,
-    folderId: item.folderId && known.has(item.folderId) ? item.folderId : null,
-  }));
-  return { folders, papers };
-}
-
 export function papersInView(data: PaperLibraryData, folderId: string | null) {
   if (!folderId) return data.papers;
   return data.papers.filter((item) => item.folderId === folderId);
@@ -247,10 +193,6 @@ export function filterPapers(
   });
 }
 
-export function usablePaper(item: PaperItem) {
-  return item.parse === "ready";
-}
-
 export function venueName(item: PaperItem) {
   const venue = (item.venue || "未标注").trim();
   return venue.replace(new RegExp(`[,\\s]*${item.year}$`), "").trim() || venue;
@@ -271,24 +213,9 @@ export function paperLink(item: PaperItem) {
   return null;
 }
 
-export type YearOrder = "library" | "newest" | "oldest";
-
-export function sortPapers(items: PaperItem[], order: YearOrder) {
-  if (order === "library") return items;
-  return [...items].sort((left, right) => {
-    const delta = order === "newest" ? right.year - left.year : left.year - right.year;
-    return delta || left.title.localeCompare(right.title);
-  });
-}
-
 export function movePapers(papers: PaperItem[], ids: string[], folderId: string | null) {
   const wanted = new Set(ids);
   return papers.map((item) => wanted.has(item.id) ? { ...item, folderId } : item);
-}
-
-export function removePapers(papers: PaperItem[], ids: string[]) {
-  const wanted = new Set(ids);
-  return papers.filter((item) => !wanted.has(item.id));
 }
 
 export interface PaperEdits {

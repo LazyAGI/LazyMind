@@ -1,5 +1,4 @@
-import { classifyIdentifier, normalizeDoi, type ImportSource, type PaperItem } from "./model";
-import { isArxivInput, requestArxivMetadata } from "./arxivImport";
+import { normalizeDoi, type ImportSource, type PaperItem } from "./model";
 
 function citationCount(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
@@ -43,24 +42,4 @@ export async function lookupDoi(raw: string): Promise<PaperItem> {
     citationCount: citationCount(message["is-referenced-by-count"]),
     doi: message?.DOI || doi,
   }, "doi");
-}
-
-export async function lookupArxiv(raw: string): Promise<PaperItem> {
-  const paper = await requestArxivMetadata(raw);
-  return {
-    ...draft({
-      id: `arxiv-${paper.base_id}`, title: paper.title, authors: paper.authors.join("、"),
-      venue: paper.venue, year: paper.year, doi: paper.doi || undefined, arxiv: paper.base_id,
-    }, "arxiv"),
-    arxivVersion: paper.version,
-    abstract: paper.abstract,
-    sourceUrl: paper.pdf_url,
-  };
-}
-
-export async function lookupIdentifier(raw: string): Promise<PaperItem> {
-  if (isArxivInput(raw)) return lookupArxiv(raw);
-  const kind = classifyIdentifier(raw);
-  if (!kind) throw new Error("请粘贴 DOI 或 arXiv 编号");
-  return kind.kind === "doi" ? lookupDoi(kind.value) : lookupArxiv(raw);
 }

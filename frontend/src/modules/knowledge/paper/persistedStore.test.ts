@@ -1,8 +1,8 @@
+import { libraryFixture } from "./__tests__/fixtures";
 import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { emptyLibraryV3, migratePaperLibrary, type PaperLibraryDataV3 } from './libraryModel';
-import { sampleLibrary } from './model';
-import { loadPersistedPaperLibrary, savePersistedPaperLibrary, savePreviewPaperLibrary } from './store';
+import { emptyLibraryV3, type PaperLibraryDataV3 } from './libraryModel';
+import { loadPersistedPaperLibrary, savePersistedPaperLibrary } from './store';
 
 const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: api }));
@@ -24,7 +24,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clea
 
 describe('server-owned paper library', () => {
   it('retains the complete graph after browser storage is cleared', async () => {
-    const data = migratePaperLibrary(sampleLibrary());
+    const data = libraryFixture();
     data.notes.push({ id: 'n', paperId: data.papers[0].id, title: 'Note', content: 'Durable research', kind: 'note', createdAt: '2026-10-21', updatedAt: '2026-10-21' });
     data.papers[0].noteIds = ['n'];
     data.papers[0].tags = ['server-tag'];
@@ -50,13 +50,13 @@ describe('server-owned paper library', () => {
 
   it('does not substitute a local save when the backend rejects the write', async () => {
     api.put.mockRejectedValue({ response: { status: 500, data: { message: '数据库写入失败' } } });
-    await expect(savePersistedPaperLibrary('shared', migratePaperLibrary(sampleLibrary()), 0)).rejects.toThrow('数据库写入失败');
+    await expect(savePersistedPaperLibrary('shared', libraryFixture(), 0)).rejects.toThrow('数据库写入失败');
     expect(localStorage.length).toBe(0);
     expect(server.data.papers).toEqual([]);
   });
 
   it('does not use the old browser copy when the server read fails', async () => {
-    savePreviewPaperLibrary('shared', migratePaperLibrary(sampleLibrary()));
+    localStorage.setItem('lazymind.paper-library.data.v3.shared', JSON.stringify(libraryFixture()));
     api.get.mockRejectedValue({ response: { status: 503, data: { message: '数据库不可用' } } });
     await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('数据库不可用');
     expect(api.put).not.toHaveBeenCalled();
@@ -65,12 +65,12 @@ describe('server-owned paper library', () => {
   it('works with browser storage unavailable when no legacy copy can be read', async () => {
     vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('Blocked'); });
     expect((await loadPersistedPaperLibrary('shared')).revision).toBe(0);
-    await savePersistedPaperLibrary('shared', migratePaperLibrary(sampleLibrary()), 0);
+    await savePersistedPaperLibrary('shared', libraryFixture(), 0);
     expect(server.data.papers.length).toBeGreaterThan(0);
   });
 
   it('reads only the server when a browser preview exists', async () => {
-    savePreviewPaperLibrary('shared', migratePaperLibrary(sampleLibrary()));
+    localStorage.setItem('lazymind.paper-library.data.v3.shared', JSON.stringify(libraryFixture()));
     expect((await loadPersistedPaperLibrary('shared')).data).toEqual(emptyLibraryV3());
     expect(api.put).not.toHaveBeenCalled();
   });

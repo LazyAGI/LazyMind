@@ -1,23 +1,30 @@
-import { afterEach, expect, it } from "vitest";
-import { parseLibraryBackup, serializeLibraryBackup } from "./exportLibrary";
-import { asLegacyLibrary, migratePaperLibrary } from "./libraryModel";
-import { normalizeLibrary, type PaperItem } from "./model";
-import { loadPreviewPaperLibrary, savePreviewPaperLibrary } from "./store";
+import { expect, it, vi } from 'vitest';
+import { libraryFixture, paperFixture } from './__tests__/fixtures';
+import { savePersistedPaperLibrary } from './store';
+import { loadPaperLibraryForExport } from './exportLibrary';
 
-afterEach(() => localStorage.clear());
+const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
+vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: api }));
+vi.mock('./libraryDocuments', async original => ({
+  ...await original<typeof import('./libraryDocuments')>(),
+  loadLibraryDocuments: vi.fn().mockResolvedValue({ documents: [], states: [] }),
+}));
 
-it("preserves known, zero, and unknown citation counts through migration, storage and backup", () => {
-  const base: PaperItem = { id: "paper", title: "Paper", authors: "A. Author", venue: "Journal", year: 2024, folderId: null, status: "unread", important: false, tags: [], source: "doi", parse: "ready" };
-  const library = normalizeLibrary({ folders: [], papers: [
-    { ...base, id: "cited", citationCount: 42 },
-    { ...base, id: "uncited", citationCount: 0 },
-    { ...base, id: "unknown" },
+it('preserves known, zero, and unknown citation counts through server persistence and export loading', async () => {
+  const data = libraryFixture({ papers: [
+    paperFixture({ id: 'cited', citationCount: 42 }),
+    paperFixture({ id: 'uncited', citationCount: 0 }),
+    paperFixture({ id: 'unknown' }),
   ] });
-  const modern = migratePaperLibrary(library);
-  const backup = parseLibraryBackup(serializeLibraryBackup(modern));
-  savePreviewPaperLibrary("citation-roundtrip", backup);
-  for (const restored of [asLegacyLibrary(backup), asLegacyLibrary(loadPreviewPaperLibrary("citation-roundtrip"))]) {
-    expect(restored.papers.map((paper) => paper.citationCount)).toEqual([42, 0, undefined]);
-    expect(restored.papers[2]).not.toHaveProperty("citationCount");
-  }
+  let saved = { data, revision: 0, can_write: true };
+  api.put.mockImplementation(async (_url, body) => {
+    saved = { data: JSON.parse(JSON.stringify(body.data)), revision: 1, can_write: true };
+    return { data: saved };
+  });
+  api.get.mockImplementation(async () => ({ data: saved }));
+
+  await savePersistedPaperLibrary('papers', data, 0);
+  const exported = await loadPaperLibraryForExport('papers');
+  expect(exported.papers.map(paper => paper.citationCount)).toEqual([42, 0, undefined]);
+  expect(exported.papers[2]).not.toHaveProperty('citationCount');
 });

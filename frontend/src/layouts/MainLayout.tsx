@@ -229,8 +229,7 @@ export default function MainLayout() {
   const datasetOwner = useRef(notificationUserKey);
   const knowledgeDatasetReady = datasetOwner.current === notificationUserKey && currentKnowledgeDataset?.dataset_id === knowledgeDatasetId;
   const isPaperPage = Boolean(
-    matchPath("/lib/knowledge/paper-preview", pathname)
-      || knowledgeDatasetReady && isPaperLibrary(currentKnowledgeDataset?.scene),
+    knowledgeDatasetReady && isPaperLibrary(currentKnowledgeDataset?.scene),
   );
   const startsWithCompactSidebar = isWorkflowDetail || isPaperPage;
   const defaultSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
