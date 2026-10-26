@@ -204,13 +204,17 @@ func TestExpansionDeleteAndPersonalHistory(t *testing.T) {
 func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	db := paperFixture(t)
 	ctx := t.Context()
+	original := "仅比较 LoRA 和 QLoRA，不新增第三篇论文。"
+	answer := "请选择综述的研究方向（可多选）: 低秩适配机制；量化低秩微调"
+	expectedInstruction := original + "\n\n" + answer
 	conversation, err := newAcademicConversation(db.DB, "u", "papers", "expansion", "expansion")
 	if err != nil {
 		t.Fatal(err)
 	}
 	seed := WorkflowPaper{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}
-	input := ReviewWorkflowInput{UserInstruction: "agents", CandidateDirections: []string{"tools"}, SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{seed, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}}}}
-	record := orm.AcademicExpansion{ID: "projection", UserID: "u", RequestOwner: "u", RequestKey: "start-projection", DatasetID: "papers", ConversationID: conversation, Title: "agents", Goal: "review", Status: "running", ResultJSON: marshal(ReviewWorkflowInput{UserInstruction: "agents", Papers: []WorkflowPaper{seed}})}
+	directions := []string{"低秩适配机制", "量化低秩微调"}
+	input := ReviewWorkflowInput{UserInstruction: "【原始要求】" + original + "\n【追问回答】" + answer, CandidateDirections: directions, SelectedDirections: directions, Papers: []WorkflowPaper{seed, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}}}}
+	record := orm.AcademicExpansion{ID: "projection", UserID: "u", RequestOwner: "u", RequestKey: "start-projection", DatasetID: "papers", ConversationID: conversation, Title: original, Goal: "review", Status: "running", ResultJSON: marshal(ReviewWorkflowInput{UserInstruction: original, Papers: []WorkflowPaper{seed}})}
 	seeds, err := seedSources(db.DB, "papers", []WorkflowPaper{seed})
 	if err != nil {
 		t.Fatal(err)
@@ -218,6 +222,17 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	record.SeedSnapshotJSON = marshal(seeds)
 	record.DiscoveryJSON = marshal([]paperDiscovery{{Papers: []PaperRef{input.Papers[1].Paper}}})
 	if err = db.Create(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	histories := []orm.ChatHistory{
+		{ID: "direction-question", ConversationID: conversation, Seq: 1, RawContent: "请先拓展论文，达到全文要求后在新的 Chat 生成综述。\n" + original, Ext: marshal(map[string]any{
+			"ask_pending":       map[string]any{"ask_id": "direction-ask", "questions": []map[string]any{{"text": "请选择综述的研究方向（可多选）", "type": "multiple", "choices": directions}}},
+			"ask_answered":      true,
+			"ask_saved_answers": map[string]any{"0": map[string]any{"type": "multiple", "value": directions, "otherText": ""}},
+		})},
+		{ID: "direction-answer", ConversationID: conversation, Seq: 2, RawContent: answer},
+	}
+	if err = db.Create(&histories).Error; err != nil {
 		t.Fatal(err)
 	}
 	session := orm.WorkflowSession{ID: "session", ConversationID: conversation, WorkflowID: "paper_expansion", CreateUserID: "u", Status: "completed"}
@@ -263,6 +278,64 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	if count != 1 {
 		t.Fatal("duplicate automatic review", count)
 	}
+	var saved ReviewWorkflowInput
+	if err = json.Unmarshal(record.ResultJSON, &saved); err != nil || saved.UserInstruction != expectedInstruction {
+		t.Fatalf("projection did not preserve only actual user instructions: %q %v", saved.UserInstruction, err)
+	}
+	var handoff orm.AcademicHandoff
+	if err = db.Where("id=?", record.AutoReviewID).Take(&handoff).Error; err != nil {
+		t.Fatal(err)
+	}
+	var launchJob orm.AsyncJob
+	if err = db.Where("job_type=? AND resource_id=?", ChatLaunchJobType, handoff.ConversationID).Take(&launchJob).Error; err != nil {
+		t.Fatal(err)
+	}
+	var launchPayload map[string]string
+	if err = json.Unmarshal(launchJob.PayloadJSON, &launchPayload); err != nil || launchPayload["query"] != "请生成论文综述。\n"+expectedInstruction {
+		t.Fatalf("new Chat received internal or duplicate context: %q %v", launchPayload["query"], err)
+	}
+
+	update := "每篇关系和贡献压缩成两句话，保留现有两篇论文及其版本。"
+	if err = db.Create(&orm.ChatHistory{ID: "continued-instruction", ConversationID: conversation, Seq: 3, RawContent: update}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Model(&artifact).Update("selected", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	step.ID, step.Attempt = "continued-attempt", 2
+	if err = db.Create(&step).Error; err != nil {
+		t.Fatal(err)
+	}
+	input.UserInstruction += "\n【后续补充】" + update
+	human.ID, human.Value = "continued-human", marshal(map[string]any{"data": input})
+	if err = db.Create(&human).Error; err != nil {
+		t.Fatal(err)
+	}
+	artifact.ID, artifact.Attempt, artifact.Revision, artifact.Selected = "continued-artifact", 2, 2, true
+	artifact.ProducerAttemptID, artifact.HumanArtifactID = step.ID, &human.ID
+	if err = db.Create(&artifact).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err = projectAcademicResult(ctx, job, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Where("id=?", record.ID).Take(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(record.ResultJSON, &saved); err != nil || record.Version != 2 || saved.UserInstruction != expectedInstruction+"\n\n"+update {
+		t.Fatalf("continued projection lost or duplicated user instructions: v%d %q %v", record.Version, saved.UserInstruction, err)
+	}
+	var round orm.AcademicExpansionRound
+	if err = db.Where("expansion_id=? AND version=2", record.ID).Take(&round).Error; err != nil {
+		t.Fatal(err)
+	}
+	var frozen struct {
+		UserUpdates  []string         `json:"user_updates"`
+		Interactions []map[string]any `json:"interactions"`
+	}
+	if err = json.Unmarshal(round.InputJSON, &frozen); err != nil || len(frozen.UserUpdates) != 3 || len(frozen.Interactions) != 1 || frozen.Interactions[0]["answers"] == nil {
+		t.Fatalf("round lost the original structured answers or updates: %+v %v", frozen, err)
+	}
 	previous := string(record.ResultJSON)
 	db.Model(&session).Update("status", "waiting")
 	if _, err = projectAcademicResult(ctx, job, nil); err != nil {
@@ -277,7 +350,7 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Where("id=?", record.ID).Take(&record)
-	if record.Status != "stopped" || record.Version != 1 || string(record.ResultJSON) != previous {
+	if record.Status != "stopped" || record.Version != 2 || string(record.ResultJSON) != previous {
 		t.Fatal("stopping must retain the completed result")
 	}
 	db.Model(&artifact).Update("validity", "outdated")
@@ -287,7 +360,7 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Where("id=?", record.ID).Take(&record)
-	if record.Version != 1 || string(record.ResultJSON) != previous {
+	if record.Version != 2 || string(record.ResultJSON) != previous {
 		t.Fatal("failure replaced completed result")
 	}
 }
@@ -380,14 +453,21 @@ func TestFolderSelectionReadsAllPagesAndDeduplicatesVersions(t *testing.T) {
 
 func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 	db := paperFixture(t)
-	oldInput := ReviewWorkflowInput{UserInstruction: "original", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true, IsImportant: true}}}
+	answer := "研究方向: 低秩适配机制；量化低秩微调"
+	oldInput := ReviewWorkflowInput{UserInstruction: "original\n补充问答：{\"questions\":{\"ask_id\":\"old-ask\"},\"answers\":{}}\n【原始要求】original", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true, IsImportant: true}}}
 	newInput := oldInput
-	newInput.UserInstruction = "continued"
-	record := orm.AcademicExpansion{ID: "versioned", UserID: "u", RequestOwner: "u", RequestKey: "source", DatasetID: "papers", ConversationID: "source-chat", Title: "agents", Goal: "expansion", Status: "completed", Version: 2, ResultJSON: marshal(newInput)}
+	newInput.UserInstruction += "\ncontinued"
+	record := orm.AcademicExpansion{ID: "versioned", UserID: "u", RequestOwner: "u", RequestKey: "source", DatasetID: "papers", ConversationID: "source-chat", Title: "original", Goal: "expansion", Status: "completed", Version: 2, ResultJSON: marshal(newInput)}
 	if err := db.Create(&record).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.AcademicExpansionRound{ID: "round-v1", ExpansionID: record.ID, Version: 1, Status: "completed", InputJSON: marshal(oldInput), ResultJSON: marshal(oldInput)}).Error; err != nil {
+	if err := db.Create(&orm.AcademicExpansionRound{ID: "round-v1", ExpansionID: record.ID, RequestKey: "v1", Version: 1, Status: "completed", InputJSON: marshal(map[string]any{"workflow_input": oldInput, "user_updates": []string{"请围绕所选论文或方向开展论文拓展。\noriginal", answer}, "interactions": []any{map[string]any{"answered": true}}}), ResultJSON: marshal(oldInput)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.AcademicExpansionRound{ID: "round-v2", ExpansionID: record.ID, RequestKey: "v2", Version: 2, Status: "completed", InputJSON: marshal(map[string]any{"workflow_input": newInput, "user_updates": []string{"请围绕所选论文或方向开展论文拓展。\noriginal", answer, "continued"}}), ResultJSON: marshal(newInput)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ChatHistory{ID: "later-update", ConversationID: record.ConversationID, Seq: 3, RawContent: "Later instructions must not enter the old round"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a", "b"} {
@@ -432,8 +512,15 @@ func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 	if err := json.Unmarshal(handoff.InputJSON, &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if handoff.Version != 1 || snapshot.UserInstruction != "original" || !snapshot.Papers[0].IsImportant || snapshot.Papers[1].IsImportant {
+	if handoff.Version != 1 || snapshot.UserInstruction != "original\n\n"+answer || !snapshot.Papers[0].IsImportant || snapshot.Papers[1].IsImportant {
 		t.Fatalf("wrong frozen input: %+v", snapshot)
+	}
+	handoff = orm.AcademicHandoff{}
+	if err := db.Where("conversation_id=?", second).Take(&handoff).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(handoff.InputJSON, &snapshot); err != nil || snapshot.UserInstruction != "original\n\n"+answer+"\n\ncontinued" {
+		t.Fatalf("latest legacy result was not rebuilt from its frozen inputs: %q %v", snapshot.UserInstruction, err)
 	}
 	w := httptest.NewRecorder()
 	GetExpansion(w, mux.SetURLVars(paperRequest(""), map[string]string{"expansion_id": record.ID}))
@@ -451,7 +538,7 @@ func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 	if !response.PaperImportance["a"] || response.PaperImportance["b"] {
 		t.Fatal("importance is not user-scoped", response.PaperImportance)
 	}
-	if string(response.Record.ResultJSON) != string(record.ResultJSON) || len(response.Rounds) != 1 || string(response.Rounds[0].ResultJSON) != string(marshal(oldInput)) {
+	if string(response.Record.ResultJSON) != string(record.ResultJSON) || len(response.Rounds) != 2 || string(response.Rounds[0].ResultJSON) != string(marshal(oldInput)) || string(response.Rounds[1].ResultJSON) != string(marshal(newInput)) {
 		t.Fatal("live importance modified saved result")
 	}
 }

@@ -566,6 +566,9 @@ func launchHistoryReview(w http.ResponseWriter, r *http.Request, user string, re
 		if err := json.Unmarshal(snapshot, &input); err != nil {
 			return err
 		}
+		if err := restorePaperRoundInstruction(tx, record, version, &input); err != nil {
+			return err
+		}
 		if req.UserInstruction != "" {
 			input.UserInstruction += "\n\n" + req.UserInstruction
 		}
@@ -805,23 +808,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			if strings.TrimSpace(input.UserInstruction) == "" {
 				return errors.New("user instruction missing")
 			}
-			instructionParts := []string{record.Title}
-			seenInstructions := map[string]bool{record.Title: true}
-			for _, history := range histories {
-				if text := strings.TrimSpace(history.RawContent); text != "" && !seenInstructions[text] {
-					instructionParts = append(instructionParts, text)
-					seenInstructions[text] = true
-				}
-				var ext map[string]any
-				_ = json.Unmarshal(history.Ext, &ext)
-				if answered, _ := ext["ask_answered"].(bool); answered && ext["ask_saved_answers"] != nil {
-					instructionParts = append(instructionParts, "补充问答：\n"+string(marshal(map[string]any{"questions": ext["ask_pending"], "answers": ext["ask_saved_answers"]})))
-				}
-			}
-			if !seenInstructions[input.UserInstruction] {
-				instructionParts = append(instructionParts, input.UserInstruction)
-			}
-			input.UserInstruction = strings.Join(instructionParts, "\n\n")
+			input.UserInstruction = paperUserInstruction(record.Title, userUpdates)
 			version := record.Version + 1
 			now := time.Now().UTC()
 			round := orm.AcademicExpansionRound{DiscoveryMode: record.DiscoveryMode, ID: uuid.NewString(), ExpansionID: record.ID, RequestKey: artifact.ID, Status: "completed", Version: version, InputJSON: marshal(map[string]any{"workflow_input": roundInput, "user_updates": userUpdates, "interactions": interactions}), ResultJSON: marshal(input), SessionID: session.ID, AttemptID: step.ID, CreatedAt: artifact.CreatedAt, UpdatedAt: now}
@@ -867,6 +854,9 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 				return nil
 			}
 			if e := json.Unmarshal(latest.ResultJSON, &input); e != nil {
+				return e
+			}
+			if e := restorePaperRoundInstruction(tx, latest, latest.Version, &input); e != nil {
 				return e
 			}
 			snapshot, contents, e := snapshotReview(ctx, tx, record.UserID, record.DatasetID, input, false)
