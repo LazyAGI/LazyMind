@@ -720,7 +720,10 @@ function SettingsPageContent() {
         )}
       </>;
     } else if (section === "models") {
-      content = integratedSurface(<ModelProvidersPage onConfigurationChanged={syncOverview} highlightProviderId={modelProviderTarget} />, "is-models");
+      content = <>
+        <header className="provider-workspace-topbar"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.models")}</h1></header>
+        {integratedSurface(<ModelProvidersPage onConfigurationChanged={syncOverview} highlightProviderId={modelProviderTarget} />, "is-models")}
+      </>;
     } else if (section === "model_defaults") {
       content = <div className="provider-workspace model-defaults-workspace">
         <header className="provider-workspace-topbar"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1></header>
@@ -951,7 +954,7 @@ function SettingsPageContent() {
     </section>;
   };
 
-  return <main className={`settings-reference${section === "model_defaults" ? " is-default-model-workspace" : ""}`} aria-label={t("settingsPage.title")}>
+  return <main className={`settings-reference${section === "models" || section === "model_defaults" ? " is-model-settings-workspace" : ""}${section === "model_defaults" ? " is-default-model-workspace" : ""}`} aria-label={t("settingsPage.title")}>
     {settingsChange.dialog}
     <aside className="settings-reference-sidebar">
       <button className="settings-back-button" type="button" onClick={() => navigate(returnTo || CHAT_HOME_PATH)}>
