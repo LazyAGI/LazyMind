@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Alert, Button, Input, Modal, Tabs, Upload, message } from "antd";
 import { DeleteOutlined, InboxOutlined, PaperClipOutlined } from "@ant-design/icons";
 import { publishSkillToMarket } from "../../skillApi";
-import { getSkillPackageValidationError, uploadSkillTempFile } from "../../skillUpload";
+import { abortSkillTempUpload, getSkillPackageValidationError, isInvalidSkillPackageError, uploadSkillTempFile } from "../../skillUpload";
 import { useSkillImportTask } from "../../hooks/useSkillImportTask";
 import SkillImportProgress from "./SkillImportProgress";
 import { isSkillAlreadyExistsError, isSkillPackageTooLargeError, isSkillSourceAmbiguousError } from "../../skillUploadError";
@@ -35,6 +35,8 @@ export default function SkillAdminPublishModal({
     ? t("admin.memorySkillImportTooLarge")
     : isSkillSourceAmbiguousError(error)
       ? t("admin.memorySkillImportMultipleSkills")
+      : isInvalidSkillPackageError(error)
+        ? t("admin.memorySkillUploadInvalidPackage")
       : isSkillAlreadyExistsError(error)
         ? t("admin.memorySkillAdminPublishDuplicate")
         : getLocalizedErrorMessage(error);
@@ -102,12 +104,19 @@ export default function SkillAdminPublishModal({
     setUrlImportError(null);
     await start(async ({ signal, setUploadProgress }) => {
       if (publishMethod === "file" && selectedFile) {
-        const upload = await uploadSkillTempFile(selectedFile, { signal, onProgress: setUploadProgress, silentError: true });
-        signal.throwIfAborted();
-        setUploadProgress(null);
-        await publishSkillToMarket({
-          source: { type: "uploaded_zip", uploadId: upload.uploadId },
-        }, { signal, silentError: true });
+        let uploadId = "";
+        try {
+          const upload = await uploadSkillTempFile(selectedFile, { validatePackage: true, signal, onProgress: setUploadProgress, silentError: true });
+          uploadId = upload.uploadId;
+          signal.throwIfAborted();
+          setUploadProgress(null);
+          await publishSkillToMarket({
+            source: { type: "uploaded_zip", uploadId },
+          }, { signal, silentError: true });
+        } catch (error) {
+          if (uploadId) await abortSkillTempUpload(uploadId);
+          throw error;
+        }
       } else {
         await publishSkillToMarket({
           source: { type: "url", url: normalizedRepoUrl },

@@ -93,6 +93,24 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 				return CreateSkillResponse{}, err
 			}
 		}
+		if strings.EqualFold(strings.TrimSpace(req.Source.Type), "url") {
+			provenanceURL := strings.TrimSpace(req.Source.SourceURL)
+			if provenanceURL == "" {
+				provenanceURL = strings.TrimSpace(req.Source.URL)
+			}
+			if provenanceURL != "" {
+				ext := map[string]any{}
+				if len(skillExt) > 0 {
+					_ = json.Unmarshal(skillExt, &ext)
+				}
+				ext["import_source_url"] = provenanceURL
+				encoded, marshalErr := json.Marshal(ext)
+				if marshalErr != nil {
+					return CreateSkillResponse{}, marshalErr
+				}
+				skillExt = encoded
+			}
+		}
 	} else {
 		if err := validateSkillPackageMetadata(req.Name, req.Category, req.Description, files); err != nil {
 			return CreateSkillResponse{}, err
@@ -1266,6 +1284,7 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if sourceRef == "" {
 			sourceRef = source.URL
 		}
+		sourceRef = boundedSourceRefID(sourceRef)
 		canonicalName := source.CanonicalName
 		if parsed, parseErr := url.Parse(source.SourceURL); parseErr == nil && canonicalName == "" {
 			if resolution, matched, resolveErr := skillsourceurl.ResolveSkillHubPageURL(parsed); matched && resolveErr == nil && resolution.DownloadURL == source.URL {
@@ -1276,6 +1295,19 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 	default:
 		return sourcePackage{}, "", "", fmt.Errorf("unsupported source type %q", source.Type)
 	}
+}
+
+const maxSkillSourceRefIDBytes = 128
+
+func boundedSourceRefID(raw string) string {
+	if len(raw) <= maxSkillSourceRefIDBytes {
+		return raw
+	}
+	// The complete URL remains in the external provenance JSON. The revision
+	// column is a legacy 128-byte reference field, so store a stable digest
+	// there instead of failing a valid import with a database length error.
+	digest := sha256.Sum256([]byte(raw))
+	return "url-sha256:" + hex.EncodeToString(digest[:])
 }
 
 func resolveExternalMetadata(pkg sourcePackage, skillID string, fallbacks ...skillmetadata.Metadata) (skillmetadata.Metadata, error) {

@@ -15,6 +15,7 @@ import httpx
 
 CONTRACT_VERSION = 'workflow.v1'
 MAX_SKILL_ZIP_BYTES = 100 << 20
+SKILL_ZIP_SUBMISSION_TIMEOUT = 300.0
 
 
 class WorkflowClientError(RuntimeError):
@@ -566,9 +567,16 @@ class WorkflowClient:
             'idempotency_key': command_id,
         }
         try:
+            request_timeout = self.timeout
+            if skill.get('zip_base64'):
+                # A 100 MiB ZIP expands to roughly 134 MiB of JSON before the
+                # server can acknowledge the task. Keep the normal short
+                # timeout for URL sources, but do not turn a large local upload
+                # into a false TASK_SUBMISSION_UNCERTAIN result.
+                request_timeout = max(request_timeout, SKILL_ZIP_SUBMISSION_TIMEOUT)
             response = self._decode(self.transport.post(
                 self.base_url + '/external-agent/workflow-tasks',
-                json=payload, headers=self._headers(command_id), timeout=self.timeout,
+                json=payload, headers=self._headers(command_id), timeout=request_timeout,
             ))
         except httpx.RequestError as exc:
             raise WorkflowClientError(

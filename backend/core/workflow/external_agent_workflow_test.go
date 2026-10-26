@@ -327,6 +327,36 @@ func TestInputBindingsFromExternalRequestImportsInputFiles(t *testing.T) {
 	}
 }
 
+func TestInputBindingsFromExternalRequestCleansPartiallyImportedFiles(t *testing.T) {
+	db := newHandlerTestDB(t)
+	files := []any{
+		map[string]any{
+			"material_id":    "first",
+			"name":           "first.txt",
+			"mime_type":      "text/plain",
+			"content_base64": base64.StdEncoding.EncodeToString([]byte("first")),
+		},
+		map[string]any{
+			"material_id":    "second",
+			"name":           "second.txt",
+			"mime_type":      "text/plain",
+			"content_base64": "%%%invalid-base64%%%",
+		},
+	}
+	_, created, err := inputBindingsFromExternalRequestTracked(context.Background(), db.DB, "user-1", nil, files)
+	if err == nil || len(created) != 1 {
+		t.Fatalf("expected partial import error and one created resource, got created=%v err=%v", created, err)
+	}
+	cleanupUnboundInputResources(context.Background(), db.DB, "user-1", created)
+	var count int64
+	if err := db.Model(&orm.WorkflowInputResource{}).Where("owner_user_id=?", "user-1").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("orphaned input resources=%d", count)
+	}
+}
+
 func TestExternalTaskResponseIncludesDisplayStatus(t *testing.T) {
 	response := externalTaskResponse(orm.ExternalAgentWorkflowTask{
 		ID: "task-1", AgentType: "codex", Status: externalTaskStatusConverting,
@@ -389,6 +419,40 @@ func TestExternalTaskStrictValidationBeforeEnqueue(t *testing.T) {
 	db.Model(&orm.AsyncJob{}).Count(&count)
 	if count != 0 {
 		t.Fatalf("invalid input queued %d jobs", count)
+	}
+}
+
+func TestExternalTaskInputLimits(t *testing.T) {
+	tooLarge := externalAgentWorkflowTaskRequest{InputFiles: []externalAgentWorkflowInputFile{{
+		MaterialID: "large", Name: "large.bin", MimeType: "application/octet-stream",
+		ContentBase64: strings.Repeat("A", base64.StdEncoding.EncodedLen(maxExternalWorkflowInputFileBytes)+8),
+	}}}
+	if err := validateExternalTaskInputs(tooLarge); err == nil || !strings.Contains(err.Error(), "file limit") {
+		t.Fatalf("oversized input file was accepted: %v", err)
+	}
+	tooMany := externalAgentWorkflowTaskRequest{InputFiles: make([]externalAgentWorkflowInputFile, maxExternalWorkflowInputFiles+1)}
+	if err := validateExternalTaskInputs(tooMany); err == nil || !strings.Contains(err.Error(), "at most") {
+		t.Fatalf("too many input files were accepted: %v", err)
+	}
+	tooManyBindings := externalAgentWorkflowTaskRequest{InputBindings: map[string]any{"brief": make([]any, maxExternalWorkflowInputBindings+1)}}
+	if err := validateExternalTaskInputs(tooManyBindings); err == nil || !strings.Contains(err.Error(), "input_bindings") {
+		t.Fatalf("too many input bindings were accepted: %v", err)
+	}
+}
+
+func TestCanonicalExternalSkillURLDropsRegistryTrackingParameters(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, want string
+	}{
+		{"skillhub", "https://skillhub.cn/skills/acme/demo?utm_source=mail#install", "https://skillhub.cn/skills/acme/demo"},
+		{"clawhub", "https://clawhub.ai/acme/skills/demo?utm_source=mail&version=v2", "https://clawhub.ai/acme/skills/demo?version=v2"},
+		{"github", "https://github.com/acme/demo/tree/main/SKILL.md?tab=readme#install", "https://github.com/acme/demo/tree/main/SKILL.md"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := canonicalExternalSkillURL(tc.input); got != tc.want {
+				t.Fatalf("canonicalExternalSkillURL(%q)=%q, want %q", tc.input, got, tc.want)
+			}
+		})
 	}
 }
 

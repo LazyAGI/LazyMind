@@ -76,6 +76,28 @@ func TestSkillArchiveDownloadReportsTypedSizeErrors(t *testing.T) {
 	}
 }
 
+func TestSkillArchiveDownloadReportsTypedUpstreamErrors(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusTooManyRequests, http.StatusBadGateway} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+			_, err := (HTTPZipDownloader{}).Download(context.Background(), server.URL)
+			if err == nil {
+				t.Fatal("expected source error")
+			}
+			sem := httperr.ForError(err)
+			if status == http.StatusNotFound && (sem.Status != http.StatusNotFound || sem.Code != httperr.CodeNotFound) {
+				t.Fatalf("error=%+v", sem)
+			}
+			if status != http.StatusNotFound && sem.Code != httperr.CodeSourceUnavailable {
+				t.Fatalf("error=%+v", sem)
+			}
+		})
+	}
+}
+
 type packageZeroReader struct{}
 
 func (packageZeroReader) Read(p []byte) (int, error) { clear(p); return len(p), nil }

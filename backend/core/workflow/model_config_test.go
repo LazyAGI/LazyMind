@@ -137,6 +137,20 @@ func TestExternalCapabilitiesMatchFrontendSystemModelSelection(t *testing.T) {
 		if len(selected.Data.Items) != 1 || external.Data.Model["ready"] != true || external.Data.Model["model"] != selected.Data.Items[0].Name || external.Data.Model["model"] != "Qwen/"+user {
 			t.Fatalf("frontend=%s external=%s", frontend.Body, capabilities.Body)
 		}
+		var capabilityEnvelope struct {
+			Data struct {
+				MaxRequestBytes  float64 `json:"max_request_bytes"`
+				MaxInputBindings float64 `json:"max_input_bindings"`
+				MaxInputFiles    float64 `json:"max_input_files"`
+				MaxInputBytes    float64 `json:"max_input_bytes"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(capabilities.Body.Bytes(), &capabilityEnvelope); err != nil {
+			t.Fatal(err)
+		}
+		if int64(capabilityEnvelope.Data.MaxRequestBytes) != maxExternalAgentSkillRequestBytes || int(capabilityEnvelope.Data.MaxInputBindings) != maxExternalWorkflowInputBindings || int(capabilityEnvelope.Data.MaxInputFiles) != maxExternalWorkflowInputFiles || int64(capabilityEnvelope.Data.MaxInputBytes) != maxExternalWorkflowInputBytes {
+			t.Fatalf("unexpected external workflow limits: %s", capabilities.Body)
+		}
 	}
 }
 

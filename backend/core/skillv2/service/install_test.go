@@ -55,6 +55,26 @@ func TestInstallURLSkillIsDisabledAndRetryDoesNotDownload(t *testing.T) {
 		t.Fatalf("provenance=%+v", revision)
 	}
 }
+
+func TestInstallRegistryTrackingVariantsShareResolvedIdentity(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	archive := filepath.Join(t.TempDir(), "skill.zip")
+	testutil.WriteSkillZip(t, archive, map[string][]byte{"SKILL.md": []byte("---\nname: registry\ndescription: Imported skill.\n---\nBody.\n")})
+	downloader := &installFixtureDownloader{path: archive}
+	service := NewSkillService(SkillServiceDeps{DB: db.DB, Downloader: downloader, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+	first, err := service.InstallSkill(context.Background(), InstallSkillRequest{OwnerUserID: "user", URL: "https://clawhub.ai/acme/registry?utm_source=share"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.InstallSkill(context.Background(), InstallSkillRequest{OwnerUserID: "user", URL: "https://clawhub.ai/acme/registry?utm_campaign=docs"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.SkillID != second.SkillID || second.Status != "already_installed" {
+		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+}
+
 func TestInstallPackageFailurePreservesExistingSkill(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	service := NewSkillService(SkillServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})

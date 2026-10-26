@@ -60,7 +60,19 @@ func (d HTTPZipDownloader) Download(ctx context.Context, rawURL string) (Downloa
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return DownloadedZip{}, fmt.Errorf("download failed: %s", resp.Status)
+		status := http.StatusBadGateway
+		code := httperr.CodeSourceUnavailable
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			status, code = http.StatusUnauthorized, httperr.CodeUnauthenticated
+		case http.StatusForbidden:
+			status, code = http.StatusForbidden, httperr.CodeForbidden
+		case http.StatusNotFound:
+			status, code = http.StatusNotFound, httperr.CodeNotFound
+		case http.StatusTooManyRequests:
+			status = http.StatusTooManyRequests
+		}
+		return DownloadedZip{}, httperr.New(status, code, fmt.Sprintf("skill source download failed: %s", resp.Status))
 	}
 	f, err := os.CreateTemp("", "lazymind-skill-*.zip")
 	if err != nil {

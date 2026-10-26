@@ -6770,7 +6770,7 @@ const zhCN = {
     memorySkillUploadRepoPlaceholder:
       "GitHub、skills.sh、SkillsMP、ClawHub、SkillHub 或 ZIP 包链接",
     memorySkillUploadFileTitle: "从本地包安装",
-    memorySkillUploadFileHint: "支持包含 SKILL.md 的 .zip 压缩包，单文件不超过 100 MiB",
+    memorySkillUploadFileHint: "支持包含 SKILL.md 的 .zip 压缩包，压缩包不超过 100 MiB，展开后单文件不超过 32 MiB",
     memorySkillUploadFileReady: "{{size}} KB，准备上传",
     memorySkillUploadClear: "清空",
     memorySkillUploadSubmit: "上传技能",

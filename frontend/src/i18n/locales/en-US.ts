@@ -6983,7 +6983,7 @@ const enUS = {
       "A GitHub, skills.sh, SkillsMP, ClawHub, SkillHub, or ZIP URL",
     memorySkillUploadFileTitle: "Install from local package",
     memorySkillUploadFileHint:
-      "Supports .zip archives containing SKILL.md. Max 100 MiB per file.",
+      "Supports .zip archives containing SKILL.md. Archive up to 100 MiB; each expanded file up to 32 MiB.",
     memorySkillUploadFileReady: "{{size}} KB, ready to upload",
     memorySkillUploadClear: "Clear",
     memorySkillUploadSubmit: "Upload skill",

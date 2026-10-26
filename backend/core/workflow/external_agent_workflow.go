@@ -89,7 +89,11 @@ func GetExternalWorkflowCapabilities(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"contract_version": "external-workflow.v1", "agent_types": agents,
 		"skill_sources": []string{"url", "zip_base64"}, "max_zip_bytes": maxExternalAgentSkillDownloadBytes,
-		"max_request_bytes": 32 << 20, "poll_after_seconds": 3,
+		"max_request_bytes":    maxExternalAgentSkillRequestBytes,
+		"max_input_bindings":   maxExternalWorkflowInputBindings,
+		"max_input_files":      maxExternalWorkflowInputFiles,
+		"max_input_file_bytes": maxExternalWorkflowInputFileBytes,
+		"max_input_bytes":      maxExternalWorkflowInputBytes, "poll_after_seconds": 3,
 		"config": map[string]any{"reuse_workflow": true}, "interaction_mode": "handoff_to_lazymind",
 		"model_configuration": model.Public,
 	})
@@ -355,8 +359,9 @@ func ensureExternalWorkflowTaskSession(ctx context.Context, db *gorm.DB, task or
 	request := decodeJSONMap(task.RequestJSON)
 	inputBindings, _ := request["input_bindings"].(map[string]any)
 	inputFiles, _ := request["input_files"].([]any)
-	bindings, err := inputBindingsFromExternalRequest(ctx, db, task.OwnerUserID, inputBindings, inputFiles)
+	bindings, importedResourceIDs, err := inputBindingsFromExternalRequestTracked(ctx, db, task.OwnerUserID, inputBindings, inputFiles)
 	if err != nil {
+		cleanupUnboundInputResources(ctx, db, task.OwnerUserID, importedResourceIDs)
 		return failExternalTask(db, task, "INPUT_RESOURCE_IMPORT_FAILED", err.Error(), "请检查 input_files 的 material_id、name、mime_type、content_base64 和 content_hash。")
 	}
 	sessionID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("external-workflow-session:"+task.ID)).String()
@@ -365,6 +370,7 @@ func ensureExternalWorkflowTaskSession(ctx context.Context, db *gorm.DB, task or
 		historyID, string(mustJSON(map[string]any{"text": task.TaskDescription, "agent_type": task.AgentType})), bindings,
 		workflowstore.ControlSettings{})
 	if err != nil {
+		cleanupUnboundInputResources(ctx, db, task.OwnerUserID, importedResourceIDs)
 		if errors.Is(err, workflowstore.ErrSessionConflict) {
 			return waitExternalTask(db, task, "prepare", "WORKFLOW_SESSION_CONFLICT", "当前会话已有未完成 Workflow。", "请进入 LazyMind 处理或关闭已有 Workflow 后重试。")
 		}
@@ -607,15 +613,21 @@ func completeExternalTask(ctx context.Context, db *gorm.DB, task orm.ExternalAge
 }
 
 func inputBindingsFromExternalRequest(ctx context.Context, db *gorm.DB, owner string, values map[string]any, files []any) ([]workflowstore.InputBinding, error) {
+	bindings, _, err := inputBindingsFromExternalRequestTracked(ctx, db, owner, values, files)
+	return bindings, err
+}
+
+func inputBindingsFromExternalRequestTracked(ctx context.Context, db *gorm.DB, owner string, values map[string]any, files []any) ([]workflowstore.InputBinding, []string, error) {
 	repo := workflowstore.New(db)
 	out, err := repo.ResolveInputBindings(ctx, owner, values, "external-agent-workflow")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	createdResourceIDs := []string{}
 	for index, raw := range files {
 		file, ok := raw.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("input_files[%d] must be an object", index)
+			return out, createdResourceIDs, fmt.Errorf("input_files[%d] must be an object", index)
 		}
 		materialID, _ := file["material_id"].(string)
 		name, _ := file["name"].(string)
@@ -628,29 +640,42 @@ func inputBindingsFromExternalRequest(ctx context.Context, db *gorm.DB, owner st
 		encoded = strings.TrimSpace(encoded)
 		expectedHash = strings.TrimSpace(expectedHash)
 		if materialID == "" || name == "" || mimeType == "" || encoded == "" {
-			return nil, fmt.Errorf("input_files[%d] requires material_id, name, mime_type, and content_base64", index)
+			return out, createdResourceIDs, fmt.Errorf("input_files[%d] requires material_id, name, mime_type, and content_base64", index)
 		}
 		content, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
-			return nil, fmt.Errorf("input_files[%d] content_base64 is invalid", index)
+			return out, createdResourceIDs, fmt.Errorf("input_files[%d] content_base64 is invalid", index)
 		}
 		if len(content) == 0 {
-			return nil, fmt.Errorf("input_files[%d] content is empty", index)
+			return out, createdResourceIDs, fmt.Errorf("input_files[%d] content is empty", index)
 		}
 		sum := sha256.Sum256(content)
 		hash := "sha256:" + hex.EncodeToString(sum[:])
 		if expectedHash != "" && expectedHash != hash {
-			return nil, fmt.Errorf("input_files[%d] content_hash mismatch", index)
+			return out, createdResourceIDs, fmt.Errorf("input_files[%d] content_hash mismatch", index)
 		}
-		resource, _, err := repo.ImportInputResource(ctx, owner, name, mimeType, hash, content)
+		resource, created, err := repo.ImportInputResource(ctx, owner, name, mimeType, hash, content)
 		if err != nil {
-			return nil, err
+			return out, createdResourceIDs, err
+		}
+		if created {
+			createdResourceIDs = append(createdResourceIDs, resource.ID)
 		}
 		out = append(out, workflowstore.InputBinding{MaterialID: materialID, ResourceType: "input_resource",
 			ResourceID: resource.ID, ResourceRevision: resource.Revision, ContentHash: resource.ContentHash,
 			CreatedByCommandID: "external-agent-workflow"})
 	}
-	return out, nil
+	return out, createdResourceIDs, nil
+}
+
+func cleanupUnboundInputResources(ctx context.Context, db *gorm.DB, owner string, resourceIDs []string) {
+	for _, resourceID := range resourceIDs {
+		var bindings int64
+		if err := db.WithContext(ctx).Table("workflow_input_bindings").Where("resource_id = ?", resourceID).Count(&bindings).Error; err != nil || bindings != 0 {
+			continue
+		}
+		_ = db.WithContext(ctx).Where("id = ? AND owner_user_id = ?", resourceID, owner).Delete(&orm.WorkflowInputResource{}).Error
+	}
 }
 
 func failExternalTask(db *gorm.DB, task orm.ExternalAgentWorkflowTask, code, message, suggestion string) orm.ExternalAgentWorkflowTask {

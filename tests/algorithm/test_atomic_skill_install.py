@@ -76,3 +76,9 @@ def test_atomic_remote_fs_request_has_long_import_timeout(monkeypatch):
     assert calls[0][0] == ('POST', 'skills:install')
     assert calls[0][1]['json'] == {'url': 'https://skills.sh/owner/repo/example'}
     assert calls[0][1]['timeout'] >= 300
+
+
+def test_atomic_remote_fs_rejects_oversized_local_zip_before_encoding():
+    fs = RemoteFS(base_url='https://core.example/api/core')
+    with pytest.raises(ValueError, match='100 MiB'):
+        fs.install_skill(package_zip=b'x' * ((100 << 20) + 1), expected_name='example')

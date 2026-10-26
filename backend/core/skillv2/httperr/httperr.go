@@ -34,6 +34,7 @@ const (
 	CodeInvalidSkillName       = "invalid_skill_name"
 	CodeDescriptionTooLong     = "description_too_long"
 	CodeGitHubMultipleSkills   = "github_multiple_skills"
+	CodeSourceUnavailable      = "source_unavailable"
 )
 
 type Semantic struct {

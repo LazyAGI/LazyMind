@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"gorm.io/gorm"
 
@@ -20,6 +21,16 @@ import (
 
 // MaxSkillInstallRequestBytes includes base64 expansion and JSON fields.
 const MaxSkillInstallRequestBytes int64 = (MaxSkillDownloadBytes+2)/3*4 + (1 << 20)
+
+type skillInstallOwnerLockEntry struct {
+	token chan struct{}
+	refs  int
+}
+
+var skillInstallOwnerLocks = struct {
+	sync.Mutex
+	entries map[string]*skillInstallOwnerLockEntry
+}{entries: make(map[string]*skillInstallOwnerLockEntry)}
 
 type InstallSkillRequest struct {
 	OwnerUserID   string
@@ -64,12 +75,19 @@ func (s *SkillService) InstallSkill(ctx context.Context, req InstallSkillRequest
 	}
 	local := *s
 	source := SourceInput{}
+	resolvedKey := ""
 	if rawURL != "" {
 		resolved, err := ResolveURLSource(ctx, rawURL)
 		if err != nil {
 			return InstallSkillResponse{}, err
 		}
 		source = resolved
+		// Website adapters intentionally discard tracking parameters. Use the
+		// resolved download identity for deduplication while keeping rawURL as
+		// provenance in the installed revision.
+		if canonical := normalizedInstallURL(source.URL); canonical != "" {
+			resolvedKey = "resolved:" + canonical
+		}
 	} else {
 		file, err := os.CreateTemp("", "lazymind-install-*.zip")
 		if err != nil {
@@ -125,11 +143,25 @@ func (s *SkillService) InstallSkill(ctx context.Context, req InstallSkillRequest
 		local.uploadStore = installUploadStore{UploadSession{UploadID: sourceKey, OwnerUserID: req.OwnerUserID, State: "completed", StoredPath: archive, Filename: "skill.zip"}}
 	}
 	var out InstallSkillResponse
+	// Keep same-process retries serialized even on MySQL, where the fallback
+	// UPDATE below cannot lock an owner that has no skill row yet. PostgreSQL
+	// still uses its transaction-scoped advisory lock; SQLite serializes its
+	// first write. Multi-instance MySQL deployments should provide an
+	// equivalent owner lock at the deployment layer.
+	ownerUnlock, err := acquireSkillInstallOwnerLock(ctx, req.OwnerUserID)
+	if err != nil {
+		return InstallSkillResponse{}, err
+	}
+	defer ownerUnlock()
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := lockSkillInstallOwner(tx, req.OwnerUserID); err != nil {
 			return err
 		}
-		existing, found, err := findInstalledSource(ctx, tx, req.OwnerUserID, sourceKey, verifiedKey)
+		keys := []string{sourceKey, verifiedKey}
+		if resolvedKey != "" && resolvedKey != sourceKey && resolvedKey != verifiedKey {
+			keys = append(keys, resolvedKey)
+		}
+		existing, found, err := findInstalledSource(ctx, tx, req.OwnerUserID, keys...)
 		if err != nil {
 			return err
 		}
@@ -155,6 +187,9 @@ func (s *SkillService) InstallSkill(ctx context.Context, req InstallSkillRequest
 		}
 		ext["import_source_identity"] = verifiedKey
 		ext["import_source_url"] = rawURL
+		if resolvedKey != "" {
+			ext["import_source_resolved_identity"] = resolvedKey
+		}
 		encoded, err := json.Marshal(ext)
 		if err != nil {
 			return err
@@ -166,6 +201,38 @@ func (s *SkillService) InstallSkill(ctx context.Context, req InstallSkillRequest
 		return nil
 	})
 	return out, err
+}
+
+func acquireSkillInstallOwnerLock(ctx context.Context, owner string) (func(), error) {
+	skillInstallOwnerLocks.Lock()
+	entry := skillInstallOwnerLocks.entries[owner]
+	if entry == nil {
+		entry = &skillInstallOwnerLockEntry{token: make(chan struct{}, 1)}
+		entry.token <- struct{}{}
+		skillInstallOwnerLocks.entries[owner] = entry
+	}
+	entry.refs++
+	skillInstallOwnerLocks.Unlock()
+	select {
+	case <-entry.token:
+		return func() {
+			entry.token <- struct{}{}
+			skillInstallOwnerLocks.Lock()
+			entry.refs--
+			if entry.refs == 0 {
+				delete(skillInstallOwnerLocks.entries, owner)
+			}
+			skillInstallOwnerLocks.Unlock()
+		}, nil
+	case <-ctx.Done():
+		skillInstallOwnerLocks.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(skillInstallOwnerLocks.entries, owner)
+		}
+		skillInstallOwnerLocks.Unlock()
+		return nil, ctx.Err()
+	}
 }
 
 func lockSkillInstallOwner(tx *gorm.DB, owner string) error {
@@ -186,7 +253,10 @@ func findInstalledSource(ctx context.Context, db *gorm.DB, owner string, keys ..
 		SourceRefID   string `gorm:"column:source_ref_id"`
 		SourceRefType string `gorm:"column:source_ref_type"`
 	}
-	err := db.WithContext(ctx).Table("skills").Select("skills.*, skill_revisions.source_ref_id, skill_revisions.source_ref_type").Joins("LEFT JOIN skill_revisions ON skill_revisions.skill_id = skills.id").Where("skills.owner_user_id = ? AND skills.category = ? AND skills.deleted_at IS NULL", owner, metadata.ExternalCategory).Find(&rows).Error
+	// Only the current head revision carries the provenance for an installed
+	// source. Joining every historical revision makes the result nondeterministic
+	// after an edit and can report an old SourceURL on an idempotent retry.
+	err := db.WithContext(ctx).Table("skills").Select("skills.*, skill_revisions.source_ref_id, skill_revisions.source_ref_type").Joins("LEFT JOIN skill_revisions ON skill_revisions.id = skills.head_revision_id").Where("skills.owner_user_id = ? AND skills.category = ? AND skills.deleted_at IS NULL", owner, metadata.ExternalCategory).Find(&rows).Error
 	if err != nil {
 		return InstallSkillResponse{}, false, err
 	}
@@ -194,12 +264,16 @@ func findInstalledSource(ctx context.Context, db *gorm.DB, owner string, keys ..
 		ext := map[string]any{}
 		_ = json.Unmarshal(row.Ext, &ext)
 		for _, key := range keys {
-			match := ext["import_source_identity"] == key
+			match := ext["import_source_identity"] == key || ext["import_source_resolved_identity"] == key
 			if strings.HasPrefix(key, "url:") {
 				match = match || normalizedInstallURL(fmt.Sprint(ext["import_source_url"])) == strings.TrimPrefix(key, "url:") || (row.SourceRefType == "url" && normalizedInstallURL(row.SourceRefID) == strings.TrimPrefix(key, "url:"))
 			}
 			if match {
-				return InstallSkillResponse{Status: "already_installed", SkillID: row.ID, SkillKey: path.Join(row.Category, row.SkillName), SourceURL: row.SourceRefID, Enabled: row.IsEnabled}, true, nil
+				sourceURL := row.SourceRefID
+				if raw, ok := ext["import_source_url"].(string); ok && strings.TrimSpace(raw) != "" {
+					sourceURL = raw
+				}
+				return InstallSkillResponse{Status: "already_installed", SkillID: row.ID, SkillKey: path.Join(row.Category, row.SkillName), SourceURL: sourceURL, Enabled: row.IsEnabled}, true, nil
 			}
 		}
 	}

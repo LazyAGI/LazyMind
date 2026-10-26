@@ -90,7 +90,7 @@ import {
   type SkillDraftPreviewRecord,
 } from "./skillApi";
 import { buildSkillZipBlob } from "./skillPackage";
-import { getSkillPackageValidationError, isInvalidSkillPackageError, uploadSkillTempFile } from "./skillUpload";
+import { abortSkillTempUpload, getSkillPackageValidationError, isInvalidSkillPackageError, uploadSkillTempFile } from "./skillUpload";
 import { useSkillImportTask } from "./hooks/useSkillImportTask";
 import SkillImportProgress from "./components/SkillManagementSection/SkillImportProgress";
 import { uploadCloudSkill, downloadCloudResource } from "./cloudResourceApi";
@@ -2543,20 +2543,27 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     const inferredName = file.name.replace(/\.zip$/i, "").trim() || t("admin.memorySkillUploadDefaultName");
     setSkillImportName(file.name);
     await startSkillImport(async ({ signal, setUploadProgress }) => {
-      const upload = await uploadSkillTempFile(file, { silentError: true, signal, onProgress: setUploadProgress });
-      signal.throwIfAborted();
-      setUploadProgress(null);
-      await createSkillAsset(
-        {
-          name: inferredName,
-          description: t("admin.memorySkillUploadPersonalDesc"),
-          category: "external",
-          isEnabled: true,
-          source: { type: "uploaded_zip", uploadId: upload.uploadId },
-        },
-        { silentError: true, signal },
-      );
-      return inferredName;
+      let uploadId = "";
+      try {
+        const upload = await uploadSkillTempFile(file, { validatePackage: true, silentError: true, signal, onProgress: setUploadProgress });
+        uploadId = upload.uploadId;
+        signal.throwIfAborted();
+        setUploadProgress(null);
+        await createSkillAsset(
+          {
+            name: inferredName,
+            description: t("admin.memorySkillUploadPersonalDesc"),
+            category: "external",
+            isEnabled: true,
+            source: { type: "uploaded_zip", uploadId },
+          },
+          { silentError: true, signal },
+        );
+        return inferredName;
+      } catch (error) {
+        if (uploadId) await abortSkillTempUpload(uploadId);
+        throw error;
+      }
     });
   };
 
@@ -3929,6 +3936,8 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         content: draft.content.trim(),
       };
 
+      let uploadIdToAbort = "";
+      let uploadedPackageConsumed = false;
       try {
         setSkillSaving(true);
         if (modalMode === "edit") {
@@ -3977,7 +3986,8 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                 body: draft.content,
                 filename: payload.name,
               }));
-            const upload = await uploadSkillTempFile(packageFile);
+            const upload = await uploadSkillTempFile(packageFile, { validatePackage: true });
+            uploadIdToAbort = upload.uploadId;
             source = { type: "uploaded_zip", uploadId: upload.uploadId };
           }
 
@@ -3989,6 +3999,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
             isEnabled: true,
             source,
           });
+          uploadedPackageConsumed = source.type !== "uploaded_zip" || Boolean(source.uploadId);
           setPendingSkillPackageFile(null);
           setPendingSkillSourceUrl("");
         }
@@ -3996,6 +4007,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
       } catch (error) {
         console.error("Save skill draft failed:", error);
+        if (uploadIdToAbort && !uploadedPackageConsumed) {
+          await abortSkillTempUpload(uploadIdToAbort);
+        }
         message.error(getLocalizedErrorMessage(error));
         return;
       } finally {

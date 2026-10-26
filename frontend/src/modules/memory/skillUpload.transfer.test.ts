@@ -18,8 +18,8 @@ describe('local skill package validation', () => {
     Object.defineProperty(tooLarge, 'size', { value: 104857601 });
     expect(getSkillPackageValidationError(wrongType)).toBe('type');
     expect(getSkillPackageValidationError(tooLarge)).toBe('size');
-    await expect(uploadSkillTempFile(wrongType)).rejects.toBeDefined();
-    await expect(uploadSkillTempFile(tooLarge)).rejects.toBeDefined();
+    await expect(uploadSkillTempFile(wrongType, { validatePackage: true })).rejects.toBeDefined();
+    await expect(uploadSkillTempFile(tooLarge, { validatePackage: true })).rejects.toBeDefined();
     expect(http.post).not.toHaveBeenCalled();
   });
 });
@@ -32,7 +32,7 @@ describe('multipart skill upload', () => {
       options.onUploadProgress({ loaded: 1 });
       return { data: {} };
     });
-    const result = await uploadSkillTempFile(new File(['abcd'], 'skill.zip'), { signal, onProgress: percent => progress.push(percent) });
+    const result = await uploadSkillTempFile(new File(['abcd'], 'script.py'), { signal, onProgress: percent => progress.push(percent) });
     expect(result.uploadId).toBe('upload');
     expect(progress).toEqual([0, 25, 50, 75, 100]);
     expect(http.post.mock.calls.every(call => call[2].signal === signal)).toBe(true);
@@ -44,6 +44,7 @@ describe('multipart skill upload', () => {
     http.put.mockImplementationOnce(async () => { controller.abort(); return { data: {} }; });
     await expect(uploadSkillTempFile(new File(['abcd'], 'skill.zip'), { signal: controller.signal })).rejects.toBeDefined();
     expect(http.put).toHaveBeenCalledTimes(1);
-    expect(http.post).toHaveBeenCalledTimes(1);
+    expect(http.post).toHaveBeenCalledTimes(2);
+    expect(http.post.mock.calls[1][0]).toContain('temp/uploads/upload:abort');
   });
 });

@@ -53,7 +53,10 @@ class SkillManagementToolkit:
         'remove_skill',
     ]
 
-    def __init__(self, store: Optional[SkillRemoteStore] = None):
+    def __init__(self, store: Optional[SkillRemoteStore] = None, installer: Any = None):
+        # ``installer`` was accepted by older callers.  Imports now go through
+        # the shared RemoteFS service, but keep the keyword for compatibility
+        # with downstream tool construction and serialized agent configs.
         self.store = store or SkillRemoteStore()
 
     @fc_register(host_file='NONE')
