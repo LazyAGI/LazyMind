@@ -1,6 +1,8 @@
 package doc
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"lazymind/core/common/orm"
 	"net/http/httptest"
@@ -12,21 +14,25 @@ import (
 
 func TestPaperUploadRecordsOriginalTaskAndReplaysWithoutAnotherDocument(t *testing.T) {
 	db := newDocumentTestDB(t)
+	installOriginalSourceTransport(t)
 	if err := db.AutoMigrate(&orm.PaperImportBatch{}, &orm.PaperImportItem{}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	dataset := orm.Dataset{ID: "papers", Ext: json.RawMessage(`{"library_kind":"paper"}`), BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
+	dataset := orm.Dataset{ID: "papers", Scene: "academic_papers", Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now}}
 	if err := db.Create(&dataset).Error; err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(t.TempDir(), "paper.pdf")
-	if err := os.WriteFile(path, []byte("%PDF-study"), 0600); err != nil {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	path := filepath.Join(root, "paper.pdf")
+	if err := os.WriteFile(path, []byte("%PDF-study\n%%EOF"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	source := newTestUploadedFile("paper-upload", "user-1", "hash", UploadedFileStateUploaded, path, now)
+	sum := sha256.Sum256([]byte("%PDF-study\n%%EOF"))
+	source := newTestUploadedFile("paper-upload", "user-1", hex.EncodeToString(sum[:]), UploadedFileStateUploaded, path, now)
 	source.DatasetID = dataset.ID
-	source.Ext = mustJSON(uploadedFileExt{StoredPath: path, OriginalFilename: "paper.pdf", FileSize: 10, ContentType: "application/pdf"})
+	source.Ext = mustJSON(uploadedFileExt{StoredPath: path, OriginalFilename: "paper.pdf", FileSize: int64(len("%PDF-study\n%%EOF")), ContentType: "application/pdf"})
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatal(err)
 	}

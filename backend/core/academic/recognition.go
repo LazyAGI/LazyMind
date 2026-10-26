@@ -30,11 +30,7 @@ func init() {
 		if err := tx.Where("id=?", row.DatasetID).Take(&ds).Error; err != nil {
 			return err
 		}
-		var classification struct {
-			LibraryKind string `json:"library_kind"`
-		}
-		_ = json.Unmarshal(ds.Ext, &classification)
-		if (ds.ScenarioKey != "academic_papers" && classification.LibraryKind != "paper") || strings.ToLower(filepath.Ext(row.DisplayName)) != ".pdf" {
+		if ds.Scene != "academic_papers" || strings.ToLower(filepath.Ext(row.DisplayName)) != ".pdf" {
 			return nil
 		}
 		return enqueueIdentify(context.Background(), tx, row, false)
@@ -170,7 +166,7 @@ func academicDataset(r *http.Request, user, dataset string) bool {
 		}
 		for _, ds := range result.Datasets {
 			if ds.DatasetID == dataset {
-				return ds.ScenarioKey == "academic_papers"
+				return ds.Scene == "academic_papers"
 			}
 		}
 		if !result.HasMore {
@@ -306,7 +302,7 @@ func DocumentStates(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 500, "READ_FAILED", err.Error())
 			return
 		}
-		_, status, message, err := newArxivImportService(store.DB()).processingStatus(r.Context(), document, nil)
+		status, message, err := paperProcessingStatus(r.Context(), store.DB(), document)
 		if err != nil {
 			status, message = "unknown", err.Error()
 		}

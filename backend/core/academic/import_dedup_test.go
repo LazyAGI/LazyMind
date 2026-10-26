@@ -1,7 +1,6 @@
 package academic
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
@@ -134,65 +132,8 @@ func TestLocalPreviewDoesNotQueryArxiv(t *testing.T) {
 	}
 }
 
-func TestFulltextPDFIsReusedByImportWithoutMetadataLookup(t *testing.T) {
-	svc, downloads := arxivImportTestService(t)
-	ref := testVerifiedPaper()
-	work, _, err := findOrCreateWork(t.Context(), svc.db, arxivWorkInput(arxivsource.Metadata{Title: ref.Title, BaseID: ref.ArxivID, Version: ref.SourceVersion, PDFURL: ref.PDFURL}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref.PaperID = work.ID
-	guard, err := lockArxivImport(t.Context(), svc.db, ref.ArxivID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path, _, err := acquireCachedPDFLocked(guard.ctx, "user", ref, svc.acquire)
-	guard.release()
-	if err != nil {
-		t.Fatal(err)
-	}
-	batch := orm.PaperImportBatch{ID: "reuse-batch", CreatedBy: "user", TargetDatasetID: "dataset", Status: "pending", SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]string{})}
-	item := orm.PaperImportItem{ID: "reuse-item", BatchID: batch.ID, AcademicWorkID: work.ID, Status: "pending", SelectedCandidateJSON: marshal(savedImportCandidate{FulltextCandidate: testPDFCandidate(), VerifiedPaper: &ref}), ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]string{}), ErrorDetailsJSON: marshal(map[string]string{})}
-	if err = svc.db.Create(&batch).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err = svc.db.Create(&item).Error; err != nil {
-		t.Fatal(err)
-	}
-	previous := http.DefaultTransport
-	calls := 0
-	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		calls++
-		return &http.Response{StatusCode: 429, Body: io.NopCloser(strings.NewReader("limited")), Header: http.Header{}, Request: r}, nil
-	})
-	t.Cleanup(func() { http.DefaultTransport = previous })
-	service := paperImportService{acquire: svc.acquire, importFile: svc.importFile}
-	if _, err = service.handleItem(t.Context(), &batch, &item, paperImportPayload{UserID: "user"}, importErrorReporter{}, 0, 1); err != nil {
-		t.Fatal(err)
-	}
-	if err = svc.db.Take(&item, "id=?", item.ID).Error; err != nil {
-		t.Fatal(err)
-	}
-	if item.Status != "succeeded" || calls != 0 || downloads.Load() != 1 {
-		t.Fatalf("redundant network or incomplete import: %+v metadata=%d downloads=%d", item, calls, downloads.Load())
-	}
-	if _, err = os.Stat(path); err != nil {
-		t.Fatal("import removed the shared temporary PDF", err)
-	}
-	svc.lookup = func(context.Context, string) (arxivsource.Metadata, error) {
-		t.Fatal("existing attachment queried metadata")
-		return arxivsource.Metadata{}, nil
-	}
-	if _, err = svc.importPaper(t.Context(), ref.PDFURL, "dataset", "user", ""); err != nil {
-		t.Fatal(err)
-	}
-	if downloads.Load() != 1 {
-		t.Fatal("existing attachment downloaded again")
-	}
-}
-
 func TestPDFCacheIsolationCorruptionAndNightlyCleanup(t *testing.T) {
-	svc, downloads := arxivImportTestService(t)
+	svc, downloads := cacheTestFixture(t)
 	ref := testVerifiedPaper()
 	acquire := func(user string) (string, error) {
 		guard, err := lockArxivImport(t.Context(), svc.db, ref.ArxivID)
@@ -272,26 +213,6 @@ func TestPDFCacheIsolationCorruptionAndNightlyCleanup(t *testing.T) {
 	}
 	if !paperPDFCleanupBoundary(now.Add(-time.Minute)).Equal(now.Add(-24 * time.Hour)) {
 		t.Fatal("startup cleanup crossed the current night boundary")
-	}
-}
-
-func TestLegacyVerifiedImportRecoveryStaysWithinUserCollectionAndVersion(t *testing.T) {
-	svc, _ := arxivImportTestService(t)
-	ref := testVerifiedPaper()
-	record := orm.AcademicExpansion{ID: "old-expansion", UserID: "user", DatasetID: "dataset", DiscoveryMode: "external", DiscoveryJSON: marshal([]paperDiscovery{{Papers: []PaperRef{ref}}}), SeedSnapshotJSON: marshal([]paperSource{}), ProgressJSON: marshal(map[string]string{}), ResultJSON: marshal(ReviewWorkflowInput{}), ConversationID: "old-chat", RequestKey: "old", RequestOwner: "user"}
-	if err := svc.db.Create(&record).Error; err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		user, dataset, version string
-		found                  bool
-	}{{"user", "dataset", "v2", true}, {"user", "other", "v2", false}, {"other", "dataset", "v2", false}, {"user", "dataset", "v1", false}} {
-		candidate := testPDFCandidate()
-		candidate.Version = tc.version
-		found, err := verifiedImportPaper(t.Context(), svc.db, tc.user, tc.dataset, "a", candidate)
-		if err != nil || (found != nil) != tc.found {
-			t.Fatal(tc, found, err)
-		}
 	}
 }
 

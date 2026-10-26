@@ -87,10 +87,12 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		Table("plugin_attempt_input_bindings AS input_bindings").
 		Select("input_bindings.*").
 		Joins("LEFT JOIN plugin_slot_revisions AS slot_revisions ON slot_revisions.id = input_bindings.material_revision_id").
+		Joins("LEFT JOIN workflow_input_bindings AS resources ON resources.id = input_bindings.material_revision_id").
 		Where("input_bindings.attempt_id = ?", row.ID).
 		Order("input_bindings.material_id ASC").
 		Order("CASE WHEN slot_revisions.list_index IS NULL THEN 0 ELSE 1 END ASC").
 		Order("slot_revisions.list_index ASC").
+		Order("resources.created_at ASC, resources.created_by_command_id ASC").
 		Order("input_bindings.created_at ASC, input_bindings.id ASC").
 		Find(&bindings).Error; err == nil {
 		if value.Inputs == nil {

@@ -104,7 +104,7 @@ def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeyp
     assert requests[-1][2]['headers'] == {'X-User-Id': 'owner'}
 
 
-@pytest.mark.parametrize('package,slot', [('paper_workflow_mock', 'mock_feedback'),
+@pytest.mark.parametrize('package,slot', [('paper_workflow_mock', 'handoff_receipt'),
                                         ('paper_ppt_with_reflection_mock', 'ppt_request')])
 def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, slot):
     import importlib.util
@@ -115,7 +115,7 @@ def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, sl
     spec = importlib.util.spec_from_file_location('academic_mock_publisher', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    frozen = {'mock': True, 'kind': 'ppt', 'input': {'papers': [{'paper': {'paper_id': 'original-paper'}}]},
+    frozen = {'status': 'awaiting_downstream', 'kind': 'ppt', 'input': {'papers': [{'paper': {'paper_id': 'original-paper'}}]},
               'papers': [{'paper_id': 'original-paper'}], 'reflection_markdown': 'saved reflection body',
               'feedback': 'Mock, no real PPT file'}
     def request(method, url, **kwargs):
@@ -127,9 +127,9 @@ def test_mock_publisher_preserves_authoritative_handoff(monkeypatch, package, sl
     published = []
     monkeypatch.setattr(tools, '_save_artifact', lambda key, value, **kwargs:
                         published.append((key, value, kwargs)) or {'status': 'ok'})
-    receipt = module.academic_mock_submit()
+    receipt = module.academic_handoff_submit()
     assert receipt['artifact']['status'] == 'ok' and receipt['paper_count'] == 1
     assert len(published) == 1 and published[0][0] == slot
     value = published[0][1]
-    saved = json.loads(value.split('```json\n')[1].split('\n```')[0]) if slot == 'mock_feedback' else value
+    saved = json.loads(value.split('```json\n')[1].split('\n```')[0]) if slot == 'handoff_receipt' else value
     assert saved == frozen

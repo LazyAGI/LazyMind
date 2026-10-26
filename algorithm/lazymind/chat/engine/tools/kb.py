@@ -18,6 +18,7 @@ from lazymind.chat.engine.tools._utils import (
     truncate_text,
 )
 from lazymind.chat.engine.tools.algo import DOCUMENT, search_kb
+from lazymind.chat.engine.tools.infra.kb_ownership import filter_active_nodes
 from lazymind.chat.engine.tools.temporary_files import kb_tmp_search  # noqa: F401
 from lazymind.chat.service.utils import (
     basename_from_path,
@@ -247,8 +248,8 @@ class KBToolkit:
     gateway is visible and you decide this Toolkit is relevant, activate the
     gateway before calling its methods. Do not activate it for unrelated requests.
 
-    Use list_knowledge_bases to discover a knowledge base, then inspect its
-    documents or aggregates. Use kb_search for open-ended semantic questions,
+    Use knowledge.list to discover a knowledge base and knowledge.document.list
+    or knowledge.document.aggregate to inspect metadata. Use kb_search for open-ended semantic questions,
     kb_keyword_search for an exact phrase in a known document, and the parent
     or window tools only to expand context around an existing search hit.
     Search methods require either explicit kb_ids or a knowledge-base selection
@@ -257,8 +258,7 @@ class KBToolkit:
     """
 
     __public_apis__ = [
-        'list_knowledge_bases', 'list_knowledge_base_documents',
-        'aggregate_knowledge_base_documents', 'read_document', 'kb_search',
+        'read_document', 'kb_search',
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
     __tool_auto_activate__ = [
@@ -274,6 +274,7 @@ class KBToolkit:
                 metadata = getattr(node, 'global_metadata', {}) or {}
                 if metadata.get('kb_id') not in self._kb_scope:
                     raise ToolExecutionError('Node is outside the inherited knowledge-base scope.')
+        nodes[:] = filter_active_nodes(nodes)
 
     def __lazy_source__(self) -> bool:
         """Stay lazy only while the request has no explicit knowledge-base scope."""
@@ -635,6 +636,7 @@ class KBToolkit:
                 kb_id=kb_id, phrase=phrase, sort_by=sort_by, size=size,
                 file_name=file_name,
             )
+            nodes = filter_active_nodes(nodes)
             LOG.info(f'[kb_keyword_search] doc.keyword_search returned {len(nodes)} nodes')
             if not nodes:
                 continue

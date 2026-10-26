@@ -39,11 +39,7 @@ func preparePaperUpload(r *http.Request, dataset *orm.Dataset, req CreateTaskReq
 	if len(req.Items) != 1 || input.IdempotencyKey == "" || len(input.IdempotencyKey) > 128 || input.LibraryPaperID == "" || len(input.LibraryPaperID) > 255 || input.Title == "" || len(input.Title) > 4096 {
 		return r, "", nil, errors.New("invalid paper upload context")
 	}
-	var ext struct {
-		LibraryKind string `json:"library_kind"`
-	}
-	_ = json.Unmarshal(dataset.Ext, &ext)
-	if ext.LibraryKind != "paper" {
+	if dataset.Scene != "academic_papers" {
 		return r, "", nil, errors.New("paper upload requires a paper library")
 	}
 	item := req.Items[0]
@@ -81,8 +77,8 @@ func existingPaperUpload(db *gorm.DB, scope paperUploadScope) (orm.Task, error) 
 	err := db.Where("id=? AND dataset_id=? AND deleted_at IS NULL", item.DocumentTaskID, scope.DatasetID).Take(&task).Error
 	return task, err
 }
-func recordPaperUpload(r *http.Request, tx *gorm.DB, task orm.Task, uploaded orm.UploadedFile, name string) error {
-	scope, ok := r.Context().Value(paperUploadKey{}).(paperUploadScope)
+func recordPaperUpload(ctx context.Context, tx *gorm.DB, task orm.Task, uploaded orm.UploadedFile, name string) error {
+	scope, ok := ctx.Value(paperUploadKey{}).(paperUploadScope)
 	if !ok {
 		return nil
 	}

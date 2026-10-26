@@ -3,54 +3,13 @@ package doc
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"gorm.io/gorm"
-	"lazymind/core/common/orm"
 	"lazymind/core/settings"
 )
 
-func datasetScenario(ds orm.Dataset) string {
-	if effectiveScenario(ds.ScenarioKey) == "general" && parseDatasetLibraryKind(ds.Ext) == "paper" {
-		return "academic_papers"
-	}
-	return effectiveScenario(ds.ScenarioKey)
-}
-
-func datasetLibraryKind(ds orm.Dataset) string {
-	if datasetScenario(ds) == "academic_papers" {
-		return "paper"
-	}
-	return parseDatasetLibraryKind(ds.Ext)
-}
-
-func effectiveScenario(value string) string {
-	if value == "" {
-		return "general"
-	}
-	return value
-}
-func normalizeScenario(ctx context.Context, db *gorm.DB, user, value string) (string, error) {
-	value = effectiveScenario(strings.TrimSpace(value))
-	switch value {
-	case "general", "academic_papers", "legal", "technical", "chinese_modern", "chinese_classical", "english_learning", "historical":
-		return value, nil
-	}
-	// Custom capability presets already have an owner-scoped identity. Persist
-	// that identity without treating their capability set as a built-in scene.
-	if len(value) <= 64 {
-		var count int64
-		if err := db.WithContext(ctx).Table("learning_capability_profiles").Where("id=? AND owner_id=?", value, user).Count(&count).Error; err != nil {
-			return "", err
-		}
-		if count > 0 {
-			return value, nil
-		}
-	}
-	return "", fmt.Errorf("unknown scenario_key: %s", value)
-}
 func validateAcademicScenario(ctx context.Context, db *gorm.DB, user, scenario, level string) error {
-	if effectiveScenario(scenario) != "academic_papers" {
+	if scenario != "academic_papers" {
 		return nil
 	}
 	if effectiveProcessingLevel(level) == ProcessingLevelStored {

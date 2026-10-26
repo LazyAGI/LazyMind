@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -105,32 +104,4 @@ func arxivMetadataFromRef(ref PaperRef) (arxivsource.Metadata, bool) {
 		abs = *ref.Abstract
 	}
 	return arxivsource.Metadata{Title: ref.Title, Authors: ref.Authors, Year: ref.Year, Abstract: abs, DOI: ref.DOI, Venue: ref.Venue, BaseID: id.BaseID, Version: id.Version, AbsURL: id.AbsURL(), PDFURL: id.PDFURL()}, true
-}
-
-// Recover pre-receipt imports only from this user's saved external discoveries
-// in the target collection, never from mutable client metadata or other libraries.
-func verifiedImportPaper(ctx context.Context, db *gorm.DB, user, dataset, work string, candidate FulltextCandidate) (*PaperRef, error) {
-	if candidate.SourceProvider != "arxiv" || candidate.Version == "" {
-		return nil, nil
-	}
-	var records []orm.AcademicExpansion
-	if err := db.WithContext(ctx).Select("discovery_json").Where("user_id=? AND dataset_id=? AND discovery_mode='external' AND deleted_at IS NULL", user, dataset).Find(&records).Error; err != nil {
-		return nil, err
-	}
-	for _, record := range records {
-		var searches []paperDiscovery
-		if err := json.Unmarshal(record.DiscoveryJSON, &searches); err != nil {
-			return nil, err
-		}
-		for _, search := range searches {
-			for _, ref := range search.Papers {
-				if ref.PaperID == work && ref.SourceProvider == candidate.SourceProvider && ref.SourceVersion == candidate.Version && ref.PDFURL == candidate.URL {
-					if _, ok := arxivMetadataFromRef(ref); ok {
-						return &ref, nil
-					}
-				}
-			}
-		}
-	}
-	return nil, nil
 }

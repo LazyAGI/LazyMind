@@ -2,70 +2,76 @@ package academic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	"lazymind/core/doc"
+	"lazymind/core/store"
+	"os"
 )
 
-func currentImportDocument(ctx context.Context, db *gorm.DB, item ImportQueueItem) (*ImportQueueDocument, error) {
-	var links []orm.AcademicWorkDocument
-	if item.DocumentID != "" {
-		var document orm.Document
-		err := db.WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", item.DocumentID, item.TargetDatasetID).Take(&document).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+func currentImportDocument(ctx context.Context, db *gorm.DB, item ImportQueueItem, user string) (*ImportQueueDocument, error) {
+	id := item.DocumentID
+	if id == "" {
+		if item.WorkID == "" || item.SourceProvider == "" || item.SourceVersion == "" {
+			return nil, nil
+		}
+		var link orm.AcademicWorkDocument
+		err := db.WithContext(ctx).Where("academic_work_id=? AND dataset_id=? AND source_provider=? AND source_version=?", item.WorkID, item.TargetDatasetID, item.SourceProvider, item.SourceVersion).Order("is_preferred_version DESC, updated_at DESC").Take(&link).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		if err != nil {
 			return nil, err
 		}
-		if err == nil {
-			ext, _, available, err := readArxivDocument(document)
-			if err != nil {
-				return nil, err
-			}
-			if available {
-				_, status, detail, err := newArxivImportService(db).processingStatus(ctx, document, ext.Marker)
-				if err != nil {
-					return nil, err
-				}
-				return &ImportQueueDocument{DocumentID: document.ID, ProcessingStatus: status, ProcessingError: detail}, nil
-			}
-		}
-		// A historical document binding must not silently jump to a replacement.
+		id = link.DocumentID
+	}
+	var d orm.Document
+	err := db.WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", id, item.TargetDatasetID).Take(&d).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
-	if item.WorkID == "" {
-		return nil, nil
-	}
-	query := db.WithContext(ctx).Where("academic_work_id=? AND dataset_id=?", item.WorkID, item.TargetDatasetID)
-	if item.SourceProvider != "" && item.SourceVersion != "" {
-		query = query.Where("source_provider=? AND source_version=?", item.SourceProvider, item.SourceVersion)
-	} else if item.DocumentID != "" {
-		query = query.Where("document_id=?", item.DocumentID)
-	} else {
-		return nil, nil
-	}
-	if err := query.Order("is_preferred_version DESC, updated_at DESC").Find(&links).Error; err != nil {
+	if err != nil {
 		return nil, err
 	}
-	service := newArxivImportService(db)
-	for _, link := range links {
-		var document orm.Document
-		if err := db.WithContext(ctx).Where("id=? AND dataset_id=? AND deleted_at IS NULL", link.DocumentID, item.TargetDatasetID).Take(&document).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			continue
-		} else if err != nil {
-			return nil, err
-		}
-		ext, _, available, err := readArxivDocument(document)
-		if err != nil {
-			return nil, err
-		}
-		if !available {
-			continue
-		}
-		_, status, detail, err := service.processingStatus(ctx, document, ext.Marker)
-		if err != nil {
-			return nil, err
-		}
-		return &ImportQueueDocument{DocumentID: document.ID, ProcessingStatus: status, ProcessingError: detail}, nil
+	var ext struct {
+		StoredPath string `json:"stored_path"`
 	}
-	return nil, nil
+	if err = json.Unmarshal(d.Ext, &ext); err != nil {
+		return nil, err
+	}
+	stat, err := os.Stat(ext.StoredPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !stat.Mode().IsRegular() {
+		return nil, nil
+	}
+	status, message, err := paperProcessingStatus(ctx, db, d)
+	if err != nil {
+		return nil, err
+	}
+	return &ImportQueueDocument{DocumentID: id, ProcessingStatus: status, ProcessingError: message}, nil
+}
+func paperProcessingStatus(ctx context.Context, db *gorm.DB, d orm.Document) (string, string, error) {
+	var ds orm.Dataset
+	if err := db.WithContext(ctx).Where("id=? AND deleted_at IS NULL", d.DatasetID).Take(&ds).Error; err != nil {
+		return "", "", err
+	}
+	if ds.ProcessingLevel == doc.ProcessingLevelStored {
+		return "ready", "", nil
+	}
+	state, _, diagnostic, err := doc.ObserveDocumentProcessingDetails(ctx, db, store.LazyLLMDB(), d)
+	if err != nil {
+		return "", "", err
+	}
+	status := doc.DocumentProcessingStatus(ds.ProcessingLevel, state)
+	if diagnostic != nil {
+		return "failed", diagnostic.Message, nil
+	}
+	return status, "", nil
 }

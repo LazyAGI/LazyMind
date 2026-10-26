@@ -227,9 +227,11 @@ func readKnownPaper(ctx context.Context, userID string, source paperSource, cont
 		}
 		defer guard.release()
 		ctx = guard.ctx
-		path, _, err = acquireCachedPDFLocked(ctx, userID, paper, acquirePDF)
+		path, _, err = acquireCachedPDFLocked(ctx, userID, paper, func(ctx context.Context, candidate FulltextCandidate) (string, int64, error) {
+			return acquirePDF(ctx, userID, candidate)
+		})
 	} else {
-		path, _, err = acquirePDF(ctx, FulltextCandidate{URL: paper.PDFURL, SourceType: "official_pdf", SourceProvider: paper.SourceProvider, Version: paper.SourceVersion, ExpectedMIME: "application/pdf"})
+		path, _, err = acquirePDF(ctx, userID, FulltextCandidate{URL: paper.PDFURL, SourceType: "official_pdf", SourceProvider: paper.SourceProvider, Version: paper.SourceVersion, ExpectedMIME: "application/pdf"})
 		if err == nil {
 			defer os.Remove(path)
 		}
@@ -487,6 +489,6 @@ func datasetPaperRef(db *gorm.DB, dataset string, work orm.AcademicWork) (PaperR
 }
 
 func documentParseReady(ctx context.Context, document orm.Document) bool {
-	_, status, _, err := newArxivImportService(store.DB()).processingStatus(ctx, document, nil)
+	status, _, err := paperProcessingStatus(ctx, store.DB(), document)
 	return err == nil && status == "ready"
 }

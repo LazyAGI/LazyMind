@@ -8,6 +8,7 @@ from lazymind.chat.engine.tools.algo.kb_adaptive_topk import AdaptiveKComponent
 from lazymind.chat.engine.tools.algo.kb_context_expansion import ContextExpansionComponent
 from lazymind.chat.engine.tools.infra import get_vocab_manager
 from lazymind.config import config as _cfg
+from lazymind.chat.engine.tools.infra.kb_ownership import filter_active_nodes
 
 
 def _adaptive_get_token_len(n: Any) -> int:
@@ -72,9 +73,12 @@ def search_kb(
         results = parallel(*retrievers)(
             expanded, **retrieval_kwargs
         )
-        return _fuse_retriever_results(results)
+        return filter_active_nodes(_fuse_retriever_results(results), user_id=payload['user_id'])
 
-    text_nodes = _search_text(expanded, _kb_retrieve, reranker, rerank_topk, k_max)
+    text_nodes = filter_active_nodes(
+        _search_text(expanded, _kb_retrieve, reranker, rerank_topk, k_max),
+        user_id=payload['user_id'],
+    )
 
     if image_retriever is None:
         return text_nodes
@@ -82,5 +86,7 @@ def search_kb(
     image_kwargs = {'filters': payload.get('filters') or {}, 'topk': image_topk}
     if payload.get('llm_config'):
         image_kwargs['llm_config'] = payload['llm_config']
-    image_nodes = list(image_retriever(query, **image_kwargs) or [])
+    image_nodes = filter_active_nodes(
+        list(image_retriever(query, **image_kwargs) or []), user_id=payload['user_id'],
+    )
     return list(text_nodes or []) + image_nodes[:image_topk]

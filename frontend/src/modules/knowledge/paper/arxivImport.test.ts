@@ -1,8 +1,8 @@
 import { AxiosError, type AxiosRequestConfig } from "axios";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  isArxivInput, listImportedArxivPapers, requestArxivMetadata,
-  type ArxivImportResult, type ArxivMetadata,
+  isArxivInput, requestArxivMetadata,
+  type ArxivMetadata,
 } from "./arxivImport";
 
 const transport = vi.hoisted(() => ({ adapter: vi.fn() }));
@@ -19,12 +19,6 @@ const metadata: ArxivMetadata = {
   year: 2024, abstract: "A verified abstract.", venue: "arXiv", base_id: "2404.06654",
   version: "v3", abs_url: "https://arxiv.org/abs/2404.06654v3", pdf_url: "https://arxiv.org/pdf/2404.06654v3",
 };
-const imported: ArxivImportResult = {
-  paper: metadata, work_id: "work-1", document_id: "document-1", document_task_id: "task-1",
-  filename: "2404.06654v3.pdf", size: 123456, source_url: metadata.pdf_url, source_version: "v3",
-  content_sha256: "a".repeat(64), status: "imported", processing_status: "pending",
-};
-
 function respond(data: unknown, status = 200) {
   transport.adapter.mockImplementationOnce(async (config) => ({ data, status, statusText: "OK", headers: {}, config }));
 }
@@ -53,41 +47,24 @@ describe("arXiv import API contract", () => {
     expect(JSON.parse(String(config.data))).toEqual({ input });
   });
 
-  it("lists backend-persisted papers scoped to the requested dataset", async () => {
-    respond({ code: 0, data: { items: [imported] } });
-    await expect(listImportedArxivPapers("dataset / 论文")).resolves.toEqual([imported]);
-    expect(requestConfig()).toMatchObject({ method: "get", url: "https://api.example.test/base/api/core/academic/arxiv/library", params: { target_dataset_id: "dataset / 论文" }, timeout: 30_000, silentError: true });
-  });
-
-  it("accepts an explicitly empty backend library", async () => {
-    respond({ data: { items: [] } });
-    await expect(listImportedArxivPapers("empty")).resolves.toEqual([]);
-  });
-
-  it("restores a persisted PDF whose background processing failed without treating it as ready", async () => {
-    const result = { ...imported, processing_status: "failed", processing_error: "文档解析任务启动失败" };
-    respond({ data: { items: [result] } });
-    await expect(listImportedArxivPapers("dataset-1")).resolves.toEqual([result]);
-  });
-
   it.each([
     [404, "ARXIV_NOT_FOUND", "未找到这篇 arXiv 论文"],
     [502, "ARXIV_UPSTREAM_FAILED", "arXiv 服务暂时不可用"],
     [413, "ARXIV_PDF_TOO_LARGE", "PDF 超出大小限制"],
   ])("preserves HTTP %i server message and code", async (status, code, message) => {
     fail(status, { code, message, data: null });
-    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({ message, code, status });
+    await expect(requestArxivMetadata("2404.06654")).rejects.toMatchObject({ message, code, status });
   });
 
   it("preserves a structured nested HTTP error", async () => {
     fail(403, { error: { code: "DATASET_WRITE_FORBIDDEN", message: "没有写入论文库的权限" } });
-    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({ code: "DATASET_WRITE_FORBIDDEN", message: "没有写入论文库的权限", status: 403 });
+    await expect(requestArxivMetadata("2404.06654")).rejects.toMatchObject({ code: "DATASET_WRITE_FORBIDDEN", message: "没有写入论文库的权限", status: 403 });
   });
 
   it("retains stored document identities in a processing-start error", async () => {
     const detail = { document_id: "document-1", document_task_id: "task-1" };
     fail(502, { code: 2000725, message: "PDF 已保存，文档解析启动失败，请重试任务", detail });
-    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({
+    await expect(requestArxivMetadata("2404.06654")).rejects.toMatchObject({
       code: 2000725, message: "PDF 已保存，文档解析启动失败，请重试任务", status: 502, detail,
     });
   });
@@ -104,7 +81,7 @@ describe("arXiv import API contract", () => {
 
   it.each([
     ["lookup", () => requestArxivMetadata("2404.06654")],
-    ["library", () => listImportedArxivPapers("dataset-1")],
+
   ])("rejects HTTP 200 HTML on the %s endpoint", async (_name, request) => {
     respond("<!doctype html><html><title>LazyMind</title></html>");
     await expect(request()).rejects.toMatchObject({ code: "ARXIV_INVALID_RESPONSE" });
@@ -123,23 +100,7 @@ describe("arXiv import API contract", () => {
     await expect(requestArxivMetadata("2404.06654")).rejects.toMatchObject({ code: "ARXIV_INVALID_RESPONSE" });
   });
 
-  it.each([
-    { ...imported, document_id: "" },
-    { ...imported, work_id: undefined },
-    { ...imported, size: 0 },
-    { ...imported, content_sha256: "" },
-    { ...imported, status: "failed" },
-    { ...imported, source_version: undefined },
-    { ...imported, processing_status: undefined },
-  ])("requires a persisted PDF identity when restoring the library", async (body) => {
-    respond({ data: { items: [body] } });
-    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({ code: "ARXIV_INVALID_RESPONSE" });
-  });
 
-  it.each([{ data: {} }, { data: { items: null } }, { data: { items: [imported, { paper: metadata }] } }])("rejects an incomplete library instead of silently dropping records", async (body) => {
-    respond(body);
-    await expect(listImportedArxivPapers("dataset-1")).rejects.toMatchObject({ code: "ARXIV_INVALID_RESPONSE" });
-  });
 });
 
 describe("arXiv candidate routing", () => {

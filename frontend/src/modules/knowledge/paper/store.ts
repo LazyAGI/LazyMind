@@ -1,31 +1,12 @@
 import type { LibraryImportContext } from "../api/academicReferences";
 import { emptyLibrary, normalizeLibrary, sampleLibrary, type PaperLibraryData } from "./model";
 import { asLegacyLibrary, migratePaperLibrary, type PaperLibraryDataV3 } from "./libraryModel";
-import { computeTextSha256 } from '../utils/fileHash';
 
-const kindKey = "lazymind.paper-library.ids";
 const dataKey = (datasetId: string) => `lazymind.paper-library.data.v2.${datasetId}`;
 const dataKeyV3 = (datasetId: string) => `lazymind.paper-library.data.v3.${datasetId}`;
 
-function readIds(): string[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(kindKey) || "[]");
-    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-export function isPaperLibrary(datasetId?: string, libraryKind?: "paper" | "document") {
-  if (!datasetId) return false;
-  if (libraryKind !== undefined) return libraryKind === "paper";
-  return readIds().includes(datasetId);
-}
-
-export function markPaperLibrary(datasetId: string) {
-  const ids = new Set(readIds());
-  ids.add(datasetId);
-  localStorage.setItem(kindKey, JSON.stringify([...ids]));
+export function isPaperLibrary(scene?: string) {
+  return scene === "academic_papers";
 }
 
 /** Read browser data only for the explicit demo. Production reads use loadPersistedPaperLibrary. */
@@ -99,7 +80,7 @@ function validateLibrary(value: unknown): asserts value is PaperLibraryDataV3 {
     && ['attachmentIds', 'noteIds', 'annotationIds', 'collectionIds', 'relatedPaperIds'].every((key) => Array.isArray(item[key])))) {
     throw new Error('服务器文献条目格式无效，已停止加载以保护原数据');
   }
-  for (const key of ['hiddenDocumentIds', 'hiddenArxivWorkIds', 'hiddenArxivPapers', 'migrationSnapshots']) {
+  for (const key of ['hiddenDocumentIds', 'hiddenArxivWorkIds', 'hiddenArxivPapers']) {
     if (value[key] !== undefined && !Array.isArray(value[key])) throw new Error('服务器文献库关联数据格式无效');
   }
 }
@@ -142,68 +123,6 @@ export async function savePersistedPaperLibrary(datasetId: string, data: PaperLi
   } catch (error) { throw persistenceError(error); }
 }
 
-function legacyBrowserCopy(datasetId: string): { data: PaperLibraryDataV3; raw: string } | undefined {
-  let modern: string | null;
-  let legacy: string | null;
-  try {
-    modern = localStorage.getItem(dataKeyV3(datasetId));
-    legacy = localStorage.getItem(dataKey(datasetId));
-  } catch { return undefined; } // Storage may be disabled; the server still works.
-  if (!modern && !legacy) return undefined;
-  try {
-    const parsed = JSON.parse(modern || legacy!);
-    if (!modern && (!object(parsed) || !Array.isArray(parsed.papers) || !Array.isArray(parsed.folders))) throw new Error('Invalid legacy library');
-    const data = modern ? parsed : migratePaperLibrary(parsed);
-    validateLibrary(data);
-    return { data, raw: modern || legacy! };
-  } catch {
-    throw new Error('旧浏览器文献数据无法解析，原数据已保留，请先恢复数据后重试迁移');
-  }
-}
-
-const unionRecords = <T extends { id: string }>(server: T[], legacy: T[]): T[] => {
-  const existing = new Set(server.map((item) => item.id));
-  return [...server, ...legacy.filter((item) => !existing.has(item.id))];
-};
-
-function migrateBrowserCopy(server: PaperLibraryDataV3, legacy: PaperLibraryDataV3, id: string): PaperLibraryDataV3 {
-  const hidden = new Set(server.hiddenArxivWorkIds || []);
-  const visibleWorks = new Set(server.papers.map((paper) => paper.academicWorkId).filter(Boolean));
-  return {
-    ...server,
-    folders: unionRecords(server.folders, legacy.folders),
-    collections: unionRecords(server.collections, legacy.collections),
-    papers: unionRecords(server.papers, legacy.papers.filter((paper) => !paper.academicWorkId || !hidden.has(paper.academicWorkId))),
-    attachments: unionRecords(server.attachments, legacy.attachments),
-    notes: unionRecords(server.notes, legacy.notes),
-    annotations: unionRecords(server.annotations, legacy.annotations),
-    relations: unionRecords(server.relations, legacy.relations),
-    mergeSnapshots: unionRecords(server.mergeSnapshots, legacy.mergeSnapshots),
-    hiddenDocumentIds: [...new Set([...(server.hiddenDocumentIds || []), ...(legacy.hiddenDocumentIds || [])])],
-    hiddenArxivWorkIds: [...new Set([...(server.hiddenArxivWorkIds || []), ...(legacy.hiddenArxivWorkIds || []).filter((workId) => !visibleWorks.has(workId))])],
-    hiddenArxivPapers: unionRecords(server.hiddenArxivPapers || [], legacy.hiddenArxivPapers || []),
-    migrationSnapshots: [...(server.migrationSnapshots || []), { id, createdAt: new Date().toISOString(), source: 'browser-local-v3', data: legacy }],
-  };
-}
-
-/** Always read the server first. Old browser records are migrated durably, never used as an offline source of truth. */
 export async function loadPersistedPaperLibrary(datasetId: string): Promise<PersistedPaperLibrary> {
-  let current = await fetchPersistedLibrary(datasetId);
-  const copy = legacyBrowserCopy(datasetId);
-  const legacy = copy?.data;
-  if (!legacy || !entityKeys.some((key) => legacy[key].length) && !legacy.hiddenArxivWorkIds?.length && !legacy.hiddenArxivPapers?.length) return current;
-  const migrationId = `browser-${computeTextSha256(copy!.raw)}`;
-  // A competing browser can update the library while its legacy copy is being merged.
-  // Re-read and merge missing records only; never retry an ordinary edit against a newer revision.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (current.data.migrationSnapshots?.some((snapshot) => snapshot.id === migrationId)) return current;
-    if (!current.canWrite) throw new Error('本浏览器有尚未迁移的文献数据，需要知识库编辑权限才能保存到服务器；原数据已保留');
-    try {
-      return await savePersistedPaperLibrary(datasetId, migrateBrowserCopy(current.data, legacy, migrationId), current.revision);
-    } catch (error) {
-      if (!object(error) || error.status !== 409 || attempt === 2) throw error;
-      current = await fetchPersistedLibrary(datasetId);
-    }
-  }
-  throw new Error('文献库正在被其他用户更新，请重试迁移');
+  return fetchPersistedLibrary(datasetId);
 }

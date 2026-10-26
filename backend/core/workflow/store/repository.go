@@ -49,7 +49,7 @@ func normalizeWorkflowMode(value string) string {
 // including the initial execution and subsequent AI retries.
 // A retry explicitly requested by the user is a separate control path and is
 // deliberately not constrained by this budget.
-const MaxAutomaticWorkflowStepAttempts = 3
+const MaxAutomaticWorkflowStepAttempts = controlpolicy.MaxAutomaticStepAttempts
 
 // Format failures may restart once. Persisted attempts keep this budget across
 // agent recreation and service restarts; explicit user retries remain separate.
@@ -262,7 +262,7 @@ func (r *Repository) ListInputBindings(ctx context.Context, owner, sessionID str
 	}
 	var values []InputBinding
 	err := r.db.WithContext(ctx).Where("workflow_session_id = ? AND validity = 'effective'", sessionID).
-		Order("material_id ASC, created_at ASC").Find(&values).Error
+		Order("material_id ASC, created_at ASC, created_by_command_id ASC, id ASC").Find(&values).Error
 	return values, err
 }
 

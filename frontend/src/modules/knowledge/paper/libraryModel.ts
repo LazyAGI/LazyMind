@@ -94,8 +94,6 @@ export interface PaperLibraryDataV3 {
   hiddenDocumentIds?: string[];
   hiddenArxivWorkIds?: string[];
   hiddenArxivPapers?: PaperRecord[];
-  /** Original browser records retained on the server after legacy migration. */
-  migrationSnapshots?: { id: string; createdAt: string; source: 'browser-local-v3'; data: PaperLibraryDataV3 }[];
 }
 
 const now = () => new Date().toISOString();

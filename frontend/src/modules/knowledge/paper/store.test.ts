@@ -1,28 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { migratePaperLibrary } from "./libraryModel";
 import { emptyLibrary, sampleLibrary } from "./model";
-import { isPaperLibrary, loadPreviewPaperLibrary, markPaperLibrary, savePreviewPaperLibrary } from "./store";
+import { isPaperLibrary, loadPreviewPaperLibrary, savePreviewPaperLibrary } from "./store";
 
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
 
-describe("library kind resolution", () => {
-  it("recognizes a server paper library with no browser-local marker", () => {
-    expect(isPaperLibrary("server-paper", "paper")).toBe(true);
-    localStorage.clear();
-    expect(isPaperLibrary("server-paper", "paper")).toBe(true);
-  });
-
-  it("lets the server document kind override a stale local paper marker", () => {
-    markPaperLibrary("regular-library");
-    expect(isPaperLibrary("regular-library", "document")).toBe(false);
-  });
-
-  it("uses local markers only for legacy datasets without a server kind", () => {
-    markPaperLibrary("legacy-paper");
-    expect(isPaperLibrary("legacy-paper")).toBe(true);
-    expect(isPaperLibrary("unmarked-library")).toBe(false);
-    expect(isPaperLibrary()).toBe(false);
-  });
+describe("persisted scene resolution", () => {
+ it("recognizes only the server paper scene", () => {
+  expect(isPaperLibrary("academic_papers")).toBe(true);
+  expect(isPaperLibrary("general")).toBe(false);
+  localStorage.setItem("lazymind.paper-library.ids",JSON.stringify(["general"]));
+  expect(isPaperLibrary("general")).toBe(false);
+  expect(isPaperLibrary()).toBe(false);
+ });
 });
 
 it("rolls back a partial library write so a failed import does not appear after reload", () => {

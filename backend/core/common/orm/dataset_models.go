@@ -13,9 +13,11 @@ type Dataset struct {
 	// KbID textCreatetext kb_id。
 	KbID string `gorm:"column:kb_id;type:varchar(255);not null;index:idx_datasets_kb_id"`
 
-	DisplayName string `gorm:"column:display_name;type:varchar(255);not null"`
-	Desc        string `gorm:"column:desc;type:text;not null"`
-	CoverImage  string `gorm:"column:cover_image;type:varchar(255);not null"`
+	Scene           string `gorm:"column:scene;type:varchar(32);not null;default:'general'"`
+	ResourceVersion int64  `gorm:"column:resource_version;not null;default:1"`
+	DisplayName     string `gorm:"column:display_name;type:varchar(255);not null"`
+	Desc            string `gorm:"column:desc;type:text;not null"`
+	CoverImage      string `gorm:"column:cover_image;type:varchar(255);not null"`
 
 	ResourceUID string `gorm:"column:resource_uid;type:varchar(36);not null;index:idx_resource_uid"`
 	BucketName  string `gorm:"column:bucket_name;type:varchar(255);not null"`
@@ -23,7 +25,6 @@ type Dataset struct {
 
 	DatasetInfo            json.RawMessage `gorm:"column:dataset_info;type:json"`
 	DatasetState           uint8           `gorm:"column:dataset_state;not null"`
-	ScenarioKey            string          `gorm:"column:scenario_key;type:varchar(64);not null;default:general"`
 	ProcessingLevel        string          `gorm:"column:processing_level;type:varchar(16);not null;default:'indexed';index"`
 	ProcessingRevision     int64           `gorm:"column:processing_revision;not null;default:1"`
 	TransitionStatus       string          `gorm:"column:transition_status;type:varchar(32);not null;default:'idle'"`

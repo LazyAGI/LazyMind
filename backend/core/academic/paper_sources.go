@@ -189,7 +189,7 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 	}
 	papers, err := arxivsource.NewClient().Search(r.Context(), strings.TrimSpace(req.Query), req.MaxResults)
 	if err != nil {
-		replyArxivImportError(w, ArxivImportResult{}, err)
+		replyArxivImportError(w, err)
 		return
 	}
 	refs := make([]PaperRef, 0, len(papers))

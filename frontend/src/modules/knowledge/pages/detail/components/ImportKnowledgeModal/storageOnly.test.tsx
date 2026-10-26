@@ -21,6 +21,7 @@ vi.mock("@/runtime/readiness", () => ({
 vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code }));
 vi.mock("@/modules/knowledge/utils/uploadByHash", () => ({ buildUploadTaskItems: mocks.build }));
 vi.mock("@/modules/knowledge/utils/request", () => ({
+  getKnowledgeOptions: vi.fn().mockResolvedValue({upload:{max_files:20,max_file_bytes:500*1024*1024,max_batch_bytes:1024*1024*1024,file_types:["pdf"]}}),
   DocumentServiceApi: () => ({ documentServiceAllDocumentTags: async () => ({ data: { tags: [] } }) }),
   TaskServiceApi: () => ({ createTasks: mocks.create, startTasks: mocks.start }),
 }));

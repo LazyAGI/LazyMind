@@ -53,13 +53,13 @@ from lazymind.chat.service.component.tool_policy import build_sidechat_tool_conf
 from lazymind.chat.service.component import (
     AgentEventFrameTranslator,
     ASK_USER_TOOL_CONFIG,
-    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
     USER_ATTACHMENT_TOOL_CONFIGS,
     collect_query_appendices,
     apply_tool_supersession,
     collect_system_prompt_appendices,
     filter_tools,
+    visible_attachment_configs,
     is_workflow_rewind_action,
     normalize_history_for_agent,
     build_session_env_tool_config,
@@ -380,71 +380,17 @@ def _mcp_server_cache_key(server: Dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-_MCP_MODEL_TOOL_NAME_MAX_LENGTH = 64
 _BROWSER_AGENT_ROUND_LIMIT = 200
 
 
-def _mcp_model_tool_name(original_name: str) -> str:
-    """Return a registry-safe model alias while the MCP closure keeps its wire name."""
-    original_name = str(original_name or '').strip()
-    alias = re.sub(r'[^A-Za-z0-9_]+', '_', original_name).strip('_') or 'mcp_tool'
-    if alias[0].isdigit():
-        alias = f'mcp_{alias}'
-    if len(alias) > _MCP_MODEL_TOOL_NAME_MAX_LENGTH:
-        digest = hashlib.sha256(original_name.encode()).hexdigest()[:8]
-        alias = f'{alias[:_MCP_MODEL_TOOL_NAME_MAX_LENGTH - len(digest) - 1]}_{digest}'
-    return alias
-
-
-def _normalize_mcp_tool_names(tools: list, server_name: str) -> list:
-    """Prevent dotted MCP method names from becoming LazyLLM registry groups."""
-    used: set[str] = set()
-    aliases: list[tuple[str, str]] = []
-    normalized = list(tools)
-    for index, tool in enumerate(normalized):
-        original_name = str(getattr(tool, '__name__', '') or '').strip()
-        # MCPClient returns callables in production, while tests and third-party
-        # adapters may use opaque schema objects. Keep those objects cacheable and
-        # unchanged instead of failing the entire server load during normalization.
-        if not original_name:
-            continue
-        alias = _mcp_model_tool_name(original_name)
-        if alias in used:
-            digest = hashlib.sha256(
-                f'{server_name}\0{original_name}\0{index}'.encode()
-            ).hexdigest()[:8]
-            alias = f'{alias[:_MCP_MODEL_TOOL_NAME_MAX_LENGTH - len(digest) - 1]}_{digest}'
-        try:
-            tool.__name__ = alias
-            tool._lazymind_mcp_original_name = original_name
-            tool._lazymind_mcp_server_name = server_name
-        except (AttributeError, TypeError):
-            LOG.warning(
-                f'[MCP] kept immutable tool name from {server_name}: {original_name}'
-            )
-            continue
-        used.add(alias)
-        if alias != original_name:
-            aliases.append((original_name, alias))
-    if aliases:
-        LOG.info(f'[MCP] normalized tool names from {server_name}: {aliases}')
-    return normalized
-
-
 def _browser_tool_name(tool: Any) -> str:
-    """Recognize browser tools before or after LazyLLM normalizes their names.
-
-    Callers supply only Core's system MCP tools, not user-configured MCP tools.
-    Keep protocol identity separate from the callable name used by the registry.
-    """
-    if getattr(tool, '_lazymind_mcp_server_name', '') != 'lazymind-browser':
+    """Recognize builtin browser tools by server identity and original MCP method."""
+    from lazyllm.tools import get_tool_runtime_metadata
+    metadata = get_tool_runtime_metadata(tool)
+    if not metadata or metadata.tool_source != 'mcp' or metadata.tool_origin != 'lazymind-browser':
         return ''
-    name = str(getattr(tool, '_lazymind_mcp_original_name', '') or '')
-    if name.startswith('browser.'):
-        return name
-    if name.startswith('browser_'):
-        return 'browser.' + name[len('browser_'):]
-    return ''
+    name = str(getattr(tool, '__mcp_tool_name__', '') or '')
+    return name if name.startswith('browser.') else ''
 
 
 def _agent_max_retries_for_mcp_tools(default_max_retries: int, tools: list) -> int:
@@ -496,25 +442,32 @@ def _set_mcp_tool_metadata(tools, server, namespace='user'):
             descriptor = [namespace, str(server['id']), server.get('url'), transport, [], original]
             encoded = json.dumps(descriptor, ensure_ascii=False, separators=(',', ':')).encode()
             _set_tool_runtime_metadata(tool, {'tool_identity': 'mcp:v1:' + hashlib.sha256(encoded).hexdigest()})
-    return _normalize_mcp_tool_names(tools, str(server.get('name') or 'mcp'))
+        tool._lazymind_mcp_server_name = str(server.get('name') or 'mcp')
+    return tools
 
 
 class _PreviewMCPClient:
+    def __init__(self, *, server_name, tool_name_prefix):
+        self.server_name = server_name
+        self.tool_name_prefix = tool_name_prefix
+
     async def call_tool(self, *_args, **_kwargs):
         raise RuntimeError('Context preview cannot execute MCP tools')
 
 
 def _mcp_tools_for_preview(server, capability=None, namespace='user'):
     from types import SimpleNamespace
-    from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool
+    from lazyllm.tools.mcp.tool_adaptor import generate_lazyllm_tool, _validate_mcp_tool_names
     if not capability or capability.get('status') != 'ready':
         return []
-    allowed = set(server.get('allowed_tools') or [])
-    tools = [generate_lazyllm_tool(_PreviewMCPClient(), SimpleNamespace(
+    from lazymind.chat.service.mcp_loading import mcp_allowed_tools, mcp_naming_options
+    allowed = mcp_allowed_tools(server)
+    client = _PreviewMCPClient(**mcp_naming_options(server))
+    tools = [generate_lazyllm_tool(client, SimpleNamespace(
         name=item['tool_name'], description=item.get('description') or item['tool_name'],
         inputSchema=item.get('input_schema') or {}))
-        for item in capability.get('tools', []) if item['tool_name'] in allowed]
-    return _set_mcp_tool_metadata(tools, server, namespace)
+        for item in capability.get('tools', []) if allowed is None or item['tool_name'] in allowed]
+    return _set_mcp_tool_metadata(_validate_mcp_tool_names(tools), server, namespace)
 
 
 def _mcp_preview_catalog_status(capabilities, extra_servers=()):
@@ -526,16 +479,25 @@ def _mcp_preview_catalog_status(capabilities, extra_servers=()):
 
 
 def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> list:
+    from lazyllm.tools.mcp.tool_adaptor import MCPToolNameError
+    from lazymind.chat.service.mcp_loading import mcp_allowed_tools, mcp_naming_options
+    from lazymind.chat.service.knowledge_management import BUILTIN_ID, KnowledgeManagementRuntime
+    if server.get('id') == BUILTIN_ID and not isinstance(server.get('_knowledge_runtime'), KnowledgeManagementRuntime):
+        return []
+    allowed = mcp_allowed_tools(server)
+    if allowed == []:
+        return []
     url = server.get('url')
     oauth = server.get('auth_type') == 'oauth' or 'oauth' in server
     adapter = MCPOAuthAdapter(server.get('oauth'), url) if oauth else None
-    if oauth and not server.get('allowed_tools'):
-        return []
     if not url:
         LOG.warning(f"[MCP] skipped server {server.get('name')}: missing 'url' field")
         return []
-    cache_key = _mcp_server_cache_key({'namespace': namespace, 'server': server})
-    if not oauth:
+    callback_keys = ('auth_provider', 'auth_recovery', 'request_metadata_provider', 'progress_callback')
+    runtime_bound = oauth or server.get('id') == 'lazymind-knowledge' or any(
+        server.get(key) is not None for key in callback_keys)
+    cache_key = None if runtime_bound else _mcp_server_cache_key({'namespace': namespace, 'server': server})
+    if not runtime_bound:
         now = time.monotonic()
         with _mcp_tool_cache_lock:
             cached = _mcp_tool_cache.get(cache_key)
@@ -548,42 +510,52 @@ def _load_mcp_server_tools(server: Dict[str, Any], namespace: str = 'user') -> l
         # treats the generic value as legacy SSE and sends an incompatible GET.
         if transport == 'http':
             transport = 'streamable-http'
-        auth_callbacks = ({'auth_provider': adapter.headers, 'auth_recovery': adapter.recover}
-                          if adapter else {})
+        auth_callbacks = {key: server[key] for key in callback_keys if server.get(key) is not None}
+        if adapter:
+            auth_callbacks.update(auth_provider=adapter.headers, auth_recovery=adapter.recover)
         client = MCPClient(
             command_or_url=url,
             headers=None if oauth else server.get('headers'),
             timeout=server.get('timeout', 5),
             transport=transport,
+            result_mode=server.get('result_mode', 'text'),
+            **mcp_naming_options(server),
             **auth_callbacks,
         )
-        allowed = server.get('allowed_tools') or None
         mcp_tools = client.get_tools(allowed_tools=allowed)
         mcp_tools = _set_mcp_tool_metadata(mcp_tools, server, namespace)
-        if not oauth:
+        if server.get('_knowledge_runtime') is not None:
+            mcp_tools = server['_knowledge_runtime'].bind_tools(mcp_tools)
+        if not runtime_bound:
             with _mcp_tool_cache_lock:
                 _mcp_tool_cache[cache_key] = (time.monotonic(), list(mcp_tools))
         LOG.info(f"[MCP] loaded {len(mcp_tools)} tools from {server.get('name')}")
         return mcp_tools
-    except (MCPAuthorizationRequired, MCPAuthUnavailable):
+    except (MCPAuthorizationRequired, MCPAuthUnavailable, MCPToolNameError):
         raise
     except Exception as e:
         if oauth:
             raise MCPAuthUnavailable() from None
-        LOG.warning(f"[MCP] failed to connect {server.get('name')}: {e}")
+        detail = type(e).__name__ if runtime_bound else str(e)
+        LOG.warning(f"[MCP] failed to connect {server.get('name')}: {detail}")
         return []
 
 
 async def _build_mcp_tools(
     mcp_config: List[Dict[str, Any]], namespace: str = 'user', *, issues: Optional[list] = None,
-    preview: bool = False,
+    preview: bool = False, preview_capabilities: Optional[dict] = None,
 ) -> list:
     """Isolate unavailable servers while preserving healthy tools for this request."""
     from lazymind.chat.service.mcp_loading import load_mcp_catalog
     catalog = [{'service': str(server.get('id') or index), 'label': server.get('name'),
                 'status': 'ready', 'runtime': server} for index, server in enumerate(mcp_config)]
-    loader = ((lambda server: _mcp_tools_for_preview(server, namespace=namespace)) if preview
-              else (lambda server: _load_mcp_server_tools(server, namespace)))
+
+    def loader(server):
+        if preview:
+            return _mcp_tools_for_preview(
+                server, (preview_capabilities or {}).get(server.get('id')), namespace=namespace)
+        return _load_mcp_server_tools(server, namespace)
+
     results = await load_mcp_catalog(catalog, loader, issues=issues)
     return [tool for result in results for tool in result['tools']]
 
@@ -676,14 +648,11 @@ def _build_chat_artifact_tools(*, host_filesystem_enabled: bool = False) -> list
     return tools
 
 
-def _build_user_attachment_tools(has_files: bool) -> list:
+def _build_user_attachment_tools(has_files: bool, disabled=()) -> list:
     """Register attachment lookup, reading, and text editing when uploads exist."""
     if not has_files:
         return []
-    return [
-        *(config.tool for config in USER_ATTACHMENT_TOOL_CONFIGS),
-        ATTACHMENT_EDIT_TOOL_CONFIG.tool,
-    ]
+    return [config.tool for config in visible_attachment_configs(disabled)]
 
 
 def _build_ask_user_tool(runtime_policy: Any = None) -> list:
@@ -1273,6 +1242,7 @@ async def _handle_chat_impl(
         'ocr_config': runtime.ocr_config or {},
         'mcp_config': runtime.mcp_config or [],
         'system_mcp_config': runtime.system_mcp_config or [],
+        'disabled_tools': list(agent.disabled_tools or []),
         'environment_context': runtime.environment_context or {},
         'user_id': user_id or '',
         'use_memory': personalization.use_memory,
@@ -1519,13 +1489,22 @@ async def _handle_chat_impl(
     configuration_runtime = None
     configuration_preview = runtime.context_usage_preview or runtime.context_prompt_export
     preview_capabilities = {item['service'][4:]: item for item in runtime.mcp_capabilities or []}
+    from lazymind.chat.service.knowledge_management import build_knowledge_runtime, bind_knowledge_server
+    knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
+
+    def bind_runtime_mcp(server):
+        return server if configuration_preview else bind_knowledge_server(server, knowledge_management)
+
+    def load_runtime_mcp(server, namespace='user'):
+        return _load_mcp_server_tools(bind_knowledge_server(server, knowledge_management), namespace)
+
     if (not sidechat_readonly and not workflow_turn_is_bound and conversation_id and user_id
             and (configuration_preview or (conversation.history_id and conversation.run_id))):
         from lazymind.chat.engine.agent_runtime.tool_configuration import ToolConfigurationRuntime
         configuration_runtime = ToolConfigurationRuntime(
             user_id, conversation_id, conversation.history_id, conversation.run_id,
             loader=(lambda server: _mcp_tools_for_preview(server, preview_capabilities.get(server.get('id'))))
-            if configuration_preview else _load_mcp_server_tools,
+            if configuration_preview else load_runtime_mcp,
             query=language_query, tool_config=runtime.tool_config,
         )
     if sidechat_readonly:
@@ -1588,7 +1567,9 @@ async def _handle_chat_impl(
             else []
         )
         system_mcp_tools = (
-            await _build_mcp_tools(runtime.system_mcp_config, 'system', issues=mcp_issues, preview=configuration_preview)
+            await _build_mcp_tools(
+                [bind_runtime_mcp(server) for server in runtime.system_mcp_config],
+                'system', issues=mcp_issues, preview=configuration_preview, preview_capabilities=preview_capabilities)
             if runtime.system_mcp_config and not workflow_turn_is_bound else []
         )
         system_mcp_tools = _add_browser_visual_tools(
@@ -1601,10 +1582,13 @@ async def _handle_chat_impl(
             extra_mcp = [item for item in (runtime.mcp_config or []) if item.get('id') not in projected]
             if extra_mcp:
                 user_mcp_tools.extend(await _build_mcp_tools(
-                    extra_mcp, issues=mcp_issues, preview=configuration_preview))
+                    [bind_runtime_mcp(server) for server in extra_mcp],
+                    issues=mcp_issues, preview=configuration_preview, preview_capabilities=preview_capabilities))
         else:
             user_mcp_tools = (
-                await _build_mcp_tools(runtime.mcp_config, issues=mcp_issues, preview=configuration_preview)
+                await _build_mcp_tools(
+                    [bind_runtime_mcp(server) for server in runtime.mcp_config],
+                    issues=mcp_issues, preview=configuration_preview, preview_capabilities=preview_capabilities)
                 if runtime.mcp_config and not workflow_turn_is_bound else []
             )
         mcp_tools = [*system_mcp_tools, *user_mcp_tools]
@@ -1619,11 +1603,10 @@ async def _handle_chat_impl(
         )
         # User attachment tools are only meaningful when the user has uploaded files.
         attachment_tools = (
-            [] if workflow_turn_is_bound else _build_user_attachment_tools(bool(files_map))
+            [] if workflow_turn_is_bound else _build_user_attachment_tools(bool(files_map), disabled)
         )
         attachment_configs = (
-            [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
-            if attachment_tools else []
+            visible_attachment_configs(disabled) if attachment_tools else []
         )
         # ask_user is a ChatAgent-only stop-tool. It is NOT in DEFAULT_TOOLS so SubAgents
         # (whose tool resolution falls back to DEFAULT_TOOLS) never see it.
@@ -1876,6 +1859,13 @@ async def _handle_chat_impl(
         request.model_context,
         task_goal=language_query,
     )
+    if knowledge_management is not None:
+        from lazymind.chat.engine.prompts.guidance import KNOWLEDGE_OPERATIONS_GUIDANCE
+        prompt_builder.runtime(
+            'knowledge_operations', 'Knowledge operation results',
+            KNOWLEDGE_OPERATIONS_GUIDANCE,
+            'chat.protocol', priority=39, content_kind='instruction',
+        )
     if enable_chat_exports:
         prompt_builder.runtime(
             'chat_exports', 'Save complete chat documents',
@@ -2094,9 +2084,9 @@ async def _handle_chat_impl(
             'When the user requests browser/page/plugin interaction, preserve that execution method '
             'through reading, editing and verification. Do not switch to database toolkits, direct '
             'APIs or Writer workflows because a page element was not found. Use the latest snapshot '
-            'to click real controls with browser_click. For a person/date table, identify both labels '
-            'in the same snapshot, click with browser_click_intersection and expected_revision, check '
-            'interaction.row and interaction.column, then browser_type_focused with verify_text. '
+            'to click real controls with mcp_browser_click. For a person/date table, identify both labels '
+            'in the same snapshot, click with mcp_browser_click_intersection and expected_revision, check '
+            'interaction.row and interaction.column, then mcp_browser_type_focused with verify_text. '
             'A missing label does not mean the row is absent and does not authorize creating a row. '
             'Inspect visible expand/search controls or scroll the document and inspect the new snapshot. '
             'If scroll reports moved=false, do not repeat identical scrolling. Prefer clicking a visible '
@@ -2194,6 +2184,7 @@ async def _handle_chat_impl(
             tool_state_scope='sidechat' if sidechat_readonly else 'chat',
             context_preview=runtime.context_usage_preview or runtime.context_prompt_export,
             configuration_runtime=configuration_runtime,
+            knowledge_management=knowledge_management,
             directory_runtime=directory_runtime,
             workspace_permission=WorkspaceContext.from_snapshot(
                 request.workspace_context, local_runtime=request.local_runtime,
@@ -2313,10 +2304,14 @@ async def _handle_chat_impl(
                 if translator.language == 'zh':
                     reason = ('需要重新授权，请在 MCP 设置中连接账号' if issue['status'] == 'needs_authorization'
                               else '暂时无法连接，请稍后重试')
+                    if issue['status'] == 'naming_error':
+                        reason = '工具命名失败：' + issue['detail']
                     notice = f"MCP 服务 {issue['server']} {reason}。本轮继续使用其他可用工具。"
                 else:
                     reason = ('needs authorization; reconnect in MCP settings'
                               if issue['status'] == 'needs_authorization' else 'is unavailable; try again later')
+                    if issue['status'] == 'naming_error':
+                        reason = 'has invalid tool names: ' + issue['detail']
                     notice = f"MCP server {issue['server']} {reason}. Continuing with other available tools."
                 yield log_and_emit_frame(
                     {'think': notice + '\n', 'text': None, 'sources': []},

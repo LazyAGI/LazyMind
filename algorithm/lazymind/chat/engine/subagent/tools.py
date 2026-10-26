@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools import fc_register
-from pydantic import Field
+from pydantic import Field, TypeAdapter, WithJsonSchema
 from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, copy_artifact_input
 from typing_extensions import NotRequired, TypedDict
 from lazymind.chat.engine.attachment_reader import (
@@ -53,6 +53,14 @@ class ArtifactSaveItem(TypedDict):
         schema = handler(source)
         schema.pop('ref', None)
         return schema
+
+
+# Kimi Coding rejects the generated local $ref for array items. Inline the
+# model-facing schema while retaining TypedDict validation at execution time.
+_ArtifactSaveInput = Annotated[
+    ArtifactSaveItem,
+    WithJsonSchema({**TypeAdapter(ArtifactSaveItem).json_schema(), 'additionalProperties': False}),
+]
 
 
 def _materialize_local_path(path: str) -> str:
@@ -558,7 +566,7 @@ def resolve_artifact_files(arguments: dict) -> object:
 
 
 @fc_register(host_file=resolve_artifact_files)
-def save_artifacts(artifacts: Annotated[List[ArtifactSaveItem], Field(min_length=1, max_length=50)]) -> Dict[str, Any]:
+def save_artifacts(artifacts: Annotated[List[_ArtifactSaveInput], Field(min_length=1, max_length=50)]) -> Dict[str, Any]:
     """Save one or more output artifacts in one tool call.
 
     Always pass a list, including when saving a single artifact. Every item MUST
@@ -1748,8 +1756,8 @@ def string_replace(
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Return path/url of a user-uploaded attachment without parsing it.
 
-    Prefer this over read_user_attachment when you only need the file location: image
-    editing, workflows, vision_extractor, or passing an image path to other tools.
+    Prefer this over read_user_attachment when you only need the file location: knowledge
+    upload, image editing, workflows, vision_extractor, or passing a path to other tools.
     Does not run OCR or vision description (fast).
 
     Args:
@@ -1761,7 +1769,9 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
 
     Returns:
         A dict with 'url' (signed HTTP URL from Go, preferred) and 'path' (local absolute path,
-        fallback). Pass 'url' to other tools when available.
+        fallback). For knowledge.document.upload, pass the local 'path' as files[].path;
+        neither 'url' nor the reading-only 'file_id' is an upload source. Other tools may
+        accept 'url' according to their own schema.
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:

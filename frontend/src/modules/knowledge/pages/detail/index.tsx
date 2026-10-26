@@ -77,7 +77,6 @@ import PaperLibrary from "@/modules/knowledge/paper/PaperLibrary";
 import { isPaperLibrary } from "@/modules/knowledge/paper/store";
 
 type DatasetWithDataSourceFlag = Dataset & {
-  scenario_key?: string;
   created_by_data_source?: boolean;
 };
 
@@ -158,7 +157,7 @@ const Detail = () => {
   const uploadPaperPdfTask = useMemo(() => createPaperPdfUploader(id), [id]);
   const activeDatasetIdRef = useRef(id);
   activeDatasetIdRef.current = id;
-  const paperLibrary = detail?.dataset_id === id && detail.scenario_key === "academic_papers" || isPaperLibrary(id, detail?.dataset_id === id ? detail.library_kind : undefined);
+  const paperLibrary = detail?.dataset_id === id && isPaperLibrary(detail.scene);
 
   const navigate = useNavigate();
   const { returnToList, listUrl } = useKnowledgeListReturn();

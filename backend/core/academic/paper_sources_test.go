@@ -18,7 +18,7 @@ func TestExternalDiscoveryReusesOnlyInitiatingCollection(t *testing.T) {
 	db := paperFixture(t)
 	for _, dataset := range []string{"papers", "other"} {
 		if dataset == "other" {
-			if err := db.Create(&orm.Dataset{ID: dataset, KbID: dataset, ScenarioKey: "academic_papers", Ext: marshal(map[string]string{}), BaseModel: orm.BaseModel{CreateUserID: "u"}}).Error; err != nil {
+			if err := db.Create(&orm.Dataset{ID: dataset, KbID: dataset, Scene: "academic_papers", Ext: marshal(map[string]string{}), BaseModel: orm.BaseModel{CreateUserID: "u"}}).Error; err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -32,7 +32,7 @@ func paperFixture(t *testing.T) *orm.DB {
 	t.Cleanup(func() { _ = shared.Close() })
 	store.Init(db.DB, nil, shared)
 	t.Cleanup(func() { store.Init(old, oldLazy, oldState) })
-	ds := orm.Dataset{ID: "papers", KbID: "papers", DisplayName: "Papers", ScenarioKey: "academic_papers", ProcessingLevel: "parsed", Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: "u", CreatedAt: time.Now(), UpdatedAt: time.Now()}}
+	ds := orm.Dataset{ID: "papers", KbID: "papers", DisplayName: "Papers", Scene: "academic_papers", ProcessingLevel: "parsed", Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: "u", CreatedAt: time.Now(), UpdatedAt: time.Now()}}
 	if err := db.Create(&ds).Error; err != nil {
 		t.Fatal(err)
 	}

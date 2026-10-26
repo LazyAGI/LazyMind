@@ -169,7 +169,7 @@ func loadImportOperations(ctx context.Context, db *gorm.DB, batches []orm.PaperI
 			current, found := documents[key]
 			if !found {
 				var err error
-				current, err = currentImportDocument(ctx, db, row.ImportQueueItem)
+				current, err = currentImportDocument(ctx, db, row.ImportQueueItem, batch.CreatedBy)
 				if err != nil {
 					return nil, err
 				}

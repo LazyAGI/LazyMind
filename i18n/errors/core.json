@@ -1959,5 +1959,13 @@
   "2004926": { "en-US": "Failed to read the imported document file", "zh-CN": "读取已导入的文档文件失败" },
   "2004927": { "en-US": "Failed to recover the imported document task", "zh-CN": "恢复已导入的文档任务失败" },
   "2004928": { "en-US": "Failed to read the imported document task metadata", "zh-CN": "读取已导入文档的任务元数据失败" },
-  "2003219": { "en-US": "Failed to update the side chat source", "zh-CN": "更新侧聊引用失败" }
+  "2003219": { "en-US": "Failed to update the side chat source", "zh-CN": "更新侧聊引用失败" },
+  "2004930": {"en-US": "Paper libraries require document parsing", "zh-CN": "论文库需要开启文档解析，并选择解析或更高处理等级"},
+  "2004931": {"en-US": "The import preview expired or changed; refresh and retry", "zh-CN": "导入预览已过期或发生变化，请刷新后重试"},
+  "2004932": {"en-US": "The paper upload request is invalid or conflicts with an existing request", "zh-CN": "论文上传请求无效或与已有请求冲突"},
+  "2004933": {"en-US": "The selected paper source is unavailable or changed; start a new task", "zh-CN": "所选论文来源不可用或已变化，请重新发起任务"},
+  "2004934": {"en-US": "The paper workflow input is not ready or changed; refresh and retry", "zh-CN": "论文工作流输入尚未就绪或已变化，请刷新后重试"},
+  "2004935": {"en-US": "The selected paper does not match the import request", "zh-CN": "所选论文与导入请求不一致"},
+  "2004936": {"en-US": "The paper identifiers conflict", "zh-CN": "论文身份标识冲突"},
+  "2004937": {"en-US": "The paper content or cache is unavailable or changed; retry the read", "zh-CN": "论文内容或缓存不可用或已变化，请重试读取"}
 }

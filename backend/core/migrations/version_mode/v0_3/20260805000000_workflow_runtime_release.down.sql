@@ -5,7 +5,6 @@ DROP TABLE IF EXISTS academic_expansion_rounds;
 DROP TABLE IF EXISTS academic_expansions;
 DROP TABLE IF EXISTS academic_user_paper_states;
 DROP TABLE IF EXISTS academic_document_states;
-ALTER TABLE datasets DROP COLUMN scenario_key;
 
 DROP TABLE IF EXISTS document_folder_nodes;
 DROP TABLE IF EXISTS document_folder_inventories;
@@ -16,6 +15,27 @@ DROP TABLE IF EXISTS task_execution_timings;
 
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS paper_libraries;
+DROP TABLE rejected_document_publications;
+DROP TABLE document_ownership_backfills;
+
+-- +migrate Dialect postgres
+DROP TRIGGER knowledge_dataset_membership_version ON documents;
+DROP TRIGGER knowledge_document_version ON documents;
+DROP FUNCTION knowledge_dataset_membership_version();
+DROP FUNCTION knowledge_document_version();
+-- +migrate Dialect sqlite
+DROP TRIGGER knowledge_dataset_membership_update;
+DROP TRIGGER knowledge_dataset_membership_delete;
+DROP TRIGGER knowledge_dataset_membership_insert;
+DROP TRIGGER knowledge_document_version;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE resource_operation_receipts;
+ALTER TABLE documents DROP COLUMN resource_version;
+ALTER TABLE datasets DROP COLUMN resource_version;
+ALTER TABLE datasets DROP COLUMN scene;
+
+-- +migrate Dialect postgres,sqlite
 DROP INDEX IF EXISTS idx_user_environment_variables_deleted_at;
 DROP INDEX IF EXISTS idx_user_env_user_enabled;
 DROP INDEX IF EXISTS idx_user_env_user_name_active;

@@ -4,7 +4,7 @@ import { useDatasetPermissionStore } from './dataset_permission';
 
 const api = vi.hoisted(() => ({ getDataset: vi.fn() }));
 vi.mock('../utils/request', () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceGetDataset: api.getDataset }) }));
-const dataset = (id: string): Dataset => ({ dataset_id: id, library_kind: 'paper', type: 'DATASET_TYPE_TEXT' });
+const dataset = (id: string): Dataset => ({ dataset_id: id, scene: 'academic_papers', type: 'DATASET_TYPE_TEXT' });
 
 beforeEach(() => {
   useDatasetPermissionStore.getState().clearDataset();

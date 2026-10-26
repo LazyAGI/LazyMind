@@ -154,7 +154,7 @@ export default function MainLayout() {
       const request = ++sequence;
       try {
         const prefs = await fetchUserUiPreferences({ silentError: true } as never);
-        if (!disposed && request === sequence) setDirectoryPreference({ user: directoryUser, enabled: prefs.document_directories_enabled ?? true });
+        if (!disposed && request === sequence) setDirectoryPreference({ user: directoryUser, enabled: prefs.document_directories_enabled ?? false });
       } catch { /* Keep the feature unavailable until preferences can be read. */ }
     };
     const changed = (event: Event) => {
@@ -228,11 +228,9 @@ export default function MainLayout() {
   const { currentDataset: currentKnowledgeDataset, requestedDatasetId, datasetLoading, datasetError, loadDataset, clearDataset } = useDatasetPermissionStore();
   const datasetOwner = useRef(notificationUserKey);
   const knowledgeDatasetReady = datasetOwner.current === notificationUserKey && currentKnowledgeDataset?.dataset_id === knowledgeDatasetId;
-  const libraryKind = currentKnowledgeDataset?.dataset_id === knowledgeDatasetId
-    ? currentKnowledgeDataset?.library_kind : undefined;
   const isPaperPage = Boolean(
-    matchPath("/lib/knowledge/paper-preview", pathname) || isPaperLibrary(knowledgeDatasetId, libraryKind)
-      || (knowledgeDatasetReady && libraryKind === undefined && currentKnowledgeDataset && 'scenario_key' in currentKnowledgeDataset && currentKnowledgeDataset.scenario_key === 'academic_papers'),
+    matchPath("/lib/knowledge/paper-preview", pathname)
+      || knowledgeDatasetReady && isPaperLibrary(currentKnowledgeDataset?.scene),
   );
   const startsWithCompactSidebar = isWorkflowDetail || isPaperPage;
   const defaultSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;

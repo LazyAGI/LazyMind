@@ -36,10 +36,13 @@ jobs:
         run: |
           verify_args=(--verify-lock-artifacts)
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # Checkout tests a synthetic merge commit. Its first parent is the
+            # actual target revision, which may be newer than the event base.
+            base_sha=$(git rev-parse HEAD^1)
             # An unrelated PR cannot change the pinned Skill archives. Keep
             # Featured Workflow validation, without downloading every remote
             # SkillHub package on every CI run.
-            if git -C ../.. diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
+            if git -C ../.. diff --quiet "$base_sha" HEAD -- \
               skills/builtin-sources.yaml skills/builtin-skills.lock.json \
               skills/patches skills/featured skills/search \
               backend/core/cmd/builtin-skill-bundle \
@@ -51,13 +54,13 @@ jobs:
                 --check-featured
               exit 0
             fi
-            mode=$(python3 ../../scripts/skill_lock_verification_mode.py "${{ github.event.pull_request.base.sha }}")
+            mode=$(python3 ../../scripts/skill_lock_verification_mode.py "$base_sha")
             if [[ "$mode" == "local" ]]; then
               # Rebuild and hash-check local packages using the existing frozen
               # catalog path; unchanged remote packages need no download.
               verify_args=(--catalog-only --frozen-lockfile)
             else
-              git show "${{ github.event.pull_request.base.sha }}:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
+              git show "$base_sha:skills/builtin-skills.lock.json" > /tmp/base-builtin-skills.lock.json
               verify_args+=(--verify-lock-base /tmp/base-builtin-skills.lock.json)
             fi
           fi
@@ -155,9 +158,10 @@ jobs:
           npx c8 check-coverage --lines 10 --functions 10 --branches 10
 
   test-workflow-panel:
+    needs: [lint, doc_check]
     name: Test Workflow Panel boundaries
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -176,9 +180,9 @@ jobs:
       - name: Type-check workflow panel integration
         working-directory: frontend
         run: pnpm typecheck
-      - name: Test native and external workflow panel boundaries
+      - name: Test frontend application including workflow panel boundaries
         working-directory: frontend
-        run: pnpm test:workflow-panel
+        run: pnpm test --maxWorkers=2 --minWorkers=1
 
   test-local-runtime:
     needs: [lint, doc_check]

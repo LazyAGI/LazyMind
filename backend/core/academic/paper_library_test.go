@@ -114,11 +114,11 @@ func paperLibraryTestDB(t *testing.T) *gorm.DB {
 	}
 	acl.InitStore(&orm.DB{DB: db})
 	for _, id := range []string{"papers", "other", "documents"} {
-		kind := "paper"
+		scene := "academic_papers"
 		if id == "documents" {
-			kind = "document"
+			scene = "general"
 		}
-		row := orm.Dataset{ID: id, Ext: json.RawMessage(fmt.Sprintf(`{"library_kind":%q}`, kind)), BaseModel: orm.BaseModel{CreateUserID: "owner"}}
+		row := orm.Dataset{ID: id, Scene: scene, Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: "owner"}}
 		if err := db.Create(&row).Error; err != nil {
 			t.Fatal(err)
 		}

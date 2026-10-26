@@ -1,4 +1,4 @@
-import { createHash, webcrypto } from 'node:crypto';
+import { webcrypto } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyLibraryV3, migratePaperLibrary, type PaperLibraryDataV3 } from './libraryModel';
 import { sampleLibrary } from './model';
@@ -69,75 +69,10 @@ describe('server-owned paper library', () => {
     expect(server.data.papers.length).toBeGreaterThan(0);
   });
 
-  it('migrates old browser records once and retains their original server backup', async () => {
-    const legacy = migratePaperLibrary(sampleLibrary());
-    savePreviewPaperLibrary('shared', legacy);
-    const migrated = await loadPersistedPaperLibrary('shared');
-    expect(migrated.data.papers).toEqual(legacy.papers);
-    expect(migrated.data.migrationSnapshots?.[0].data).toEqual(legacy);
-    expect(localStorage.getItem('lazymind.paper-library.data.v3.shared')).not.toBeNull();
-    await loadPersistedPaperLibrary('shared');
-    expect(api.put).toHaveBeenCalledTimes(1);
-    localStorage.clear();
-    expect((await loadPersistedPaperLibrary('shared')).data).toEqual(migrated.data);
-  });
-
-  it('preserves newer server metadata and archives conflicting legacy metadata', async () => {
-    const legacy = migratePaperLibrary(sampleLibrary());
-    server.data = clone(legacy);
-    server.revision = 3;
-    server.data.papers[0].title = 'New shared title';
-    savePreviewPaperLibrary('shared', legacy);
-    const migrated = await loadPersistedPaperLibrary('shared');
-    expect(migrated.data.papers[0].title).toBe('New shared title');
-    expect(migrated.data.migrationSnapshots?.[0].data.papers[0].title).toBe(legacy.papers[0].title);
-  });
-
-  it('leaves old records recoverable after failed migration and can retry', async () => {
-    const legacy = migratePaperLibrary(sampleLibrary());
-    savePreviewPaperLibrary('shared', legacy);
-    api.put.mockRejectedValueOnce(new Error('Connection lost'));
-    await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('Connection lost');
-    expect(JSON.parse(localStorage.getItem('lazymind.paper-library.data.v3.shared')!)).toEqual(legacy);
-    expect((await loadPersistedPaperLibrary('shared')).data.papers).toEqual(legacy.papers);
-  });
-
-  it('migrates v2 data idempotently despite generating attachment timestamps', async () => {
-    localStorage.setItem('lazymind.paper-library.data.v2.shared', JSON.stringify(sampleLibrary()));
-    await loadPersistedPaperLibrary('shared');
-    await loadPersistedPaperLibrary('shared');
-    expect(api.put).toHaveBeenCalledTimes(1);
-    expect(server.data.migrationSnapshots).toHaveLength(1);
-  });
-
-  it('migrates on HTTP origins without Web Crypto using the same SHA-256 fingerprint', async () => {
-    vi.stubGlobal('crypto', {});
-    const data = migratePaperLibrary(sampleLibrary());
-    savePreviewPaperLibrary('shared', data);
-    const raw = localStorage.getItem('lazymind.paper-library.data.v3.shared')!;
-    const result = await loadPersistedPaperLibrary('shared');
-    expect(result.data.migrationSnapshots?.[0].id).toBe(`browser-${createHash('sha256').update(raw).digest('hex')}`);
-  });
-
-  it('re-reads after a migration conflict instead of overwriting shared edits', async () => {
+  it('reads only the server when a browser preview exists', async () => {
     savePreviewPaperLibrary('shared', migratePaperLibrary(sampleLibrary()));
-    api.put.mockImplementationOnce(async () => {
-      server.data.folders.push({ id: 'other', name: 'Another user' });
-      server.revision = 1;
-      throw { response: { status: 409, data: { message: '冲突' } } };
-    });
-    const result = await loadPersistedPaperLibrary('shared');
-    expect(result.data.folders.some((folder) => folder.id === 'other')).toBe(true);
-    expect(result.data.papers.length).toBeGreaterThan(0);
-    expect(result.revision).toBe(2);
-  });
-
-  it('retains legacy data and reports permission failure instead of pretending to migrate', async () => {
-    savePreviewPaperLibrary('shared', migratePaperLibrary(sampleLibrary()));
-    server.can_write = false;
-    await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('编辑权限');
+    expect((await loadPersistedPaperLibrary('shared')).data).toEqual(emptyLibraryV3());
     expect(api.put).not.toHaveBeenCalled();
-    expect(localStorage.getItem('lazymind.paper-library.data.v3.shared')).not.toBeNull();
   });
 
   it('reports corrupt server data instead of treating it as an empty library', async () => {

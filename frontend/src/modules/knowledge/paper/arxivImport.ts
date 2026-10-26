@@ -14,21 +14,6 @@ export interface ArxivMetadata {
   pdf_url: string;
 }
 
-export interface ArxivImportResult {
-  paper: ArxivMetadata;
-  work_id: string;
-  document_id: string;
-  document_task_id?: string;
-  filename: string;
-  size: number;
-  source_url: string;
-  source_version: string;
-  content_sha256: string;
-  status: "imported" | "already_present";
-  processing_status: string;
-  processing_error?: string;
-}
-
 export class ArxivImportError extends Error {
   readonly code?: string | number;
   readonly status?: number;
@@ -132,20 +117,6 @@ function metadata(value: unknown): ArxivMetadata {
   return paper as unknown as ArxivMetadata;
 }
 
-function importResult(value: unknown): ArxivImportResult {
-  const result = record(value);
-  if (!result) return invalidResponse();
-  metadata(result.paper);
-  if (!nonempty(result.work_id) || !nonempty(result.document_id) || !nonempty(result.filename)
-    || (result.document_task_id !== undefined && typeof result.document_task_id !== "string")
-    || typeof result.size !== "number" || !Number.isSafeInteger(result.size) || result.size <= 0
-    || !officialUrl(result.source_url, "pdf") || !nonempty(result.source_version) || !versionPattern.test(result.source_version)
-    || !nonempty(result.content_sha256) || !/^[a-f0-9]{64}$/i.test(result.content_sha256)
-    || (result.status !== "imported" && result.status !== "already_present") || !nonempty(result.processing_status)
-    || (result.processing_error !== undefined && typeof result.processing_error !== "string")) return invalidResponse();
-  return result as unknown as ArxivImportResult;
-}
-
 function requestOptions(timeout: number): AxiosRequestConfig & { silentError: true } {
   return { timeout, silentError: true };
 }
@@ -161,13 +132,6 @@ async function request<T>(send: () => Promise<AxiosResponse<unknown>>, parse: (b
 
 export function requestArxivMetadata(input: string): Promise<ArxivMetadata> {
   return request(() => axiosInstance.post(`${endpoint}/arxiv:lookup`, { input }, requestOptions(60_000)), (body) => metadata(body.paper));
-}
-
-export function listImportedArxivPapers(datasetId: string): Promise<ArxivImportResult[]> {
-  return request(() => axiosInstance.get(`${endpoint}/arxiv/library`, { ...requestOptions(30_000), params: { target_dataset_id: datasetId } }), (body) => {
-    if (!Array.isArray(body.items)) return invalidResponse();
-    return body.items.map(importResult);
-  });
 }
 
 /** A routing hint only. The backend parses and validates the original input. */

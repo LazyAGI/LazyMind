@@ -12,7 +12,7 @@ import {
 
 import { DataSourceType } from "@/modules/knowledge/constants/common";
 import DragUpload, { ALLOWED_FILE_TYPES } from "../DragUpload";
-import { DocumentServiceApi, TaskServiceApi } from "@/modules/knowledge/utils/request";
+import { DocumentServiceApi, TaskServiceApi, getKnowledgeOptions, type KnowledgeOptions } from "@/modules/knowledge/utils/request";
 import { buildUploadTaskItems } from "@/modules/knowledge/utils/uploadByHash";
 import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import TagSelect from "@/modules/knowledge/components/TagSelect";
@@ -69,6 +69,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const { availability } = useRAGComponent();
   const storageOnly = availability !== "ready" || props.storageOnly === true;
   const [data, setData] = useState<IData>(InitData);
+  const [uploadOptions, setUploadOptions] = useState<KnowledgeOptions["upload"]>();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [runtimeWaiting, setRuntimeWaiting] = useState(false);
@@ -109,7 +110,9 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       });
   }
 
-  function handleOpen(currentData: IData) {
+  async function handleOpen(currentData: IData) {
+    const options = await getKnowledgeOptions();
+    setUploadOptions(options.upload);
     if (currentData.data_source_type) {
       form.setFieldsValue({ dataSourceType: currentData.data_source_type });
     }
@@ -315,9 +318,10 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
                 <DragUpload
                   disabled={loading}
                   maxCount={300}
-                  maxSize={TOTAL_FILE_MAX_SIZE}
-                  maxFileSize={SINGLE_FILE_MAX_SIZE}
-                  accept={isZipMode ? ZIP_FILE_TYPES : ALLOWED_FILE_TYPES}
+                  maxSize={uploadOptions?.max_batch_bytes ?? TOTAL_FILE_MAX_SIZE}
+                  maxFileSize={uploadOptions?.max_file_bytes ?? SINGLE_FILE_MAX_SIZE}
+                  supportedFileTypes={uploadOptions?.file_types}
+                  accept={isZipMode ? ZIP_FILE_TYPES : uploadOptions?.file_types ?? ALLOWED_FILE_TYPES}
                   targetPath={data.targetPath}
                   maxLevel={2}
                   onZipStatusChange={setHasZipError}

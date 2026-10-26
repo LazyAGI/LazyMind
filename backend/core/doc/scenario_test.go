@@ -1,29 +1,73 @@
 package doc
 
 import (
+	"context"
+	"errors"
+	"lazymind/core/common/orm"
+	"lazymind/core/learning"
 	"testing"
 )
 
-func TestScenarioPresetsAndCustomOwnership(t *testing.T) {
-	db := newDocumentTestDB(t)
-	if err := db.Exec(`CREATE TABLE learning_capability_profiles (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL)`).Error; err != nil {
+func TestKnowledgeSceneBoundariesAndAtomicity(t *testing.T) {
+	s, db, op := resourceFixture(t)
+	if err := db.AutoMigrate(&orm.KBModel{}, &orm.ACLModel{}, &orm.UserUIPreferences{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`INSERT INTO learning_capability_profiles (id, owner_id) VALUES ('my-profile', 'u'), ('foreign-profile', 'other')`).Error; err != nil {
-		t.Fatal(err)
+	s.provision = func(context.Context, DatasetCatalogCaller, *orm.Dataset) error { return nil }
+	for _, initial := range []string{"general", "academic_papers", "custom"} {
+		t.Run(initial, func(t *testing.T) {
+			refs := []learning.CapabilityRef{{Key: "general_translation", Version: 1, Enabled: true, DisplayOrder: 1}}
+			result, err := s.CreateKnowledge(t.Context(), op, CreateKnowledgeRequest{Name: "scene-" + initial, Tags: []string{"test"}, Scene: initial, ProcessingLevel: "parsed", Capabilities: refs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := result.Items[0].ResourceRef
+			id := target.ID()
+			name := "renamed-" + initial
+			_, err = s.UpdateMetadata(t.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: target, Changes: ResourceMetadataChanges{Name: &name, Capabilities: &refs}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ds orm.Dataset
+			if err = db.First(&ds, "id=?", id).Error; err != nil {
+				t.Fatal(err)
+			}
+			if ds.Scene != initial {
+				t.Fatalf("capabilities altered scene: %+v", ds)
+			}
+			next := "academic_papers"
+			if initial == next {
+				next = "general"
+			}
+			name = "must-roll-back"
+			_, err = s.UpdateMetadata(t.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: target, Changes: ResourceMetadataChanges{Scene: &next, Name: &name, Capabilities: &refs}}}})
+			var resource *ResourceError
+			if !errors.As(err, &resource) || resource.Code != "CONFLICT" {
+				t.Fatalf("expected conflict, got %v", err)
+			}
+			db.First(&ds, "id=?", id)
+			if ds.Scene != initial || ds.DisplayName != "renamed-"+initial {
+				t.Fatalf("partial scene update: %+v", ds)
+			}
+			if initial == "general" {
+				next = "legal"
+				_, err = s.UpdateMetadata(t.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: target, Changes: ResourceMetadataChanges{Scene: &next}}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				db.First(&ds, "id=?", id)
+				if ds.Scene != "legal" {
+					t.Fatal(ds.Scene)
+				}
+			}
+		})
 	}
-	for _, key := range []string{"general", "academic_papers", "legal", "technical", "chinese_modern", "chinese_classical", "english_learning", "historical", "my-profile"} {
-		got, err := normalizeScenario(t.Context(), db.DB, "u", key)
-		if err != nil || got != key {
-			t.Fatalf("scenario %s: got %q, %v", key, got, err)
-		}
+	if _, err := s.CreateKnowledge(t.Context(), op, CreateKnowledgeRequest{Name: "invalid-paper", Tags: []string{"test"}, Scene: "academic_papers", ProcessingLevel: "stored"}); err == nil {
+		t.Fatal("paper storage-only library accepted")
 	}
-	for _, key := range []string{"foreign-profile", "missing", "custom"} {
-		if _, err := normalizeScenario(t.Context(), db.DB, "u", key); err == nil {
-			t.Fatalf("unowned scenario %q was accepted", key)
-		}
-	}
-	if got, err := normalizeScenario(t.Context(), db.DB, "u", ""); err != nil || got != "general" {
-		t.Fatalf("legacy scene: %q %v", got, err)
+	var count int64
+	db.Model(&orm.Dataset{}).Where("display_name=?", "invalid-paper").Count(&count)
+	if count != 0 {
+		t.Fatal("failed creation left a library")
 	}
 }

@@ -16,7 +16,7 @@ func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 	return orm.MigrateTestDB(t,
 		&orm.SubAgentTask{}, &orm.SubAgentStep{}, &orm.SubAgentArtifact{},
-		&orm.UserEnvironmentVariable{},
+		&orm.UserEnvironmentVariable{}, &orm.UserDisabledTool{}, &orm.ChatHistory{}, &orm.MultiAnswersChatHistory{},
 		&orm.ArtifactV2{}, &orm.ArtifactBlob{}, &orm.ArtifactRevision{}, &orm.ArtifactHead{},
 		&orm.ArtifactBinding{}, &orm.ArtifactDependency{}, &orm.ArtifactIdempotency{}, &orm.ArtifactEventOutbox{},
 	)

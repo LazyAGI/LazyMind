@@ -476,6 +476,17 @@ type resolveRequest struct {
 }
 
 func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.AcademicWork, string, error) {
+	provenanceCopy := map[string]any{}
+	for k, v := range in.Provenance {
+		if k != "trusted_fulltext" {
+			provenanceCopy[k] = v
+		}
+	}
+	if in.TrustedFulltext {
+		provenanceCopy["trusted_fulltext"] = true
+	}
+	in.Provenance = provenanceCopy
+
 	if in.WorkID != "" {
 		var row orm.AcademicWork
 		err := tx.WithContext(ctx).Where("id = ?", in.WorkID).Take(&row).Error
@@ -1040,7 +1051,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			if work.ID != linkedWorkID && resolveExternal {
 				metadata, e := arxivsource.NewClient().Lookup(r.Context(), work.ArxivIDBase+version)
 				if e != nil {
-					replyArxivImportError(w, ArxivImportResult{}, e)
+					replyArxivImportError(w, e)
 					return
 				}
 				ref = documentPaperRef(ref, marshal(arxivWorkInput(metadata)))

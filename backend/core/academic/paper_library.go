@@ -74,7 +74,7 @@ func paperLibraryAccess(w http.ResponseWriter, r *http.Request) (string, bool, b
 		}
 		return "", false, false
 	}
-	if dataset.LibraryKind != "paper" {
+	if dataset.Scene != "academic_papers" {
 		replyError(w, 400, "PAPER_LIBRARY_REQUIRED", "目标知识库不是论文库")
 		return "", false, false
 	}
@@ -277,9 +277,9 @@ func validatePaperLibraryObject(value any, documents map[string]bool) error {
 	if !ok || root["schemaVersion"] != float64(3) {
 		return errors.New("论文库 schemaVersion 必须为 3")
 	}
-	for _, key := range []string{"folders", "collections", "papers", "attachments", "notes", "annotations", "relations", "mergeSnapshots", "hiddenArxivPapers", "migrationSnapshots"} {
+	for _, key := range []string{"folders", "collections", "papers", "attachments", "notes", "annotations", "relations", "mergeSnapshots", "hiddenArxivPapers"} {
 		raw, present := root[key]
-		if !present && (key == "hiddenArxivPapers" || key == "migrationSnapshots") {
+		if !present && (key == "hiddenArxivPapers") {
 			continue
 		}
 		items, ok := raw.([]any)
@@ -358,11 +358,6 @@ func validatePaperLibraryObject(value any, documents map[string]bool) error {
 			case "mergeSnapshots":
 				required = []string{"createdAt", "primaryId", "duplicateId"}
 				if err := validatePaperLibraryObject(object["before"], documents); err != nil {
-					return err
-				}
-			case "migrationSnapshots":
-				required = []string{"createdAt", "source"}
-				if err := validatePaperLibraryObject(object["data"], documents); err != nil {
 					return err
 				}
 			}

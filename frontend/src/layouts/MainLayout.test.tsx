@@ -34,7 +34,7 @@ vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: (
 
 beforeEach(() => {
   useDatasetPermissionStore.getState().clearDataset();
-  mocks.getDataset.mockReset().mockImplementation(async ({ dataset }: { dataset: string }) => ({ data: { dataset_id: dataset, library_kind: dataset === "papers" ? "paper" : "document", type: "DATASET_TYPE_TEXT" } }));
+  mocks.getDataset.mockReset().mockImplementation(async ({ dataset }: { dataset: string }) => ({ data: { dataset_id: dataset, scene: dataset === "papers" ? "academic_papers" : "general", type: "DATASET_TYPE_TEXT" } }));
 });
 
 vi.mock("react-i18next", async (importOriginal) => ({
@@ -306,7 +306,7 @@ describe("MainLayout resizable navigation", () => {
   function renderLayout(path = "/agent/chat/home", loaded = true) {
     const datasetId = path.match(/^\/lib\/knowledge\/(?:detail|knowledge)\/([^/]+)/)?.[1];
     if (loaded && datasetId && useDatasetPermissionStore.getState().currentDataset?.dataset_id !== datasetId) {
-      useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: datasetId, library_kind: datasetId === "papers" ? "paper" : "document", type: "DATASET_TYPE_TEXT" });
+      useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: datasetId, scene: datasetId === "papers" ? "academic_papers" : "general", type: "DATASET_TYPE_TEXT" });
     }
     return render(
       <MemoryRouter initialEntries={[path]}>
@@ -381,11 +381,11 @@ describe("MainLayout resizable navigation", () => {
     renderLayout(path, false);
     expect(screen.queryByRole("separator", { name: "layout.resizeSidebar" })).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("layout.loadingKnowledge");
-    await act(async () => finish({ data: { dataset_id: "papers", library_kind: "paper", type: "DATASET_TYPE_TEXT" } }));
+    await act(async () => finish({ data: { dataset_id: "papers", scene: "academic_papers", type: "DATASET_TYPE_TEXT" } }));
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
     fireEvent.click(screen.getByRole("button", { name: "layout.expandMenu" }));
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
-    act(() => useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", library_kind: "paper", type: "DATASET_TYPE_TEXT" }));
+    act(() => useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", scene: "academic_papers", type: "DATASET_TYPE_TEXT" }));
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
     fireEvent.click(screen.getByRole("link", { name: "Open tasks" }));
     fireEvent.click(screen.getByRole("link", { name: "Open papers" }));
@@ -394,13 +394,13 @@ describe("MainLayout resizable navigation", () => {
 
   it.each(["/lib/knowledge/detail/papers", "/lib/knowledge/knowledge/papers/paper-1"])("uses an explicit server document kind over a stale paper marker on %s", (path) => {
     localStorage.setItem("lazymind.paper-library.ids", JSON.stringify(["papers"]));
-    useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", library_kind: "document", type: "DATASET_TYPE_TEXT" });
+    useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", scene: "general", type: "DATASET_TYPE_TEXT" });
     renderLayout(path);
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
   });
 
   it("does not apply a different dataset's server kind to the current route", async () => {
-    useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", library_kind: "paper", type: "DATASET_TYPE_TEXT" });
+    useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", scene: "academic_papers", type: "DATASET_TYPE_TEXT" });
     renderLayout("/lib/knowledge/detail/regular", false);
     expect(screen.queryByRole("separator", { name: "layout.resizeSidebar" })).not.toBeInTheDocument();
     await waitFor(() => expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272"));
@@ -689,8 +689,8 @@ describe("MainLayout document directory feature control", () => {
     act(() => window.dispatchEvent(new CustomEvent("lazymind:user-ui-preferences-changed", { detail: { document_directories_enabled: true } })));
     expect(await screen.findByText("directories.title")).toBeInTheDocument();
   });
-  it("does not load directory content or batches for an initially disabled user", async () => {
-    mocks.fetchPreferences.mockResolvedValueOnce({ document_directories_enabled: false });
+  it.each([undefined, false])("does not load directory content or batches when the preference is %s", async (enabled) => {
+    mocks.fetchPreferences.mockResolvedValueOnce({ document_directories_enabled: enabled });
     mocks.listDirectoryBatches.mockClear();
     render(<MemoryRouter initialEntries={["/document-directories/example"]}>
       <Routes><Route element={<MainLayout />}>
