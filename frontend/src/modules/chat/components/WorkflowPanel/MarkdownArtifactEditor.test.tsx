@@ -11,7 +11,8 @@ const mdxMocks = vi.hoisted(() => ({
 
 vi.mock('./writerEmptyHeadingPlugin', () => ({ writerEmptyHeadingPlugin: () => ({}) }));
 
-vi.mock('@mdxeditor/editor', async () => {
+vi.mock('@mdxeditor/editor', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@mdxeditor/editor')>();
   const React = await import('react');
   const { flushSync } = await import('react-dom');
   const emptyPlugin = () => ({});
@@ -79,6 +80,7 @@ vi.mock('@mdxeditor/editor', async () => {
     );
   });
   return {
+    ...actual,
     BlockTypeSelect: EmptyControl,
     BoldItalicUnderlineToggles: FormattingControl,
     ListsToggle: EmptyControl,

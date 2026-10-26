@@ -57,7 +57,6 @@ export const ALLOWED_FILE_TYPES = [
   "py",
 ];
 
-const ZIP_ALLOWED_SUFFIX = ALLOWED_FILE_TYPES;
 
 export interface IDragUploadProps {
   value?: any[];
@@ -66,6 +65,7 @@ export interface IDragUploadProps {
   maxCount?: number; // Total quantity.
   maxSize?: number; // Total size Unit B.
   maxFileSize?: number; // Single file size (unit: B).
+  supportedFileTypes?: string[];
   accept?: string[]; // Supported suffixes.
   title?: string; // Title.
   description?: ReactNode; // Description
@@ -92,6 +92,7 @@ const DragUpload = (props: IDragUploadProps) => {
     maxSize,
     maxFileSize,
     accept,
+    supportedFileTypes = ALLOWED_FILE_TYPES,
     title,
     description,
     targetPath,
@@ -161,12 +162,12 @@ const DragUpload = (props: IDragUploadProps) => {
         }
         const fileName = normalizedPath.split("/").pop() || normalizedPath;
         const suffix = FileUtils.getSuffix(fileName);
-        if (!ZIP_ALLOWED_SUFFIX.includes(suffix)) {
+        if (!supportedFileTypes.includes(suffix)) {
           hasInvalidType = true;
         }
         // @ts-ignore
         const fileSize = file._data?.uncompressedSize || 0;
-        if (fileSize > ZIP_SINGLE_FILE_MAX_SIZE) {
+        if (fileSize > (maxFileSize ?? ZIP_SINGLE_FILE_MAX_SIZE)) {
           hasOversizeFile = true;
         }
         totalSize += fileSize;
@@ -192,7 +193,7 @@ const DragUpload = (props: IDragUploadProps) => {
         return;
       }
 
-      if (totalSize > ZIP_TOTAL_MAX_SIZE) {
+      if (totalSize > (maxSize ?? ZIP_TOTAL_MAX_SIZE)) {
         setZipStatusMap((prev) => ({
           ...prev,
           [file.uid]: { loading: false, error: t("knowledge.fileTooLargeSplit") },

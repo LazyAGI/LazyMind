@@ -272,6 +272,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
 	// ----- Datasettext -----
+	handleAPI(r, "GET", "/knowledge/options", []string{"document.read"}, doc.GetKnowledgeOptions)
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, systemdeps.RequireRAG(doc.ListAlgos))
 	handleAPI(r, "GET", "/dataset/tags", []string{"document.read"}, doc.AllDatasetTags)
 	handleAPI(r, "GET", "/datasets", []string{"document.read"}, doc.ListDatasets)
@@ -283,6 +284,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateDataset))
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:reparse", []string{"document.write"}, doc.ReparseDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:read", []string{"document.read"}, doc.ReadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
@@ -290,6 +292,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, systemdeps.RequireRAG(academic.ListReferences))
 	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, systemdeps.RequireRAG(academic.ExtractReferences))
 	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)
+	handleAPI(r, "POST", "/academic/sources:inspect", []string{"document.read"}, academic.InspectSources)
+	handleAPI(r, "GET", "/academic/source-targets", []string{"document.read"}, academic.ListSourceTargets)
 	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, systemdeps.RequireRAG(academic.CheckPresence))
 	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, systemdeps.RequireRAG(academic.PreviewImport))
 	handleAPI(r, "POST", "/academic/imports", []string{"document.write"}, systemdeps.RequireRAG(academic.CreateImport))
@@ -1017,7 +1021,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/learning/review/sessions", []string{"document.write"}, learning.CreateReviewSession)
 	handleAPI(r, "GET", "/learning/review/sessions/{session_id}", []string{"document.read"}, learning.GetReviewSession)
 	handleAPI(r, "POST", "/learning/review/sessions/{session_id}/answers", []string{"document.write"}, learning.AnswerReviewQuestion)
-	handleAPI(r, "POST", "/learning/preanalysis/tasks", []string{"document.write"}, learning.CreatePreanalysisTask)
+	handleAPI(r, "POST", "/learning/preanalysis/tasks", []string{"document.write"}, doc.CreatePreanalysisTask)
 	handleAPI(r, "GET", "/learning/preanalysis/tasks/latest", []string{"document.read"}, learning.GetLatestPreanalysisTask)
 	handleAPI(r, "GET", "/learning/preanalysis/tasks/{task_id}", []string{"document.read"}, learning.GetPreanalysisTask)
 	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}:run", []string{"document.write"}, learning.RunPreanalysisTask)

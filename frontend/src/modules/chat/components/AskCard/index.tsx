@@ -21,6 +21,8 @@ export interface AskPending {
   /** Optional subtitle / description shown below the title */
   description?: string;
   user_env_delete?: { id: string; name: string; expected_updated_at: string };
+  knowledge_management?: { confirmation_id: string; arguments_digest: string; snapshot: string };
+  knowledge_management_preview?: Record<string, unknown>;
   env_input?: import("../EnvInputCard").EnvironmentInput;
   skill_ambiguity?: { requested_name: string; candidates: string[]; original_query: string };
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
@@ -53,6 +55,8 @@ interface AskCardProps {
   /** Called with a payload containing the formatted text and full structured answers. */
   onSubmit: (payload: AskSubmitPayload) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
+  /** Persisted completion, distinct from a temporarily disabled or superseded card. */
+  answered?: boolean;
   /** Cached answers to pre-populate (index → serialized answer) */
   savedAnswers?: Record<number, AnswerState>;
   /** Called whenever an answer changes, for external caching */
@@ -78,6 +82,24 @@ function initAnswer(q: AskQuestion): AnswerState {
       return { type: "multiple", value: [], otherText: "" };
     default:
       return { type: "text", value: "" };
+  }
+}
+
+function restoreAnswer(q: AskQuestion, saved?: AnswerState): AnswerState {
+  if (!saved || saved.type !== q.type) return initAnswer(q);
+  const choices = q.choices?.length ? q.choices :
+    q.type === "boolean" ? ["__ask_user_yes__", "__ask_user_no__"] : [];
+  switch (saved.type) {
+    case "text":
+      return typeof saved.value === "string" ? saved : initAnswer(q);
+    case "boolean":
+      return saved.value === null || choices.includes(saved.value) ? saved : initAnswer(q);
+    case "single":
+      return saved.value === null || choices.includes(saved.value)
+        ? { ...saved, otherText: saved.otherText ?? "" } : initAnswer(q);
+    case "multiple":
+      return Array.isArray(saved.value) && saved.value.every(value => choices.includes(value))
+        ? { ...saved, otherText: saved.otherText ?? "" } : initAnswer(q);
   }
 }
 
@@ -136,6 +158,15 @@ function formatAnswer(
   }
 }
 
+function previewText(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.map(previewText).filter(Boolean).join("\n");
+  if (typeof value === "object") {
+    return Object.entries(value).map(([key, entry]) => `${key}: ${previewText(entry)}`).join("; ");
+  }
+  return String(value);
+}
+
 function ChoiceLabel({ value }: { value: string }) {
   return <span className="ask-wizard__choice-label">{value}</span>;
 }
@@ -158,6 +189,7 @@ export default function AskCard({
   askPending,
   onSubmit,
   disabled = false,
+  answered = false,
   savedAnswers,
   onAnswerChange,
 }: AskCardProps) {
@@ -177,18 +209,35 @@ export default function AskCard({
     description,
   } = askPending;
   const questions = normalizedAskQuestions(askPending, t);
-  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "");
+  const preview = askPending.knowledge_management_preview;
+  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "") || previewText(preview?.title);
+  const displayDescription = description || previewText(preview?.description);
+  const irreversible = previewText(preview?.impact).includes("删除后不可恢复");
+  const previewEntries = Object.entries(preview ?? {}).flatMap(([key, value]) => {
+    if (key === "title" || key === "description") return [];
+    const text = previewText(value);
+    return !text || text === displayTitle || text === displayDescription ? [] : [[key, text]];
+  });
   const total = questions.length;
 
   const [answers, setAnswers] = useState<AnswerState[]>(() =>
-    questions.map((q, i) => savedAnswers?.[i] ?? initAnswer(q)),
+    questions.map((q, i) => restoreAnswer(q, savedAnswers?.[i])),
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [submitted, setSubmitted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [decisionFailed, setDecisionFailed] = useState(false);
   const submittingRef = useRef(false);
-  const isReadOnly = disabled || submitted || submitting;
-  const needsConfirmation = !!askPending.user_env_delete && !(
+  const processed = answered || submitted;
+  const isReadOnly = disabled || processed || submitting;
+  const isConfirmation = !!(askPending.knowledge_management || askPending.user_env_delete);
+  const decision = answers[0]?.type === "boolean" ? answers[0].value : null;
+  const statusLabel = t(isConfirmation && decision === "__ask_user_yes__"
+    ? "chat.askCardConfirmed"
+    : isConfirmation && decision === "__ask_user_no__"
+      ? "chat.askCardCancelled" : "chat.askCardAnswered");
+  const needsConfirmation = !!(askPending.user_env_delete || askPending.knowledge_management) && !(
     answers.length === 1 && answers[0]?.type === "boolean" &&
     ["__ask_user_yes__", "__ask_user_no__"].includes(answers[0].value ?? "")
   );
@@ -200,7 +249,7 @@ export default function AskCard({
 
   useEffect(() => {
     setAnswers((prev) =>
-      questions.map((q, i) => savedAnswers?.[i] ?? prev[i] ?? initAnswer(q)),
+      questions.map((q, i) => restoreAnswer(q, savedAnswers?.[i] ?? prev[i])),
     );
   }, [askPending.ask_id, savedAnswers]);
 
@@ -254,11 +303,14 @@ export default function AskCard({
     };
     submittingRef.current = true;
     setSubmitting(true);
+    setDecisionFailed(false);
     try {
       const accepted = await onSubmit({ text: lines.join("\n"), structured });
       if (accepted !== false && !askPending.user_env_delete) setSubmitted(true);
+      if (accepted === false && askPending.knowledge_management) setDecisionFailed(true);
     } catch {
-      // The caller reports request errors; keep the selected answer available for retry.
+      if (askPending.knowledge_management) setDecisionFailed(true);
+      // Ordinary callers report their own request errors; keep the answer for retry.
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -277,6 +329,21 @@ export default function AskCard({
       className={`ask-wizard${isReadOnly ? " ask-wizard--disabled" : ""}`}
       aria-label={t("chat.askCardAria")}
     >
+      {processed && (
+        <button
+          type="button"
+          className="ask-wizard__summary"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span className="ask-wizard__summary-status">{statusLabel}</span>
+          <span className="ask-wizard__summary-title">{displayTitle}</span>
+          <span>{t(expanded ? "chat.askCardCollapse" : "chat.askCardExpand")}</span>
+          <RightOutlined rotate={expanded ? 90 : 0} />
+        </button>
+      )}
+      {(!processed || expanded) && <>
+      {decisionFailed && <p role="alert">{t("chat.knowledgeConfirmationFailed")}</p>}
       {/* Header */}
       <div className="ask-wizard__header">
         <div className="ask-wizard__header-top">
@@ -284,8 +351,17 @@ export default function AskCard({
             {displayTitle && (
               <h3 className="ask-wizard__title">{displayTitle}</h3>
             )}
-            {description && (
-              <p className="ask-wizard__description">{description}</p>
+            {displayDescription && (
+              <p className="ask-wizard__description">{displayDescription}</p>
+            )}
+            {irreversible && <p role="alert"><strong>删除后不可恢复</strong></p>}
+            {previewEntries.length > 0 && (
+              <dl className="ask-wizard__knowledge-preview">
+                {previewEntries.map(([key, text]) => <div key={key}>
+                  <dt>{t(`chat.knowledgePreviewLabels.${key}`, { defaultValue: key.replaceAll("_", " ") })}</dt>
+                  <dd>{text}</dd>
+                </div>)}
+              </dl>
             )}
           </div>
           <div className="ask-wizard__meta">
@@ -488,7 +564,7 @@ export default function AskCard({
               <RightOutlined />
             </Button>
           ) : (
-            !disabled && !submitted && (
+            !disabled && !processed && (
               <Button
                 type="primary"
                 onClick={handleSubmit}
@@ -521,6 +597,7 @@ export default function AskCard({
       {!isReadOnly && (
         <p className="ask-wizard__hint">{t("chat.askCardAutoSaveHint")}</p>
       )}
+      </>}
     </div>
   );
 }

@@ -21,7 +21,7 @@ import type { DocumentChatSelection } from "./types";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import type { DocumentTranslationRequest } from "./types";
 import { touchCachedPdfChat } from "./cache";
-import { ensureDocumentParsed } from "@/modules/knowledge/api/pdfArtifacts";
+import { ensureDocumentParsed, retryDocumentParsed, type DocumentParseResult } from "@/modules/knowledge/api/pdfArtifacts";
 
 interface PdfTemporaryChatProps {
   datasetId: string;
@@ -66,8 +66,10 @@ export default function PdfTemporaryChat({
   const [saved, setSaved] = useState(false);
   const [restartKey, setRestartKey] = useState(0);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({ knowledgeBaseId: [datasetId] });
-  const [parseState, setParseState] = useState<"parsing" | "parsed" | "failed">("parsing");
+  const [parseState, setParseState] = useState<DocumentParseResult["status"] | "loading">("loading");
   const [parseError, setParseError] = useState("");
+  const [parseAttempt, setParseAttempt] = useState(0);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     // Opening document chat is the first concrete signal that the stored file
@@ -75,17 +77,18 @@ export default function PdfTemporaryChat({
     // user is composing the first question instead of waiting for retrieval to
     // discover that no chunks exist.
     let cancelled = false;
+    setParseState("loading");
     let timer: number | undefined;
     const poll = async () => {
       try {
         const result = await ensureDocumentParsed(datasetId, documentId);
         if (cancelled) return;
         setParseState(result.status);
-        setParseError("");
+        setParseError(result.error?.message || (result.status === "failed" ? t("knowledge.pdfChatParseReasonUnknown") : ""));
         if (result.status === "parsing") timer = window.setTimeout(poll, 1000);
       } catch (error) {
         if (cancelled) return;
-        setParseState("failed");
+        setParseState("unknown");
         setParseError(getLocalizedErrorMessage(error));
       }
     };
@@ -94,7 +97,7 @@ export default function PdfTemporaryChat({
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [datasetId, documentId]);
+  }, [datasetId, documentId, parseAttempt]);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -317,10 +320,18 @@ export default function PdfTemporaryChat({
           <Alert className="pdf-temporary-chat__parse-status" type="info" showIcon message={t("knowledge.pdfChatParsing")} />
         ) : null}
         {parseState === "failed" ? (
-          <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseError} />
+          <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseError} action={<Button size="small" loading={retrying} onClick={async () => {
+            setRetrying(true);
+            try { await retryDocumentParsed(datasetId, documentId); setParseAttempt(value => value + 1); }
+            catch (error) { setParseError(getLocalizedErrorMessage(error)); }
+            finally { setRetrying(false); }
+          }}>{t("knowledge.pdfChatRetryParse")}</Button>} />
         ) : null}
+        {["loading", "unknown", "not_requested"].includes(parseState) && <Alert type="warning" showIcon message={t(parseState === "loading" ? "knowledge.pdfChatChecking" : parseState === "not_requested" ? "knowledge.pdfChatNotParsed" : "knowledge.pdfChatUnknown")} description={parseError} />}
         <ChatContainerComponent
           ref={chatRef}
+          canChat={parseState === "parsed"}
+          disabledReason={parseState === "parsed" ? undefined : t(parseState === "failed" ? "knowledge.pdfChatParseFailed" : parseState === "parsing" ? "knowledge.pdfChatParsing" : "knowledge.pdfChatUnknown")}
           sessionId={conversationId}
           onOpenSSE={openSSE}
           onOpenResumeSSE={openResumeSSE}

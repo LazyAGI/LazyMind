@@ -235,7 +235,7 @@ def create_subagent(
         params=params,
         input_slots=input_slots,
         output_slots=output_slots,
-        tools=tools or [],
+        tools=tools,
         resume=bool(resume),
     )
 

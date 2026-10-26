@@ -60,6 +60,7 @@ async def list_chat_tools(
             )
         ),
     ] = None,
+    system_mcp_config: Annotated[Optional[List[Dict[str, Any]]], Body()] = None,
     accept_language: Annotated[
         Optional[str],
         Header(
@@ -80,7 +81,7 @@ async def list_chat_tools(
     locale = normalize_tool_locale(accept_language)
     response.headers['Content-Language'] = locale
     response.headers['Vary'] = 'Accept-Language'
-    return {'tool_groups': get_all_tool_groups(locale)}
+    return {'tool_groups': get_all_tool_groups(locale, system_mcp_config=system_mcp_config or [])}
 
 
 async def _external_tool_request(payload, token, *, execute=False):

@@ -113,15 +113,20 @@ class ToolStateStore:
             payload = json.loads(self.path.read_text(encoding='utf-8'))
         except FileNotFoundError:
             return {}
-        if (not isinstance(payload, dict) or payload.get('version') not in (1, 2)
+        if (not isinstance(payload, dict) or payload.get('version') not in (1, 2, 3)
                 or not isinstance(payload.get('loaded'), list)
                 or not all(isinstance(name, str) for name in payload['loaded'])
                 or not isinstance(payload.get('skills'), dict)):
             raise ValueError('Invalid tool retrieval state')
-        if payload['version'] == 1:
+        if payload['version'] in (1, 2):
             # Old public names cannot identify their original provider. Rebuild
             # required tools and Skill dependencies, never reuse optional names.
-            return {'version': 2, 'loaded': [], 'skills': payload['skills']}
+            return {'version': 3, 'loaded': [], 'skills': payload['skills'], 'mcp_bindings': {}}
+        bindings = payload.get('mcp_bindings')
+        if not isinstance(bindings, dict) or not all(
+                isinstance(name, str) and isinstance(identity, str) and identity
+                for name, identity in bindings.items()):
+            raise ValueError('Invalid MCP tool bindings')
         return payload
 
     def update(self, update):
@@ -129,7 +134,7 @@ class ToolStateStore:
             raise RuntimeError('Context preview cannot change tool loading state')
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(self.path) + '.lock'):
-            state = {**update(self.read()), 'version': 2}
+            state = {'mcp_bindings': {}, **update(self.read()), 'version': 3}
             temporary = None
             try:
                 with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.path.parent,

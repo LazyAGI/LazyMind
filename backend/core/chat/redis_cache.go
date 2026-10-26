@@ -63,32 +63,33 @@ const (
 )
 
 type ChatChunkResponse struct {
-	SteeringReplay        []steeringReplayItem         `json:"steering_replay,omitempty"`
-	SteeringApplied       []steeringApplied            `json:"steering_applied,omitempty"`
-	Exports               *[]ChatExport                `json:"exports,omitempty"`
-	ConversationID        string                       `json:"conversation_id"`
-	Seq                   int32                        `json:"seq"`
-	Message               string                       `json:"message"`
-	Delta                 string                       `json:"delta"`
-	DeltaMode             ChatDeltaMode                `json:"delta_mode,omitempty"`
-	HistoryID             string                       `json:"history_id"`
-	Sources               []any                        `json:"sources,omitempty"`
-	PromptQuestions       []string                     `json:"prompt_questions,omitempty"`
-	ReasoningContent      string                       `json:"reasoning_content,omitempty"`
-	ThinkingDurationS     int64                        `json:"thinking_duration_s,omitempty"`
-	ToolCallTurns         int                          `json:"tool_call_turns,omitempty"`
-	ExternalEventSequence int64                        `json:"external_event_sequence,omitempty"`
-	Execution             *externalExecutionProjection `json:"execution,omitempty"`
-	ModelRoute            *chatModelRoute              `json:"model_route,omitempty"`
-	TaskCreated           *TaskCreatedNotice           `json:"task_created,omitempty"`
-	ArtifactCreated       *ConversationArtifactDTO     `json:"artifact_created,omitempty"`
-	AskPending            *AskPendingEvent             `json:"ask_pending,omitempty"`
-	ToolLimitPending      *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
-	IntentUpdated         *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
-	CapabilityDependency  map[string]any               `json:"capability_dependency,omitempty"`
-	ToolConfiguration     map[string]any               `json:"tool_configuration,omitempty"`
-	RuntimeEvent          *ChatRuntimeEvent            `json:"runtime_event,omitempty"`
-	PerformanceMetrics    *RunPerformanceMetrics       `json:"performance_metrics,omitempty"`
+	SteeringReplay           []steeringReplayItem         `json:"steering_replay,omitempty"`
+	SteeringApplied          []steeringApplied            `json:"steering_applied,omitempty"`
+	KnowledgeOperationResult map[string]any               `json:"knowledge_operation_result,omitempty"`
+	Exports                  *[]ChatExport                `json:"exports,omitempty"`
+	ConversationID           string                       `json:"conversation_id"`
+	Seq                      int32                        `json:"seq"`
+	Message                  string                       `json:"message"`
+	Delta                    string                       `json:"delta"`
+	DeltaMode                ChatDeltaMode                `json:"delta_mode,omitempty"`
+	HistoryID                string                       `json:"history_id"`
+	Sources                  []any                        `json:"sources,omitempty"`
+	PromptQuestions          []string                     `json:"prompt_questions,omitempty"`
+	ReasoningContent         string                       `json:"reasoning_content,omitempty"`
+	ThinkingDurationS        int64                        `json:"thinking_duration_s,omitempty"`
+	ToolCallTurns            int                          `json:"tool_call_turns,omitempty"`
+	ExternalEventSequence    int64                        `json:"external_event_sequence,omitempty"`
+	Execution                *externalExecutionProjection `json:"execution,omitempty"`
+	ModelRoute               *chatModelRoute              `json:"model_route,omitempty"`
+	TaskCreated              *TaskCreatedNotice           `json:"task_created,omitempty"`
+	ArtifactCreated          *ConversationArtifactDTO     `json:"artifact_created,omitempty"`
+	AskPending               *AskPendingEvent             `json:"ask_pending,omitempty"`
+	ToolLimitPending         *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
+	IntentUpdated            *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
+	CapabilityDependency     map[string]any               `json:"capability_dependency,omitempty"`
+	ToolConfiguration        map[string]any               `json:"tool_configuration,omitempty"`
+	RuntimeEvent             *ChatRuntimeEvent            `json:"runtime_event,omitempty"`
+	PerformanceMetrics       *RunPerformanceMetrics       `json:"performance_metrics,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend that an independent SubAgent task exists.
@@ -465,6 +466,21 @@ type ConvEvent struct {
 	// persisted. Consumers must not re-run command-like side effects for replayed
 	// events (for example driver_input or auto_chat_started).
 	Replayed bool `json:"replayed,omitempty"`
+}
+
+// PublishConversationEvent is the production SubAgent hook. History identity
+// survives the public lifecycle projection so clients can hydrate that record.
+func PublishConversationEvent(ctx context.Context, st state.Store, conversationID, historyID, eventType string, payload map[string]any) error {
+	enriched := make(map[string]any, len(payload)+3)
+	for key, value := range payload {
+		enriched[key] = value
+	}
+	enriched["event_type"] = eventType
+	enriched["conversation_id"] = conversationID
+	if historyID != "" {
+		enriched["history_id"] = historyID
+	}
+	return AppendConvEvent(ctx, st, conversationID, &ConvEvent{Type: eventType, Payload: enriched})
 }
 
 // AppendConvEvent appends a ConvEvent to the conversation-level event LIST.

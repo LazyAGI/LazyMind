@@ -278,3 +278,24 @@ func TestConfigurationBatchAuthFailureIsolationAndRevocation(t *testing.T) {
 		t.Fatalf("revocation: %+v actions=%+v err=%v", snapshots, actions, err)
 	}
 }
+
+func TestConfigurationRefreshUsesRunVisibilitySnapshot(t *testing.T) {
+	db := newToolsTestDB(t)
+	if err := db.AutoMigrate(&orm.ChatHistory{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ChatHistory{ID: "history", ConversationID: "conv", RunID: "run", Ext: json.RawMessage(`{"disabled_tools":[]}`)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.UserDisabledTool{CreateUserID: "owner", ToolName: "web_search"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := probeRunToolConfiguration(t.Context(), db.DB, "owner", "conv", "history", "run", "web_search")
+	if err != nil || snapshot.Status == "forbidden" {
+		t.Fatalf("current setting revoked running visibility: %+v %v", snapshot, err)
+	}
+	snapshot, err = probeToolConfiguration(t.Context(), db.DB, "owner", "web_search")
+	if err != nil || snapshot.Status != "forbidden" {
+		t.Fatalf("new execution ignored current setting: %+v %v", snapshot, err)
+	}
+}

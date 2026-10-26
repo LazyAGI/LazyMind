@@ -353,7 +353,10 @@ func (s *Service) GetRevision(ctx context.Context, ownerUserID, revisionID strin
 	}
 	var art orm.ArtifactV2
 	if err := s.DB.WithContext(ctx).Where("id = ?", rev.ArtifactID).Take(&art).Error; err != nil {
-		return nil, nil, ErrNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
 	}
 	if art.DeletedAt != nil {
 		return nil, nil, ErrNotFound

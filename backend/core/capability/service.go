@@ -26,6 +26,7 @@ const (
 )
 
 type Dependencies struct {
+	Management   KnowledgeManager
 	Skills       SkillReader
 	Knowledge    KnowledgeCatalog
 	Documents    KnowledgeDocumentReader
@@ -37,6 +38,7 @@ type Dependencies struct {
 }
 
 type Service struct {
+	management   KnowledgeManager
 	skills       SkillReader
 	knowledge    KnowledgeCatalog
 	documents    KnowledgeDocumentReader
@@ -62,7 +64,7 @@ func NewService(deps Dependencies) (*Service, error) {
 	case deps.Vocabulary == nil:
 		return nil, NewError(Internal, "capability.new", "vocabulary trainer is required", false, nil)
 	default:
-		return &Service{skills: deps.Skills, knowledge: deps.Knowledge, documents: deps.Documents, search: deps.Search, cloud: deps.Cloud, vocabulary: deps.Vocabulary, external: deps.External, cloudContent: deps.CloudContent}, nil
+		return &Service{management: deps.Management, skills: deps.Skills, knowledge: deps.Knowledge, documents: deps.Documents, search: deps.Search, cloud: deps.Cloud, vocabulary: deps.Vocabulary, external: deps.External, cloudContent: deps.CloudContent}, nil
 	}
 }
 
@@ -493,95 +495,6 @@ func (s *Service) GetSkill(ctx context.Context, call InvocationContext, input Ge
 		return GetSkillResult{}, NewError(ResultTooLarge, operation, "skill content exceeds 512 KiB", false, nil)
 	}
 	result.Content = &content
-	return result, nil
-}
-
-func (s *Service) ListKnowledge(ctx context.Context, call InvocationContext, input ListKnowledgeInput) (ListKnowledgeResult, error) {
-	const operation = "knowledge.list"
-	if err := validateCaller(call, operation); err != nil {
-		return ListKnowledgeResult{}, err
-	}
-	keyword, err := boundedOptional(input.Keyword, maxFilterBytes, operation, "keyword")
-	if err != nil {
-		return ListKnowledgeResult{}, err
-	}
-	tags, err := normalizeTags(input.Tags, operation)
-	if err != nil {
-		return ListKnowledgeResult{}, err
-	}
-	pageSize, err := normalizePageSize(input.Page.PageSize, operation)
-	if err != nil {
-		return ListKnowledgeResult{}, err
-	}
-	fingerprint, err := pageFingerprint(struct {
-		Keyword string
-		Tags    []string
-	}{keyword, tags})
-	if err != nil {
-		return ListKnowledgeResult{}, NewError(Internal, operation, "cannot prepare pagination", false, err)
-	}
-	offset, err := pageOffset(input.Page.PageToken, "knowledge", fingerprint, operation)
-	if err != nil {
-		return ListKnowledgeResult{}, err
-	}
-	page, err := s.knowledge.ListKnowledge(ctx, call, KnowledgeListQuery{Keyword: keyword, Tags: tags, Offset: offset, Limit: pageSize})
-	if err != nil {
-		return ListKnowledgeResult{}, err
-	}
-	result := ListKnowledgeResult{Items: nonNilKnowledge(page.Items), Page: PageInfo{Total: page.Total}}
-	if page.HasMore {
-		result.Page.NextPageToken, err = encodePageToken("knowledge", fingerprint, page.NextOffset)
-		if err != nil {
-			return ListKnowledgeResult{}, NewError(Internal, operation, "cannot encode page token", false, err)
-		}
-	}
-	return result, nil
-}
-
-func (s *Service) ListKnowledgeDocuments(ctx context.Context, call InvocationContext, input ListKnowledgeDocumentsInput) (ListKnowledgeDocumentsResult, error) {
-	const operation = "knowledge.document.list"
-	if err := validateCaller(call, operation); err != nil {
-		return ListKnowledgeDocumentsResult{}, err
-	}
-	knowledgeID, err := boundedRequired(input.KnowledgeID, maxIDBytes, operation, "knowledge_id")
-	if err != nil {
-		return ListKnowledgeDocumentsResult{}, err
-	}
-	pageSize, err := normalizePageSize(input.Page.PageSize, operation)
-	if err != nil {
-		return ListKnowledgeDocumentsResult{}, err
-	}
-	name, err := boundedOptional(input.Name, maxFilterBytes, operation, "name")
-	if err != nil {
-		return ListKnowledgeDocumentsResult{}, err
-	}
-	path, err := boundedOptional(input.Path, 1024, operation, "path")
-	if err != nil {
-		return ListKnowledgeDocumentsResult{}, err
-	}
-	fingerprint, err := pageFingerprint(struct{ KnowledgeID, Name, Path, UserID, TenantID string }{
-		knowledgeID, name, path, call.Principal.UserID, call.Principal.TenantID,
-	})
-	if err != nil {
-		return ListKnowledgeDocumentsResult{}, NewError(Internal, operation, "cannot prepare pagination", false, err)
-	}
-	offset, err := pageOffset(input.Page.PageToken, "knowledge-documents", fingerprint, operation)
-	if err != nil {
-		return ListKnowledgeDocumentsResult{}, err
-	}
-	page, err := s.documents.ListKnowledgeDocuments(ctx, call, KnowledgeDocumentListQuery{
-		KnowledgeID: knowledgeID, Name: name, Path: path, Offset: offset, Limit: pageSize,
-	})
-	if err != nil {
-		return ListKnowledgeDocumentsResult{}, err
-	}
-	result := ListKnowledgeDocumentsResult{Items: nonNilKnowledgeDocuments(page.Items), Page: PageInfo{Total: page.Total}}
-	if next := offset + len(page.Items); next < int(page.Total) {
-		result.Page.NextPageToken, err = encodePageToken("knowledge-documents", fingerprint, next)
-		if err != nil {
-			return ListKnowledgeDocumentsResult{}, NewError(Internal, operation, "cannot encode page token", false, err)
-		}
-	}
 	return result, nil
 }
 

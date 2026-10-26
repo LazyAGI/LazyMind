@@ -124,3 +124,33 @@ func TestExternalRegenerationOwnerRejectsLatePreviousTerminal(t *testing.T) {
 		t.Fatalf("current external terminal mismatch: history=%#v terminal=%#v", history, terminal)
 	}
 }
+
+func TestOwnedChatHistoryPreservesKnowledgeDecisionDuringTerminalSave(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	stored := json.RawMessage(`{"ask_pending":{"ask_id":"confirm-current","knowledge_management":{"confirmation_id":"confirm-current"}},"ask_answered":true,"ask_saved_answers":{"0":{"type":"boolean","value":"__ask_user_no__"}}}`)
+	if err := db.Create(&orm.ChatHistory{ID: "knowledge-history", ConversationID: "conversation-1", RunID: "knowledge-run", Ext: stored}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, incoming := range []string{
+		`{"ask_pending":{"ask_id":"confirm-current","knowledge_management":{"confirmation_id":"confirm-current"}},"ask_answered":false,"terminal":"saved"}`,
+		`{"ask_pending":{"ask_id":"older-confirm","knowledge_management":{"confirmation_id":"older-confirm"}},"terminal":"saved"}`,
+		`{"terminal":"saved"}`,
+	} {
+		updated, err := updateOwnedChatHistory(context.Background(), db, "knowledge-history", "knowledge-run", map[string]any{"ext": json.RawMessage(incoming), "run_status": "completed"})
+		if err != nil || !updated {
+			t.Fatalf("save: %v %v", updated, err)
+		}
+		var history orm.ChatHistory
+		if err := db.First(&history, "id = ?", "knowledge-history").Error; err != nil {
+			t.Fatal(err)
+		}
+		var ext map[string]any
+		if err := json.Unmarshal(history.Ext, &ext); err != nil {
+			t.Fatal(err)
+		}
+		pending, _ := ext["ask_pending"].(map[string]any)
+		if ext["ask_answered"] != true || pending["ask_id"] != "confirm-current" || ext["ask_saved_answers"] == nil || ext["terminal"] != "saved" {
+			t.Fatalf("decision overwritten: %s", history.Ext)
+		}
+	}
+}

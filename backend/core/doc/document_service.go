@@ -125,19 +125,22 @@ type DocumentReadResult struct {
 }
 
 type DocumentMetadata struct {
-	ID           string
-	DatasetID    string
-	Name         string
-	RelativePath string
-	Source       string
-	Tags         []string
-	ParseStatus  string
-	MIMEType     string
-	SizeBytes    int64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	CreatedBy    string
-	OriginalFile *DocumentFileRef
+	ProcessingError *ProcessingDiagnostic
+	ID              string
+	DatasetID       string
+	Name            string
+	RelativePath    string
+	Source          string
+	Tags            []string
+	ProcessingLevel string
+	ProcessingState orm.DocumentProcessingState
+	ParseStatus     string
+	MIMEType        string
+	SizeBytes       int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	CreatedBy       string
+	OriginalFile    *DocumentFileRef
 }
 
 type DocumentFileRef struct {
@@ -172,12 +175,14 @@ type DocumentChunksResult struct {
 }
 
 type documentServiceRecord struct {
-	dataset  orm.Dataset
-	row      orm.Document
-	ext      documentExt
-	lazy     *readonlyorm.LazyLLMDocRow
-	taskData string
-	taskStat string
+	diagnostic *ProcessingDiagnostic
+	dataset    orm.Dataset
+	row        orm.Document
+	ext        documentExt
+	lazy       *readonlyorm.LazyLLMDocRow
+	taskData   string
+	taskStat   string
+	processing orm.DocumentProcessingState
 }
 
 func (s *DocumentService) GetDocumentMetadata(ctx context.Context, req DocumentGetRequest) (DocumentMetadata, error) {
@@ -462,7 +467,11 @@ func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, doc
 			rec.lazy = lazy
 		}
 		rec.taskData = s.latestTaskDataSource(ctx, row.ID)
-		rec.taskStat = s.latestLazyTaskStatus(ctx, lazyDocID)
+
+	}
+	rec.processing, rec.taskStat, rec.diagnostic, err = observeDocumentProcessingDetails(ctx, s.db, s.lazyDB, row)
+	if err != nil {
+		return documentServiceRecord{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "query document failed", Err: err}
 	}
 	return rec, nil
 }
@@ -474,6 +483,9 @@ func (s *DocumentService) requireDatasetRead(ctx context.Context, userID, datase
 			return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceNotFound, Message: "dataset not found", Err: err}
 		}
 		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "query dataset failed", Err: err}
+	}
+	if resourceTenant(ds.TenantID) != resourceTenant(caller.TenantID) {
+		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceNotFound, Message: "dataset not found"}
 	}
 	if !canAccessDataset(&ds, userID, acl.PermissionDatasetRead) {
 		return orm.Dataset{}, &DocumentServiceError{Code: DocumentServiceForbidden, Message: "dataset forbidden"}
@@ -509,18 +521,6 @@ func (s *DocumentService) latestTaskDataSource(ctx context.Context, docID string
 	return strings.TrimSpace(ext.DataSourceType)
 }
 
-func (s *DocumentService) latestLazyTaskStatus(ctx context.Context, lazyDocID string) string {
-	if s.lazyDB == nil {
-		return ""
-	}
-	var task readonlyorm.LazyLLMDocServiceTaskRow
-	err := s.lazyDB.WithContext(ctx).Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).Where("doc_id = ?", lazyDocID).Order("updated_at DESC").Take(&task).Error
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(task.Status)
-}
-
 func (r documentServiceRecord) metadata() DocumentMetadata {
 	row := r.row
 	ext := r.ext
@@ -542,7 +542,7 @@ func (r documentServiceRecord) metadata() DocumentMetadata {
 			source = "LOCAL_FILE"
 		}
 	}
-	parseStatus := firstNonEmpty(strings.TrimSpace(row.PDFConvertResult), strings.TrimSpace(ext.ConvertStatus), r.taskStat)
+	parseStatus := firstNonEmpty(r.taskStat, strings.TrimSpace(row.PDFConvertResult), strings.TrimSpace(ext.ConvertStatus))
 	if r.lazy != nil {
 		parseStatus = firstNonEmpty(parseStatus, strings.TrimSpace(r.lazy.UploadStatus))
 	}
@@ -557,18 +557,21 @@ func (r documentServiceRecord) metadata() DocumentMetadata {
 	}
 	filename := firstNonEmpty(strings.TrimSpace(ext.OriginalFilename), strings.TrimSpace(ext.StoredName), displayName)
 	return DocumentMetadata{
-		ID:           row.ID,
-		DatasetID:    row.DatasetID,
-		Name:         displayName,
-		RelativePath: ext.RelativePath,
-		Source:       source,
-		Tags:         append([]string(nil), tags...),
-		ParseStatus:  parseStatus,
-		MIMEType:     mimeType,
-		SizeBytes:    size,
-		CreatedAt:    row.CreatedAt,
-		UpdatedAt:    row.UpdatedAt,
-		CreatedBy:    row.CreateUserName,
+		ID:              row.ID,
+		DatasetID:       row.DatasetID,
+		Name:            displayName,
+		RelativePath:    ext.RelativePath,
+		Source:          source,
+		Tags:            append([]string(nil), tags...),
+		ParseStatus:     parseStatus,
+		ProcessingLevel: r.dataset.ProcessingLevel,
+		ProcessingState: r.processing,
+		ProcessingError: r.diagnostic,
+		MIMEType:        mimeType,
+		SizeBytes:       size,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
+		CreatedBy:       row.CreateUserName,
 		OriginalFile: &DocumentFileRef{
 			FileName:    filename,
 			DownloadURL: documentDownloadPath(row.DatasetID, row.ID),
@@ -812,4 +815,33 @@ func validateDocumentChunkSuccess(value any) error {
 		return nil
 	}
 	return errors.New("chunk backend business success failed")
+}
+
+// GetProcessingMetadata batches a scoped status observation without reading originals.
+func (s *DocumentService) GetProcessingMetadata(ctx context.Context, caller DatasetCatalogCaller, datasetID string, ids []string) (map[string]DocumentMetadata, error) {
+	out := map[string]DocumentMetadata{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ds, err := s.requireDatasetRead(ctx, caller.UserID, datasetID, caller)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := loadProcessingSnapshot(ctx, s.db, s.lazyDB, datasetID, "", ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range snapshot.documents {
+		state, raw := snapshot.observe(row)
+		task := snapshot.tasks[row.ID]
+		detail := snapshot.diagnostics[[2]string{task.LazyllmTaskID, row.LazyllmDocID}]
+		if task.LazyllmTaskID == "" {
+			var ext taskExt
+			_ = json.Unmarshal(task.Ext, &ext)
+			detail[1] = ext.ErrorMessage
+		}
+		out[row.ID] = DocumentMetadata{ID: row.ID, DatasetID: datasetID, ProcessingLevel: ds.ProcessingLevel, ProcessingState: state,
+			ProcessingError: processingDiagnostic(state, task, raw, detail[0], detail[1])}
+	}
+	return out, nil
 }

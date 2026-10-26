@@ -331,7 +331,7 @@ func storedRunEvent(runID string, raw json.RawMessage) *ChatRuntimeEvent {
 
 func hasBusinessStreamPayload(chunk UpstreamStreamChunk) bool {
 	return chunk.Text != "" || chunk.ReasoningText != "" || len(chunk.Sources) > 0 ||
-		chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
+		chunk.KnowledgeOperationResult != nil || chunk.TaskCreated != nil || chunk.ArtifactCreated != nil || chunk.AskPending != nil ||
 		chunk.ToolLimitPending != nil || chunk.IntentUpdated != nil || chunk.WorkflowPreflightUpdated != nil ||
 		chunk.CapabilityDependency != nil || chunk.ToolConfiguration != nil ||
 		len(chunk.SteeringApplied) > 0 || chunk.Heartbeat

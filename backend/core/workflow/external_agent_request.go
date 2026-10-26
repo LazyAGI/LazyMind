@@ -3,11 +3,11 @@ package workflow
 import (
 	"encoding/base64"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 
 	"lazymind/core/common/orm"
+	workflowstore "lazymind/core/workflow/store"
 )
 
 // Keep a fingerprint after large input bytes have been removed from task state.
@@ -53,27 +53,10 @@ func externalTaskGenerationDescription(task orm.ExternalAgentWorkflowTask) strin
 
 func validateExternalTaskInputs(body externalAgentWorkflowTaskRequest) error {
 	seen := make(map[string]bool)
-	for id, raw := range body.InputBindings {
-		binding, ok := raw.(map[string]any)
-		if strings.TrimSpace(id) == "" || !ok || stringFromMap(binding, "resource_id") == "" {
-			return fmt.Errorf("input_bindings[%q] requires an object with resource_id", id)
-		}
-		for field := range binding {
-			if field != "resource_id" && field != "revision" && field != "content_hash" {
-				return fmt.Errorf("input_bindings[%q]: unknown field %q", id, field)
-			}
-		}
-		if rawRevision, exists := binding["revision"]; exists {
-			revision, ok := rawRevision.(float64)
-			if !ok || revision < 1 || math.Trunc(revision) != revision {
-				return fmt.Errorf("input_bindings[%q].revision must be a positive integer", id)
-			}
-		}
-		if hash, exists := binding["content_hash"]; exists {
-			if _, ok := hash.(string); !ok {
-				return fmt.Errorf("input_bindings[%q].content_hash must be a string", id)
-			}
-		}
+	if _, err := workflowstore.ParseInputBindings(body.InputBindings, "external-agent-workflow"); err != nil {
+		return err
+	}
+	for id := range body.InputBindings {
 		seen[id] = true
 	}
 	for i, file := range body.InputFiles {
