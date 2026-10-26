@@ -38,7 +38,8 @@ export function tokenLimitCount(value?: string | null): bigint | null {
 export function formatContextWindow(value?: string | null): string | null {
   const count = tokenLimitCount(value);
   if (count === null) return null;
-  const unit = count > 1000n * 1024n ? 1024n * 1024n : 1024n;
+  // Treat decimal one million through binary 1M as the same display tier.
+  const unit = count >= 1_000_000n ? 1024n * 1024n : 1024n;
   const rounded = (count + unit / 2n) / unit;
   return `${rounded}${unit === 1024n ? "K" : "M"}`;
 }

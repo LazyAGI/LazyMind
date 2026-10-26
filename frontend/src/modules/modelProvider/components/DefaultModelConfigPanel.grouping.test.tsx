@@ -144,9 +144,9 @@ describe("default capability configuration groups", () => {
     renderPanel();
     await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     const row = group("modelProvider.module.llmChatTitle");
-    const badge = await within(row).findByText("977K");
+    const badge = await within(row).findByText("1M");
     expect(badge.closest(".ant-select")).not.toBeNull();
-    expect(row.querySelector(".model-provider-default-meta")).not.toHaveTextContent("977K");
+    expect(row.querySelector(".model-provider-default-meta")).not.toHaveTextContent("1M");
     expect(mocks.saveModel).not.toHaveBeenCalled();
   });
 
