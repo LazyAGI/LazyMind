@@ -139,6 +139,26 @@ describe("default capability configuration groups", () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
+  it("keeps context length inside the selected model control, without a metadata line", async () => {
+    mocks.selections.mockResolvedValue({ data: { selections: [{ ...selectedLlm, max_input_tokens: "1000000" }] } });
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const row = group("modelProvider.module.llmChatTitle");
+    const badge = await within(row).findByText("977K");
+    expect(badge.closest(".ant-select")).not.toBeNull();
+    expect(row.querySelector(".model-provider-default-meta")).not.toHaveTextContent("977K");
+    expect(mocks.saveModel).not.toHaveBeenCalled();
+  });
+
+  it("opens configuration for an already configured external service", async () => {
+    renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    const row = group("modelProvider.module.cloudParsingServiceTitle");
+    await within(row).findByRole("combobox");
+    fireEvent.click(within(row).getByRole("button", { name: "modelProvider.configureCapability" }));
+    expect(mocks.configureService).toHaveBeenCalledWith("cloudParsing");
+  });
+
   it("shows two basic selectors on entry and keeps optional categories collapsed", async () => {
     renderPanel();
     await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });

@@ -32,6 +32,7 @@ import {
   type UseDefaultModelConfigOptions,
   type VerifiedCloudServiceResponse,
 } from "../hooks/useDefaultModelConfig";
+import { formatContextWindow } from "../maxInputTokens";
 import "./DefaultModelConfigPanel.scss";
 
 export type {
@@ -314,7 +315,7 @@ export default function DefaultModelConfigPanel({
     const moduleTitle = t(module.titleKey);
     const moduleSubtitle = t(module.subtitleKey);
     const maxInputTokens = selectedModelMaxInputTokens[module.key];
-    const shouldShowMaxInputTokens = Boolean(maxInputTokens?.trim());
+    const contextWindow = formatContextWindow(maxInputTokens);
     const selectedOption = options.find(
       (option) => option.value === selectedModels[module.key],
     );
@@ -342,13 +343,6 @@ export default function DefaultModelConfigPanel({
             ) : null}
             <span className="model-provider-default-title-text">{moduleTitle}</span>
           </label>
-          {configured && shouldShowMaxInputTokens ? (
-            <span className="model-provider-max-input-tokens">
-              {t("modelProvider.maxInputTokens", {
-                value: maxInputTokens,
-              })}
-            </span>
-          ) : null}
           <Tooltip placement="top" title={moduleSubtitle} trigger={["hover", "focus"]}>
             <button
               aria-label={t("modelProvider.moduleHelpAria", {
@@ -423,7 +417,7 @@ export default function DefaultModelConfigPanel({
         ) : null}
         {modelProviderSetupState === "ready" && (configured || hasAvailableOptions) && <Select
           allowClear={!module.required}
-          className="model-provider-model-select"
+          className={`model-provider-model-select${configured && contextWindow ? " has-context-window" : ""}`}
           disabled={(module.restricted && !isAdmin) || saving}
           filterOption={false}
           id={`model-provider-${module.key.toLowerCase()}`}
@@ -448,7 +442,14 @@ export default function DefaultModelConfigPanel({
           {...selectInteractionProps}
           showSearch
           suffixIcon={
-            <DownOutlined className="model-provider-select-caret" />
+            <span className="model-provider-select-suffix">
+              {configured && contextWindow ? (
+                <span className="model-provider-context-badge" title={t("modelProvider.maxInputTokens", { value: maxInputTokens })}>
+                  {contextWindow}
+                </span>
+              ) : null}
+              <DownOutlined className="model-provider-select-caret" />
+            </span>
           }
           value={selectedModels[module.key]}
           onChange={(value) => handleModelSelection(module.key, value)}
@@ -524,6 +525,9 @@ export default function DefaultModelConfigPanel({
                           : t("modelProvider.customModelSuffix")}
                       </small>
                     </span>
+                    {formatContextWindow(model.maxInputTokens) ? (
+                      <span className="model-provider-context-badge">{formatContextWindow(model.maxInputTokens)}</span>
+                    ) : null}
                   </span>
                 </Tooltip>
               </Select.Option>
@@ -628,12 +632,6 @@ export default function DefaultModelConfigPanel({
           <Alert type="error" showIcon message={t("modelProvider.cloudServiceSetupLoadFailed")}
             action={<Button size="small" onClick={setupState === "error" ? onRetrySetup : () => void loadVerifiedCloudService(service)}>{t("common.retry")}</Button>} />
         ) : null}
-        {setupState === "empty" || (!configured && setupState === "ready" && optionState === "ready" && !options.length) ? (
-          <Button className="model-provider-configure-capability" type="text" size="small" disabled={saving} onClick={() => onConfigureCloudService(service.key)}>
-            {t("modelProvider.configureCapability")}
-            <RightOutlined aria-hidden="true" />
-          </Button>
-        ) : null}
         {setupState === "ready" && (configured || options.length > 0) && <Select
           allowClear
           disabled={saving}
@@ -712,6 +710,13 @@ export default function DefaultModelConfigPanel({
             </Select.Option>
           ))}
         </Select>}
+        {setupState === "empty" || setupState === "ready" ? (
+          <Button className="model-provider-configure-capability" type="text" size="small" disabled={saving} onClick={() => onConfigureCloudService(service.key)}>
+            {t("modelProvider.configureCapability")}
+            <RightOutlined aria-hidden="true" />
+          </Button>
+        ) : null}
+
         </div>
         {configured && setupState === "ready" && isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
           <Tooltip title={t(cloudServiceShareStatus[service.key] ? "modelProvider.shareOn" : "modelProvider.shareOff")}>

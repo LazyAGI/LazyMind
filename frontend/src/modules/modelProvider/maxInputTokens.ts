@@ -33,3 +33,12 @@ export function tokenLimitCount(value?: string | null): bigint | null {
   const amount = BigInt(suffix === "K" || suffix === "M" ? normalized.slice(0, -1) : normalized);
   return amount * BigInt(suffix === "K" ? 1024 : suffix === "M" ? 1024 * 1024 : 1);
 }
+
+/** Compact context badge only; never use this rounded value in API payloads. */
+export function formatContextWindow(value?: string | null): string | null {
+  const count = tokenLimitCount(value);
+  if (count === null) return null;
+  const unit = count > 1000n * 1024n ? 1024n * 1024n : 1024n;
+  const rounded = (count + unit / 2n) / unit;
+  return `${rounded}${unit === 1024n ? "K" : "M"}`;
+}
