@@ -172,6 +172,8 @@ class AgentExecutor:
 
             def history_compactor(history, keep_full_turns=None, **kwargs):
                 import inspect
+                if fallback_state is not None:
+                    kwargs['budget_provider'] = lambda: fallback_state.budget
                 state = kwargs.get('runtime_state', {})
                 previous = state.get('compression_revision', 0)
                 parameters = inspect.signature(compact_history).parameters

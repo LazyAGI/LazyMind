@@ -67,9 +67,13 @@ def test_image_request_is_not_interrupted_by_the_soft_budget(provider, text_only
     assert [item['model'] for item in provider.requests] == ['model-a']
 
 
-def test_slow_initial_model_leaves_time_for_a_healthy_fallback(provider):
+@pytest.mark.parametrize('proxy_configured', [False, True])
+def test_slow_initial_model_leaves_time_for_a_healthy_fallback(provider, monkeypatch, proxy_configured):
     import threading
 
+    if proxy_configured:
+        monkeypatch.setenv('http_proxy', provider.url)
+        monkeypatch.setenv('no_proxy', '127.0.0.1')
     release = threading.Event()
     succeed(provider, 'model-a')
     succeed(provider, 'model-b')
@@ -96,12 +100,16 @@ def test_slow_initial_model_leaves_time_for_a_healthy_fallback(provider):
     assert model.state.current.model_id == 'model-b'
 
 
-def test_sse_cancel_closes_the_socket_and_never_starts_fallback(provider):
+@pytest.mark.parametrize('proxy_configured', [False, True])
+def test_sse_cancel_closes_the_socket_and_never_starts_fallback(provider, monkeypatch, proxy_configured):
     import json
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError
 
+    if proxy_configured:
+        monkeypatch.setenv('http_proxy', provider.url)
+        monkeypatch.setenv('no_proxy', '127.0.0.1')
     cancelled, disconnected = threading.Event(), threading.Event()
     requests = []
 
@@ -223,14 +231,14 @@ def test_initial_backup_and_auxiliary_calls_receive_the_same_timeout_policy(prov
     fail(provider, 'model-a')
     succeed(provider, 'model-b')
     model = wrapper(a, [b])
-    post = requests.post
+    post = requests.Session.post
     observed = []
 
-    def record(url, **kwargs):
+    def record(session, url, **kwargs):
         observed.append((kwargs['json']['model'], kwargs['timeout']))
-        return post(url, **kwargs)
+        return post(session, url, **kwargs)
 
-    monkeypatch.setattr(requests, 'post', record)
+    monkeypatch.setattr(requests.Session, 'post', record)
     assert model('continue') == 'done:model-b'
     assert model.auxiliary_call('', 'final summary') == 'done:model-b'
     initial_timeout, backup_timeout = ((0.3, 0.7), (0.4, 0.8)) if overrides else ((3.0, 10.0), (3.0, 10.0))

@@ -162,6 +162,57 @@ def effect_call(value='once', identifier='actual-effect'):
     }]}, 'finish': 'tool_calls'}
 
 
+def test_workflow_switch_to_short_model_compacts_subsequent_real_tool_round(provider, tmp_path):
+    from lazymind.chat.engine.agent_runtime.workflow_compactor import make_workflow_history_compactor
+
+    receipts = []
+    payload = 'workflow evidence\n' * 350
+
+    def workflow_result(index: int) -> str:
+        """Return one Workflow tool result.
+
+        Args:
+            index: Result index.
+        """
+        receipts.append(index)
+        return f'result-{index}\n' + payload
+
+    a = candidate(provider, 'model-a', window=32768)
+    b = candidate(provider, 'model-b', window=8192)
+    fail(provider, 'model-a')
+    tool_calls = [{'id': f'workflow-{index}', 'index': index, 'type': 'function',
+                   'function': {'name': 'workflow_result', 'arguments': json.dumps({'index': index})}}
+                  for index in range(3)]
+    provider.script['model-b'] = [
+        {'message': {'role': 'assistant', 'content': '', 'tool_calls': tool_calls}, 'finish': 'tool_calls'},
+        {'message': {'role': 'assistant', 'content': 'workflow completed'}},
+    ]
+    plan = replace(agent_plan(tmp_path, a, [b], tools=[workflow_result]), history=[])
+    with compression_settings(), config.temp('agentic_workspace', str(tmp_path)):
+        plan.execution_options = replace(
+            plan.execution_options, required_tool_names=('workflow_result',),
+            history_compactor=make_workflow_history_compactor(
+                max_input_tokens=a.max_input_tokens, workspace=str(tmp_path)))
+        raw = lazyllm.OnlineChatModule(source='openai', model='model-a', type='llm', url=provider.url,
+                                       api_key='fixture-key', stream=False)
+        agent = AgentExecutor().create_agent(raw, plan)
+        assert agent(plan.prompt.current_input) == 'workflow completed'
+    assert sorted(receipts) == [0, 1, 2]
+    assert [request['model'] for request in provider.requests] == ['model-a', 'model-b', 'model-b']
+    assert provider.requests[0]['messages'] == provider.requests[1]['messages']
+    assert agent._model_fallback_state.current.model_id == 'model-b'
+    sent = provider.requests[-1]['messages']
+    assert validate_tool_pairing(sent) == (True, 'ok')
+    assert [message['tool_call_id'] for message in sent if message['role'] == 'tool'] \
+        == [f'workflow-{index}' for index in range(3)]
+    assert 'workspace://tool_spills/' in str(sent)
+    spills = list((tmp_path / 'tool_spills').glob('workflow_result_*.txt'))
+    assert spills and all(payload in spill.read_text() for spill in spills)
+    history = lazyllm.locals['_lazyllm_agent']['history']
+    results = [message for message in history if message['role'] == 'tool']
+    assert len(results) == 3 and all(payload in message['content'] for message in results)
+
+
 @pytest.mark.parametrize('fallback', [False, True])
 @pytest.mark.parametrize('style', ['legacy_tuple', 'legacy_list', 'combined', 'structured'])
 def test_history_callback_protocol_matches_the_normal_agent(provider, tmp_path, fallback, style):
