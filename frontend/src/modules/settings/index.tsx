@@ -721,7 +721,7 @@ function SettingsPageContent() {
       </>;
     } else if (section === "models") {
       content = <>
-        <header className="provider-workspace-topbar"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.models")}</h1></header>
+        <h1 className="settings-model-services-heading" ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.models")}</h1>
         {integratedSurface(<ModelProvidersPage onConfigurationChanged={syncOverview} highlightProviderId={modelProviderTarget} />, "is-models")}
       </>;
     } else if (section === "model_defaults") {

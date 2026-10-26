@@ -61,7 +61,7 @@
 
   .model-provider-default-row {
     display: grid;
-    grid-template-columns: 180px minmax(0, 560px);
+    grid-template-columns: 180px minmax(0, 1fr);
     align-items: center;
     gap: 24px;
     min-height: 64px;
@@ -218,7 +218,7 @@
   .model-defaults-group > section > .model-defaults-rows { margin: 0 16px 0 50px; border-top: 1px solid var(--defaults-line); }
 
   .model-defaults-group .model-provider-default-row {
-    grid-template-columns: 129px minmax(0, 560px);
+    grid-template-columns: 129px minmax(0, 1fr);
   }
 
   > .ant-alert { margin-bottom: 16px; }
