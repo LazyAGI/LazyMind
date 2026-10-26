@@ -143,6 +143,17 @@ _COMPLETION_CONCERN = re.compile(
     r'无法|不能|失败|未完成|未能|缺少|尚未|没有(?:完成|生成|交付)',
     re.IGNORECASE,
 )
+# Remove only explicit zero failure counters before checking for unresolved work.
+_ZERO_FAILURE_COUNT = re.compile(
+    r'(?<![\w])(?:failed|failures?)\s*[:：=]\s*0(?![\d.])(?:\s+(?:pages?|files?|items?))?'
+    r'|失败\s*[:：=]?\s*0(?![\d.])(?:\s*[页个项次])?', re.IGNORECASE,
+)
+
+
+def _has_completion_concern(result: Any) -> bool:
+    return bool(_COMPLETION_CONCERN.search(_ZERO_FAILURE_COUNT.sub('', str(result or ''))))
+
+
 _COMPLETION_EVALUATION_POLL_SECONDS = 0.05
 
 
@@ -1765,11 +1776,11 @@ async def run_subagent_stream(
             return
 
         summary = _result_summary(final_result, required_output_keys)
-        # Uncontracted ordinary tasks and final reports of trouble need review.
-        # Otherwise satisfied contracts, including Workflow rules, are sufficient.
-        if (
-            (effective_agent_type != 'workflow_step' and not required_output_keys)
-            or _COMPLETION_CONCERN.search(str(final_result or ''))
+        # Workflow completion follows declared outputs, package post-step checks
+        # and configured human review. Narrative wording must not introduce an
+        # additional model verdict. Ordinary SubAgents retain completion review.
+        if effective_agent_type != 'workflow_step' and (
+            not required_output_keys or _has_completion_concern(final_result)
         ):
             is_ok, summary, failure_phase = await _evaluate_completion_async(
                 llm=(agent._model_fallback_state.raw_llm if agent is not None else llm),
@@ -2006,37 +2017,64 @@ def _evaluate_completion(
     ]
     eval_prompt = '\n'.join(prompt_lines)
 
-    try:
-        resp = _silent_background_model_call(llm, eval_prompt)
-        text = resp if isinstance(resp, str) else (
-            resp.get('content', '') if isinstance(resp, dict) else ''
-        )
-        text = (text or '').strip()
-        verdict = json.loads(text)
-        if (
-            not isinstance(verdict, dict)
-            or not isinstance(verdict.get('completed'), bool)
-            or not isinstance(verdict.get('requires_artifact'), bool)
-            or not isinstance(verdict.get('artifact_keys'), list)
-            or not all(isinstance(key, str) and key.strip() for key in verdict['artifact_keys'])
-            or not isinstance(verdict.get('reason'), str)
-            or not verdict['reason'].strip()
-        ):
-            raise ValueError('Invalid completion verdict')
-        summary = verdict['reason'].strip()
-        delivered = set(verdict['artifact_keys'])
-        saved = {artifact.get('slot') for artifact in artifacts}
-        if verdict['requires_artifact'] and (not delivered or not delivered.issubset(saved)):
-            message = 'Required deliverables were not saved as artifacts.'
-            if not verdict['completed']:
-                message += f' {summary}'
-            return False, message, 'missing_required_artifacts'
+    # Retry malformed reviewer output once. A valid negative verdict is final.
+    verdict = None
+    for attempt in range(2):
+        try:
+            resp = _silent_background_model_call(llm, eval_prompt)
+            text = resp if isinstance(resp, str) else (
+                resp.get('content', '') if isinstance(resp, dict) else ''
+            )
+            if not isinstance(text, str):
+                raise ValueError('Completion response content must be text')
+            text = text.strip()
+            fenced = re.fullmatch(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL | re.IGNORECASE)
+            if fenced:
+                text = fenced.group(1).strip()
+            verdict = json.loads(text)
+            if (
+                not isinstance(verdict, dict)
+                or not isinstance(verdict.get('completed'), bool)
+                or not isinstance(verdict.get('requires_artifact'), bool)
+                or not isinstance(verdict.get('artifact_keys'), list)
+                or not all(isinstance(key, str) and key.strip() for key in verdict['artifact_keys'])
+                or not isinstance(verdict.get('reason'), str)
+                or not verdict['reason'].strip()
+            ):
+                raise ValueError('Invalid completion verdict schema')
+            break
+        except (ValueError, TypeError) as exc:
+            LOG.warning(f'[SubAgent] Invalid completion verdict (attempt {attempt + 1}/2): {exc}')
+            if attempt == 1:
+                return (
+                    False,
+                    'Completion reviewer returned an invalid verdict twice; saved artifacts remain available.',
+                    'completion_evaluation_failed',
+                )
+            eval_prompt += (
+                '\nYour previous response could not be parsed as the required verdict. '
+                'Return only the JSON object with completed and requires_artifact booleans, '
+                'artifact_keys as an array of strings, and a nonempty reason. '
+                'Re-evaluate the same evidence; do not assume success.'
+            )
+        except Exception as exc:
+            LOG.warning(f'[SubAgent] Completion reviewer call failed: {exc}')
+            return (
+                False,
+                'Completion reviewer could not be reached; saved artifacts remain available.',
+                'completion_evaluation_failed',
+            )
+    summary = verdict['reason'].strip()
+    delivered = set(verdict['artifact_keys'])
+    saved = {artifact.get('slot') for artifact in artifacts}
+    if verdict['requires_artifact'] and (not delivered or not delivered.issubset(saved)):
+        message = 'Required deliverables were not saved as artifacts.'
         if not verdict['completed']:
-            return False, summary, 'objective_incomplete'
-        return True, summary, ''
-    except Exception as e:
-        LOG.warning(f'[SubAgent] _evaluate_completion LLM call failed: {e}')
-        return False, 'Could not verify task completion.', 'completion_evaluation_failed'
+            message += f' {summary}'
+        return False, message, 'missing_required_artifacts'
+    if not verdict['completed']:
+        return False, summary, 'objective_incomplete'
+    return True, summary, ''
 
 
 async def _evaluate_completion_async(

@@ -215,7 +215,8 @@ type preparationGraph struct {
 		Kind     string `json:"kind"`
 		Optional bool   `json:"optional"`
 	} `json:"material_producers"`
-	InputExpressions map[string]graphengine.Expression `json:"input_expressions"`
+	MaterialCardinalities map[string]string                 `json:"material_cardinalities"`
+	InputExpressions      map[string]graphengine.Expression `json:"input_expressions"`
 }
 
 func collectRequiredInputMaterials(expression graphengine.Expression, materials map[string]struct{}) {
@@ -743,6 +744,10 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 	}
 	plan := json.RawMessage(`{"status":"ready"}`)
 	if workflow, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, req.WorkflowID, ""); packageErr == nil {
+		if _, err := h.Store.ResolveInputBindings(r.Context(), owner, req.InputBindings, "prepare"); err != nil {
+			fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", err.Error(), false)
+			return
+		}
 		controllerHost := req.ControllerHost
 		if controllerHost == "" {
 			controllerHost = req.OriginHost
@@ -750,9 +755,23 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 		if controllerHost == "" {
 			controllerHost = "lazymind"
 		}
+		var graph preparationGraph
+		if err := json.Unmarshal(workflow.CompiledGraph, &graph); err != nil {
+			fail(w, http.StatusUnprocessableEntity, "INVALID_WORKFLOW_GRAPH", err.Error(), false)
+			return
+		}
+		for material, raw := range req.InputBindings {
+			producer, exists := graph.MaterialProducers[material]
+			if len(graph.MaterialProducers) > 0 && (!exists || producer.Kind != "external") {
+				fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", "input must name an external material: "+material, false)
+				return
+			}
+			if items, list := raw.([]any); list && len(items) > 1 && graph.MaterialCardinalities[material] != "list" {
+				fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", "multiple resources require a list material: "+material, false)
+				return
+			}
+		}
 		if h.Hosts != nil {
-			var graph preparationGraph
-			_ = json.Unmarshal(workflow.CompiledGraph, &graph)
 			capabilities, legacyTools := []string{}, []string{}
 			for _, node := range graph.Nodes {
 				capabilities = append(capabilities, node.Capabilities...)
@@ -767,14 +786,13 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 					strings.Join(missing, ", "), false)
 				return
 			}
-			missingInputs := missingExternalInputs(graph, req.InputBindings)
-			if len(missingInputs) > 0 {
-				plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
-					"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,
-					"revision_no": workflow.RevisionNo, "tree_hash": workflow.TreeHash,
-					"missing_inputs": missingInputs, "controller_host": controllerHost})
-				goto prepared
-			}
+		}
+		if missingInputs := missingExternalInputs(graph, req.InputBindings); len(missingInputs) > 0 {
+			plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
+				"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,
+				"revision_no": workflow.RevisionNo, "tree_hash": workflow.TreeHash,
+				"missing_inputs": missingInputs, "controller_host": controllerHost})
+			goto prepared
 		}
 		plan, _ = json.Marshal(map[string]any{
 			"status": "ready", "workflow_ref": workflow.WorkflowRef, "workflow_id": workflow.WorkflowID,
@@ -861,20 +879,10 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 			intentJSON, _ := json.Marshal(map[string]string{"text": original.RequestContext})
 			intentContext = string(intentJSON)
 		}
-		bindings := make([]workflowstore.InputBinding, 0, len(original.InputBindings))
-		for materialID, raw := range original.InputBindings {
-			value, _ := raw.(map[string]any)
-			resourceID, _ := value["resource_id"].(string)
-			hash, _ := value["content_hash"].(string)
-			revision, _ := value["revision"].(float64)
-			if resourceID == "" {
-				continue
-			}
-			bindings = append(bindings, workflowstore.InputBinding{
-				MaterialID: materialID, ResourceType: "input_resource", ResourceID: resourceID,
-				ResourceRevision: int64(revision), ContentHash: hash,
-				CreatedByCommandID: "prepare:" + prepared.ID,
-			})
+		bindings, bindingErr := h.Store.ResolveInputBindings(r.Context(), owner, original.InputBindings, "prepare:"+prepared.ID)
+		if bindingErr != nil {
+			fail(w, http.StatusUnprocessableEntity, "INVALID_INPUT_BINDINGS", bindingErr.Error(), false)
+			return
 		}
 		session, _, createErr := h.Store.CreateInitializedHostSession(
 			r.Context(), owner, sessionID, conversationID, original.OriginHost, original.OriginRef,

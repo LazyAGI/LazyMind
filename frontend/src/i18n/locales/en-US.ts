@@ -3172,6 +3172,16 @@ const enUS = {
         unknown: "Unable to complete this reply. Try again later or switch models.",
       },
     },
+    writerImageGroups: {
+      title: "Image display",
+      setSliding: "Set as sliding gallery",
+      restoreVertical: "Restore vertical layout",
+      hint: "Swipe to view · {{count}} images",
+      reminder_one: "One group contains at least three consecutive images. You can display it as a sliding gallery.",
+      reminder_other: "{{count}} groups contain at least three consecutive images. You can display them as sliding galleries.",
+      keepVertical: "Keep vertical and publish",
+      returnToDocument: "Return to document",
+    },
     writerIR: {
       referenceTargetMissing: "The reference target is missing. Check the generated heading or paragraph format.",
       documentRegion: "Structured document",
