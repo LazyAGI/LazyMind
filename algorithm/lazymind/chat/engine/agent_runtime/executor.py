@@ -301,6 +301,7 @@ class AgentExecutor:
             repeat_monitor=repeat_monitor,
             notice_buffer=notice_buffer,
             authorization_gate=options.authorization_gate,
+            knowledge_management=options.knowledge_management,
             workspace_permission=permission,
             tool_context=options.tool_context,
             trusted_opaque_tools=trusted_opaque_tools,

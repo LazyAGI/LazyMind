@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -32,9 +33,76 @@ func TestEnsureDatasetRAG(t *testing.T) {
 				return testJSONResponse(200, `{}`), nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = previous })
-			err := ensureDatasetRAG(httptest.NewRequest("POST", "/", nil), &orm.Dataset{ID: "retained-kb", BaseModel: orm.BaseModel{CreateUserID: "u1"}})
+			err := ensureDatasetRAG(context.Background(), &orm.Dataset{ID: "retained-kb", BaseModel: orm.BaseModel{CreateUserID: "u1"}})
 			if (err != nil) != (status == 503) || (posts == 1) != (status == 404) {
 				t.Fatalf("status=%d posts=%d err=%v", status, posts, err)
+			}
+		})
+	}
+}
+
+func TestKnowledgeProcessingResumesRAGAfterInstallation(t *testing.T) {
+	for _, remoteStatus := range []int{http.StatusNotFound, http.StatusServiceUnavailable} {
+		t.Run(http.StatusText(remoteStatus), func(t *testing.T) {
+			t.Setenv("LAZYMIND_RAG_ENABLED", "true")
+			service, db, op := resourceFixture(t)
+			if err := db.Model(&orm.Dataset{}).Where("id = ?", "source").Updates(map[string]any{
+				"processing_level": ProcessingLevelStored, "processing_revision": 1,
+				"ext": mustJSON(map[string]any{"tags": []string{"keep"}}),
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			previous := http.DefaultTransport
+			provisions := 0
+			http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				switch r.URL.Path {
+				case "/v1/algo/list":
+					return testJSONResponse(200, `{"code":200,"data":{"items":[{"algo_id":"general_algo"}]}}`), nil
+				case "/v1/kbs/kb-source":
+					if r.Method == http.MethodGet {
+						return testJSONResponse(remoteStatus, `{}`), nil
+					}
+					return testJSONResponse(200, `{}`), nil
+				case "/v1/kbs":
+					provisions++
+					var body kbCreateRequest
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatal(err)
+					}
+					if body.KbID != "kb-source" || body.OwnerID != op.Caller.UserID || body.AlgoID != "general_algo" {
+						t.Fatalf("wrong provisioning identity: %+v", body)
+					}
+					return testJSONResponse(200, `{}`), nil
+				default:
+					return previous.RoundTrip(r)
+				}
+			})
+			t.Cleanup(func() { http.DefaultTransport = previous })
+			level := ProcessingLevelParsed
+			op.OperationKey = "resume-processing"
+			request := UpdateMetadataRequest{Items: []ResourceMetadataItem{{
+				Target:  ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: "source"},
+				Changes: ResourceMetadataChanges{ProcessingLevel: &level},
+			}}}
+			_, err := service.UpdateMetadata(context.Background(), op, request)
+			var dataset orm.Dataset
+			if loadErr := db.First(&dataset, "id = ?", "source").Error; loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			if remoteStatus == http.StatusServiceUnavailable {
+				if err == nil || dataset.ProcessingLevel != ProcessingLevelStored || dataset.ProcessingRevision != 1 || provisions != 0 {
+					t.Fatalf("unavailable RAG changed configuration: %+v provisions=%d err=%v", dataset, provisions, err)
+				}
+				return
+			}
+			if err != nil || dataset.ProcessingLevel != level || dataset.ProcessingRevision != 2 || parseDatasetAlgo(dataset.Ext).AlgoID != "general_algo" {
+				t.Fatalf("processing configuration not restored: %+v err=%v", dataset, err)
+			}
+			if tags := parseDatasetTags(dataset.Ext); len(tags) != 1 || tags[0] != "keep" {
+				t.Fatalf("existing metadata lost: %v", tags)
+			}
+			if _, err := service.UpdateMetadata(context.Background(), op, request); err != nil || provisions != 1 {
+				t.Fatalf("replay provisioned again: provisions=%d err=%v", provisions, err)
 			}
 		})
 	}

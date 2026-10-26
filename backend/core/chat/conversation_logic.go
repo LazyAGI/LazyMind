@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"lazymind/core/toolpolicy"
 	"maps"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1605,7 +1607,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		body["workflow_context"] = mergedPC
 	}
 	if resourceContext != nil {
-		body["disabled_tools"] = mergeDisabledToolNames(
+		body["disabled_tools"] = toolpolicy.Merge(
 			requestDisabledTools, resourceContext.DisabledTools,
 		)
 		body["available_skills"] = resourceContext.AvailableSkills
@@ -1832,6 +1834,12 @@ func datasetIDsFromSearchConfig(sc map[string]any) []string {
 
 func stringSliceFromAny(v any) []string {
 	raw, _ := v.([]any)
+	if values, ok := v.([]string); ok {
+		raw = make([]any, len(values))
+		for i, value := range values {
+			raw[i] = value
+		}
+	}
 	if len(raw) == 0 {
 		return nil
 	}
@@ -2802,6 +2810,20 @@ func streamSingleAnswer(
 			}
 			if decision.Stop {
 				break
+			}
+			continue
+		}
+		if d.KnowledgeOperationResult != nil {
+			historyExt = mergeKnowledgeOperation(historyExt, d.KnowledgeOperationResult)
+			if err := persistKnowledgeOperation(chatCtx, db, convID, historyID, d.KnowledgeOperationResult); err != nil {
+				log.Logger.Error().Err(err).Msg("persist knowledge operation")
+			}
+			chunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq), KnowledgeOperationResult: d.KnowledgeOperationResult}
+			if reqCtx.Err() == nil {
+				writeSSEChunk(w, flusher, chunk)
+			}
+			if stateStore != nil {
+				_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
 			}
 			continue
 		}
@@ -4731,14 +4753,15 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		HistoryID string         `json:"history_id"`
+		AskID     string         `json:"ask_id"`
 		Answers   map[string]any `json:"answers"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if body.HistoryID == "" {
-		common.ReplyErr(w, "history_id required", http.StatusBadRequest)
+	if body.HistoryID == "" || strings.TrimSpace(body.AskID) == "" {
+		common.ReplyErr(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
@@ -4764,12 +4787,17 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 	if m == nil {
 		m = make(map[string]any)
 	}
+	pending, _ := m["ask_pending"].(map[string]any)
+	if pending == nil || pending["ask_id"] != body.AskID {
+		common.ReplyErr(w, "answer does not match an unanswered question card", http.StatusConflict)
+		return
+	}
 	if answered, _ := m["ask_answered"].(bool); answered {
 		// Already submitted — do not allow overwriting answers.
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if pending, _ := m["ask_pending"].(map[string]any); pending["env_input"] != nil {
+	if pending["env_input"] != nil {
 		common.ReplyAppErr(w, invalidEnvironmentInput())
 		return
 	}
@@ -4875,10 +4903,12 @@ func validAskSubmission(pending, submission map[string]any) bool {
 			continue
 		}
 		var answer struct {
-			Type  string `json:"type"`
-			Value any    `json:"value"`
+			Type      string `json:"type"`
+			Value     any    `json:"value"`
+			OtherText string `json:"otherText"`
 		}
-		if json.Unmarshal(item.Answer, &answer) != nil || answer.Type != kind || !validAskAnswerValue(kind, answer.Value) {
+		if json.Unmarshal(item.Answer, &answer) != nil || answer.Type != kind ||
+			!validAskAnswerValue(kind, answer.Value, choices, answer.OtherText) {
 			return false
 		}
 	}
@@ -4913,18 +4943,25 @@ func sameStrings(left, right []string) bool {
 	return true
 }
 
-func validAskAnswerValue(kind string, value any) bool {
+func validAskAnswerValue(kind string, value any, choices []string, otherText string) bool {
+	validChoice := func(value any) bool {
+		choice, ok := value.(string)
+		return ok && slices.Contains(choices, choice) &&
+			(choice != "__ask_user_other__" || strings.TrimSpace(otherText) != "")
+	}
 	switch kind {
-	case "boolean", "single", "text":
+	case "text":
 		_, ok := value.(string)
 		return ok
+	case "boolean", "single":
+		return validChoice(value)
 	case "multiple":
 		values, ok := value.([]any)
-		if !ok {
+		if !ok || len(values) == 0 {
 			return false
 		}
 		for _, value := range values {
-			if _, ok := value.(string); !ok {
+			if !validChoice(value) {
 				return false
 			}
 		}

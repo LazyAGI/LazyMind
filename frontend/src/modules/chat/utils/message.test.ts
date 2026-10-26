@@ -129,6 +129,25 @@ describe("mailDraftCardsReadOnly", () => {
 });
 
 describe("mergeAskPending", () => {
+  it("replaces question-specific metadata across ask IDs while retaining mail receipts", () => {
+    const previous = { ask_id: "old", title: "Delete", description: "Old target", title_i18n_key: "old.title",
+      knowledge_management: { confirmation_id: "old" }, knowledge_management_preview: { impact: "Delete" },
+      user_env_delete: { id: "env" }, env_input: { name: "SECRET" }, skill_ambiguity: { candidates: ["old"] },
+      questions: [{ text: "Old?", type: "boolean" }], mail_draft: { draft_id: "mail", status: "sent" } };
+    const incoming = { ask_id: "new", questions: [{ text: "Next?", type: "single", choices: ["Stop"] }] };
+    const merged = mergeAskPending(previous, incoming);
+    for (const key of ["title", "description", "title_i18n_key", "knowledge_management", "knowledge_management_preview", "user_env_delete", "env_input", "skill_ambiguity"]) {
+      expect(merged[key]).toBeUndefined();
+    }
+    expect(merged.questions).toEqual(incoming.questions);
+    expect(merged.mail_draft_only).toBe(false);
+    expect(merged.mail_drafts).toEqual([previous.mail_draft]);
+  });
+  it("keeps metadata for a partial update to the same question", () => {
+    const previous = { ask_id: "same", title: "Question", questions: [{ text: "When?", type: "text" }] };
+    expect(mergeAskPending(previous, { ask_id: "same", description: "Detail" })).toMatchObject(previous);
+  });
+
   it("keeps ordinary questions distinguishable when mail cards precede them", () => {
     const merged = mergeAskPending(
       { ask_id: "mail", mail_draft: { draft_id: "a", status: "sent" } },

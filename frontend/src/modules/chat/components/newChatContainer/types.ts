@@ -200,6 +200,7 @@ export interface ChatMessage {
     scope: "conversation";
     intent_context: Record<string, unknown>;
   };
+  knowledge_operations?: import("../../utils/knowledgeOperations").KnowledgeOperation[];
   ask_pending?: {
     env_input?: import("../EnvInputCard").EnvironmentInput;
     ask_id: string;

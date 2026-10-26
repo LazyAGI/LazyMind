@@ -50,6 +50,12 @@ func TestHydrateRunRequestUsesCoreOwnedSnapshotWithoutDSN(t *testing.T) {
 	if req.TaskSpec["id"] != task.ID || len(req.InitialSteps) != 1 {
 		t.Fatalf("request not hydrated: %#v", req)
 	}
+	params := req.TaskSpec["params"].(map[string]any)
+	snapshot, ok := params["_tool_visibility"].(taskVisibilitySnapshot)
+	if !ok || snapshot.ExecutionID != task.ExecutionID || params["depth"] != "high" {
+		t.Fatalf("execution snapshot lost parameters or visibility: %#v", params)
+	}
+
 	artifacts, ok := req.TaskSpec["artifacts"].([]map[string]any)
 	if !ok || len(artifacts) != 1 || artifacts[0]["seq"] != 2 {
 		t.Fatalf("artifacts=%#v", req.TaskSpec["artifacts"])

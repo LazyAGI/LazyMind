@@ -18,6 +18,9 @@ func TestLoadFeatureControlsDefaultsWhenPreferencesTableIsMissing(t *testing.T) 
 	if controls != DefaultFeatureControls() {
 		t.Fatalf("controls=%#v, want defaults", controls)
 	}
+	if controls.DocumentDirectoriesEnabled {
+		t.Fatal("document directories must require opting in")
+	}
 }
 
 func TestLoadFeatureControlsKeepsTaskControlsIndependent(t *testing.T) {
@@ -43,5 +46,15 @@ func TestLoadFeatureControlsKeepsTaskControlsIndependent(t *testing.T) {
 	}
 	if controls.TaskCenterEnabled || !controls.WorkflowsEnabled || !controls.SchedulesEnabled {
 		t.Fatalf("subtasks, workflows, and schedules must remain independent: %#v", controls)
+	}
+	if controls.DocumentDirectoriesEnabled {
+		t.Fatal("new preferences must default document directories to off")
+	}
+	if err := db.Model(&orm.UserUIPreferences{}).Where("user_id = ?", "user-1").Update("document_directories_enabled", true).Error; err != nil {
+		t.Fatal(err)
+	}
+	controls, err = LoadFeatureControls(context.Background(), db.DB, "user-1")
+	if err != nil || !controls.DocumentDirectoriesEnabled {
+		t.Fatalf("saved opt-in not preserved: controls=%#v err=%v", controls, err)
 	}
 }

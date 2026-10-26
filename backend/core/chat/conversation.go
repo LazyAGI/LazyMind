@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"lazymind/core/toolpolicy"
 	"net/http"
 	"regexp"
 	"sort"
@@ -62,7 +63,7 @@ func applyBasicChatOnlyPolicy(reqBody map[string]any) {
 	reqBody["enable_subagent"] = false
 	reqBody["workflow_context"] = map[string]any{}
 	reqBody["workflow_catalog"] = []map[string]any{}
-	reqBody["disabled_tools"] = mergeDisabledToolNames(
+	reqBody["disabled_tools"] = toolpolicy.Merge(
 		stringSliceFromAny(reqBody["disabled_tools"]),
 		[]string{"ask_user", "schedule", "task", "task_center"},
 	)
@@ -518,13 +519,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query disabled tools failed", http.StatusInternalServerError)
 		return
 	}
-	resourceContext.DisabledTools = mergeDisabledToolNames(
+	resourceContext.DisabledTools = toolpolicy.Merge(
 		resourceContext.DisabledTools, mentionedResources.ExcludedToolNames,
 	)
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentionedResources.ToolNames)
 	if len(dbDisabledTools) > 0 {
 		// A setting-level pause must not be bypassed by an explicit @tool mention.
-		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
+		resourceContext.DisabledTools = toolpolicy.Merge(resourceContext.DisabledTools, dbDisabledTools)
 	}
 	if target.IsRegeneration {
 		if err := clearModelContext(r.Context(), db, convID); err != nil {
@@ -1078,10 +1079,22 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 	resumeSingleAnswerChat(ctx, stateStore, convID, targetHistoryID, w, flusher)
 }
 
+func withHistoryAskState(payload map[string]any, ext json.RawMessage) map[string]any {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(ext, &fields) == nil {
+		for _, key := range []string{"ask_pending", "ask_answered", "ask_saved_answers"} {
+			if value, ok := fields[key]; ok {
+				payload[key] = value
+			}
+		}
+	}
+	return payload
+}
+
 func resumeFromDBOnly(ctx context.Context, db *gorm.DB, userID, convID string, flusher http.Flusher, w http.ResponseWriter) {
 	var last orm.ChatHistory
 	if err := db.Where("conversation_id = ?", convID).Order("seq DESC").First(&last).Error; err != nil || last.ID == "" {
-		writeSSEChunk(w, flusher, map[string]any{"runtime_event": failedRunEvent(newID("run_"), "history_not_found", false)})
+		writeSSEChunk(w, flusher, withHistoryAskState(map[string]any{"runtime_event": failedRunEvent(newID("run_"), "history_not_found", false)}, nil))
 		return
 	}
 	snapshot := map[string]any{
@@ -1099,7 +1112,7 @@ func resumeFromDBOnly(ctx context.Context, db *gorm.DB, userID, convID string, f
 		"thinking_duration_s": last.ThinkingDurationS,
 	}
 	addModelOutputSnapshot(snapshot, last)
-	writeSSEChunk(w, flusher, snapshot)
+	writeSSEChunk(w, flusher, withHistoryAskState(snapshot, last.Ext))
 	writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 }
 
@@ -1121,18 +1134,18 @@ func resumeCompletedFromDB(ctx context.Context, db *gorm.DB, userID, convID stri
 			"thinking_duration_s": last.ThinkingDurationS,
 		}
 		addModelOutputSnapshot(snapshot, last)
-		writeSSEChunk(w, flusher, snapshot)
+		writeSSEChunk(w, flusher, withHistoryAskState(snapshot, last.Ext))
 		writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 		return
 	}
 
 	var mh []orm.MultiAnswersChatHistory
 	if err := db.Where("conversation_id = ?", convID).Order("seq DESC, create_time DESC").Limit(2).Find(&mh).Error; err != nil || len(mh) == 0 {
-		writeSSEChunk(w, flusher, map[string]any{"runtime_event": failedRunEvent(newID("run_"), "history_not_found", false)})
+		writeSSEChunk(w, flusher, withHistoryAskState(map[string]any{"runtime_event": failedRunEvent(newID("run_"), "history_not_found", false)}, nil))
 		return
 	}
 	for _, h := range mh {
-		writeSSEChunk(w, flusher, map[string]any{
+		writeSSEChunk(w, flusher, withHistoryAskState(map[string]any{
 			"conversation_id":     convID,
 			"seq":                 h.Seq,
 			"message":             stripThinkTags(stripToolTags(h.Result)),
@@ -1143,7 +1156,7 @@ func resumeCompletedFromDB(ctx context.Context, db *gorm.DB, userID, convID stri
 			"sources":             retrievalSources(h.RetrievalResult),
 			"tool_call_turns":     h.ToolCallTurns,
 			"thinking_duration_s": h.ThinkingDurationS,
-		})
+		}, h.Ext))
 		writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, h.ID, h.RunID, h.RunTerminal))
 	}
 }
@@ -1817,6 +1830,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		var ext struct {
 			Input                 any                 `json:"input"`
 			Mentions              any                 `json:"mentions"`
+			KnowledgeOperations   []map[string]any    `json:"knowledge_operations"`
 			MailConfirmation      map[string]any      `json:"mail_confirmation"`
 			AskPending            any                 `json:"ask_pending"`
 			AskAnswered           bool                `json:"ask_answered"`
@@ -1905,6 +1919,13 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		item["failed_attempts"] = failedAttempts
 	}
 	addModelOutputSnapshot(item, h)
+	var operationExt struct {
+		KnowledgeOperations []map[string]any `json:"knowledge_operations"`
+	}
+	_ = json.Unmarshal(h.Ext, &operationExt)
+	if len(operationExt.KnowledgeOperations) > 0 {
+		item["knowledge_operations"] = operationExt.KnowledgeOperations
+	}
 	return item
 }
 

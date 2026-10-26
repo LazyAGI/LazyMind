@@ -43,6 +43,29 @@ func seedTaskModel(t *testing.T, db *gorm.DB, owner, id string, shared bool) {
 	}
 }
 
+type modelFallbackStateStore struct {
+	*state.SQLiteStore
+	rpushCalls []rpushCall
+}
+
+func newModelFallbackStateStore(t *testing.T) *modelFallbackStateStore {
+	t.Helper()
+	ss, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ss.Close() })
+	return &modelFallbackStateStore{SQLiteStore: ss}
+}
+
+func (s *modelFallbackStateStore) RPush(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	if err := s.SQLiteStore.RPush(ctx, key, value, ttl); err != nil {
+		return err
+	}
+	s.rpushCalls = append(s.rpushCalls, rpushCall{key: key, value: append([]byte(nil), value...)})
+	return nil
+}
+
 func TestOrdinaryModelFallbackReconnectHydratesCommittedThenOpenCall(t *testing.T) {
 	db := orm.MigrateAllModelsForTest(t).DB
 	_, err := CreateTask(t.Context(), db, CreateTaskInput{TaskID: "replay", ConversationID: "conv", AgentType: "research", CreateUserID: "0", Title: "replay"})
@@ -327,7 +350,7 @@ func TestOrdinaryModelFallbackActualConsumerCommitsOnlyClosedCalls(t *testing.T)
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-	if err := Run(t.Context(), db, &mockStateStore{}, RunRequest{TaskID: "task-model"}); err != nil {
+	if err := Run(t.Context(), db, newModelFallbackStateStore(t), RunRequest{TaskID: "task-model"}); err != nil {
 		t.Fatal(err)
 	}
 	steps, err := LoadSteps(t.Context(), db, "task-model")
@@ -403,7 +426,7 @@ func TestOrdinaryModelFallbackActualSwitchPersistsAuthorizedFact(t *testing.T) {
 			}))
 			defer server.Close()
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-			stateStore := &mockStateStore{}
+			stateStore := newModelFallbackStateStore(t)
 			err = Run(t.Context(), db, stateStore, RunRequest{TaskID: "switch"})
 			if localFailure != (err != nil) {
 				t.Fatalf("local failure=%v err=%v", localFailure, err)
@@ -477,7 +500,7 @@ func TestOrdinaryModelFallbackRejectsUnconfirmedRuntimeAndClosesErrors(t *testin
 			}))
 			defer server.Close()
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-			stateStore := &mockStateStore{}
+			stateStore := newModelFallbackStateStore(t)
 			_ = Run(t.Context(), db, stateStore, RunRequest{TaskID: "reject"})
 			task, _ := GetTask(t.Context(), db, "reject")
 			steps, _ := LoadSteps(t.Context(), db, "reject")
@@ -548,7 +571,7 @@ func TestOrdinaryModelFallbackPlainCommitRetriesFromConfirmedState(t *testing.T)
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-	stateStore := &mockStateStore{}
+	stateStore := newModelFallbackStateStore(t)
 	err := Run(t.Context(), db, stateStore, RunRequest{TaskID: "plain-retry"})
 	task, _ := GetTask(t.Context(), db, "plain-retry")
 	steps, _ := LoadSteps(t.Context(), db, "plain-retry")
@@ -630,7 +653,7 @@ func TestOrdinaryModelFallbackSwitchCommitRetryKeepsOriginalWireIdempotent(t *te
 	}))
 	defer server.Close()
 	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-	stateStore := &mockStateStore{}
+	stateStore := newModelFallbackStateStore(t)
 	err := Run(t.Context(), db, stateStore, RunRequest{TaskID: "switch-retry"})
 	task, _ := GetTask(t.Context(), db, "switch-retry")
 	steps, _ := LoadSteps(t.Context(), db, "switch-retry")

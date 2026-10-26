@@ -137,7 +137,14 @@ func runHistoryInjections(ctx context.Context, db *gorm.DB) error {
 }
 
 func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
+	moveBudget, err := doc.KnowledgeMoveBudget()
+	if err != nil {
+		return nil, err
+	}
 	return capabilitybootstrap.NewRuntime(capabilitybootstrap.Config{
+		EnableKnowledgeManagement: knowledgeManagementEnabled(),
+		MoveBudget:                moveBudget,
+		State:                     store.State(), ValidateKnowledgeExecution: validateKnowledgeExecution, ValidateKnowledgeCommit: validateKnowledgeCommit, PendingKnowledgeConfirmation: persistKnowledgeConfirmation, KnowledgeDecisionRecorded: persistKnowledgeDecision,
 		DB:                        store.DB(),
 		LazyDB:                    store.LazyLLMDB(),
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
@@ -270,7 +277,7 @@ func registerCoreRoutes(r *mux.Router) {
 }
 
 func registerCapabilityMCPRoute(r *mux.Router, handler http.Handler) {
-	handleAPI(r, "POST", "/mcp/capabilities/v1", []string{"qa.read"}, handler.ServeHTTP)
+	handleAPI(r, "POST", "/mcp/capabilities/v1", nil, handler.ServeHTTP)
 	r.Handle("/mcp/capabilities/v1", handler).Methods(http.MethodGet, http.MethodDelete)
 }
 
@@ -945,22 +952,8 @@ func run(ctx context.Context) error {
 	workflow.RegisterSubAgentHooks()
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
-	subagent.EventHooks.RegisterConversationEventHook(
-		func(_ context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) error {
-			enriched := make(map[string]any, len(payload)+2)
-			for k, v := range payload {
-				enriched[k] = v
-			}
-			enriched["event_type"] = eventType
-			if _, ok := enriched["conversation_id"]; !ok {
-				enriched["conversation_id"] = convID
-			}
-			return chat.AppendConvEvent(runtimeCtx, stateStore, convID, &chat.ConvEvent{
-				Type:    eventType,
-				Payload: enriched,
-			})
-		},
-	)
+	subagent.EventHooks.RegisterConversationEventHook(chat.PublishConversationEvent)
+
 	log.Logger.Info().Msg("plugin subagent hooks registered")
 
 	// Start the schedule ticker.
@@ -1018,6 +1011,17 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "initialize capability MCP", err: err}
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
+	if capabilityRuntime.KnowledgeInternal != nil {
+		for _, action := range []string{"credential", "prepare", "status", "claim"} {
+			r.Handle("/internal/knowledge-management:"+action, capabilityRuntime.KnowledgeInternal).Methods(http.MethodPost)
+		}
+		r.Handle("/internal/mcp/knowledge-management", capabilityRuntime.KnowledgeMCP).Methods(http.MethodPost, http.MethodGet, http.MethodDelete)
+		handleAPI(r, "POST", "/knowledge-management/confirmations/{confirmation_id}/decision", []string{"document.write"}, capabilityRuntime.KnowledgeDecision)
+	}
+	if err := doc.InitializeDocumentVisibility(ctx, store.DB(), store.LazyLLMDB()); err != nil {
+		return &startupError{msg: "initialize document visibility", err: err}
+	}
+	handleAPI(r, "POST", "/documents:filterActive", []string{"document.read"}, doc.FilterDocumentVisibilityHTTP)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 	registerBrowserMCPRoute(r, browser.NewMCPHandler(browser.DefaultHub))
 	log.Logger.Info().Str("path", "/mcp/browser/v1").Msg("browser MCP enabled")

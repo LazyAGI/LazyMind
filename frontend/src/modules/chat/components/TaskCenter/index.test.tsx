@@ -586,11 +586,12 @@ describe("TaskCenter display modes", () => {
     expect(panel).toHaveAttribute("role", "region");
     expect(trigger).toHaveAttribute("aria-controls", panel?.id);
     expect(panel).toHaveAttribute("aria-labelledby", trigger?.id);
-    expect(panel?.querySelectorAll("button")).toHaveLength(0);
+    expect(panel?.querySelectorAll("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /chat.references/ })).toBeInTheDocument();
     expect(panel?.querySelector(".ant-progress")).not.toBeInTheDocument();
     expect(panel?.querySelector(".ordinary-thinking-item.is-running")).not.toBeInTheDocument();
     expect(screen.getByText("taskCenter.ordinaryThinking")).toBeInTheDocument();
-    expect(screen.getByText("taskCenter.ordinarySources")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /chat.references/ })).toBeInTheDocument();
   });
 
   it("does not read private task fields in the ordinary process projection", () => {
@@ -611,7 +612,7 @@ describe("TaskCenter display modes", () => {
       .toBeInTheDocument();
   });
 
-  it("uses native links for public sources and summarizes dependencies", () => {
+  it("opens public sources through the shared reference panel and summarizes dependencies", () => {
     useTaskCenterStore.setState({
       tasksByConversation: {
         "conversation-1": [{
@@ -634,14 +635,9 @@ describe("TaskCenter display modes", () => {
 
     expect(screen.getByText("taskCenter.ordinaryDependencyCount"))
       .toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("href", "https://example.com/article");
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("target", "_blank");
-    expect(screen.queryByRole("link", { name: /Unsafe source/ }))
-      .not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /chat.references/ }));
+    expect(screen.getByRole("button", { name: /Example source/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Unsafe source/ })).not.toBeInTheDocument();
     expect(screen.getByText("Unsafe source")).toBeInTheDocument();
   });
 

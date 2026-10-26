@@ -167,6 +167,7 @@ type LazyChatData struct {
 	ReasoningText            string                         `json:"think"`
 	TaskCreated              *TaskCreatedEvent              `json:"task_created,omitempty"`
 	ExportSnapshot           *ChatExportSnapshot            `json:"export_snapshot,omitempty"`
+	KnowledgeOperationResult map[string]any                 `json:"knowledge_operation_result,omitempty"`
 	ArtifactCreated          *ArtifactCreatedEvent          `json:"artifact_created,omitempty"`
 	AskPending               *AskPendingEvent               `json:"ask_pending,omitempty"`
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
@@ -227,17 +228,19 @@ type AskQuestion struct {
 // The frontend renders a clarification UI; the user's answers are sent as plain text
 // in the next chat turn's query — no special ask_response parameter is needed.
 type AskPendingEvent struct {
-	AskID          string                     `json:"ask_id"`
-	Questions      []AskQuestion              `json:"questions"`
-	Title          string                     `json:"title,omitempty"`
-	Description    string                     `json:"description,omitempty"`
-	MailDraft      map[string]any             `json:"mail_draft,omitempty"`
-	MailDrafts     []map[string]any           `json:"mail_drafts,omitempty"`
-	MailDraftOnly  *bool                      `json:"mail_draft_only,omitempty"`
-	ReviewHook     map[string]any             `json:"review_hook,omitempty"`
-	UserEnvDelete  *UserEnvDeleteConfirmation `json:"user_env_delete,omitempty"`
-	EnvInput       *EnvironmentInputRequest   `json:"env_input,omitempty"`
-	SkillAmbiguity *SkillAmbiguitySelection   `json:"skill_ambiguity,omitempty"`
+	KnowledgeManagementPreview map[string]any             `json:"knowledge_management_preview,omitempty"`
+	KnowledgeManagement        map[string]string          `json:"knowledge_management,omitempty"`
+	AskID                      string                     `json:"ask_id"`
+	Questions                  []AskQuestion              `json:"questions"`
+	Title                      string                     `json:"title,omitempty"`
+	Description                string                     `json:"description,omitempty"`
+	MailDraft                  map[string]any             `json:"mail_draft,omitempty"`
+	MailDrafts                 []map[string]any           `json:"mail_drafts,omitempty"`
+	MailDraftOnly              *bool                      `json:"mail_draft_only,omitempty"`
+	ReviewHook                 map[string]any             `json:"review_hook,omitempty"`
+	UserEnvDelete              *UserEnvDeleteConfirmation `json:"user_env_delete,omitempty"`
+	EnvInput                   *EnvironmentInputRequest   `json:"env_input,omitempty"`
+	SkillAmbiguity             *SkillAmbiguitySelection   `json:"skill_ambiguity,omitempty"`
 }
 
 // EnvironmentInputRequest contains metadata only; values use a dedicated authenticated API.
@@ -452,6 +455,7 @@ type UpstreamStreamChunk struct {
 	ReasoningText            string                         `json:"reasoning_text"` // text think
 	TaskCreated              *TaskCreatedEvent              `json:"task_created,omitempty"`
 	ExportSnapshot           *ChatExportSnapshot            `json:"export_snapshot,omitempty"`
+	KnowledgeOperationResult map[string]any                 `json:"knowledge_operation_result,omitempty"`
 	ArtifactCreated          *ArtifactCreatedEvent          `json:"artifact_created,omitempty"`
 	AskPending               *AskPendingEvent               `json:"ask_pending,omitempty"`
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
@@ -1131,6 +1135,7 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		ReasoningText:            data.ReasoningText,
 		TaskCreated:              data.TaskCreated,
 		ArtifactCreated:          data.ArtifactCreated,
+		KnowledgeOperationResult: data.KnowledgeOperationResult,
 		ExportSnapshot:           data.ExportSnapshot,
 		AskPending:               data.AskPending,
 		ToolLimitPending:         data.ToolLimitPending,

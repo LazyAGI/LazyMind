@@ -1,3 +1,4 @@
+import { SourceImportActions } from "../SourceImports";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -202,6 +203,7 @@ function SourcePreview({ sources }: { sources: ChatSource[] }) {
         {previewText && <p className="md-source-preview-summary">{previewText}</p>}
         {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
       </a>
+      <SourceImportActions source={source} />
     </div>
   );
 }
@@ -633,6 +635,7 @@ const LinkComponent = (props: any) => {
 
     return (
       <Popover
+        trigger={["hover", "focus"]}
         mouseEnterDelay={0.2}
         placement="top"
         classNames={{ root: "md-source-popover md-source-popover--interactive" }}

@@ -104,7 +104,7 @@ vi.mock("react-i18next", () => ({
     type: "3rdParty",
     init: () => undefined,
   },
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en-US" } }),
 }));
 
 vi.mock("@/modules/chat/store/workflowPanel", () => ({
@@ -918,5 +918,146 @@ describe("configuration continuation", () => {
       fireEvent.click(await screen.findByText("toolConfiguration.continue"));
       expect(sendMessage).toHaveBeenCalledWith("toolConfiguration.continueMessage");
     } finally { request.mockRestore(); }
+  });
+});
+
+
+describe("knowledge confirmation parent state", () => {
+  it.each([
+    { turn: "latest", index: 0, length: 1, hasLaterUserMessage: false, choice: "no" },
+    { turn: "older approved", index: 1, length: 4, hasLaterUserMessage: true, choice: "yes" },
+    { turn: "older rejected", index: 1, length: 4, hasLaterUserMessage: true, choice: "no" },
+  ])("persists the $turn decision without sending a chat turn", async ({ index, length, hasLaterUserMessage, choice }) => {
+    const post = vi.spyOn(axiosInstance, "post").mockResolvedValue({ data: {} });
+    const updateMessage = vi.fn();
+    const sendMessage = vi.fn();
+    const item = { role: "assistant", history_id: "knowledge-history", ask_pending: {
+      ask_id: "knowledge-card", knowledge_management: { confirmation_id: "knowledge-card", arguments_digest: "digest", snapshot: "snapshot" },
+      questions: [{ text: "Delete?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+    } };
+    const props = { index, length, hasLaterUserMessage, renderText: () => null, regenerate: vi.fn(), stopGeneration: vi.fn(), updateMessage, sendMessage };
+    try {
+      const view = render(<AssistantMessage {...props} item={item} />);
+      expect(screen.getByRole("button", { name: `common.${choice}` })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: `common.${choice}` }));
+      fireEvent.click(screen.getByRole("button", { name: "chat.askCardSubmit" }));
+      await waitFor(() => expect(updateMessage).toHaveBeenCalledWith(expect.objectContaining({ ask_answered: true })));
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(post).toHaveBeenCalledWith(
+        expect.stringContaining("/knowledge-management/confirmations/knowledge-card/decision"),
+        { decision: choice === "yes" ? "approved" : "rejected", arguments_digest: "digest", snapshot: "snapshot" },
+      );
+      const saved = updateMessage.mock.calls[updateMessage.mock.calls.length - 1][0];
+      expect(saved.ask_saved_answers[0].value).toBe(`__ask_user_${choice}__`);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
+      view.unmount();
+      const restored = buildChatMessageListFromHistory([{
+        id: "knowledge-history", query: "Delete archive", result: "Decision recorded",
+        ask_pending: saved.ask_pending, ask_answered: saved.ask_answered,
+        ask_saved_answers: saved.ask_saved_answers,
+      }])[1];
+      render(<AssistantMessage {...props} item={restored} />);
+      const summary = screen.getByRole("button", { name: choice === "yes" ? /chat.askCardConfirmed/ : /chat.askCardCancelled/ });
+      expect(summary).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByText("Delete?")).toBeNull();
+      fireEvent.click(summary);
+      expect(screen.getByRole("button", { name: `common.${choice}` })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
+    } finally {
+      post.mockRestore();
+    }
+  });
+
+  it("keeps an older confirmation retryable when its decision request fails", async () => {
+    const post = vi.spyOn(axiosInstance, "post")
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce({ data: {} });
+    const updateMessage = vi.fn();
+    const sendMessage = vi.fn();
+    try {
+      render(<AssistantMessage index={1} length={4} hasLaterUserMessage
+        renderText={() => null} regenerate={vi.fn()} stopGeneration={vi.fn()}
+        updateMessage={updateMessage} sendMessage={sendMessage}
+        item={{ role: "assistant", history_id: "older-work", ask_pending: {
+          ask_id: "pending-decision", knowledge_management: { confirmation_id: "pending-decision", arguments_digest: "digest", snapshot: "snapshot" },
+          questions: [{ text: "Create?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] }],
+        } }} />);
+      fireEvent.click(screen.getByRole("button", { name: "common.yes" }));
+      const submit = screen.getByRole("button", { name: "chat.askCardSubmit" });
+      fireEvent.click(submit);
+      await screen.findByText("chat.knowledgeConfirmationFailed");
+      expect(updateMessage.mock.calls.some(([item]) => item.ask_answered)).toBe(false);
+      expect(screen.getByRole("button", { name: "common.yes" })).toHaveClass("ant-btn-primary");
+      await waitFor(() => expect(submit).toBeEnabled());
+      fireEvent.click(submit);
+      await waitFor(() => expect(updateMessage).toHaveBeenCalledWith(expect.objectContaining({ ask_answered: true })));
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(sendMessage).not.toHaveBeenCalled();
+    } finally {
+      post.mockRestore();
+    }
+  });
+
+  it.each([false, true])("preserves ordinary question interactivity with later user messages: %s", (hasLaterUserMessage) => {
+    render(<AssistantMessage index={1} length={4} hasLaterUserMessage={hasLaterUserMessage}
+      renderText={() => null} regenerate={vi.fn()} stopGeneration={vi.fn()}
+      updateMessage={vi.fn()} sendMessage={vi.fn()}
+      item={{ role: "assistant", ask_pending: { ask_id: "ordinary-question", questions: [
+        { text: "Continue?", type: "boolean", choices: ["__ask_user_yes__", "__ask_user_no__"] },
+      ] } }} />);
+    const yes = screen.getByRole("button", { name: "common.yes" });
+    if (hasLaterUserMessage) {
+      expect(yes).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "chat.askCardSubmit" })).toBeNull();
+    } else {
+      expect(yes).toBeEnabled();
+      expect(screen.getByRole("button", { name: "chat.askCardSubmit" })).toBeInTheDocument();
+    }
+  });
+});
+
+
+describe("ask answer autosave lifecycle", () => {
+  it("keeps pending and new autosaves bound to their respective card IDs", async () => {
+    const patch = vi.spyOn(axiosInstance, "patch").mockResolvedValue({ data: {} });
+    const item = (ask_id: string) => ({ role: "assistant", history_id: "autosave-history", ask_pending: {
+      ask_id, questions: [{ text: `Question ${ask_id}`, type: "single", choices: ["Monday"] }],
+    } });
+    const props = { sessionId: "autosave-conversation", index: 0, length: 1, renderText: () => null,
+      regenerate: vi.fn(), stopGeneration: vi.fn(), updateMessage: vi.fn(), sendMessage: vi.fn() };
+    const view = render(<AssistantMessage {...props} item={item("old")} />);
+    fireEvent.click(screen.getByRole("radio", { name: "Monday" }));
+    view.rerender(<AssistantMessage {...props} item={item("new")} />);
+    expect(patch).toHaveBeenCalledWith(
+      expect.stringContaining("autosave-conversation:ask-answers"),
+      expect.objectContaining({ history_id: "autosave-history", ask_id: "old" }),
+      expect.objectContaining({ silentError: true }),
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "Monday" }));
+    await waitFor(() => expect(patch).toHaveBeenLastCalledWith(
+      expect.stringContaining("autosave-conversation:ask-answers"),
+      { history_id: "autosave-history", ask_id: "new", answers: { 0: { type: "single", value: "Monday", otherText: "" } } },
+      { silentError: true, headers: { "Content-Type": "application/json" } },
+    ));
+    patch.mockRestore();
+  });
+});
+
+
+describe("ask draft navigation", () => {
+  it("saves the last edit when leaving the chat before debounce expires", async () => {
+    const patch = vi.spyOn(axiosInstance, "patch").mockResolvedValue({ data: {} });
+    const view = render(<AssistantMessage sessionId="leaving" index={0} length={1} renderText={() => null}
+      regenerate={vi.fn()} stopGeneration={vi.fn()} updateMessage={vi.fn()} sendMessage={vi.fn()}
+      item={{ role: "assistant", history_id: "history", ask_pending: { ask_id: "still-valid", questions: [
+        { text: "When?", type: "text" },
+      ] } }} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Friday" } });
+    view.unmount();
+    await waitFor(() => expect(patch).toHaveBeenCalledWith(expect.stringContaining("leaving:ask-answers"),
+      { history_id: "history", ask_id: "still-valid", answers: { 0: { type: "text", value: "Friday" } } },
+      expect.any(Object)));
+    patch.mockRestore();
   });
 });

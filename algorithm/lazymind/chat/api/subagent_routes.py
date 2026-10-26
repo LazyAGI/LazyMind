@@ -44,6 +44,10 @@ async def run_subagent(
     model_fallback_initial_switch: Annotated[
         Optional[Dict[str, Any]], Body(description='Core private initial model replacement'),
     ] = None,
+    disabled_tools: Annotated[Optional[List[str]], Body(description='Core-owned tool visibility snapshot')] = None,
+    system_mcp_config: Annotated[
+        Optional[List[Dict[str, Any]]], Body(description='Core private per-run MCP scope'),
+    ] = None,
 ):
     from lazymind.chat.engine.subagent.runner import run_subagent_stream
 
@@ -62,6 +66,8 @@ async def run_subagent(
             model_fallback_current_id=model_fallback_current_id,
             model_fallback_candidates=model_fallback_candidates,
             model_fallback_initial_switch=model_fallback_initial_switch,
+            system_mcp_config=system_mcp_config,
+            disabled_tools=disabled_tools,
         ),
         media_type='text/event-stream',
     )

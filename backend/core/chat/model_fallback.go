@@ -235,13 +235,19 @@ func persistChatFallbackProgress(ctx context.Context, db *gorm.DB, convID, histo
 		values["retrieval_result"] = retrieval
 	}
 	return conversationCheckpoint(ctx, db, convID, func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.ChatHistory{}).Where("id = ? AND conversation_id = ? AND run_id = ?", historyID, convID, runID).UpdateColumn("update_time", gorm.Expr("update_time")).Error; err != nil {
+			return err
+		}
 		var history orm.ChatHistory
-		err := tx.Select("run_id").Where("id = ? AND conversation_id = ?", historyID, convID).Take(&history).Error
+		err := tx.Select("run_id", "ext").Where("id = ? AND conversation_id = ?", historyID, convID).Take(&history).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			err = tx.Create(&orm.ChatHistory{ID: historyID, ConversationID: convID, RunID: runID, RunStatus: "generating", RawContent: query, Content: query, AlgorithmID: algorithmID, Seq: seq, Result: result, Ext: ext, RetrievalResult: retrieval, TimeMixin: orm.TimeMixin{CreateTime: time.Now(), UpdateTime: time.Now()}}).Error
 		} else if err == nil {
 			if history.RunID != runID {
 				return gorm.ErrRecordNotFound
+			}
+			if err := preserveHistoryKnowledgeConfirmation(history.Ext, values); err != nil {
+				return err
 			}
 			err = tx.Model(&orm.ChatHistory{}).Where("id = ? AND run_id = ?", historyID, runID).Updates(values).Error
 		}
