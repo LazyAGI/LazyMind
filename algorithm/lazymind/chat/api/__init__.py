@@ -13,6 +13,7 @@ from . import (
 )
 
 __all__ = [
+    'academic_routes',
     'agent_control_routes',
     'chat_routes',
     'document_routes',

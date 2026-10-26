@@ -32,6 +32,7 @@ async def parse_pdf(payload: PDFRequest, token: Annotated[Optional[str], Header(
     path = (root / payload.file_ref).resolve()
     if not path.is_relative_to(root) or not path.is_file() or path.suffix != '.pdf':
         raise HTTPException(422, 'invalid academic file reference')
+
     def run():
         from lazymind.chat.engine.tools.file_resources.ingest import parse_pdf_pages
         if hashlib.sha256(path.read_bytes()).hexdigest() != payload.content_hash:
@@ -50,8 +51,11 @@ async def parse_pdf(payload: PDFRequest, token: Annotated[Optional[str], Header(
 
 
 @router.post('/internal/academic/metadata:extract')
-async def extract_metadata(payload: MetadataRequest, token: Annotated[Optional[str], Header(alias=INTERNAL_TOKEN_HEADER)] = None):
+async def extract_metadata(
+    payload: MetadataRequest, token: Annotated[Optional[str], Header(alias=INTERNAL_TOKEN_HEADER)] = None,
+):
     require_internal_token(token)
+
     def run():
         from lazymind.chat.service.llm_task import LLMTaskInput, LLMTaskRequest, run_llm_task
         instruction = (
