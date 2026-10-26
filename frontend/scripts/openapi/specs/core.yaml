@@ -212,7 +212,6 @@ components:
                 discovery_mode:
                     enum:
                         - external
-                        - legacy_mock
                     type: string
                 goal:
                     type: string
@@ -266,6 +265,22 @@ components:
                         - paper_references
                         - collection_references
                         - paper_link
+                        - bibliography
+                        - pdf_upload
+                    type: string
+                file_name:
+                    type: string
+                folder_id:
+                    type: string
+                folders:
+                    items:
+                        $ref: '#/components/schemas/PaperLibraryFolder'
+                    type: array
+                format:
+                    enum:
+                        - bib
+                        - ris
+                        - csv
                     type: string
                 idempotency_key:
                     type: string
@@ -291,10 +306,19 @@ components:
             properties:
                 candidate:
                     $ref: '#/components/schemas/AcademicImportCandidate'
+                confirmed:
+                    type: boolean
+                document_id:
+                    type: string
+                paper:
+                    $ref: '#/components/schemas/PaperLibraryPaper'
                 reference_ids:
                     items:
                         type: string
                     type: array
+                revision:
+                    format: int64
+                    type: integer
                 work_id:
                     type: string
             type: object
@@ -464,6 +488,9 @@ components:
                     items:
                         type: string
                     type: array
+                citation_count:
+                    format: int64
+                    type: integer
                 document_id:
                     type: string
                 doi:
@@ -8408,63 +8435,236 @@ components:
                 - sources
                 - stage_artifacts
             type: object
-        PaperLibraryAttachmentContext:
+        PaperLibraryAttachment:
             properties:
-                attachment_id:
+                addedAt:
+                    format: date-time
                     type: string
-                confirmed:
+                available:
                     type: boolean
-                document_id:
+                contentHash:
                     type: string
-                idempotency_key:
+                contentRef:
                     type: string
-                operation:
-                    enum:
-                        - attach
-                        - detach
+                expansionId:
                     type: string
-                paper_id:
+                expansionVersion:
+                    format: int64
+                    type: integer
+                id:
+                    type: string
+                importMethod:
+                    type: string
+                isPrimary:
+                    type: boolean
+                kind:
+                    type: string
+                name:
+                    type: string
+                paperId:
+                    type: string
+                source:
+                    type: string
+                sourceProvider:
+                    type: string
+                sourceUrl:
+                    type: string
+                sourceVersion:
                     type: string
             required:
-                - operation
-                - paper_id
-                - document_id
-                - attachment_id
-                - confirmed
-                - idempotency_key
+                - id
+                - paperId
+                - name
+                - kind
+                - addedAt
+                - isPrimary
+                - available
             type: object
-        PaperLibraryImportContext:
+        PaperLibraryChanges:
             properties:
-                entry_type:
-                    enum:
-                        - bibliography
-                        - paper_link
+                batch_id:
                     type: string
-                file_name:
-                    type: string
-                format:
-                    enum:
-                        - bib
-                        - ris
-                        - csv
-                    type: string
-                idempotency_key:
-                    type: string
-                items:
+                data:
+                    $ref: '#/components/schemas/PaperLibraryData'
+                removedFolderIds:
                     items:
-                        properties:
-                            paper_id:
-                                type: string
-                        required:
-                            - paper_id
-                        type: object
+                        type: string
                     type: array
-                preview_token:
+                removedPaperIds:
+                    items:
+                        type: string
+                    type: array
+                status:
                     type: string
             required:
-                - idempotency_key
-                - entry_type
-                - items
+                - data
+            type: object
+        PaperLibraryData:
+            properties:
+                attachments:
+                    items:
+                        $ref: '#/components/schemas/PaperLibraryAttachment'
+                    type: array
+                folders:
+                    items:
+                        $ref: '#/components/schemas/PaperLibraryFolder'
+                    type: array
+                notes:
+                    items:
+                        $ref: '#/components/schemas/PaperLibraryNote'
+                    type: array
+                papers:
+                    items:
+                        $ref: '#/components/schemas/PaperLibraryPaper'
+                    type: array
+            required:
+                - papers
+                - folders
+                - attachments
+                - notes
+            type: object
+        PaperLibraryFolder:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                parentId:
+                    nullable: true
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - name
+                - parentId
+                - revision
+            type: object
+        PaperLibraryMetadata:
+            properties:
+                abstract:
+                    type: string
+                authors:
+                    items:
+                        type: string
+                    type: array
+                citationCount:
+                    format: int64
+                    type: integer
+                identifiers:
+                    properties:
+                        arxiv:
+                            type: string
+                        doi:
+                            type: string
+                    type: object
+                title:
+                    type: string
+                venue:
+                    type: string
+                year:
+                    type: integer
+            required:
+                - title
+                - authors
+                - venue
+                - year
+                - identifiers
+            type: object
+        PaperLibraryNote:
+            properties:
+                content:
+                    type: string
+                createdAt:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                kind:
+                    type: string
+                paperId:
+                    type: string
+                title:
+                    type: string
+                updatedAt:
+                    format: date-time
+                    type: string
+            required:
+                - id
+                - paperId
+                - title
+                - content
+                - kind
+                - createdAt
+                - updatedAt
+            type: object
+        PaperLibraryPaper:
+            properties:
+                academicWorkId:
+                    type: string
+                arxivVersion:
+                    type: string
+                associationConflict:
+                    type: string
+                attachmentIds:
+                    items:
+                        type: string
+                    type: array
+                folderId:
+                    nullable: true
+                    type: string
+                id:
+                    type: string
+                importMethod:
+                    type: string
+                important:
+                    type: boolean
+                incomplete:
+                    type: boolean
+                metadata:
+                    $ref: '#/components/schemas/PaperLibraryMetadata'
+                noteIds:
+                    items:
+                        type: string
+                    type: array
+                parse:
+                    enum:
+                        - ready
+                        - parsing
+                        - failed
+                    type: string
+                processingError:
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+                source:
+                    type: string
+                sourceUrl:
+                    type: string
+                status:
+                    enum:
+                        - unread
+                        - reading
+                        - read
+                    type: string
+                tags:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - id
+                - revision
+                - metadata
+                - folderId
+                - status
+                - tags
+                - important
+                - source
+                - parse
+                - attachmentIds
+                - noteIds
             type: object
         PaperLibraryResponse:
             properties:
@@ -8473,29 +8673,30 @@ components:
                 can_write:
                     type: boolean
                 data:
-                    properties: {}
-                    type: object
+                    $ref: '#/components/schemas/PaperLibraryData'
                 paper_count:
                     format: int64
                     type: integer
-                paper_importance:
-                    additionalProperties:
-                        type: boolean
-                    type: object
                 pdf_attachment_count:
-                    format: int64
-                    type: integer
-                revision:
                     format: int64
                     type: integer
             required:
                 - data
-                - revision
                 - can_write
                 - paper_count
                 - pdf_attachment_count
-                - paper_importance
                 - active
+            type: object
+        PaperLibraryTarget:
+            properties:
+                id:
+                    type: string
+                revision:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - revision
             type: object
         PaperUploadContext:
             properties:
@@ -8504,6 +8705,8 @@ components:
                 library_paper_id:
                     type: string
                 paper: {}
+                source_version:
+                    type: string
                 title:
                     type: string
             required:
@@ -16566,8 +16769,8 @@ paths:
                                             type: object
                                         type: array
                                 type: object
-                    description: Read saved rounds, cumulative papers, content states and Chat availability
-            summary: Read saved rounds, cumulative papers, content states and Chat availability
+                    description: Read saved rounds, current papers, content states and Chat availability
+            summary: Read saved rounds, current papers, content states and Chat availability
             tags:
                 - AcademicWorkflows
     /api/core/academic/expansions/{expansion_id}/papers:resolve:
@@ -16602,88 +16805,26 @@ paths:
             summary: Resolve registered expansion papers and version-scoped content metadata without full bodies
             tags:
                 - AcademicWorkflows
-    /api/core/academic/import-batches:
-        get:
-            parameters:
-                - in: query
-                  name: target_dataset_id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: cursor
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: limit
-                  required: false
-                  schema:
-                    type: integer
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    items:
-                                        items:
-                                            $ref: '#/components/schemas/AcademicImportOperation'
-                                        type: array
-                                    next_cursor:
-                                        type: string
-                                    notification:
-                                        properties:
-                                            active:
-                                                type: integer
-                                            needs_action:
-                                                type: integer
-                                        type: object
-                                type: object
-                    description: List owned paper import operations with complete summaries and notification totals
-            summary: List owned paper import operations with complete summaries and notification totals
-            tags:
-                - AcademicWorkflows
-    /api/core/academic/import-batches/{batch_id}:
-        get:
-            parameters:
-                - in: path
-                  name: batch_id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: cursor
-                  required: false
-                  schema:
-                    type: string
-                - in: query
-                  name: limit
-                  required: false
-                  schema:
-                    type: integer
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    items:
-                                        items:
-                                            $ref: '#/components/schemas/AcademicImportOperationItem'
-                                        type: array
-                                    next_cursor:
-                                        type: string
-                                    operation:
-                                        $ref: '#/components/schemas/AcademicImportOperation'
-                                type: object
-                    description: Read a complete operation summary and a page of its papers
-            summary: Read a complete operation summary and a page of its papers
-            tags:
-                - AcademicWorkflows
     /api/core/academic/imports:
         get:
             parameters:
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - operations
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    type: integer
                 - in: query
                   name: target_dataset_id
                   required: false
@@ -16744,8 +16885,23 @@ paths:
                                       required:
                                         - items
                                       type: object
-                    description: Read source-scoped Chat/Work imports or current-collection import history
-            summary: Read source-scoped Chat/Work imports or current-collection import history
+                                    - properties:
+                                        items:
+                                            items:
+                                                $ref: '#/components/schemas/AcademicImportOperation'
+                                            type: array
+                                        next_cursor:
+                                            type: string
+                                        notification:
+                                            properties:
+                                                active:
+                                                    type: integer
+                                                needs_action:
+                                                    type: integer
+                                            type: object
+                                      type: object
+                    description: Read source-scoped imports or a page of import operations
+            summary: Read source-scoped imports or a page of import operations
             tags:
                 - AcademicWorkflows
         post:
@@ -16760,14 +16916,16 @@ paths:
                     content:
                         application/json:
                             schema:
-                                properties:
-                                    batch_id:
-                                        type: string
-                                    status:
-                                        type: string
-                                type: object
-                    description: Queue version-aware paper link or reference imports
-            summary: Queue version-aware paper link or reference imports
+                                oneOf:
+                                    - $ref: '#/components/schemas/PaperLibraryChanges'
+                                    - properties:
+                                        batch_id:
+                                            type: string
+                                        status:
+                                            type: string
+                                      type: object
+                    description: Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+            summary: Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
             tags:
                 - AcademicWorkflows
     /api/core/academic/imports/{batch_id}:
@@ -16778,10 +16936,53 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - operations
+                    type: string
+                - in: query
+                  name: cursor
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: limit
+                  required: false
+                  schema:
+                    type: integer
             responses:
                 "200":
-                    description: OK
-            summary: GET /academic/imports/{batch_id}
+                    content:
+                        application/json:
+                            schema:
+                                oneOf:
+                                    - properties:
+                                        batch:
+                                            properties: {}
+                                            type: object
+                                        items:
+                                            items:
+                                                properties: {}
+                                                type: object
+                                            type: array
+                                      type: object
+                                    - properties:
+                                        items:
+                                            items:
+                                                $ref: '#/components/schemas/AcademicImportOperationItem'
+                                            type: array
+                                        next_cursor:
+                                            type: string
+                                        operation:
+                                            $ref: '#/components/schemas/AcademicImportOperation'
+                                      type: object
+                    description: Read a batch or its complete operation summary and a page of items
+            summary: Read a batch or its complete operation summary and a page of items
+            tags:
+                - AcademicWorkflows
     /api/core/academic/imports/{batch_id}:cancel:
         post:
             parameters:
@@ -16817,6 +17018,10 @@ paths:
                                     type: string
                                 identifier:
                                     type: string
+                                papers:
+                                    items:
+                                        $ref: '#/components/schemas/PaperLibraryPaper'
+                                    type: array
                                 reference_ids:
                                     items:
                                         type: string
@@ -16866,11 +17071,12 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/PaperLibraryResponse'
-                    description: Read the resolved paper library and current user importance
-            summary: Read the resolved paper library and current user importance
+                    description: Read paper entries, logical folders and active materials
+            summary: Read paper entries, logical folders and active materials
             tags:
                 - AcademicWorkflows
-        put:
+    /api/core/academic/library/folders:
+        post:
             parameters:
                 - in: query
                   name: target_dataset_id
@@ -16882,18 +17088,87 @@ paths:
                     application/json:
                         schema:
                             properties:
-                                attachment_context:
-                                    $ref: '#/components/schemas/PaperLibraryAttachmentContext'
-                                data:
-                                    properties: {}
-                                    type: object
-                                import_context:
-                                    $ref: '#/components/schemas/PaperLibraryImportContext'
+                                id:
+                                    type: string
+                                name:
+                                    type: string
+                                parent_id:
+                                    type: string
+                            required:
+                                - id
+                                - name
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Create a logical paper-library folder
+            summary: Create a logical paper-library folder
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/folders/{folder_id}:
+        patch:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: folder_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                name:
+                                    type: string
                                 revision:
                                     format: int64
                                     type: integer
                             required:
-                                - data
+                                - revision
+                                - name
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Rename a logical folder with revision validation
+            summary: Rename a logical folder with revision validation
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/folders/{folder_id}:delete:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: folder_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                revision:
+                                    format: int64
+                                    type: integer
+                            required:
                                 - revision
                             type: object
                 required: true
@@ -16902,13 +17177,13 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/PaperLibraryResponse'
-                    description: Atomically save a versioned paper library and confirmed attachment association
-            summary: Atomically save a versioned paper library and confirmed attachment association
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Delete a folder subtree and move its papers into the parent folder
+            summary: Delete a folder subtree and move its papers into the parent folder
             tags:
                 - AcademicWorkflows
-    /api/core/academic/library/papers/{library_paper_id}/importance:
-        put:
+    /api/core/academic/library/papers/{library_paper_id}:
+        patch:
             parameters:
                 - in: query
                   name: target_dataset_id
@@ -16925,14 +17200,23 @@ paths:
                     application/json:
                         schema:
                             properties:
-                                is_important:
-                                    type: boolean
+                                metadata:
+                                    $ref: '#/components/schemas/PaperLibraryMetadata'
                                 revision:
                                     format: int64
                                     type: integer
+                                status:
+                                    enum:
+                                        - unread
+                                        - reading
+                                        - read
+                                    type: string
+                                tags:
+                                    items:
+                                        type: string
+                                    type: array
                             required:
                                 - revision
-                                - is_important
                             type: object
                 required: true
             responses:
@@ -16940,9 +17224,151 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/PaperLibraryResponse'
-                    description: Set personal importance on a library paper, including metadata-only papers
-            summary: Set personal importance on a library paper, including metadata-only papers
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Update one paper with its revision and validate every active attachment
+            summary: Update one paper with its revision and validate every active attachment
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/papers/{library_paper_id}/attachments/{attachment_id}:detach:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: library_paper_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attachment_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                revision:
+                                    format: int64
+                                    type: integer
+                            required:
+                                - revision
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Detach a material without deleting its original or scholarly file facts
+            summary: Detach a material without deleting its original or scholarly file facts
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/papers/{library_paper_id}/notes:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: library_paper_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                content:
+                                    type: string
+                                id:
+                                    type: string
+                            required:
+                                - id
+                                - content
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Add a note idempotently by stable note ID
+            summary: Add a note idempotently by stable note ID
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/papers:move:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                folder_id:
+                                    type: string
+                                items:
+                                    items:
+                                        $ref: '#/components/schemas/PaperLibraryTarget'
+                                    type: array
+                            required:
+                                - items
+                                - folder_id
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Atomically move selected paper entries without moving files
+            summary: Atomically move selected paper entries without moving files
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/library/papers:remove:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                items:
+                                    items:
+                                        $ref: '#/components/schemas/PaperLibraryTarget'
+                                    type: array
+                            required:
+                                - items
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PaperLibraryChanges'
+                    description: Atomically remove selected entries while retaining materials and history
+            summary: Atomically remove selected entries while retaining materials and history
             tags:
                 - AcademicWorkflows
     /api/core/academic/mock-handoffs/{handoff_id}:submit:
@@ -17089,9 +17515,12 @@ paths:
                     application/json:
                         schema:
                             properties:
+                                dataset_id:
+                                    type: string
                                 is_important:
                                     type: boolean
                             required:
+                                - dataset_id
                                 - is_important
                             type: object
                 required: true

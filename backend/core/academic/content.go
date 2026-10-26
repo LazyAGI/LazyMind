@@ -23,12 +23,14 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 )
 
 var errFulltextUnavailable = errors.New("full text is unavailable: no registered PDF candidate")
 
 type PaperRef struct {
+	CitationCount    *int64   `json:"citation_count,omitempty"`
 	SourceDocumentID string   `json:"document_id,omitempty"`
 	SourceVersion    string   `json:"source_version,omitempty"`
 	SourceProvider   string   `json:"source_provider,omitempty"`
@@ -451,6 +453,9 @@ func RetryPaperContent(w http.ResponseWriter, r *http.Request) {
 func documentPaperRef(paper PaperRef, metadata json.RawMessage) PaperRef {
 	var value WorkInput
 	if json.Unmarshal(metadata, &value) != nil {
+		if value.CitationCount != nil {
+			paper.CitationCount = value.CitationCount
+		}
 		return paper
 	}
 	var fields map[string]json.RawMessage
@@ -476,6 +481,18 @@ func documentPaperRef(paper PaperRef, metadata json.RawMessage) PaperRef {
 // Document metadata stays scoped to this knowledge base; manual corrections win.
 func datasetPaperRef(db *gorm.DB, dataset string, work orm.AcademicWork) (PaperRef, error) {
 	paper := paperRef(work)
+	var entry orm.PaperLibraryEntry
+	if e := db.Where("dataset_id=? AND academic_work_id=? AND removed_at IS NULL", dataset, work.ID).Take(&entry).Error; e == nil {
+		m, e := paperlibrary.EffectiveMetadata(entry, work)
+		if e != nil {
+			return paper, e
+		}
+		paper.Title, paper.Authors, paper.Year, paper.Venue, paper.Abstract, paper.CitationCount = m.Title, m.Authors, m.Year, m.Venue, &m.Abstract, m.CitationCount
+		return paper, nil
+	} else if !errors.Is(e, gorm.ErrRecordNotFound) {
+		return paper, e
+	}
+
 	var state orm.AcademicDocumentState
 	documents := db.Model(&orm.Document{}).Select("id").Where("dataset_id=? AND deleted_at IS NULL", dataset)
 	err := db.Where("dataset_id=? AND paper_id=? AND document_id IN (?)", dataset, work.ID, documents).Order("manual DESC, updated_at DESC").Take(&state).Error

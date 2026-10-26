@@ -48,7 +48,7 @@ func SubmitMockHandoff(w http.ResponseWriter, r *http.Request) {
 			output = handoff.MockResultJSON
 			return nil
 		}
-		papers, err := handoffPapers(handoff.InputJSON)
+		papers, err := handoffPapers(handoff)
 		if err != nil {
 			return err
 		}

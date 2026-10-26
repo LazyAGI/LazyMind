@@ -12,8 +12,6 @@ import './index.scss';
 
 interface Props {
     dataset: string;
-    mode: PaperTask | undefined;
-    setMode: (mode: PaperTask | undefined) => void;
     selected: string[];
     selectedTitles?: string[];
     canImport: boolean;
@@ -55,7 +53,7 @@ function currentPaperDocument(detail: ExpansionDetail, item: WorkflowPaper, prev
 }
 const stages = ['direction_research', 'seed_set', 'expanded_papers', 'paper_relations', 'expansion_result'];
 
-export default function PaperTasks({ dataset, mode, setMode, selected, selectedTitles = [], selectionError, canImport, onImportSubmitted, actionsContainer }: Props) {
+export default function PaperTasks({ dataset, selected, selectedTitles = [], selectionError, canImport, onImportSubmitted, actionsContainer }: Props) {
     const { t } = useTranslation();
     const navigate = useNavigate();
     const [params, setParams] = useSearchParams();
@@ -87,7 +85,6 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selectedT
     const selectedPaperTaskError = selectionError || (!selected.length ? t('paperTasks.selectPaperFirst') : '');
     const openLaunch = useCallback((kind: PaperTask, direction: boolean) => {
         if (!direction) {
-            setMode(undefined);
             if (selectedPaperTaskError) { message.warning(selectedPaperTaskError); return; }
         }
         setInstruction('');
@@ -95,10 +92,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selectedT
         setLaunch({ kind, direction });
         requestKey.current = crypto.randomUUID();
         requestInput.current = '';
-    }, [selectedPaperTaskError, setMode]);
-    useEffect(() => {
-        if (mode) openLaunch(mode, false);
-    }, [mode, openLaunch]);
+    }, [selectedPaperTaskError]);
     const refreshHistory = async () => setRecords(await listExpansions(dataset));
     const openHistory = () => {
         setHistory(true);
@@ -208,7 +202,6 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selectedT
             requestInput.current = fingerprint;
             const result = await launchPaperTask({ ...body, request_key: requestKey.current });
             setLaunch(undefined);
-            setMode(undefined);
             goChat(result.conversation_id, launch.kind === 'review');
         } catch {
             // The request client displays the server error; keep the form for retry.
@@ -370,7 +363,7 @@ export default function PaperTasks({ dataset, mode, setMode, selected, selectedT
     const confirmationPapers = confirmation ? distinctPapers(confirmation.source.record.result.papers || []).filter(item => confirmation.selected.includes(item.paper.paper_id)) : [];
     const confirmationImportable = confirmation ? confirmationPapers.filter(item => !importReason(confirmation.source, item)) : [];
     const sourceLabel = (item: WorkflowPaper) => t(item.is_seed ? 'paperTasks.seed' : 'paperTasks.expanded');
-    const activeTask = launch?.kind || mode;
+    const activeTask = launch?.kind;
     const actions = <div className="paper-library-task-actions" role="group" aria-label="论文工具">
             <Dropdown trigger={['click']} placement="topLeft" menu={{ items: [
                 { key: 'direction', label: t('paperTasks.expandDirection'), onClick: () => openLaunch('expansion', true) },

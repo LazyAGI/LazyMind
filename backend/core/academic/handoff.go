@@ -34,78 +34,38 @@ type handoffContentSnapshot struct {
 var paperTaskNames = map[string]string{"expansion": "论文扩展", "review": "论文综述", "reflection": "阅读心得", "ppt": "汇报 PPT"}
 
 func paperTaskNotes(ctx context.Context, db *gorm.DB, dataset string, papers []PaperRef) ([]PaperTaskNote, error) {
-	library, err := readPaperLibrary(ctx, db, dataset)
-	if err != nil {
-		return nil, err
-	}
-	var graph struct {
-		Papers      []importLibraryPaper `json:"papers"`
-		Attachments []struct {
-			PaperID    string `json:"paperId"`
-			ContentRef string `json:"contentRef"`
-		} `json:"attachments"`
-		Notes []struct {
-			ID      string `json:"id"`
-			PaperID string `json:"paperId"`
-			Title   string `json:"title"`
-			Content string `json:"content"`
-		} `json:"notes"`
-	}
-	if err = json.Unmarshal(library.Data, &graph); err != nil {
-		return nil, err
-	}
-	selected, documents, libraryIDs := map[string]bool{}, map[string]string{}, map[string]string{}
-	for _, paper := range papers {
-		selected[paper.PaperID] = true
-		if paper.SourceDocumentID != "" {
-			documents[paper.SourceDocumentID] = paper.PaperID
-		}
-	}
-	for _, paper := range graph.Papers {
-		if selected[paper.AcademicWorkID] {
-			libraryIDs[paper.ID] = paper.AcademicWorkID
-		}
-	}
-	for _, attachment := range graph.Attachments {
-		if id := documents[attachment.ContentRef]; id != "" {
-			libraryIDs[attachment.PaperID] = id
-		}
+	ids := []string{}
+	for _, p := range papers {
+		ids = append(ids, p.PaperID)
 	}
 	notes := []PaperTaskNote{}
-	for _, note := range graph.Notes {
-		if id := libraryIDs[note.PaperID]; id != "" {
-			notes = append(notes, PaperTaskNote{ID: note.ID, PaperID: id, Title: note.Title, Content: note.Content})
-		}
+	if len(ids) == 0 {
+		return notes, nil
 	}
-	return notes, nil
+	err := db.WithContext(ctx).Table("paper_library_notes n").Select("n.id,e.academic_work_id AS paper_id,n.title,n.content").Joins("JOIN paper_library_entries e ON e.id=n.paper_id AND e.dataset_id=n.dataset_id AND e.removed_at IS NULL").Where("e.dataset_id=? AND e.academic_work_id IN ?", dataset, ids).Order("n.created_at,n.id").Scan(&notes).Error
+	return notes, err
 }
-
-// Legacy handoffs wrapped every paper in WorkflowPaper. Keep them readable
-// while new reading-note/PPT handoffs use the agreed list[PaperRef] contract.
-func handoffPapers(input json.RawMessage) ([]PaperRef, error) {
-	var value struct {
-		Papers []json.RawMessage `json:"papers"`
-	}
-	if err := json.Unmarshal(input, &value); err != nil {
-		return nil, err
-	}
-	papers := make([]PaperRef, 0, len(value.Papers))
-	for _, raw := range value.Papers {
-		var paper PaperRef
-		if err := json.Unmarshal(raw, &paper); err != nil {
+func handoffPapers(handoff orm.AcademicHandoff) ([]PaperRef, error) {
+	papers := []PaperRef{}
+	if handoff.Kind == "review" {
+		var input ReviewWorkflowInput
+		if err := json.Unmarshal(handoff.InputJSON, &input); err != nil {
 			return nil, err
 		}
-		if paper.PaperID == "" {
-			var legacy WorkflowPaper
-			if err := json.Unmarshal(raw, &legacy); err != nil {
-				return nil, err
-			}
-			paper = legacy.Paper
+		for _, p := range input.Papers {
+			papers = append(papers, p.Paper)
 		}
-		if paper.PaperID == "" {
+	} else {
+		var input PaperTaskInput
+		if err := json.Unmarshal(handoff.InputJSON, &input); err != nil {
+			return nil, err
+		}
+		papers = input.Papers
+	}
+	for _, p := range papers {
+		if p.PaperID == "" {
 			return nil, errors.New("handoff paper identity is missing")
 		}
-		papers = append(papers, paper)
 	}
 	return papers, nil
 }
@@ -127,10 +87,7 @@ func ownedHandoff(w http.ResponseWriter, r *http.Request, user, id string) (orm.
 func handoffSource(db *gorm.DB, handoff orm.AcademicHandoff, paperID string) (paperSource, []orm.AcademicPaperContent, error) {
 	var snapshot handoffContentSnapshot
 	if err := json.Unmarshal(handoff.ContentsJSON, &snapshot); err != nil {
-		// Previous releases stored only a content-metadata array.
-		if err = json.Unmarshal(handoff.ContentsJSON, &snapshot.Contents); err != nil {
-			return paperSource{}, nil, err
-		}
+		return paperSource{}, nil, err
 	}
 	for _, source := range snapshot.Sources {
 		if source.Paper.PaperID == paperID {
@@ -142,25 +99,5 @@ func handoffSource(db *gorm.DB, handoff orm.AcademicHandoff, paperID string) (pa
 			return source, snapshot.Contents, nil
 		}
 	}
-	if len(snapshot.Sources) > 0 {
-		return paperSource{}, nil, errors.New("paper is not in this handoff")
-	}
-	papers, err := handoffPapers(handoff.InputJSON)
-	if err != nil {
-		return paperSource{}, nil, err
-	}
-	for _, paper := range papers {
-		if paper.PaperID != paperID {
-			continue
-		}
-		if paper.SourceDocumentID != "" {
-			sources, err := seedSources(db, handoff.DatasetID, []WorkflowPaper{{Paper: paper, IsSeed: true}})
-			if err != nil {
-				return paperSource{}, nil, err
-			}
-			return sources[0], snapshot.Contents, nil
-		}
-		return paperSource{Paper: paper, DatasetID: handoff.DatasetID}, snapshot.Contents, nil
-	}
-	return paperSource{}, nil, errors.New("paper is not in this handoff")
+	return paperSource{}, nil, errors.New("paper has no frozen source in this handoff")
 }

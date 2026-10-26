@@ -198,24 +198,7 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if record.DiscoveryMode != "external" {
-			var input ReviewWorkflowInput
-			if err := json.Unmarshal(record.ResultJSON, &input); err != nil {
-				return err
-			}
-			seeds := []WorkflowPaper{}
-			for _, paper := range input.Papers {
-				if paper.IsSeed {
-					seeds = append(seeds, paper)
-				}
-			}
-			snapshot, err := seedSources(tx, record.DatasetID, seeds)
-			if err != nil {
-				return err
-			}
-			record.SeedSnapshotJSON = marshal(snapshot)
-			if err := tx.Model(&record).Updates(map[string]any{"seed_snapshot_json": record.SeedSnapshotJSON, "discovery_mode": "external"}).Error; err != nil {
-				return err
-			}
+			return errors.New("unsupported expansion discovery mode")
 		}
 		var searches []paperDiscovery
 		if err := json.Unmarshal(record.DiscoveryJSON, &searches); err != nil {

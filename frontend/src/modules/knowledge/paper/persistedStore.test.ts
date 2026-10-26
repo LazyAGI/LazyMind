@@ -1,88 +1,14 @@
-import { libraryFixture } from "./__tests__/fixtures";
-import { webcrypto } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { emptyLibraryV3, type PaperLibraryDataV3 } from './libraryModel';
-import { loadPersistedPaperLibrary, savePersistedPaperLibrary } from './store';
-
-const api = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }));
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { libraryFixture, paperFixture } from './__tests__/fixtures';
+import { emptyLibrary } from './libraryModel';
+import { loadPersistedPaperLibrary, patchLibraryPaper, mergeLibraryChanges, confirmLibraryPdf, importLibraryPapers } from './store';
+const api = vi.hoisted(() => ({ get: vi.fn(), request: vi.fn() }));
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: api }));
-
-let server: { data: PaperLibraryDataV3; revision: number; can_write: boolean };
-const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
-beforeEach(() => {
-  vi.stubGlobal('crypto', webcrypto);
-  localStorage.clear();
-  server = { data: emptyLibraryV3(), revision: 0, can_write: true };
-  api.get.mockReset().mockImplementation(async () => ({ data: clone(server) }));
-  api.put.mockReset().mockImplementation(async (_url, body) => {
-    if (body.revision !== server.revision) throw { response: { status: 409, data: { message: '文献库已被其他用户更新，请刷新后重试' } } };
-    server = { data: clone(body.data), revision: server.revision + 1, can_write: true };
-    return { data: clone(server) };
-  });
-});
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
-
-describe('server-owned paper library', () => {
-  it('retains the complete graph after browser storage is cleared', async () => {
-    const data = libraryFixture();
-    data.notes.push({ id: 'n', paperId: data.papers[0].id, title: 'Note', content: 'Durable research', kind: 'note', createdAt: '2026-10-21', updatedAt: '2026-10-21' });
-    data.papers[0].noteIds = ['n'];
-    data.papers[0].tags = ['server-tag'];
-    data.papers[0].important = true;
-    data.papers[0].status = 'read';
-    const firstClient = await loadPersistedPaperLibrary('shared');
-    await savePersistedPaperLibrary('shared', data, firstClient.revision);
-    localStorage.clear();
-    const secondClient = await loadPersistedPaperLibrary('shared');
-    expect(secondClient.data).toEqual(data);
-    expect(secondClient.revision).toBe(1);
-    expect(localStorage.length).toBe(0);
-  });
-
-  it('rejects stale clients without overwriting a newer edit', async () => {
-    const clientA = await loadPersistedPaperLibrary('shared');
-    const clientB = await loadPersistedPaperLibrary('shared');
-    const saved = { ...clientA.data, folders: [{ id: 'a', name: 'Client A' }] };
-    await savePersistedPaperLibrary('shared', saved, clientA.revision);
-    await expect(savePersistedPaperLibrary('shared', { ...clientB.data, folders: [{ id: 'b', name: 'Client B' }] }, clientB.revision)).rejects.toThrow('其他用户');
-    expect((await loadPersistedPaperLibrary('shared')).data).toEqual(saved);
-  });
-
-  it('does not substitute a local save when the backend rejects the write', async () => {
-    api.put.mockRejectedValue({ response: { status: 500, data: { message: '数据库写入失败' } } });
-    await expect(savePersistedPaperLibrary('shared', libraryFixture(), 0)).rejects.toThrow('数据库写入失败');
-    expect(localStorage.length).toBe(0);
-    expect(server.data.papers).toEqual([]);
-  });
-
-  it('does not use the old browser copy when the server read fails', async () => {
-    localStorage.setItem('lazymind.paper-library.data.v3.shared', JSON.stringify(libraryFixture()));
-    api.get.mockRejectedValue({ response: { status: 503, data: { message: '数据库不可用' } } });
-    await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('数据库不可用');
-    expect(api.put).not.toHaveBeenCalled();
-  });
-
-  it('works with browser storage unavailable when no legacy copy can be read', async () => {
-    vi.spyOn(localStorage, 'getItem').mockImplementation(() => { throw new Error('Blocked'); });
-    expect((await loadPersistedPaperLibrary('shared')).revision).toBe(0);
-    await savePersistedPaperLibrary('shared', libraryFixture(), 0);
-    expect(server.data.papers.length).toBeGreaterThan(0);
-  });
-
-  it('reads only the server when a browser preview exists', async () => {
-    localStorage.setItem('lazymind.paper-library.data.v3.shared', JSON.stringify(libraryFixture()));
-    expect((await loadPersistedPaperLibrary('shared')).data).toEqual(emptyLibraryV3());
-    expect(api.put).not.toHaveBeenCalled();
-  });
-
-  it('reports corrupt server data instead of treating it as an empty library', async () => {
-    api.get.mockResolvedValue({ data: { data: { schemaVersion: 3 }, revision: 1, can_write: true } });
-    await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('格式');
-  });
-
-  it('exposes read-only permission and never writes an empty library on read', async () => {
-    server.can_write = false;
-    expect((await loadPersistedPaperLibrary('shared')).canWrite).toBe(false);
-    expect(api.put).not.toHaveBeenCalled();
-  });
+beforeEach(() => { vi.resetAllMocks(); localStorage.clear(); api.request.mockResolvedValue({ data: { data: emptyLibrary() } }); });
+describe('entity-based paper storage', () => {
+    it('loads authoritative metadata and read permission', async () => { const data = libraryFixture(); api.get.mockResolvedValue({ data: { data, can_write: false, paper_count: 1, pdf_attachment_count: 0, active: false } }); expect(await loadPersistedPaperLibrary('shared')).toMatchObject({ data, canWrite: false }); expect(api.request).not.toHaveBeenCalled(); });
+    it('patches only one revision and preserves server conflicts', async () => { const paper = paperFixture(); await patchLibraryPaper('shared', paper, { status: 'read' }); expect(api.request.mock.calls[0][0]).toMatchObject({ method: 'patch', url: '/api/core/academic/library/papers/paper', data: { revision: 1, status: 'read' } }); const error = new Error('conflict'); api.request.mockRejectedValue(error); await expect(patchLibraryPaper('shared', paper, { status: 'read' })).rejects.toBe(error); expect(localStorage.length).toBe(0); });
+    it('merges an updated entry in place without losing other entries', () => { const data = libraryFixture({ papers: [paperFixture({ id: 'a' }), paperFixture({ id: 'b' })] }); const fresh = { ...emptyLibrary(), papers: [{ ...data.papers[0], status: 'read' as const, revision: 2 }] }; const result = mergeLibraryChanges(data, { data: fresh }); expect(result.papers.map(p => p.id)).toEqual(['a', 'b']); expect(result.papers[0].revision).toBe(2); expect(result.papers[1]).toEqual(data.papers[1]); });
+    it('uses the same import endpoint and key for PDF confirmation and bibliography', async () => { const paper = paperFixture(); await confirmLibraryPdf('shared', paper, 'doc', 'upload-key'); expect(api.request.mock.calls[0][0]).toMatchObject({ url: '/api/core/academic/imports', data: { entry_type: 'pdf_upload', idempotency_key: 'upload-key', items: [{ document_id: 'doc', revision: 1, confirmed: true }] } }); await importLibraryPapers('shared', [paper], [], 'bib-key', 'bib'); expect(api.request.mock.calls[1][0]).toMatchObject({ url: '/api/core/academic/imports', data: { entry_type: 'bibliography', idempotency_key: 'bib-key' } }); });
+    it('rejects corrupt server data and propagates read failures', async () => { api.get.mockResolvedValue({ data: { can_write: true, data: { papers: [] } } }); await expect(loadPersistedPaperLibrary('shared')).rejects.toThrow('格式'); const error = new Error('database unavailable'); api.get.mockRejectedValue(error); await expect(loadPersistedPaperLibrary('shared')).rejects.toBe(error); });
 });

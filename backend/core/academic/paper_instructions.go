@@ -1,12 +1,7 @@
 package academic
 
 import (
-	"encoding/json"
-	"errors"
 	"strings"
-
-	"gorm.io/gorm"
-	"lazymind/core/common/orm"
 )
 
 // User messages already contain the submitted AskCard's readable answers. Keep
@@ -32,29 +27,4 @@ func paperUserInstruction(original string, updates []string) string {
 		parts = append(parts, text)
 	}
 	return strings.Join(parts, "\n\n")
-}
-
-// Older results embedded raw AskCard JSON. Rebuild from that round's frozen
-// user inputs, never from later messages in the current expansion Chat.
-func restorePaperRoundInstruction(db *gorm.DB, record orm.AcademicExpansion, version int64, input *ReviewWorkflowInput) error {
-	var round orm.AcademicExpansionRound
-	if err := db.Where("expansion_id=? AND version=? AND status='completed'", record.ID, version).Take(&round).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		return err
-	}
-	var frozen struct {
-		UserUpdates []string `json:"user_updates"`
-	}
-	if len(round.InputJSON) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(round.InputJSON, &frozen); err != nil {
-		return err
-	}
-	if frozen.UserUpdates != nil {
-		input.UserInstruction = paperUserInstruction(record.Title, frozen.UserUpdates)
-	}
-	return nil
 }

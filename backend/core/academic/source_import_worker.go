@@ -43,6 +43,32 @@ func sourceItemUpdate(ctx context.Context, job asyncjob.Job, b orm.PaperImportBa
 		return tx.Model(&orm.PaperImportItem{}).Where("id = ? AND batch_id = ?", itemID, b.ID).Updates(updates).Error
 	})
 }
+func completePresentImport(ctx context.Context, job asyncjob.Job, b orm.PaperImportBatch, item orm.PaperImportItem, workID, documentID string) error {
+	return store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if e := sourceJobFence(tx, job, b.ID); e != nil {
+			return e
+		}
+		var d orm.Document
+		var work orm.AcademicWork
+		if e := tx.Where("id=? AND dataset_id=? AND deleted_at IS NULL", documentID, b.TargetDatasetID).Take(&d).Error; e != nil {
+			return e
+		}
+		if e := tx.Where("id=?", workID).Take(&work).Error; e != nil {
+			return e
+		}
+		var policy struct {
+			FolderID string `json:"folder_id"`
+		}
+		if e := json.Unmarshal(b.PolicySnapshotJSON, &policy); e != nil {
+			return e
+		}
+		id, e := registerRecognizedLibraryDocument(ctx, tx, d, work, true, policy.FolderID, item.ID, "")
+		if e != nil {
+			return e
+		}
+		return tx.Model(&orm.PaperImportItem{}).Where("id=? AND batch_id=?", item.ID, b.ID).Updates(map[string]any{"academic_work_id": workID, "document_id": documentID, "library_paper_id": id, "status": presentImportStatus(b), "stage": "done", "error_code": "already_present", "updated_at": time.Now().UTC()}).Error
+	})
+}
 func activeSourceDocuments(tx *gorm.DB, dataset string) *gorm.DB {
 	return tx.Table("documents d").Where("d.dataset_id = ? AND d.deleted_at IS NULL", dataset)
 }
@@ -249,7 +275,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		}
 		if err == nil {
 			associateReferencesWithWork(ctx, item.ReferenceIDsJSON, presentWork.ID, "presence")
-			return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"academic_work_id": presentWork.ID, "document_id": presentDocument.DocumentID, "status": presentImportStatus(b), "stage": "done", "error_code": "already_present"})
+			return completePresentImport(ctx, job, b, item, presentWork.ID, presentDocument.DocumentID)
 		}
 	}
 	var bound doc.OriginalImportResult
@@ -264,7 +290,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 	} else {
 		existing, e := sourcePresentDocument(store.DB().WithContext(ctx), b.TargetDatasetID, item.AcademicWorkID, "", selected.Version)
 		if e == nil {
-			return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": presentImportStatus(b), "stage": "done", "document_id": existing.ID, "error_code": "already_present"})
+			return completePresentImport(ctx, job, b, item, item.AcademicWorkID, existing.ID)
 		}
 		if !errors.Is(e, gorm.ErrRecordNotFound) {
 			return e
@@ -378,7 +404,17 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 					return e
 				}
 			}
-			updates := map[string]any{"document_id": bound.Document.ID, "document_task_id": bound.Task.ID, "content_sha256": original.ContentSHA256, "stage": "processing", "updated_at": now}
+			var policy struct {
+				FolderID string `json:"folder_id"`
+			}
+			if e = json.Unmarshal(b.PolicySnapshotJSON, &policy); e != nil {
+				return e
+			}
+			libraryID, e := registerRecognizedLibraryDocument(ctx, tx, bound.Document, work, true, policy.FolderID, item.ID, "")
+			if e != nil {
+				return e
+			}
+			updates := map[string]any{"document_id": bound.Document.ID, "document_task_id": bound.Task.ID, "content_sha256": original.ContentSHA256, "stage": "processing", "updated_at": now, "library_paper_id": libraryID}
 			if bound.Skipped {
 				updates["error_code"] = "already_present"
 				updates["status"] = presentImportStatus(b)

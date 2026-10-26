@@ -3,6 +3,7 @@ package academic
 import "time"
 
 type WorkInput struct {
+	CitationCount   *int64         `json:"citation_count,omitempty"`
 	TrustedFulltext bool           `json:"-"`
 	WorkID          string         `json:"work_id,omitempty"`
 	Title           string         `json:"title,omitempty"`
@@ -47,15 +48,16 @@ type PresenceResult struct {
 }
 
 type PreviewItem struct {
-	Paper        PaperRef            `json:"paper"`
-	WorkID       string              `json:"work_id"`
-	ReferenceIDs []string            `json:"reference_ids,omitempty"`
-	Title        string              `json:"title"`
-	DOI          string              `json:"doi,omitempty"`
-	ArxivID      string              `json:"arxiv_id,omitempty"`
-	Presence     PresenceResult      `json:"presence"`
-	Candidates   []FulltextCandidate `json:"fulltext_candidates"`
-	Disposition  string              `json:"disposition"`
+	LibraryPaperID string              `json:"library_paper_id,omitempty"`
+	Paper          PaperRef            `json:"paper"`
+	WorkID         string              `json:"work_id"`
+	ReferenceIDs   []string            `json:"reference_ids,omitempty"`
+	Title          string              `json:"title"`
+	DOI            string              `json:"doi,omitempty"`
+	ArxivID        string              `json:"arxiv_id,omitempty"`
+	Presence       PresenceResult      `json:"presence"`
+	Candidates     []FulltextCandidate `json:"fulltext_candidates"`
+	Disposition    string              `json:"disposition"`
 }
 
 type ImportQueueItem struct {

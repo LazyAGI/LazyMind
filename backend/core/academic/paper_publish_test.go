@@ -21,7 +21,7 @@ func TestResolveExpansionPapersUsesOwnedPinnedSourcesAndPersonalState(t *testing
 	if err = db.Create(&record).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err = db.Create(&orm.AcademicUserPaperState{UserID: "u", PaperID: "a", IsImportant: true}).Error; err != nil {
+	if err = db.Create(&orm.AcademicUserPaperState{UserID: "u", DatasetID: "papers", PaperID: "a", IsImportant: true}).Error; err != nil {
 		t.Fatal(err)
 	}
 	resolve := func(body, user string) *httptest.ResponseRecorder {

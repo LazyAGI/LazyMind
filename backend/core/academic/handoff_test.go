@@ -12,14 +12,22 @@ import (
 
 func TestReadingHandoffIncludesOnlySelectedNotesAndFreezesInput(t *testing.T) {
 	db := paperFixture(t)
-	var graph map[string]any
-	if err := json.Unmarshal([]byte(paperLibraryFixture("Paper A")), &graph); err != nil {
-		t.Fatal(err)
-	}
-	graph["attachments"] = []any{map[string]any{"id": "pdf", "paperId": "paper", "contentRef": "a", "name": "a.pdf", "kind": "pdf", "source": "local", "addedAt": "2026-10-26"}}
-	graph["notes"] = append(graph["notes"].([]any), map[string]any{"id": "unselected-note", "paperId": "unselected", "title": "Other", "content": "Do not include", "kind": "note", "createdAt": "2026-10-26", "updatedAt": "2026-10-26"})
-	if err := db.Create(&orm.PaperLibrary{DatasetID: "papers", Revision: 1, DataJSON: marshal(graph)}).Error; err != nil {
-		t.Fatal(err)
+	for _, id := range []string{"a", "b"} {
+		var work orm.AcademicWork
+		if err := db.Where("id=?", id).Take(&work).Error; err != nil {
+			t.Fatal(err)
+		}
+		entry, err := importedLibraryEntry(t.Context(), db.DB, "papers", work, nil, "", "bibliography", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := "Durable note"
+		if id == "b" {
+			content = "Do not include"
+		}
+		if err = db.Create(&orm.PaperLibraryNote{DatasetID: "papers", ID: "note-" + id, PaperID: entry.ID, Title: "Note", Content: content, Kind: "note"}).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
 	body := `{"kind":"reflection","dataset_id":"papers","document_ids":["a"],"user_instruction":"关注方法贡献","request_key":"reading-notes"}`
 	w := httptest.NewRecorder()
@@ -55,8 +63,7 @@ func TestReadingHandoffIncludesOnlySelectedNotesAndFreezesInput(t *testing.T) {
 	if w.Code != 200 || taskContext.DatasetID != "papers" || string(taskContext.Input) != string(handoff.InputJSON) {
 		t.Fatal("Workflow context lost the original input", w.Code, w.Body.String())
 	}
-	graph["notes"].([]any)[0].(map[string]any)["content"] = "Edited after launch"
-	db.Model(&orm.PaperLibrary{}).Where("dataset_id=?", "papers").Update("data_json", marshal(graph))
+	db.Model(&orm.PaperLibraryNote{}).Where("dataset_id=? AND id=?", "papers", "note-a").Update("content", "Edited after launch")
 	w = httptest.NewRecorder()
 	LaunchPaperWorkflow(w, paperRequest(body))
 	if w.Code != 200 {

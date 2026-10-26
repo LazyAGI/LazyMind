@@ -36,7 +36,7 @@ func TestPaperUploadRecordsOriginalTaskAndReplaysWithoutAnotherDocument(t *testi
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatal(err)
 	}
-	req := CreateTaskRequest{PaperImport: &PaperUploadContext{IdempotencyKey: "upload-request", LibraryPaperID: "library-paper", Title: "Uploaded study"}, Items: []CreateTaskItem{{UploadFileID: source.UploadFileID}}}
+	req := CreateTaskRequest{PaperImport: &PaperUploadContext{IdempotencyKey: "upload-request", LibraryPaperID: "library-paper", Title: "Uploaded study", SourceVersion: "v2", Paper: mustJSON(map[string]any{"id": "library-paper", "metadata": map[string]any{"title": "Uploaded study", "authors": []string{}}, "tags": []string{}})}, Items: []CreateTaskItem{{UploadFileID: source.UploadFileID}}}
 	request := httptest.NewRequest("POST", "/", nil)
 	request.Header.Set("X-User-Id", "user-1")
 	request, batchID, replay, err := preparePaperUpload(request, &dataset, req)
@@ -55,6 +55,12 @@ func TestPaperUploadRecordsOriginalTaskAndReplaysWithoutAnotherDocument(t *testi
 	db.Where("batch_id=?", batchID).Take(&item)
 	if item.DocumentTaskID != tasks[0].ID || item.TitleSnapshot != "Uploaded study" || item.AcademicWorkID != "" {
 		t.Fatalf("bad receipt: %+v", item)
+	}
+	var candidate struct {
+		Version string `json:"version"`
+	}
+	if e := json.Unmarshal(item.SelectedCandidateJSON, &candidate); e != nil || candidate.Version != "v2" {
+		t.Fatal("upload recovery lost file version", candidate, e)
 	}
 	var count int64
 	db.Model(&orm.Document{}).Where("dataset_id=?", dataset.ID).Count(&count)

@@ -10,6 +10,14 @@ export interface AcademicReference {
   reference_key?: string;
   RawText?: string;
   raw_text?: string;
+  Title?: string;
+  title?: string;
+  AuthorsJSON?: string[];
+  authors_json?: string[];
+  PublicationYear?: number;
+  publication_year?: number;
+  SourceDocumentID?: string;
+  source_document_id?: string;
   DOINormalized?: string;
   doi_normalized?: string;
   ArxivIDBase?: string;
@@ -186,9 +194,9 @@ export async function previewPaperLink(identifier: string, targetDatasetId: stri
   if (!item) throw new Error('没有查询到有效文献');
   return item;
 }
-export async function importPaperLink(targetDatasetId: string, item: ImportPreviewItem, idempotencyKey: string) {
+export async function importPaperLink(targetDatasetId: string, item: ImportPreviewItem, idempotencyKey: string, folderId?: string | null) {
   const response = await axiosInstance.post(`${core}/imports`, {
-    entry_type: 'paper_link', target_dataset_id: targetDatasetId, idempotency_key: idempotencyKey, preview_token: item.preview_token,
+    entry_type: 'paper_link', target_dataset_id: targetDatasetId, idempotency_key: idempotencyKey, preview_token: item.preview_token, folder_id: folderId || '',
     items: [{ work_id: item.work_id, candidate: item.fulltext_candidates[0] }],
   });
   return unwrap<{ batch_id?: string; status?: string }>(response.data);
@@ -199,18 +207,11 @@ export async function retryAcademicImport(batchId: string) {
 }
 
 export interface PaperUploadContext {
+ source_version?: string;
   idempotency_key: string;
   library_paper_id: string;
   title: string;
-  paper?: import('../paper/model').PaperItem;
-}
-export interface LibraryImportContext {
-  idempotency_key: string;
-  entry_type: 'bibliography' | 'paper_link';
-  format?: 'bib' | 'ris' | 'csv';
-  file_name?: string;
-  preview_token?: string;
-  items: Array<{ paper_id: string }>;
+  paper: import('../paper/model').PaperRecord;
 }
 export interface ImportOperationItem extends AcademicImportQueueItem {
   library_paper_id?: string;
@@ -220,7 +221,7 @@ export interface ImportOperationItem extends AcademicImportQueueItem {
   resolved_later: boolean;
   can_retry: boolean;
   upload_request_key?: string;
-  pending_paper?: import('../paper/model').PaperItem;
+  pending_paper?: import('../paper/model').PaperRecord;
   content_sha256?: string;
 }
 export interface ImportOperation {
@@ -244,10 +245,10 @@ export interface ImportBatchDetail {
 }
 export const emptyImportBatchPage = (): ImportBatchPage => ({ items: [], next_cursor: '', notification: { active: 0, needs_action: 0 } });
 export async function listAcademicImportBatches(datasetId: string, cursor?: string): Promise<ImportBatchPage> {
-  const response = await axiosInstance.get(`${core}/import-batches`, { params: { target_dataset_id: datasetId, cursor }, silentError: true } as never);
+  const response = await axiosInstance.get(`${core}/imports`, { params: { target_dataset_id: datasetId, cursor, view: 'operations' }, silentError: true } as never);
   return unwrap<ImportBatchPage>(response.data);
 }
 export async function getAcademicImportBatch(batchId: string, cursor?: string): Promise<ImportBatchDetail> {
-  const response = await axiosInstance.get(`${core}/import-batches/${encodeURIComponent(batchId)}`, { params: { cursor }, silentError: true } as never);
+  const response = await axiosInstance.get(`${core}/imports/${encodeURIComponent(batchId)}`, { params: { cursor, view: 'operations' }, silentError: true } as never);
   return unwrap<ImportBatchDetail>(response.data);
 }

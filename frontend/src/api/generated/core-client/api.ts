@@ -165,8 +165,7 @@ export interface AcademicExpansion {
 }
 
 export const AcademicExpansionDiscoveryModeEnum = {
-    External: 'external',
-    LegacyMock: 'legacy_mock'
+    External: 'external'
 } as const;
 
 export type AcademicExpansionDiscoveryModeEnum = typeof AcademicExpansionDiscoveryModeEnum[keyof typeof AcademicExpansionDiscoveryModeEnum];
@@ -185,6 +184,10 @@ export interface AcademicImportCandidate {
 }
 export interface AcademicImportCreate {
     'entry_type'?: AcademicImportCreateEntryTypeEnum;
+    'file_name'?: string;
+    'folder_id'?: string;
+    'folders'?: Array<PaperLibraryFolder>;
+    'format'?: AcademicImportCreateFormatEnum;
     'idempotency_key'?: string;
     'items': Array<AcademicImportItem>;
     'preview_token'?: string;
@@ -197,14 +200,27 @@ export const AcademicImportCreateEntryTypeEnum = {
     SingleReference: 'single_reference',
     PaperReferences: 'paper_references',
     CollectionReferences: 'collection_references',
-    PaperLink: 'paper_link'
+    PaperLink: 'paper_link',
+    Bibliography: 'bibliography',
+    PdfUpload: 'pdf_upload'
 } as const;
 
 export type AcademicImportCreateEntryTypeEnum = typeof AcademicImportCreateEntryTypeEnum[keyof typeof AcademicImportCreateEntryTypeEnum];
+export const AcademicImportCreateFormatEnum = {
+    Bib: 'bib',
+    Ris: 'ris',
+    Csv: 'csv'
+} as const;
+
+export type AcademicImportCreateFormatEnum = typeof AcademicImportCreateFormatEnum[keyof typeof AcademicImportCreateFormatEnum];
 
 export interface AcademicImportItem {
     'candidate'?: AcademicImportCandidate;
+    'confirmed'?: boolean;
+    'document_id'?: string;
+    'paper'?: PaperLibraryPaper;
     'reference_ids'?: Array<string>;
+    'revision'?: number;
     'work_id'?: string;
 }
 export interface AcademicImportOperation {
@@ -289,6 +305,7 @@ export interface AcademicPaperRef {
     'abstract': string | null;
     'arxiv_id'?: string;
     'authors'?: Array<string>;
+    'citation_count'?: number;
     'document_id'?: string;
     'doi'?: string;
     'paper_id': string;
@@ -781,24 +798,24 @@ export interface ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
 export interface ApiCoreAcademicExpansionsGet200Response {
     'items'?: Array<AcademicExpansion>;
 }
-export interface ApiCoreAcademicImportBatchesBatchIdGet200Response {
+/**
+ * @type ApiCoreAcademicImportsBatchIdGet200Response
+ */
+export type ApiCoreAcademicImportsBatchIdGet200Response = ApiCoreAcademicImportsBatchIdGet200ResponseOneOf | ApiCoreAcademicImportsBatchIdGet200ResponseOneOf1;
+
+export interface ApiCoreAcademicImportsBatchIdGet200ResponseOneOf {
+    'batch'?: object;
+    'items'?: Array<object>;
+}
+export interface ApiCoreAcademicImportsBatchIdGet200ResponseOneOf1 {
     'items'?: Array<AcademicImportOperationItem>;
     'next_cursor'?: string;
     'operation'?: AcademicImportOperation;
 }
-export interface ApiCoreAcademicImportBatchesGet200Response {
-    'items'?: Array<AcademicImportOperation>;
-    'next_cursor'?: string;
-    'notification'?: ApiCoreAcademicImportBatchesGet200ResponseNotification;
-}
-export interface ApiCoreAcademicImportBatchesGet200ResponseNotification {
-    'active'?: number;
-    'needs_action'?: number;
-}
 /**
  * @type ApiCoreAcademicImportsGet200Response
  */
-export type ApiCoreAcademicImportsGet200Response = ApiCoreAcademicImportsGet200ResponseOneOf | ApiCoreAcademicImportsGet200ResponseOneOf1;
+export type ApiCoreAcademicImportsGet200Response = ApiCoreAcademicImportsGet200ResponseOneOf | ApiCoreAcademicImportsGet200ResponseOneOf1 | ApiCoreAcademicImportsGet200ResponseOneOf2;
 
 export interface ApiCoreAcademicImportsGet200ResponseOneOf {
     'items': Array<AcademicImportQueueItem>;
@@ -807,13 +824,28 @@ export interface ApiCoreAcademicImportsGet200ResponseOneOf {
 export interface ApiCoreAcademicImportsGet200ResponseOneOf1 {
     'items': Array<AcademicSourceImportItem>;
 }
-export interface ApiCoreAcademicImportsPost200Response {
+export interface ApiCoreAcademicImportsGet200ResponseOneOf2 {
+    'items'?: Array<AcademicImportOperation>;
+    'next_cursor'?: string;
+    'notification'?: ApiCoreAcademicImportsGet200ResponseOneOf2Notification;
+}
+export interface ApiCoreAcademicImportsGet200ResponseOneOf2Notification {
+    'active'?: number;
+    'needs_action'?: number;
+}
+/**
+ * @type ApiCoreAcademicImportsPost200Response
+ */
+export type ApiCoreAcademicImportsPost200Response = ApiCoreAcademicImportsPost200ResponseOneOf | PaperLibraryChanges;
+
+export interface ApiCoreAcademicImportsPost200ResponseOneOf {
     'batch_id'?: string;
     'status'?: string;
 }
 export interface ApiCoreAcademicImportsPreviewPostRequest {
     'expansion_id'?: string;
     'identifier'?: string;
+    'papers'?: Array<PaperLibraryPaper>;
     'reference_ids'?: Array<string>;
     'resolve_external'?: boolean;
     'source_document_ids'?: Array<string>;
@@ -821,15 +853,43 @@ export interface ApiCoreAcademicImportsPreviewPostRequest {
     'work_ids'?: Array<string>;
     'works'?: Array<object>;
 }
-export interface ApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest {
-    'is_important': boolean;
+export interface ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest {
     'revision': number;
 }
-export interface ApiCoreAcademicLibraryPutRequest {
-    'attachment_context'?: PaperLibraryAttachmentContext;
-    'data': object;
-    'import_context'?: PaperLibraryImportContext;
+export interface ApiCoreAcademicLibraryFoldersFolderIdPatchRequest {
+    'name': string;
     'revision': number;
+}
+export interface ApiCoreAcademicLibraryFoldersPostRequest {
+    'id': string;
+    'name': string;
+    'parent_id'?: string;
+}
+export interface ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
+    'content': string;
+    'id': string;
+}
+export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
+    'metadata'?: PaperLibraryMetadata;
+    'revision': number;
+    'status'?: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum;
+    'tags'?: Array<string>;
+}
+
+export const ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum = {
+    Unread: 'unread',
+    Reading: 'reading',
+    Read: 'read'
+} as const;
+
+export type ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum = typeof ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum[keyof typeof ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum];
+
+export interface ApiCoreAcademicLibraryPapersMovePostRequest {
+    'folder_id': string;
+    'items': Array<PaperLibraryTarget>;
+}
+export interface ApiCoreAcademicLibraryPapersRemovePostRequest {
+    'items': Array<PaperLibraryTarget>;
 }
 export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response {
     'feedback'?: string;
@@ -862,6 +922,7 @@ export interface ApiCoreAcademicPapersPaperIdImportancePut200Response {
     'is_important'?: boolean;
 }
 export interface ApiCoreAcademicPapersPaperIdImportancePutRequest {
+    'dataset_id': string;
     'is_important': boolean;
 }
 export interface ApiCoreAcademicPapersSearchPost200Response {
@@ -5616,61 +5677,117 @@ export interface Pages {
     'sources': CollectionPage;
     'stage_artifacts': CollectionPage;
 }
-export interface PaperLibraryAttachmentContext {
-    'attachment_id': string;
-    'confirmed': boolean;
-    'document_id': string;
-    'idempotency_key': string;
-    'operation': PaperLibraryAttachmentContextOperationEnum;
-    'paper_id': string;
+export interface PaperLibraryAttachment {
+    'addedAt': string;
+    'available': boolean;
+    'contentHash'?: string;
+    'contentRef'?: string;
+    'expansionId'?: string;
+    'expansionVersion'?: number;
+    'id': string;
+    'importMethod'?: string;
+    'isPrimary': boolean;
+    'kind': string;
+    'name': string;
+    'paperId': string;
+    'source'?: string;
+    'sourceProvider'?: string;
+    'sourceUrl'?: string;
+    'sourceVersion'?: string;
+}
+export interface PaperLibraryChanges {
+    'batch_id'?: string;
+    'data': PaperLibraryData;
+    'removedFolderIds'?: Array<string>;
+    'removedPaperIds'?: Array<string>;
+    'status'?: string;
+}
+export interface PaperLibraryData {
+    'attachments': Array<PaperLibraryAttachment>;
+    'folders': Array<PaperLibraryFolder>;
+    'notes': Array<PaperLibraryNote>;
+    'papers': Array<PaperLibraryPaper>;
+}
+export interface PaperLibraryFolder {
+    'id': string;
+    'name': string;
+    'parentId': string | null;
+    'revision': number;
+}
+export interface PaperLibraryMetadata {
+    'abstract'?: string;
+    'authors': Array<string>;
+    'citationCount'?: number;
+    'identifiers': PaperLibraryMetadataIdentifiers;
+    'title': string;
+    'venue': string;
+    'year': number;
+}
+export interface PaperLibraryMetadataIdentifiers {
+    'arxiv'?: string;
+    'doi'?: string;
+}
+export interface PaperLibraryNote {
+    'content': string;
+    'createdAt': string;
+    'id': string;
+    'kind': string;
+    'paperId': string;
+    'title': string;
+    'updatedAt': string;
+}
+export interface PaperLibraryPaper {
+    'academicWorkId'?: string;
+    'arxivVersion'?: string;
+    'associationConflict'?: string;
+    'attachmentIds': Array<string>;
+    'folderId': string | null;
+    'id': string;
+    'importMethod'?: string;
+    'important': boolean;
+    'incomplete'?: boolean;
+    'metadata': PaperLibraryMetadata;
+    'noteIds': Array<string>;
+    'parse': PaperLibraryPaperParseEnum;
+    'processingError'?: string;
+    'revision': number;
+    'source': string;
+    'sourceUrl'?: string;
+    'status': PaperLibraryPaperStatusEnum;
+    'tags': Array<string>;
 }
 
-export const PaperLibraryAttachmentContextOperationEnum = {
-    Attach: 'attach',
-    Detach: 'detach'
+export const PaperLibraryPaperParseEnum = {
+    Ready: 'ready',
+    Parsing: 'parsing',
+    Failed: 'failed'
 } as const;
 
-export type PaperLibraryAttachmentContextOperationEnum = typeof PaperLibraryAttachmentContextOperationEnum[keyof typeof PaperLibraryAttachmentContextOperationEnum];
-
-export interface PaperLibraryImportContext {
-    'entry_type': PaperLibraryImportContextEntryTypeEnum;
-    'file_name'?: string;
-    'format'?: PaperLibraryImportContextFormatEnum;
-    'idempotency_key': string;
-    'items': Array<PaperLibraryImportContextItemsInner>;
-    'preview_token'?: string;
-}
-
-export const PaperLibraryImportContextEntryTypeEnum = {
-    Bibliography: 'bibliography',
-    PaperLink: 'paper_link'
+export type PaperLibraryPaperParseEnum = typeof PaperLibraryPaperParseEnum[keyof typeof PaperLibraryPaperParseEnum];
+export const PaperLibraryPaperStatusEnum = {
+    Unread: 'unread',
+    Reading: 'reading',
+    Read: 'read'
 } as const;
 
-export type PaperLibraryImportContextEntryTypeEnum = typeof PaperLibraryImportContextEntryTypeEnum[keyof typeof PaperLibraryImportContextEntryTypeEnum];
-export const PaperLibraryImportContextFormatEnum = {
-    Bib: 'bib',
-    Ris: 'ris',
-    Csv: 'csv'
-} as const;
+export type PaperLibraryPaperStatusEnum = typeof PaperLibraryPaperStatusEnum[keyof typeof PaperLibraryPaperStatusEnum];
 
-export type PaperLibraryImportContextFormatEnum = typeof PaperLibraryImportContextFormatEnum[keyof typeof PaperLibraryImportContextFormatEnum];
-
-export interface PaperLibraryImportContextItemsInner {
-    'paper_id': string;
-}
 export interface PaperLibraryResponse {
     'active': boolean;
     'can_write': boolean;
-    'data': object;
+    'data': PaperLibraryData;
     'paper_count': number;
-    'paper_importance': { [key: string]: boolean; };
     'pdf_attachment_count': number;
+}
+export interface PaperLibraryTarget {
+    'id': string;
     'revision': number;
 }
 export interface PaperUploadContext {
     'idempotency_key': string;
     'library_paper_id': string;
     'paper'?: any;
+    'source_version'?: string;
     'title': string;
 }
 export interface ParserConfig {
@@ -8400,7 +8517,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Read saved rounds, cumulative papers, content states and Chat availability
+         * @summary Read saved rounds, current papers, content states and Chat availability
          * @param {string} expansionId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -8510,17 +8627,18 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Read a complete operation summary and a page of its papers
+         * @summary Read a batch or its complete operation summary and a page of items
          * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdGetViewEnum} [view]
          * @param {string} [cursor]
          * @param {number} [limit]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicImportBatchesBatchIdGet: async (batchId: string, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicImportsBatchIdGet: async (batchId: string, view?: ApiCoreAcademicImportsBatchIdGetViewEnum, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'batchId' is not null or undefined
-            assertParamExists('apiCoreAcademicImportBatchesBatchIdGet', 'batchId', batchId)
-            const localVarPath = `/api/core/academic/import-batches/{batch_id}`
+            assertParamExists('apiCoreAcademicImportsBatchIdGet', 'batchId', batchId)
+            const localVarPath = `/api/core/academic/imports/{batch_id}`
                 .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -8533,6 +8651,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
             if (cursor !== undefined) {
                 localVarQueryParameter['cursor'] = cursor;
             }
@@ -8554,54 +8676,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary List owned paper import operations with complete summaries and notification totals
-         * @param {string} targetDatasetId
+         * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetViewEnum} [view]
          * @param {string} [cursor]
          * @param {number} [limit]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportBatchesGet: async (targetDatasetId: string, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'targetDatasetId' is not null or undefined
-            assertParamExists('apiCoreAcademicImportBatchesGet', 'targetDatasetId', targetDatasetId)
-            const localVarPath = `/api/core/academic/import-batches`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (targetDatasetId !== undefined) {
-                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
-            }
-
-            if (cursor !== undefined) {
-                localVarQueryParameter['cursor'] = cursor;
-            }
-
-            if (limit !== undefined) {
-                localVarQueryParameter['limit'] = limit;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Read source-scoped Chat/Work imports or current-collection import history
          * @param {string} [targetDatasetId]
          * @param {string} [sourceDocumentId]
          * @param {string} [conversationId]
@@ -8612,7 +8690,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicImportsGet: async (targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicImportsGet: async (view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/academic/imports`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -8624,6 +8702,18 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
 
             if (targetDatasetId !== undefined) {
                 localVarQueryParameter['target_dataset_id'] = targetDatasetId;
@@ -8666,7 +8756,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Queue version-aware paper link or reference imports
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
          * @param {AcademicImportCreate} academicImportCreate
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -8736,7 +8826,141 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Read the resolved paper library and current user importance
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdDeletePost: async (targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'folderId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'folderId', folderId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest', apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest)
+            const localVarPath = `/api/core/academic/library/folders/{folder_id}:delete`
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdPatchRequest} apiCoreAcademicLibraryFoldersFolderIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdPatch: async (targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'folderId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'folderId', folderId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdPatchRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'apiCoreAcademicLibraryFoldersFolderIdPatchRequest', apiCoreAcademicLibraryFoldersFolderIdPatchRequest)
+            const localVarPath = `/api/core/academic/library/folders/{folder_id}`
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdPatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryFoldersPostRequest} apiCoreAcademicLibraryFoldersPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersPost: async (targetDatasetId: string, apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersPost', 'apiCoreAcademicLibraryFoldersPostRequest', apiCoreAcademicLibraryFoldersPostRequest)
+            const localVarPath = `/api/core/academic/library/folders`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
          * @param {string} targetDatasetId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -8773,22 +8997,26 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Set personal importance on a library paper, including metadata-only papers
+         * @summary Detach a material without deleting its original or scholarly file facts
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
-         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest} apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest
+         * @param {string} attachmentId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut: async (targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost: async (targetDatasetId: string, libraryPaperId: string, attachmentId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'targetDatasetId' is not null or undefined
-            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut', 'targetDatasetId', targetDatasetId)
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'targetDatasetId', targetDatasetId)
             // verify required parameter 'libraryPaperId' is not null or undefined
-            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut', 'libraryPaperId', libraryPaperId)
-            // verify required parameter 'apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest' is not null or undefined
-            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut', 'apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest', apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest)
-            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/importance`
-                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)));
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'attachmentId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'attachmentId', attachmentId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest', apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/attachments/{attachment_id}:detach`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)))
+                .replace(`{${"attachment_id"}}`, encodeURIComponent(String(attachmentId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8796,7 +9024,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
                 baseOptions = configuration.baseOptions;
             }
 
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -8810,7 +9038,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest, localVarRequestOptions, configuration)
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -8819,18 +9047,22 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Atomically save a versioned paper library and confirmed attachment association
+         * @summary Add a note idempotently by stable note ID
          * @param {string} targetDatasetId
-         * @param {ApiCoreAcademicLibraryPutRequest} apiCoreAcademicLibraryPutRequest
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicLibraryPut: async (targetDatasetId: string, apiCoreAcademicLibraryPutRequest: ApiCoreAcademicLibraryPutRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost: async (targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'targetDatasetId' is not null or undefined
-            assertParamExists('apiCoreAcademicLibraryPut', 'targetDatasetId', targetDatasetId)
-            // verify required parameter 'apiCoreAcademicLibraryPutRequest' is not null or undefined
-            assertParamExists('apiCoreAcademicLibraryPut', 'apiCoreAcademicLibraryPutRequest', apiCoreAcademicLibraryPutRequest)
-            const localVarPath = `/api/core/academic/library`;
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest', apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/notes`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -8838,7 +9070,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
                 baseOptions = configuration.baseOptions;
             }
 
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -8852,7 +9084,137 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPutRequest, localVarRequestOptions, configuration)
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdPatch: async (targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest', apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersMovePostRequest} apiCoreAcademicLibraryPapersMovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersMovePost: async (targetDatasetId: string, apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersMovePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersMovePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersMovePost', 'apiCoreAcademicLibraryPapersMovePostRequest', apiCoreAcademicLibraryPapersMovePostRequest)
+            const localVarPath = `/api/core/academic/library/papers:move`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersMovePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersRemovePostRequest} apiCoreAcademicLibraryPapersRemovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersRemovePost: async (targetDatasetId: string, apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersRemovePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersRemovePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersRemovePost', 'apiCoreAcademicLibraryPapersRemovePostRequest', apiCoreAcademicLibraryPapersRemovePostRequest)
+            const localVarPath = `/api/core/academic/library/papers:remove`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersRemovePostRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -9178,7 +9540,7 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Read saved rounds, cumulative papers, content states and Chat availability
+         * @summary Read saved rounds, current papers, content states and Chat availability
          * @param {string} expansionId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9218,37 +9580,26 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Read a complete operation summary and a page of its papers
+         * @summary Read a batch or its complete operation summary and a page of items
          * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdGetViewEnum} [view]
          * @param {string} [cursor]
          * @param {number} [limit]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicImportBatchesBatchIdGet(batchId: string, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportBatchesBatchIdGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportBatchesBatchIdGet(batchId, cursor, limit, options);
+        async apiCoreAcademicImportsBatchIdGet(batchId: string, view?: ApiCoreAcademicImportsBatchIdGetViewEnum, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsBatchIdGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdGet(batchId, view, cursor, limit, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportBatchesBatchIdGet']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsBatchIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary List owned paper import operations with complete summaries and notification totals
-         * @param {string} targetDatasetId
+         * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetViewEnum} [view]
          * @param {string} [cursor]
          * @param {number} [limit]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportBatchesGet(targetDatasetId: string, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportBatchesGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportBatchesGet(targetDatasetId, cursor, limit, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportBatchesGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Read source-scoped Chat/Work imports or current-collection import history
          * @param {string} [targetDatasetId]
          * @param {string} [sourceDocumentId]
          * @param {string} [conversationId]
@@ -9259,15 +9610,15 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicImportsGet(targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
+        async apiCoreAcademicImportsGet(view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(view, cursor, limit, targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Queue version-aware paper link or reference imports
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
          * @param {AcademicImportCreate} academicImportCreate
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9293,7 +9644,51 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Read the resolved paper library and current user importance
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersFolderIdDeletePost(targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersFolderIdDeletePost(targetDatasetId, folderId, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersFolderIdDeletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdPatchRequest} apiCoreAcademicLibraryFoldersFolderIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersFolderIdPatch(targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersFolderIdPatch(targetDatasetId, folderId, apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersFolderIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryFoldersPostRequest} apiCoreAcademicLibraryFoldersPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersPost(targetDatasetId: string, apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersPost(targetDatasetId, apiCoreAcademicLibraryFoldersPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
          * @param {string} targetDatasetId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9306,31 +9701,76 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Set personal importance on a library paper, including metadata-only papers
+         * @summary Detach a material without deleting its original or scholarly file facts
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
-         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest} apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest
+         * @param {string} attachmentId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut(targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut(targetDatasetId, libraryPaperId, apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest, options);
+        async apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(targetDatasetId: string, libraryPaperId: string, attachmentId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(targetDatasetId, libraryPaperId, attachmentId, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Atomically save a versioned paper library and confirmed attachment association
+         * @summary Add a note idempotently by stable note ID
          * @param {string} targetDatasetId
-         * @param {ApiCoreAcademicLibraryPutRequest} apiCoreAcademicLibraryPutRequest
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicLibraryPut(targetDatasetId: string, apiCoreAcademicLibraryPutRequest: ApiCoreAcademicLibraryPutRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPut(targetDatasetId, apiCoreAcademicLibraryPutRequest, options);
+        async apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(targetDatasetId, libraryPaperId, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPut']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdPatch(targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdPatch(targetDatasetId, libraryPaperId, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersMovePostRequest} apiCoreAcademicLibraryPapersMovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersMovePost(targetDatasetId: string, apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersMovePost(targetDatasetId, apiCoreAcademicLibraryPapersMovePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersMovePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersRemovePostRequest} apiCoreAcademicLibraryPapersRemovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersRemovePost(targetDatasetId: string, apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersRemovePost(targetDatasetId, apiCoreAcademicLibraryPapersRemovePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersRemovePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -9477,7 +9917,7 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Read saved rounds, cumulative papers, content states and Chat availability
+         * @summary Read saved rounds, current papers, content states and Chat availability
          * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9507,37 +9947,27 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Read a complete operation summary and a page of its papers
-         * @param {AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest} requestParameters Request parameters.
+         * @summary Read a batch or its complete operation summary and a page of items
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicImportBatchesBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportBatchesBatchIdGet200Response> {
-            return localVarFp.apiCoreAcademicImportBatchesBatchIdGet(requestParameters.batchId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        apiCoreAcademicImportsBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsBatchIdGet200Response> {
+            return localVarFp.apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, requestParameters.view, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary List owned paper import operations with complete summaries and notification totals
-         * @param {AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportBatchesGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportBatchesGet200Response> {
-            return localVarFp.apiCoreAcademicImportBatchesGet(requestParameters.targetDatasetId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Read source-scoped Chat/Work imports or current-collection import history
+         * @summary Read source-scoped imports or a page of import operations
          * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsGet200Response> {
-            return localVarFp.apiCoreAcademicImportsGet(requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Queue version-aware paper link or reference imports
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
          * @param {AcademicWorkflowsApiApiCoreAcademicImportsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9557,7 +9987,37 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Read the resolved paper library and current user importance
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryFoldersPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
          * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9567,23 +10027,53 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Set personal importance on a library paper, including metadata-only papers
-         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest} requestParameters Request parameters.
+         * @summary Detach a material without deleting its original or scholarly file facts
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryResponse> {
-            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest, options).then((request) => request(axios, basePath));
+        apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.attachmentId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Atomically save a versioned paper library and confirmed attachment association
-         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest} requestParameters Request parameters.
+         * @summary Add a note idempotently by stable note ID
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicLibraryPut(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryResponse> {
-            return localVarFp.apiCoreAcademicLibraryPut(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPutRequest, options).then((request) => request(axios, basePath));
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersMovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersMovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersMovePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersRemovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersRemovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersRemovePostRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -9716,21 +10206,12 @@ export interface AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest {
 }
 
 /**
- * Request parameters for apiCoreAcademicImportBatchesBatchIdGet operation in AcademicWorkflowsApi.
+ * Request parameters for apiCoreAcademicImportsBatchIdGet operation in AcademicWorkflowsApi.
  */
-export interface AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest {
+export interface AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest {
     readonly batchId: string
 
-    readonly cursor?: string
-
-    readonly limit?: number
-}
-
-/**
- * Request parameters for apiCoreAcademicImportBatchesGet operation in AcademicWorkflowsApi.
- */
-export interface AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest {
-    readonly targetDatasetId: string
+    readonly view?: ApiCoreAcademicImportsBatchIdGetViewEnum
 
     readonly cursor?: string
 
@@ -9741,6 +10222,12 @@ export interface AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest {
  * Request parameters for apiCoreAcademicImportsGet operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicImportsGetRequest {
+    readonly view?: ApiCoreAcademicImportsGetViewEnum
+
+    readonly cursor?: string
+
+    readonly limit?: number
+
     readonly targetDatasetId?: string
 
     readonly sourceDocumentId?: string
@@ -9771,6 +10258,37 @@ export interface AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreAcademicLibraryFoldersFolderIdDeletePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest {
+    readonly targetDatasetId: string
+
+    readonly folderId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryFoldersFolderIdPatch operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest {
+    readonly targetDatasetId: string
+
+    readonly folderId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryFoldersPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest
+}
+
+/**
  * Request parameters for apiCoreAcademicLibraryGet operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest {
@@ -9778,23 +10296,56 @@ export interface AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest {
 }
 
 /**
- * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut operation in AcademicWorkflowsApi.
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost operation in AcademicWorkflowsApi.
  */
-export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest {
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest {
     readonly targetDatasetId: string
 
     readonly libraryPaperId: string
 
-    readonly apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest
+    readonly attachmentId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
 }
 
 /**
- * Request parameters for apiCoreAcademicLibraryPut operation in AcademicWorkflowsApi.
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost operation in AcademicWorkflowsApi.
  */
-export interface AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest {
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
     readonly targetDatasetId: string
 
-    readonly apiCoreAcademicLibraryPutRequest: ApiCoreAcademicLibraryPutRequest
+    readonly libraryPaperId: string
+
+    readonly apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdPatch operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersMovePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersRemovePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest
 }
 
 /**
@@ -9900,7 +10451,7 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Read saved rounds, cumulative papers, content states and Chat availability
+     * @summary Read saved rounds, current papers, content states and Chat availability
      * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -9933,40 +10484,29 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Read a complete operation summary and a page of its papers
-     * @param {AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest} requestParameters Request parameters.
+     * @summary Read a batch or its complete operation summary and a page of items
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreAcademicImportBatchesBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportBatchesBatchIdGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportBatchesBatchIdGet(requestParameters.batchId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreAcademicImportsBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, requestParameters.view, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary List owned paper import operations with complete summaries and notification totals
-     * @param {AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportBatchesGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportBatchesGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportBatchesGet(requestParameters.targetDatasetId, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Read source-scoped Chat/Work imports or current-collection import history
+     * @summary Read source-scoped imports or a page of import operations
      * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Queue version-aware paper link or reference imports
+     * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
      * @param {AcademicWorkflowsApiApiCoreAcademicImportsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -9988,7 +10528,40 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Read the resolved paper library and current user importance
+     * @summary Delete a folder subtree and move its papers into the parent folder
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Rename a logical folder with revision validation
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a logical paper-library folder
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryFoldersPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read paper entries, logical folders and active materials
      * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -9999,24 +10572,57 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Set personal importance on a library paper, including metadata-only papers
-     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest} requestParameters Request parameters.
+     * @summary Detach a material without deleting its original or scholarly file facts
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdImportancePut(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdImportancePutRequest, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.attachmentId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Atomically save a versioned paper library and confirmed attachment association
-     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest} requestParameters Request parameters.
+     * @summary Add a note idempotently by stable note ID
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreAcademicLibraryPut(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPutRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPut(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPutRequest, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Update one paper with its revision and validate every active attachment
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Atomically move selected paper entries without moving files
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersMovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersMovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersMovePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Atomically remove selected entries while retaining materials and history
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersRemovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersRemovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersRemovePostRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -10097,6 +10703,14 @@ export class AcademicWorkflowsApi extends BaseAPI {
     }
 }
 
+export const ApiCoreAcademicImportsBatchIdGetViewEnum = {
+    Operations: 'operations'
+} as const;
+export type ApiCoreAcademicImportsBatchIdGetViewEnum = typeof ApiCoreAcademicImportsBatchIdGetViewEnum[keyof typeof ApiCoreAcademicImportsBatchIdGetViewEnum];
+export const ApiCoreAcademicImportsGetViewEnum = {
+    Operations: 'operations'
+} as const;
+export type ApiCoreAcademicImportsGetViewEnum = typeof ApiCoreAcademicImportsGetViewEnum[keyof typeof ApiCoreAcademicImportsGetViewEnum];
 
 
 /**
@@ -16662,39 +17276,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {string} batchId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsBatchIdGet: async (batchId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'batchId' is not null or undefined
-            assertParamExists('apiCoreAcademicImportsBatchIdGet', 'batchId', batchId)
-            const localVarPath = `/api/core/academic/imports/{batch_id}`
-                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -29263,19 +29844,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {string} batchId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsBatchIdGet(batchId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdGet(batchId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsBatchIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /academic/imports/{batch_id}:retry
          * @param {string} batchId
          * @param {*} [options] Override http request option.
@@ -34099,16 +34667,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {DefaultApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsBatchIdGet(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary POST /academic/imports/{batch_id}:retry
          * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -37673,13 +38231,6 @@ export interface DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest {
 }
 
 /**
- * Request parameters for apiCoreAcademicImportsBatchIdGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreAcademicImportsBatchIdGetRequest {
-    readonly batchId: string
-}
-
-/**
  * Request parameters for apiCoreAcademicImportsBatchIdRetryPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest {
@@ -39802,17 +40353,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicImportsBatchIdCancelPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdCancelPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /academic/imports/{batch_id}
-     * @param {DefaultApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsBatchIdGet(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

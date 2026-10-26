@@ -1,11 +1,11 @@
 import { useId } from "react";
 import { Slider } from "antd";
-import type { PaperItem } from "./model";
+import type { PaperRecord } from "./model";
 import { DEFAULT_PAPER_FILTERS, getFilterBounds, hasPaperFilters, type PaperFilters } from "./paperFilters";
 import "./PaperFilterPanel.scss";
 
 interface Props {
-  papers: PaperItem[];
+  papers: PaperRecord[];
   value: PaperFilters;
   onChange: (value: PaperFilters) => void;
 }

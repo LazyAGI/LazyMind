@@ -2,14 +2,8 @@ import { useState } from 'react';
 import { Button, Tooltip, message } from 'antd';
 import { StarFilled, StarOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import { setPaperImportance } from '../../api/paperWorkflows';
 
-export default function PaperImportanceButton({ paperID, important, onChange, onToggle }: {
-    paperID?: string;
-    important: boolean;
-    onChange: () => Promise<void>;
-    onToggle?: (important: boolean) => Promise<void>;
-}) {
+export default function PaperImportanceButton({important,onToggle}:{important:boolean;onToggle:(important:boolean)=>Promise<void>}) {
     const { t } = useTranslation();
     const [busy, setBusy] = useState(false);
     const label = t(important ? 'paperTasks.unmarkImportant' : 'paperTasks.markImportant');
@@ -17,9 +11,7 @@ export default function PaperImportanceButton({ paperID, important, onChange, on
         if (busy) return;
         setBusy(true);
         try {
-            if (onToggle) await onToggle(!important);
-            else await setPaperImportance(paperID!, !important);
-            await onChange();
+            await onToggle(!important);
         } catch {
             message.error(t('paperTasks.importanceFailed'));
         } finally {

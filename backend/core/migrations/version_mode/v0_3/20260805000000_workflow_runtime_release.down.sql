@@ -14,7 +14,10 @@ DROP TABLE IF EXISTS task_attempt_timings;
 DROP TABLE IF EXISTS task_execution_timings;
 
 -- +migrate Dialect postgres,sqlite
-DROP TABLE IF EXISTS paper_libraries;
+DROP TABLE IF EXISTS paper_library_attachments;
+DROP TABLE IF EXISTS paper_library_notes;
+DROP TABLE IF EXISTS paper_library_entries;
+DROP TABLE IF EXISTS paper_library_folders;
 DROP TABLE rejected_document_publications;
 DROP TABLE document_ownership_backfills;
 

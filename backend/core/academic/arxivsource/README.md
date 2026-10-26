@@ -44,7 +44,7 @@ paper, err := arxivsource.NewClient().Lookup(ctx, identifier.ID())
 
 - `POST /api/core/academic/imports:preview`：解析编号或链接并确认目标论文与版本。
 - `POST /api/core/academic/imports`：提交预览回执、所选候选、目标知识库和幂等标识，进入统一导入队列。
-- `GET /api/core/academic/import-batches`：读取批次回执及文档处理状态。
+- `GET /api/core/academic/imports?view=operations`：读取批次回执及文档处理状态。
 
 接口使用现有登录身份和知识库权限。导入按 base ID 关联父条目、按知识库和版本去重 PDF。`processing_status` 区分 `ready`、`parsing`、`failed`；文件已保存但后续处理失败仍返回错误，文档 ID 保留用于恢复。前端只走这些 Core 接口，不需要 `/arxiv` 开发代理。
 

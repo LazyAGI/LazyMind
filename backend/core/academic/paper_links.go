@@ -40,8 +40,9 @@ func lookupPaperLink(ctx context.Context, input string) (WorkInput, error) {
 	}
 	var result struct {
 		Message struct {
-			Title   []string `json:"title"`
-			Authors []struct {
+			Title         []string `json:"title"`
+			CitationCount *int64   `json:"is-referenced-by-count"`
+			Authors       []struct {
 				Given  string `json:"given"`
 				Family string `json:"family"`
 			} `json:"author"`
@@ -59,7 +60,10 @@ func lookupPaperLink(ctx context.Context, input string) (WorkInput, error) {
 	if len(m.Title) == 0 || strings.TrimSpace(m.Title[0]) == "" || NormalizeDOI(m.DOI) != doi {
 		return WorkInput{}, errors.New("DOI 服务未返回匹配的有效题录")
 	}
-	work := WorkInput{Title: m.Title[0], DOI: doi, Provider: "crossref", ProviderWorkID: doi, Provenance: map[string]any{}}
+	work := WorkInput{CitationCount: m.CitationCount, Title: m.Title[0], DOI: doi, Provider: "crossref", ProviderWorkID: doi, Provenance: map[string]any{}}
+	if work.CitationCount != nil && *work.CitationCount < 0 {
+		work.CitationCount = nil
+	}
 	for _, author := range m.Authors {
 		if name := strings.TrimSpace(author.Given + " " + author.Family); name != "" {
 			work.Authors = append(work.Authors, name)

@@ -19,6 +19,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/workflow"
+	workflowstore "lazymind/core/workflow/store"
 )
 
 func paperFixture(t *testing.T) *orm.DB {
@@ -109,10 +110,10 @@ func TestImportedIdentitySurvivesQueuedRecognitionAndManualMetadataCorrection(t 
 func TestReviewGateFullManifestImportanceAndSeparateChat(t *testing.T) {
 	db := paperFixture(t)
 	input := ReviewWorkflowInput{UserInstruction: "agents", CandidateDirections: []string{"tools"}, SelectedDirections: []string{"tools"}, Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}}}}
-	if err := db.Create(&orm.AcademicUserPaperState{UserID: "u", PaperID: "a", IsImportant: true}).Error; err != nil {
+	if err := db.Create(&orm.AcademicUserPaperState{UserID: "u", DatasetID: "papers", PaperID: "a", IsImportant: true}).Error; err != nil {
 		t.Fatal(err)
 	}
-	db.Create(&orm.AcademicUserPaperState{UserID: "other", PaperID: "b", IsImportant: true})
+	db.Create(&orm.AcademicUserPaperState{UserID: "other", DatasetID: "papers", PaperID: "b", IsImportant: true})
 	for i, id := range []string{"a", "b"} {
 		content := orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "content-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "real parsed body"}})}
 		if err := db.Create(&content).Error; err != nil {
@@ -307,6 +308,7 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	input.UserInstruction += "\n【后续补充】" + update
+	input.Papers = input.Papers[:1]
 	human.ID, human.Value = "continued-human", marshal(map[string]any{"data": input})
 	if err = db.Create(&human).Error; err != nil {
 		t.Fatal(err)
@@ -325,6 +327,17 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	if err = json.Unmarshal(record.ResultJSON, &saved); err != nil || record.Version != 2 || saved.UserInstruction != expectedInstruction+"\n\n"+update {
 		t.Fatalf("continued projection lost or duplicated user instructions: v%d %q %v", record.Version, saved.UserInstruction, err)
 	}
+	if len(saved.Papers) != 1 || saved.Papers[0].Paper.PaperID != "a" {
+		t.Fatalf("excluded paper returned in current result: %+v", saved.Papers)
+	}
+	var firstRound orm.AcademicExpansionRound
+	if err = db.Where("expansion_id=? AND version=1", record.ID).Take(&firstRound).Error; err != nil {
+		t.Fatal(err)
+	}
+	var firstResult ReviewWorkflowInput
+	if err = json.Unmarshal(firstRound.ResultJSON, &firstResult); err != nil || len(firstResult.Papers) != 2 {
+		t.Fatal("previous round was overwritten", err)
+	}
 	var round orm.AcademicExpansionRound
 	if err = db.Where("expansion_id=? AND version=2", record.ID).Take(&round).Error; err != nil {
 		t.Fatal(err)
@@ -335,6 +348,24 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	}
 	if err = json.Unmarshal(round.InputJSON, &frozen); err != nil || len(frozen.UserUpdates) != 3 || len(frozen.Interactions) != 1 || frozen.Interactions[0]["answers"] == nil {
 		t.Fatalf("round lost the original structured answers or updates: %+v %v", frozen, err)
+	}
+	late := workflowstore.Artifact{ID: "late-unseen-result", SessionID: session.ID, Slot: "expansion_result", StepID: "compose_result", Attempt: 1, ProducerAttemptID: "attempt", Revision: 1, Validity: "effective", Selected: true, CreatedAt: artifact.CreatedAt, Value: marshal(map[string]any{"data": ReviewWorkflowInput{UserInstruction: "old", CandidateDirections: directions, SelectedDirections: directions, Papers: []WorkflowPaper{seed}}})}
+	lateJob := job
+	lateJob.PayloadJSON = marshal(expansionProjectionPayload{SessionID: session.ID, CompletedArtifacts: []workflowstore.Artifact{late}})
+	if _, err = projectAcademicResult(ctx, lateJob, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Where("id=?", record.ID).Take(&record).Error; err != nil || record.Version != 2 {
+		t.Fatal("late earlier attempt replaced published round", err)
+	}
+	late.ID = "late-invalid-result"
+	late.Value = marshal(map[string]any{"data": ReviewWorkflowInput{}})
+	lateJob.PayloadJSON = marshal(expansionProjectionPayload{SessionID: session.ID, CompletedArtifacts: []workflowstore.Artifact{late}})
+	if _, err = projectAcademicResult(ctx, lateJob, nil); err != nil {
+		t.Fatal("invalid late event affected current publication", err)
+	}
+	if err = db.Where("id=?", record.ID).Take(&record).Error; err != nil || record.Version != 2 || record.Status != "completed" {
+		t.Fatal("late invalid event changed publication status", record.Status, err)
 	}
 	previous := string(record.ResultJSON)
 	db.Model(&session).Update("status", "waiting")
@@ -454,9 +485,9 @@ func TestFolderSelectionReadsAllPagesAndDeduplicatesVersions(t *testing.T) {
 func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 	db := paperFixture(t)
 	answer := "研究方向: 低秩适配机制；量化低秩微调"
-	oldInput := ReviewWorkflowInput{UserInstruction: "original\n补充问答：{\"questions\":{\"ask_id\":\"old-ask\"},\"answers\":{}}\n【原始要求】original", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true, IsImportant: true}}}
+	oldInput := ReviewWorkflowInput{UserInstruction: "original\n\n" + answer, Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true}, {Paper: PaperRef{PaperID: "b", SourceVersion: "v1", SourceProvider: "arxiv"}, IsSeed: true, IsImportant: true}}}
 	newInput := oldInput
-	newInput.UserInstruction += "\ncontinued"
+	newInput.UserInstruction += "\n\ncontinued"
 	record := orm.AcademicExpansion{ID: "versioned", UserID: "u", RequestOwner: "u", RequestKey: "source", DatasetID: "papers", ConversationID: "source-chat", Title: "original", Goal: "expansion", Status: "completed", Version: 2, ResultJSON: marshal(newInput)}
 	if err := db.Create(&record).Error; err != nil {
 		t.Fatal(err)
@@ -475,10 +506,10 @@ func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.Create(&orm.AcademicUserPaperState{UserID: "u", PaperID: "a", IsImportant: true}).Error; err != nil {
+	if err := db.Create(&orm.AcademicUserPaperState{UserID: "u", DatasetID: "papers", PaperID: "a", IsImportant: true}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.AcademicUserPaperState{UserID: "other", PaperID: "b", IsImportant: true}).Error; err != nil {
+	if err := db.Create(&orm.AcademicUserPaperState{UserID: "other", DatasetID: "papers", PaperID: "b", IsImportant: true}).Error; err != nil {
 		t.Fatal(err)
 	}
 	launch := func(key string, version int64, status int) string {
@@ -520,7 +551,7 @@ func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(handoff.InputJSON, &snapshot); err != nil || snapshot.UserInstruction != "original\n\n"+answer+"\n\ncontinued" {
-		t.Fatalf("latest legacy result was not rebuilt from its frozen inputs: %q %v", snapshot.UserInstruction, err)
+		t.Fatalf("selected round did not retain its frozen input: %q %v", snapshot.UserInstruction, err)
 	}
 	w := httptest.NewRecorder()
 	GetExpansion(w, mux.SetURLVars(paperRequest(""), map[string]string{"expansion_id": record.ID}))
@@ -576,7 +607,7 @@ func TestPersonalImportanceIsIndependentOfWritePermissionAndOtherUsers(t *testin
 		user      string
 		important bool
 	}{{"u", true}, {"reader", true}, {"reader", false}} {
-		r := mux.SetURLVars(paperRequest(string(marshal(map[string]bool{"is_important": change.important}))), map[string]string{"paper_id": "a"})
+		r := mux.SetURLVars(paperRequest(string(marshal(map[string]any{"dataset_id": "papers", "is_important": change.important}))), map[string]string{"paper_id": "a"})
 		r.Header.Set("X-User-Id", change.user)
 		w := httptest.NewRecorder()
 		SetImportance(w, r)
@@ -586,11 +617,36 @@ func TestPersonalImportanceIsIndependentOfWritePermissionAndOtherUsers(t *testin
 	}
 	for user, important := range map[string]bool{"u": true, "reader": false} {
 		var saved orm.AcademicUserPaperState
-		if err := db.Where("user_id=? AND paper_id=?", user, "a").Take(&saved).Error; err != nil {
+		if err := db.Where("user_id=? AND dataset_id=? AND paper_id=?", user, "papers", "a").Take(&saved).Error; err != nil {
 			t.Fatal(err)
 		}
 		if saved.IsImportant != important {
 			t.Fatalf("%s personal importance changed: %+v", user, saved)
+		}
+	}
+}
+
+func TestImportanceRequiresAccessibleLibraryAndDoesNotLeakIntoSelection(t *testing.T) {
+	db := paperFixture(t)
+	if err := db.Create(&orm.AcademicUserPaperState{UserID: "u", DatasetID: "other", PaperID: "a", IsImportant: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	papers, invalid, err := resolvePaperSelection(paperRequest(""), "u", "papers", []string{"a"})
+	if err != nil || len(invalid) != 0 || len(papers) != 1 || papers[0].IsImportant {
+		t.Fatalf("selection inherited another library's mark: %+v %+v %v", papers, invalid, err)
+	}
+	for _, test := range []struct {
+		body   string
+		status int
+	}{
+		{`{"is_important":true}`, 400},
+		{`{"dataset_id":"inaccessible","is_important":true}`, 403},
+	} {
+		r := mux.SetURLVars(paperRequest(test.body), map[string]string{"paper_id": "a"})
+		w := httptest.NewRecorder()
+		SetImportance(w, r)
+		if w.Code != test.status {
+			t.Fatalf("unscoped or inaccessible mark: %d %s", w.Code, w.Body.String())
 		}
 	}
 }

@@ -5,6 +5,7 @@ function unwrap<T>(value: T | { data: T }): T {
   return value && typeof value === 'object' && 'data' in value ? (value as { data: T }).data : value as T;
 }
 export interface PaperRef {
+ citation_count?: number;
   document_id?: string;
   source_version?: string;
   source_provider?: string;
@@ -116,8 +117,8 @@ export async function documentAcademicStates(dataset: string, ids: string[]) {
   const res = await axiosInstance.get(`${core}/document-states`, { params: { dataset_id: dataset, document_ids: ids.join(',') } });
   return unwrap<{ items: DocumentAcademic[] }>(res.data).items || [];
 }
-export async function setPaperImportance(id: string, value: boolean) {
-  await axiosInstance.put(`${core}/papers/${encodeURIComponent(id)}/importance`, { is_important: value });
+export async function setPaperImportance(datasetId: string, id: string, value: boolean) {
+  await axiosInstance.put(`${core}/papers/${encodeURIComponent(id)}/importance`, { dataset_id: datasetId, is_important: value });
 }
 export async function updatePaperIdentity(id: string, input: {
   kind?: string; reidentify?: boolean;

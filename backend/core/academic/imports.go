@@ -19,18 +19,27 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 )
 
 const paperImportJobType = "academic.paper_import"
 
 type selectedImportItem struct {
-	WorkID       string            `json:"work_id"`
-	ReferenceIDs []string          `json:"reference_ids,omitempty"`
-	Candidate    FulltextCandidate `json:"candidate"`
+	Paper        *paperlibrary.Paper `json:"paper,omitempty"`
+	DocumentID   string              `json:"document_id,omitempty"`
+	Revision     int64               `json:"revision,omitempty"`
+	Confirmed    bool                `json:"confirmed,omitempty"`
+	WorkID       string              `json:"work_id"`
+	ReferenceIDs []string            `json:"reference_ids,omitempty"`
+	Candidate    FulltextCandidate   `json:"candidate"`
 }
 
 type createImportRequest struct {
+	FolderID          string                      `json:"folder_id,omitempty"`
+	Folders           []paperlibrary.Folder       `json:"folders,omitempty"`
+	Format            string                      `json:"format,omitempty"`
+	FileName          string                      `json:"file_name,omitempty"`
 	PreviewToken      string                      `json:"preview_token,omitempty"`
 	SourceContext     *SourceContext              `json:"source_context,omitempty"`
 	SourceIDs         []string                    `json:"source_ids,omitempty"`
@@ -72,6 +81,10 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 	}
 	if !doc.HasDatasetPermission(r, req.TargetDatasetID, acl.PermissionDatasetUpload) {
 		replyError(w, http.StatusForbidden, "TARGET_DATASET_FORBIDDEN", "target knowledge base is not writable")
+		return
+	}
+	if req.EntryType == "bibliography" || req.EntryType == "pdf_upload" || req.EntryType == "paper_link" && len(req.Items) == 1 && req.Items[0].Candidate.URL == "" {
+		createLibraryImport(w, r, userID, req)
 		return
 	}
 	entryType := strings.TrimSpace(req.EntryType)
@@ -117,7 +130,7 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	batchID := uuid.NewString()
 	sources, _ := json.Marshal(req.SourceDocumentIDs)
-	policySnapshot := map[string]any{"version_policy": "skip_exact"}
+	policySnapshot := map[string]any{"version_policy": "skip_exact", "folder_id": req.FolderID}
 	sourceContext := map[string]any{}
 	if preview != nil && preview.ExpansionID != "" {
 		record, ok := ownedExpansion(w, r, userID, preview.ExpansionID)
@@ -237,6 +250,10 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 }
 
 func ListImports(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "operations" {
+		ListImportOperations(w, r)
+		return
+	}
 	if r.URL.Query().Get("history_id") != "" || r.URL.Query().Get("task_id") != "" || r.URL.Query().Get("workflow_session_id") != "" {
 		ListSourceImports(w, r)
 		return
@@ -311,6 +328,10 @@ func ListImports(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetImport(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("view") == "operations" {
+		GetImportOperation(w, r)
+		return
+	}
 	userID, ok := requireUser(w, r)
 	if !ok {
 		return

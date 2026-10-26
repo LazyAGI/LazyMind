@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { libraryFixture, paperFixture } from './__tests__/fixtures';
-import { paperDocument, restoreLibraryPaper } from './libraryDocuments';
+import { libraryFixture } from './__tests__/fixtures';
+import { paperDocument } from './libraryDocuments';
 import type { DocumentAcademic } from '../api/paperWorkflows';
 
 describe('paper document selection and explicit restoration', () => {
@@ -17,16 +17,9 @@ describe('paper document selection and explicit restoration', () => {
     data.attachments[1].available = false;
     expect(paperDocument(data, data.papers[0].id, states)?.state.document_id).toBe('pending');
   });
-  it('restores a removed paper once while preserving its notes and attachment references', () => {
-    const data = libraryFixture({ papers: [paperFixture({ academicWorkId: 'work' })] });
-    data.attachments[0].contentRef = 'pdf';
-    data.papers[0].noteIds = ['note'];
-    data.notes = [{ id: 'note', paperId: 'paper', title: 'Notes', content: 'Keep this result', kind: 'note', createdAt: '', updatedAt: '' }];
-    const removed = { ...data, papers: [], hiddenArxivWorkIds: ['work'], hiddenArxivPapers: [data.papers[0]], hiddenDocumentIds: ['pdf'] };
-    const restored = restoreLibraryPaper(removed, 'work');
-    expect(restored.papers[0].noteIds).toEqual(['note']);
-    expect(restored.notes).toEqual(data.notes);
-    expect(restored.hiddenDocumentIds).toEqual([]);
-    expect(restoreLibraryPaper(restored, 'work').papers).toHaveLength(1);
+  it('does not select an unassociated original file', () => {
+    const data=libraryFixture();data.papers[0].attachmentIds=[];
+    const states:DocumentAcademic[]=[{state:{document_id:'raw',kind:'paper',status:'succeeded',paper_id:'paper',manual:true},is_important:false}];
+    expect(paperDocument(data,'paper',states)).toBeUndefined();
   });
 });

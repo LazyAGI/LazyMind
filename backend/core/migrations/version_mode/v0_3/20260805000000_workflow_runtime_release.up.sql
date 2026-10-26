@@ -3325,12 +3325,13 @@ CREATE INDEX idx_academic_document_states_dataset_id ON academic_document_states
 CREATE TABLE academic_user_paper_states (
   updated_at TIMESTAMP NOT NULL,
   user_id varchar(255) NOT NULL,
+  dataset_id varchar(255) NOT NULL,
   paper_id varchar(36) NOT NULL,
   is_important BOOLEAN NOT NULL DEFAULT false,
-  PRIMARY KEY (user_id, paper_id)
+  PRIMARY KEY (user_id, dataset_id, paper_id)
 );
 CREATE TABLE academic_expansions (
- discovery_mode VARCHAR(32) NOT NULL DEFAULT 'legacy_mock',
+ discovery_mode VARCHAR(32) NOT NULL DEFAULT 'external',
  seed_snapshot_json JSON NOT NULL DEFAULT '[]',
  discovery_json JSON NOT NULL DEFAULT '[]',
  progress_json JSON NOT NULL DEFAULT '{}',
@@ -3357,7 +3358,7 @@ CREATE UNIQUE INDEX idx_academic_expansions_conversation_id ON academic_expansio
 CREATE UNIQUE INDEX uk_academic_expansion_request ON academic_expansions(request_key, request_owner);
 CREATE INDEX idx_academic_expansions_deleted_at ON academic_expansions(deleted_at);
 CREATE TABLE academic_expansion_rounds (
- discovery_mode VARCHAR(32) NOT NULL DEFAULT 'legacy_mock',
+ discovery_mode VARCHAR(32) NOT NULL DEFAULT 'external',
   id varchar(36) NOT NULL,
   expansion_id varchar(36) NOT NULL,
   request_key varchar(128) NOT NULL,
@@ -3412,10 +3413,40 @@ CREATE TABLE academic_paper_contents (
 CREATE UNIQUE INDEX uk_academic_content ON academic_paper_contents(user_id, paper_id, parser_version, source_key);
 -- Complete editable paper-library state and optimistic concurrency revision.
 -- +migrate Dialect postgres,sqlite
-CREATE TABLE paper_libraries (
-    dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
-    data_json JSON NOT NULL,
-    revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
-    created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+CREATE TABLE paper_library_folders (
+ dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, parent_id VARCHAR(255) NOT NULL DEFAULT '',
+ name VARCHAR(255) NOT NULL, name_key VARCHAR(255) NOT NULL, revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0),
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+ PRIMARY KEY(dataset_id,id), UNIQUE(dataset_id,parent_id,name_key)
 );
+CREATE INDEX idx_library_folder_parent ON paper_library_folders(dataset_id,parent_id);
+CREATE TABLE paper_library_entries (
+ dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, academic_work_id VARCHAR(36) NOT NULL,
+ folder_id VARCHAR(255) NOT NULL DEFAULT '', status VARCHAR(16) NOT NULL DEFAULT 'unread',
+ tags_json JSON NOT NULL, metadata_json JSON NOT NULL, source VARCHAR(32) NOT NULL DEFAULT 'unknown',
+ import_method VARCHAR(32) NOT NULL DEFAULT '', source_url TEXT NOT NULL DEFAULT '', arxiv_version VARCHAR(64) NOT NULL DEFAULT '',
+ revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0), removed_at TIMESTAMP,
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+ PRIMARY KEY(dataset_id,id), UNIQUE(dataset_id,academic_work_id),
+ FOREIGN KEY(academic_work_id) REFERENCES academic_works(id)
+);
+CREATE INDEX idx_library_entry_folder ON paper_library_entries(dataset_id,folder_id);
+CREATE INDEX idx_library_entry_active ON paper_library_entries(dataset_id,removed_at);
+CREATE TABLE paper_library_notes (
+ dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, paper_id VARCHAR(255) NOT NULL,
+ title TEXT NOT NULL, content TEXT NOT NULL, kind VARCHAR(32) NOT NULL DEFAULT 'note',
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+ PRIMARY KEY(dataset_id,id), FOREIGN KEY(dataset_id,paper_id) REFERENCES paper_library_entries(dataset_id,id)
+);
+CREATE INDEX idx_library_note_paper ON paper_library_notes(dataset_id,paper_id);
+CREATE TABLE paper_library_attachments (
+ dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, paper_id VARCHAR(255) NOT NULL,
+ document_id VARCHAR(128) NOT NULL DEFAULT '', import_item_id VARCHAR(36) NOT NULL DEFAULT '',
+ name TEXT NOT NULL, kind VARCHAR(32) NOT NULL DEFAULT 'pdf', source_url TEXT NOT NULL DEFAULT '',
+ is_primary BOOLEAN NOT NULL DEFAULT FALSE, detached_at TIMESTAMP,
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+ PRIMARY KEY(dataset_id,id), FOREIGN KEY(dataset_id,paper_id) REFERENCES paper_library_entries(dataset_id,id)
+);
+CREATE INDEX idx_library_attachment_paper ON paper_library_attachments(dataset_id,paper_id);
+CREATE INDEX idx_library_attachment_document ON paper_library_attachments(dataset_id,document_id);
+CREATE UNIQUE INDEX uk_library_active_document ON paper_library_attachments(dataset_id,document_id) WHERE document_id<>'' AND detached_at IS NULL;

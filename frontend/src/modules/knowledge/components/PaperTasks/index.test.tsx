@@ -22,11 +22,10 @@ const detail: ExpansionDetail = { record, paper_importance: {}, chat_status: 'av
 const third = { paper: { paper_id: 'c', abstract: null, title: 'C' }, is_seed: false, is_important: false };
 const threePapers: ExpansionDetail = { ...detail, record: { ...record, result: { ...input, papers: [...input.papers, third] } }, contents: [...detail.contents, { id: 'cc', paper_id: 'c', status: 'ready', content_hash: 'c' }] };
 const preview = (id: string, disposition: ImportPreviewItem['disposition'] = 'downloadable'): ImportPreviewItem => ({ work_id: id, title: id, disposition, presence: { status: '', current_dataset: [], other_datasets: [], importing: false, coverage_complete: true }, fulltext_candidates: disposition === 'downloadable' ? [{ url: `https://arxiv.org/pdf/${id}v2`, source_type: 'official_pdf', source_provider: 'arxiv', version: 'v2' }] : [], paper: { paper_id: id, abstract: null, source_provider: 'arxiv', source_version: 'v2' } });
-function Harness({ selected = ['a'], canImport = true, selectionError, initialMode }: { selected?: string[]; canImport?: boolean; selectionError?: string; initialMode?: PaperTask }) {
-    const [mode, setMode] = useState<PaperTask | undefined>(initialMode);
+function Harness({ selected = ['a'], canImport = true, selectionError }: { selected?: string[]; canImport?: boolean; selectionError?: string }) {
     const [actionsContainer, setActionsContainer] = useState<HTMLDivElement | null>(null);
     const location = useLocation();
-    return <><aside aria-label="论文工具栏"><div ref={setActionsContainer} /></aside><main><PaperTasks dataset="d" mode={mode} setMode={setMode} selected={selected} selectedTitles={selected.map(id => id.toUpperCase())} selectionError={selectionError} canImport={canImport} onImportSubmitted={importsChanged} actionsContainer={actionsContainer} /></main><div data-testid="location">{location.pathname}</div></>;
+    return <><aside aria-label="论文工具栏"><div ref={setActionsContainer} /></aside><main><PaperTasks dataset="d" selected={selected} selectedTitles={selected.map(id => id.toUpperCase())} selectionError={selectionError} canImport={canImport} onImportSubmitted={importsChanged} actionsContainer={actionsContainer} /></main><div data-testid="location">{location.pathname}</div></>;
 }
 function mount(selected?: string[], query = '', canImport = true, options: { selectionError?: string; initialMode?: PaperTask } = {}) {
     return render(<I18nextProvider i18n={i18n}><MemoryRouter initialEntries={['/knowledge' + query]}><ConfigProvider theme={{ token: { motion: false } }}><Harness selected={selected} canImport={canImport} {...options} /></ConfigProvider></MemoryRouter></I18nextProvider>);
@@ -117,16 +116,9 @@ describe('paper task startup routes', () => {
             expect(await screen.findByRole('tooltip')).toHaveTextContent(selectionError);
         });
     });
-    it.each(['expansion', 'review', 'reflection', 'ppt'] as const)('opens the %s action from the library without another selection step', async kind => {
-        mount(['a'], '', true, { initialMode: kind });
-        expect(await screen.findByLabelText('补充要求（选填）')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: /^继\s*续$/ })).not.toBeInTheDocument();
-        await submit();
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind, document_ids: ['a'] }));
-    });
     it.each([['reflection', '阅读心得'], ['ppt', '汇报 PPT']] as const)('starts %s directly from the current library selection', async (kind, label) => {
         mount(['a', 'b']);
-        fireEvent.click(screen.getByRole('button', { name: label, exact: true }));
+        fireEvent.click(screen.getByRole('button', { name: label }));
         expect(screen.queryByRole('menu')).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: /^继\s*续$/ })).not.toBeInTheDocument();
         const dialog = within(screen.getByRole('dialog'));
@@ -144,7 +136,7 @@ describe('paper task startup routes', () => {
     });
     it.each(['阅读心得', '汇报 PPT'])('shows the selection hint only while hovering disabled %s', async label => {
         mount([]);
-        const button = screen.getByRole('button', { name: label, exact: true });
+        const button = screen.getByRole('button', { name: label });
         expect(button).toBeDisabled();
         expect(screen.queryByText('请先选择论文')).not.toBeInTheDocument();
         fireEvent.mouseEnter(button.parentElement!);
@@ -158,10 +150,10 @@ describe('paper task startup routes', () => {
     it.each(['阅读心得', '汇报 PPT'])('explains an invalid library selection when hovering disabled %s', async label => {
         const selectionError = '所选文献的论文身份尚未确认，请先识别或手动确认';
         mount(['a'], '', true, { selectionError });
-        expect(screen.getByRole('button', { name: '阅读心得', exact: true })).toBeDisabled();
-        expect(screen.getByRole('button', { name: '汇报 PPT', exact: true })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '阅读心得' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: '汇报 PPT' })).toBeDisabled();
         expect(screen.queryByText(selectionError)).not.toBeInTheDocument();
-        fireEvent.mouseEnter(screen.getByRole('button', { name: label, exact: true }).parentElement!);
+        fireEvent.mouseEnter(screen.getByRole('button', { name: label }).parentElement!);
         expect(await screen.findByRole('tooltip')).toHaveTextContent(selectionError);
     });
     it('opens history and reviews papers selected in the result list', async () => {
@@ -472,19 +464,19 @@ describe('personal importance', () => {
         vi.mocked(setPaperImportance).mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
         function Mark() {
             const [important, setImportant] = useState(false);
-            return <PaperImportanceButton paperID="a" important={important} onChange={async () => setImportant(true)} />;
+            return <PaperImportanceButton important={important} onToggle={async value => {await setPaperImportance("papers","a",value);setImportant(value)}} />;
         }
         render(<I18nextProvider i18n={i18n}><Mark /></I18nextProvider>);
         fireEvent.click(screen.getByRole('button', { name: '标为重点' }));
         expect(screen.getByRole('button', { name: '标为重点' })).toBeDisabled();
-        expect(setPaperImportance).toHaveBeenCalledWith('a', true);
+        expect(setPaperImportance).toHaveBeenCalledWith('papers', 'a', true);
         await act(async () => { finish(); });
         expect(screen.getByRole('button', { name: '取消重点' })).toHaveAttribute('aria-pressed', 'true');
     });
     it('keeps the original star state when saving fails', async () => {
         vi.mocked(setPaperImportance).mockRejectedValueOnce(new Error('offline'));
         const changed = vi.fn();
-        render(<I18nextProvider i18n={i18n}><PaperImportanceButton paperID="a" important={false} onChange={changed} /></I18nextProvider>);
+        render(<I18nextProvider i18n={i18n}><PaperImportanceButton important={false} onToggle={async value=>{await setPaperImportance("papers","a",value);changed();}} /></I18nextProvider>);
         fireEvent.click(screen.getByRole('button', { name: '标为重点' }));
         await screen.findByText('重点标记更新失败，请重试');
         expect(screen.getByRole('button', { name: '标为重点' })).toHaveAttribute('aria-pressed', 'false');

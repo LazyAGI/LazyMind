@@ -24,6 +24,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 )
 
@@ -743,22 +744,15 @@ func presenceForWorks(ctx context.Context, r *http.Request, userID string, workI
 			return nil, err
 		}
 	}
-	var bibliography struct {
-		Papers []struct {
-			WorkID string `json:"academicWorkId"`
-			DOI    string `json:"doi"`
-			Arxiv  string `json:"arxiv"`
-		} `json:"papers"`
-	}
+	var libraryWorkIDs []string
 	if currentDatasetID != "" {
-		var library orm.PaperLibrary
-		if e := store.DB().WithContext(ctx).Where("dataset_id=?", currentDatasetID).Take(&library).Error; e == nil {
-			if e = json.Unmarshal(library.DataJSON, &bibliography); e != nil {
-				return nil, e
-			}
-		} else if !errors.Is(e, gorm.ErrRecordNotFound) {
+		if e := store.DB().WithContext(ctx).Model(&orm.PaperLibraryEntry{}).Where("dataset_id=? AND academic_work_id IN ? AND removed_at IS NULL", currentDatasetID, workIDs).Pluck("academic_work_id", &libraryWorkIDs).Error; e != nil {
 			return nil, e
 		}
+	}
+	libraryMembers := map[string]bool{}
+	for _, id := range libraryWorkIDs {
+		libraryMembers[id] = true
 	}
 	results := make([]PresenceResult, 0, len(workIDs))
 	for _, workID := range workIDs {
@@ -805,19 +799,8 @@ func presenceForWorks(ctx context.Context, r *http.Request, userID string, workI
 		} else if result.Importing {
 			result.Status = "importing"
 		}
-		if len(result.CurrentDataset) == 0 {
-			var work orm.AcademicWork
-			if e := store.DB().WithContext(ctx).Where("id=?", workID).Take(&work).Error; e != nil {
-				return nil, e
-			}
-			for _, paper := range bibliography.Papers {
-				base, _ := NormalizeArxivID(paper.Arxiv)
-				if paper.WorkID == workID || (work.DOINormalized != "" && NormalizeDOI(paper.DOI) == work.DOINormalized) || (work.ArxivIDBase != "" && base == work.ArxivIDBase) {
-					result.MetadataOnly = true
-					break
-				}
-			}
-		}
+		result.MetadataOnly = len(result.CurrentDataset) == 0 && libraryMembers[workID]
+
 		results = append(results, result)
 	}
 	return results, nil
@@ -893,15 +876,16 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ExpansionID       string      `json:"expansion_id,omitempty"`
-		Identifier        string      `json:"identifier,omitempty"`
-		ReferenceIDs      []string    `json:"reference_ids"`
-		SourceDocumentIDs []string    `json:"source_document_ids"`
-		WorkIDs           []string    `json:"work_ids"`
-		Works             []WorkInput `json:"works"`
-		TargetDatasetID   string      `json:"target_dataset_id"`
-		TargetPID         string      `json:"target_pid,omitempty"`
-		ResolveExternal   *bool       `json:"resolve_external,omitempty"`
+		Papers            []paperlibrary.Paper `json:"papers,omitempty"`
+		ExpansionID       string               `json:"expansion_id,omitempty"`
+		Identifier        string               `json:"identifier,omitempty"`
+		ReferenceIDs      []string             `json:"reference_ids"`
+		SourceDocumentIDs []string             `json:"source_document_ids"`
+		WorkIDs           []string             `json:"work_ids"`
+		Works             []WorkInput          `json:"works"`
+		TargetDatasetID   string               `json:"target_dataset_id"`
+		TargetPID         string               `json:"target_pid,omitempty"`
+		ResolveExternal   *bool                `json:"resolve_external,omitempty"`
 	}
 	if !parseJSON(r, &req) || req.TargetDatasetID == "" {
 		replyError(w, http.StatusBadRequest, "INVALID_REQUEST", "target_dataset_id is required")
@@ -909,6 +893,10 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 	}
 	if !doc.HasDatasetPermission(r, req.TargetDatasetID, acl.PermissionDatasetUpload) {
 		replyError(w, http.StatusForbidden, "TARGET_DATASET_FORBIDDEN", "target knowledge base is not writable")
+		return
+	}
+	if len(req.Papers) > 500 {
+		replyError(w, 400, "INVALID_REQUEST", "一次最多预览 500 条题录")
 		return
 	}
 	var linkInput *WorkInput
@@ -982,6 +970,32 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	draftIDs := map[string]string{}
+	if len(req.Papers) > 0 {
+		err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+			for _, draft := range req.Papers {
+				if !paperlibrary.ValidID(draft.ID) {
+					return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "论文条目 ID 无效")
+				}
+				if e := validateLibraryMetadata(&draft.Metadata); e != nil {
+					return e
+				}
+				work, e := resolveLibraryWork(r.Context(), tx, req.TargetDatasetID, draft.ID, draft.Metadata)
+				if e != nil {
+					return e
+				}
+				workIDs = append(workIDs, work.ID)
+				draftIDs[work.ID] = draft.ID
+				m := draft.Metadata
+				previewInputs[work.ID] = WorkInput{Title: m.Title, Authors: m.Authors, Venue: m.Venue, Year: m.Year, Abstract: m.Abstract, CitationCount: m.CitationCount}
+			}
+			return nil
+		})
+		if err != nil {
+			replyLibraryError(w, err)
+			return
+		}
+	}
 	if len(req.Works) > 0 {
 		err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 			for index, input := range req.Works {
@@ -1034,6 +1048,9 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 	for _, work := range works {
 		p := presenceByID[work.ID]
 		ref := paperRef(work)
+		if input, exists := previewInputs[work.ID]; exists {
+			ref = documentPaperRef(ref, marshal(input))
+		}
 		if work.ID == linkedWorkID {
 			ref = documentPaperRef(ref, marshal(*linkInput))
 			work.ProvenanceJSON = marshal(linkInput.Provenance)
@@ -1106,7 +1123,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		} else if len(candidates) == 0 {
 			disposition = "metadata_only"
 		}
-		items = append(items, PreviewItem{Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
+		items = append(items, PreviewItem{LibraryPaperID: draftIDs[work.ID], Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Title < items[j].Title })
 	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified, expansion)

@@ -46,7 +46,7 @@ func ResolveExpansionPapers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var mark orm.AcademicUserPaperState
-		if err := db.Where("user_id=? AND paper_id=?", user, id).Take(&mark).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := db.Where("user_id=? AND dataset_id=? AND paper_id=?", user, record.DatasetID, id).Take(&mark).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			replyError(w, 500, "READ_FAILED", err.Error())
 			return
 		}

@@ -1,275 +1,242 @@
 package academic
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
-	"strings"
-	"sync"
-	"testing"
-
-	"github.com/glebarez/sqlite"
+	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	"io"
 	"lazymind/core/acl"
 	"lazymind/core/common/orm"
+	"lazymind/core/paperlibrary"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
 )
-
-func TestPaperLibraryAtomicSaveAndReopen(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "libraries.db")
-	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = db.AutoMigrate(&orm.PaperLibrary{}); err != nil {
-		t.Fatal(err)
-	}
-	sqlDB, _ := db.DB()
-	sqlDB.SetMaxOpenConns(1)
-	for _, revision := range []int64{0, 1} {
-		start := make(chan struct{})
-		results := make(chan bool, 8)
-		errors := make(chan error, 8)
-		var group sync.WaitGroup
-		for i := 0; i < 8; i++ {
-			group.Add(1)
-			go func(i int) {
-				defer group.Done()
-				<-start
-				saved, err := savePaperLibrary(context.Background(), db, "papers", revision, json.RawMessage(paperLibraryFixture(fmt.Sprintf("Writer %d", i))))
-				results <- saved
-				errors <- err
-			}(i)
-		}
-		close(start)
-		group.Wait()
-		close(results)
-		close(errors)
-		winners := 0
-		for saved := range results {
-			if saved {
-				winners++
-			}
-		}
-		for err := range errors {
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		if winners != 1 {
-			t.Fatalf("revision %d had %d successful writers", revision, winners)
-		}
-	}
-	if err = sqlDB.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, _ := reopened.DB()
-	defer connection.Close()
-	result, err := readPaperLibrary(context.Background(), reopened, "papers")
-	if err != nil || result.Revision != 2 || !strings.Contains(string(result.Data), "Writer ") {
-		t.Fatalf("restart lost state: %#v %v", result, err)
-	}
-}
-
-func TestPaperLibraryBodyLimitAndScanWritePolicy(t *testing.T) {
-	paperLibraryTestDB(t)
-	w := paperLibraryRequest(t, "PUT", "papers", "owner", `{"revision":0,"data":"`+strings.Repeat("x", maxPaperLibraryBytes)+`"}`)
-	if w.Code != 413 {
-		t.Fatalf("oversized request: %d", w.Code)
-	}
-	previous := http.DefaultTransport
-	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		if strings.HasSuffix(r.URL.Path, "source-access/by-dataset:batch") {
-			var request struct {
-				Action string `json:"action"`
-			}
-			json.NewDecoder(r.Body).Decode(&request)
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"items":[{"dataset_id":"papers","exists":true,"allowed":%t}]}`, request.Action == "read"))), Header: make(http.Header), Request: r}, nil
-		}
-		return previous.RoundTrip(r)
-	})
-	w = paperLibraryRequest(t, "GET", "papers", "owner", "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"can_write":false`) {
-		t.Fatalf("scan readonly: %d %s", w.Code, w.Body.String())
-	}
-	w = paperLibraryRequest(t, "PUT", "papers", "owner", `{"revision":0,"data":`+paperLibraryFixture("No access")+`}`)
-	if w.Code != 403 {
-		t.Fatalf("scan write denial bypassed: %d %s", w.Code, w.Body.String())
-	}
-}
 
 func paperLibraryTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := importErrorDB(t)
-	if err := db.AutoMigrate(&orm.PaperLibrary{}, &orm.AcademicUserPaperState{}, &orm.Dataset{}, &orm.Document{}, &orm.ACLModel{}, &orm.ACLGroupModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); err != nil {
-		t.Fatal(err)
+	if e := db.AutoMigrate(&orm.PaperLibraryEntry{}, &orm.PaperLibraryFolder{}, &orm.PaperLibraryNote{}, &orm.PaperLibraryAttachment{}, &orm.AcademicUserPaperState{}, &orm.Dataset{}, &orm.ACLModel{}, &orm.ACLGroupModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); e != nil {
+		t.Fatal(e)
 	}
+	sqlDB, _ := db.DB()
+	sqlDB.SetMaxOpenConns(1)
 	acl.InitStore(&orm.DB{DB: db})
 	for _, id := range []string{"papers", "other", "documents"} {
 		scene := "academic_papers"
 		if id == "documents" {
 			scene = "general"
 		}
-		row := orm.Dataset{ID: id, Scene: scene, Ext: json.RawMessage(`{}`), BaseModel: orm.BaseModel{CreateUserID: "owner"}}
-		if err := db.Create(&row).Error; err != nil {
-			t.Fatal(err)
+		if e := db.Create(&orm.Dataset{ID: id, Scene: scene, ProcessingLevel: "stored", Ext: marshal(map[string]any{}), BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; e != nil {
+			t.Fatal(e)
 		}
 	}
-	previous := http.DefaultTransport
+	old := http.DefaultTransport
 	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		body := `{"items":[],"source_map":{},"code":200,"data":[]}`
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"items":[],"source_map":{},"code":200,"data":[]}`)), Header: make(http.Header), Request: r}, nil
 	})
-	t.Cleanup(func() { http.DefaultTransport = previous })
+	t.Cleanup(func() { http.DefaultTransport = old })
 	return db
 }
-
-func paperLibraryRequest(t *testing.T, method, dataset, user, body string) *httptest.ResponseRecorder {
+func libraryRequest(t *testing.T, method, path, dataset, user string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	r := httptest.NewRequest(method, "/academic/library?target_dataset_id="+dataset, strings.NewReader(body))
+	router := mux.NewRouter()
+	router.HandleFunc("/library", GetPaperLibrary).Methods("GET")
+	router.HandleFunc("/library/papers/{library_paper_id}", PatchLibraryPaper).Methods("PATCH")
+	router.HandleFunc("/library/papers:move", MoveLibraryPapers)
+	router.HandleFunc("/library/papers:remove", RemoveLibraryPapers)
+	router.HandleFunc("/library/papers/{library_paper_id}/attachments/{attachment_id}:detach", DetachLibraryAttachment)
+	router.HandleFunc("/library/papers/{library_paper_id}/notes", AddLibraryNote)
+	router.HandleFunc("/library/folders", CreateLibraryFolder).Methods("POST")
+	router.HandleFunc("/library/folders/{folder_id}", RenameLibraryFolder).Methods("PATCH")
+	router.HandleFunc("/library/folders/{folder_id}:delete", DeleteLibraryFolder)
+	router.HandleFunc("/papers/{paper_id}/importance", SetImportance)
+	router.HandleFunc("/imports", CreateImport).Methods("POST")
+	router.HandleFunc("/imports", ListImports).Methods("GET")
+	router.HandleFunc("/imports/{batch_id}", GetImport).Methods("GET")
+	sep := "?"
+	if strings.Contains(path, "?") {
+		sep = "&"
+	}
+	r := httptest.NewRequest(method, path+sep+"target_dataset_id="+dataset, strings.NewReader(string(marshal(body))))
 	r.Header.Set("X-User-Id", user)
 	w := httptest.NewRecorder()
-	if method == http.MethodGet {
-		GetPaperLibrary(w, r)
-	} else {
-		PutPaperLibrary(w, r)
-	}
+	router.ServeHTTP(w, r)
 	return w
 }
-
-func paperLibraryFixture(title string) string {
-	return fmt.Sprintf(`{"schemaVersion":3,"folders":[{"id":"folder","name":"Topic"}],"collections":[{"id":"collection","name":"Collection"}],"papers":[{"id":"paper","title":%q,"authors":"Author","year":2026,"venue":"Journal","folderId":"folder","status":"reading","important":true,"tags":["tag"],"source":"doi","parse":"ready","metadata":{"identifiers":{"doi":"10.1234/test"},"confidence":{}},"attachmentIds":[],"noteIds":["note"],"annotationIds":[],"collectionIds":["collection"],"relatedPaperIds":[]}],"attachments":[],"notes":[{"id":"note","paperId":"paper","title":"Note","content":"Durable note","kind":"note","createdAt":"2026-10-21","updatedAt":"2026-10-21"}],"annotations":[],"relations":[],"mergeSnapshots":[],"hiddenArxivWorkIds":["hidden-work"],"hiddenArxivPapers":[]}`, title)
+func libraryDraft(id, title, doi string) *paperlibrary.Paper {
+	return &paperlibrary.Paper{ID: id, Metadata: paperlibrary.Metadata{Title: title, Authors: []string{"Jane Doe", "John Smith", "Alex Lee", "Chris Wang"}, Venue: "Journal", Year: 2025, Identifiers: paperlibrary.Identifiers{DOI: doi}}, Tags: []string{}, Source: "local"}
 }
-
-func TestPaperLibraryPersistsFullGraphAndRejectsStaleWrites(t *testing.T) {
-	db := paperLibraryTestDB(t)
-	w := paperLibraryRequest(t, "GET", "papers", "owner", "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"revision":0`) || !strings.Contains(w.Body.String(), `"can_write":true`) {
-		t.Fatalf("empty: %d %s", w.Code, w.Body.String())
+func importDraft(t *testing.T, dataset, key string, papers ...*paperlibrary.Paper) libraryChanges {
+	t.Helper()
+	items := []selectedImportItem{}
+	for _, p := range papers {
+		items = append(items, selectedImportItem{Paper: p})
 	}
-	fixture := paperLibraryFixture("Persistent paper")
-	w = paperLibraryRequest(t, "PUT", "papers", "owner", `{"revision":0,"data":`+fixture+`}`)
+	w := libraryRequest(t, "POST", "/imports", dataset, "owner", createImportRequest{EntryType: "bibliography", TargetDatasetID: dataset, IdempotencyKey: key, Format: "bib", Items: items})
 	if w.Code != 200 {
-		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+		t.Fatal(w.Code, w.Body.String())
 	}
-	var acknowledged struct {
-		Data json.RawMessage `json:"data"`
+	var out libraryChanges
+	if e := json.Unmarshal(w.Body.Bytes(), &out); e != nil {
+		t.Fatal(e)
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &acknowledged); err != nil {
-		t.Fatal(err)
+	return out
+}
+func readLibrary(t *testing.T, dataset string) paperlibrary.View {
+	t.Helper()
+	w := libraryRequest(t, "GET", "/library", dataset, "owner", nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
 	}
-	// A fresh handler/service reads only database state, independent of the writer.
-	w = paperLibraryRequest(t, "GET", "papers", "owner", "")
-	var result struct {
-		Data     json.RawMessage `json:"data"`
-		Revision int64           `json:"revision"`
+	var out paperlibrary.View
+	if e := json.Unmarshal(w.Body.Bytes(), &out); e != nil {
+		t.Fatal(e)
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
+	return out
+}
+func TestLibraryMetadataIdentityAndIndependentRevisions(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	saved := importDraft(t, "papers", "two-papers", libraryDraft("a", "A", "10.1234/a"), libraryDraft("b", "B", "10.1234/b"))
+	a, b := saved.Data.Papers[0], saved.Data.Papers[1]
+	corrected := a.Metadata
+	corrected.Identifiers.DOI = "10.1234/corrected"
+	w := libraryRequest(t, "PATCH", "/library/papers/a", "papers", "owner", map[string]any{"revision": a.Revision, "metadata": corrected})
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
 	}
-	var got, want any
-	json.Unmarshal(result.Data, &got)
-	json.Unmarshal(acknowledged.Data, &want)
-	gotJSON, _ := json.Marshal(got)
-	wantJSON, _ := json.Marshal(want)
-	if w.Code != 200 || result.Revision != 1 || string(gotJSON) != string(wantJSON) {
-		t.Fatalf("lost graph: %d %s", w.Code, w.Body.String())
+	w = libraryRequest(t, "PATCH", "/library/papers/b", "papers", "owner", map[string]any{"revision": b.Revision, "status": "read"})
+	if w.Code != 200 {
+		t.Fatal("unrelated paper conflicted", w.Code, w.Body.String())
 	}
-	for _, revision := range []int{0, 2} {
-		w = paperLibraryRequest(t, "PUT", "papers", "owner", fmt.Sprintf(`{"revision":%d,"data":%s}`, revision, paperLibraryFixture("overwrite")))
-		if w.Code != 409 || !strings.Contains(w.Body.String(), "Persistent paper") {
-			t.Fatalf("stale save: %d %s", w.Code, w.Body.String())
+	view := readLibrary(t, "papers")
+	for _, p := range view.Data.Papers {
+		if p.ID == "a" {
+			var work orm.AcademicWork
+			if e := db.Where("id=?", p.AcademicWorkID).Take(&work).Error; e != nil {
+				t.Fatal(e)
+			}
+			if work.DOINormalized != "10.1234/corrected" || p.Metadata.Identifiers.DOI != work.DOINormalized {
+				t.Fatal("bibliography and identity disagree")
+			}
 		}
 	}
-	if err := db.Callback().Update().Before("gorm:update").Register("fail_library_write", func(tx *gorm.DB) {
-		if tx.Statement.Table == "paper_libraries" {
-			tx.AddError(errors.New("disk unavailable"))
-		}
-	}); err != nil {
-		t.Fatal(err)
+	w = libraryRequest(t, "PATCH", "/library/papers/a", "papers", "owner", map[string]any{"revision": a.Revision, "status": "read"})
+	if w.Code != 409 {
+		t.Fatal("stale edit replaced newer data", w.Code)
 	}
-	w = paperLibraryRequest(t, "PUT", "papers", "owner", `{"revision":1,"data":`+paperLibraryFixture("failed")+`}`)
-	if w.Code != 500 {
-		t.Fatalf("failed DB save accepted: %d %s", w.Code, w.Body.String())
-	}
-	db.Callback().Update().Remove("fail_library_write")
-	w = paperLibraryRequest(t, "GET", "papers", "owner", "")
-	if !strings.Contains(w.Body.String(), "Persistent paper") || !strings.Contains(w.Body.String(), `"revision":1`) {
-		t.Fatalf("failed write damaged state: %s", w.Body.String())
-	}
-	w = paperLibraryRequest(t, "GET", "other", "owner", "")
-	if !strings.Contains(w.Body.String(), `"revision":0`) {
-		t.Fatalf("cross-dataset state: %s", w.Body.String())
+	if view.PaperCount != 2 || len(view.Data.Papers[0].Metadata.Authors) != 4 {
+		t.Fatal("paper or author data lost")
 	}
 }
-
-func TestPaperLibraryAuthorizationAndValidation(t *testing.T) {
+func TestLibraryImportReplayAndBatchMoveAreAtomic(t *testing.T) {
 	db := paperLibraryTestDB(t)
-	acl.GetStore().AddACL(acl.ResourceTypeDB, "papers", acl.GranteeUser, "reader", acl.PermissionDatasetRead, "owner", nil)
-	acl.GetStore().AddACL(acl.ResourceTypeDB, "papers", acl.GranteeUser, "uploader", acl.PermissionDatasetUpload, "owner", nil)
-	acl.GetStore().AddACL(acl.ResourceTypeDB, "papers", acl.GranteeUser, "writer", acl.PermissionDatasetWrite, "owner", nil)
-	valid := `{"revision":0,"data":` + paperLibraryFixture("Paper") + `}`
-	for _, tt := range []struct {
-		method, dataset, user, body string
-		status                      int
-	}{
-		{"GET", "papers", "", "", 400}, {"GET", "unknown", "owner", "", 403}, {"GET", "papers", "stranger", "", 403},
-		{"GET", "documents", "owner", "", 400}, {"PUT", "papers", "reader", valid, 403}, {"PUT", "papers", "uploader", valid, 403},
-		{"PUT", "papers", "owner", `{"revision":-1,"data":{}}`, 400}, {"PUT", "papers", "owner", `{"revision":0,"data":null}`, 400},
-		{"PUT", "papers", "owner", valid + ` {}`, 400}, {"PUT", "papers", "owner", `{"data":` + paperLibraryFixture("Paper") + `}`, 400},
-	} {
-		w := paperLibraryRequest(t, tt.method, tt.dataset, tt.user, tt.body)
-		if w.Code != tt.status {
-			t.Fatalf("%+v: %d %s", tt, w.Code, w.Body.String())
+	saved := importDraft(t, "papers", "original", libraryDraft("a", "A", "10.1234/a"), libraryDraft("b", "B", "10.1234/b"))
+	importDraft(t, "papers", "original", libraryDraft("a", "A", "10.1234/a"), libraryDraft("b", "B", "10.1234/b"))
+	var count int64
+	db.Model(&orm.PaperImportBatch{}).Count(&count)
+	if count != 1 {
+		t.Fatal("import replay duplicated receipt")
+	}
+	w := libraryRequest(t, "POST", "/library/folders", "papers", "owner", map[string]any{"id": "folder", "name": "Topic"})
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	items := []libraryTarget{{ID: "a", Revision: saved.Data.Papers[0].Revision}, {ID: "b", Revision: 99}}
+	w = libraryRequest(t, "POST", "/library/papers:move", "papers", "owner", map[string]any{"items": items, "folder_id": "folder"})
+	if w.Code != 409 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	for _, p := range readLibrary(t, "papers").Data.Papers {
+		if p.FolderID != nil {
+			t.Fatal("batch move partially committed")
 		}
 	}
-	w := paperLibraryRequest(t, "GET", "papers", "reader", "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"can_write":false`) {
-		t.Fatalf("reader: %d %s", w.Code, w.Body.String())
+}
+func TestLibraryNotesAndDirectoryDeletionRetainMaterials(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	for _, f := range []map[string]any{{"id": "parent", "name": "Parent"}, {"id": "child", "name": "Child", "parent_id": "parent"}} {
+		w := libraryRequest(t, "POST", "/library/folders", "papers", "owner", f)
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
 	}
-	w = paperLibraryRequest(t, "PUT", "papers", "writer", valid)
+	draft := libraryDraft("a", "A", "10.1234/a")
+	folder := "child"
+	draft.FolderID = &folder
+	importDraft(t, "papers", "with-folder", draft)
+	for i := 0; i < 2; i++ {
+		w := libraryRequest(t, "POST", "/library/papers/a/notes", "papers", "owner", map[string]any{"id": "note", "content": "Do not lose this note"})
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	w := libraryRequest(t, "POST", "/library/folders/parent:delete", "papers", "owner", map[string]any{"revision": 1})
 	if w.Code != 200 {
-		t.Fatalf("writer: %d %s", w.Code, w.Body.String())
+		t.Fatal(w.Code, w.Body.String())
 	}
-	if err := db.Model(&orm.PaperLibrary{}).Where("dataset_id = ?", "papers").Update("data_json", `{"schemaVersion":99}`).Error; err != nil {
-		t.Fatal(err)
+	view := readLibrary(t, "papers")
+	if len(view.Data.Folders) != 0 || view.Data.Papers[0].FolderID != nil || len(view.Data.Notes) != 1 {
+		t.Fatal("directory removal lost or duplicated reading data", view)
 	}
-	w = paperLibraryRequest(t, "GET", "papers", "owner", "")
-	if w.Code != 500 {
-		t.Fatalf("corrupt state silently reset: %d %s", w.Code, w.Body.String())
+	db.Model(&orm.PaperLibraryNote{}).Count(&view.PaperCount)
+	if view.PaperCount != 1 {
+		t.Fatal("notes were rewritten")
 	}
 }
-
-func TestPaperLibraryRejectsForeignDocumentAndKeepsMigrationArchive(t *testing.T) {
+func TestLibrarySinglePaperMutationHasBoundedReads(t *testing.T) {
 	db := paperLibraryTestDB(t)
-	if err := db.Create(&orm.Document{ID: "foreign-doc", DatasetID: "other", BaseModel: orm.BaseModel{CreateUserID: "owner"}}).Error; err != nil {
-		t.Fatal(err)
+	importDraft(t, "papers", "seed", libraryDraft("a", "A", "10.1234/a"))
+	queries := 0
+	db.Callback().Query().After("gorm:query").Register("library-read-count", func(*gorm.DB) { queries++ })
+	t.Cleanup(func() { db.Callback().Query().Remove("library-read-count") })
+	patch := func(revision int64) {
+		w := libraryRequest(t, "PATCH", "/library/papers/a", "papers", "owner", map[string]any{"revision": revision, "status": "reading"})
+		if w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
 	}
-	var data map[string]any
-	json.Unmarshal([]byte(paperLibraryFixture("Paper")), &data)
-	data["attachments"] = []any{map[string]any{"id": "a", "paperId": "paper", "name": "File", "kind": "pdf", "source": "local", "addedAt": "today", "contentRef": "foreign-doc"}}
-	encoded, _ := json.Marshal(data)
-	w := paperLibraryRequest(t, "PUT", "papers", "owner", `{"revision":0,"data":`+string(encoded)+`}`)
-	if w.Code != 400 {
-		t.Fatalf("foreign document accepted: %d %s", w.Code, w.Body.String())
+	patch(1)
+	queries = 0
+	patch(2)
+	small := queries
+	works := []orm.AcademicWork{}
+	entries := []orm.PaperLibraryEntry{}
+	for i := 0; i < 1000; i++ {
+		id := fmt.Sprintf("bulk-%d", i)
+		works = append(works, orm.AcademicWork{ID: id, CanonicalTitle: id, AuthorsJSON: marshal([]string{}), ExternalIDsJSON: marshal(map[string]string{}), ProvenanceJSON: marshal(map[string]any{})})
+		entries = append(entries, orm.PaperLibraryEntry{DatasetID: "papers", ID: id, AcademicWorkID: id, Status: "unread", TagsJSON: marshal([]string{}), MetadataJSON: marshal(map[string]any{}), Revision: 1})
 	}
-	data["attachments"] = []any{}
-	data["migrationSnapshots"] = []any{map[string]any{"id": "legacy-hash", "createdAt": "today", "source": "browser-local-v3", "data": json.RawMessage(paperLibraryFixture("Archived legacy"))}}
-	encoded, _ = json.Marshal(data)
-	w = paperLibraryRequest(t, "PUT", "papers", "owner", `{"revision":0,"data":`+string(encoded)+`}`)
+	if e := db.CreateInBatches(&works, 100).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := db.CreateInBatches(&entries, 100).Error; e != nil {
+		t.Fatal(e)
+	}
+	queries = 0
+	patch(3)
+	if queries > small+2 {
+		t.Fatalf("single edit reads grew with library size: %d -> %d", small, queries)
+	}
+}
+func TestLibraryAccessAndForeignFoldersAreRejected(t *testing.T) {
+	paperLibraryTestDB(t)
+	importDraft(t, "papers", "seed", libraryDraft("a", "A", "10.1234/a"))
+	w := libraryRequest(t, "PATCH", "/library/papers/a", "papers", "stranger", map[string]any{"revision": 1, "status": "read"})
+	if w.Code != 403 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = libraryRequest(t, "POST", "/library/folders", "other", "owner", map[string]any{"id": "foreign", "name": "Foreign"})
 	if w.Code != 200 {
-		t.Fatalf("migration save: %d %s", w.Code, w.Body.String())
+		t.Fatal(w.Body.String())
 	}
-	w = paperLibraryRequest(t, "GET", "papers", "owner", "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "Archived legacy") {
-		t.Fatalf("lost archive: %d %s", w.Code, w.Body.String())
+	w = libraryRequest(t, "POST", "/library/papers:move", "papers", "owner", map[string]any{"items": []libraryTarget{{ID: "a", Revision: 1}}, "folder_id": "foreign"})
+	if w.Code != 404 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if readLibrary(t, "papers").Data.Papers[0].FolderID != nil {
+		t.Fatal("foreign folder accepted")
 	}
 }

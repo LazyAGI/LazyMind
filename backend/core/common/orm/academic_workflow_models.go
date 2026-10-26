@@ -24,6 +24,7 @@ func (AcademicDocumentState) TableName() string { return "academic_document_stat
 
 type AcademicUserPaperState struct {
 	UserID      string `gorm:"primaryKey;type:varchar(255)"`
+	DatasetID   string `gorm:"primaryKey;type:varchar(255)"`
 	PaperID     string `gorm:"primaryKey;type:varchar(36)"`
 	IsImportant bool   `gorm:"not null;default:false"`
 	UpdatedAt   time.Time
@@ -32,7 +33,7 @@ type AcademicUserPaperState struct {
 func (AcademicUserPaperState) TableName() string { return "academic_user_paper_states" }
 
 type AcademicExpansion struct {
-	DiscoveryMode    string          `gorm:"type:varchar(32);not null;default:'legacy_mock'" json:"discovery_mode"`
+	DiscoveryMode    string          `gorm:"type:varchar(32);not null;default:'external'" json:"discovery_mode"`
 	SeedSnapshotJSON json.RawMessage `gorm:"serializer:json;type:json;not null;default:'[]'" json:"-"`
 	DiscoveryJSON    json.RawMessage `gorm:"serializer:json;type:json;not null;default:'[]'" json:"-"`
 	ProgressJSON     json.RawMessage `gorm:"serializer:json;type:json;not null;default:'{}'" json:"progress"`
@@ -56,7 +57,7 @@ type AcademicExpansion struct {
 func (AcademicExpansion) TableName() string { return "academic_expansions" }
 
 type AcademicExpansionRound struct {
-	DiscoveryMode string          `gorm:"type:varchar(32);not null;default:'legacy_mock'" json:"discovery_mode"`
+	DiscoveryMode string          `gorm:"type:varchar(32);not null;default:'external'" json:"discovery_mode"`
 	ID            string          `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	ExpansionID   string          `gorm:"uniqueIndex:uk_academic_round,priority:1;type:varchar(36);not null" json:"expansion_id"`
 	RequestKey    string          `gorm:"uniqueIndex:uk_academic_round,priority:2;type:varchar(128);not null" json:"request_key"`

@@ -133,10 +133,13 @@ func resolvePaperSelection(r *http.Request, user, dataset string, ids []string) 
 		}
 		seenPapers[work.ID] = true
 		var mark orm.AcademicUserPaperState
-		if err := store.DB().Where("user_id=? AND paper_id=?", user, work.ID).Take(&mark).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := store.DB().Where("user_id=? AND dataset_id=? AND paper_id=?", user, dataset, work.ID).Take(&mark).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil, err
 		}
-		ref := documentPaperRef(paperRef(work), state.MetadataJSON)
+		ref, refErr := datasetPaperRef(store.DB().WithContext(r.Context()), dataset, work)
+		if refErr != nil {
+			return nil, nil, refErr
+		}
 		ref.SourceDocumentID = id
 		var link orm.AcademicWorkDocument
 		if err := store.DB().Where("dataset_id=? AND document_id=? AND academic_work_id=?", dataset, id, work.ID).Take(&link).Error; err == nil {
@@ -442,7 +445,7 @@ func snapshotReview(ctx context.Context, tx *gorm.DB, user, dataset string, inpu
 		}
 		p.Paper = ref
 		var mark orm.AcademicUserPaperState
-		if err := tx.Where("user_id=? AND paper_id=?", user, work.ID).Take(&mark).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := tx.Where("user_id=? AND dataset_id=? AND paper_id=?", user, dataset, work.ID).Take(&mark).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 			return input, nil, err
 		}
 		p.IsImportant = mark.IsImportant
@@ -566,9 +569,6 @@ func launchHistoryReview(w http.ResponseWriter, r *http.Request, user string, re
 		if err := json.Unmarshal(snapshot, &input); err != nil {
 			return err
 		}
-		if err := restorePaperRoundInstruction(tx, record, version, &input); err != nil {
-			return err
-		}
 		if req.UserInstruction != "" {
 			input.UserInstruction += "\n\n" + req.UserInstruction
 		}
@@ -610,14 +610,61 @@ func academicArtifactJSON(raw json.RawMessage) (json.RawMessage, error) {
 	return workflowdocument.ArtifactData(value), nil
 }
 
-func rejectExpansionResult(db *gorm.DB, record orm.AcademicExpansion, session orm.WorkflowSession, artifact workflowstore.Artifact, err error) (asyncjob.Result, error) {
-	if updateErr := db.Model(&orm.AcademicExpansion{}).Where("id=? AND deleted_at IS NULL", record.ID).
-		Where("EXISTS (SELECT 1 FROM plugin_sessions WHERE id=? AND state_version=? AND status='completed')", session.ID, session.StateVersion).
-		Where("NOT EXISTS (SELECT 1 FROM academic_expansion_rounds WHERE expansion_id=? AND status='completed' AND created_at>?)", record.ID, artifact.CreatedAt).
-		Updates(map[string]any{"status": "failed", "updated_at": time.Now().UTC()}).Error; updateErr != nil {
-		return asyncjob.Result{}, updateErr
+func rejectExpansionResult(db *gorm.DB, record orm.AcademicExpansion, session orm.WorkflowSession, artifact workflowstore.Artifact, projectionErr error) (asyncjob.Result, error) {
+	stale := false
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", record.ID).Take(&record).Error; e != nil {
+			return e
+		}
+		var published orm.AcademicExpansionRound
+		e := tx.Where("expansion_id=? AND status='completed'", record.ID).Order("version DESC").Take(&published).Error
+		if e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
+			return e
+		}
+		if e == nil {
+			stale, e = publishedRoundAfter(tx, published, session, artifact)
+			if e != nil {
+				return e
+			}
+			if stale {
+				return nil
+			}
+		}
+		return tx.Model(&orm.AcademicExpansion{}).Where("id=? AND deleted_at IS NULL", record.ID).Where("EXISTS (SELECT 1 FROM plugin_sessions WHERE id=? AND state_version=? AND status='completed')", session.ID, session.StateVersion).Updates(map[string]any{"status": "failed", "updated_at": time.Now().UTC()}).Error
+	})
+	if err != nil {
+		return asyncjob.Result{}, err
 	}
-	return asyncjob.Result{Permanent: true}, err
+	if stale {
+		return asyncjob.Result{}, nil
+	}
+	return asyncjob.Result{Permanent: true}, projectionErr
+}
+
+// Compare the runtime's session, attempt and artifact order, including timestamp ties.
+func publishedRoundAfter(tx *gorm.DB, round orm.AcademicExpansionRound, session orm.WorkflowSession, artifact workflowstore.Artifact) (bool, error) {
+	if round.SessionID != session.ID {
+		var published orm.WorkflowSession
+		if e := tx.Where("id=?", round.SessionID).Take(&published).Error; e != nil {
+			return false, e
+		}
+		if !published.CreatedAt.Equal(session.CreatedAt) {
+			return published.CreatedAt.After(session.CreatedAt), nil
+		}
+		return published.ID > session.ID, nil
+	}
+	var attempt orm.WorkflowSessionStep
+	if e := tx.Where("id=?", round.AttemptID).Take(&attempt).Error; e != nil {
+		return false, e
+	}
+	if attempt.Attempt != artifact.Attempt {
+		return attempt.Attempt > artifact.Attempt, nil
+	}
+	var previous orm.WorkflowSlotRevision
+	if e := tx.Where("id=?", round.RequestKey).Take(&previous).Error; e != nil {
+		return false, e
+	}
+	return previous.Revision >= artifact.Revision, nil
 }
 
 func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (asyncjob.Result, error) {
@@ -754,27 +801,24 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			if exists > 0 {
 				return nil
 			}
-			var previous ReviewWorkflowInput
-			if e := json.Unmarshal(record.ResultJSON, &previous); e != nil {
-				return e
-			}
 			roundInput := input
 			var newest orm.AcademicExpansionRound
-			historical := tx.Where("expansion_id=? AND status='completed'", record.ID).Order("created_at DESC").Take(&newest).Error == nil && newest.CreatedAt.After(artifact.CreatedAt)
-			if historical {
-				input.UserInstruction = previous.UserInstruction
-				input.CandidateDirections = previous.CandidateDirections
-				input.SelectedDirections = previous.SelectedDirections
+			newestErr := tx.Where("expansion_id=? AND status='completed'", record.ID).Order("version DESC").Take(&newest).Error
+			if newestErr != nil && !errors.Is(newestErr, gorm.ErrRecordNotFound) {
+				return newestErr
 			}
-			priorPapers := []WorkflowPaper{}
-			for _, p := range previous.Papers {
-				if _, e := expansionSource(tx, record, p.Paper.PaperID); e == nil {
-					priorPapers = append(priorPapers, p)
+			if newestErr == nil {
+				stale, e := publishedRoundAfter(tx, newest, session, artifact)
+				if e != nil {
+					return e
+				}
+				if stale {
+					return nil
 				}
 			}
 			merged := map[string]WorkflowPaper{}
 			order := []string{}
-			for _, p := range append(priorPapers, input.Papers...) {
+			for _, p := range input.Papers {
 				id := p.Paper.PaperID
 				if id == "" {
 					return errors.New("paper_id is required")
@@ -790,7 +834,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 				p.Paper, p.IsSeed = source.Paper, source.IsSeed
 
 				var mark orm.AcademicUserPaperState
-				if e := tx.Where("user_id=? AND paper_id=?", record.UserID, id).Take(&mark).Error; e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
+				if e := tx.Where("user_id=? AND dataset_id=? AND paper_id=?", record.UserID, record.DatasetID, id).Take(&mark).Error; e != nil && !errors.Is(e, gorm.ErrRecordNotFound) {
 					return e
 				}
 				p.IsImportant = mark.IsImportant
@@ -854,9 +898,6 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 				return nil
 			}
 			if e := json.Unmarshal(latest.ResultJSON, &input); e != nil {
-				return e
-			}
-			if e := restorePaperRoundInstruction(tx, latest, latest.Version, &input); e != nil {
 				return e
 			}
 			snapshot, contents, e := snapshotReview(ctx, tx, record.UserID, record.DatasetID, input, false)
@@ -977,7 +1018,7 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(ids) > 0 {
 		var marks []orm.AcademicUserPaperState
-		if err := store.DB().Where("user_id=? AND paper_id IN ?", user, ids).Find(&marks).Error; err != nil {
+		if err := store.DB().Where("user_id=? AND dataset_id=? AND paper_id IN ?", user, record.DatasetID, ids).Find(&marks).Error; err != nil {
 			replyError(w, 500, "READ_FAILED", err.Error())
 			return
 		}

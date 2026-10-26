@@ -1,515 +1,250 @@
-// Package paperlibrary resolves the dataset's editable paper graph against its
-// originals. It does not depend on HTTP handlers or document-processing services.
 package paperlibrary
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"regexp"
-	"strings"
-
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 )
 
-type Graph map[string]any
-type Entity = map[string]any
-
+type Counts struct {
+	PaperCount         int64 `json:"paper_count"`
+	PDFAttachmentCount int64 `json:"pdf_attachment_count"`
+}
 type View struct {
-	Data               json.RawMessage `json:"data"`
-	PaperCount         int64           `json:"paper_count"`
-	PDFAttachmentCount int64           `json:"pdf_attachment_count"`
-	PaperImportance    map[string]bool `json:"paper_importance"`
-	Active             bool            `json:"active"`
+	Data     Data `json:"data"`
+	CanWrite bool `json:"can_write"`
+	Active   bool `json:"active"`
+	Counts
 }
 
-func Empty() Graph {
-	graph := Graph{"schemaVersion": 3}
-	for _, key := range []string{"folders", "collections", "papers", "attachments", "notes", "annotations", "relations", "mergeSnapshots"} {
-		graph[key] = []any{}
-	}
-	return graph
-}
-
-func Decode(raw json.RawMessage) (Graph, error) {
-	graph := Empty()
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &graph); err != nil {
-			return nil, err
-		}
-	}
-	return graph, nil
-}
-
-func Objects(graph Graph, key string) []Entity {
-	var result []Entity
-	for _, value := range array(graph[key]) {
-		if item, ok := value.(map[string]any); ok {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
-func SetObjects(graph Graph, key string, objects []Entity) {
-	values := make([]any, 0, len(objects))
-	for _, object := range objects {
-		values = append(values, object)
-	}
-	graph[key] = values
-}
-
-func Text(item Entity, key string) string {
-	value, _ := item[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func StringList(value any) []string {
-	result := []string{}
-	if values, ok := value.([]string); ok {
-		return append(result, values...)
-	}
-	for _, value := range array(value) {
-		if text, ok := value.(string); ok {
-			result = append(result, text)
-		}
-	}
-	return result
-}
-
-func array(value any) []any { values, _ := value.([]any); return values }
-
-var arxivVersion = regexp.MustCompile(`(?i)v[1-9][0-9]*$`)
-
-func ArxivBase(value string) string {
-	value = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".pdf")
-	for _, prefix := range []string{"https://arxiv.org/abs/", "http://arxiv.org/abs/", "https://arxiv.org/pdf/", "http://arxiv.org/pdf/", "arxiv:"} {
-		value = strings.TrimPrefix(value, prefix)
-	}
-	return arxivVersion.ReplaceAllString(value, "")
-}
-
-func DOI(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	for _, prefix := range []string{"https://doi.org/", "http://doi.org/", "https://dx.doi.org/", "http://dx.doi.org/", "doi:"} {
-		value = strings.TrimPrefix(value, prefix)
-	}
-	return strings.TrimRight(value, ".,;)]}")
-}
-
-// Identifier accepts the v3 metadata location as well as legacy top-level fields.
-func Identifier(paper Entity, name string) string {
-	if value := Text(paper, name); value != "" {
-		return value
-	}
-	metadata, _ := paper["metadata"].(map[string]any)
-	identifiers, _ := metadata["identifiers"].(map[string]any)
-	return Text(identifiers, name)
-}
-
-// MatchIdentity never treats a title or a filename as proof of identity. A
-// shared arXiv base identifies a work independently of publication DOI/version.
-func MatchIdentity(left, right Entity) string {
-	if id := Text(left, "academicWorkId"); id != "" && id == Text(right, "academicWorkId") {
-		return "match"
-	}
-	a, b := ArxivBase(Identifier(left, "arxiv")), ArxivBase(Identifier(right, "arxiv"))
-	d, e := DOI(Identifier(left, "doi")), DOI(Identifier(right, "doi"))
-	if a != "" && b != "" {
-		if a == b {
-			return "match"
-		}
-		if d != "" && d == e {
-			return "uncertain"
-		}
-		return "conflict"
-	}
-	if d != "" && e != "" {
-		if d == e {
-			return "match"
-		}
-		return "conflict"
-	}
-	return "uncertain"
-}
-
-func WorkEntity(work orm.AcademicWork) Entity {
-	var authors []string
-	_ = json.Unmarshal(work.AuthorsJSON, &authors)
-	return Entity{"academicWorkId": work.ID, "title": work.CanonicalTitle, "authors": strings.Join(authors, "、"), "year": work.PublicationYear, "venue": work.Venue, "doi": work.DOINormalized, "arxiv": work.ArxivIDBase, "abstract": work.Abstract}
-}
-
-// LoadMany uses bounded, set-based queries for both the library and catalog.
-// Graphs remain maps so unknown fields and archived annotation references survive.
-func LoadMany(ctx context.Context, db *gorm.DB, datasetIDs []string, userID string) (map[string]View, error) {
-	result := map[string]View{}
-	if len(datasetIDs) == 0 {
+// Statistics never loads bibliographic text, notes, identities, or import history.
+func Statistics(ctx context.Context, db *gorm.DB, datasets []string) (map[string]Counts, error) {
+	result := map[string]Counts{}
+	if len(datasets) == 0 {
 		return result, nil
 	}
+	var rows []struct {
+		DatasetID          string
+		PaperCount         int64
+		PDFAttachmentCount int64
+	}
+	err := db.WithContext(ctx).Table("paper_library_entries e").Select("e.dataset_id, COUNT(DISTINCT e.id) AS paper_count, COUNT(DISTINCT CASE WHEN a.kind='pdf' AND d.id IS NOT NULL THEN d.id END) AS pdf_attachment_count").
+		Joins("LEFT JOIN paper_library_attachments a ON a.dataset_id=e.dataset_id AND a.paper_id=e.id AND a.detached_at IS NULL").
+		Joins("LEFT JOIN documents d ON d.id=a.document_id AND d.dataset_id=e.dataset_id AND d.deleted_at IS NULL").Where("e.dataset_id IN ? AND e.removed_at IS NULL", datasets).Group("e.dataset_id").Scan(&rows).Error
+	for _, row := range rows {
+		result[row.DatasetID] = Counts{PaperCount: row.PaperCount, PDFAttachmentCount: row.PDFAttachmentCount}
+	}
+	return result, err
+}
+
+// Load reads only the requested entries and their children. Nil ids is an initial library read.
+func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, includeFolders bool) (View, error) {
+	view := View{Data: EmptyData()}
 	db = db.WithContext(ctx)
-	var libraries []orm.PaperLibrary
-	var documents []orm.Document
-	var states []orm.AcademicDocumentState
-	var links []orm.AcademicWorkDocument
-	var processing []orm.DocumentProcessingState
-	var origins []struct {
-		DocumentID, Stage, EntryType         string
-		ReferenceIDsJSON, PolicySnapshotJSON json.RawMessage
+	query := db.Where("dataset_id=? AND removed_at IS NULL", dataset)
+	if ids != nil {
+		if len(ids) == 0 {
+			return view, nil
+		}
+		query = query.Where("id IN ?", ids)
 	}
-	for _, query := range []*gorm.DB{
-		db.Where("dataset_id IN ?", datasetIDs).Find(&libraries),
-		db.Where("dataset_id IN ? AND deleted_at IS NULL", datasetIDs).Order("created_at, id").Find(&documents),
-		db.Where("dataset_id IN ?", datasetIDs).Find(&states),
-		db.Where("dataset_id IN ?", datasetIDs).Find(&links),
-		db.Where("dataset_id IN ?", datasetIDs).Find(&processing),
-		db.Table("paper_import_items AS i").Select("i.document_id, i.stage, i.reference_ids_json, b.entry_type, b.policy_snapshot_json").Joins("JOIN paper_import_batches AS b ON b.id=i.batch_id").Where("b.target_dataset_id IN ? AND i.document_id<>?", datasetIDs, "").Order("i.created_at, i.id").Scan(&origins),
+	var entries []orm.PaperLibraryEntry
+	if err := query.Order("created_at,id").Find(&entries).Error; err != nil {
+		return view, err
+	}
+	if includeFolders {
+		var folders []orm.PaperLibraryFolder
+		if err := db.Where("dataset_id=?", dataset).Order("created_at,id").Find(&folders).Error; err != nil {
+			return view, err
+		}
+		for _, f := range folders {
+			view.Data.Folders = append(view.Data.Folders, Folder{ID: f.ID, Name: f.Name, ParentID: Pointer(f.ParentID), Revision: f.Revision})
+		}
+	}
+	if len(entries) == 0 {
+		return view, nil
+	}
+	entryIDs, workIDs := []string{}, []string{}
+	for _, e := range entries {
+		entryIDs = append(entryIDs, e.ID)
+		workIDs = append(workIDs, e.AcademicWorkID)
+	}
+	var works []orm.AcademicWork
+	var members []orm.PaperLibraryAttachment
+	var notes []orm.PaperLibraryNote
+	for _, q := range []*gorm.DB{
+		db.Where("id IN ?", workIDs).Find(&works),
+		db.Where("dataset_id=? AND paper_id IN ? AND detached_at IS NULL", dataset, entryIDs).Order("created_at,id").Find(&members),
+		db.Where("dataset_id=? AND paper_id IN ?", dataset, entryIDs).Order("created_at,id").Find(&notes),
 	} {
-		if query.Error != nil {
-			return nil, query.Error
+		if q.Error != nil {
+			return view, q.Error
 		}
 	}
-	graphs := map[string]Graph{}
-	for _, id := range datasetIDs {
-		graphs[id] = Empty()
+	workByID := map[string]orm.AcademicWork{}
+	for _, w := range works {
+		workByID[w.ID] = w
 	}
-	for _, library := range libraries {
-		graph, err := Decode(library.DataJSON)
-		if err != nil {
-			return nil, fmt.Errorf("read paper graph: %w", err)
-		}
-		graphs[library.DatasetID] = graph
-	}
-	workIDs := []string{}
-	for _, state := range states {
-		if state.PaperID != "" {
-			workIDs = append(workIDs, state.PaperID)
-		}
-	}
-	for _, graph := range graphs {
-		for _, paper := range Objects(graph, "papers") {
-			if id := Text(paper, "academicWorkId"); id != "" {
-				workIDs = append(workIDs, id)
-			}
-		}
-	}
-	works := map[string]orm.AcademicWork{}
 	marks := map[string]bool{}
-	if len(workIDs) > 0 {
-		var rows []orm.AcademicWork
-		if err := db.Where("id IN ?", workIDs).Find(&rows).Error; err != nil {
-			return nil, err
+	if user != "" {
+		var rows []orm.AcademicUserPaperState
+		if err := db.Where("user_id=? AND dataset_id=? AND paper_id IN ?", user, dataset, workIDs).Find(&rows).Error; err != nil {
+			return view, err
 		}
-		for _, work := range rows {
-			works[work.ID] = work
+		for _, m := range rows {
+			marks[m.PaperID] = m.IsImportant
 		}
-		if userID != "" {
-			var rows []orm.AcademicUserPaperState
-			if err := db.Where("user_id=? AND paper_id IN ?", userID, workIDs).Find(&rows).Error; err != nil {
-				return nil, err
+	}
+	documents, itemIDs := []string{}, []string{}
+	for _, a := range members {
+		if a.DocumentID != "" {
+			documents = append(documents, a.DocumentID)
+		}
+		if a.ImportItemID != "" {
+			itemIDs = append(itemIDs, a.ImportItemID)
+		}
+	}
+	docByID := map[string]orm.Document{}
+	linkByID := map[string]orm.AcademicWorkDocument{}
+	stateByID := map[string]orm.AcademicDocumentState{}
+	processingByID := map[string]orm.DocumentProcessingState{}
+	if len(documents) > 0 {
+		var docs []orm.Document
+		var links []orm.AcademicWorkDocument
+		var states []orm.AcademicDocumentState
+		var processing []orm.DocumentProcessingState
+		for _, q := range []*gorm.DB{
+			db.Where("dataset_id=? AND id IN ? AND deleted_at IS NULL", dataset, documents).Find(&docs),
+			db.Where("dataset_id=? AND document_id IN ?", dataset, documents).Find(&links),
+			db.Where("dataset_id=? AND document_id IN ?", dataset, documents).Find(&states),
+			db.Where("dataset_id=? AND document_id IN ?", dataset, documents).Find(&processing),
+		} {
+			if q.Error != nil {
+				return view, q.Error
 			}
-			for _, mark := range rows {
-				marks[mark.PaperID] = mark.IsImportant
-			}
+		}
+		for _, d := range docs {
+			docByID[d.ID] = d
+		}
+		for _, l := range links {
+			linkByID[l.DocumentID] = l
+		}
+		for _, s := range states {
+			stateByID[s.DocumentID] = s
+		}
+		for _, p := range processing {
+			processingByID[p.DocumentID] = p
 		}
 	}
-	stateByDocument := map[string]orm.AcademicDocumentState{}
-	linkByDocument := map[string]orm.AcademicWorkDocument{}
-	processingByDocument := map[string]orm.DocumentProcessingState{}
-	pending := map[string]bool{}
-	provenance := map[string]Entity{}
-	for _, state := range states {
-		stateByDocument[state.DocumentID] = state
-	}
-	for _, link := range links {
-		linkByDocument[link.DocumentID] = link
-	}
-	for _, row := range processing {
-		processingByDocument[row.DocumentID] = row
-	}
-	for _, origin := range origins {
-		if origin.EntryType == "pdf_upload" && origin.Stage == "awaiting_association" {
-			pending[origin.DocumentID] = true
+	origins := map[string]orm.PaperImportBatch{}
+	if len(itemIDs) > 0 {
+		var rows []struct {
+			ItemID string
+			orm.PaperImportBatch
 		}
-		if provenance[origin.DocumentID] != nil {
+		if err := db.Table("paper_import_items i").Select("i.id AS item_id,b.*").Joins("JOIN paper_import_batches b ON b.id=i.batch_id").Where("i.id IN ? AND b.target_dataset_id=?", itemIDs, dataset).Scan(&rows).Error; err != nil {
+			return view, err
+		}
+		for _, r := range rows {
+			origins[r.ItemID] = r.PaperImportBatch
+		}
+	}
+	paperByID := map[string]*Paper{}
+	primaryByPaper := map[string]int{}
+	for _, e := range entries {
+		work, exists := workByID[e.AcademicWorkID]
+		if !exists {
+			return view, fmt.Errorf("paper %s has no scholarly identity", e.ID)
+		}
+		metadata, err := EffectiveMetadata(e, work)
+		if err != nil {
+			return view, err
+		}
+		p := Paper{ID: e.ID, AcademicWorkID: e.AcademicWorkID, Revision: e.Revision, Metadata: metadata, FolderID: Pointer(e.FolderID), Status: e.Status, Tags: []string{}, Important: marks[e.AcademicWorkID], Source: e.Source, ImportMethod: e.ImportMethod, SourceURL: e.SourceURL, ArxivVersion: e.ArxivVersion, Parse: "ready", AttachmentIDs: []string{}, NoteIDs: []string{}, Incomplete: metadata.Title == "" || len(metadata.Authors) == 0}
+		if err = json.Unmarshal(e.TagsJSON, &p.Tags); err != nil {
+			return view, err
+		}
+		if p.Tags == nil {
+			p.Tags = []string{}
+		}
+		view.Data.Papers = append(view.Data.Papers, p)
+	}
+	for i := range view.Data.Papers {
+		p := &view.Data.Papers[i]
+		paperByID[p.ID] = p
+	}
+	for _, a := range members {
+		p := paperByID[a.PaperID]
+		if p == nil {
 			continue
 		}
-		method := map[string]string{"paper_link": "link", "pdf_upload": "upload", "paper_expansion": "expansion"}[origin.EntryType]
-		var references []string
-		_ = json.Unmarshal(origin.ReferenceIDsJSON, &references)
-		if method == "" && len(references) > 0 {
-			method = "references"
+		link := linkByID[a.DocumentID]
+		_, available := docByID[a.DocumentID]
+		attachment := Attachment{ID: a.ID, PaperID: a.PaperID, Name: a.Name, Kind: a.Kind, ContentRef: a.DocumentID, Source: p.Source, ImportMethod: p.ImportMethod, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, SourceURL: link.SourceLocator, ContentHash: link.ContentSHA256, IsPrimary: a.IsPrimary, Available: a.DocumentID == "" || available, AddedAt: a.CreatedAt}
+		if attachment.SourceURL == "" {
+			attachment.SourceURL = a.SourceURL
 		}
-		if method == "" {
-			continue
-		}
-		value := Entity{"importMethod": method}
-		if method == "expansion" {
+		if origin, ok := origins[a.ImportItemID]; ok {
+			attachment.ImportMethod = ImportMethod(origin.EntryType)
 			var policy struct {
 				ExpansionID      string `json:"expansion_id"`
 				ExpansionVersion int64  `json:"expansion_version"`
 			}
-			if json.Unmarshal(origin.PolicySnapshotJSON, &policy) == nil {
-				value["expansionId"], value["expansionVersion"] = policy.ExpansionID, policy.ExpansionVersion
+			if err := json.Unmarshal(origin.PolicySnapshotJSON, &policy); err != nil {
+				return view, err
+			}
+			attachment.ExpansionID, attachment.ExpansionVersion = policy.ExpansionID, policy.ExpansionVersion
+		}
+		p.AttachmentIDs = append(p.AttachmentIDs, a.ID)
+		if state, ok := stateByID[a.DocumentID]; ok {
+			if state.Status == "pending" || state.Status == "processing" {
+				view.Active = true
+			}
+			if state.PaperID != "" && state.PaperID != p.AcademicWorkID {
+				p.AssociationConflict = "附件识别结果与已确认题录不同，请核对"
 			}
 		}
-		provenance[origin.DocumentID] = value
-	}
-	byDataset := map[string][]orm.Document{}
-	for _, document := range documents {
-		byDataset[document.DatasetID] = append(byDataset[document.DatasetID], document)
-	}
-	for id, graph := range graphs {
-		view, err := resolve(graph, byDataset[id], stateByDocument, linkByDocument, processingByDocument, works, marks, pending, provenance)
-		if err != nil {
-			return nil, err
+		if attachment.Kind == "pdf" && attachment.ContentRef != "" && attachment.Available {
+			if _, exists := primaryByPaper[p.ID]; !exists || attachment.IsPrimary {
+				primaryByPaper[p.ID] = len(view.Data.Attachments)
+			}
 		}
-		result[id] = view
+		view.Data.Attachments = append(view.Data.Attachments, attachment)
 	}
-	return result, nil
-}
-
-func resolve(graph Graph, documents []orm.Document, states map[string]orm.AcademicDocumentState, links map[string]orm.AcademicWorkDocument, processing map[string]orm.DocumentProcessingState, works map[string]orm.AcademicWork, marks map[string]bool, pending map[string]bool, provenance map[string]Entity) (View, error) {
-	papers, attachments, folders := Objects(graph, "papers"), Objects(graph, "attachments"), Objects(graph, "folders")
-	hidden, hiddenWorks := map[string]bool{}, map[string]bool{}
-	for _, id := range StringList(graph["hiddenDocumentIds"]) {
-		hidden[id] = true
+	for _, n := range notes {
+		if p := paperByID[n.PaperID]; p != nil {
+			p.NoteIDs = append(p.NoteIDs, n.ID)
+			view.Data.Notes = append(view.Data.Notes, Note{ID: n.ID, PaperID: n.PaperID, Title: n.Title, Content: n.Content, Kind: n.Kind, CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt})
+		}
 	}
-	for _, id := range StringList(graph["hiddenArxivWorkIds"]) {
-		hiddenWorks[id] = true
+	var ds orm.Dataset
+	if err := db.Select("processing_level").Where("id=?", dataset).Take(&ds).Error; err != nil {
+		return view, err
 	}
-	documentsByID := map[string]orm.Document{}
-	folderIDs := map[string]bool{}
-	folderByID := map[string]Entity{}
-	for _, folder := range folders {
-		folderIDs[Text(folder, "id")] = true
-		folderByID[Text(folder, "id")] = folder
-	}
-	for _, document := range documents {
-		documentsByID[document.ID] = document
-	}
-	hiddenFolders := map[string]bool{}
-	for _, id := range StringList(graph["hiddenFolderIds"]) {
-		hiddenFolders[id] = true
-	}
-	for _, document := range documents {
-		if !strings.EqualFold(document.DocumentType, "FOLDER") {
+	for i := range view.Data.Papers {
+		p := &view.Data.Papers[i]
+		index, exists := primaryByPaper[p.ID]
+		if !exists {
 			continue
 		}
-		id := "document-folder-" + document.ID
-		if hiddenFolders[id] {
+		primary := &view.Data.Attachments[index]
+		primary.IsPrimary = true
+		if ds.ProcessingLevel == "stored" {
 			continue
 		}
-		if !folderIDs[id] {
-			parent := any(nil)
-			if ancestor, exists := documentsByID[document.PID]; exists && strings.EqualFold(ancestor.DocumentType, "FOLDER") && !hiddenFolders["document-folder-"+ancestor.ID] {
-				parent = "document-folder-" + document.PID
+		if state, ok := processingByID[primary.ContentRef]; ok {
+			switch state.ParseStatus {
+			case "failed":
+				p.Parse = "failed"
+				p.ProcessingError = state.ParseErrorMessage
+			case "succeeded", "success", "ready":
+			default:
+				p.Parse = "parsing"
+				view.Active = true
 			}
-			folders = append(folders, Entity{"id": id, "name": document.DisplayName, "parentId": parent})
-			folderIDs[id] = true
-		} else if _, declared := folderByID[id]["parentId"]; !declared {
-			parent := any(nil)
-			if ancestor, exists := documentsByID[document.PID]; exists && strings.EqualFold(ancestor.DocumentType, "FOLDER") && !hiddenFolders["document-folder-"+ancestor.ID] {
-				parent = "document-folder-" + document.PID
-			}
-			folderByID[id]["parentId"] = parent
-			folderByID[id]["name"] = document.DisplayName
 		}
 	}
-	byID, attachedByDocument := map[string]Entity{}, map[string]Entity{}
-	for _, paper := range papers {
-		byID[Text(paper, "id")] = paper
-	}
-	for _, attachment := range attachments {
-		if id := Text(attachment, "contentRef"); id != "" {
-			attachedByDocument[id] = attachment
-		}
-	}
-	active := false
-	for _, document := range documents {
-		if !strings.EqualFold(filepath.Ext(document.DisplayName), ".pdf") || hidden[document.ID] || pending[document.ID] {
-			continue
-		}
-		state, link := states[document.ID], links[document.ID]
-		work, hasWork := works[state.PaperID]
-		if hasWork && hiddenWorks[work.ID] {
-			continue
-		}
-		attachment := attachedByDocument[document.ID]
-		var paper Entity
-		if attachment != nil {
-			paper = byID[Text(attachment, "paperId")]
-		}
-		identity := Entity{}
-		if hasWork {
-			identity = WorkEntity(work)
-		}
-		if paper == nil && hasWork {
-			var candidates []Entity
-			for _, existing := range papers {
-				if MatchIdentity(existing, identity) == "match" {
-					candidates = append(candidates, existing)
-				}
-			}
-			if len(candidates) == 1 {
-				paper = candidates[0]
-			}
-		}
-		if paper == nil {
-			paper = Entity{"id": "document-" + document.ID, "title": strings.TrimSuffix(document.DisplayName, filepath.Ext(document.DisplayName)), "authors": "", "venue": "", "year": 0, "folderId": nil, "status": "unread", "important": false, "tags": []any{}, "source": "local", "parse": "parsing", "metadata": Entity{"identifiers": Entity{}, "confidence": Entity{}}, "attachmentIds": []any{}, "noteIds": []any{}, "annotationIds": []any{}, "collectionIds": []any{}, "relatedPaperIds": []any{}}
-			if link.SourceProvider == "arxiv" {
-				paper["source"] = "arxiv"
-			} else if link.SourceProvider != "" && link.SourceProvider != "manual" && link.SourceProvider != "upload" {
-				paper["source"] = "web"
-			}
-			if origin := provenance[document.ID]; origin != nil {
-				for key, value := range origin {
-					paper[key] = value
-				}
-			}
-			if hasWork {
-				for key, value := range identity {
-					paper[key] = value
-				}
-				var identified Entity
-				if json.Unmarshal(state.MetadataJSON, &identified) == nil {
-					for _, key := range []string{"title", "venue", "abstract"} {
-						if value := Text(identified, key); value != "" {
-							paper[key] = value
-						}
-					}
-					if authors := StringList(identified["authors"]); len(authors) > 0 {
-						paper["authors"] = strings.Join(authors, "、")
-					}
-				}
-			} else {
-				paper["incomplete"] = true
-			}
-			if parent := "document-folder-" + document.PID; document.PID != "" && folderIDs[parent] {
-				paper["folderId"] = parent
-			}
-			var tags []string
-			if json.Unmarshal(document.Tags, &tags) == nil && tags != nil {
-				paper["tags"] = tags
-			}
-			papers = append(papers, paper)
-			byID[Text(paper, "id")] = paper
-		} else if hasWork {
-			switch MatchIdentity(paper, identity) {
-			case "conflict":
-				paper["associationConflict"] = "附件识别结果与论文不一致，请核对附件归属"
-			case "match", "uncertain":
-				if Text(paper, "academicWorkId") == "" {
-					paper["academicWorkId"] = work.ID
-				}
-			}
-		}
-		if attachment == nil {
-			attachment = Entity{"id": "document-attachment-" + document.ID, "paperId": Text(paper, "id"), "name": document.DisplayName, "kind": "pdf", "addedAt": document.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), "contentRef": document.ID, "source": "local"}
-			if origin := provenance[document.ID]; origin != nil {
-				for key, value := range origin {
-					attachment[key] = value
-				}
-			}
-			attachments = append(attachments, attachment)
-			attachedByDocument[document.ID] = attachment
-		}
-		attachment["available"] = true
-		if link.SourceProvider != "" {
-			attachment["sourceProvider"] = link.SourceProvider
-			if link.SourceVersion != "" {
-				attachment["sourceVersion"] = link.SourceVersion
-			}
-			if link.SourceLocator != "" {
-				attachment["sourceUrl"] = link.SourceLocator
-			}
-			if link.ContentSHA256 != "" {
-				attachment["contentHash"] = link.ContentSHA256
-			}
-		}
-		if link.SourceProvider == "arxiv" {
-			attachment["source"] = "arxiv"
-			if Text(attachment, "importMethod") == "" {
-				attachment["importMethod"] = "link"
-			}
-		} else if link.SourceProvider == "upload" && Text(attachment, "importMethod") == "" {
-			attachment["importMethod"] = "upload"
-		} else if link.SourceProvider != "" && link.SourceProvider != "manual" && link.SourceProvider != "upload" {
-			attachment["source"] = "web"
-		}
-		ids := StringList(paper["attachmentIds"])
-		found := false
-		for _, id := range ids {
-			if id == Text(attachment, "id") {
-				found = true
-			}
-		}
-		if !found {
-			ids = append(ids, Text(attachment, "id"))
-			paper["attachmentIds"] = ids
-		}
-		if state.Status == "pending" || state.Status == "processing" {
-			active = true
-		}
-	}
-	importance, pdfDocuments := map[string]bool{}, map[string]bool{}
-	for _, paper := range papers {
-		ids := map[string]bool{}
-		for _, id := range StringList(paper["attachmentIds"]) {
-			ids[id] = true
-		}
-		var firstPDF, primary Entity
-		for _, attachment := range attachments {
-			if !ids[Text(attachment, "id")] || Text(attachment, "paperId") != Text(paper, "id") {
-				continue
-			}
-			documentID := Text(attachment, "contentRef")
-			if documentID != "" {
-				_, exists := documentsByID[documentID]
-				attachment["available"] = exists && !hidden[documentID] && !pending[documentID]
-				if attachment["available"] != true {
-					continue
-				}
-			}
-			if Text(attachment, "kind") != "pdf" || documentID == "" {
-				continue
-			}
-			if documentID != "" {
-				pdfDocuments[documentID] = true
-			}
-			if firstPDF == nil {
-				firstPDF = attachment
-			}
-			if attachment["isPrimary"] == true {
-				primary = attachment
-			}
-		}
-		if primary == nil && firstPDF != nil {
-			firstPDF["isPrimary"] = true
-			primary = firstPDF
-		}
-		if primary != nil {
-			if status, ok := processing[Text(primary, "contentRef")]; ok {
-				switch status.ParseStatus {
-				case "succeeded", "success", "ready":
-					paper["parse"] = "ready"
-					delete(paper, "processingError")
-				case "failed":
-					paper["parse"] = "failed"
-					paper["processingError"] = status.ParseErrorMessage
-				default:
-					paper["parse"] = "parsing"
-					active = true
-				}
-			}
-		}
-		importance[Text(paper, "id")] = marks[Text(paper, "academicWorkId")]
-		paper["important"] = false
-	}
-	SetObjects(graph, "folders", folders)
-	SetObjects(graph, "papers", papers)
-	SetObjects(graph, "attachments", attachments)
-	raw, err := json.Marshal(graph)
-	return View{Data: raw, PaperCount: int64(len(papers)), PDFAttachmentCount: int64(len(pdfDocuments)), PaperImportance: importance, Active: active}, err
+	return view, nil
 }
