@@ -8,7 +8,7 @@ const id = (value: unknown): value is string => typeof value === 'string' && val
 const noticeID = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 type Entry = { status: 'submitting' | 'shown' | 'acked' };
 type Journal = Record<string, Entry>;
-interface Notice { notification_id: string; user_id: string; task_id: string; channel: string; status: string; title: string; body: string }
+interface Notice { notification_id: string; user_id: string; task_id: string; channel: string; status: string; title: string; body: string; navigation?: { type: string; expansion_id?: string; dataset_id?: string } }
 interface Page { device_id: string; items: Notice[]; next_cursor: string }
 const unwrap = <T,>(value: T | { data: T }): T => value && typeof value === 'object' && 'data' in value ? value.data : value as T;
 
@@ -120,7 +120,7 @@ export function startBrowserNotifications(): () => void {
           for (const item of data.items) {
             if (!allowed()) return;
             if (item.user_id !== me.user_id || item.channel !== 'desktop' || item.status !== 'pending'
-              || !noticeID(item.notification_id) || !id(item.task_id) || !id(item.title)
+              || !noticeID(item.notification_id) || !(id(item.task_id) || (item.navigation?.type === 'academic_expansion' && id(item.navigation.expansion_id) && id(item.navigation.dataset_id))) || !id(item.title)
               || typeof item.body !== 'string' || [...item.body].length > 200 || journal[item.notification_id]) continue;
             if (Object.keys(journal).length >= MAX_ENTRIES) {
               const completed = Object.keys(journal).find(key => journal[key].status === 'acked');
@@ -129,6 +129,11 @@ export function startBrowserNotifications(): () => void {
             }
             // Browser submission and storage are not transactional. Unknown submissions
             // are retained and never automatically displayed twice after a crash.
+            if (item.navigation?.type === 'academic_expansion' && document.visibilityState === 'visible' && document.documentElement.dataset.paperExpansion === item.navigation.expansion_id) {
+              journal[item.notification_id] = { status: 'shown' }; persist();
+              try { await acknowledge(item.notification_id); } catch { /* Retry delivery receipt. */ }
+              continue;
+            }
             journal[item.notification_id] = { status: 'submitting' };
             persist();
             await new Promise<void>(resolve => {
@@ -168,6 +173,10 @@ export function startBrowserNotifications(): () => void {
                 notification.onclick = () => {
                   if (!allowed()) return;
                   window.focus();
+                  if (item.navigation?.type === 'academic_expansion' && id(item.navigation.expansion_id) && id(item.navigation.dataset_id)) {
+                    window.location.assign(`${window.BASENAME || ''}/lib/knowledge/detail/${encodeURIComponent(item.navigation.dataset_id)}?expansion_id=${encodeURIComponent(item.navigation.expansion_id)}`);
+                    return;
+                  }
                   void request<{ conversation_id?: string }>(`/api/core/task-center/tasks/${encodeURIComponent(item.task_id)}`).then(task => {
                     if (!allowed()) return;
                     const route = id(task.conversation_id) ? `/agent/chat/home/${encodeURIComponent(task.conversation_id)}` : '/task-center?tab=tasks';

@@ -9,10 +9,12 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 
 	"lazymind/core/academic/arxivsource"
 	"lazymind/core/doc"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
 
@@ -77,6 +79,20 @@ func acquireCandidateOriginal(ctx context.Context, svc *doc.OriginalService, cal
 		request := doc.AcquireRemoteOriginalRequest{URL: address, MaxBytes: maxPaperBytes}
 		if candidate.SourceType != "reference_page" && candidate.SourceProvider != "web" {
 			request.DisplayName, request.ExpectedMIME = "paper.pdf", "application/pdf"
+		}
+		if candidate.SourceType == "openalex_hosted" {
+			target, e := url.Parse(address)
+			if e != nil || target.Scheme != "https" || target.Host != "content.openalex.org" || target.User != nil || !regexp.MustCompile(`^/works/W[0-9]+\.pdf$`).MatchString(target.Path) {
+				return doc.OriginalRef{}, errors.New("invalid OpenAlex hosted content URL")
+			}
+			key, e := modelconfig.LoadOpenAlexAPIKey(ctx, store.DB(), caller.UserID)
+			if e != nil {
+				return doc.OriginalRef{}, e
+			}
+			if key == "" {
+				return doc.OriginalRef{}, errors.New("OpenAlex 托管全文需要有效的 API Key")
+			}
+			request.PrivateQuery = map[string]string{"api_key": key}
 		}
 		ref, err := svc.AcquireRemoteOriginal(ctx, caller, request)
 		if err == nil && strings.EqualFold(candidate.SourceProvider, "arxiv") {

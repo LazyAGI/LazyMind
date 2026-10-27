@@ -413,6 +413,10 @@ func HandleWorkflowStepCreated(
 // launchWorkflowAttempt persists and launches an attempt after its caller has
 // performed admission. New transitions pass legacyEvent=false so the legacy
 // single-current compatibility field is not mutated.
+// ConfigureHostStep lets installed host capabilities constrain an attempt using
+// server-owned task state. It runs inside the launch transaction.
+var ConfigureHostStep func(context.Context, *gorm.DB, string, string, *WorkflowStepParams) error
+
 func launchWorkflowAttempt(
 	ctx context.Context,
 	db *gorm.DB,
@@ -606,6 +610,11 @@ func launchWorkflowAttempt(
 	}
 	if params.TerminalToolsOnly {
 		rawParamsMap["terminal_tools_only"] = true
+	}
+	if ConfigureHostStep != nil {
+		if err := ConfigureHostStep(ctx, db, userID, convID, &params); err != nil {
+			return sessionID, taskID, false, err
+		}
 	}
 	if !params.Runtime.IsZero() {
 		rawParamsMap["workflow_runtime"] = params.Runtime

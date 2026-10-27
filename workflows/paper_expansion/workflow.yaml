@@ -1,129 +1,149 @@
 id: paper_expansion
 name: 论文自动拓展
-description: 在独立 Chat 中分五步拓展论文，保存当前用户的成果。候选只通过 arXiv 外部搜索发现，版本由服务端锁定；全文复用限定发起论文集，关系分析依据实际材料。
-when_to_use: 用户从知识库启动论文拓展、先拓展后综述，或继续同一论文拓展 Chat。保留原拓展记录 ID。
+description: 承接记录中已确认的研究范围，四步自动检索、筛选、分层阅读和证据核验。临时阅读不自动入库。
+when_to_use: 仅在用户已经于拓展记录确认方向后执行；继续同一范围或调整结果表达沿用原记录。
 runtime:
   transactional_outputs: true
-  publisher_owned_slots: [paper_relations, expansion_result]
+  publisher_owned_slots:
+  - expansion_plan
+  - candidate_set
+  - relation_analysis
+  - expansion_result
+  - expansion_report
+  host_extensions:
+  - academic-paper-chat-v1
+  trigger_inputs:
+  - expansion_id
+  completed_edit_step: compose_result
+  completed_continue_steps:
+  - expand_and_screen
+  completed_edit_routing: 同一范围继续查找回到 expand_and_screen；仅调整表达回到 compose_result；实质改变主题或方向时返回拓展记录准备并确认，不在正式
+    Workflow 内决策方向。
+  execution_limits:
+    prepare_plan:
+      rounds: 12
+      timeout: 120
+      tool_calls:
+        academic_search_papers: 6
+    expand_and_screen:
+      rounds: 32
+      timeout: 480
+      tool_calls:
+        academic_search_papers: 24
+    analyze_relations:
+      rounds: 32
+      timeout: 480
+      tool_calls:
+        academic_read_paper: 48
+        academic_submit_relations: 2
+    compose_result:
+      rounds: 8
+      timeout: 120
   post_step_checks:
-  - step_id: explore_directions
+  - step_id: prepare_plan
     tool: academic_validate_stage
-    arguments: {result: direction_research}
-  - step_id: prepare_seed_set
-    tool: academic_validate_stage
-    arguments: {result: seed_set}
+    arguments:
+      result: expansion_plan
   - step_id: expand_and_screen
     tool: academic_validate_stage
-    arguments: {result: expanded_papers}
+    arguments:
+      result: candidate_set
   - step_id: compose_result
     tool: academic_validate_result
     arguments:
       result: expansion_result
-  host_extensions:
-  - academic-paper-chat-v1
-  completed_edit_step: compose_result
-  completed_edit_routing: 主题变更回到 explore_directions；方向变更回到 prepare_seed_set；继续寻找新增论文回到 expand_and_screen；展示要求回到
-    compose_result。先保存原成果，继续补充同一记录。
-  trigger_inputs:
-  - expansion_id
 tool_scripts:
 - path: scripts/tools.py
   functions:
   - academic_expansion_context
   - academic_search_papers
   - academic_read_paper
-  - academic_validate_result
-  - academic_validate_stage
+  - academic_publish_stage
   - academic_submit_relations
   - academic_publish_expansion_result
+  - academic_validate_stage
+  - academic_validate_result
 steps:
-- id: explore_directions
-  label: 调研与方向
-- id: prepare_seed_set
-  label: 准备种子论文
+- id: prepare_plan
+  label: 准备参考论文与检索计划
 - id: expand_and_screen
   label: 拓展与筛选
 - id: analyze_relations
-  label: 研究关系分析
+  label: 分析论文关系
 - id: compose_result
-  label: 整理拓展成果
+  label: 研究脉络与阅读建议
 slots:
 - id: expansion_id
-  label: 任务上下文
+  label: 任务定位
   type: text
   cardinality: single
   external: true
   exposed: false
-- id: direction_research
-  label: 调研与方向
+- id: expansion_plan
+  label: 准备参考论文与检索计划
   type: json
   cardinality: single
   exposed: true
-- id: seed_set
-  label: 准备种子论文
-  type: json
-  cardinality: single
-  exposed: true
-- id: expanded_papers
+- id: candidate_set
   label: 拓展与筛选
   type: json
   cardinality: single
   exposed: true
-- id: paper_relations
-  label: 研究关系分析
+- id: relation_analysis
+  label: 分析论文关系
   type: json
   cardinality: single
   exposed: true
 - id: expansion_result
-  label: 整理拓展成果
+  label: 论文清单
+  type: json
+  cardinality: single
+  exposed: true
+- id: expansion_report
+  label: 研究脉络、证据与阅读路线
   type: json
   cardinality: single
   exposed: true
 ui:
   slots:
-    direction_research:
+    expansion_plan:
       widgetType: json-block
       readOnly: true
-    seed_set:
+    candidate_set:
       widgetType: json-block
       readOnly: true
-    expanded_papers:
-      widgetType: json-block
-      readOnly: true
-    paper_relations:
+    relation_analysis:
       widgetType: json-block
       readOnly: true
     expansion_result:
       widgetType: json-block
       readOnly: true
+    expansion_report:
+      widgetType: json-block
+      readOnly: true
   tabs:
-  - id: explore_directions
-    step_id: explore_directions
-    label: 调研与方向
+  - id: prepare_plan
+    step_id: prepare_plan
+    label: 准备参考论文与检索计划
     layout: list
     slots:
-    - id: direction_research
-  - id: prepare_seed_set
-    step_id: prepare_seed_set
-    label: 准备种子论文
-    layout: list
-    slots:
-    - id: seed_set
+    - id: expansion_plan
   - id: expand_and_screen
     step_id: expand_and_screen
     label: 拓展与筛选
     layout: list
     slots:
-    - id: expanded_papers
+    - id: candidate_set
   - id: analyze_relations
     step_id: analyze_relations
-    label: 研究关系分析
+    label: 分析论文关系
     layout: list
     slots:
-    - id: paper_relations
+    - id: relation_analysis
   - id: compose_result
     step_id: compose_result
-    label: 整理拓展成果
+    label: 研究脉络与阅读建议
     layout: list
     slots:
+    - id: expansion_report
     - id: expansion_result

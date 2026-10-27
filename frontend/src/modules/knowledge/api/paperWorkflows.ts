@@ -34,7 +34,31 @@ export interface ReviewWorkflowInput {
   selected_directions: string[];
   papers: WorkflowPaper[];
 }
+export type BudgetMode = 'fast' | 'balanced' | 'deep';
+export interface ExpansionReport {
+ narrative?: string; reading_order?: string[]; limitations?: string[];
+ claims?: Array<{ paper_id: string; statement: string; status: string; reason: string; content_hash: string; positions: number[] }>;
+ reading?: Record<string, { read_level: string; positions: number[]; pages: number[]; total_blocks: number }>;
+ currency_cost?: number | null;
+ execution_elapsed_ms?: number;
+ stage_timing?: Array<{step_id: string; attempt: number; status: string; queue_and_execution_ms: number}>;
+ stage_metrics?: Record<string, {model?: string; provider_usage_records?: unknown[]}>;
+ compose_metrics?: {model?: string; provider_usage_records?: unknown[]};
+ source_queries?: Array<{query: string; sources?: Array<{source: string; status: string; count: number; elapsed_ms: number}>}>;
+ preparation_attempts?: Array<{revision: number; model: string; metrics?: unknown}>;
+}
+export interface ExpansionPreparation {
+ user_instruction: string; summary: string; error?: string;
+ questions: Array<{ id: string; question: string; options?: string[] }>;
+ directions: Array<{ name: string; question: string; reason: string; difference: string; paper_ids: string[]; papers?: PaperRef[] }>;
+ selected_directions: string[];
+}
 export interface Expansion {
+  preparation?: ExpansionPreparation;
+  preparation_revision: number;
+  budget_mode: BudgetMode;
+  reading?: ExpansionReport['reading'];
+  report?: ExpansionReport;
   discovery_mode?: string;
   progress?: Record<string, Partial<ReviewWorkflowInput>>;
   id: string;
@@ -54,13 +78,14 @@ export interface PaperContent {
   paper_id: string;
   status: string;
   content_hash: string;
+  quality?: { eligible: boolean; downloaded: boolean; parsed: boolean; identity: string; text: string; material: string };
   parser_version?: string;
   error?: string;
 }
 export interface ExpansionDetail {
   record: Expansion;
-  rounds: Array<{ discovery_mode?: string; id: string; version: number; status: string; result: ReviewWorkflowInput }>;
-  chat_status: 'available' | 'trashed' | 'deleted';
+  rounds: Array<{ discovery_mode?: string; id: string; version: number; status: string; result: ReviewWorkflowInput; report?: ExpansionReport }>;
+  chat_status: 'uncreated' | 'available' | 'trashed' | 'deleted';
   contents: PaperContent[];
   paper_importance: Record<string, boolean>;
   presence?: Array<{ work_id: string; metadata_only?: boolean; current_dataset: ImportPreviewItem['presence']['current_dataset']; importing: boolean }>;
@@ -82,6 +107,7 @@ export interface DocumentAcademic {
 }
 export type PaperTask = 'expansion' | 'review' | 'reflection' | 'ppt';
 export interface PaperLaunch {
+  budget_mode?: BudgetMode;
   kind: PaperTask;
   dataset_id: string;
   document_ids?: string[];
@@ -95,7 +121,7 @@ export interface PaperLaunch {
 }
 export async function launchPaperTask(input: PaperLaunch, silentError = false) {
   const res = await axiosInstance.post(`${core}/workflow-launches`, input, { silentError } as never);
-  return unwrap<{ conversation_id: string; expansion_id?: string }>(res.data);
+  return unwrap<{ conversation_id?: string; expansion_id?: string; status?: string }>(res.data);
 }
 export async function resolvePaperSelection(dataset: string, documents: string[], silentError = false) {
   const res = await axiosInstance.post(`${core}/paper-selections:resolve`, { dataset_id: dataset, document_ids: documents }, { silentError } as never);
@@ -124,4 +150,22 @@ export async function updatePaperIdentity(id: string, input: {
 }
 export async function retryPaperContent(id: string, expansionId: string, silentError = false) {
   await axiosInstance.post(`${core}/paper-contents:retry`, { paper_id: id, expansion_id: expansionId }, { silentError } as never);
+}
+
+export async function submitPreparation(id: string, input: {
+ action: 'answer' | 'revise' | 'retry'; revision: number; request_key: string;
+ answers?: Record<string, string>; user_instruction?: string; budget_mode?: BudgetMode;
+}) {
+ const response = await axiosInstance.post(`${core}/expansions/${encodeURIComponent(id)}/preparation`, input);
+ return unwrap<{ expansion_id: string; revision: number; status: string }>(response.data);
+}
+export async function confirmExpansion(id: string, input: {
+ revision: number; request_key: string; selected_directions: string[]; budget_mode: BudgetMode;
+}) {
+ const response = await axiosInstance.post(`${core}/expansions/${encodeURIComponent(id)}:confirm`, input);
+ return unwrap<{ conversation_id: string; expansion_id: string }>(response.data);
+}
+export async function getExpansionCapabilities() {
+ const response = await axiosInstance.get(`${core}/expansion-capabilities`);
+ return unwrap<{ openalex_key: boolean; sciverse: boolean; web_search: boolean }>(response.data);
 }

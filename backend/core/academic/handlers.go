@@ -476,6 +476,8 @@ type resolveRequest struct {
 	Works        []WorkInput `json:"works"`
 }
 
+var errConflictingPaperIdentifiers = errors.New("conflicting paper identifiers")
+
 func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.AcademicWork, string, error) {
 	provenanceCopy := map[string]any{}
 	for k, v := range in.Provenance {
@@ -493,12 +495,31 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 		err := tx.WithContext(ctx).Where("id = ?", in.WorkID).Take(&row).Error
 		return row, "id", err
 	}
+	if in.Provider != "" && in.ProviderWorkID != "" {
+		var possible []orm.AcademicWork
+		if err := tx.WithContext(ctx).Where("CAST(external_ids_json AS TEXT) LIKE ?", "%"+in.ProviderWorkID+"%").Find(&possible).Error; err != nil {
+			return orm.AcademicWork{}, "", err
+		}
+		for _, known := range possible {
+			ids := map[string]string{}
+			_ = json.Unmarshal(known.ExternalIDsJSON, &ids)
+			if ids[in.Provider] != in.ProviderWorkID {
+				continue
+			}
+			doi := NormalizeDOI(in.DOI)
+			arxiv, _ := NormalizeArxivID(in.ArxivID)
+			if doi != "" && known.DOINormalized != "" && doi != known.DOINormalized || arxiv != "" && known.ArxivIDBase != "" && arxiv != known.ArxivIDBase {
+				return known, "", errConflictingPaperIdentifiers
+			}
+			return known, "provider", enrichWorkMissing(ctx, tx, &known, in)
+		}
+	}
 	doi := NormalizeDOI(in.DOI)
 	arxiv, _ := NormalizeArxivID(in.ArxivID)
 	var row orm.AcademicWork
 	if doi != "" && tx.WithContext(ctx).Where("doi_normalized = ?", doi).Take(&row).Error == nil {
 		if arxiv != "" && row.ArxivIDBase != "" && arxiv != row.ArxivIDBase {
-			return row, "", errors.New("conflicting paper identifiers")
+			return row, "", errConflictingPaperIdentifiers
 		}
 		updates := map[string]any{"updated_at": time.Now().UTC()}
 		if arxiv != "" && row.ArxivIDBase == "" {
@@ -526,7 +547,7 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 	}
 	if arxiv != "" && tx.WithContext(ctx).Where("arxiv_id_base = ?", arxiv).Take(&row).Error == nil {
 		if doi != "" && row.DOINormalized != "" && doi != row.DOINormalized {
-			return row, "", errors.New("conflicting paper identifiers")
+			return row, "", errConflictingPaperIdentifiers
 		}
 		if doi != "" && row.DOINormalized == "" {
 			if err := tx.WithContext(ctx).Model(&row).Updates(map[string]any{"doi_normalized": doi, "updated_at": time.Now().UTC()}).Error; err != nil {
@@ -1137,6 +1158,15 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 // Shared identities only gain missing metadata; document-specific corrections
 // live in AcademicDocumentState and never overwrite another file's metadata.
 func enrichWorkMissing(ctx context.Context, tx *gorm.DB, row *orm.AcademicWork, in WorkInput) error {
+	if in.Provider != "" && in.ProviderWorkID != "" {
+		ids := map[string]string{}
+		_ = json.Unmarshal(row.ExternalIDsJSON, &ids)
+		ids[in.Provider] = in.ProviderWorkID
+		row.ExternalIDsJSON = marshal(ids)
+		if err := tx.Model(row).Update("external_ids_json", row.ExternalIDsJSON).Error; err != nil {
+			return err
+		}
+	}
 	updates := map[string]any{}
 	if row.Abstract == "" && in.Abstract != "" {
 		row.Abstract = in.Abstract

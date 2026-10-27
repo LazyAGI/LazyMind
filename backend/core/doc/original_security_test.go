@@ -2,6 +2,7 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"gorm.io/gorm"
 	"io"
@@ -185,5 +186,33 @@ func TestRemoteOriginalHonorsPaperSizeLimitAndCleansRejectedBytes(t *testing.T) 
 	db.Model(&orm.UploadedFile{}).Count(&count)
 	if count != 0 {
 		t.Fatal("rejected acquisition left an original", count)
+	}
+}
+
+func TestAuthenticatedOriginalDoesNotPersistPrivateQuery(t *testing.T) {
+	db := newDocumentTestDB(t)
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
+	svc, _ := NewOriginalService(OriginalServiceDeps{DB: db.DB})
+	request := AcquireRemoteOriginalRequest{URL: "https://example.com/paper.txt", PrivateQuery: map[string]string{"api_key": "private-test-key"}, DisplayName: "paper.txt", ExpectedMIME: "text/plain"}
+	raw, err := json.Marshal(request)
+	if err != nil || strings.Contains(string(raw), "private-test-key") {
+		t.Fatal("private request fields were serialized")
+	}
+	target, _ := url.Parse("https://example.com/paper.txt?api_key=private-test-key&version=2")
+	response := &http.Response{StatusCode: 200, ContentLength: 4, Body: io.NopCloser(strings.NewReader("text")), Header: http.Header{"Content-Type": []string{"text/plain"}}, Request: &http.Request{URL: target}}
+	ref, err := svc.acquireResponse(t.Context(), DatasetCatalogCaller{UserID: "owner"}, request, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ref.FinalURL, "api_key") || !strings.Contains(ref.FinalURL, "version=2") {
+		t.Fatal("private query leaked into original reference")
+	}
+	var row orm.UploadedFile
+	if err = db.Where("upload_file_id=?", ref.FileRef).Take(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	persisted, _ := json.Marshal(row)
+	if strings.Contains(string(persisted), "private-test-key") {
+		t.Fatal("credential persisted in original metadata")
 	}
 }

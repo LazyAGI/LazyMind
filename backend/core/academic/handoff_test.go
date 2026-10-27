@@ -3,12 +3,103 @@ package academic
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
 )
+
+func TestHandoffContextSeparatesBusinessInputFromNavigation(t *testing.T) {
+	db := paperFixture(t)
+	input := ReviewWorkflowInput{UserInstruction: "Read the selected paper", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", Title: "Frozen title", SourceDocumentID: "a"}, IsSeed: true}}}
+	handoff, err := createPaperHandoff(t.Context(), db.DB, "u", "papers", "", 0, "ppt", "summary", input, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func(view, user string) *httptest.ResponseRecorder {
+		t.Helper()
+		r := paperRequest("")
+		r.Header.Set("X-User-Id", user)
+		r.URL.RawQuery = url.Values{"conversation_id": {handoff.ConversationID}, "view": {view}}.Encode()
+		w := httptest.NewRecorder()
+		AcademicChatContext(w, r)
+		return w
+	}
+	for _, view := range []string{"", "summary"} {
+		w := read(view, "u")
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &fields); err != nil || w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String(), err)
+		}
+		if string(fields["handoff_id"]) != string(marshal(handoff.ID)) || fields["contents"] != nil || fields["mock_result"] != nil {
+			t.Fatal("context lost its locator or exposed internal sources", w.Body.String())
+		}
+		if view == "summary" && fields["input"] != nil || view == "" && string(fields["input"]) != string(handoff.InputJSON) {
+			t.Fatal("context view did not preserve the frozen input boundary", w.Body.String())
+		}
+		if w := read(view, "other"); w.Code != 404 {
+			t.Fatal("context view allowed access to another user's Chat", view, w.Code)
+		}
+	}
+	if w := read("unknown", "u"); w.Code != 400 {
+		t.Fatal("unknown view was accepted", w.Code)
+	}
+	prefix := academicChatContext(t.Context(), db.DB, "u", handoff.ConversationID)
+	if !strings.Contains(prefix, handoff.ID) || strings.Contains(prefix, "Frozen title") || strings.Contains(prefix, input.UserInstruction) {
+		t.Fatal("Chat prefix must contain a locator without duplicating the business input", prefix)
+	}
+	if err := db.Model(&orm.Dataset{}).Where("id=?", "papers").Update("create_user_id", "other").Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range []string{"", "summary"} {
+		if w := read(view, "u"); w.Code != 403 {
+			t.Fatal("context view bypassed dataset permissions", view, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestPPTReceiptUsesCompletedReflectionAndKeepsItFrozen(t *testing.T) {
+	db := paperFixture(t)
+	input := ReviewWorkflowInput{UserInstruction: "Present this paper", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", SourceDocumentID: "a"}, IsSeed: true}}}
+	handoff, err := createPaperHandoff(t.Context(), db.DB, "u", "papers", "", 0, "ppt", "with-reflection", input, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	submit := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		SubmitMockHandoff(w, mux.SetURLVars(paperRequest(body), map[string]string{"handoff_id": handoff.ID}))
+		return w
+	}
+	if w := submit(`{}`); w.Code != 422 {
+		t.Fatal("PPT accepted an unfinished reflection", w.Code, w.Body.String())
+	}
+	session := orm.WorkflowSession{ID: "reflection-session", ConversationID: handoff.ConversationID, WorkflowID: "paper_ppt_with_reflection_mock", CreateUserID: "u", Status: "running"}
+	step := orm.WorkflowSessionStep{ID: "reflection-attempt", SessionID: session.ID, StepID: "reflection", Status: "succeeded", Validity: "effective", Attempt: 1}
+	human := orm.WorkflowHumanArtifact{ID: "saved-reflection", SessionID: session.ID, Slot: "reflection_markdown", Value: marshal(map[string]string{"text": "Saved reflection body"}), ContentType: "text"}
+	artifact := orm.WorkflowSlotRevision{ID: "reflection-revision", SessionID: session.ID, SlotID: "reflection_markdown", Slot: "reflection_markdown", StepID: "reflection", Attempt: 1, Revision: 1, Selected: true, Validity: "effective", ProducerAttemptID: step.ID, HumanArtifactID: &human.ID}
+	for _, value := range []any{&session, &step, &human, &artifact} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w := submit(`{"reflection_markdown":"Model-authored replacement"}`); w.Code != 422 {
+		t.Fatal("PPT accepted a replacement for the saved reflection", w.Code, w.Body.String())
+	}
+	w := submit(`{}`)
+	var result mockHandoffResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != 200 || result.ReflectionMarkdown != "Saved reflection body" || string(result.Input) != string(handoff.InputJSON) {
+		t.Fatal("PPT lost the frozen papers or the saved reflection", w.Code, w.Body.String(), err)
+	}
+	if err := db.Model(&human).Update("value", marshal(map[string]string{"text": "Later edit"})).Error; err != nil {
+		t.Fatal(err)
+	}
+	if replay := submit(`{}`); replay.Code != 200 || replay.Body.String() != w.Body.String() {
+		t.Fatal("receipt replay switched to a later reflection", replay.Code, replay.Body.String())
+	}
+}
 
 func TestReadingHandoffIncludesOnlySelectedNotesAndFreezesInput(t *testing.T) {
 	db := paperFixture(t)
@@ -91,7 +182,7 @@ func TestHandoffFullTextIsScopedAndPinnedWithoutAnExpansion(t *testing.T) {
 	for page := 1; page <= 7; page++ {
 		pages = append(pages, ContentPage{Page: page, Text: "Selected paper text"})
 	}
-	content := orm.AcademicPaperContent{ID: "handoff-body", UserID: "u", PaperID: "a", ParserVersion: orm.AcademicPaperParserVersion, SourceKey: seeds[0].key(), SourceKind: "kb", SourceDatasetID: "papers", SourceDocumentID: "a", Status: "ready", ContentHash: "original-body", PagesJSON: marshal(pages)}
+	content := orm.AcademicPaperContent{QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"}), ID: "handoff-body", UserID: "u", PaperID: "a", ParserVersion: orm.AcademicPaperParserVersion, SourceKey: seeds[0].key(), SourceKind: "kb", SourceDatasetID: "papers", SourceDocumentID: "a", Status: "ready", ContentHash: "original-body", PagesJSON: marshal(pages)}
 	if err := db.Create(&content).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -48,6 +48,8 @@ type AcquireOriginalRequest struct {
 	Reader                                         io.Reader
 }
 type AcquireRemoteOriginalRequest struct {
+	// PrivateQuery is injected only by trusted adapters; credentials are never persisted.
+	PrivateQuery                   map[string]string `json:"-"`
 	URL, DisplayName, ExpectedMIME string
 	// MaxBytes is an internal caller limit; zero uses the common upload maximum.
 	MaxBytes int64

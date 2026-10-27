@@ -115,3 +115,29 @@ func TestLoadToolConfigForCapabilitiesUsesWorkflowAllowlist(t *testing.T) {
 		t.Fatalf("local-only step received unrelated credentials: %#v", localOnly)
 	}
 }
+
+func TestOpenAlexAndSciverseConfigurationsCoexist(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "Sciverse", "datasource", "academic-token")
+	if err := db.Model(&orm.UserModelProvider{}).Where("id=?", "provider-Sciverse").Update("category", "datasource").Error; err != nil {
+		t.Fatal(err)
+	}
+	provider := orm.UserModelProvider{ID: "openalex", Name: "OpenAlex", Category: "datasource", BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+	group := orm.UserModelProviderGroup{ID: "openalex-group", UserModelProviderID: "openalex", APIKey: "openalex-token", IsVerified: true, BaseModel: orm.BaseModel{CreateUserID: "user-1"}}
+	for _, value := range []any{&provider, &group} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Model(&orm.UserSelectedProvider{}).Where("user_id=? AND category=?", "user-1", "datasource").Update("user_model_provider_group_id", group.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	academic, err := LoadAcademicSearchToolConfig(t.Context(), db, "user-1")
+	if err != nil || academic["sciverse"] != "academic-token" {
+		t.Fatal("selecting OpenAlex hid configured Sciverse", err)
+	}
+	key, err := LoadOpenAlexAPIKey(t.Context(), db, "user-1")
+	if err != nil || key != "openalex-token" {
+		t.Fatal("OpenAlex credential was not resolved independently", err)
+	}
+}

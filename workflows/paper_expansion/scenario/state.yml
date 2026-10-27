@@ -2,10 +2,8 @@ initial: __start__
 start_route: all
 transitions:
   __start__:
-  - to: explore_directions
-  explore_directions:
-  - to: prepare_seed_set
-  prepare_seed_set:
+  - to: prepare_plan
+  prepare_plan:
   - to: expand_and_screen
   expand_and_screen:
   - to: analyze_relations
@@ -14,109 +12,106 @@ transitions:
   compose_result:
   - to: __end__
 steps:
-  explore_directions:
-    label: 调研与方向
+  prepare_plan:
+    label: 准备参考论文与检索计划
     prompt: '{{runtime_instruction}}
 
-      使用 save_artifacts 一次保存完整的 direction_research JSON，不保存测试对象或空壳，不逐字段补写。candidate_directions 与 selected_directions 是字符串数组；方向详情保存在本阶段的 directions 数组。保存后结束，程序校验结构。
+      先用 academic_expansion_context 读取绑定任务；使用服务端确认的方向、用户要求、种子和已有调研。不得改变主要方向或 ask_user。模型只提交论文
+      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。接近预算时停止补查，保存有效成果和缺口。
 
-      先调用 academic_expansion_context 读取启动消息中的拓展记录 ID，保留完整原始指令和历史。调用 academic_search_papers(expansion_id, query) 从 arXiv 实际搜索，保留来源、版本及查询结果；不从知识库搜索候选。围绕用户要求归纳候选研究方向，每项包含依据、差异、代表论文；保存 direction_research JSON，包含 user_instruction、candidate_directions、selected_directions、needs_direction_selection、directions。范围已明确时
-      selected_directions 至少一项，needs_direction_selection=false；多个合理范围尚待选择时置 true、selected_directions=[]，由主
-      Chat 在步骤完成后 ask_user，子步骤不得伪造用户选择或调用 ask_user。不要重复追问已知边界。'
+      复用 preparation 的调研、摘要、代表论文及先前成果，不机械重查。多方向分别安排主题、前后向引用与方法检索，写明预算与停止条件。调用 academic_publish_stage(paper_ids,plan,decisions,gaps)
+      保存 expansion_plan，保留全部用户种子。'
     tools:
     - academic_expansion_context
     - academic_search_papers
     - academic_read_paper
+    - academic_publish_stage
+    terminal_tools:
+    - academic_publish_stage
     inputs:
     - material: expansion_id
       required: true
     outputs:
-    - material: direction_research
+    - material: expansion_plan
       required: true
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
-  prepare_seed_set:
-    label: 准备种子论文
-    prompt: '{{runtime_instruction}}
-
-      使用 save_artifacts 一次保存完整的 seed_set JSON，不保存测试对象或空壳，不逐字段补写。candidate_directions 与 selected_directions 是字符串数组。方向调研详情沿用上一步，不再复制到本阶段。保存后结束，程序校验结构和论文来源。
-
-      先调用 academic_expansion_context 读取当前记录的 interactions 与 user_updates，使用 answered=true 的实际 answers 中 value 数组作为用户方向选择；不能仅依据旧 result 的默认方向或自行揣测。结合方向调研和自定义方向。自定义方向先补充有依据的调研；selected_directions 必须是 candidate_directions
-      中的原字符串且至少一项。所有用户选择种子保留；方向入口从外部搜索发现代表论文，is_seed=false；只有启动时用户选定的论文才是种子。保存 seed_set JSON：user_instruction、candidate_directions、selected_directions、papers；papers
-      是 WorkflowPaper 数组，每项有 paper(PaperRef)、is_seed、is_important。paper_id 只能来自服务返回的真实身份。原始要求、追问回答、后续补充完整并入
-      user_instruction。'
-    tools:
-    - academic_expansion_context
-    - academic_search_papers
-    - academic_read_paper
-    inputs:
-    - material: expansion_id
-      required: true
-    - material: direction_research
-      required: true
-    outputs:
-    - material: seed_set
-      required: true
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
+    acceptance_criteria: 保持已确认范围、全部用户种子和实际来源；证据对应真实内容版本及读取范围；异常保留，局部成果可用；不得自动入库。
   expand_and_screen:
     label: 拓展与筛选
     prompt: '{{runtime_instruction}}
 
-      使用 save_artifacts 一次保存完整的 expanded_papers JSON，不保存测试对象或空壳，不逐字段补写。candidate_directions 与 selected_directions 是字符串数组。保存后结束，程序校验结构和论文来源。
+      先用 academic_expansion_context 读取绑定任务；使用服务端确认的方向、用户要求、种子和已有调研。不得改变主要方向或 ask_user。模型只提交论文
+      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。接近预算时停止补查，保存有效成果和缺口。
 
-      读取 seed_set.user_instruction 并严格执行用户的纳入、排除和新增限制。若用户要求只保留种子、不新增，则 papers 必须只保留原种子；读取种子和已选方向，调用 academic_search_papers(expansion_id, query) 实际搜索外部候选，无结果时如实保存，不用本地论文或模型记忆补齐。保留全部种子，去重并筛选最终保留论文；被淘汰的候选不得进入最终集合。保留每篇真实
-      paper_id，不编造 ID、元数据或下载链接。保存 expanded_papers JSON，沿用 seed_set 结构并包含最终 papers。没有新增论文时仍保存正常完成结果，综述是否可启动由服务端按至少两篇全文成功判断。'
+      按各已选方向分别检索，再跨方向去重。academic_search_papers 的 sources 可选 openalex/arxiv/sciverse/web，mode
+      可选 keyword/references/citations（引用查询用 openalex 和 paper_id）。Sciverse 有配置时正常参与适合的查询；通用搜索补查遗漏和公开副本，网页线索不能冒充论文。正常零结果、缺
+      Key、鉴权/额度失败分别处理，不重复无效调用。按相关性筛选，可移除非种子；用户要求不新增时只保留种子。用 academic_publish_stage
+      保存完整 candidate_set 和筛选理由、覆盖缺口。'
     tools:
     - academic_expansion_context
     - academic_search_papers
     - academic_read_paper
+    - academic_publish_stage
+    terminal_tools:
+    - academic_publish_stage
     inputs:
     - material: expansion_id
       required: true
-    - material: seed_set
+    - material: expansion_plan
       required: true
     outputs:
-    - material: expanded_papers
+    - material: candidate_set
       required: true
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
+    acceptance_criteria: 保持已确认范围、全部用户种子和实际来源；证据对应真实内容版本及读取范围；异常保留，局部成果可用；不得自动入库。
   analyze_relations:
-    label: 研究关系分析
+    label: 分析论文关系
     prompt: '{{runtime_instruction}}
 
-      读取绑定的 expanded_papers，逐篇调用 academic_read_paper(expansion_id, paper_id)，通过 next_cursor 读取至游标为空，才算读完全文。游标续读属于同一篇正文读取，不计入外部搜索轮次。processing、failed、unavailable 时保留论文，只分析已实际读取的材料，不能把摘要称为全文。
+      先用 academic_expansion_context 读取绑定任务；使用服务端确认的方向、用户要求、种子和已有调研。不得改变主要方向或 ask_user。模型只提交论文
+      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。接近预算时停止补查，保存有效成果和缺口。
 
-      分析完成后调用 academic_submit_relations(analyses)。analyses 是对象数组，必须准确覆盖 expanded_papers 的每个 paper_id；每项只含 paper_id 及可选的纯文本 seed_relation、direction_relation、key_contribution。每篇用完整段落表达分析，不创建嵌套证据对象，不抄写标题、作者、摘要、版本、下载链接、状态或搜索日志。仅有摘要时说明依据摘要，无法分析时省略对应描述。真实无结果时提交空数组。
-
-      发布工具会核对来源并补齐已有信息。返回成功即结束；不调用 save_artifacts、patch_artifact，不保存测试对象或空壳。校验失败时只修正工具指出的字段后重新提交。'
+      先按原始摘要初筛，对关键论文按问题调用 academic_read_paper(keywords=[...]) 或指定 page_start/page_end。检查完整命中页、相邻页、表格标题、实验条件及运行前提；必要时扩大或完整阅读，不要求所有论文把
+      cursor 读到底。内容 processing/failed/needs_review 时保留论文并限制分析。调用 academic_submit_relations(analyses,claims)：analyses
+      精确覆盖 candidate_set 全部 ID，只提交 paper_id 及纯文本 seed_relation、direction_relation、key_contribution。claims
+      是需要独立核验的方法继承、效果改善、关键数字、适用条件，每项 paper_id、field、statement、positions（真实读取返回的0起始块位置，1..5个）。先补齐上下文，再统一提交一次核验；无法取正文时不作具体强结论。复核不支持的项由程序降为不确定。'
     tools:
     - academic_expansion_context
     - academic_read_paper
     - academic_submit_relations
-    terminal_tools: [academic_submit_relations]
+    terminal_tools:
+    - academic_submit_relations
     inputs:
     - material: expansion_id
       required: true
-    - material: expanded_papers
+    - material: candidate_set
       required: true
     outputs:
-    - material: paper_relations
+    - material: relation_analysis
       required: true
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
+    acceptance_criteria: 保持已确认范围、全部用户种子和实际来源；证据对应真实内容版本及读取范围；异常保留，局部成果可用；不得自动入库。
   compose_result:
-    label: 整理拓展成果
+    label: 研究脉络与阅读建议
     prompt: '{{runtime_instruction}}
 
-      直接调用无参数的 academic_publish_expansion_result。工具读取本步骤绑定且已校验的 paper_relations，自动生成并保存 expansion_result，其顶层只有 user_instruction、candidate_directions、selected_directions、papers。无需重新检索、阅读、分析或生成 JSON。
+      先用 academic_expansion_context 读取绑定任务；使用服务端确认的方向、用户要求、种子和已有调研。不得改变主要方向或 ask_user。模型只提交论文
+      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。接近预算时停止补查，保存有效成果和缺口。
 
-      返回成功后结束。服务沿用现有成果投影、轮次和下游 Mock 交接规则；当前 Chat 不执行综述。'
-    tools: [academic_publish_expansion_result]
-    tools_only: true
-    terminal_tools: [academic_publish_expansion_result]
+      读取 relation_analysis 的 input、claims、reading，按方向整理研究问题、前序基础、相关路线、后续变化及阅读建议。具体主张必须遵循复核结论；不把引用当继承，不把方法改变当效果改善。调用
+      academic_publish_expansion_result(narrative,reading_order,limitations)，narrative
+      为可读 Markdown，reading_order 为选中论文 ID 顺序，limitations 包含实际覆盖及材料限制。程序同时发布四字段 expansion_result
+      和独立 expansion_report，不重新抄写题录或摘要。'
+    tools:
+    - academic_expansion_context
+    - academic_publish_expansion_result
+    terminal_tools:
+    - academic_publish_expansion_result
     inputs:
     - material: expansion_id
       required: true
-    - material: paper_relations
+    - material: relation_analysis
       required: true
     outputs:
     - material: expansion_result
       required: true
-    acceptance_criteria: 严格遵循用户的纳入、排除和新增限制；保留真实论文身份和完整用户要求；外部搜索和实际全文读取状态如实展示，不编造候选或全文证据。
+    - material: expansion_report
+      required: true
+    acceptance_criteria: 保持已确认范围、全部用户种子和实际来源；证据对应真实内容版本及读取范围；异常保留，局部成果可用；不得自动入库。

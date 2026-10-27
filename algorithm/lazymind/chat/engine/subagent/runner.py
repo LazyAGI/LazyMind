@@ -963,6 +963,18 @@ def _build_subagent_plan(
     # A declared execution budget overrides defaults; None preserves the
     # upstream round, retry, tool-discovery and tool-limit path exactly.
     execution_policy = policy_for(ctx.params)
+    execution_deadline = time.monotonic() + execution_policy.timeout if execution_policy else None
+    ctx.execution_deadline = execution_deadline
+
+    def check_execution_budget():
+        if execution_deadline is not None and time.monotonic() >= execution_deadline:
+            raise RuntimeError('WORKFLOW_STEP_TIMEOUT: execution budget exhausted')
+
+    def execution_budget_notice():
+        seconds = max(0, round(execution_deadline - time.monotonic()))
+        return (f'本步骤剩余执行预算约 {seconds} 秒。接近上限时停止新增调查，'
+                '使用已有可靠材料提交有效的部分成果并说明未完成事项；不能补造事实。')
+
     return AgentRunPlan(
         role=AgentRole.SUBAGENT,
         prompt=builder.build(),
@@ -1001,6 +1013,8 @@ def _build_subagent_plan(
                          max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)),
             expanded_round_limit=execution_policy.rounds if execution_policy else None,
             llm_config=llm_config or {},
+            before_model_request=check_execution_budget if execution_policy else None,
+            model_context_provider=execution_budget_notice if execution_policy else None,
             tool_failure_limits=WORKFLOW_TOOL_FAILURE_LIMITS,
             tool_call_limits={**WORKFLOW_TOOL_CALL_LIMITS, **(execution_policy.calls if execution_policy else {})},
         ),

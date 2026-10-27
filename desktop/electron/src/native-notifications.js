@@ -28,7 +28,7 @@ function isTrustedNotificationSender(event, window, frontendOrigin) {
 }
 
 function createDesktopNotifications({ Notification, fetch = globalThis.fetch, getRuntime, openPath,
-  statePath, icon, renewSession, report = () => {}, clock = { setTimeout, clearTimeout } }) {
+  statePath, icon, renewSession, isTargetVisible = () => false, report = () => {}, clock = { setTimeout, clearTimeout } }) {
   let generation = 0;
   let current = null;
   let timer;
@@ -140,10 +140,17 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
     finally { receipts.delete(key); }
   }
 
-  async function clicked(context, taskID) {
+  async function clicked(context, item) {
+    const taskID = item.task_id;
     const revision = context.revision;
     if (!context.verified || context.paused) return;
     try {
+    if (item.navigation?.type === "academic_expansion" && identifier(item.navigation.expansion_id) && identifier(item.navigation.dataset_id)) {
+      await openPath(context.runtime.frontendOrigin + `/lib/knowledge/detail/${encodeURIComponent(item.navigation.dataset_id)}?expansion_id=${encodeURIComponent(item.navigation.expansion_id)}`,
+        () => activeRequest(context, revision) && context.verified && !context.paused);
+      return;
+    }
+
       const response = await request(context, `/api/core/task-center/tasks/${encodeURIComponent(taskID)}`);
       const task = response?.data ?? response;
       if (!activeRequest(context, revision) || !context.verified) return;
@@ -162,7 +169,7 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
     }
     if (!alive(context) || !context.verified || context.paused || storageFailed
       || item?.user_id !== context.user || item.channel !== "desktop" || item.status !== "pending"
-      || !notificationID(item.notification_id) || !identifier(item.task_id)
+      || !notificationID(item.notification_id) || !(identifier(item.task_id) || (item.navigation?.type === "academic_expansion" && identifier(item.navigation.expansion_id) && identifier(item.navigation.dataset_id)))
       || !identifier(item.title) || typeof item.body !== "string" || [...item.body].length > 200) return;
     const key = hash(`${context.scope}:${item.notification_id}`);
     if (journal.entries[key]) return;
@@ -178,6 +185,9 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
     const entry = journal.entries[key] = { id: item.notification_id, scope: context.scope, status: "submitting" };
     persist();
     try {
+      if (item.navigation?.type === "academic_expansion" && isTargetVisible(item.navigation)) {
+        entry.status = "shown"; persist(); void acknowledge(context, key); return;
+      }
       const notification = new Notification({ title: item.title, body: item.body, ...(icon ? { icon } : {}) });
       native.set(key, notification);
       notification.on("show", () => {
@@ -186,7 +196,7 @@ function createDesktopNotifications({ Notification, fetch = globalThis.fetch, ge
         try { persist(); } catch { return; }
         void acknowledge(context, key);
       });
-      notification.on("click", () => { if (alive(context)) void clicked(context, item.task_id); });
+      notification.on("click", () => { if (alive(context)) void clicked(context, item); });
       notification.on("failed", () => { if (alive(context)) report("DESKTOP_NOTIFICATION_RESULT_UNKNOWN"); });
       notification.show();
     } catch { report("DESKTOP_NOTIFICATION_RESULT_UNKNOWN"); }
