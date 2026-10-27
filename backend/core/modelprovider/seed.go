@@ -303,6 +303,33 @@ func syncDefaultModelToUserGroups(
 		if count > 0 {
 			continue
 		}
+		// A refreshed catalog can reintroduce a model that was previously
+		// retired. Restore the soft-deleted row before inserting so the unique
+		// group/name index remains valid across catalog refreshes.
+		var retired orm.UserModelProviderGroupModel
+		if err := tx.Unscoped().
+			Where("user_model_provider_group_id = ? AND name = ?", group.GroupID, modelName).
+			Take(&retired).Error; err == nil {
+			if err := tx.Unscoped().Model(&retired).Updates(map[string]any{
+				"user_model_provider_id":     group.UserModelProviderID,
+				"provider_name":              providerName,
+				"model_type":                 modelType,
+				"vision":                     vision,
+				"max_input_tokens":           maxInputTokens,
+				"free_auto_select_priority":  freeAutoSelectPriority,
+				"free_auto_select_base_urls": freeAutoSelectBaseURLs,
+				"is_default":                 true,
+				"create_user_id":             group.CreateUserID,
+				"create_user_name":           group.CreateUserName,
+				"updated_at":                 now,
+				"deleted_at":                 nil,
+			}).Error; err != nil {
+				return err
+			}
+			continue
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 		row := orm.UserModelProviderGroupModel{
 			ID:                       common.GenerateID(),
 			UserModelProviderID:      group.UserModelProviderID,
