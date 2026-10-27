@@ -49,6 +49,29 @@ func TestLocalSupplierTemplateKeepsMediaUnsupportedAfterOpenAIProtocolSelection(
 	}
 }
 
+func TestLocalSupplierTemplateBlocksExistingMediaRoleDuringModelEdit(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.DefaultModelProvider{}, &orm.UserModelProvider{}, &orm.UserSelectedModel{}).DB
+	now := time.Now().UTC()
+	base := orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}
+	template := orm.DefaultModelProvider{ID: "vllm-template", Name: "vLLM", Category: "model", CreatedAt: now, UpdatedAt: now}
+	parent := orm.UserModelProvider{ID: "local", DefaultModelProviderID: template.ID, Name: "my-local", IsCustom: true, ProtocolName: "OpenAI", Category: "model", BaseModel: base}
+	if err := db.Create(&template).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&parent).Error; err != nil {
+		t.Fatal(err)
+	}
+	before := orm.UserModelProviderGroupModel{ID: "model", UserModelProviderID: parent.ID, ModelType: "llm", Name: "chat", ProviderName: "OpenAI", BaseModel: base}
+	after := before
+	after.ModelType = "text2image"
+	if err := db.Create(&orm.UserSelectedModel{UserID: "owner", ModelKey: "text2image", UserModelProviderGroupModelID: before.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := validateModelEditReferences(t.Context(), db, parent, before, after, "http://local.example/v1/"); err != errModelDefaultReference {
+		t.Fatalf("local media edit error=%v, want %v", err, errModelDefaultReference)
+	}
+}
+
 func TestLocalSupplierMediaRowStaysUnavailableInListsAndReadiness(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.DefaultModelProvider{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}, &orm.UserSelectedModel{}).DB
 	store.Init(db, db, nil)

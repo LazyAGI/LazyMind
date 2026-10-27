@@ -112,7 +112,7 @@ func modelSupportsSelectionForProvider(ctx context.Context, db *gorm.DB, parent 
 
 // The model UUID is kept stable. Reject changes that would make its existing
 // role bindings invalid rather than silently clearing or repointing them.
-func validateModelEditReferences(tx *gorm.DB, before, after orm.UserModelProviderGroupModel, baseURL string) error {
+func validateModelEditReferences(ctx context.Context, tx *gorm.DB, parent orm.UserModelProvider, before, after orm.UserModelProviderGroupModel, baseURL string) error {
 	identityChanged := before.Name != after.Name || equivalentTechnicalType(before.ModelType) != equivalentTechnicalType(after.ModelType) || modelsettings.EmbeddingIdentityChanged(before.ModelSettings, after.ModelSettings)
 	var selections []orm.UserSelectedModel
 	if tx.Migrator().HasTable(&orm.UserSelectedModel{}) {
@@ -135,7 +135,7 @@ func validateModelEditReferences(tx *gorm.DB, before, after orm.UserModelProvide
 		}
 	}
 	for _, selection := range selections {
-		if !modelSupportsSelection(after, selection.ModelKey, baseURL) {
+		if !modelSupportsSelectionForProvider(ctx, tx, parent, after, selection.ModelKey, baseURL) {
 			return errModelDefaultReference
 		}
 	}

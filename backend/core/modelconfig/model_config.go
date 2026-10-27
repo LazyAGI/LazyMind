@@ -219,7 +219,12 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string, scope
 }
 
 type SelectedRuntimeModel struct {
-	RuntimeGroupID     string `gorm:"column:runtime_group_id"`
+	RuntimeGroupID    string `gorm:"column:runtime_group_id"`
+	RuntimeProviderID string `gorm:"column:runtime_provider_id"`
+	// RuntimeIdentity is the catalog identity used to choose a LazyLLM
+	// adapter. It is separate from ProviderName, which may be an
+	// OpenAI-compatible protocol for local vLLM/LMDeploy providers.
+	RuntimeIdentity    string `gorm:"column:runtime_identity"`
 	ModelType          string
 	TechnicalModelType string
 	Vision             bool
@@ -312,7 +317,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.model_type AS technical_model_type, m.vision, m.model_settings, "+
 				"m.is_default, "+
 				"m.provider_name, "+
-				"m.name AS model_name, "+
+				"m.name AS model_name, m.user_model_provider_id AS runtime_provider_id, "+
 				"g.id AS runtime_group_id, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
 				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
@@ -335,6 +340,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	if err != nil {
 		return nil, err
 	}
+	populateRuntimeIdentities(ctx, db, ownRows)
 	ownRows = eligibleRuntimeModels(ownRows)
 	availableOwn := make([]SelectedRuntimeModel, 0, len(ownRows))
 	blockedOwnTypes := make(map[string]struct{})
@@ -411,7 +417,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.model_type AS technical_model_type, m.vision, m.model_settings, "+
 				"m.is_default, "+
 				"m.provider_name, "+
-				"m.name AS model_name, "+
+				"m.name AS model_name, m.user_model_provider_id AS runtime_provider_id, "+
 				"g.id AS runtime_group_id, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
 				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
@@ -435,6 +441,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	if err != nil {
 		return nil, err
 	}
+	populateRuntimeIdentities(ctx, db, sharedRows)
 	sharedRows = eligibleRuntimeModels(sharedRows)
 
 	// Explicit own/Cloud selections take priority; shared rows fill missing types.
@@ -797,7 +804,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	var row SelectedRuntimeModel
 	err := db.WithContext(ctx).
 		Table("user_model_provider_group_models m").
-		Select("g.id AS runtime_group_id, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.base_url, g.api_key, g.api_key_ciphertext").
+		Select("g.id AS runtime_group_id, m.user_model_provider_id AS runtime_provider_id, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.base_url, g.api_key, g.api_key_ciphertext").
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
@@ -816,6 +823,7 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 		return nil, nil
 	}
 	rows := []SelectedRuntimeModel{row}
+	populateRuntimeIdentities(ctx, db, rows)
 	if err := decryptRuntimeModels(ctx, db, rows); err != nil {
 		return nil, err
 	}
@@ -824,6 +832,80 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 	cfg, _ := config["embed_main"].(map[string]any)
 
 	return cfg, nil
+}
+
+// populateRuntimeIdentities enriches selected rows with the immutable catalog
+// identity used by local runtime adapters. Older installations and focused
+// test databases may not have the provider catalog tables yet; in that case
+// the existing protocol/provider name remains the compatibility fallback.
+func populateRuntimeIdentities(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) {
+	if db == nil || len(rows) == 0 ||
+		!db.Migrator().HasTable(&orm.UserModelProvider{}) ||
+		!db.Migrator().HasTable(&orm.DefaultModelProvider{}) {
+		return
+	}
+	ids := make([]string, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		id := strings.TrimSpace(row.RuntimeProviderID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var providers []struct {
+		ID                     string `gorm:"column:id"`
+		DefaultModelProviderID string `gorm:"column:default_model_provider_id"`
+	}
+	if err := db.WithContext(ctx).
+		Table("user_model_providers").
+		Select("id, default_model_provider_id").
+		Where("id IN ? AND deleted_at IS NULL", ids).
+		Find(&providers).Error; err != nil {
+		return
+	}
+	defaultIDs := make([]string, 0, len(providers))
+	for _, provider := range providers {
+		if id := strings.TrimSpace(provider.DefaultModelProviderID); id != "" {
+			defaultIDs = append(defaultIDs, id)
+		}
+	}
+	if len(defaultIDs) == 0 {
+		return
+	}
+	var templates []struct {
+		ID   string `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	if err := db.WithContext(ctx).
+		Table("default_model_providers").
+		Select("id, name").
+		Where("id IN ? AND deleted_at IS NULL", defaultIDs).
+		Find(&templates).Error; err != nil {
+		return
+	}
+	nameByID := make(map[string]string, len(templates))
+	for _, template := range templates {
+		nameByID[template.ID] = strings.TrimSpace(template.Name)
+	}
+	identityByProvider := make(map[string]string, len(providers))
+	for _, provider := range providers {
+		if identity := nameByID[provider.DefaultModelProviderID]; identity != "" {
+			identityByProvider[provider.ID] = identity
+		}
+	}
+	for i := range rows {
+		if identity := identityByProvider[strings.TrimSpace(rows[i].RuntimeProviderID)]; identity != "" {
+			rows[i].RuntimeIdentity = identity
+		}
+	}
 }
 
 func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) error {
@@ -935,7 +1017,11 @@ func runtimeModelAdapterAvailable(row SelectedRuntimeModel) bool {
 		}
 		technical = row.ModelType
 	}
-	return modelprovider.RuntimeSupportsModelType(row.ProviderName, technical)
+	identity := strings.TrimSpace(row.RuntimeIdentity)
+	if identity == "" {
+		identity = row.ProviderName
+	}
+	return modelprovider.RuntimeSupportsModelType(identity, technical)
 }
 
 func openCodeDescriptor(row SelectedRuntimeModel) (modelprovider.OpenCodeModelDescriptor, bool) {

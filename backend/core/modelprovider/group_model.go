@@ -414,7 +414,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 			next.IsDefault = false
 		}
 		if metadataChanged {
-			if err := validateModelEditReferences(tx, before, next, connectionBaseURL(parent, group.BaseURL)); err != nil {
+			if err := validateModelEditReferences(r.Context(), tx, parent, before, next, connectionBaseURL(parent, group.BaseURL)); err != nil {
 				return err
 			}
 			if err := ensureEditedModelNameAvailable(tx, before, next.Name); err != nil {
