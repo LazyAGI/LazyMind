@@ -1,10 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import ChatMessageContent from "./ChatMessageContent";
 import MessageList from "./MessageList";
+
+const workflowFixture = vi.hoisted(() => ({ session: null as object | null, props: null as any }));
+beforeEach(() => { workflowFixture.session = null; workflowFixture.props = null; });
 
 vi.mock("react-i18next", () => ({
   initReactI18next: {
@@ -15,11 +18,11 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/modules/chat/store/workflowPanel", () => ({
-  useWorkflowStore: () => null,
+  useWorkflowStore: () => workflowFixture.session,
 }));
 
 vi.mock("@/modules/chat/components/WorkflowPanel", () => ({
-  WorkflowPanel: () => null,
+  WorkflowPanel: (props: any) => { workflowFixture.props = props; return null; },
 }));
 
 vi.mock("@/modules/identityAvatar", () => ({
@@ -54,6 +57,36 @@ function selectMessageText(text: string) {
   selection?.addRange(range);
   fireEvent.mouseUp(selected);
 }
+
+describe("native workflow Chat control wiring", () => {
+  it.each([false, true])("keeps the Chat stop callback separate from workflow controls (multi-answer: %s)", (multiAnswer) => {
+    workflowFixture.session = { session_id: 'workflow' };
+    const stop = vi.fn();
+    const props = {
+      sessionId: 'conversation',
+      messageList: [{ role: RoleTypes.ASSISTANT, history_id: 'history', delta: '',
+        ...(multiAnswer ? { answers: [
+          { content: 'answer one', history_id: 'answer-one' },
+          { content: 'answer two', history_id: 'answer-two' },
+        ] } : {}) }],
+      sendMessage: vi.fn(), regenerate: vi.fn(), stopGeneration: stop,
+      renderText: () => null, updateAssistantMessage: vi.fn(),
+    };
+    const view = render(<MessageList {...props} chatBusy />);
+    expect(workflowFixture.props.chatBusy).toBe(true);
+    expect(workflowFixture.props.onStop).toBeUndefined();
+    view.rerender(<MessageList {...props} />);
+    expect(workflowFixture.props.chatBusy).toBe(false);
+    expect(workflowFixture.props.onStop).toBeUndefined();
+  });
+
+  it('does not add workflow controls to an ordinary streaming Chat', () => {
+    render(<MessageList messageList={[{ role: RoleTypes.ASSISTANT, delta: '' }]} sessionId='conversation'
+      sendMessage={vi.fn()} regenerate={vi.fn()} stopGeneration={vi.fn()} renderText={() => null}
+      updateAssistantMessage={vi.fn()} chatBusy />);
+    expect(workflowFixture.props).toBeNull();
+  });
+});
 
 describe("MessageList resource references", () => {
   it.each([

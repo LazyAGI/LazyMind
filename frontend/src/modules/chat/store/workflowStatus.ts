@@ -1,4 +1,19 @@
-export type WorkflowSessionStatus = 'active' | 'completed' | 'failed' | 'waiting' | 'stopped';
+export type WorkflowSessionStatus = 'active' | 'pausing' | 'completed' | 'failed' | 'waiting' | 'stopped';
+
+export interface WorkflowDisplayState {
+  status: 'running' | 'waiting' | 'paused' | 'failed' | 'completed';
+  reason: string;
+  approval_step_id: string;
+  /** Native Chat turn owning cancellation, including after workflow hand-off. */
+  chat_history_id?: string;
+}
+
+const displayLabels: Record<WorkflowDisplayState['status'], string> = {
+  running: 'chat.workflowStatusRunning', waiting: 'chat.workflowStatusWaiting',
+  paused: 'chat.workflowStatusPaused', failed: 'chat.workflowStatusFailed',
+  completed: 'chat.workflowStatusDone',
+};
+export const workflowDisplayLabel = (status?: WorkflowDisplayState['status']): string => status ? displayLabels[status] : 'common.loading';
 
 export interface RuntimeProjectionStatus {
   completed?: boolean;
@@ -22,6 +37,7 @@ export function reconcileWorkflowSessionStatus(
   // Ordering is enforced at the store/reducer boundary. A newer projection
   // may legitimately reopen a failed/completed session after retry or rewind.
   const projectedStatus = projection.status === 'running' ? 'active' : projection.status;
+  if (projectedStatus === 'pausing') return 'pausing';
   if (projectedStatus === 'stopped') return 'stopped';
   if (projection.completed) return 'completed';
   const executions = (projection.current ?? []).map((id) => projection.nodes?.[id]?.execution);
@@ -40,16 +56,10 @@ export function reconcileWorkflowSessionStatus(
   return status;
 }
 
-/** A prepared session can be waiting for its first dispatch without awaiting approval. */
-export function isWorkflowReadyToStart(
-  status: WorkflowSessionStatus,
-  projection?: RuntimeProjectionStatus,
-  recordedStepCount = 0,
-): boolean {
-  const ready = projection?.ready ?? [];
-  return status === 'waiting'
-    && recordedStepCount === 0
-    && (projection?.current?.length ?? 0) === 0
-    && ready.length > 0
-    && ready.every((stepId) => projection?.nodes?.[stepId]?.requires_approval === false);
+export interface NativeWorkflowControl {
+  session_id: string;
+  kind: 'approve' | 'resume' | 'retry' | 'rewind';
+  expected_state_version: number;
+  step_id?: string;
+  preference_scope?: 'step' | 'following';
 }

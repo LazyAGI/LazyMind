@@ -90,7 +90,7 @@ func TestParallelAttemptsAndNewRoundRemainIndependent(t *testing.T) {
 func ptr(t time.Time) *time.Time { return &t }
 
 func TestWorkflowBindingPreservesAcceptedTimeAndStartsNewRound(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{}, &orm.WorkflowSession{})
+	db := orm.MigrateTestDB(t, &orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{})
 	ctx := context.Background()
 	start := time.Now().UTC().Add(-time.Minute)
 	must := func(err error) {

@@ -54,7 +54,10 @@ def _state_request_fingerprint(user_input: str) -> str:
 
 
 def _state_authoritative_user_input(context: Any, supplied: str = '') -> str:
-    authoritative = str((context.params or {}).get('user_input') or '').strip()
+    # Continuation turns carry control text in user_input; command identity is
+    # bound to the immutable request that launched this workflow.
+    params = context.params or {}
+    authoritative = str(params.get('launch_user_input') or params.get('user_input') or '').strip()
     return authoritative or str(supplied or '').strip()
 
 

@@ -171,7 +171,7 @@ export default function ChatMessageContent({
           >
             <img src={ThinkIcon} className="chat-think-icon" alt="" />
             <span className="chat-think-title">
-              {item.delta ? t("chat.thinkingDone") : t("chat.thinking")}
+              {item.delta || !isStreaming ? t("chat.thinkingDone") : t("chat.thinking")}
               {searchSummary ? ` · ${searchSummary}` : ""}
               {thinkingDuration ? ` (${thinkingDuration})` : ""}
             </span>

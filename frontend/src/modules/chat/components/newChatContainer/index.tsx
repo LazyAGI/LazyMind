@@ -598,6 +598,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                 workspacePermissionSaving
               }
               stopGeneration={conversation.stopGeneration}
+              chatBusy={conversation.loading || conversation.isStreaming || conversation.runtimeWaiting}
               renderText={renderText}
               updateAssistantMessage={conversation.updateAssistantMessage}
               onCiteMessage={handleAddCiteMessage}
@@ -661,6 +662,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               rerankReady={rerankReady}
               sessionId={sessionId}
               isStreaming={conversation.isStreaming}
+              canStopGeneration={conversation.canStopGeneration}
               onStopGeneration={conversation.stopGeneration}
               disabled={!canChat || conversation.runtimeWaiting}
               disabledReason={canChat ? undefined : disabledReason}

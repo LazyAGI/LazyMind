@@ -575,3 +575,16 @@ def test_external_sdk_rejects_zip_path_over_hundred_mib(tmp_path):
         handle.truncate((100 << 20) + 1)
     with pytest.raises(WorkflowClientError, match='100 MiB'):
         WorkflowClient._external_skill_source({'name': 'large', 'zip_path': str(archive)})
+
+
+@pytest.mark.parametrize('history_id', ['', 'foreground-history'])
+def test_prepare_preserves_explicit_host_chat_turn(history_id):
+    from lazymind.workflow_sdk import WorkflowClient
+
+    transport = MagicMock()
+    transport.post.return_value = httpx.Response(200, json={'result': {}})
+    client = WorkflowClient('http://core', 'user', transport=transport, trigger_history_id=history_id)
+    client.prepare_workflow('writer', fields={'conversation_id': 'chat'})
+    payload = transport.post.call_args.kwargs['json']
+    assert payload.get('trigger_history_id', '') == history_id
+    assert ('trigger_history_id' in payload) == bool(history_id)

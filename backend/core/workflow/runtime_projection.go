@@ -17,6 +17,7 @@ import (
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 	"lazymind/core/workflow/publication"
@@ -196,6 +197,7 @@ func loadRuntimeSnapshot(ctx context.Context, db *gorm.DB, sessionID string, gra
 }
 
 type projectionResponse struct {
+	Display        displaystate.View                `json:"display"`
 	Control        *controlstore.Snapshot           `json:"control,omitempty"`
 	Status         string                           `json:"status"`
 	CurrentStepID  string                           `json:"current_step_id"`
@@ -286,7 +288,15 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 			}
 		}
 	}
+	display, err := displaystate.Read(db.WithContext(ctx), *session)
+	if err != nil {
+		return projectionResponse{}, err
+	}
+	if display.Status == "waiting" {
+		projection.Completed = false
+	}
 	return projectionResponse{
+		Display: display,
 		Control: control,
 		Status:  session.Status, CurrentStepID: session.CurrentStepID,
 		SessionID: session.ID, StateVersion: session.StateVersion, GraphHash: graph.GraphHash, SchemaVersion: graph.SchemaVersion,
@@ -511,7 +521,9 @@ func reconcileSessionProjection(ctx context.Context, db *gorm.DB, session *orm.W
 		return err
 	}
 	status := SessionStatusWaiting
-	if projected.Projection.Completed {
+	if session.Status == "pausing" {
+		status = "pausing"
+	} else if projected.Projection.Completed {
 		status = SessionStatusCompleted
 	} else {
 		for _, id := range projected.Projection.Current {
@@ -523,6 +535,13 @@ func reconcileSessionProjection(ctx context.Context, db *gorm.DB, session *orm.W
 					status = SessionStatusFailed
 				}
 			}
+		}
+		// A ready successor is part of the already admitted execution. Keep
+		// its preparation interval open until the driver advances or explicitly
+		// yields; no worker running between steps is not itself a failure.
+		if session.Status == SessionStatusActive && len(projected.Projection.Current) == 0 &&
+			len(projected.Projection.Ready) > 0 && projected.Display.Status == "running" {
+			status = SessionStatusActive
 		}
 	}
 	updates := map[string]any{

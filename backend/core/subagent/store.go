@@ -494,12 +494,14 @@ func MarkInterrupted(ctx context.Context, db *gorm.DB, maxAge time.Duration) (in
 
 // InterruptConversation marks every active ordinary SubAgent task in a conversation
 // terminal and returns the task IDs whose live runner streams must be canceled.
-func InterruptConversation(ctx context.Context, db *gorm.DB, convID, summary string) ([]string, error) {
+func InterruptConversation(ctx context.Context, db *gorm.DB, convID, summary string, historyID ...string) ([]string, error) {
 	var taskIDs []string
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.SubAgentTask{}).
-			Where("conversation_id = ? AND status IN ?", convID, []string{StatusPending, StatusRunning}).
-			Pluck("id", &taskIDs).Error; err != nil {
+		query := tx.Model(&orm.SubAgentTask{}).Where("conversation_id = ? AND status IN ?", convID, []string{StatusPending, StatusRunning})
+		if len(historyID) > 0 && historyID[0] != "" {
+			query = query.Where("trigger_history_id = ?", historyID[0])
+		}
+		if err := query.Pluck("id", &taskIDs).Error; err != nil {
 			return err
 		}
 		if len(taskIDs) == 0 {

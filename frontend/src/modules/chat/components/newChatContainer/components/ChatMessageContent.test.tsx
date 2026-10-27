@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import ChatMessageContent from "./ChatMessageContent";
 
 vi.mock("react-i18next", async (importOriginal) => ({
@@ -38,6 +39,32 @@ describe("ChatMessageContent provider retry", () => {
 });
 
 describe("ChatMessageContent thinking duration", () => {
+  it.each([
+    { run_status: "completed" },
+    { run_status: "cancelled" },
+    { run_status: "interrupted" },
+    { run_status: "failed" },
+    { finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop },
+  ])("ends reasoning-only thinking for %j", (terminal) => {
+    const props = {
+      isThinkingCollapsed: () => false,
+      onToggleThinkingCollapse: vi.fn(),
+    };
+    const item = {
+      role: "assistant", delta: "", reasoning_content: "reasoning",
+      thinking_duration_s: 75,
+    };
+    const { rerender } = render(<ChatMessageContent {...props} item={item} />);
+    expect(screen.getByText("chat.thinking (1m15s)")).toBeInTheDocument();
+
+    rerender(<ChatMessageContent {...props} item={{ ...item, ...terminal }} />);
+    expect(screen.getByText("chat.thinkingDone (1m15s)")).toBeInTheDocument();
+    expect(screen.queryByText("chat.thinking (1m15s)")).not.toBeInTheDocument();
+
+    rerender(<ChatMessageContent {...props} item={item} />);
+    expect(screen.getByText("chat.thinking (1m15s)")).toBeInTheDocument();
+  });
+
   it.each([
     [20, "20s"],
     [60, "1m"],
