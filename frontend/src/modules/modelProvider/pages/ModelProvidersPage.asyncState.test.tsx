@@ -191,8 +191,8 @@ describe("model provider asynchronous state", () => {
     fireEvent.click(open);
     const dialog = within(await screen.findByRole("dialog"));
     fireEvent.change(dialog.getByPlaceholderText("modelProvider.modelNamePlaceholder"), { target: { value: "manual-with-tools-off" } });
-    fireEvent.click(dialog.getByRole("switch", { name: "modelProvider.editor.featureEnabled.tool_calling" }));
-    fireEvent.click(dialog.getByRole("switch", { name: "modelProvider.vision" }));
+    fireEvent.click(dialog.getByRole("button", { name: "modelProvider.editor.featureEnabled.tool_calling" }));
+    fireEvent.click(dialog.getByRole("button", { name: "modelProvider.editor.featureEnabled.vision" }));
     fireEvent.click(dialog.getByRole("button", { name: "modelProvider.add" }));
     await waitFor(() => expect(mocks.addModel).toHaveBeenCalledWith(expect.objectContaining({ addModelProviderGroupModelOpenAPIRequest: {
       name: "manual-with-tools-off", model_type: "llm", vision: true,
