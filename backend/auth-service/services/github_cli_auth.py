@@ -30,6 +30,8 @@ class _Session:
     connection_id: str = ''
     error_code: str = ''
     cancel: threading.Event = field(default_factory=threading.Event)
+    aliases: set[str] = field(default_factory=set)
+    cancelled_before_start: bool = False
 
 
 class GitHubCLIAuthService:
@@ -114,34 +116,80 @@ class GitHubCLIAuthService:
             raise_error(ErrorCodes.FORBIDDEN)
         return session
 
-    def start(self, *, owner_user_id, attempt_id, reauthorize_connection_id='', force_web=False):
+    def _prune(self):
+        for key, session in list(self._sessions.items()):
+            self._check(session)
+            if self.clock() >= session.deadline + 300 and session.status in _TERMINAL:
+                del self._sessions[key]
+
+    def _check_capacity(self):
+        if sum(1 + len(session.aliases) for session in self._sessions.values()) >= 256:
+            raise_error(ErrorCodes.GITHUB_CLI_BUSY)
+
+    @staticmethod
+    def _attempt_owner(attempt_id, owner_user_id):
         owner = (owner_user_id or '').strip()
         if not owner:
             raise_error(ErrorCodes.UNAUTHORIZED)
+        if not isinstance(attempt_id, str) or not 1 <= len(attempt_id) <= 128:
+            raise_error(ErrorCodes.INVALID_REQUEST)
+        return owner
+
+    def _find_attempt(self, attempt_id, owner):
+        return next((session for session in self._sessions.values() if session.owner == owner
+                     and (session.attempt == attempt_id or attempt_id in session.aliases)), None)
+
+    def get_attempt(self, attempt_id, *, owner_user_id):
+        owner = self._attempt_owner(attempt_id, owner_user_id)
+        with self._lock:
+            self._prune()
+            session = self._find_attempt(attempt_id, owner)
+            if session is None:
+                raise_error(ErrorCodes.GITHUB_CLI_SESSION_NOT_FOUND)
+            return self._snapshot(session)
+
+    def cancel_attempt(self, attempt_id, *, owner_user_id):
+        owner = self._attempt_owner(attempt_id, owner_user_id)
+        with self._lock:
+            self._prune()
+            session = self._find_attempt(attempt_id, owner)
+            if session is None:
+                # The create request may still be in transit. Retain cancellation
+                # under the same owner/attempt so a late POST cannot start login.
+                self._check_capacity()
+                session = _Session(owner, attempt_id, '', self.clock() + AUTH_TIMEOUT,
+                                   cancelled_before_start=True)
+                self._sessions[session.session_id] = session
+            if self._check(session):
+                self._finish(session, 'CANCELLED')
+            return self._snapshot(session)
+
+    def start(self, *, owner_user_id, attempt_id, reauthorize_connection_id='', force_web=False):
+        owner = self._attempt_owner(attempt_id, owner_user_id)
         if not self.web_authorization_enabled:
             raise_error(ErrorCodes.GITHUB_CLI_DISABLED)
         if self._recovery_failed:
             raise_error(ErrorCodes.GITHUB_CLI_FAILED if self.host_credentials_enabled else ErrorCodes.GITHUB_CLI_DISABLED)
         if not self._recovery_ready.is_set():
             raise_error(ErrorCodes.GITHUB_CLI_BUSY)
-        if not isinstance(attempt_id, str) or not 1 <= len(attempt_id) <= 128:
-            raise_error(ErrorCodes.INVALID_REQUEST)
         with self._lock:
-            for key, session in list(self._sessions.items()):
-                self._check(session)
-                if self.clock() >= session.deadline + 300 and session.status in _TERMINAL:
-                    del self._sessions[key]
-                elif session.owner == owner:
-                    if session.attempt == attempt_id:
-                        if session.target != reauthorize_connection_id or session.force_web != force_web:
-                            raise_error(ErrorCodes.INVALID_REQUEST)
-                        return self._snapshot(session)
+            self._prune()
+            existing = self._find_attempt(attempt_id, owner)
+            if existing is not None:
+                if not existing.cancelled_before_start and (
+                    existing.target != reauthorize_connection_id or existing.force_web != force_web
+                ):
+                    raise_error(ErrorCodes.INVALID_REQUEST)
+                return self._snapshot(existing)
+            for session in self._sessions.values():
+                if session.owner == owner:
                     if session.target == reauthorize_connection_id and session.status not in _TERMINAL:
                         if session.force_web != force_web:
                             raise_error(ErrorCodes.GITHUB_CLI_BUSY)
+                        self._check_capacity()
+                        session.aliases.add(attempt_id)
                         return self._snapshot(session)
-            if len(self._sessions) >= 256:
-                raise_error(ErrorCodes.GITHUB_CLI_BUSY)
+            self._check_capacity()
             if reauthorize_connection_id:
                 target = self.connections.get_connection(reauthorize_connection_id, user_id=owner)
                 if target['provider'] != 'github' or target.get('token_source') != 'github_cli':

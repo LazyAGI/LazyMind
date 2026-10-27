@@ -393,11 +393,11 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       if (code && beforeWrite.includes(code)) attempt.current = undefined;
       else request.uncertain = true;
       setError(documentPublicationErrorMessage(code, provider));
-      if (code === 'PROVIDER_CREDENTIALS_UNAVAILABLE' && provider === 'feishu') {
+      if (code === 'PROVIDER_CREDENTIALS_UNAVAILABLE' && (provider === 'feishu' || provider === 'github')) {
         const states = await availability.refresh();
-        if (states?.feishu === 'chat-disabled') {
+        if (states?.[provider] === 'chat-disabled') {
           setAuthorizationNeeded(provider);
-          setError(String(i18n.t('chat.writerLocal.feishuChatDisabled')));
+          setError(String(i18n.t(provider === 'github' ? 'chat.writerLocal.githubChatDisabled' : 'chat.writerLocal.feishuChatDisabled')));
           setErrorAction('providers');
         }
       }
@@ -411,7 +411,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     const state = availability.states[provider];
     if (state !== 'ready') {
       setAuthorizationNeeded(provider);
-      setError(state === 'chat-disabled' ? String(i18n.t('chat.writerLocal.feishuChatDisabled')) : state === 'authorize' ? String(i18n.t('chat.writerLocal.authorization', { provider: providerLabel(provider) })) : String(i18n.t(state === 'checking' ? 'chat.writerLocal.checking' : 'chat.writerLocal.platformFailed')));
+      setError(state === 'chat-disabled' ? String(i18n.t(provider === 'github' ? 'chat.writerLocal.githubChatDisabled' : 'chat.writerLocal.feishuChatDisabled')) : state === 'authorize' ? String(i18n.t('chat.writerLocal.authorization', { provider: providerLabel(provider) })) : String(i18n.t(state === 'checking' ? 'chat.writerLocal.checking' : 'chat.writerLocal.platformFailed')));
       setErrorAction('providers');
       return;
     }

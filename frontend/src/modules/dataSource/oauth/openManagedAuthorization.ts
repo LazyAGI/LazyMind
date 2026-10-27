@@ -29,13 +29,23 @@ export async function openGitHubCLIAuthorization(
       return result && typeof result === "object" && "opened" in result && result.opened === true
         ? { ok: true } : { ok: false, reason: "blocked" };
     }
-    if (popup !== undefined) {
-      if (!popup || popup.closed) return { ok: false, reason: "blocked" };
-      popup.location.replace(url);
+    const target = popup === undefined ? window.open("about:blank", "_blank") : popup;
+    if (!target || target.closed) return { ok: false, reason: "blocked" };
+    try {
+      target.opener = null;
+      const link = target.document.createElement("a");
+      link.href = url;
+      link.rel = "noreferrer";
+      link.referrerPolicy = "no-referrer";
+      link.target = "_self";
+      target.document.body.append(link);
+      link.click();
+      link.remove();
       return { ok: true };
+    } catch {
+      closeManagedAuthorizationPopup(target);
+      return { ok: false, reason: "blocked" };
     }
-    return window.open(url, "_blank", "noopener,noreferrer")
-      ? { ok: true } : { ok: false, reason: "blocked" };
   } catch {
     closeManagedAuthorizationPopup(popup);
     return { ok: false, reason: "blocked" };

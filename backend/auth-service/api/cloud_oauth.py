@@ -31,6 +31,8 @@ from services.cloud_oauth_service import cloud_oauth_service
 from services.github_cli_auth import github_cli_auth_service
 
 
+# The permission exporter also runs under /app, without an auth-service directory.
+_API_PREFIX = '/api/authservice'
 router = APIRouter(prefix='/v1/cloud', tags=['cloud-oauth'])
 
 
@@ -67,6 +69,20 @@ def get_github_cli_session(session_id: str, response: Response, user: User = Dep
 def cancel_github_cli_session(session_id: str, response: Response, user: User = Depends(current_user)):  # noqa: B008
     response.headers['Cache-Control'] = 'no-store'
     return _github_cli_call(github_cli_auth_service.cancel, session_id, owner_user_id=str(user.id))
+
+
+@router.get('/github/cli/attempts/{attempt_id}', response_model=GitHubCLISessionResponse)
+@permission_required('model.write')
+def get_github_cli_attempt(attempt_id: str, response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_cli_call(github_cli_auth_service.get_attempt, attempt_id, owner_user_id=str(user.id))
+
+
+@router.delete('/github/cli/attempts/{attempt_id}', response_model=GitHubCLISessionResponse)
+@permission_required('model.write')
+def cancel_github_cli_attempt(attempt_id: str, response: Response, user: User = Depends(current_user)):  # noqa: B008
+    response.headers['Cache-Control'] = 'no-store'
+    return _github_cli_call(github_cli_auth_service.cancel_attempt, attempt_id, owner_user_id=str(user.id))
 
 
 @router.post('/{provider}/connections', response_model=CloudConnectionCreateResponse)

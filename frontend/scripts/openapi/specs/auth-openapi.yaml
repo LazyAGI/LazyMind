@@ -1699,6 +1699,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/github/cli/attempts/{attempt_id}:
+    get:
+      tags:
+      - cloud-oauth
+      summary: Get Github Cli Attempt
+      operationId: get_github_cli_attempt_api_authservice_v1_cloud_github_cli_attempts__attempt_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubCLISessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - cloud-oauth
+      summary: Cancel Github Cli Attempt
+      operationId: cancel_github_cli_attempt_api_authservice_v1_cloud_github_cli_attempts__attempt_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubCLISessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AuthorizeBody:

@@ -14,8 +14,11 @@
     }
   }
 
-  &.github-connection-summary .github-connection-header {
-    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+  &.github-connection-summary {
+    padding: 0;
+
+    > .model-provider-cloud-doc-resource-row { border-bottom: 0; }
+    > .ant-alert { margin: 12px 20px 18px; }
   }
 
   &.github-account-management { border: 0; }
@@ -52,10 +55,9 @@
   }
 
   @media (max-width: 640px) {
-    .github-connection-header,
-    &.github-connection-summary .github-connection-header { grid-template-columns: 44px minmax(0, 1fr); }
+    .github-connection-header { grid-template-columns: 44px minmax(0, 1fr); }
     .github-connection-header > .ant-tag { grid-column: 2; justify-self: start; }
-    .github-connection-header > button { grid-column: 2; justify-self: start; }
+    .github-connection-header > div:last-child { grid-column: 2; justify-self: start; }
   }
 }
 

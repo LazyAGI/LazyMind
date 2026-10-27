@@ -9,7 +9,17 @@ function open(url: string, popup?: Window | null) {
   return (implementation as (url: string, popup?: Window | null) => Promise<{ ok: boolean; reason?: string }>)(url, popup);
 }
 function popup() {
-  return { closed: false, close: vi.fn(), location: { replace: vi.fn() } } as unknown as Window;
+  const doc = document.implementation.createHTMLDocument();
+  const navigations = vi.fn();
+  const reserved = { closed: false, opener: window, document: doc, navigations,
+    close: vi.fn(), location: { replace: vi.fn() } };
+  doc.addEventListener("click", event => {
+    event.preventDefault(); // jsdom cannot navigate; the browser probe checks the real Referer.
+    const link = event.target as HTMLAnchorElement;
+    navigations({ href: link.href, rel: link.rel, target: link.target,
+      policy: link.referrerPolicy || link.getAttribute("referrerpolicy"), opener: reserved.opener });
+  });
+  return reserved as unknown as Window & { navigations: ReturnType<typeof vi.fn> };
 }
 beforeEach(() => { Reflect.deleteProperty(window, "lazymindDesktop"); });
 afterEach(() => { vi.restoreAllMocks(); Reflect.deleteProperty(window, "lazymindDesktop"); });
@@ -27,15 +37,24 @@ describe("GitHub device authorization navigation", () => {
     expect(nativeOpen).not.toHaveBeenCalled();
   });
   it("uses an isolated ordinary browser popup for the fixed official URL", async () => {
-    const nativeOpen = vi.spyOn(window, "open").mockReturnValue(popup());
+    const reserved = popup();
+    const nativeOpen = vi.spyOn(window, "open").mockReturnValue(reserved);
     expect(await open(DEVICE_URL)).toEqual({ ok: true });
-    expect(nativeOpen).toHaveBeenCalledWith(DEVICE_URL, "_blank", "noopener,noreferrer");
+    expect(nativeOpen).toHaveBeenCalledWith("about:blank", "_blank");
+    expect(nativeOpen).toHaveBeenCalledOnce();
+    expect(reserved.navigations).toHaveBeenCalledOnce();
+    expect(reserved.navigations).toHaveBeenCalledWith({ href: DEVICE_URL, rel: "noreferrer",
+      target: "_self", policy: "no-referrer", opener: null });
+    expect(reserved.location.replace).not.toHaveBeenCalled();
   });
   it("reuses a reserved popup without opening a second window", async () => {
     const reserved = popup();
     const nativeOpen = vi.spyOn(window, "open");
     expect(await open(DEVICE_URL, reserved)).toEqual({ ok: true });
-    expect(reserved.location.replace).toHaveBeenCalledWith(DEVICE_URL);
+    expect(reserved.navigations).toHaveBeenCalledOnce();
+    expect(reserved.navigations).toHaveBeenCalledWith({ href: DEVICE_URL, rel: "noreferrer",
+      target: "_self", policy: "no-referrer", opener: null });
+    expect(reserved.location.replace).not.toHaveBeenCalled();
     expect(nativeOpen).not.toHaveBeenCalled();
   });
   it.each([
@@ -53,6 +72,7 @@ describe("GitHub device authorization navigation", () => {
     expect(bridge).not.toHaveBeenCalled();
     expect(nativeOpen).not.toHaveBeenCalled();
     expect(reserved.location.replace).not.toHaveBeenCalled();
+    expect(reserved.navigations).not.toHaveBeenCalled();
     expect(reserved.close).toHaveBeenCalledOnce();
   });
   it("reports Desktop open rejection as recoverable without leaking the native error", async () => {

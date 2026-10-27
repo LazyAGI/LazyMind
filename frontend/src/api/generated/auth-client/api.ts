@@ -1351,6 +1351,44 @@ export const CloudOauthApiAxiosParamCreator = function (configuration?: Configur
         },
         /**
          *
+         * @summary Cancel Github Cli Attempt
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete: async (attemptId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'attemptId' is not null or undefined
+            assertParamExists('cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete', 'attemptId', attemptId)
+            const localVarPath = `/api/authservice/v1/cloud/github/cli/attempts/{attempt_id}`
+                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Cancel Github Cli Session
          * @param {string} sessionId
          * @param {*} [options] Override http request option.
@@ -1576,6 +1614,44 @@ export const CloudOauthApiAxiosParamCreator = function (configuration?: Configur
             if (tenantId !== undefined) {
                 localVarQueryParameter['tenant_id'] = tenantId;
             }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get Github Cli Attempt
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet: async (attemptId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'attemptId' is not null or undefined
+            assertParamExists('getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet', 'attemptId', attemptId)
+            const localVarPath = `/api/authservice/v1/cloud/github/cli/attempts/{attempt_id}`
+                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication HTTPBearer required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
             localVarHeaderParameter['Accept'] = 'application/json';
 
@@ -2155,6 +2231,19 @@ export const CloudOauthApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Cancel Github Cli Attempt
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete(attemptId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<GitHubCLISessionResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete(attemptId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Cancel Github Cli Session
          * @param {string} sessionId
          * @param {*} [options] Override http request option.
@@ -2232,6 +2321,19 @@ export const CloudOauthApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(connectionId, userId, tenantId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get Github Cli Attempt
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet(attemptId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<GitHubCLISessionResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet(attemptId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['CloudOauthApi.getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -2435,6 +2537,16 @@ export const CloudOauthApiFactory = function (configuration?: Configuration, bas
         },
         /**
          *
+         * @summary Cancel Github Cli Attempt
+         * @param {CloudOauthApiCancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete(requestParameters: CloudOauthApiCancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<GitHubCLISessionResponse> {
+            return localVarFp.cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete(requestParameters.attemptId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Cancel Github Cli Session
          * @param {CloudOauthApiCancelGithubCliSessionApiAuthserviceV1CloudGithubCliSessionsSessionIdDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -2492,6 +2604,16 @@ export const CloudOauthApiFactory = function (configuration?: Configuration, bas
          */
         getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(requestParameters: CloudOauthApiGetConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<CloudConnectionTokenResponse> {
             return localVarFp.getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(requestParameters.connectionId, requestParameters.userId, requestParameters.tenantId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get Github Cli Attempt
+         * @param {CloudOauthApiGetGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet(requestParameters: CloudOauthApiGetGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<GitHubCLISessionResponse> {
+            return localVarFp.getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet(requestParameters.attemptId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -2638,6 +2760,13 @@ export interface CloudOauthApiBatchConnectionStatusApiAuthserviceV1CloudConnecti
 }
 
 /**
+ * Request parameters for cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete operation in CloudOauthApi.
+ */
+export interface CloudOauthApiCancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDeleteRequest {
+    readonly attemptId: string
+}
+
+/**
  * Request parameters for cancelGithubCliSessionApiAuthserviceV1CloudGithubCliSessionsSessionIdDelete operation in CloudOauthApi.
  */
 export interface CloudOauthApiCancelGithubCliSessionApiAuthserviceV1CloudGithubCliSessionsSessionIdDeleteRequest {
@@ -2683,6 +2812,13 @@ export interface CloudOauthApiGetConnectionTokenApiAuthserviceV1CloudConnections
     readonly userId?: string | null
 
     readonly tenantId?: string | null
+}
+
+/**
+ * Request parameters for getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet operation in CloudOauthApi.
+ */
+export interface CloudOauthApiGetGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGetRequest {
+    readonly attemptId: string
 }
 
 /**
@@ -2815,6 +2951,17 @@ export class CloudOauthApi extends BaseAPI {
 
     /**
      *
+     * @summary Cancel Github Cli Attempt
+     * @param {CloudOauthApiCancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete(requestParameters: CloudOauthApiCancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).cancelGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdDelete(requestParameters.attemptId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Cancel Github Cli Session
      * @param {CloudOauthApiCancelGithubCliSessionApiAuthserviceV1CloudGithubCliSessionsSessionIdDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -2877,6 +3024,17 @@ export class CloudOauthApi extends BaseAPI {
      */
     public getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(requestParameters: CloudOauthApiGetConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGetRequest, options?: RawAxiosRequestConfig) {
         return CloudOauthApiFp(this.configuration).getConnectionTokenApiAuthserviceV1CloudConnectionsConnectionIdTokenGet(requestParameters.connectionId, requestParameters.userId, requestParameters.tenantId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get Github Cli Attempt
+     * @param {CloudOauthApiGetGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet(requestParameters: CloudOauthApiGetGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGetRequest, options?: RawAxiosRequestConfig) {
+        return CloudOauthApiFp(this.configuration).getGithubCliAttemptApiAuthserviceV1CloudGithubCliAttemptsAttemptIdGet(requestParameters.attemptId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
