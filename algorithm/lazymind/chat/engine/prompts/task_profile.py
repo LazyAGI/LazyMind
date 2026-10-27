@@ -676,10 +676,10 @@ def _extract_json(value: Any) -> dict[str, Any]:
     fenced = re.search(r'```(?:json)?\s*([\s\S]*?)```', text, re.I)
     if fenced:
         text = fenced.group(1).strip()
-    start, end = text.find('{'), text.rfind('}')
-    if start < 0 or end <= start:
+    start = text.find('{')
+    if start < 0:
         raise ValueError('classifier returned no JSON object')
-    raw = json.loads(text[start:end + 1])
+    raw, _ = json.JSONDecoder().raw_decode(text[start:])
     if not isinstance(raw, dict):
         raise ValueError('classifier JSON must be an object')
     return raw

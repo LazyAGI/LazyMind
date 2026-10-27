@@ -1,0 +1,6 @@
+test_interrupted_sqlite_upgrade_rolls_back_and_can_restart (test_migration_atomicity.MigrationAtomicityTests.test_interrupted_sqlite_upgrade_rolls_back_and_can_restart) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.372s
+
+OK

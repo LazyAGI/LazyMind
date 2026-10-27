@@ -1,0 +1,59 @@
+........................................................................ [ 32%]
+...................................................................... [ 63%]
+............................................... [ 84%]
+....................................                                     [100%]
+=============================== warnings summary ===============================
+../../.cache/uv/archive-v0/3dVMg8yvinvJnaGn/lib/python3.12/site-packages/starlette/formparsers.py:12
+  /home/cuishaoting/.cache/uv/archive-v0/3dVMg8yvinvJnaGn/lib/python3.12/site-packages/starlette/formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+../../.cache/uv/archive-v0/3dVMg8yvinvJnaGn/lib/python3.12/site-packages/passlib/utils/__init__.py:854
+  /home/cuishaoting/.cache/uv/archive-v0/3dVMg8yvinvJnaGn/lib/python3.12/site-packages/passlib/utils/__init__.py:854: DeprecationWarning: 'crypt' is deprecated and slated for removal in Python 3.13
+    from crypt import crypt as _crypt
+
+backend/auth-service/api/auth.py:104
+  /home/cuishaoting/testRag/LazyMind/backend/auth-service/api/auth.py:104: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @router.on_event('startup')
+
+backend/auth-service/main.py:316
+  /home/cuishaoting/testRag/LazyMind/backend/auth-service/main.py:316: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event('startup')
+
+../../.cache/uv/archive-v0/3dVMg8yvinvJnaGn/lib/python3.12/site-packages/fastapi/applications.py:4495
+../../.cache/uv/archive-v0/3dVMg8yvinvJnaGn/lib/python3.12/site-packages/fastapi/applications.py:4495
+  /home/cuishaoting/.cache/uv/archive-v0/3dVMg8yvinvJnaGn/lib/python3.12/site-packages/fastapi/applications.py:4495: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    return self.router.on_event(event_type)
+
+backend/auth-service/main.py:324
+  /home/cuishaoting/testRag/LazyMind/backend/auth-service/main.py:324: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event('shutdown')
+
+tests/backend/auth-service/api/test_auth_api.py: 7 warnings
+tests/backend/auth-service/api/test_password_ownership.py: 7 warnings
+tests/backend/auth-service/core/test_security.py: 1 warning
+tests/backend/auth-service/test_cloud_oauth.py: 6 warnings
+  /home/cuishaoting/.cache/uv/archive-v0/3dVMg8yvinvJnaGn/lib/python3.12/site-packages/jose/jwt.py:311: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = timegm(datetime.utcnow().utctimetuple())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+225 passed, 28 warnings, 27 subtests passed in 23.53s

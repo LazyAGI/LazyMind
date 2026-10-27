@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Input, Progress, Radio } from "antd";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { LeftOutlined, RightOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import type { RcFile } from "antd/es/upload";
+import ImageUpload, { type ImageUploadImperativeProps } from "../ImageUpload";
 import "./index.scss";
 
 export interface AskQuestion {
@@ -9,6 +11,13 @@ export interface AskQuestion {
   type: "boolean" | "single" | "multiple" | "text";
   choices?: string[];
   allow_other?: boolean;
+  attachment?: {
+    when_choice: string;
+    material_id: string;
+    accept: string[];
+    max_files?: number;
+    required?: boolean;
+  };
 }
 
 export interface AskPending {
@@ -48,6 +57,8 @@ export interface AskSubmitPayload {
   text: string;
   /** Full structured answers, forwarded to the backend as ask_answers_structured. */
   structured: AskAnswersStructured;
+  /** Uploaded through a conditional question and sent as normal chat attachments. */
+  files?: (RcFile & { uri: string })[];
 }
 
 interface AskCardProps {
@@ -118,6 +129,35 @@ function isAnswered(ans: AnswerState, otherOption: string): boolean {
     case "text":
       return ans.value.trim().length > 0;
   }
+}
+
+type AskAttachmentFile = RcFile & { uri?: string };
+
+function attachmentIsActive(q: AskQuestion, ans: AnswerState): boolean {
+  return Boolean(
+    q.attachment && ans.type === "single" &&
+    ans.value === q.attachment.when_choice,
+  );
+}
+
+function questionIsComplete(
+  q: AskQuestion,
+  ans: AnswerState,
+  files: AskAttachmentFile[],
+  otherOption: string,
+): boolean {
+  if (!isAnswered(ans, otherOption)) return false;
+  if (!attachmentIsActive(q, ans) || !q.attachment?.required) return true;
+  return files.length > 0 && files.every((file) => Boolean(file.uri));
+}
+
+function attachmentRequirementSatisfied(
+  q: AskQuestion,
+  ans: AnswerState,
+  files: AskAttachmentFile[],
+): boolean {
+  if (!attachmentIsActive(q, ans) || !q.attachment?.required) return true;
+  return files.length > 0 && files.every((file) => Boolean(file.uri));
 }
 
 function formatAnswer(
@@ -228,6 +268,8 @@ export default function AskCard({
   const [expanded, setExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [decisionFailed, setDecisionFailed] = useState(false);
+  const [attachmentFiles, setAttachmentFiles] = useState<Record<number, AskAttachmentFile[]>>({});
+  const attachmentRefs = useRef<Record<number, ImageUploadImperativeProps | null>>({});
   const submittingRef = useRef(false);
   const processed = answered || submitted;
   const isReadOnly = disabled || processed || submitting;
@@ -253,12 +295,19 @@ export default function AskCard({
     );
   }, [askPending.ask_id, savedAnswers]);
 
+  useEffect(() => {
+    setAttachmentFiles({});
+    attachmentRefs.current = {};
+  }, [askPending.ask_id]);
+
   const currentQ = questions[currentIndex]!;
   const currentAns = answers[currentIndex]!;
   const currentChoices = customChoices[currentIndex] ?? currentQ.choices ?? [];
 
   const progressPercent = Math.round(
-    (answers.filter((answer) => isAnswered(answer, otherOption)).length /
+    (answers.filter((answer, index) => questionIsComplete(
+      questions[index]!, answer, attachmentFiles[index] ?? [], otherOption,
+    )).length /
       total) *
       100,
   );
@@ -280,6 +329,9 @@ export default function AskCard({
 
   const handleSubmit = async () => {
     if (isReadOnly || submittingRef.current || needsConfirmation) return;
+    if (questions.some((question, index) => !attachmentRequirementSatisfied(
+      question, answers[index]!, attachmentFiles[index] ?? [],
+    ))) return;
     const lines = questions.map((q, i) =>
       formatAnswer(
         q,
@@ -305,7 +357,12 @@ export default function AskCard({
     setSubmitting(true);
     setDecisionFailed(false);
     try {
-      const accepted = await onSubmit({ text: lines.join("\n"), structured });
+      const files = questions.flatMap((question, index) => (
+        attachmentIsActive(question, answers[index]!)
+          ? (attachmentFiles[index] ?? []).filter((file): file is RcFile & { uri: string } => Boolean(file.uri))
+          : []
+      ));
+      const accepted = await onSubmit({ text: lines.join("\n"), structured, files });
       if (accepted !== false && !askPending.user_env_delete) setSubmitted(true);
       if (accepted === false && askPending.knowledge_management) setDecisionFailed(true);
     } catch {
@@ -427,6 +484,11 @@ export default function AskCard({
                 value={currentAns.type === "single" ? currentAns.value : null}
                 onChange={(e) => {
                   const chosen = e.target.value as string;
+                  const activatesAttachment = currentQ.attachment?.when_choice === chosen;
+                  if (!activatesAttachment && attachmentFiles[currentIndex]?.length) {
+                    attachmentRefs.current[currentIndex]?.clear();
+                    setAttachmentFiles((previous) => ({ ...previous, [currentIndex]: [] }));
+                  }
                   updateAnswer(
                     currentIndex,
                     {
@@ -437,7 +499,7 @@ export default function AskCard({
                           ? currentAns.otherText
                           : "",
                     },
-                    chosen !== otherOption,
+                    chosen !== otherOption && !activatesAttachment,
                   );
                 }}
                 disabled={isReadOnly}
@@ -470,6 +532,46 @@ export default function AskCard({
                     className="ask-wizard__other-input"
                   />
                 )}
+              {attachmentIsActive(currentQ, currentAns) && currentQ.attachment && (
+                <div className="ask-wizard__attachment">
+                  <ImageUpload
+                    ref={(instance) => { attachmentRefs.current[currentIndex] = instance; }}
+                    max={currentQ.attachment.max_files === -1 ? Infinity : (currentQ.attachment.max_files ?? 1)}
+                    listNum={0}
+                    types={currentQ.attachment.accept}
+                    disabled={isReadOnly}
+                    updateFiles={(files) => setAttachmentFiles((previous) => ({
+                      ...previous,
+                      [currentIndex]: files as AskAttachmentFile[],
+                    }))}
+                    icon={(
+                      <Button icon={<UploadOutlined />} disabled={isReadOnly}>
+                        {t("chat.askCardUploadFile")}
+                      </Button>
+                    )}
+                  />
+                  {(attachmentFiles[currentIndex] ?? []).map((file) => (
+                    <div className="ask-wizard__attachment-file" key={file.uid}>
+                      <span>{file.name}</span>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CloseOutlined />}
+                        disabled={isReadOnly}
+                        aria-label={t("chat.askCardRemoveFile")}
+                        onClick={() => attachmentRefs.current[currentIndex]?.removeFile(file.uid)}
+                      />
+                    </div>
+                  ))}
+                  {currentQ.attachment.required && !questionIsComplete(
+                    currentQ, currentAns, attachmentFiles[currentIndex] ?? [], otherOption,
+                  ) && (
+                    <span className="ask-wizard__attachment-hint">
+                      {t("chat.askCardUploadRequired")}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -568,7 +670,9 @@ export default function AskCard({
               <Button
                 type="primary"
                 onClick={handleSubmit}
-                disabled={needsConfirmation || submitting}
+                disabled={needsConfirmation || submitting || questions.some((question, index) => !attachmentRequirementSatisfied(
+                  question, answers[index]!, attachmentFiles[index] ?? [],
+                ))}
                 loading={submitting}
                 className="ask-wizard__submit-btn"
               >
@@ -584,7 +688,7 @@ export default function AskCard({
             <button
               key={idx}
               type="button"
-              className={`ask-wizard__jump-item${idx === currentIndex ? " is-current" : ""}${isAnswered(answers[idx]!, otherOption) ? " is-done" : ""}`}
+              className={`ask-wizard__jump-item${idx === currentIndex ? " is-current" : ""}${questionIsComplete(questions[idx]!, answers[idx]!, attachmentFiles[idx] ?? [], otherOption) ? " is-done" : ""}`}
               onClick={() => goTo(idx)}
               aria-label={`Go to question ${idx + 1}`}
             >

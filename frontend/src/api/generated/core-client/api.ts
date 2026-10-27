@@ -56,9 +56,21 @@ export interface AddACLRequest {
 }
 export interface AddModelProviderGroupModelOpenAPIRequest {
     /**
-     * Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
+    /**
+     * Optional context window. Explicit discovered values are preserved for unclassified models. When omitted for LLM/VLM models, resolves from config/model_context_windows.yaml with a 128K fallback; unclassified models have no inferred default.
      */
     'max_input_tokens'?: string;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
+    /**
+     * Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use.
+     */
     'model_type': string;
     'name': string;
     /**
@@ -70,11 +82,20 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
     'base_url': string;
     'group_name': string;
     'id': string;
+    /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
     'is_default': boolean;
     /**
-     * Stored LLM input context window, for example 512, 128K, or 1M
+     * Stored context window, including an explicit discovered value on an unclassified model; for example 262144, 128K, or 1M
      */
     'max_input_tokens'?: string | null;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
     'provider_name': string;
@@ -84,6 +105,29 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
      * Whether this LLM accepts image input
      */
     'vision': boolean;
+}
+export interface AddModelProviderGroupModelsOpenAPIFailure {
+    /**
+     * Safe per-model validation failure.
+     */
+    'message': string;
+    'name': string;
+}
+export interface AddModelProviderGroupModelsOpenAPIRequest {
+    /**
+     * One to 1000 models. Existing active names are returned without overwriting saved metadata; deleted models are restored with their original UUID.
+     */
+    'models'?: Array<AddModelProviderGroupModelOpenAPIRequest>;
+}
+export interface AddModelProviderGroupModelsOpenAPIResponse {
+    'added_count': number;
+    'existing_count': number;
+    'failures'?: Array<AddModelProviderGroupModelsOpenAPIFailure>;
+    'models'?: Array<AddModelProviderGroupModelOpenAPIResponse>;
+    /**
+     * Total active saved models in this group after the batch, including models outside the request.
+     */
+    'total_count': number;
 }
 export interface AddWordGroupConflictToGroupsRequest {
     'group_ids'?: Array<string>;
@@ -914,6 +958,10 @@ export interface ChatModelListOpenAPIItem {
     'group_name': string;
     'id': string;
     'lifecycle': ChatModelListOpenAPIItemLifecycleEnum;
+    /**
+     * Optional normalized PNG supplier logo data URL. Display metadata only.
+     */
+    'logo_data_url'?: string;
     'name': string;
     'shared': boolean;
     'source': ChatModelListOpenAPIItemSourceEnum;
@@ -963,6 +1011,8 @@ export type ChatModelOutputPhaseEnum = typeof ChatModelOutputPhaseEnum[keyof typ
 
 export interface ChatModelProviderOpenAPIItem {
     'id': string;
+    'is_custom': boolean;
+    'logo_data_url'?: string;
     'models'?: Array<ChatModelListOpenAPIItem>;
     'name': string;
     'source': ChatModelProviderOpenAPIItemSourceEnum;
@@ -1031,6 +1081,10 @@ export interface ChatModelSelectionOpenAPI {
     'availability': ChatModelSelectionOpenAPIAvailabilityEnum;
     'group_id'?: string;
     'group_name'?: string;
+    /**
+     * Optional normalized PNG logo inherited from the selected supplier, including a shared model.
+     */
+    'logo_data_url'?: string;
     'mode': ChatModelSelectionOpenAPIModeEnum;
     'model_id'?: string;
     'model_name'?: string;
@@ -1144,13 +1198,18 @@ export interface CheckFileHashesResponse {
 }
 export interface CheckModelProviderData {
     'message'?: string;
+    'reason'?: string;
     'success': boolean;
 }
 export interface CheckModelProviderOpenAPIRequest {
-    'api_key': string;
-    'base_url': string;
-    'dry_run': boolean;
-    'provider_name': string;
+    /**
+     * Omit to check the supplier\'s enabled key. An explicit empty string tests a keyless connection.
+     */
+    'api_key'?: string;
+    'base_url'?: string;
+    'dry_run'?: boolean;
+    'model'?: string;
+    'provider_name'?: string;
 }
 export interface CheckResponse {
     'message': string;
@@ -1554,6 +1613,10 @@ export interface ConversationArchiveResponse {
     'archived_at': string;
     'conversation_id': string;
     'newly_archived': boolean;
+    /**
+     * All affected conversation IDs, including dependent side chats.
+     */
+    'archived_ids': Array<string>;
 }
 export interface ConversationBatchDeleteRequest {
     'conversation_ids': Array<string>;
@@ -1928,6 +1991,10 @@ export const ConversationItemThinkingDepthEnum = {
 export type ConversationItemThinkingDepthEnum = typeof ConversationItemThinkingDepthEnum[keyof typeof ConversationItemThinkingDepthEnum];
 
 export interface ConversationListResponse {
+    /**
+     * True only for the complete lightweight selection snapshot. Such a response has no next page.
+     */
+    'selection_complete'?: boolean;
     'conversations'?: Array<ConversationItem>;
     'next_page_token'?: string;
     'total_size'?: number;
@@ -2237,6 +2304,26 @@ export const CreateChatExportRequestContentTypeEnum = {
 
 export type CreateChatExportRequestContentTypeEnum = typeof CreateChatExportRequestContentTypeEnum[keyof typeof CreateChatExportRequestContentTypeEnum];
 
+export interface CreateCustomModelProviderOpenAPIRequest {
+    'base_url': string;
+    /**
+     * Optional PNG data URL, at most 128 by 128 pixels and 96 KiB decoded. Empty uses the default custom supplier icon.
+     */
+    'logo_data_url'?: string;
+    'name': string;
+    /**
+     * An owned model provider whose technical protocol is used for this custom supplier.
+     */
+    'source_provider_id': string;
+}
+export interface CreateCustomModelProviderOpenAPIResponse {
+    /**
+     * Private credential/model storage ID retained for API compatibility.
+     */
+    'group_id': string;
+    'id': string;
+    'logo_data_url'?: string;
+}
 export interface CreateEvalSetByImportRequest {
     'dataset_ids'?: Array<string>;
     'description': string;
@@ -2269,8 +2356,11 @@ export interface CreateEvalSetRequest {
 }
 export interface CreateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
-    'base_url': string;
+    'base_url'?: string;
     'name': string;
+    /**
+     * Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
+     */
     'verify': boolean;
 }
 export interface CreateModelProviderGroupOpenAPIResponse {
@@ -2623,6 +2713,10 @@ export interface CurrentMemorySoulResponse {
     'data': CurrentMemorySoulData;
     'message': string;
 }
+export interface CustomModelProviderMutationOpenAPIResponse {
+    'id': string;
+    'logo_data_url'?: string;
+}
 export interface DatabaseConnectionRequest {
     'database_name': string;
     'db_type': string;
@@ -2718,6 +2812,10 @@ export interface DatasetOptionsResponse {
 export interface DatasetRole {
     'display_name'?: string;
     'role'?: string;
+}
+export interface DeleteCustomModelProviderOpenAPIResponse {
+    'downgraded_knowledge_bases': number;
+    'id': string;
 }
 export interface DeleteDatabaseConnectionOpenAPIResponse {
     'deleted': boolean;
@@ -3349,6 +3447,56 @@ export interface DocumentImageDisplay {
     'start': number;
     'width': number;
 }
+export interface DocumentImageExportItem {
+    'error_code'?: string;
+    'filename': string;
+    'id': string;
+    'size'?: number;
+    'status': DocumentImageExportItemStatusEnum;
+}
+
+export const DocumentImageExportItemStatusEnum = {
+    Pending: 'pending',
+    Ready: 'ready',
+    Failed: 'failed'
+} as const;
+
+export type DocumentImageExportItemStatusEnum = typeof DocumentImageExportItemStatusEnum[keyof typeof DocumentImageExportItemStatusEnum];
+
+export interface DocumentImageExportRequest {
+    'base_draft_version'?: number;
+    'base_revision': number;
+    'document': DocumentConvertPreviewInputDocument;
+    'image_reference'?: string;
+}
+export interface DocumentImageExportResponse {
+    'code': number;
+    'data': DocumentImageExportState;
+    'message': string;
+}
+export interface DocumentImageExportState {
+    'completed': number;
+    'expires_at': string;
+    'filename': string;
+    'id': string;
+    'items'?: Array<DocumentImageExportItem>;
+    'ready': number;
+    'single': boolean;
+    'status': DocumentImageExportStateStatusEnum;
+    'total': number;
+}
+
+export const DocumentImageExportStateStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Ready: 'ready',
+    Partial: 'partial',
+    Failed: 'failed',
+    Expired: 'expired'
+} as const;
+
+export type DocumentImageExportStateStatusEnum = typeof DocumentImageExportStateStatusEnum[keyof typeof DocumentImageExportStateStatusEnum];
+
 export interface DocumentInvalidCrossReference {
     'target_id': string;
 }
@@ -3499,6 +3647,23 @@ export interface DocumentProvidersOpenAPIResponse {
     'data': DocumentProviderCatalog;
     'message': string;
 }
+export interface DocumentPublicationGroupRequest {
+    'base_draft_version'?: number;
+    'base_revision': number;
+    'idempotency_key': string;
+    'targets': Array<DocumentPublicationTargetInput>;
+}
+export interface DocumentPublicationGroupResponse {
+    'code': number;
+    'data': DocumentPublicationGroupState;
+    'message': string;
+}
+export interface DocumentPublicationGroupState {
+    'current_hash': string;
+    'preferred_providers': Array<string>;
+    'publication_id'?: string;
+    'targets': Array<DocumentPublicationTargetState>;
+}
 export interface DocumentPublicationLookup {
     'operation'?: DocumentPublicationStatus;
 }
@@ -3550,6 +3715,25 @@ export interface DocumentPublicationStatus {
     'status': string;
     'target_url'?: string;
     'updated_at': string;
+}
+export interface DocumentPublicationTargetInput {
+    'connection_id'?: string;
+    'parent_uri'?: string;
+    'provider': string;
+    'retry_operation_id'?: string;
+    'title'?: string;
+}
+export interface DocumentPublicationTargetState {
+    'bound': boolean;
+    'connection_id'?: string;
+    'last_success_at'?: string;
+    'last_success_hash'?: string;
+    'operation'?: DocumentPublicationStatus;
+    'operation_hash'?: string;
+    'parent_uri'?: string;
+    'provider': string;
+    'target_url'?: string;
+    'title'?: string;
 }
 export interface DocumentPublishInput {
     'idempotency_key': string;
@@ -3769,6 +3953,11 @@ export interface DocumentTableColumn {
 export interface DocumentTagsResponse {
     'tags'?: Array<string>;
 }
+export interface EmbeddingOptions {
+    'batch_size'?: number | null;
+    'passage_prefix'?: string;
+    'query_prefix'?: string;
+}
 export interface EpisodeMemory {
     'conversation_id': string;
     'episode_type': EpisodeMemoryEpisodeTypeEnum;
@@ -3979,6 +4168,11 @@ export const FailedRunAttemptRunStatusEnum = {
 
 export type FailedRunAttemptRunStatusEnum = typeof FailedRunAttemptRunStatusEnum[keyof typeof FailedRunAttemptRunStatusEnum];
 
+export interface FeatureFlags {
+    'reasoning'?: boolean;
+    'tool_calling'?: boolean;
+    'vision'?: boolean;
+}
 export interface ForkAttachment {
     'name': string;
     'reason'?: string;
@@ -4555,25 +4749,38 @@ export interface ListGrantPrincipalsResponse {
 export interface ListModelProviderGroupModelsOpenAPIItem {
     'availability': ListModelProviderGroupModelsOpenAPIItemAvailabilityEnum;
     'base_url'?: string;
+    'brand_key'?: string;
     'capabilities'?: Array<string>;
     'group_name'?: string;
     'id': string;
+    /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
+    'is_custom': boolean;
     'is_default': boolean;
     /**
      * Whether this option supports image editing
      */
     'is_editable': boolean;
     'lifecycle': ListModelProviderGroupModelsOpenAPIItemLifecycleEnum;
+    'logo_data_url'?: string;
     /**
-     * Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
+     * Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported
      */
     'max_input_tokens'?: string | null;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
     'provider_group_id'?: string;
     'provider_id': string;
     'provider_name': string;
     'read_only': boolean;
+    'service_key'?: string;
     'source': ListModelProviderGroupModelsOpenAPIItemSourceEnum;
     'user_model_provider_group_id'?: string;
     'user_model_provider_id'?: string;
@@ -4608,10 +4815,12 @@ export interface ListModelProviderGroupModelsOpenAPIResponse {
     'models'?: Array<ListModelProviderGroupModelsOpenAPIItem>;
 }
 export interface ListModelProviderGroupsOpenAPIItem {
-    'api_key': string;
     'base_url': string;
+    'has_api_key': boolean;
     'id': string;
     'is_verified': boolean;
+    'keys'?: Array<ModelProviderGroupKeyOpenAPIItem>;
+    'model_count': number;
     'name': string;
     'user_model_provider_id': string;
 }
@@ -4620,10 +4829,18 @@ export interface ListModelProviderGroupsOpenAPIResponse {
 }
 export interface ListRemoteGroupModelsOpenAPIItem {
     'added': boolean;
+    'feature_support'?: FeatureFlags;
     'id': string;
+    'input'?: Array<string>;
     'max_input_tokens'?: string;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
+    'output'?: Array<string>;
+    /**
+     * Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog.
+     */
+    'sub_types'?: Array<string>;
 }
 export interface ListRemoteGroupModelsOpenAPIResponse {
     'models'?: Array<ListRemoteGroupModelsOpenAPIItem>;
@@ -4997,11 +5214,58 @@ export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
 }
+export interface ModelProbeResponse {
+    'code': ModelProbeResponseCodeEnum;
+    'elapsed_ms': number;
+    'embedding_dimensions'?: number;
+    'http_status'?: number;
+    'model_type': string;
+    'status': ModelProbeResponseStatusEnum;
+}
+
+export const ModelProbeResponseCodeEnum = {
+    Ok: 'ok',
+    Accepted: 'accepted',
+    UnsupportedType: 'unsupported_type',
+    UnsupportedProvider: 'unsupported_provider',
+    UnknownType: 'unknown_type',
+    AuthenticationFailed: 'authentication_failed',
+    PermissionDenied: 'permission_denied',
+    ModelNotFound: 'model_not_found',
+    RateLimited: 'rate_limited',
+    QuotaExceeded: 'quota_exceeded',
+    InvalidRequest: 'invalid_request',
+    Timeout: 'timeout',
+    ConnectionError: 'connection_error',
+    InvalidResponse: 'invalid_response',
+    EmptyResponse: 'empty_response',
+    UpstreamError: 'upstream_error',
+    ConfigurationChanged: 'configuration_changed',
+    KeyDisabled: 'key_disabled',
+    KeyRequired: 'key_required',
+    ProbeInProgress: 'probe_in_progress'
+} as const;
+
+export type ModelProbeResponseCodeEnum = typeof ModelProbeResponseCodeEnum[keyof typeof ModelProbeResponseCodeEnum];
+export const ModelProbeResponseStatusEnum = {
+    Passed: 'passed',
+    Failed: 'failed',
+    Unsupported: 'unsupported',
+    Accepted: 'accepted'
+} as const;
+
+export type ModelProbeResponseStatusEnum = typeof ModelProbeResponseStatusEnum[keyof typeof ModelProbeResponseStatusEnum];
+
 export interface ModelProviderBaseURLPresetItem {
     'api_key_required'?: boolean;
     'key': string;
     'label'?: string;
     'value': string;
+}
+export interface ModelProviderGroupKeyOpenAPIItem {
+    'enabled': boolean;
+    'id': string;
+    'masked': string;
 }
 export interface NotificationClaim {
     'outbox_id': string;
@@ -5551,6 +5815,52 @@ export interface ProviderConnectionSession {
     'session_id': string;
     'status': string;
 }
+export interface ProviderRequestAdvanced {
+    'extra_body'?: { [key: string]: any; };
+    'headers'?: { [key: string]: string; };
+    'query'?: { [key: string]: string; };
+}
+export interface ProviderRequestConfigOpenAPIResponse {
+    'advanced'?: ProviderRequestAdvanced;
+    'default_protocol': ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum;
+    'protocols'?: Array<ProviderRequestProtocolOpenAPIItem>;
+}
+
+export const ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum = {
+    Openai: 'openai',
+    Anthropic: 'anthropic'
+} as const;
+
+export type ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum = typeof ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum[keyof typeof ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum];
+
+export interface ProviderRequestProtocolOpenAPIItem {
+    'base_url': string;
+    'default_base_url': string;
+    'name': string;
+    'protocol': ProviderRequestProtocolOpenAPIItemProtocolEnum;
+    /**
+     * Official protocol declaration for this built-in service. False means undeclared, not proven vendor rejection. Omitted for custom suppliers.
+     */
+    'provider_supported'?: boolean;
+    /**
+     * Whether the current runtime adapter implements this protocol for this service, independently of the official declaration.
+     */
+    'runtime_supported': boolean;
+    /**
+     * Whether this protocol can be configured: declared for the built-in service (or user-configurable custom service) and supported by the current runtime.
+     */
+    'supported': boolean;
+}
+
+export const ProviderRequestProtocolOpenAPIItemProtocolEnum = {
+    Openai: 'openai',
+    Anthropic: 'anthropic',
+    Gemini: 'gemini',
+    OpenaiResponses: 'openai-responses'
+} as const;
+
+export type ProviderRequestProtocolOpenAPIItemProtocolEnum = typeof ProviderRequestProtocolOpenAPIItemProtocolEnum[keyof typeof ProviderRequestProtocolOpenAPIItemProtocolEnum];
+
 export interface PublicArtifact {
     'artifact_id': string;
     'capabilities': Capabilities;
@@ -5629,6 +5939,13 @@ export interface QuestionTypeOptionsResponse {
 export interface RecoveryDeleteCountResponse {
     'deleted_count'?: number;
 }
+export interface ReplaceModelProviderKeyOpenAPIRequest {
+    'api_key': string;
+}
+export interface ReplaceModelProviderKeyOpenAPIResponse {
+    'enabled': boolean;
+    'key_id': string;
+}
 export interface ResourceError {
     'code': string;
     'details'?: { [key: string]: object; };
@@ -5703,6 +6020,12 @@ export interface Result {
 }
 export interface ResumeTaskRequest {
     'task_id'?: string;
+}
+export interface RevealModelProviderKeyOpenAPIResponse {
+    /**
+     * The selected saved secret, returned only by an explicit owner-authorized action with Cache-Control: no-store.
+     */
+    'api_key': string;
 }
 export interface RouterAlgorithmTraffic {
     'actual_ratio': number;
@@ -5873,7 +6196,9 @@ export interface SearchWordGroupsRequest {
 export interface SelectedModelOpenAPIItem {
     'availability': SelectedModelOpenAPIItemAvailabilityEnum;
     'base_url'?: string;
+    'brand_key'?: string;
     'group_name'?: string;
+    'is_custom': boolean;
     /**
      * True when the selection was copied from catalog YAML
      */
@@ -5882,21 +6207,32 @@ export interface SelectedModelOpenAPIItem {
      * Whether the selected model supports image editing
      */
     'is_editable': boolean;
+    'logo_data_url'?: string;
     /**
      * Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
      */
     'max_input_tokens'?: string | null;
     'model_id': string;
     'model_key': string;
+    'model_settings'?: Settings;
+    /**
+     * Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata
+     */
+    'model_type'?: string;
     'name': string;
     'provider_group_id'?: string;
     'provider_id': string;
     'provider_name': string;
     'read_only': boolean;
+    'service_key'?: string;
     'source': SelectedModelOpenAPIItemSourceEnum;
     'unavailable_reason'?: string;
     'user_model_provider_group_id'?: string;
     'user_model_provider_id'?: string;
+    /**
+     * Actual configured vision support, including explicit false; omitted when unknown for cloud models
+     */
+    'vision'?: boolean;
 }
 
 export const SelectedModelOpenAPIItemAvailabilityEnum = {
@@ -5959,6 +6295,20 @@ export interface SessionDTO {
     'workflow_id': string;
     'workflow_mode': string;
 }
+export interface SetActiveModelProviderKeyOpenAPIRequest {
+    /**
+     * Connection containing the saved key; empty with key_id disables the supplier\'s active key.
+     */
+    'group_id': string;
+    /**
+     * Opaque saved key ID. At most one key can be enabled across all connections to a supplier.
+     */
+    'key_id': string;
+}
+export interface SetActiveModelProviderKeyOpenAPIResponse {
+    'group_id': string;
+    'key_id': string;
+}
 export interface SetChatHistoryResponse {
     'history_id'?: string;
 }
@@ -5999,6 +6349,11 @@ export interface SetSelectedProviderOpenAPIRequest {
 export interface SetSharedProviderOpenAPIRequest {
     'group_id': string;
     'share': boolean;
+}
+export interface Settings {
+    'embedding'?: EmbeddingOptions;
+    'feature_enabled'?: FeatureFlags;
+    'feature_support'?: FeatureFlags;
 }
 export interface SettingsCheckResultOpenAPIResponse {
     'id': string;
@@ -7242,6 +7597,16 @@ export interface UpdateACLRequest {
     'expires_at'?: string;
     'permission': string;
 }
+export interface UpdateCustomModelProviderOpenAPIRequest {
+    /**
+     * Optional normalized PNG supplier logo. Omit to preserve; empty restores the default icon.
+     */
+    'logo_data_url'?: string;
+    /**
+     * Optional custom supplier display name. Omit for a logo-only edit.
+     */
+    'name'?: string;
+}
 export interface UpdateDatabaseConnectionRequest {
     'database_name'?: string;
     'db_type'?: string;
@@ -7279,18 +7644,69 @@ export interface UpdateEvalSetRequest {
     'group_id'?: string;
     'name'?: string;
 }
+export interface UpdateModelProviderEndpointOpenAPIRequest {
+    'base_url': string;
+}
+export interface UpdateModelProviderEndpointOpenAPIResponse {
+    'base_url': string;
+    'id': string;
+}
 export interface UpdateModelProviderGroupModelOpenAPIRequest {
     /**
-     * LLM input context window, for example 512, 128K, or 1M
+     * Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it.
      */
-    'max_input_tokens': string;
+    'customize'?: boolean;
+    /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
+    /**
+     * Optional stored context window for LLM/VLM or unclassified models, for example 262144, 128K, or 1M. Empty clears an unclassified model\'s value; omitted fields remain unchanged.
+     */
+    'max_input_tokens'?: string;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
+    /**
+     * Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references.
+     */
+    'model_type'?: string;
+    /**
+     * Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID.
+     */
+    'name'?: string;
+    /**
+     * Optional image-input support for chat models.
+     */
+    'vision'?: boolean;
 }
 export interface UpdateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
-    'base_url': string;
+    'base_url'?: string;
     'name': string;
+    /**
+     * Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
+     */
     'verify': boolean;
 }
+export interface UpdateProviderRequestConfigOpenAPIRequest {
+    'advanced'?: ProviderRequestAdvanced;
+    'default_protocol': UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum;
+    /**
+     * Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+     */
+    'endpoints'?: { [key: string]: string; };
+}
+
+export const UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum = {
+    Openai: 'openai',
+    Anthropic: 'anthropic'
+} as const;
+
+export type UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum = typeof UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum[keyof typeof UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum];
+
 export interface UpdateServerRequest {
     'allowed_tools'?: Array<string>;
     'api_key'?: string;
@@ -7390,14 +7806,25 @@ export interface UserInfo {
 export interface UserModelProviderOpenAPIItem {
     'base_url': string;
     'base_url_presets'?: Array<ModelProviderBaseURLPresetItem>;
+    /**
+     * Stable built-in navigation brand; absent for custom providers. Independent of the runtime protocol.
+     */
+    'brand_key'?: string;
     'capabilities'?: Array<string>;
     'category': string;
     'default_model_provider_id': string;
     'description': string;
     'id': string;
     'is_configured': boolean;
+    'is_custom': boolean;
+    'logo_data_url'?: string;
     'model_types'?: Array<string>;
     'name': string;
+    'protocol_name': string;
+    /**
+     * Stable configurable service within the brand. Each service owns independent credentials and models.
+     */
+    'service_key'?: string;
 }
 export interface UserUIPreferencesOpenAPIResponse {
     'accepted_user_agreement_version': string;
@@ -7413,6 +7840,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'task_center_enabled': boolean;
     'updated_at': string;
     'user_preference_configured': boolean;
+    'workflow_trust_notice_dismissed': boolean;
     'workflows_enabled': boolean;
 }
 export interface UserUIPreferencesPatchOpenAPIRequest {
@@ -7427,6 +7855,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'sensitive_word_filter_enabled'?: boolean;
     'skills_enabled'?: boolean;
     'task_center_enabled'?: boolean;
+    'workflow_trust_notice_dismissed'?: boolean;
     'workflows_enabled'?: boolean;
 }
 export interface VerifiedProviderGroupOpenAPIItem {
@@ -17137,10 +17566,12 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {boolean} [selectionSnapshot] Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
+         * @param {string} [selectionGroupId] Restrict a selection snapshot to this owned group.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, selectionSnapshot?: boolean, selectionGroupId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/conversations`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -17167,6 +17598,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (pageToken !== undefined) {
                 localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            if (selectionSnapshot !== undefined) {
+                localVarQueryParameter['selection_snapshot'] = selectionSnapshot;
+            }
+
+            if (selectionGroupId !== undefined) {
+                localVarQueryParameter['selection_group_id'] = selectionGroupId;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -28141,11 +28580,13 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {boolean} [selectionSnapshot] Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
+         * @param {string} [selectionGroupId] Restrict a selection snapshot to this owned group.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, options);
+        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, selectionSnapshot?: boolean, selectionGroupId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, selectionSnapshot, selectionGroupId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -32749,7 +33190,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationListResponse> {
-            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, requestParameters.selectionSnapshot, requestParameters.selectionGroupId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -35966,6 +36407,16 @@ export interface DefaultApiApiCoreConversationsGetRequest {
     readonly pageSize?: number
 
     readonly pageToken?: string
+
+    /**
+     * Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
+     */
+    readonly selectionSnapshot?: boolean
+
+    /**
+     * Restrict a selection snapshot to this owned group.
+     */
+    readonly selectionGroupId?: string
 }
 
 /**
@@ -38565,7 +39016,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, requestParameters.selectionSnapshot, requestParameters.selectionGroupId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -47741,7 +48192,85 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {string} modelProviderId
+         * @param {boolean} [confirmIndexedDowngrade] Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdDelete: async (modelProviderId: string, confirmIndexedDowngrade?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdDelete', 'modelProviderId', modelProviderId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (confirmIndexedDowngrade !== undefined) {
+                localVarQueryParameter['confirm_indexed_downgrade'] = confirmIndexedDowngrade;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+         * @summary Update a model supplier\'s shared endpoint
+         * @param {string} modelProviderId
+         * @param {UpdateModelProviderEndpointOpenAPIRequest} updateModelProviderEndpointOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdEndpointPut: async (modelProviderId: string, updateModelProviderEndpointOpenAPIRequest: UpdateModelProviderEndpointOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdEndpointPut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'updateModelProviderEndpointOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdEndpointPut', 'updateModelProviderEndpointOpenAPIRequest', updateModelProviderEndpointOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/endpoint`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateModelProviderEndpointOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
          * @summary List model provider connection groups
          * @param {string} modelProviderId
          * @param {*} [options] Override http request option.
@@ -47775,7 +48304,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47856,7 +48385,139 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+         * @summary Replace one saved supplier API key
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} keyId
+         * @param {ReplaceModelProviderKeyOpenAPIRequest} replaceModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut: async (modelProviderId: string, groupId: string, keyId: string, replaceModelProviderKeyOpenAPIRequest: ReplaceModelProviderKeyOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut', 'groupId', groupId)
+            // verify required parameter 'keyId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut', 'keyId', keyId)
+            // verify required parameter 'replaceModelProviderKeyOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut', 'replaceModelProviderKeyOpenAPIRequest', replaceModelProviderKeyOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"key_id"}}`, encodeURIComponent(String(keyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(replaceModelProviderKeyOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.
+         * @summary Explicitly reveal one saved supplier API key
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} keyId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost: async (modelProviderId: string, groupId: string, keyId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost', 'groupId', groupId)
+            // verify required parameter 'keyId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost', 'keyId', keyId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"key_id"}}`, encodeURIComponent(String(keyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {AddModelProviderGroupModelsOpenAPIRequest} addModelProviderGroupModelsOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost: async (modelProviderId: string, groupId: string, addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'groupId', groupId)
+            // verify required parameter 'addModelProviderGroupModelsOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'addModelProviderGroupModelsOpenAPIRequest', addModelProviderGroupModelsOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models:batch`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(addModelProviderGroupModelsOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47936,7 +48597,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47983,7 +48644,49 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost: async (modelProviderId: string, groupId: string, modelId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'groupId', groupId)
+            // verify required parameter 'modelId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'modelId', modelId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48026,7 +48729,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+         * Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
          * @summary Update model provider connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48069,7 +48772,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48107,7 +48810,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+         * Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
          * @summary Create model provider connection group
          * @param {string} modelProviderId
          * @param {CreateModelProviderGroupOpenAPIRequest} createModelProviderGroupOpenAPIRequest
@@ -48146,6 +48849,157 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {string} modelProviderId
+         * @param {SetActiveModelProviderKeyOpenAPIRequest} setActiveModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdKeysActivePut: async (modelProviderId: string, setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdKeysActivePut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'setActiveModelProviderKeyOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdKeysActivePut', 'setActiveModelProviderKeyOpenAPIRequest', setActiveModelProviderKeyOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/keys/active`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(setActiveModelProviderKeyOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {string} modelProviderId
+         * @param {UpdateCustomModelProviderOpenAPIRequest} updateCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdPatch: async (modelProviderId: string, updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdPatch', 'modelProviderId', modelProviderId)
+            // verify required parameter 'updateCustomModelProviderOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdPatch', 'updateCustomModelProviderOpenAPIRequest', updateCustomModelProviderOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateCustomModelProviderOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+         * @summary Get supplier request protocols and endpoint overrides
+         * @param {string} modelProviderId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdRequestConfigGet: async (modelProviderId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdRequestConfigGet', 'modelProviderId', modelProviderId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/request-config`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+         * @summary Update supplier request configuration
+         * @param {string} modelProviderId
+         * @param {UpdateProviderRequestConfigOpenAPIRequest} updateProviderRequestConfigOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdRequestConfigPut: async (modelProviderId: string, updateProviderRequestConfigOpenAPIRequest: UpdateProviderRequestConfigOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdRequestConfigPut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'updateProviderRequestConfigOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdRequestConfigPut', 'updateProviderRequestConfigOpenAPIRequest', updateProviderRequestConfigOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/request-config`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateProviderRequestConfigOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -48174,6 +49028,41 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {CreateCustomModelProviderOpenAPIRequest} createCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersPost: async (createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'createCustomModelProviderOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersPost', 'createCustomModelProviderOpenAPIRequest', createCustomModelProviderOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(createCustomModelProviderOpenAPIRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -48487,7 +49376,35 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {string} modelProviderId
+         * @param {boolean} [confirmIndexedDowngrade] Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdDelete(modelProviderId: string, confirmIndexedDowngrade?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DeleteCustomModelProviderOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdDelete(modelProviderId, confirmIndexedDowngrade, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+         * @summary Update a model supplier\'s shared endpoint
+         * @param {string} modelProviderId
+         * @param {UpdateModelProviderEndpointOpenAPIRequest} updateModelProviderEndpointOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdEndpointPut(modelProviderId: string, updateModelProviderEndpointOpenAPIRequest: UpdateModelProviderEndpointOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<UpdateModelProviderEndpointOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdEndpointPut(modelProviderId, updateModelProviderEndpointOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdEndpointPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
          * @summary List model provider connection groups
          * @param {string} modelProviderId
          * @param {*} [options] Override http request option.
@@ -48500,7 +49417,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48529,7 +49446,53 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+         * @summary Replace one saved supplier API key
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} keyId
+         * @param {ReplaceModelProviderKeyOpenAPIRequest} replaceModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(modelProviderId: string, groupId: string, keyId: string, replaceModelProviderKeyOpenAPIRequest: ReplaceModelProviderKeyOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ReplaceModelProviderKeyOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(modelProviderId, groupId, keyId, replaceModelProviderKeyOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.
+         * @summary Explicitly reveal one saved supplier API key
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} keyId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(modelProviderId: string, groupId: string, keyId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RevealModelProviderKeyOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(modelProviderId, groupId, keyId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {AddModelProviderGroupModelsOpenAPIRequest} addModelProviderGroupModelsOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(modelProviderId: string, groupId: string, addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AddModelProviderGroupModelsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(modelProviderId, groupId, addModelProviderGroupModelsOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48558,7 +49521,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48574,7 +49537,22 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId: string, groupId: string, modelId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelProbeResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId, groupId, modelId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48589,7 +49567,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+         * Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
          * @summary Update model provider connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48604,7 +49582,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48618,7 +49596,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+         * Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
          * @summary Create model provider connection group
          * @param {string} modelProviderId
          * @param {CreateModelProviderGroupOpenAPIRequest} createModelProviderGroupOpenAPIRequest
@@ -48632,6 +49610,61 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {string} modelProviderId
+         * @param {SetActiveModelProviderKeyOpenAPIRequest} setActiveModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdKeysActivePut(modelProviderId: string, setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SetActiveModelProviderKeyOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdKeysActivePut(modelProviderId, setActiveModelProviderKeyOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdKeysActivePut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {string} modelProviderId
+         * @param {UpdateCustomModelProviderOpenAPIRequest} updateCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdPatch(modelProviderId: string, updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CustomModelProviderMutationOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdPatch(modelProviderId, updateCustomModelProviderOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+         * @summary Get supplier request protocols and endpoint overrides
+         * @param {string} modelProviderId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdRequestConfigGet(modelProviderId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProviderRequestConfigOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdRequestConfigGet(modelProviderId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdRequestConfigGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+         * @summary Update supplier request configuration
+         * @param {string} modelProviderId
+         * @param {UpdateProviderRequestConfigOpenAPIRequest} updateProviderRequestConfigOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdRequestConfigPut(modelProviderId: string, updateProviderRequestConfigOpenAPIRequest: UpdateProviderRequestConfigOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProviderRequestConfigOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdRequestConfigPut(modelProviderId, updateProviderRequestConfigOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdRequestConfigPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -48642,6 +49675,19 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelsGet(modelType, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {CreateCustomModelProviderOpenAPIRequest} createCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersPost(createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CreateCustomModelProviderOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersPost(createCustomModelProviderOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -48775,7 +49821,27 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersGet(requestParameters.category, requestParameters.excludeCategory, requestParameters.keyword, requestParameters.acceptLanguage, options).then((request) => request(axios, basePath));
         },
         /**
-         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<DeleteCustomModelProviderOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdDelete(requestParameters.modelProviderId, requestParameters.confirmIndexedDowngrade, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+         * @summary Update a model supplier\'s shared endpoint
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdEndpointPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<UpdateModelProviderEndpointOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdEndpointPut(requestParameters.modelProviderId, requestParameters.updateModelProviderEndpointOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
          * @summary List model provider connection groups
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48785,7 +49851,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGet(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48805,7 +49871,37 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete(requestParameters.modelProviderId, requestParameters.groupId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+         * @summary Replace one saved supplier API key
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ReplaceModelProviderKeyOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, requestParameters.replaceModelProviderKeyOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.
+         * @summary Explicitly reveal one saved supplier API key
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<RevealModelProviderKeyOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AddModelProviderGroupModelsOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.addModelProviderGroupModelsOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48825,7 +49921,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48835,7 +49931,17 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.updateModelProviderGroupModelOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ModelProbeResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48845,7 +49951,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.addModelProviderGroupModelOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+         * Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
          * @summary Update model provider connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48855,7 +49961,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.updateModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48865,7 +49971,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(requestParameters.modelProviderId, requestParameters.groupId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+         * Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
          * @summary Create model provider connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48873,6 +49979,46 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CreateModelProviderGroupOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters.modelProviderId, requestParameters.createModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest, options?: RawAxiosRequestConfig): AxiosPromise<SetActiveModelProviderKeyOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters.modelProviderId, requestParameters.setActiveModelProviderKeyOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CustomModelProviderMutationOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdPatch(requestParameters.modelProviderId, requestParameters.updateCustomModelProviderOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+         * @summary Get supplier request protocols and endpoint overrides
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdRequestConfigGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ProviderRequestConfigOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdRequestConfigGet(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+         * @summary Update supplier request configuration
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ProviderRequestConfigOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters.modelProviderId, requestParameters.updateProviderRequestConfigOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
@@ -48883,6 +50029,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ListModelProviderGroupModelsOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelsGet(requestParameters.modelType, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersPost(requestParameters: ModelProvidersApiApiCoreModelProvidersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CreateCustomModelProviderOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersPost(requestParameters.createCustomModelProviderOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Lists verified provider groups owned by the current user for the given non-model category (for example ocr or search). Shared provider groups are intentionally excluded from this selectable list.
@@ -48982,6 +50138,27 @@ export interface ModelProvidersApiApiCoreModelProvidersGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdDelete operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest {
+    readonly modelProviderId: string
+
+    /**
+     * Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+     */
+    readonly confirmIndexedDowngrade?: boolean
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdEndpointPut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest {
+    readonly modelProviderId: string
+
+    readonly updateModelProviderEndpointOpenAPIRequest: UpdateModelProviderEndpointOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGetRequest {
@@ -49006,6 +50183,41 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
     readonly modelProviderId: string
 
     readonly groupId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly keyId: string
+
+    readonly replaceModelProviderKeyOpenAPIRequest: ReplaceModelProviderKeyOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly keyId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest
 }
 
 /**
@@ -49039,6 +50251,17 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
     readonly modelId: string
 
     readonly updateModelProviderGroupModelOpenAPIRequest: UpdateModelProviderGroupModelOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly modelId: string
 }
 
 /**
@@ -49082,10 +50305,51 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPost
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdKeysActivePut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest {
+    readonly modelProviderId: string
+
+    readonly setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdPatch operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest {
+    readonly modelProviderId: string
+
+    readonly updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdRequestConfigGet operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest {
+    readonly modelProviderId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdRequestConfigPut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest {
+    readonly modelProviderId: string
+
+    readonly updateProviderRequestConfigOpenAPIRequest: UpdateProviderRequestConfigOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelsGetRequest {
     readonly modelType?: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersPostRequest {
+    readonly createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest
 }
 
 /**
@@ -49159,7 +50423,29 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+     * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+     * @summary Delete a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdDelete(requestParameters.modelProviderId, requestParameters.confirmIndexedDowngrade, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+     * @summary Update a model supplier\'s shared endpoint
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdEndpointPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdEndpointPut(requestParameters.modelProviderId, requestParameters.updateModelProviderEndpointOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
      * @summary List model provider connection groups
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49170,7 +50456,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+     * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
      * @summary Check model provider connectivity
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49192,7 +50478,40 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+     * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+     * @summary Replace one saved supplier API key
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, requestParameters.replaceModelProviderKeyOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.
+     * @summary Explicitly reveal one saved supplier API key
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+     * @summary Add multiple models under a connection group
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.addModelProviderGroupModelsOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
      * @summary List models under a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49214,7 +50533,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+     * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
      * @summary Update a connection group model
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49225,7 +50544,18 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+     * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+     * @summary Test one saved model with a minimal inference request
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
      * @summary Add custom model under a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49236,7 +50566,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+     * Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
      * @summary Update model provider connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49247,7 +50577,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+     * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
      * @summary List models advertised by a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49258,7 +50588,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+     * Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
      * @summary Create model provider connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49266,6 +50596,50 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters.modelProviderId, requestParameters.createModelProviderGroupOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+     * @summary Set the single enabled key for a model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters.modelProviderId, requestParameters.setActiveModelProviderKeyOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+     * @summary Rename a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdPatch(requestParameters.modelProviderId, requestParameters.updateCustomModelProviderOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+     * @summary Get supplier request protocols and endpoint overrides
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdRequestConfigGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdRequestConfigGet(requestParameters.modelProviderId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+     * @summary Update supplier request configuration
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters.modelProviderId, requestParameters.updateProviderRequestConfigOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -49277,6 +50651,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelsGetRequest = {}, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelsGet(requestParameters.modelType, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+     * @summary Create a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersPost(requestParameters: ModelProvidersApiApiCoreModelProvidersPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersPost(requestParameters.createCustomModelProviderOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -61813,6 +63198,163 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {string} fileId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet: async (artifactId: string, exportId: string, fileId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'exportId', exportId)
+            // verify required parameter 'fileId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'fileId', fileId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}/files/{file_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)))
+                .replace(`{${"file_id"}}`, encodeURIComponent(String(fileId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet: async (artifactId: string, exportId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet', 'exportId', exportId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost: async (artifactId: string, exportId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost', 'exportId', exportId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}:retry`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {string} artifactId
+         * @param {DocumentImageExportRequest} documentImageExportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsPost: async (artifactId: string, documentImageExportRequest: DocumentImageExportRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsPost', 'artifactId', artifactId)
+            // verify required parameter 'documentImageExportRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsPost', 'documentImageExportRequest', documentImageExportRequest)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentImageExportRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {string} artifactId
          * @param {DocumentArtifactPatchRequest} documentArtifactPatchRequest
@@ -61878,6 +63420,79 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {string} artifactId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsGet: async (artifactId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsGet', 'artifactId', artifactId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/publications`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPost: async (artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPost', 'artifactId', artifactId)
+            // verify required parameter 'documentPublicationGroupRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPost', 'documentPublicationGroupRequest', documentPublicationGroupRequest)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/publications`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentPublicationGroupRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -62437,6 +64052,63 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {string} fileId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(artifactId: string, exportId: string, fileId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(artifactId, exportId, fileId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(artifactId: string, exportId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(artifactId, exportId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(artifactId: string, exportId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(artifactId, exportId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {string} artifactId
+         * @param {DocumentImageExportRequest} documentImageExportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsPost(artifactId: string, documentImageExportRequest: DocumentImageExportRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsPost(artifactId, documentImageExportRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {string} artifactId
          * @param {DocumentArtifactPatchRequest} documentArtifactPatchRequest
@@ -62460,6 +64132,33 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationGet(artifactId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {string} artifactId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdPublicationsGet(artifactId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentPublicationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationsGet(artifactId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdPublicationsPost(artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentPublicationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationsPost(artifactId, documentPublicationGroupRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationsPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -62718,6 +64417,46 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters.artifactId, requestParameters.exportId, requestParameters.fileId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters.artifactId, requestParameters.documentImageExportRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -62735,6 +64474,26 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
          */
         apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationLookupResponse> {
             return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters.artifactId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationGroupResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters.artifactId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationGroupResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -62909,6 +64668,44 @@ export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+
+    readonly fileId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest {
+    readonly artifactId: string
+
+    readonly documentImageExportRequest: DocumentImageExportRequest
+}
+
+/**
  * Request parameters for apiCoreWorkflowArtifactsArtifactIdPatch operation in WorkflowApi.
  */
 export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest {
@@ -62922,6 +64719,22 @@ export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest {
  */
 export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest {
     readonly artifactId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPublicationsGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest {
+    readonly artifactId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPublicationsPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest {
+    readonly artifactId: string
+
+    readonly documentPublicationGroupRequest: DocumentPublicationGroupRequest
 }
 
 /**
@@ -63141,6 +64954,50 @@ export class WorkflowApi extends BaseAPI {
 
     /**
      *
+     * @summary Download an owned image archive or original image
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters.artifactId, requestParameters.exportId, requestParameters.fileId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read owned image export progress and individual outcomes
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Retry missing images without changing the captured document
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Prepare images referenced by the current document snapshot
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters.artifactId, requestParameters.documentImageExportRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Save an Artifact with revision and draft preconditions
      * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -63159,6 +65016,28 @@ export class WorkflowApi extends BaseAPI {
      */
     public apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest, options?: RawAxiosRequestConfig) {
         return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read current per-platform synchronization state and confirmed preferences
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Confirm publication of the current saved document to independent targets
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

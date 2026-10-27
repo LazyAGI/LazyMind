@@ -16,6 +16,11 @@ import (
 func seedWorkflowModelSelection(t *testing.T, db *orm.DB, user string) {
 	t.Helper()
 	for _, row := range []any{
+		&orm.UserModelProvider{
+			ID: user + "-provider", Name: "Custom", ProtocolName: "OpenAI", IsCustom: true,
+			Category: "model", BaseURL: "https://gateway.example/v1",
+			BaseModel: orm.BaseModel{CreateUserID: user},
+		},
 		&orm.UserModelProviderGroup{
 			ID: user + "-group", UserModelProviderID: user + "-provider", Name: "Custom",
 			BaseURL: "https://gateway.example/v1", APIKey: "test-only", IsVerified: true,
@@ -36,7 +41,7 @@ func seedWorkflowModelSelection(t *testing.T, db *orm.DB, user string) {
 
 func TestGenerationLoadsCurrentOwnerSelectionAtExecution(t *testing.T) {
 	db := newHandlerTestDB(t)
-	if err := db.AutoMigrate(&orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
+	if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
 		t.Fatal(err)
 	}
 	seedWorkflowModelSelection(t, db, "owner")
@@ -83,7 +88,7 @@ func TestWorkflowModelStaticAndDynamicReadinessUseSameResolver(t *testing.T) {
 	for _, dynamic := range []bool{true, false} {
 		t.Run(map[bool]string{true: "dynamic", false: "static"}[dynamic], func(t *testing.T) {
 			db := newHandlerTestDB(t)
-			if err := db.AutoMigrate(&orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
+			if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
 				t.Fatal(err)
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +110,7 @@ func TestWorkflowModelStaticAndDynamicReadinessUseSameResolver(t *testing.T) {
 
 func TestExternalCapabilitiesMatchFrontendSystemModelSelection(t *testing.T) {
 	db := newHandlerTestDB(t)
-	if err := db.AutoMigrate(&orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
+	if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, user := range []string{"owner", "other"} {
@@ -151,7 +156,7 @@ func TestWorkflowGenerationRejectsMissingOrUnreadableModelSettings(t *testing.T)
 				}))
 				t.Cleanup(server.Close)
 				t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-				if err := db.AutoMigrate(&orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
+				if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{}); err != nil {
 					t.Fatal(err)
 				}
 			}

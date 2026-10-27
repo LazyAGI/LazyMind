@@ -22,7 +22,7 @@ export interface SlotFooterAction {
   icon?: 'write-back' | 'download' | 'copy';
   selectedMenuKey?: string;
   menuLabel?: string;
-  menu?: Array<{ key: string; label: ReactNode; icon?: ReactNode; onClick: () => void }>;
+  menu?: Array<{ key: string; label: ReactNode; icon?: ReactNode; disabled?: boolean; onClick: () => void }>;
   statusText?: string;
   statusTone?: 'success' | 'error';
   statusLink?: {
@@ -32,6 +32,8 @@ export interface SlotFooterAction {
 }
 
 export interface SlotEditingContextValue {
+  /** Explicit reading/editing intent stops automatic stage navigation. */
+  onBrowse?: () => void;
   actionPending?: boolean;
   runFooterAction?: (action: () => void | Promise<void>, flushKey?: string) => Promise<void>;
   registerSnapshot?: (key: string, read: () => unknown) => () => void;

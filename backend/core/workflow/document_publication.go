@@ -18,6 +18,8 @@ import (
 )
 
 type DocumentPublicationInput struct {
+	PublicationID    string
+	ConnectionID     string
 	ArtifactID       string
 	CandidateValue   json.RawMessage
 	OwnerUserID      string
@@ -42,7 +44,7 @@ type DocumentPublicationReceipt struct {
 	Provider       string
 	TargetDocument json.RawMessage
 	ContentType    string
-	Value          json.RawMessage
+	Value          json.RawMessage `json:",omitempty"`
 }
 
 type publicationDomainError string
@@ -138,7 +140,13 @@ func publicationInput(op *DocumentPublicationOperation) DocumentPublicationInput
 	return DocumentPublicationInput{OwnerUserID: op.OwnerUserID, SessionID: op.SessionID, SlotID: op.SlotID, ListIndex: publicationPointer(op.ItemIndex), BaseRevision: op.SourceRevision, BaseDraftVersion: draft, Provider: op.Provider, AllowBound: op.AllowBound, SharedTarget: op.SharedTarget}
 }
 func publicationBindingQuery(tx *gorm.DB, op *DocumentPublicationOperation) *gorm.DB {
-	return tx.Where("session_id = ? AND slot_id = ? AND item_index = ?", op.SessionID, op.SlotID, op.ItemIndex)
+	return tx.Where("session_id = ? AND slot_id = ? AND item_index = ? AND binding_scope = ?", op.SessionID, op.SlotID, op.ItemIndex, publicationBindingScope(op))
+}
+func publicationBindingScope(op *DocumentPublicationOperation) string {
+	if op.PublicationID != "" {
+		return op.Provider
+	}
+	return ""
 }
 func publicationHasIRBinding(raw json.RawMessage) bool {
 	var v struct {
@@ -182,7 +190,20 @@ func prepareDocumentPublication(ctx context.Context, db *gorm.DB, in DocumentPub
 		if !in.AllowBound && publicationHasIRBinding(content.Value) {
 			return publicationError("PUBLICATION_ALREADY_BOUND")
 		}
-		op := DocumentPublicationOperation{ID: "pub_" + common.GenerateID(), OwnerUserID: in.OwnerUserID, SessionID: in.SessionID, SlotID: in.SlotID, ItemIndex: publicationIndex(in.ListIndex), IdempotencyKey: in.IdempotencyKey, Status: "preparing", CandidateValue: in.CandidateValue, SourceRevisionID: revision.ID, SourceRevision: revision.Revision, SourceDraftVersion: draft, SourceSchema: content.Schema, SourceContentType: ct, SourceValue: content.Value, SourceHash: publicationHash(content.Schema, content.Value), RequestHash: requestHash, Provider: in.Provider, Title: in.Title, ParentURI: in.ParentURI, Template: in.Template, AllowBound: in.AllowBound, SharedTarget: in.SharedTarget, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		op := DocumentPublicationOperation{PublicationID: in.PublicationID, ConnectionID: in.ConnectionID, ID: "pub_" + common.GenerateID(), OwnerUserID: in.OwnerUserID, SessionID: in.SessionID, SlotID: in.SlotID, ItemIndex: publicationIndex(in.ListIndex), IdempotencyKey: in.IdempotencyKey, Status: "preparing", CandidateValue: in.CandidateValue, SourceRevisionID: revision.ID, SourceRevision: revision.Revision, SourceDraftVersion: draft, SourceSchema: content.Schema, SourceContentType: ct, SourceValue: content.Value, SourceHash: publicationHash(content.Schema, content.Value), RequestHash: requestHash, Provider: in.Provider, Title: in.Title, ParentURI: in.ParentURI, Template: in.Template, AllowBound: in.AllowBound, SharedTarget: in.SharedTarget, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		var pending int64
+		q := tx.Model(&orm.DocumentPublicationBinding{}).Where("session_id = ? AND pending_operation_id <> ''", op.SessionID)
+		if op.PublicationID != "" {
+			q = q.Where("binding_scope = ''")
+		} else {
+			q = q.Where("binding_scope <> ''")
+		}
+		if err := q.Count(&pending).Error; err != nil {
+			return err
+		}
+		if pending > 0 {
+			return publicationError("PUBLICATION_IN_PROGRESS")
+		}
 		var binding orm.DocumentPublicationBinding
 		err = publicationBindingQuery(tx, &op).First(&binding).Error
 		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -207,8 +228,29 @@ func prepareDocumentPublication(ctx context.Context, db *gorm.DB, in DocumentPub
 			if err != nil {
 				return err
 			}
-			if len(target) > 0 {
-				binding = orm.DocumentPublicationBinding{ID: "pbind_" + common.GenerateID(), SessionID: op.SessionID, SlotID: op.SlotID, ItemIndex: op.ItemIndex, OwnerUserID: op.OwnerUserID, Provider: targetProvider(target), TargetDocument: target, RemoteValue: remote}
+			if len(target) > 0 && (op.PublicationID == "" || targetProvider(target) == op.Provider) {
+				if op.PublicationID != "" {
+					var source struct {
+						Revision string `json:"revision"`
+						Binding  struct {
+							Provider string `json:"provider"`
+						} `json:"provider_binding"`
+					}
+					if json.Unmarshal(op.SourceValue, &source) == nil && source.Revision != "" && source.Binding.Provider == op.Provider {
+						var dest map[string]any
+						if json.Unmarshal(target, &dest) == nil {
+							meta, _ := dest["meta"].(map[string]any)
+							if meta == nil {
+								meta = map[string]any{}
+							}
+							meta["publication_revision"] = source.Revision
+							dest["meta"] = meta
+							target, _ = json.Marshal(dest)
+						}
+					}
+					remote = nil
+				}
+				binding = orm.DocumentPublicationBinding{BindingScope: publicationBindingScope(&op), ID: "pbind_" + common.GenerateID(), SessionID: op.SessionID, SlotID: op.SlotID, ItemIndex: op.ItemIndex, OwnerUserID: op.OwnerUserID, Provider: targetProvider(target), TargetDocument: target, RemoteValue: remote}
 				if err := tx.Create(&binding).Error; err != nil {
 					return err
 				}
@@ -216,8 +258,14 @@ func prepareDocumentPublication(ctx context.Context, db *gorm.DB, in DocumentPub
 		}
 		op.TargetDocument = binding.TargetDocument
 		op.RemoteValue = binding.RemoteValue
+		if op.PublicationID != "" {
+			op.RemoteValue = nil
+			if binding.ConnectionID != "" && binding.ConnectionID != op.ConnectionID {
+				return publicationError("PUBLICATION_BINDING_CONFLICT")
+			}
+		}
 		op.CandidateValue = in.CandidateValue
-		if op.SharedTarget {
+		if op.SharedTarget || op.PublicationID != "" {
 			mediaSlot := "resolved_media_assets"
 			if op.SlotID == "flat_draft_document" {
 				mediaSlot = "flat_resolved_media_assets"
@@ -242,7 +290,7 @@ func prepareDocumentPublication(ctx context.Context, db *gorm.DB, in DocumentPub
 			return err
 		}
 		if binding.ID == "" {
-			binding = orm.DocumentPublicationBinding{ID: "pbind_" + common.GenerateID(), SessionID: op.SessionID, SlotID: op.SlotID, ItemIndex: op.ItemIndex, OwnerUserID: op.OwnerUserID, PendingOperationID: op.ID}
+			binding = orm.DocumentPublicationBinding{BindingScope: publicationBindingScope(&op), ID: "pbind_" + common.GenerateID(), SessionID: op.SessionID, SlotID: op.SlotID, ItemIndex: op.ItemIndex, OwnerUserID: op.OwnerUserID, PendingOperationID: op.ID}
 			if err := tx.Create(&binding).Error; err != nil {
 				return err
 			}
@@ -358,6 +406,9 @@ func ClaimDocumentPublicationWrite(ctx context.Context, db *gorm.DB, owner, id s
 				return err
 			}
 		}
+		if op.PublicationID != "" {
+			return tx.Model(op).Updates(map[string]any{"status": "write_started", "updated_at": time.Now().UTC()}).Error
+		}
 		_, content, _, _, err := publicationSource(ctx, tx, publicationInput(op), op.SourceRevisionID)
 		if err != nil {
 			return err
@@ -396,7 +447,11 @@ func finishPublicationBeforeWrite(ctx context.Context, db *gorm.DB, owner, id, s
 				return err
 			}
 		}
-		return tx.Model(op).Updates(map[string]any{"status": status, "error_code": errorCode, "updated_at": time.Now().UTC()}).Error
+		values := map[string]any{"status": status, "error_code": errorCode, "updated_at": time.Now().UTC()}
+		if op.PublicationID != "" {
+			clearPublicationPayload(values)
+		}
+		return tx.Model(op).Updates(values).Error
 	})
 }
 func CancelDocumentPublication(ctx context.Context, db *gorm.DB, owner, id string) error {
@@ -460,6 +515,10 @@ func FinalizeDocumentPublication(ctx context.Context, db *gorm.DB, owner, id str
 			return err
 		}
 		if op.Status == "succeeded" {
+			if op.PublicationID != "" {
+				result = &orm.WorkflowSlotRevision{ID: op.SourceRevisionID}
+				return nil
+			}
 			var revision orm.WorkflowSlotRevision
 			if err := tx.First(&revision, "id = ?", op.ResultRevisionID).Error; err != nil {
 				return err
@@ -472,6 +531,13 @@ func FinalizeDocumentPublication(ctx context.Context, db *gorm.DB, owner, id str
 		}
 		if err := publicationReserved(tx, op); err != nil {
 			return err
+		}
+		if op.PublicationID != "" {
+			if err := finalizeIndependentPublication(tx, op); err != nil {
+				return err
+			}
+			result = &orm.WorkflowSlotRevision{ID: op.SourceRevisionID}
+			return nil
 		}
 		current, content, _, _, err := publicationSource(ctx, tx, publicationInput(op), op.SourceRevisionID)
 		if err != nil {
@@ -527,4 +593,33 @@ func FinalizeDocumentPublication(ctx context.Context, db *gorm.DB, owner, id str
 		return nil, err
 	}
 	return result, nil
+}
+
+// Terminal operations keep only fingerprints and receipts, never historical bodies.
+func clearPublicationPayload(values map[string]any) {
+	for _, field := range []string{"source_value", "remote_value", "candidate_value", "media_assets"} {
+		values[field] = nil
+	}
+}
+func finalizeIndependentPublication(tx *gorm.DB, op *DocumentPublicationOperation) error {
+	var receipt DocumentPublicationReceipt
+	if json.Unmarshal(op.ReceiptJSON, &receipt) != nil || receipt.Provider != op.Provider || !json.Valid(receipt.TargetDocument) {
+		return publicationError("DOCUMENT_ACTION_RESULT_INVALID")
+	}
+	now := time.Now().UTC()
+	if err := publicationBindingQuery(tx.Model(&orm.DocumentPublicationBinding{}), op).Updates(map[string]any{
+		"pending_operation_id": "", "provider": op.Provider, "connection_id": op.ConnectionID,
+		"target_document": receipt.TargetDocument, "remote_value": nil, "last_success_hash": op.SourceHash,
+		"last_operation_id": op.ID, "last_success_at": now, "source_revision_id": op.SourceRevisionID,
+	}).Error; err != nil {
+		return err
+	}
+	receipt.Value = nil
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	values := map[string]any{"status": "succeeded", "error_code": "", "receipt_json": json.RawMessage(raw), "updated_at": now}
+	clearPublicationPayload(values)
+	return tx.Model(op).Updates(values).Error
 }

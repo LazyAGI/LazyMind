@@ -1,11 +1,11 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from 'antd';
-import { ExclamationCircleOutlined, ExportOutlined, LockOutlined, ReloadOutlined } from '@ant-design/icons';
-import type { DocumentProvider, DocumentPublishRequest, DocumentNumberingResult, DocumentConvertResult } from '@/api/generated/core-client';
+import { ExclamationCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
+import type { DocumentProvider, DocumentNumberingResult, DocumentConvertResult } from '@/api/generated/core-client';
 import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { WorkflowSessionApi, type RewriteSelectionPreview, type WriterNumberingState, type WriterNumberingUpdate } from '@/modules/chat/utils/request';
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlFromMap } from '@/modules/knowledge/utils/imageUrl';
-import { getCloudDocumentsUrl } from '@/modules/modelProvider/utils/cloudDocumentUrls';
+import { CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH, getCloudDocumentsUrl } from '@/modules/modelProvider/utils/cloudDocumentUrls';
 import i18n from '@/i18n';
 import { MarkdownArtifactEditor, type MarkdownSaveMode } from './MarkdownArtifactEditor';
 import { WriterIRControl, type WriterIRSaveMode } from './WriterIRControl';
@@ -17,11 +17,14 @@ import { downloadSource, writerDownloadFilename, writerDownloadCacheKey } from '
 import { useWriterProviderAvailability } from './useWriterProviderAvailability';
 import { documentRewritePreview } from './documentRewritePreview';
 import { documentPublicationErrorMessage } from './documentPublicationError';
+import { DocumentPublicationDialog, type PublicationProviderChoices } from './DocumentPublicationDialog';
 import { DocumentPublicationRecoveryPanel } from './DocumentPublicationRecoveryPanel';
 import { documentPublicationTargetUrl } from './documentPublicationUrl';
 import { WriterProviderIcon } from './DocumentProviderChoice';
 import { pendingImageGroups, keepVerticalImageGroups, imageGroupKey } from './writerImageGroups';
 import type { SlotVersionPopover } from './SlotComponents';
+import { documentImages } from './documentImages';
+import { useDocumentImageDownloads } from './useDocumentImageDownloads';
 
 function unwrap(value: unknown): unknown {
   while (value && typeof value === 'object') {
@@ -33,9 +36,6 @@ function unwrap(value: unknown): unknown {
   return value;
 }
 function key() { return crypto.randomUUID(); }
-function responseCode(error: unknown): string | undefined {
-  return (error as { response?: { data?: { data?: { code?: string } } } })?.response?.data?.data?.code;
-}
 function rewriteConflict(code: 'DRAFT_VERSION_CONFLICT' | 'SELECTION_STALE'): Error & { code: string } {
   return Object.assign(new Error(code), { code });
 }
@@ -101,17 +101,18 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const representation = typeof value === 'string' ? 'markdown' : isWriterDocument(value) ? 'ir' : descriptor.representation;
   const [version, setVersion] = useState(initial.revision);
   const [loaded, setLoaded] = useState(false);
+  const [hasImages, setHasImages] = useState(false);
+  useEffect(() => { setHasImages(documentImages(value).length > 0); }, [value]);
   const [providers, setProviders] = useState<DocumentProvider[]>([]);
-  const [publishingProvider, setPublishingProvider] = useState<string | null>(null);
-  const busy = publishingProvider !== null;
+  const [publishDialog, setPublishDialog] = useState<{ provider?: string }>();
+  const [publicationChoices, setPublicationChoices] = useState<PublicationProviderChoices>({});
   const [error, setError] = useState('');
   const [errorAction, setErrorAction] = useState<'providers' | 'download' | 'history' | null>(null);
   const retryHistory = useRef<() => void>();
   const historyLoadPending = useRef(false);
   const [publicationBlocked,setPublicationBlocked]=useState(true);
-  const [publicationRefresh,setPublicationRefresh]=useState(0);
   const publicationAvailable=useCallback((allowed:boolean)=>setPublicationBlocked(!allowed),[]);
-  const publicationResolved=useCallback(()=>{attempt.current=undefined;setError('');onRefresh?.();},[onRefresh]);
+  const publicationResolved=useCallback(()=>{setError('');onRefresh?.();},[onRefresh]);
   const draftContent = useRef(initial.value);
   const [numberingView, setNumberingView] = useState<{ source: unknown; id: string; revision: number; draft?: number; result: DocumentNumberingResult }>();
   const currentNumbering = numberingView && numberingView.source === value && numberingView.id === latest.current.id
@@ -123,7 +124,6 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const [downloading, setDownloading] = useState(false);
   const downloadPending = useRef(false);
   const retryDownload = useRef<() => void>();
-  const publishPending = useRef(false);
   const [publicationStatus, setPublicationStatus] = useState<{ signature: string; text: string }>();
   const slotSignature = JSON.stringify([slot.artifact_id, slot.revision, slot.draft_version]);
   const [currentSignature, setCurrentSignature] = useState(slotSignature);
@@ -136,11 +136,9 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     setPublicationStatus({ signature: slotSignature, text: provider === 'wechat' && !url
       ? String(i18n.t('chat.writerIR.wechatDraftLinkUnavailable')) : String(i18n.t('chat.writerIR.writeBackSuccess')) });
   }, [slotSignature, slot.write_back_state]);
-  const [authorizationNeeded, setAuthorizationNeeded] = useState('');
   const [providerRefresh, setProviderRefresh] = useState(0);
   const availability = useWriterProviderAvailability(providers.map(provider => provider.id));
   const previewSource = useRef<Baseline>();
-  const attempt = useRef<{ fingerprint: string; body: DocumentPublishRequest; id: string; uncertain: boolean }>();
 
   const writerSlot = (['source_document', 'outline_document', 'flat_draft_document', 'draft_document'] as const).find(id => id === slot.slot_id);
   const mediaRevision = useWorkflowStore(state => {
@@ -160,6 +158,11 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     // MDXEditor does not cancel older preview lookups when its handler changes.
     return latestMediaUrls.current === mediaUrls ? resolved : resolveMarkdownImageUrlFromMap(url, latestMediaUrls.current);
   }, [mediaUrls]);
+  const imageDownloads = useDocumentImageDownloads({ scopeKey: editingKey, resolveImage: resolveImageUrl,
+    readSource: () => ({ artifactId: latest.current.id, revision: latest.current.revision, draft: latest.current.draft,
+      document: getSnapshot?.(editingKey) ?? draftContent.current }),
+  });
+  const imageDownloadsRef = useRef(imageDownloads); imageDownloadsRef.current = imageDownloads;
 
   useEffect(() => {
     if (descriptor.representation !== 'markdown' || !writerSlot || mediaRevision === undefined || (slot.list_index ?? -1) >= 0) return;
@@ -194,7 +197,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       external.current = next;
       if (!dirty.current) { latest.current = next; draftContent.current = content; setCurrentSignature(signature); }
       // A publication refresh must not replace the editor holding newer local edits.
-      if (dirty.current && (retainedPublicationSource.current !== undefined || publishPending.current)
+      if (dirty.current && retainedPublicationSource.current !== undefined
         && typeof content !== typeof draftContent.current) return;
       setValue(content); setVersion(next.revision); setLoaded(true);
     }
@@ -223,6 +226,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   }, []);
   const edit = useCallback((content: unknown) => {
     draftContent.current = content;
+    setHasImages(documentImages(content).length > 0);
     dirty.current = JSON.stringify(content) !== JSON.stringify(retainedPublicationSource.current ?? external.current.value);
     setHasLocalChanges(dirty.current);
     if (!dirty.current) {
@@ -265,7 +269,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     }
   };
   const rollback = async (revision: number) => {
-    if (!writable || busy) return false;
+    if (!writable) return false;
     if (flushEditor.current && !await flushEditor.current()) throw new Error('draft save failed');
     rollbackPrevious.current = [parentSignatureRef.current,
       JSON.stringify([latest.current.id, latest.current.revision, latest.current.draft])];
@@ -292,7 +296,6 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     const result = response.data.result;
     if (!response.data.ok || !result?.artifact_id || typeof result.revision !== 'number' || typeof result.draft_version !== 'number') throw new Error('invalid save response');
     accept(result.artifact_id, result.revision, result.draft_version, unwrap(result.value ?? artifact), content);
-    attempt.current = undefined;
     onRefresh?.();
     return latest.current;
   }, [accept, onRefresh]);
@@ -338,15 +341,17 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   };
   const downloadRef = useRef(beginDownload); downloadRef.current = beginDownload;
   useEffect(() => {
-    if (!active || !loaded || !descriptor.capabilities.includes('convert_document')) return;
+    const convertible = descriptor.capabilities.includes('convert_document');
+    if (!active || !loaded || (!convertible && !hasImages)) return;
     return registerFooterAction(`${editingKey}:download`, {
-      label: String(i18n.t(downloading ? 'chat.writerLocal.preparing' : 'chat.slots.download')), icon: 'download', order: 25,
+      label: String(i18n.t(downloading || imageDownloads.busy ? 'chat.writerLocal.preparing' : 'chat.slots.download')), icon: 'download', order: 25,
       menuLabel: String(i18n.t('chat.writerLocal.chooseDownload')),
-      disabled: downloading, onClick: () => void downloadRef.current('markdown'),
-      menu: (['markdown', 'text', 'latex', 'lmd'] as const).map(format => ({ key: format,
-        label: String(i18n.t(format === 'lmd' ? 'chat.writerLocal.structure' : `chat.writerCopy.${format}`)), onClick: () => void downloadRef.current(format) })),
+      disabled: downloading || imageDownloads.busy, onClick: () => convertible ? void downloadRef.current('markdown') : imageDownloadsRef.current.showGallery(),
+      menu: [...(convertible ? (['markdown', 'text', 'latex', 'lmd'] as const).map(format => ({ key: format,
+        label: String(i18n.t(format === 'lmd' ? 'chat.writerLocal.structure' : `chat.writerCopy.${format}`)), onClick: () => void downloadRef.current(format) })) : []),
+        ...(hasImages ? imageDownloadsRef.current.menu : [])],
     });
-  }, [active, loaded, descriptor.capabilities, registerFooterAction, editingKey, downloading]);
+  }, [active, loaded, descriptor.capabilities, registerFooterAction, editingKey, downloading, hasImages, imageDownloads.busy]);
   const applyPreview = async () => {
     if (!preview?.value.commit?.token) return undefined;
     const baseline=previewSource.current;
@@ -363,127 +368,51 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   };
   const canRewrite = writable && descriptor.capabilities.includes('rewrite_selection') && !selection && !preview;
 
-  const publish = useCallback(async (provider: string) => {
-    if (publishPending.current || busy || publicationBlocked) return;
-    const current = latest.current;
-    const fingerprint = JSON.stringify([current.id, current.revision, current.draft, provider]);
-    if (attempt.current?.uncertain && attempt.current.fingerprint !== fingerprint) {
-      setError(documentPublicationErrorMessage('PUBLICATION_OUTCOME_UNKNOWN', provider)); return;
-    }
-    if (!attempt.current || attempt.current.fingerprint !== fingerprint) {
-      attempt.current = { fingerprint, id: current.id, uncertain: false, body: { action: 'publish_document',
-        base_revision: current.revision, base_draft_version: current.draft,
-        input: { provider, mode: 'replace', idempotency_key: key() } } };
-    }
-    const request = attempt.current;
-    publishPending.current = true; setPublishingProvider(provider); setError(''); setErrorAction(null); setPublicationStatus(undefined);
-    try {
-      const response = await WorkflowSessionApi().publishDocument(request.id, request.body, { silentError: true } as never);
-      const result = response.data.data;
-      if (!result.provider_synced || !result.artifact_saved || !result.artifact_id) throw new Error('publication did not complete');
-      accept(result.artifact_id, result.revision, result.draft_version, result.document, current.value);
-      setPublicationUrl(documentPublicationTargetUrl(result.target_document, provider));
-      setPublicationStatus({ signature: JSON.stringify([result.artifact_id, result.revision, result.draft_version]),
-        text: String(i18n.t(dirty.current ? 'chat.writerLocal.publishedWithEdits' : 'chat.writerIR.writeBackSuccess')) });
-      attempt.current = undefined; onRefresh?.();
-    } catch (failure) {
-      const code = responseCode(failure);
-      const beforeWrite = ['DOCUMENT_ACTION_INVALID', 'REVISION_CONFLICT', 'DRAFT_VERSION_CONFLICT', 'ARTIFACT_IN_USE',
-        'DOCUMENT_ACTION_UNSUPPORTED', 'DOCUMENT_PROVIDERS_UNAVAILABLE', 'PROVIDER_CREDENTIALS_UNAVAILABLE', 'DOCUMENT_CONVERSION_FAILED', 'PUBLICATION_RECOVERY_CLOSED'];
-      if (code && beforeWrite.includes(code)) attempt.current = undefined;
-      else request.uncertain = true;
-      setError(documentPublicationErrorMessage(code, provider));
-      if (code === 'PROVIDER_CREDENTIALS_UNAVAILABLE' && (provider === 'feishu' || provider === 'github')) {
-        const states = await availability.refresh();
-        if (states?.[provider] === 'chat-disabled') {
-          setAuthorizationNeeded(provider);
-          setError(String(i18n.t(provider === 'github' ? 'chat.writerLocal.githubChatDisabled' : 'chat.writerLocal.feishuChatDisabled')));
-          setErrorAction('providers');
-        }
-      }
-    } finally { publishPending.current = false; setPublishingProvider(null);setPublicationRefresh(value=>value+1); }
-  }, [accept, busy, publicationBlocked, onRefresh, availability.refresh]);
-  const publishRef = useRef(publish); publishRef.current = publish;
   const imageGroupReminders = useRef(new Set<string>());
-
   const providerLabel = (provider: string) => i18n.exists(`chat.writerIR.providers.${provider}`) ? String(i18n.t(`chat.writerIR.providers.${provider}`)) : provider;
-  const chooseProvider = (provider: string) => {
-    const state = availability.states[provider];
-    if (state !== 'ready') {
-      setAuthorizationNeeded(provider);
-      setError(state === 'chat-disabled' ? String(i18n.t(provider === 'github' ? 'chat.writerLocal.githubChatDisabled' : 'chat.writerLocal.feishuChatDisabled')) : state === 'authorize' ? String(i18n.t('chat.writerLocal.authorization', { provider: providerLabel(provider) })) : String(i18n.t(state === 'checking' ? 'chat.writerLocal.checking' : 'chat.writerLocal.platformFailed')));
-      setErrorAction('providers');
-      return;
-    }
-    setAuthorizationNeeded(''); setError(''); setErrorAction(null);
-    const content = draftContent.current;
-    const pending = provider === 'wechat' && (typeof content === 'string' || isWriterDocument(content))
-      ? pendingImageGroups(content).filter(group => !imageGroupReminders.current.has(imageGroupKey(group.images))) : [];
-    try { localStorage.setItem('writer-publish-provider', provider); } catch { /* Storage preferences are optional. */ }
-    const updating = slot.provider === provider && (slot.provider_document_id || slot.write_back_ready);
-    if (updating || pending.length) {
-      const safeTarget = updating ? documentPublicationTargetUrl({ uri: slot.write_back_url, doc_id: slot.provider_document_id }, slot.provider) : '';
-      pending.forEach(group => imageGroupReminders.current.add(imageGroupKey(group.images)));
-      Modal.confirm({ title: updating ? i18n.t('chat.writerLocal.update', { provider: providerLabel(provider) }) : i18n.t('chat.writerImageGroups.title'),
-        content: <div>{updating && i18n.t('chat.writerLocal.updateConfirm')}{safeTarget && <p><a href={safeTarget} target='_blank' rel='noreferrer'>{safeTarget}</a></p>}
-          {pending.length > 0 && <p>{i18n.t('chat.writerImageGroups.reminder', { count: pending.length })}</p>}</div>,
-        ...(pending.length ? { okText: i18n.t('chat.writerImageGroups.keepVertical'), cancelText: i18n.t('chat.writerImageGroups.returnToDocument'), onCancel: () => {
-          const group = Array.from(window.document.querySelectorAll<HTMLElement>('.writer-image-group'))
-            .find(element => pending.some(candidate => imageGroupKey(candidate.images) === element.dataset.imageGroupKey));
-          group?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-          group?.querySelector<HTMLButtonElement>('button')?.focus();
-        } } : {}),
-        onOk: async () => {
-          if (pending.length) {
-            const current = draftContent.current;
-            if (typeof current !== 'string' && !isWriterDocument(current)) throw new Error('Document content is unavailable.');
-            await save(keepVerticalImageGroups(current, pending), latest.current.revision, 'draft');
-          }
-          await publishRef.current(provider);
-        },
-      });
-    } else { void publishRef.current(provider); }
+  const chooseProvider = (provider?: string) => {
+    if (publicationBlocked || !loaded || !writable) return;
+    if (provider && !publicationChoices[provider]?.selectable) return;
+    setError(''); setErrorAction(null);
+    setPublishDialog({ provider });
   };
   const chooseRef = useRef(chooseProvider); chooseRef.current = chooseProvider;
   useEffect(() => {
-    if (authorizationNeeded && availability.states[authorizationNeeded] === 'ready') {
-      setAuthorizationNeeded(''); setError(''); setErrorAction(null);
-    }
-  }, [authorizationNeeded, availability.states]);
-  useEffect(() => {
     if (!active || !writable || !descriptor.capabilities.includes('publish_document')) return;
-    let remembered: string | null = null;
-    try { remembered = localStorage.getItem('writer-publish-provider'); } catch { /* Storage preferences are optional. */ }
-    const preferred = providers.find(provider => provider.id === slot.provider)?.id ?? providers.find(provider => provider.id === remembered)?.id ?? providers[0]?.id;
-    const authorizationStatus = (provider: string) => availability.states[provider] === 'ready' ? '' : String(i18n.t(availability.states[provider] === 'chat-disabled' ? 'chat.writerLocal.feishuChatDisabledShort' : availability.states[provider] === 'authorize' ? 'chat.writerLocal.authorizeShort' : availability.states[provider] === 'failed' ? 'chat.writerLocal.platformFailed' : 'chat.writerLocal.checking'));
+    const authorizationStatus = (provider: string) => publicationChoices[provider]?.reason ?? String(i18n.t('chat.writerLocal.checking'));
     // Saving edits advances the local identity, not the published cloud version.
     const confirmedStatus = publicationStatus
       ? publicationStatus.signature === currentSignature ? publicationStatus.text : String(i18n.t('chat.writerLocal.publishedWithEdits'))
       : '';
     // Slot metadata may still describe the version before the latest local save.
     const synced = slot.write_back_state === 'synced_clean' && slotSignature === currentSignature;
-    const successStatus = busy || publicationBlocked ? '' : hasLocalChanges
+    const successStatus = publicationBlocked ? '' : hasLocalChanges
       ? (confirmedStatus === String(i18n.t('chat.writerLocal.publishedWithEdits')) ? confirmedStatus : '')
       : confirmedStatus || (synced ? String(i18n.t('chat.writerIR.writeBackSuccess')) : '');
     return registerFooterAction(`${editingKey}:publish`, {
-      label: publishingProvider !== null ? String(i18n.t('chat.writerLocal.publishing', { provider: providerLabel(publishingProvider) }))
-        : providers.length === 1 ? String(i18n.t(slot.provider === preferred && slot.write_back_ready ? 'chat.writerLocal.update' : 'chat.writerLocal.create', { provider: providerLabel(preferred) })) : String(i18n.t('chat.writerLocal.publishTo')),
+      label: String(i18n.t('chat.writerLocal.publishTo')),
       icon: 'write-back', tone: 'primary', order: 30,
       menuLabel: String(i18n.t('chat.writerLocal.chooseProvider')),
-      disabled: busy || publicationBlocked || !loaded || providers.length === 0, flushBeforeAction: true, flushKey: editingKey,
-      onClick: () => { if (preferred) chooseRef.current(preferred); },
+      disabled: publicationBlocked || !loaded || providers.length === 0, flushBeforeAction: false, flushKey: editingKey,
+      onClick: () => chooseRef.current(),
       menu: providers.length > 1 ? providers.map(provider => {
         const label = [providerLabel(provider.id), authorizationStatus(provider.id)].filter(Boolean).join(' · ');
         const state = availability.states[provider.id];
-        const settingsAction = state === 'authorize' ? String(i18n.t('chat.writerLocal.authorizeAction'))
+        const isObsidian = provider.id === 'obsidian';
+        const settingsAction = isObsidian ? String(i18n.t('modelProvider.cloudDocuments.obsidianSetupGuideShort')) : state === 'authorize' ? String(i18n.t('chat.writerLocal.authorizeAction'))
           : state === 'chat-disabled' ? String(i18n.t('chat.writerLocal.settings')) : '';
         return { key: provider.id,
+          disabled: !publicationChoices[provider.id]?.selectable,
           label: settingsAction ? <span className='workflow-panel__provider-menu-label'>
-            <span>{label}</span>
+            <span className='workflow-panel__provider-menu-copy'>
+              <span>{label}</span>
+              {isObsidian && <small title={String(i18n.t('modelProvider.cloudDocuments.obsidianEnvironmentHint'))}>{i18n.t('modelProvider.cloudDocuments.obsidianEnvironmentSummary')}</small>}
+            </span>
             <a className='workflow-panel__provider-settings-link'
-              href={getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)}
+              href={isObsidian ? CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH : getCloudDocumentsUrl(provider.id === 'feishu' || provider.id === 'googledrive' || provider.id === 'wechat' ? provider.id : undefined)}
               target='_blank' rel='noopener noreferrer'
-              aria-label={String(i18n.t('chat.writerLocal.providerSettingsLabel', { provider: providerLabel(provider.id), action: settingsAction }))}
+              aria-disabled={false}
+              aria-label={isObsidian ? String(i18n.t('modelProvider.cloudDocuments.obsidianSetupGuideAction')) : String(i18n.t('chat.writerLocal.providerSettingsLabel', { provider: providerLabel(provider.id), action: settingsAction }))}
               onClick={event => event.stopPropagation()}
               onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') event.stopPropagation(); }}>
               {settingsAction}<ExportOutlined aria-hidden='true' />
@@ -493,30 +422,30 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           onClick: () => chooseRef.current(provider.id),
         };
       }) : undefined,
-      statusText: error && authorizationNeeded ? undefined : error || successStatus || (providers.length === 1 && preferred ? authorizationStatus(preferred) : undefined), statusTone: error ? 'error' : 'success',
+      statusText: error || successStatus, statusTone: error ? 'error' : 'success',
       statusLink: publicationUrl ? { href: publicationUrl, label: String(i18n.t('chat.writerIR.openCloudDocument')) } : undefined,
     });
-  }, [active, writable, descriptor.capabilities, registerFooterAction, editingKey, loaded, providers, busy, publishingProvider, publicationBlocked, error, authorizationNeeded, publicationStatus, publicationUrl, slot.provider, slot.write_back_ready, slot.write_back_state, availability.states, currentSignature, slotSignature, hasLocalChanges]);
+  }, [active, writable, descriptor.capabilities, registerFooterAction, editingKey, loaded, providers, publicationBlocked, publicationChoices, error, publicationStatus, publicationUrl, slot.provider, slot.write_back_ready, slot.write_back_state, availability.states, currentSignature, slotSignature, hasLocalChanges]);
 
   if (!loaded) return <div role='status'>{error || '…'}</div>;
   const versionHistory = VersionHistory && sessionId ? <VersionHistory sessionId={sessionId} slotId={slot.slot_id}
     listIndex={slot.list_index ?? -1} revisionCount={revisionCount ?? version} currentRevision={version}
     currentVersionNumber={slot.version_number} currentValue={value} currentChangeSource={slot.change_source}
     readCurrentValue={() => getSnapshot?.(editingKey) ?? draftContent.current} contentType='text'
-    readOnly={!writable || busy} triggerLabel={String(i18n.t('chat.slots.versionHistory'))} onRollback={rollback} /> : undefined;
+    readOnly={!writable} triggerLabel={String(i18n.t('chat.slots.versionHistory'))} onRollback={rollback} /> : undefined;
   return <SlotEditingContext.Provider value={editorContext}><div className='workflow-slot workflow-slot--artifact'>
-    <div className={`workflow-slot__artifact-body${representation === 'markdown' ? ' workflow-slot__artifact-body--markdown' : ''}`}>
+    <div className={`workflow-slot__artifact-body${representation === 'markdown' ? ' workflow-slot__artifact-body--markdown' : ''}`} onClick={imageDownloads.onImageClick}>
     {representation === 'markdown' && typeof value === 'string'
-      ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} savePaused={busy} allowMultipleParagraphs
+      ? <MarkdownArtifactEditor renderContext={descriptor.render_context} markdown={value} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
         numberingDocument={typeof currentNumbering?.document === 'string' ? currentNumbering.document : undefined}
-        resolveImageUrl={resolveImageUrl} onContentChange={edit} numbering={numbering} toolbarActions={versionHistory}
+        resolveImageUrl={resolveImageUrl} onDownloadImage={imageDownloads.downloadImage} onContentChange={edit} numbering={numbering} toolbarActions={versionHistory}
         onRewriteSelection={canRewrite ? (picked) => { if (picked.supported) setSelection({ type: 'markdown', selected_text: picked.text, selectedText: picked.text, paragraph: picked.paragraph, paragraphs: picked.paragraphSelections?.map(item => item.paragraph), startOffset: picked.startOffset, sourceRange: picked.sourceRange, sourceRanges: picked.sourceRanges, anchor: picked.anchor }); } : undefined}
         rewriteDialogOpen={selection !== null}
         rewritePreview={preview?.selection.paragraph ? { paragraph: preview.selection.paragraph, paragraphs: preview.selection.paragraphs, sourceMarkdown: String(previewSource.current?.value ?? value), startOffset: preview.selection.startOffset,
           sessionId, slotId: slot.slot_id, listIndex: slot.list_index ?? -1, preview: preview.value, applyPreview } : null}
         onRewritePreviewApplied={() => setPreview(null)} onRewritePreviewRejected={() => setPreview(null)}
         onSave={async (text, revision, mode, numbering) => { const saved = await save(text, revision, mode, numbering); return { markdown: String(saved.value), revision: saved.revision }; }} />
-      : isWriterDocument(value) ? <WriterIRControl document={value as WriterDocument} sourceRevision={version} editingKey={editingKey} readOnly={!writable} savePaused={busy} allowMultipleParagraphs
+      : isWriterDocument(value) ? <WriterIRControl document={value as WriterDocument} sourceRevision={version} editingKey={editingKey} readOnly={!writable} allowMultipleParagraphs
         onDocumentChange={edit} numbering={numbering} toolbarActions={versionHistory}
         onRewriteSelection={canRewrite ? (picked) => setSelection({ type: 'ir', node_id: picked.nodeId, nodeSelections: picked.nodeSelections, selectedText: picked.selectedText, anchor: picked.anchor }) : undefined}
         rewriteDialogOpen={selection !== null}
@@ -527,20 +456,51 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           return { document: saved.value as WriterDocument, sourceRevision: saved.revision, draftVersion: saved.draft };
         }} /> : <div role='alert'>{String(i18n.t('chat.writerIR.saveFailed'))}</div>}
     </div>
-    {error && <div className={`workflow-document-notice${authorizationNeeded ? ' workflow-document-notice--authorization' : ''}`} role='alert'>
-      <span className='workflow-document-notice__icon' aria-hidden='true'>{authorizationNeeded ? <LockOutlined /> : <ExclamationCircleOutlined />}</span>
+    {imageDownloads.dialog}
+    {error && <div className='workflow-document-notice' role='alert'>
+      <span className='workflow-document-notice__icon' aria-hidden='true'><ExclamationCircleOutlined /></span>
       <span className='workflow-document-notice__message'>{error}</span>
-      {(authorizationNeeded || errorAction) && <div className='workflow-document-notice__actions'>
-        {authorizationNeeded && <a className='workflow-document-notice__action workflow-document-notice__action--settings' href={getCloudDocumentsUrl(authorizationNeeded === 'feishu' ? 'feishu' : undefined)} target='_blank' rel='noreferrer'>
-          {String(i18n.t(authorizationNeeded === 'feishu' ? 'chat.writerLocal.feishuSettings' : 'chat.writerLocal.settings'))}<ExportOutlined aria-hidden='true' />
-        </a>}
-        {errorAction && <button className='workflow-document-notice__action' type='button' onClick={() => { if (errorAction === 'download') retryDownload.current?.(); else if (errorAction === 'history') retryHistory.current?.(); else { setError(''); setProviderRefresh(value => value + 1); void availability.refresh(); } }}>
+      {errorAction && <div className='workflow-document-notice__actions'>
+        <button className='workflow-document-notice__action' type='button' onClick={() => { if (errorAction === 'download') retryDownload.current?.(); else if (errorAction === 'history') retryHistory.current?.(); else { setError(''); setProviderRefresh(value => value + 1); void availability.refresh(); } }}>
           <ReloadOutlined aria-hidden='true' />{String(i18n.t('common.retry'))}
-        </button>}
+        </button>
       </div>}
     </div>}
+    {descriptor.capabilities.includes('publish_document') && <DocumentPublicationDialog key={`${sessionId}:${slot.slot_id}:${slot.list_index ?? -1}`}
+      artifactId={latest.current.id} sourceSignature={currentSignature} providers={providers} availability={availability} open={!!publishDialog} initialProvider={publishDialog?.provider} dirty={hasLocalChanges} readOnly={!writable}
+      onProviderChoicesChange={setPublicationChoices}
+      onClose={() => setPublishDialog(undefined)} beforePublish={async selectedProviders => {
+        if (flushEditor.current && !await flushEditor.current()) throw new Error(String(i18n.t('chat.writerIR.saveFailed')));
+        if (dirty.current) throw new Error(String(i18n.t('chat.writerIR.saveFailed')));
+        const content = draftContent.current;
+        const pending = selectedProviders.includes('wechat') && (typeof content === 'string' || isWriterDocument(content))
+          ? pendingImageGroups(content).filter(group => !imageGroupReminders.current.has(imageGroupKey(group.images))) : [];
+        if (pending.length) {
+          const keepVertical = await new Promise<boolean>(resolve => {
+            Modal.confirm({ title: i18n.t('chat.writerImageGroups.title'),
+              content: i18n.t('chat.writerImageGroups.reminder', { count: pending.length }),
+              okText: i18n.t('chat.writerImageGroups.keepVertical'), cancelText: i18n.t('chat.writerImageGroups.returnToDocument'),
+              onOk: () => { resolve(true); },
+              onCancel: () => {
+                setPublishDialog(undefined);
+                const group = Array.from(window.document.querySelectorAll<HTMLElement>('.writer-image-group'))
+                  .find(element => pending.some(candidate => imageGroupKey(candidate.images) === element.dataset.imageGroupKey));
+                group?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                group?.querySelector<HTMLButtonElement>('button')?.focus();
+                resolve(false);
+              },
+            });
+          });
+          if (!keepVertical) return undefined;
+          const current = draftContent.current;
+          if (typeof current !== 'string' && !isWriterDocument(current)) throw new Error(String(i18n.t('chat.writerIR.saveFailed')));
+          await save(keepVerticalImageGroups(current, pending), latest.current.revision, 'draft');
+          pending.forEach(group => imageGroupReminders.current.add(imageGroupKey(group.images)));
+        }
+        return { ...latest.current };
+      }} />}
     {descriptor.capabilities.includes('publish_document') && <DocumentPublicationRecoveryPanel key={latest.current.id} artifactId={latest.current.id} slotId={slot.slot_id} itemIndex={slot.list_index ?? -1}
-      refreshKey={publicationRefresh} publishing={busy} readOnly={readOnly} canApplyLocal={()=>!dirty.current} onAvailability={publicationAvailable} onResolved={publicationResolved} onPublished={writable ? publicationSucceeded : undefined} onTarget={writable ? setPublicationUrl : undefined} />}
+      refreshKey={0} publishing={false} readOnly={readOnly} canApplyLocal={()=>!dirty.current} onAvailability={publicationAvailable} onResolved={publicationResolved} onPublished={writable ? publicationSucceeded : undefined} onTarget={writable ? setPublicationUrl : undefined} />}
     <ArtifactRewriteDialog open={selection !== null} sessionId={sessionId} slotId={slot.slot_id} listIndex={slot.list_index ?? -1}
       baseRevision={latest.current.revision} baseDraftVersion={latest.current.draft} selection={selection}
       onClose={() => setSelection(null)} onApplied={() => { setPreview(null); onRefresh?.(); }}

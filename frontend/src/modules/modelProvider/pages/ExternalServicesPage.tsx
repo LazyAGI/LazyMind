@@ -927,22 +927,9 @@ export default function ExternalServicesPage({
           savedGroup = await loadFirstGroup(activeService.key);
         }
         if (savedGroup) {
-          const baseUrlChanged = normalizeBaseUrlForCompare(normalizedBaseUrl) !== normalizeBaseUrlForCompare(savedGroup.base_url || originalBaseUrlRef.current);
-          if (baseUrlChanged && (savedGroup.has_api_key || keyList.length > 0)) {
-            const confirmed = await new Promise<boolean>((resolve) => {
-              Modal.confirm({
-                title: t("modelProvider.external.baseUrlChangeTitle"),
-                content: t("modelProvider.external.baseUrlChangeContent", { count: keyList.length }),
-                okText: t("modelProvider.external.confirmChange"),
-                cancelText: t("modelProvider.external.cancelChange"),
-                okButtonProps: { danger: true },
-                onOk: () => { resolve(true); },
-                onCancel: () => { resolve(false); },
-              });
-            });
-            if (!confirmed) return;
-          }
-          savedGroup = await updateProviderGroup(activeService, savedGroup, normalizedBaseUrl);
+          // Address updates retain the saved pool. The patch response contains
+          // verification/address fields, so preserve its masked key metadata.
+          savedGroup = { ...savedGroup, ...await updateProviderGroup(activeService, savedGroup, normalizedBaseUrl) };
         } else {
           savedGroup = await createProviderGroup(activeService, {
             name: activeService.name,
@@ -954,9 +941,8 @@ export default function ExternalServicesPage({
         originalBaseUrlRef.current = normalizedBaseUrl;
       }
 
-      const retainsKeys = normalizeBaseUrlForCompare(normalizedBaseUrl) === normalizeBaseUrlForCompare(groupForActiveService?.base_url || "")
-        && (groupForActiveService?.has_api_key || keyList.length > 0);
-      if (savedGroup && (retainsKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+      const hasSavedKeys = savedGroup?.has_api_key || Boolean(savedGroup?.keys?.length) || keyList.length > 0;
+      if (savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
         await selectServiceProvider(activeService, savedGroup.id);
       }
 

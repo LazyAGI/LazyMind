@@ -601,8 +601,8 @@ func manualSchemas() map[string]any {
 		"ConversationBatchDeleteResponse":  obj(prop("deleted_count", intSchema()), prop("deleted_ids", array(strSchema()))),
 		"ConversationArchiveFolderRequest": objReq([]string{"name"}, prop("name", strSchema())),
 		"ConversationArchiveRequest":       obj(prop("folder_id", nullableSchema(strSchema())), prop("only_if_active", boolSchema())),
-		"ConversationArchiveResponse": objReq([]string{"conversation_id", "newly_archived", "archived_at"},
-			prop("conversation_id", strSchema()), prop("newly_archived", boolSchema()), prop("archived_at", dateTimeSchema())),
+		"ConversationArchiveResponse": objReq([]string{"conversation_id", "newly_archived", "archived_at", "archived_ids"},
+			prop("conversation_id", strSchema()), prop("newly_archived", boolSchema()), prop("archived_at", dateTimeSchema()), prop("archived_ids", array(strSchema()))),
 		"ConversationUnarchiveRequest": obj(prop("expected_archived_at", dateTimeSchema())),
 		"ConversationArchiveFolder": objReq(
 			[]string{"id", "name", "dialog_count", "task_count", "total_count", "created_at", "updated_at"},
@@ -779,7 +779,7 @@ func manualSchemas() map[string]any {
 			prop("history_id", strSchema()), prop("seq", intSchema()), prop("summary", strSchema()), prop("question", strSchema()), prop("depth", intSchema()), prop("parent_history_id", strSchema()), prop("source", strSchema()), prop("create_time", strSchema()),
 		),
 		"ConversationTrailListResponse": obj(prop("conversation_id", strSchema()), prop("name", strSchema()), prop("items", array(refSchema("ConversationTrailItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
-		"ConversationListResponse":      obj(prop("conversations", array(refSchema("ConversationItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
+		"ConversationListResponse":      obj(prop("conversations", array(refSchema("ConversationItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema()), prop("selection_complete", boolSchema())),
 		"EpisodeMemory": objReq(
 			[]string{
 				"id",
@@ -1133,7 +1133,7 @@ func manualPaths() map[string]any {
 			"post": op("Start, pause, resume or retry conversation metadata backfill", nil, jsonBody(objReq([]string{"action"}, prop("action", enumStringSchema("start", "pause", "resume", "retry"))), true), response(200, "Metadata progress", refSchema("ConversationOpeningState"))),
 		},
 		"/conversations/{name}/title": map[string]any{"patch": op("Rename conversation with title revision protection", queryParams(param("path", "name", true, strSchema())), jsonBody(objReq([]string{"display_name", "title_revision"}, prop("display_name", strSchema()), prop("title_revision", int64Schema())), true), response(200, "Updated title", obj(prop("display_name", strSchema()), prop("title_revision", int64Schema()))))},
-		"/conversations":              map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "assistant", false, enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
+		"/conversations":              map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "assistant", false, enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema()), param("query", "selection_snapshot", false, boolSchema()), param("query", "selection_group_id", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
 		"/memory/soul": map[string]any{
 			"get": map[string]any{
 				"summary": "Get current user's Soul memory",

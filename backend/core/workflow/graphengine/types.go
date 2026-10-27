@@ -86,12 +86,25 @@ type CompiledBypass struct {
 // collect before it initializes a Workflow session. It is deliberately part of
 // the package contract: hosts must not branch on a particular workflow id.
 type ClarificationField struct {
-	ID           string   `json:"id" yaml:"id"`
-	Label        string   `json:"label,omitempty" yaml:"label,omitempty"`
-	Question     string   `json:"question" yaml:"question"`
-	Type         string   `json:"type,omitempty" yaml:"type,omitempty"`
-	Choices      []string `json:"choices,omitempty" yaml:"choices,omitempty"`
-	ChoicePolicy string   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
+	ID           string                   `json:"id" yaml:"id"`
+	Label        string                   `json:"label,omitempty" yaml:"label,omitempty"`
+	Question     string                   `json:"question" yaml:"question"`
+	AskWhen      string                   `json:"ask_when,omitempty" yaml:"ask_when,omitempty"`
+	Type         string                   `json:"type,omitempty" yaml:"type,omitempty"`
+	Choices      []string                 `json:"choices,omitempty" yaml:"choices,omitempty"`
+	ChoicePolicy string                   `json:"choice_policy,omitempty" yaml:"choice_policy,omitempty"`
+	Attachment   *ClarificationAttachment `json:"attachment,omitempty" yaml:"attachment,omitempty"`
+}
+
+// ClarificationAttachment reuses the Chat host's normal attachment transport
+// for a choice-dependent upload. It deliberately does not introduce a fifth
+// question type or a workflow-specific upload API.
+type ClarificationAttachment struct {
+	WhenChoice string   `json:"when_choice" yaml:"when_choice"`
+	MaterialID string   `json:"material_id" yaml:"material_id"`
+	Accept     []string `json:"accept,omitempty" yaml:"accept,omitempty"`
+	MaxFiles   int      `json:"max_files,omitempty" yaml:"max_files,omitempty"`
+	Required   bool     `json:"required,omitempty" yaml:"required,omitempty"`
 }
 
 // PostStepCheck is a deterministic package-owned function that a Host must run

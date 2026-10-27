@@ -361,3 +361,31 @@ def test_portable_conversion_available_to_pinned_workflows_without_action_declar
     result = workflow_routes.invoke_workflow_action(request)['result']
     assert result['format'] == 'latex'
     assert 'Article' in result['content']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('count', [31, 100])
+async def test_ppt_export_keeps_all_pages_above_former_limit(monkeypatch, tmp_path, count):
+    import io
+    import urllib.request
+
+    routes = _load_workflow_routes(monkeypatch)
+    monkeypatch.setattr(routes, 'editable_pptx_enabled', lambda: True)
+    monkeypatch.setenv('LAZYMIND_SUBAGENT_WORKSPACE', str(tmp_path))
+    monkeypatch.setenv('LAZYMIND_PPT_EXPORT_CLI', '')
+
+    def export(request, timeout):
+        deck = Path(json.loads(request.data)['deck_dir'])
+        pages = sorted((deck / 'pages').glob('*.html'))
+        assert len(pages) == count
+        assert pages[-1].read_text() == f'<html>Page {count}</html>'
+        (deck / 'output.pptx').write_bytes(b'export-result')
+        return io.BytesIO(b'{"status":"ok"}')
+
+    monkeypatch.setattr(urllib.request, 'urlopen', export)
+    response = await routes.export_ppt_from_html(routes.PptExportRequest(
+        pages=[routes.PptExportPage(html=f'<html>Page {index}</html>') for index in range(1, count + 1)],
+    ))
+    assert Path(response.path).read_bytes() == b'export-result'
+    await response.background()
+    assert not Path(response.path).exists()

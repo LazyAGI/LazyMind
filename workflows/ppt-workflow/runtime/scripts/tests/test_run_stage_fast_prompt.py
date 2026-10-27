@@ -21,6 +21,26 @@ import run_stage  # noqa: E402
 
 
 class StyleRenderingRecipeTest(unittest.TestCase):
+    def test_authored_design_survives_recipe_loading_and_style_changes(self) -> None:
+        style = {
+            'design_style': {'id': 1},
+            'art_direction': {
+                'concept': '用安装包分层结构表达依赖拆分',
+                'background': '象牙白底，右侧三层错位轮廓，橄榄绿细线',
+                'composition': ['封面用超大标题，数据页用左右对比'],
+                'forbidden_effects': [],
+            },
+        }
+        enriched = run_stage._attach_style_rendering_recipe(style)
+        self.assertEqual(enriched['art_direction']['background'], style['art_direction']['background'])
+        self.assertTrue(enriched['art_direction']['forbidden_effects'])
+        self.assertEqual(run_stage._attach_style_rendering_recipe(enriched), enriched)
+        legacy = run_stage._attach_style_rendering_recipe({'design_style': {'id': 1}})
+        legacy['design_style']['id'] = 19
+        switched = run_stage._attach_style_rendering_recipe(legacy)
+        self.assertEqual(switched['art_direction']['family'], 'editorial_business')
+        self.assertNotEqual(switched['art_direction']['background'], legacy['art_direction']['background'])
+
     def test_recipe_catalog_covers_every_declared_style_once(self) -> None:
         recipes = json.loads(
             run_stage._STYLE_RENDERING_RECIPES_PATH.read_text(encoding='utf-8')
@@ -50,7 +70,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertTrue(direction['forbidden_effects'])
         self.assertIn('small centered banner', direction['composition'][0])
 
-    def test_workflow_ask_uses_recipe_options_as_a_ranked_subset(self) -> None:
+    def test_workflow_ask_preserves_custom_visual_requirements(self) -> None:
         recipes = json.loads(
             run_stage._STYLE_RENDERING_RECIPES_PATH.read_text(encoding='utf-8')
         )
@@ -61,7 +81,8 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             if field['id'] == 'visual_style'
         )
 
-        self.assertEqual(style_field['choice_policy'], 'subset')
+        self.assertEqual(style_field['choice_policy'], 'seed')
+        self.assertIn('no visual direction', style_field['ask_when'].replace('\n', ' '))
         self.assertEqual(
             style_field['choices'],
             [option['label'] for option in recipes['ask_options']],
@@ -77,7 +98,8 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         )
 
         self.assertEqual(slide_count['choice_policy'], 'seed')
-        self.assertEqual(slide_count['choices'], ['3 页', '5 页', '8 页', '10 页'])
+        self.assertEqual(slide_count['choices'][:4], ['3 页', '5 页', '8 页', '10 页'])
+        self.assertIn('沿用模板全部页面（已上传模板时）', slide_count['choices'])
 
     def test_workflow_asks_for_explicit_ai_background_opt_in(self) -> None:
         workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
@@ -95,16 +117,17 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertTrue(field['choices'][1].startswith('不启用'))
         self.assertIn('background_images', workflow['runtime']['publisher_owned_slots'])
 
-    def test_only_page_prompts_and_generation_checkpoints_require_approval(self) -> None:
+    def test_generation_steps_continue_without_confirmation(self) -> None:
         state_path = Path(__file__).resolve().parents[3] / 'scenario' / 'state.yml'
         state = yaml.safe_load(state_path.read_text(encoding='utf-8'))
 
         self.assertEqual(state['steps']['plan_background_prompts']['mode'], 'auto')
         self.assertEqual(state['steps']['build_outline']['mode'], 'auto')
-        self.assertEqual(state['steps']['choose_style']['mode'], 'human')
-        self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'human')
-        self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'human')
-        self.assertEqual(state['steps']['generate_ppt']['mode'], 'human')
+        self.assertEqual(state['steps']['choose_style']['mode'], 'auto')
+        self.assertEqual(state['steps']['plan_page_prompts']['mode'], 'auto')
+        self.assertEqual(state['steps']['generate_backgrounds']['mode'], 'auto')
+        self.assertEqual(state['steps']['generate_ppt']['mode'], 'auto')
+        self.assertEqual(state['steps']['analyze_academic_sources']['mode'], 'auto')
 
     def test_background_prompt_and_generation_steps_support_skip_and_targeted_rerun(self) -> None:
         workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
@@ -127,7 +150,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertIn('background_prompts', workflow['runtime']['publisher_owned_slots'])
         self.assertEqual(
             [edge['to'] for edge in state['transitions']['collect_materials']],
-            ['choose_style', 'plan_background_prompts', 'build_outline'],
+            ['analyze_academic_sources', 'choose_style', 'plan_background_prompts', 'build_outline'],
         )
         self.assertEqual(
             [edge['to'] for edge in state['transitions']['choose_style']],
@@ -144,7 +167,12 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             state['transitions']['generate_backgrounds'],
             [{'to': 'build_outline'}],
         )
-        self.assertEqual(state['transitions']['build_outline'], [{'to': 'plan_page_prompts'}])
+        self.assertEqual([edge['to'] for edge in state['transitions']['build_outline']],
+                         ['generate_ppt', 'plan_page_prompts'])
+        self.assertIn('quick', state['transitions']['build_outline'][0]['when'])
+        generate_inputs = {i['material']: i for i in state['steps']['generate_ppt']['inputs']}
+        self.assertFalse(generate_inputs['slide_outline']['required'])
+        self.assertIn('deck_outline', generate_inputs)
         self.assertEqual(state['transitions']['plan_page_prompts'], [{'to': 'generate_ppt'}])
         slots = {slot['id']: slot for slot in workflow['slots']}
         self.assertEqual(slots['deck_outline']['cardinality'], 'single')
@@ -166,7 +194,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             workflow['runtime']['completed_edit_routing'],
         )
         self.assertIn(
-            "ppt_publish_outline(deck_dir, pages=[N], insert_before=N)",
+            "ppt_publish_outline(pages=[N], insert_before=N)",
             state['steps']['plan_page_prompts']['prompt'],
         )
 
@@ -202,6 +230,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
                 'capability_requirements': 'ppt_capability_requirements',
                 'style_flow': 'style_flow',
                 'generate_background_images': 'generate_background_images',
+                'template_mode': 'template_mode',
             },
         }])
         self.assertFalse(slots['ppt_capability_requirements']['exposed'])
@@ -307,6 +336,104 @@ class OutlineReferenceImageRepairTest(unittest.TestCase):
 
 
 class PagePromptModeTest(unittest.TestCase):
+    def test_complete_prompt_reaches_html_model_verbatim_without_replanning(self):
+        html = ("<!DOCTYPE html><html><body><div class='wrapper'><div id='bg'></div>"
+                "<div id='ct'>春节快乐</div></div></body></html>")
+        prompt = '用简体中文生成 1280x720 HTML。标题春节快乐，红金配色，大字，左右习俗插画，无 AI 底图。'
+        with tempfile.TemporaryDirectory() as temp:
+            deck = self._deck(Path(temp))
+            (deck / 'complete_page_prompts.json').write_text('{"version":1}')
+            # Complete prompts do not need the old style/outline rewrite inputs.
+            (deck / 'outline.json').unlink()
+            with patch.object(run_stage, 'llm', return_value=html) as model, \
+                 patch.object(run_stage, '_build_brief_page_query') as rewrite, \
+                 patch.object(run_stage, '_load_deck_style') as style:
+                self.assertEqual(run_stage.cmd_page_html_from_brief(deck, 1, prompt), 0)
+            self.assertEqual(model.call_args.args[1], prompt)
+            self.assertEqual(model.call_count, 1)
+            rewrite.assert_not_called()
+            style.assert_not_called()
+            self.assertEqual((deck / 'pages/page_001.query.txt').read_text(), prompt)
+
+    def test_editable_brief_retains_internal_page_design_without_restoring_old_copy(self) -> None:
+        html = ("<!DOCTYPE html><html><body><div class='wrapper'><div id='bg'></div>"
+                "<div id='ct'>完成</div></div></body></html>")
+        with tempfile.TemporaryDirectory() as temp:
+            deck = self._deck(Path(temp))
+            outline_path = deck / 'outline.json'
+            outline = json.loads(outline_path.read_text(encoding='utf-8'))
+            outline['pages'][0]['visual_hints'] = '左侧大数字，右侧两阶段折线；边缘采用细线轮廓'
+            outline_path.write_text(json.dumps(outline, ensure_ascii=False), encoding='utf-8')
+            with patch.object(run_stage, 'llm', return_value=html) as model:
+                self.assertEqual(run_stage.cmd_page_html_from_brief(deck, 1, '用户修改后的正文'), 0)
+            query = model.call_args.args[1]
+            self.assertIn(outline['pages'][0]['visual_hints'], query)
+            self.assertIn('用户修改后的正文', query)
+            self.assertNotIn('减少等待时间', query)
+            self.assertIn('NO AI BACKGROUND IMAGE', query)
+            self.assertEqual(model.call_count, 1)
+
+    def test_generated_background_does_not_receive_vector_replacement_instructions(self) -> None:
+        html = ("<!DOCTYPE html><html><head><style>"
+                "#bg{background-image:url('../images/page_001_background.png')}"
+                "</style></head><body><div class='wrapper'><div id='bg'></div>"
+                "<div id='ct'>完成</div></div></body></html>")
+        with tempfile.TemporaryDirectory() as temp:
+            deck = self._deck(Path(temp))
+            self._attach_background_image(deck)
+            with patch.object(run_stage, 'llm', return_value=html) as model:
+                self.assertEqual(run_stage.cmd_page_html_from_brief(deck, 1, '用户正文'), 0)
+            query = model.call_args.args[1]
+            self.assertIn('AI BACKGROUND IMAGE', query)
+            self.assertIn('../images/page_001_background.png', query)
+            self.assertNotIn('NO AI BACKGROUND IMAGE', query)
+
+    def test_current_visual_edit_reaches_renderer_and_unchanged_output_fails(self):
+        original = '<html><head></head><body><div id="ct">Original</div></body></html>'
+        with tempfile.TemporaryDirectory() as temp:
+            deck = self._deck(Path(temp))
+            target = deck / 'pages' / 'page_001.html'
+            target.write_text(original, encoding='utf-8')
+            calls = []
+            def model(system, user, **kwargs):
+                calls.append((system, user))
+                return original
+            result = run_stage.cmd_page_html(deck, 1, llm_call=model,
+                                             edit_instruction='第1页减少留白，保留文字，不要蓝色')
+            self.assertNotEqual(result, 0)
+            self.assertIn('第1页减少留白，保留文字，不要蓝色', calls[0][1])
+            self.assertIn('current_html', calls[0][1])
+            self.assertIn('VISUAL PRIORITY', calls[0][0])
+            self.assertEqual(target.read_text(encoding='utf-8'), original)
+
+    def test_brief_revision_receives_instruction_and_original(self):
+        with tempfile.TemporaryDirectory() as temp:
+            deck = self._deck(Path(temp))
+            (deck / 'pages' / 'page_001.html').write_text('<html><body>Old</body></html>')
+            calls = []
+            def model(system, user, **kwargs):
+                calls.append(user)
+                return '<html><head></head><body><div id="ct" style="color:#556B2F">Old</div></body></html>'
+            self.assertEqual(run_stage.cmd_page_html_from_brief(
+                deck, 1, '旧蓝色风格', llm_call=model, edit_instruction='改为橄榄绿'), 0)
+            self.assertIn('改为橄榄绿', calls[0])
+            self.assertIn('current_html', calls[0])
+
+    def test_explicit_palette_survives_catalog_repair(self):
+        style = {'design_style': {'id': 1}, 'color_tone': {'id': 1},
+                 'primary_color': {'id': 3}, 'palette': {'primary': '#556B2F'},
+                 'explicit_visual_constraints': '米白科技风，橄榄绿，不要蓝色和HUD'}
+        dims = {'design_styles': [{'id': 1, 'compatible_tones': [1], 'compatible_colors': [3]}],
+                'color_tones': [{'id': 1, 'compatible_colors': [3]}],
+                'primary_colors': [{'id': 3, 'hex': '#1976D2'}]}
+        actual, _ = run_stage._repair_style_triple(style, dims)
+        self.assertEqual(actual['palette']['primary'], '#556B2F')
+        self.assertEqual(actual['primary_color']['hex'], '#556B2F')
+        enriched = run_stage._attach_style_rendering_recipe(actual)
+        self.assertIn('Advisory only', enriched['art_direction']['priority'])
+        with self.assertRaisesRegex(ValueError, 'refusing an arbitrary fallback'):
+            run_stage._repair_style_triple({'design_style': {'id': 999}}, dims)
+
     def _deck(self, root: Path) -> Path:
         deck = root / "deck"
         (deck / "pages").mkdir(parents=True)

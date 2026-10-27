@@ -21,6 +21,7 @@ const McpOAuthConnect = lazy(() => import("@/modules/modelProvider/pages/McpOAut
 const McpOAuthCallback = lazy(() => import("@/modules/modelProvider/pages/McpOAuthCallback"));
 
 const WorkflowRunPage = lazy(() => import("@/modules/chat/pages/workflowRun"));
+const PptxPreviewPage = lazy(() => import("@/modules/chat/pages/pptxPreview"));
 const ShowcaseGalleryPage = lazy(() => import("@/modules/showcase/GalleryPage"));
 const ShowcaseDetailPage = lazy(() => import("@/modules/showcase/DetailPage"));
 const KnowledgeApp = lazy(() => import("@/modules/knowledge/KnowledgeApp"));
@@ -167,6 +168,7 @@ export default function AppRouter() {
           )}
         >
           <Route path="workflow-runs/:sessionId" element={<WorkflowRunPage />} />
+          <Route path="workflow-runs/:sessionId/pptx/:slotId" element={<PptxPreviewPage />} />
           <Route index element={<Navigate to="/agent/chat" replace />} />
           <Route path="agent/chat" element={<ChatApp />}>
             <Route index element={<Navigate to="home" replace />} />

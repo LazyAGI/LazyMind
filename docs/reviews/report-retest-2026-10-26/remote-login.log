@@ -1,0 +1,9 @@
+
+ RUN  v2.1.9 /Users/cuishaoting/Documents/LazyMind/frontend
+
+ ✓ src/runtime/reportRetest.test.ts (1 test) 2ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  17:27:59
+   Duration  700ms (transform 38ms, setup 55ms, collect 58ms, tests 2ms, environment 405ms, prepare 44ms)

@@ -17,18 +17,6 @@ import (
 	"lazymind/core/store"
 )
 
-func TestInferRemoteModelTypeUnknownIsEmpty(t *testing.T) {
-	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
-		t.Fatal(err)
-	}
-	if got := inferRemoteModelType("definitely-not-a-catalog-model"); got != "" {
-		t.Fatalf("unknown remote type = %q, want empty", got)
-	}
-	if got := inferRemoteModelType("qwen-plus"); got != "llm" {
-		t.Fatalf("qwen-plus type = %q, want llm", got)
-	}
-}
-
 func TestModelsListURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -40,12 +28,15 @@ func TestModelsListURL(t *testing.T) {
 		{"https://api.deepseek.com/v1/", "https://api.deepseek.com/v1/models"},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1/", "https://dashscope.aliyuncs.com/compatible-mode/v1/models"},
 		{"https://api.openai.com/v1/chat/completions", "https://api.openai.com/v1/models"},
-		{"https://gateway.example.com/openai", "https://gateway.example.com/openai/v1/models"},
-		{"https://gateway.example.com/openai/", "https://gateway.example.com/openai/v1/models"},
-		{"https://gateway.example.com/compatible", "https://gateway.example.com/compatible/v1/models"},
+		{"https://gateway.example.com/openai", "https://gateway.example.com/openai/models"},
+		{"https://gateway.example.com/openai/", "https://gateway.example.com/openai/models"},
+		{"https://gateway.example.com/compatible", "https://gateway.example.com/compatible/models"},
+		{"https://gateway.example.com/api/v3", "https://gateway.example.com/api/v3/models"},
+		{"https://gateway.example.com/api/v4/", "https://gateway.example.com/api/v4/models"},
+		{"https://gateway.example.com/team%2Fprivate/v3/", "https://gateway.example.com/team%2Fprivate/v3/models"},
 	}
 	for _, tt := range tests {
-		got, err := modelsListURL(tt.in)
+		got, err := modelsListURL("OpenAI", tt.in)
 		if err != nil {
 			t.Fatalf("modelsListURL(%q) error: %v", tt.in, err)
 		}
@@ -61,7 +52,7 @@ func TestModelsListURL(t *testing.T) {
 		"https://user:pass@api.openai.com/v1",
 	}
 	for _, in := range blocked {
-		if _, err := modelsListURL(in); err == nil {
+		if _, err := modelsListURL("OpenAI", in); err == nil {
 			t.Fatalf("modelsListURL(%q) succeeded, want error", in)
 		}
 	}
@@ -71,11 +62,11 @@ func TestModelsListURL(t *testing.T) {
 		want string
 	}{
 		{"http://10.0.0.8/v1", "http://10.0.0.8/v1/models"},
-		{"http://172.16.1.4/openai", "http://172.16.1.4/openai/v1/models"},
+		{"http://172.16.1.4/openai", "http://172.16.1.4/openai/models"},
 		{"http://192.168.1.10/", "http://192.168.1.10/v1/models"},
 	}
 	for _, tt := range allowedPrivate {
-		got, err := modelsListURL(tt.in)
+		got, err := modelsListURL("OpenAI", tt.in)
 		if err != nil {
 			t.Fatalf("modelsListURL(%q) error: %v", tt.in, err)
 		}
@@ -90,14 +81,14 @@ func TestListRemoteGroupModels(t *testing.T) {
 	t.Cleanup(func() { remoteModelsAllowPrivateHosts = false })
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
+		if r.URL.Path != "/models" {
 			http.NotFound(w, r)
 			return
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
 			t.Errorf("Authorization = %q, want Bearer secret", got)
 		}
-		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-chat"},{"id":"deepseek-reasoner"},{"id":"qwen-plus"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-chat"},{"id":"deepseek-reasoner"},{"id":"qwen-plus","architecture":{"input_modalities":["text"],"output_modalities":["text"]}}]}`))
 	}))
 	t.Cleanup(upstream.Close)
 
@@ -128,6 +119,7 @@ func TestListRemoteGroupModels(t *testing.T) {
 		UserModelProviderGroupID: group.ID,
 		Name:                     "qwen-plus",
 		ModelType:                "llm",
+		ModelSettings:            `{"feature_support":{"tool_calling":false},"feature_enabled":{"tool_calling":false}}`,
 		BaseModel:                orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
 	}
 	if err := db.Create(&provider).Error; err != nil {
@@ -177,6 +169,49 @@ func TestListRemoteGroupModels(t *testing.T) {
 	if byName["qwen-plus"].ModelType != "llm" {
 		t.Fatalf("qwen-plus type = %q, want llm", byName["qwen-plus"].ModelType)
 	}
+	var featurePayload struct {
+		Data struct {
+			Models []struct {
+				Name     string         `json:"name"`
+				Settings *ModelSettings `json:"model_settings"`
+			} `json:"models"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &featurePayload); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range featurePayload.Data.Models {
+		if item.Name == "qwen-plus" && (item.Settings == nil || item.Settings.FeatureSupport == nil || item.Settings.FeatureSupport.ToolCalling == nil || *item.Settings.FeatureSupport.ToolCalling || item.Settings.FeatureEnabled == nil || item.Settings.FeatureEnabled.ToolCalling == nil || *item.Settings.FeatureEnabled.ToolCalling) {
+			t.Fatalf("saved support/enabled settings lost in discovery: %s", rec.Body.String())
+		}
+	}
+}
+
+func TestListRemoteGroupModelsUsesAnthropicRequestAuthentication(t *testing.T) {
+	remoteModelsAllowPrivateHosts = true
+	t.Cleanup(func() { remoteModelsAllowPrivateHosts = false; store.Init(nil, nil, nil) })
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "anthropic-secret" || r.Header.Get("anthropic-version") != "2023-06-01" || r.Header.Get("Authorization") != "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Write([]byte(`{"data":[{"id":"claude-sonnet"}]}`))
+	}))
+	defer upstream.Close()
+	db, parent, group := setupEncryptedGroupKeyTest(t, "anthropic-secret")
+	if err := db.AutoMigrate(&orm.UserModelProviderGroupModel{}); err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&parent).Updates(map[string]any{"protocol_name": "Claude", "base_url": upstream.URL})
+	db.Model(&group).Update("base_url", upstream.URL)
+	req := httptest.NewRequest(http.MethodGet, "/remote_models", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"model_provider_id": parent.ID, "group_id": group.ID})
+	rec := httptest.NewRecorder()
+	ListRemoteGroupModels(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Anthropic model discovery failed: %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestListRemoteGroupModelsKeepsPathPrefix(t *testing.T) {
@@ -184,7 +219,7 @@ func TestListRemoteGroupModelsKeepsPathPrefix(t *testing.T) {
 	t.Cleanup(func() { remoteModelsAllowPrivateHosts = false })
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/openai/v1/models" {
+		if r.URL.Path != "/openai/models" {
 			http.NotFound(w, r)
 			return
 		}
@@ -202,7 +237,7 @@ func TestListRemoteGroupModelsKeepsPathPrefix(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Data.URL != upstream.URL+"/openai/v1/models" {
+	if payload.Data.URL != upstream.URL+"/openai/models" {
 		t.Fatalf("url = %q", payload.Data.URL)
 	}
 	if len(payload.Data.Models) != 1 || payload.Data.Models[0].Name != "gpt-test" {
@@ -348,6 +383,7 @@ func listRemoteGroupModelsForURL(t *testing.T, baseURL string) *httptest.Respons
 	provider := orm.UserModelProvider{
 		ID:           "provider-rm",
 		Name:         "Remote",
+		ProtocolName: "OpenAI",
 		Category:     "model",
 		Capabilities: "has_models",
 		BaseModel:    orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},

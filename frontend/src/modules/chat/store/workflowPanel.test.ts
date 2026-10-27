@@ -7,6 +7,7 @@ import {
   filterWorkflowTabs,
   hydrateWorkflowUI,
   workflowTabAllowsDownload,
+  type SlotRevision,
 } from './workflowPanel';
 
 describe('hydrateWorkflowUI', () => {
@@ -164,4 +165,20 @@ describe('workflowTabAllowsDownload', () => {
     expect(workflowTabAllowsDownload(tab, 0, 2)).toBe(false);
     expect(workflowTabAllowsDownload(tab, 1, 2)).toBe(true);
   });
+});
+
+it('preserves authoritative workflow ownership and opt-in follow configuration', () => {
+  const ui = { source_type: 'builtin', follow_mode: { default: 'following' }, tabs: [] };
+  expect(hydrateWorkflowUI({ source_type: 'user', ui }).source_type).toBe('user');
+  expect(hydrateWorkflowUI({ source_type: 'builtin', ui }).source_type).toBe('builtin');
+  expect(hydrateWorkflowUI({ source_type: 'builtin' }).source_type).toBe('builtin');
+  expect(hydrateWorkflowUI({ source_type: 'builtin', ui }).follow_mode).toEqual({ default: 'following' });
+});
+
+it('restores skipped tabs only for effective runtime activity', () => {
+  const tabs = [{ id: 'result', step_id: 'generate', label: 'Result', slots: [], hide_when_material: 'skip' }];
+  const slots = [{ slot: 'skip', selected: true }] as SlotRevision[];
+  const node = { requires_approval: false, execution: 'running', validity: 'effective', reachability: 'reachable', readiness: '', branch: 'active' };
+  expect(filterWorkflowTabs(tabs, slots, undefined, { projection: { current: ['generate'], nodes: { generate: node } } })).toEqual(tabs);
+  expect(filterWorkflowTabs(tabs, slots, undefined, { projection: { current: ['generate'], nodes: { generate: { ...node, validity: 'stale' } } } })).toEqual([]);
 });

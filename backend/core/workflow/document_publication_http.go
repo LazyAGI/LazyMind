@@ -126,7 +126,7 @@ func initialPublicationTarget(ctx context.Context, tx *gorm.DB, op *DocumentPubl
 	}
 	_ = json.Unmarshal(raw, &envelope)
 	target := envelope.Meta.Sync.TargetDocument
-	if len(target) == 0 && op.SharedTarget {
+	if len(target) == 0 && (op.SharedTarget || op.PublicationID != "") {
 		var legacy orm.WorkflowSlotRevision
 		err := tx.Where("session_id = ? AND slot_id = ? AND selected = ? AND validity = ?", op.SessionID, "target_document", true, "effective").First(&legacy).Error
 		if err == nil {
@@ -279,6 +279,11 @@ func PublishDocumentArtifact(ctx context.Context, db *gorm.DB, owner, id string,
 		}
 		return nil, op, publicationReplayFailure(op)
 	}
+	return executeDocumentPublication(ctx, db, owner, op, session, options)
+}
+
+// Workers resume durable state; only preparing operations may reach a write claim.
+func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, op *DocumentPublicationOperation, session *orm.WorkflowSession, options *DocumentPublicationOptions) (*DocumentPublishResult, *DocumentPublicationOperation, error) {
 	// Only the transaction that created this operation may perform conversion.
 	// Replays report durable state and never acquire another execution path.
 	failBefore := func(failure error) (*DocumentPublishResult, *DocumentPublicationOperation, error) {
@@ -311,7 +316,7 @@ func PublishDocumentArtifact(ctx context.Context, db *gorm.DB, owner, id string,
 	}
 	var baseline *document.Content
 	syncIR := false
-	if sameProvider && op.SourceSchema == document.IRSchema {
+	if sameProvider && op.SourceSchema == document.IRSchema && op.PublicationID == "" {
 		var problem *document.ProjectionError
 		baseline, problem = document.ReadContent(op.RemoteValue, document.IRSchema, func() (bool, error) { return false, nil })
 		if problem != nil || baseline == nil {
@@ -329,7 +334,7 @@ func PublishDocumentArtifact(ctx context.Context, db *gorm.DB, owner, id string,
 	if !sameProvider {
 		target = nil
 	}
-	config, err := modelconfig.LoadWriterProviderToolConfig(ctx, op.Provider, owner)
+	config, err := modelconfig.LoadWriterProviderConnectionConfig(ctx, op.Provider, owner, op.ConnectionID)
 	if err != nil {
 		return failBefore(documentFailure("PROVIDER_CREDENTIALS_UNAVAILABLE", 502))
 	}
@@ -366,6 +371,28 @@ func PublishDocumentArtifact(ctx context.Context, db *gorm.DB, owner, id string,
 		}
 		if json.Unmarshal(converted.Result, &value) != nil || value.Provider != op.Provider || value.Format == "" || len(value.Content) == 0 || string(value.Content) == "null" || value.SourceDocument == nil || value.MediaReferences == nil {
 			return failBefore(documentFailure("DOCUMENT_CONVERSION_FAILED", 502))
+		}
+		if op.PublicationID != "" {
+			// Reuse the adapter's existing revision precondition without storing a historical body.
+			var destination struct {
+				Meta struct {
+					Revision string `json:"publication_revision"`
+				} `json:"meta"`
+			}
+			_ = json.Unmarshal(target, &destination)
+			var convertedObject map[string]any
+			if json.Unmarshal(converted.Result, &convertedObject) != nil {
+				return failBefore(documentFailure("DOCUMENT_CONVERSION_FAILED", 502))
+			}
+			sourceObject, ok := convertedObject["source_document"].(map[string]any)
+			if !ok {
+				return failBefore(documentFailure("DOCUMENT_CONVERSION_FAILED", 502))
+			}
+			delete(sourceObject, "revision")
+			if destination.Meta.Revision != "" {
+				sourceObject["revision"] = destination.Meta.Revision
+			}
+			converted.Result, _ = json.Marshal(convertedObject)
 		}
 		args = map[string]any{"converted_document": converted.Result, "mode": "replace"}
 		if len(op.MediaAssets) > 0 {
@@ -467,6 +494,20 @@ func publicationReceiptFromResult(op *DocumentPublicationOperation, raw, target 
 	if problem != nil || source == nil {
 		return invalid()
 	}
+	if op.PublicationID != "" {
+		var persisted struct {
+			Revision string `json:"revision"`
+		}
+		if json.Unmarshal(source.Value, &persisted) == nil && persisted.Revision != "" {
+			meta, _ := binding["meta"].(map[string]any)
+			if meta == nil {
+				meta = map[string]any{}
+			}
+			meta["publication_revision"] = persisted.Revision
+			binding["meta"] = meta
+			target, _ = json.Marshal(binding)
+		}
+	}
 	artifact, _ := json.Marshal(map[string]any{"schema": schema, "data": source.Value, "meta": map[string]any{"lazymind_provider_sync": map[string]any{"provider": op.Provider, "confirmed": true, "target_document": binding}}})
 	return DocumentPublicationReceipt{Provider: op.Provider, TargetDocument: target, ContentType: "json", Value: artifact}, nil
 }
@@ -492,6 +533,13 @@ func publicationReplayFailure(op *DocumentPublicationOperation) error {
 	}
 }
 func publicationSavedResult(ctx context.Context, db *gorm.DB, op *DocumentPublicationOperation) (*DocumentPublishResult, error) {
+	if op.PublicationID != "" {
+		var receipt DocumentPublicationReceipt
+		if json.Unmarshal(op.ReceiptJSON, &receipt) != nil {
+			return nil, publicationError("DOCUMENT_ACTION_RESULT_INVALID")
+		}
+		return &DocumentPublishResult{OperationID: op.ID, Provider: op.Provider, ProviderSynced: true, Status: "synced", TargetDocument: receipt.TargetDocument}, nil
+	}
 	var revision orm.WorkflowSlotRevision
 	if err := db.WithContext(ctx).First(&revision, "id = ?", op.ResultRevisionID).Error; err != nil {
 		return nil, err

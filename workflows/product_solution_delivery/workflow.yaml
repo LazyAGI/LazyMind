@@ -212,126 +212,126 @@ steps:
   - {id: finalize_product_delivery, label: 交付总结}
 
 slots:
-  - {id: reuse_product_structure, label: 沿用已有正文结构, type: text, cardinality: single, exposed: false}
-  - {id: product_goal, label: 产品目标, type: text, cardinality: single, external: true, exposed: false}
-  - {id: requested_stage, label: 当前阶段偏好, type: text, cardinality: single, external: true, exposed: false}
-  - {id: execution_depth, label: 当前阶段执行深度（auto/light/minimum-fill/full，默认 auto）, type: text, cardinality: single, external: true, exposed: false}
-  - {id: word_target, label: 文本目标篇幅, type: text, cardinality: single, external: true, exposed: false}
-  - {id: reference_sample_choice, label: 参照样例选择, type: text, cardinality: single, external: true, exposed: false}
-  - {id: reference_sample, label: 参照样例或模板, type: file, cardinality: single, external: true, exposed: false}
-  - {id: product_materials, label: 产品输入材料, type: file, cardinality: list, external: true, exposed: false}
+  - {id: reuse_product_structure, user_visible: false, label: 沿用已有正文结构, type: text, cardinality: single, exposed: false}
+  - {id: product_goal, user_visible: false, label: 产品目标, type: text, cardinality: single, external: true, exposed: false}
+  - {id: requested_stage, user_visible: false, label: 当前阶段偏好, type: text, cardinality: single, external: true, exposed: false}
+  - {id: execution_depth, user_visible: false, label: 当前阶段执行深度（auto/light/minimum-fill/full，默认 auto）, type: text, cardinality: single, external: true, exposed: false}
+  - {id: word_target, user_visible: false, label: 文本目标篇幅, type: text, cardinality: single, external: true, exposed: false}
+  - {id: reference_sample_choice, user_visible: false, label: 参照样例选择, type: text, cardinality: single, external: true, exposed: false}
+  - {id: reference_sample, user_visible: false, label: 参照样例或模板, type: file, cardinality: single, external: true, exposed: false}
+  - {id: product_materials, user_visible: false, label: 产品输入材料, type: file, cardinality: list, external: true, exposed: false}
 
-  - {id: workspace_seed, label: 继承的产品上下文, type: json, cardinality: single, external: true, required: false, exposed: false}
-  - {id: stage_approval, label: 阶段接力授权, type: json, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_direction, label: 已选产品方向版本, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_competitive, label: 已选竞品与生态位版本, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_design, label: 已选产品方案版本, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_prd, label: 已选PRD版本, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_prototype, label: 已选交互原型版本, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_review, label: 已选方案评审版本, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_handoff, label: 已选研发交付版本, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_direction_view, label: 已选产品方向HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_competitive_view, label: 已选竞品分析Markdown视图, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_design_view, label: 已选产品方案HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_prd_view, label: 已选PRD HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_prototype_view, label: 已选原型Markdown视图, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_review_view, label: 已选评审HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: upstream_handoff_view, label: 已选研发交付HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
-  - {id: direction_assessment, label: 产品方向内部质量记录, type: json, cardinality: single, exposed: false}
-  - {id: competitive_assessment, label: 竞品与生态位内部质量记录, type: json, cardinality: single, exposed: false}
-  - {id: design_assessment, label: 产品方案内部质量记录, type: json, cardinality: single, exposed: false}
-  - {id: prd_assessment, label: PRD内部质量记录, type: json, cardinality: single, exposed: false}
-  - {id: prototype_assessment, label: 交互原型内部质量记录, type: json, cardinality: single, exposed: false}
-  - {id: review_assessment, label: 方案评审内部质量记录, type: json, cardinality: single, exposed: false}
-  - {id: handoff_assessment, label: 研发交付内部质量记录, type: json, cardinality: single, exposed: false}
-  - {id: design_escalation, label: 设计取证升级记录, type: json, cardinality: single, exposed: false}
+  - {id: workspace_seed, user_visible: false, label: 继承的产品上下文, type: json, cardinality: single, external: true, required: false, exposed: false}
+  - {id: stage_approval, user_visible: false, label: 阶段接力授权, type: json, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_direction, user_visible: false, label: 已选产品方向版本, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_competitive, user_visible: false, label: 已选竞品与生态位版本, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_design, user_visible: false, label: 已选产品方案版本, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_prd, user_visible: false, label: 已选PRD版本, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_prototype, user_visible: false, label: 已选交互原型版本, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_review, user_visible: false, label: 已选方案评审版本, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_handoff, user_visible: false, label: 已选研发交付版本, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_direction_view, user_visible: false, label: 已选产品方向HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_competitive_view, user_visible: false, label: 已选竞品分析Markdown视图, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_design_view, user_visible: false, label: 已选产品方案HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_prd_view, user_visible: false, label: 已选PRD HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_prototype_view, user_visible: false, label: 已选原型Markdown视图, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_review_view, user_visible: false, label: 已选评审HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: upstream_handoff_view, user_visible: false, label: 已选研发交付HTML视图, type: file, cardinality: single, external: true, required: false, exposed: false}
+  - {id: direction_assessment, user_visible: false, label: 产品方向内部质量记录, type: json, cardinality: single, exposed: false}
+  - {id: competitive_assessment, user_visible: false, label: 竞品与生态位内部质量记录, type: json, cardinality: single, exposed: false}
+  - {id: design_assessment, user_visible: false, label: 产品方案内部质量记录, type: json, cardinality: single, exposed: false}
+  - {id: prd_assessment, user_visible: false, label: PRD内部质量记录, type: json, cardinality: single, exposed: false}
+  - {id: prototype_assessment, user_visible: false, label: 交互原型内部质量记录, type: json, cardinality: single, exposed: false}
+  - {id: review_assessment, user_visible: false, label: 方案评审内部质量记录, type: json, cardinality: single, exposed: false}
+  - {id: handoff_assessment, user_visible: false, label: 研发交付内部质量记录, type: json, cardinality: single, exposed: false}
+  - {id: design_escalation, user_visible: false, label: 设计取证升级记录, type: json, cardinality: single, exposed: false}
 
-  - {id: routing_record, label: 父 Router 内部记录, type: json, cardinality: single, exposed: false}
-  - {id: execution_plan, label: 单阶段执行计划, type: json, cardinality: single, exposed: false}
-  - {id: routing_summary, label: 本次计划, type: text, cardinality: single, exposed: false}
-  - {id: hide_direction, label: 隐藏产品方向, type: text, cardinality: single, exposed: false}
-  - {id: hide_competitive, label: 隐藏竞品分析, type: text, cardinality: single, exposed: false}
-  - {id: hide_design, label: 隐藏产品方案, type: text, cardinality: single, exposed: false}
-  - {id: hide_prd, label: 隐藏 PRD, type: text, cardinality: single, exposed: false}
-  - {id: hide_prototype, label: 隐藏交互原型, type: text, cardinality: single, exposed: false}
-  - {id: hide_review, label: 隐藏方案评审, type: text, cardinality: single, exposed: false}
-  - {id: hide_handoff, label: 隐藏研发交付, type: text, cardinality: single, exposed: false}
+  - {id: routing_record, user_visible: false, label: 父 Router 内部记录, type: json, cardinality: single, exposed: false}
+  - {id: execution_plan, user_visible: false, label: 单阶段执行计划, type: json, cardinality: single, exposed: false}
+  - {id: routing_summary, user_visible: false, label: 本次计划, type: text, cardinality: single, exposed: false}
+  - {id: hide_direction, user_visible: false, label: 隐藏产品方向, type: text, cardinality: single, exposed: false}
+  - {id: hide_competitive, user_visible: false, label: 隐藏竞品分析, type: text, cardinality: single, exposed: false}
+  - {id: hide_design, user_visible: false, label: 隐藏产品方案, type: text, cardinality: single, exposed: false}
+  - {id: hide_prd, user_visible: false, label: 隐藏 PRD, type: text, cardinality: single, exposed: false}
+  - {id: hide_prototype, user_visible: false, label: 隐藏交互原型, type: text, cardinality: single, exposed: false}
+  - {id: hide_review, user_visible: false, label: 隐藏方案评审, type: text, cardinality: single, exposed: false}
+  - {id: hide_handoff, user_visible: false, label: 隐藏研发交付, type: text, cardinality: single, exposed: false}
 
-  - {id: research_evidence, label: 本次依据, type: text, cardinality: single, exposed: false}
-  - {id: research_log, label: 资料检索记录, type: text, cardinality: single, exposed: false}
-  - {id: material_digest, label: 输入材料摘要, type: text, cardinality: single, exposed: false}
-  - {id: resource_profiles, label: Writer 资料画像, type: file, cardinality: single, exposed: false}
+  - {id: research_evidence, user_visible: false, label: 本次依据, type: text, cardinality: single, exposed: false}
+  - {id: research_log, user_visible: false, label: 资料检索记录, type: text, cardinality: single, exposed: false}
+  - {id: material_digest, user_visible: false, label: 输入材料摘要, type: text, cardinality: single, exposed: false}
+  - {id: resource_profiles, user_visible: false, label: Writer 资料画像, type: file, cardinality: single, exposed: false}
 
-  - {id: direction_task, label: 方向 Writer 任务, type: file, cardinality: single, exposed: false}
-  - {id: direction_context, label: 方向写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: direction_outline, label: 产品方向大纲, type: file, cardinality: single, exposed: true}
-  - {id: direction_outline_report, label: 产品方向大纲检查, type: text, cardinality: single, exposed: false}
-  - {id: direction_context_approved, label: 批准后方向上下文, type: file, cardinality: single, exposed: false}
-  - {id: direction_section_plan, label: 产品方向章节规划, type: file, cardinality: single, exposed: false}
-  - {id: direction_chapters, label: 产品方向分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: direction_document, label: 产品方向文档, type: file, cardinality: single, exposed: true}
-  - {id: direction_document_html, label: 产品方向交互视图, type: file, cardinality: single, exposed: true}
-  - {id: direction_context_final, label: 产品方向最终上下文, type: file, cardinality: single, exposed: false}
+  - {id: direction_task, user_visible: false, label: 方向 Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: direction_context, user_visible: false, label: 方向写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: direction_outline, user_visible: false, label: 产品方向大纲, type: file, cardinality: single, exposed: true}
+  - {id: direction_outline_report, user_visible: false, label: 产品方向大纲检查, type: text, cardinality: single, exposed: false}
+  - {id: direction_context_approved, user_visible: false, label: 批准后方向上下文, type: file, cardinality: single, exposed: false}
+  - {id: direction_section_plan, user_visible: false, label: 产品方向章节规划, type: file, cardinality: single, exposed: false}
+  - {id: direction_chapters, user_visible: false, label: 产品方向分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: direction_document, user_visible: true, label: 产品方向文档, type: file, cardinality: single, exposed: true}
+  - {id: direction_document_html, user_visible: true, label: 产品方向交互视图, type: file, cardinality: single, exposed: true}
+  - {id: direction_context_final, user_visible: false, label: 产品方向最终上下文, type: file, cardinality: single, exposed: false}
 
-  - {id: competitive_analysis, label: 竞品与生态位报告, type: file, cardinality: single, exposed: true}
-  - {id: competitive_analysis_markdown, label: 竞品与生态位Markdown, type: file, cardinality: single, exposed: true}
+  - {id: competitive_analysis, user_visible: true, label: 竞品与生态位报告, type: file, cardinality: single, exposed: true}
+  - {id: competitive_analysis_markdown, user_visible: true, label: 竞品与生态位Markdown, type: file, cardinality: single, exposed: true}
 
-  - {id: design_routing_record, label: 方案内部 Router 记录, type: json, cardinality: single, exposed: false}
-  - {id: design_effort_route, label: 方案研究路径, type: text, cardinality: single, exposed: false}
-  - {id: design_routing_summary, label: 方案范围与轻重摘要, type: text, cardinality: single, exposed: true}
-  - {id: design_light_evidence, label: 方案轻量证据, type: text, cardinality: single, exposed: true}
-  - {id: design_heavy_evidence, label: 方案重型证据, type: text, cardinality: single, exposed: true}
+  - {id: design_routing_record, user_visible: false, label: 方案内部 Router 记录, type: json, cardinality: single, exposed: false}
+  - {id: design_effort_route, user_visible: false, label: 方案研究路径, type: text, cardinality: single, exposed: false}
+  - {id: design_routing_summary, user_visible: false, label: 方案范围与轻重摘要, type: text, cardinality: single, exposed: true}
+  - {id: design_light_evidence, user_visible: false, label: 方案轻量证据, type: text, cardinality: single, exposed: true}
+  - {id: design_heavy_evidence, user_visible: false, label: 方案重型证据, type: text, cardinality: single, exposed: true}
 
-  - {id: design_task, label: 方案 Writer 任务, type: file, cardinality: single, exposed: false}
-  - {id: design_context, label: 方案写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: design_outline, label: 产品方案大纲, type: file, cardinality: single, exposed: false}
-  - {id: design_outline_report, label: 产品方案大纲检查, type: text, cardinality: single, exposed: false}
-  - {id: design_context_approved, label: 批准后方案上下文, type: file, cardinality: single, exposed: false}
-  - {id: design_section_plan, label: 产品方案章节规划, type: file, cardinality: single, exposed: false}
-  - {id: design_chapters, label: 产品方案分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: design_document, label: 产品方案文档, type: file, cardinality: single, exposed: true}
-  - {id: design_document_html, label: 产品方案交互视图, type: file, cardinality: single, exposed: true}
-  - {id: design_context_final, label: 产品方案最终上下文, type: file, cardinality: single, exposed: false}
+  - {id: design_task, user_visible: false, label: 方案 Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: design_context, user_visible: false, label: 方案写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: design_outline, user_visible: false, label: 产品方案大纲, type: file, cardinality: single, exposed: false}
+  - {id: design_outline_report, user_visible: false, label: 产品方案大纲检查, type: text, cardinality: single, exposed: false}
+  - {id: design_context_approved, user_visible: false, label: 批准后方案上下文, type: file, cardinality: single, exposed: false}
+  - {id: design_section_plan, user_visible: false, label: 产品方案章节规划, type: file, cardinality: single, exposed: false}
+  - {id: design_chapters, user_visible: false, label: 产品方案分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: design_document, user_visible: true, label: 产品方案文档, type: file, cardinality: single, exposed: true}
+  - {id: design_document_html, user_visible: true, label: 产品方案交互视图, type: file, cardinality: single, exposed: true}
+  - {id: design_context_final, user_visible: false, label: 产品方案最终上下文, type: file, cardinality: single, exposed: false}
 
-  - {id: prd_task, label: PRD Writer 任务, type: file, cardinality: single, exposed: false}
-  - {id: prd_context, label: PRD 写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: prd_outline, label: PRD 大纲, type: file, cardinality: single, exposed: true}
-  - {id: prd_outline_report, label: PRD 大纲检查, type: text, cardinality: single, exposed: false}
-  - {id: prd_context_approved, label: 批准后 PRD 上下文, type: file, cardinality: single, exposed: false}
-  - {id: prd_section_plan, label: PRD 章节规划, type: file, cardinality: single, exposed: false}
-  - {id: prd_chapters, label: PRD 分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: prd_document, label: PRD 文档, type: file, cardinality: single, exposed: true}
-  - {id: prd_document_html, label: PRD交互视图, type: file, cardinality: single, exposed: true}
-  - {id: prd_context_final, label: PRD 最终上下文, type: file, cardinality: single, exposed: false}
+  - {id: prd_task, user_visible: false, label: PRD Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: prd_context, user_visible: false, label: PRD 写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: prd_outline, user_visible: true, label: PRD 大纲, type: file, cardinality: single, exposed: true}
+  - {id: prd_outline_report, user_visible: false, label: PRD 大纲检查, type: text, cardinality: single, exposed: false}
+  - {id: prd_context_approved, user_visible: false, label: 批准后 PRD 上下文, type: file, cardinality: single, exposed: false}
+  - {id: prd_section_plan, user_visible: false, label: PRD 章节规划, type: file, cardinality: single, exposed: false}
+  - {id: prd_chapters, user_visible: false, label: PRD 分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: prd_document, user_visible: true, label: PRD 文档, type: file, cardinality: single, exposed: true}
+  - {id: prd_document_html, user_visible: true, label: PRD交互视图, type: file, cardinality: single, exposed: true}
+  - {id: prd_context_final, user_visible: false, label: PRD 最终上下文, type: file, cardinality: single, exposed: false}
 
-  - {id: prototype, label: 可交互产品原型, type: file, cardinality: single, exposed: true}
-  - {id: prototype_markdown, label: 交互原型说明Markdown, type: file, cardinality: single, exposed: true}
+  - {id: prototype, user_visible: true, label: 可交互产品原型, type: file, cardinality: single, exposed: true}
+  - {id: prototype_markdown, user_visible: true, label: 交互原型说明Markdown, type: file, cardinality: single, exposed: true}
 
-  - {id: review_task, label: 评审 Writer 任务, type: file, cardinality: single, exposed: false}
-  - {id: review_context, label: 评审写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: review_outline, label: 评审大纲, type: file, cardinality: single, exposed: true}
-  - {id: review_outline_report, label: 评审大纲检查, type: text, cardinality: single, exposed: false}
-  - {id: review_context_approved, label: 批准后评审上下文, type: file, cardinality: single, exposed: false}
-  - {id: review_section_plan, label: 评审章节规划, type: file, cardinality: single, exposed: false}
-  - {id: review_chapters, label: 评审分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: review_document, label: 方案评审报告, type: file, cardinality: single, exposed: true}
-  - {id: review_document_html, label: 方案评审交互视图, type: file, cardinality: single, exposed: true}
-  - {id: review_context_final, label: 评审最终上下文, type: file, cardinality: single, exposed: false}
+  - {id: review_task, user_visible: false, label: 评审 Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: review_context, user_visible: false, label: 评审写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: review_outline, user_visible: false, label: 评审大纲, type: file, cardinality: single, exposed: true}
+  - {id: review_outline_report, user_visible: false, label: 评审大纲检查, type: text, cardinality: single, exposed: false}
+  - {id: review_context_approved, user_visible: false, label: 批准后评审上下文, type: file, cardinality: single, exposed: false}
+  - {id: review_section_plan, user_visible: false, label: 评审章节规划, type: file, cardinality: single, exposed: false}
+  - {id: review_chapters, user_visible: false, label: 评审分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: review_document, user_visible: true, label: 方案评审报告, type: file, cardinality: single, exposed: true}
+  - {id: review_document_html, user_visible: true, label: 方案评审交互视图, type: file, cardinality: single, exposed: true}
+  - {id: review_context_final, user_visible: false, label: 评审最终上下文, type: file, cardinality: single, exposed: false}
 
-  - {id: handoff_task, label: 交付 Writer 任务, type: file, cardinality: single, exposed: false}
-  - {id: handoff_context, label: 交付写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: handoff_outline, label: 研发交付大纲, type: file, cardinality: single, exposed: true}
-  - {id: handoff_outline_report, label: 研发交付大纲检查, type: text, cardinality: single, exposed: false}
-  - {id: handoff_context_approved, label: 批准后交付上下文, type: file, cardinality: single, exposed: false}
-  - {id: handoff_section_plan, label: 研发交付章节规划, type: file, cardinality: single, exposed: false}
-  - {id: handoff_chapters, label: 研发交付分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: handoff_document, label: 研发交付文档, type: file, cardinality: single, exposed: true}
-  - {id: handoff_document_html, label: 研发交付交互视图, type: file, cardinality: single, exposed: true}
-  - {id: handoff_context_final, label: 研发交付最终上下文, type: file, cardinality: single, exposed: false}
+  - {id: handoff_task, user_visible: false, label: 交付 Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: handoff_context, user_visible: false, label: 交付写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: handoff_outline, user_visible: false, label: 研发交付大纲, type: file, cardinality: single, exposed: true}
+  - {id: handoff_outline_report, user_visible: false, label: 研发交付大纲检查, type: text, cardinality: single, exposed: false}
+  - {id: handoff_context_approved, user_visible: false, label: 批准后交付上下文, type: file, cardinality: single, exposed: false}
+  - {id: handoff_section_plan, user_visible: false, label: 研发交付章节规划, type: file, cardinality: single, exposed: false}
+  - {id: handoff_chapters, user_visible: false, label: 研发交付分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: handoff_document, user_visible: true, label: 研发交付文档, type: file, cardinality: single, exposed: true}
+  - {id: handoff_document_html, user_visible: true, label: 研发交付交互视图, type: file, cardinality: single, exposed: true}
+  - {id: handoff_context_final, user_visible: false, label: 研发交付最终上下文, type: file, cardinality: single, exposed: false}
 
-  - {id: delivery_summary, label: 产品交付摘要, type: text, cardinality: single, exposed: false}
-  - {id: stage_manifest, label: 阶段产物内部登记, type: json, cardinality: single, exposed: false}
-  - {id: workspace_state, label: Product Workspace 内部状态, type: json, cardinality: single, exposed: false}
+  - {id: delivery_summary, user_visible: false, label: 产品交付摘要, type: text, cardinality: single, exposed: false}
+  - {id: stage_manifest, user_visible: false, label: 阶段产物内部登记, type: json, cardinality: single, exposed: false}
+  - {id: workspace_state, user_visible: false, label: Product Workspace 内部状态, type: json, cardinality: single, exposed: false}
 
 ui:
   extensions: [product-project-v1]

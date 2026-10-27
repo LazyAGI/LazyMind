@@ -776,8 +776,9 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Order   []int `json:"order"`
-		Version int   `json:"version"`
+		Order        []int             `json:"order"`
+		Version      int               `json:"version"`
+		LinkedOrders []SlotOrderChange `json:"linked_orders"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Order) == 0 {
 		common.ReplyErr(w, "invalid body: order required", http.StatusBadRequest)
@@ -803,7 +804,12 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := ReorderSlot(ctx, db, sessionID, slotID, body.Order, body.Version); err != nil {
+	changes := append([]SlotOrderChange{{SlotID: slotID, Order: body.Order, Version: body.Version}}, body.LinkedOrders...)
+	if err := ReorderSlots(ctx, db, sessionID, changes); err != nil {
+		if err == ErrInvalidOrder {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		if err == ErrConflict {
 			common.ReplyErr(w, "version conflict", http.StatusConflict)
 			return
@@ -811,6 +817,7 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "reorder failed", http.StatusInternalServerError)
 		return
 	}
+	NotifyWorkflowArtifactUpdated(ctx, db, sessionID, "", slotID, slotID, 0, nil, "reorder")
 	// Return updated order_version.
 	updated, _ := GetSlotOrder(ctx, db, sessionID, slotID)
 	newVersion := body.Version + 1

@@ -214,48 +214,56 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
         </div>
       ) : null}
 
-      {isDesktopRuntime ? (
-        <div className="model-provider-cloud-doc-resource-row">
-          <ProviderLogo
-            type="obsidian"
-            icon={<FolderOpenOutlined />}
-            logoUrl={OBSIDIAN_LOGO_URL}
-          />
-          <div className="model-provider-cloud-doc-resource-copy">
-            <h3>{t("modelProvider.cloudDocuments.obsidianTitle")}</h3>
-            <p>
-              {obsidianConfig?.available
-                ? t("modelProvider.cloudDocuments.obsidianConnectedHint", {
-                    root: obsidianConfig.root,
-                  })
-                : t("modelProvider.cloudDocuments.obsidianUnavailableHint")}
-            </p>
-          </div>
-          <Tag
-            className="model-provider-cloud-doc-resource-status"
-            color={isDesktopRuntime && obsidianConfig?.available ? "success" : "default"}
-          >
+      <div className="model-provider-cloud-doc-resource-row model-provider-cloud-doc-resource-row--obsidian">
+        <ProviderLogo
+          type="obsidian"
+          icon={<FolderOpenOutlined />}
+          logoUrl={OBSIDIAN_LOGO_URL}
+        />
+        <div className="model-provider-cloud-doc-resource-copy">
+          <h3>{t("modelProvider.cloudDocuments.obsidianTitle")}</h3>
+          <p>{t("modelProvider.cloudDocuments.obsidianEnvironmentHint")}</p>
+          {isDesktopRuntime && <p>
             {obsidianConfig?.available
+              ? t("modelProvider.cloudDocuments.obsidianConnectedHint", {
+                  root: obsidianConfig.root,
+                })
+              : t("modelProvider.cloudDocuments.obsidianUnavailableHint")}
+          </p>}
+        </div>
+        <Tag
+          className="model-provider-cloud-doc-resource-status"
+          color={isDesktopRuntime && obsidianConfig?.available ? "success" : "default"}
+        >
+          {!isDesktopRuntime
+            ? t("modelProvider.cloudDocuments.obsidianDeploymentStatus")
+            : obsidianConfig?.available
               ? t("modelProvider.cloudDocuments.obsidianConnectedStatus")
               : t("modelProvider.cloudDocuments.obsidianUnavailableStatus")}
-          </Tag>
-          <div className="model-provider-cloud-doc-resource-controls">
-            <>
-              <button
-                type="button"
-                className="model-provider-cloud-doc-resource-action"
-                onClick={() => setObsidianConfigModalOpen(true)}
-                disabled={obsidianLoading}
-              >
-                {obsidianConfig?.configured
-                  ? t("modelProvider.cloudDocuments.obsidianChangeRoot")
-                  : t("modelProvider.cloudDocuments.obsidianChooseRoot")}
-                <ArrowRightOutlined />
-              </button>
-            </>
-          </div>
+        </Tag>
+        <div className="model-provider-cloud-doc-resource-controls">
+          <a className="model-provider-cloud-doc-resource-action"
+            href={CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH} target="_blank" rel="noopener noreferrer"
+            aria-label={t("modelProvider.cloudDocuments.obsidianSetupGuideAction")}
+          >
+            {t("modelProvider.cloudDocuments.obsidianSetupGuideShort")}
+            <ArrowRightOutlined />
+          </a>
+          {isDesktopRuntime && (
+            <button
+              type="button"
+              className="model-provider-cloud-doc-resource-action"
+              onClick={() => setObsidianConfigModalOpen(true)}
+              disabled={obsidianLoading}
+            >
+              {obsidianConfig?.configured
+                ? t("modelProvider.cloudDocuments.obsidianChangeRoot")
+                : t("modelProvider.cloudDocuments.obsidianChooseRoot")}
+              <ArrowRightOutlined />
+            </button>
+          )}
         </div>
-      ) : null}
+      </div>
 
       {cloudAuthProviderOptions.map((item) => {
         const isFeishu = item.type === "feishu";
@@ -326,7 +334,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             </div>
             <Tag
               className="model-provider-cloud-doc-resource-status"
-              color={isAuthValid ? "success" : isProviderLocked ? "default" : "processing"}
+              color={isAuthValid ? "success" : isWeChatOfficialAccount && hasWeChatOfficialAccount ? "processing" : "default"}
             >
               {authStatusText}
             </Tag>

@@ -1,0 +1,52 @@
+{
+  "models_http_status": 200,
+  "rerank_model": "BAAI/bge-reranker-v2-m3",
+  "checks": [
+    {
+      "case": "base_without_slash",
+      "resolved_url": "https://api.siliconflow.cn/v1/rerank",
+      "ok": true,
+      "results": [
+        [
+          0,
+          0.9874996542930603
+        ],
+        [
+          1,
+          1.6171872630366124e-05
+        ]
+      ]
+    },
+    {
+      "case": "base_with_slash",
+      "resolved_url": "https://api.siliconflow.cn/v1/rerank",
+      "ok": true,
+      "results": [
+        [
+          0,
+          0.9874996542930603
+        ],
+        [
+          1,
+          1.6171872630366124e-05
+        ]
+      ]
+    },
+    {
+      "case": "explicit_endpoint",
+      "resolved_url": "https://api.siliconflow.cn/v1/rerank",
+      "ok": true,
+      "results": [
+        [
+          0,
+          0.9874996542930603
+        ],
+        [
+          1,
+          1.6171872630366124e-05
+        ]
+      ]
+    }
+  ],
+  "ok": true
+}

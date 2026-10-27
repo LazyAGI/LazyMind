@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -37,7 +36,11 @@ type ProviderCredential struct {
 	ProviderCatalogKey   string
 	DisplayName          string
 	BaseURL              string
-	APIKey               []byte `json:"-"`
+	RequestConfig        string
+	// Nil is a legacy record. -1 disables the supplier; other values index the
+	// nonempty saved keys, independent of installation-specific group IDs.
+	ActiveKeyIndex *int
+	APIKey         []byte `json:"-"`
 }
 
 type ProviderCredentialSource interface {
@@ -200,14 +203,14 @@ func (service *BackupService) ProcessDue(ctx context.Context) error {
 		return err
 	}
 	if item.Operation != BackupUpsert {
-		return service.repository.Discard(ctx, item.ID)
+		return service.repository.Discard(ctx, item)
 	}
 	credential, err := service.source.LoadCredential(ctx, item.LocalProviderGroupID)
 	if err != nil {
 		return service.retry(ctx, item, 3080011, err)
 	}
 	if len(credential.APIKey) == 0 {
-		_ = service.repository.Discard(ctx, item.ID)
+		_ = service.repository.Discard(ctx, item)
 		return nil
 	}
 	defer clear(credential.APIKey)
@@ -237,13 +240,8 @@ func (service *BackupService) upload(ctx context.Context, scope AccountScope, to
 	if err != nil {
 		return service.retry(ctx, item, 3080006, err)
 	}
-	payload, err := json.Marshal(map[string]any{
-		"schema_version": 1, "provider_catalog_key": credential.ProviderCatalogKey,
-		"display_name": credential.DisplayName, "base_url": credential.BaseURL,
-		"credential_type": "api_key", "api_key": string(credential.APIKey),
-		"provider_specific_fields": map[string]any{},
-	})
-	if err != nil || len(payload) > MaximumPlaintextLength {
+	payload, err := EncodeProviderCredentialPayload(credential)
+	if err != nil {
 		return service.retry(ctx, item, 3080006, ErrInvalidContract)
 	}
 	defer clear(payload)
@@ -296,7 +294,7 @@ func (service *BackupService) upload(ctx context.Context, scope AccountScope, to
 	if err != nil {
 		var cloudErr *cloudclient.CloudError
 		if errors.As(err, &cloudErr) && cloudErr.HTTPStatus == http.StatusPreconditionFailed {
-			_ = service.repository.Conflict(ctx, item.ID, 3080005, service.now().UTC())
+			_ = service.repository.Conflict(ctx, item, 3080005, service.now().UTC())
 			return ErrLocalConflict
 		}
 		code := 3080011

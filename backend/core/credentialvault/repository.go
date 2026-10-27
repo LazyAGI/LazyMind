@@ -129,7 +129,7 @@ func EnqueueCredentialBackup(tx *gorm.DB, groupID string, revision int64, operat
 			return err
 		}
 		if revision >= current.LocalCredentialRevision {
-			if err := tx.Model(&current).Updates(map[string]any{
+			if err := tx.Model(&current).Where("local_credential_revision <= ?", revision).Updates(map[string]any{
 				"local_credential_revision": revision, "operation": string(operation), "backup_state": string(BackupPending),
 				"attempt_count": 0, "next_attempt_at": now, "last_error_code": 0, "updated_at": now,
 			}).Error; err != nil {
@@ -215,7 +215,7 @@ func (repository *Repository) Complete(ctx context.Context, scope AccountScope, 
 		if err := tx.Save(&binding).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("id = ?", item.ID).Delete(&backupOutboxRow{}).Error; err != nil {
+		if err := tx.Where("id = ? AND local_credential_revision <= ? AND operation = ?", item.ID, binding.LastLocalCredentialRevision, string(item.Operation)).Delete(&backupOutboxRow{}).Error; err != nil {
 			return err
 		}
 		return tx.Model(&VaultAccount{}).Where("cloud_issuer = ? AND cloud_account_id = ?", scope.CloudIssuer, scope.CloudAccountID).
@@ -224,18 +224,18 @@ func (repository *Repository) Complete(ctx context.Context, scope AccountScope, 
 }
 
 func (repository *Repository) Retry(ctx context.Context, item BackupOutboxItem) error {
-	return repository.db.WithContext(ctx).Model(&backupOutboxRow{}).Where("id = ?", item.ID).Updates(map[string]any{
+	return repository.db.WithContext(ctx).Model(&backupOutboxRow{}).Where("id = ? AND local_credential_revision = ? AND operation = ? AND backup_state = ?", item.ID, item.LocalCredentialRevision, string(item.Operation), string(BackupRunning)).Updates(map[string]any{
 		"backup_state": string(item.State), "attempt_count": item.AttemptCount, "next_attempt_at": item.NextAttemptAt,
 		"last_error_code": item.LastErrorCode, "updated_at": item.UpdatedAt,
 	}).Error
 }
 
-func (repository *Repository) Discard(ctx context.Context, itemID string) error {
-	return repository.db.WithContext(ctx).Where("id = ?", itemID).Delete(&backupOutboxRow{}).Error
+func (repository *Repository) Discard(ctx context.Context, item BackupOutboxItem) error {
+	return repository.db.WithContext(ctx).Where("id = ? AND local_credential_revision = ? AND operation = ? AND backup_state = ?", item.ID, item.LocalCredentialRevision, string(item.Operation), string(BackupRunning)).Delete(&backupOutboxRow{}).Error
 }
 
-func (repository *Repository) Conflict(ctx context.Context, itemID string, code int, now time.Time) error {
-	return repository.db.WithContext(ctx).Model(&backupOutboxRow{}).Where("id = ?", itemID).
+func (repository *Repository) Conflict(ctx context.Context, item BackupOutboxItem, code int, now time.Time) error {
+	return repository.db.WithContext(ctx).Model(&backupOutboxRow{}).Where("id = ? AND local_credential_revision = ? AND operation = ? AND backup_state = ?", item.ID, item.LocalCredentialRevision, string(item.Operation), string(BackupRunning)).
 		Updates(map[string]any{"backup_state": string(BackupConflict), "last_error_code": code, "updated_at": now}).Error
 }
 

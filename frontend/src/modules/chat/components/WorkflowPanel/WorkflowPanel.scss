@@ -24,6 +24,31 @@
     > .anticon {
       margin-top: 3px;
     }
+
+    &-content {
+      flex: 1;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    &-close {
+      display: inline-flex;
+      flex: 0 0 24px;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+
+      &:hover { background: #fef3c7; }
+      &:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+      &:disabled { cursor: wait; opacity: 0.6; }
+    }
   }
 
   &--expanded {
@@ -837,7 +862,7 @@
 
     &--grid {
       display: grid;
-      grid-template-columns: var(--workflow-grid-cols, repeat(auto-fill, minmax(200px, 1fr)));
+      grid-template-columns: var(--workflow-grid-cols, repeat(auto-fit, minmax(min(200px, 100%), 1fr)));
       gap: 16px;
       align-items: start;
 
@@ -4010,12 +4035,6 @@
   font-size: 12px;
   line-height: 1.6;
 
-  &--authorization {
-    border-color: #e0e7f1;
-    background: #f8faff;
-    color: #475569;
-  }
-
   &__icon {
     display: inline-flex;
     flex: 0 0 16px;
@@ -4063,18 +4082,6 @@
       outline: 2px solid #2563eb;
       outline-offset: 2px;
     }
-
-    &--settings {
-      border-color: #dbe5f5;
-      background: #fff;
-      color: #2563eb;
-
-      &:hover {
-        border-color: #b8cef5;
-        background: #eff6ff;
-        color: #1d4ed8;
-      }
-    }
   }
 }
 
@@ -4104,6 +4111,14 @@
   justify-content: space-between;
   gap: 20px;
 
+  .workflow-panel__provider-menu-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    small { color: #667085; font-size: 11px; }
+  }
+
   .workflow-panel__provider-settings-link {
     display: inline-flex;
     align-items: center;
@@ -4123,6 +4138,12 @@
       border-radius: 2px;
     }
   }
+}
+
+// A disabled publication target still needs an operable authorization shortcut.
+.ant-dropdown .ant-dropdown-menu-item-disabled .workflow-panel__provider-menu-label a.workflow-panel__provider-settings-link {
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .workflow-writer-provider-picker__hint {
@@ -4714,4 +4735,60 @@
     border-radius: 50%;
     background: #fff;
   }
+}
+
+.workflow-panel__follow-mode {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  background: #f1f5f9;
+  border-radius: 6px;
+
+  button {
+    padding: 4px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #475569;
+    font-size: 12px;
+    white-space: nowrap;
+    cursor: pointer;
+    &[aria-pressed='true'] { background: #fff; color: #2563eb; box-shadow: 0 1px 3px #0f172a1a; }
+    &:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+    &:disabled { opacity: 0.6; cursor: wait; }
+  }
+}
+
+.workflow-panel__tab-text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.workflow-panel__tabs:has(.workflow-panel__tab-current) {
+  align-items: flex-start;
+
+  .workflow-panel__tab { align-items: flex-start; min-height: 36px; padding-top: 4px; }
+  .workflow-panel__tab-badge { margin-top: 5px; }
+  .workflow-panel__tab-separator { margin-top: 8px; }
+  .workflow-panel__step-status { margin-top: 7px; }
+}
+
+.workflow-panel__tab-current {
+  display: block;
+  width: 4px;
+  height: 4px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #2563eb;
+}
+
+@container workflow-panel (max-width: 440px) {
+  .workflow-panel__topbar { grid-template-areas: 'title title' 'actions actions' 'tabs tabs'; }
+  .workflow-panel__header-left, .workflow-panel__header-right { min-height: 36px; }
+  .workflow-panel__header-right { flex-wrap: wrap; justify-content: flex-end; }
+  .workflow-panel__follow-mode { margin-right: auto; }
 }
