@@ -3049,6 +3049,7 @@ type writerDocumentSaveOpenAPIRequest struct {
 type translationOpenAPIRequest struct {
 	Text   string `json:"text"`
 	Target string `json:"target,omitempty"`
+	Source string `json:"source,omitempty"`
 }
 
 type translationOpenAPIResponse struct {
@@ -3058,7 +3059,9 @@ type translationOpenAPIResponse struct {
 }
 
 type translationStatusOpenAPIResponse struct {
-	Configured bool `json:"configured"`
+	Configured        bool   `json:"configured"`
+	Provider          string `json:"provider,omitempty"`
+	DocumentSupported bool   `json:"document_supported"`
 }
 
 func registeredCoreOperations() []openAPIOperation {
@@ -4774,7 +4777,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/translation/status",
 			Summary:     "Get translation configuration status",
-			Description: "Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.",
+			Description: "Reports the current user's selected translation provider, whether it is configured, and whether it supports document translation. Keyless providers require no credentials. Secrets are never returned.",
 			Tags:        []string{"translation"},
 			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
 		},
@@ -4782,7 +4785,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/translation:translate",
 			Summary:     "Translate selected document text",
-			Description: "Translates up to 5000 characters with the current user's server-side translation credential.",
+			Description: "Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable. MyMemory requires the source language.",
 			Tags:        []string{"translation"},
 			RequestBody: jsonBodyOf(translationOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Translated text", translationOpenAPIResponse{})},

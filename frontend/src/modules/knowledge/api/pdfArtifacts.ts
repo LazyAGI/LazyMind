@@ -206,18 +206,21 @@ export async function getPdfTranslationDraft(datasetId: string, documentId: stri
 export async function retranslatePdfDraftBlock(datasetId: string, documentId: string, artifactId: string, input: {
   block_id: string;
   provider_type?: "api" | "llm";
-}): Promise<{ block_id: string; translated_text: string }> {
-  const response = await axiosInstance.post<Envelope<{ block_id: string; translated_text: string }>>(
+}): Promise<{ block_id: string; translated_text: string; provider_type: "api" | "llm"; provider: string }> {
+  const response = await axiosInstance.post<Envelope<{ block_id: string; translated_text: string; provider_type: "api" | "llm"; provider: string }>>(
     `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:retranslate`, input,
     { timeout: 10 * 60 * 1000 },
   );
   return response.data.data;
 }
 
-export async function revisePdfTranslation(datasetId: string, documentId: string, artifactId: string, overrides: Record<string, string>): Promise<PdfArtifact> {
+export async function revisePdfTranslation(datasetId: string, documentId: string, artifactId: string, overrides: Record<string, string>, source?: {
+  provider_type: "api" | "llm";
+  provider: string;
+}): Promise<PdfArtifact> {
   const response = await axiosInstance.post<Envelope<PdfArtifact>>(
     `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:revise`,
-    { overrides },
+    { overrides, ...source },
     { timeout: 20 * 60 * 1000 },
   );
   return response.data.data;

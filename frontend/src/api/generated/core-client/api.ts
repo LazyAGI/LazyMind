@@ -7579,6 +7579,7 @@ export interface TransferBinding {
     'target_lazy_doc_id'?: string;
 }
 export interface TranslationOpenAPIRequest {
+    'source'?: string;
     'target'?: string;
     'text': string;
 }
@@ -7589,6 +7590,8 @@ export interface TranslationOpenAPIResponse {
 }
 export interface TranslationStatusOpenAPIResponse {
     'configured': boolean;
+    'document_supported': boolean;
+    'provider'?: string;
 }
 export interface UnsetDefaultDatasetRequest {
     'name': string;

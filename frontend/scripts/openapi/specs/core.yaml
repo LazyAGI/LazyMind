@@ -15626,6 +15626,8 @@ components:
             type: object
         translationOpenAPIRequest:
             properties:
+                source:
+                    type: string
                 target:
                     type: string
                 text:
@@ -15650,8 +15652,13 @@ components:
             properties:
                 configured:
                     type: boolean
+                document_supported:
+                    type: boolean
+                provider:
+                    type: string
             required:
                 - configured
+                - document_supported
             type: object
         updateCustomModelProviderOpenAPIRequest:
             properties:
@@ -31242,7 +31249,7 @@ paths:
                 - tools
     /api/core/translation/status:
         get:
-            description: Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+            description: Reports the current user's selected translation provider, whether it is configured, and whether it supports document translation. Keyless providers require no credentials. Secrets are never returned.
             responses:
                 "200":
                     content:
@@ -31255,7 +31262,7 @@ paths:
                 - translation
     /api/core/translation:translate:
         post:
-            description: Translates up to 5000 characters with the current user's server-side translation credential.
+            description: Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable. MyMemory requires the source language.
             requestBody:
                 content:
                     application/json:

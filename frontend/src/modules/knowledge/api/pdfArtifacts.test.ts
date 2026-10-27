@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() }));
 vi.mock("@/components/request", () => ({ BASE_URL: "", axiosInstance: mocks }));
 
-import { completePdfRenderJob, createSearchablePdfJob, createTranslationPdfJob, deletePdfArtifact, getPdfArtifactData, getPdfArtifactLayout, isActivePdfJob, isRasterLayoutBlock, latestActiveTranslationJob, latestTranslationJob, listPdfLayoutBlocks, matchPdfTranslationDraftBlock, pdfArtifactContentUrl, splitTranslationText, translateTextWithLLM, validatePdfLayoutBlocks } from "./pdfArtifacts";
+import { completePdfRenderJob, createSearchablePdfJob, createTranslationPdfJob, deletePdfArtifact, getPdfArtifactData, getPdfArtifactLayout, isActivePdfJob, isRasterLayoutBlock, latestActiveTranslationJob, latestTranslationJob, listPdfLayoutBlocks, matchPdfTranslationDraftBlock, pdfArtifactContentUrl, retranslatePdfDraftBlock, revisePdfTranslation, splitTranslationText, translateTextWithLLM, validatePdfLayoutBlocks } from "./pdfArtifacts";
 
 describe("PDF artifacts API", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -66,6 +66,26 @@ describe("PDF artifacts API", () => {
     expect(mocks.post.mock.calls[0][1]).toEqual({ force: true });
     expect(mocks.post.mock.calls[1][1]).toEqual(expect.objectContaining({ force: true }));
     expect(mocks.delete).toHaveBeenCalledWith(expect.stringContaining("/pdf-artifacts/a1"));
+  });
+
+  it("keeps a draft block's actual translation source when revising the artifact", async () => {
+    mocks.post
+      .mockResolvedValueOnce({ data: { data: { block_id: "b1", translated_text: "新译文", provider_type: "api", provider: "DeepL" } } })
+      .mockResolvedValueOnce({ data: { data: { id: "revised" } } });
+    const result = await retranslatePdfDraftBlock("d", "doc", "a1", { block_id: "b1", provider_type: "api" });
+    expect(result).toMatchObject({ provider_type: "api", provider: "DeepL" });
+    await revisePdfTranslation("d", "doc", "a1", { b1: result.translated_text }, {
+      provider_type: result.provider_type, provider: result.provider,
+    });
+    expect(mocks.post.mock.calls[1][1]).toEqual({
+      overrides: { b1: "新译文" }, provider_type: "api", provider: "DeepL",
+    });
+  });
+
+  it("omits provider metadata for a manual draft edit", async () => {
+    mocks.post.mockResolvedValueOnce({ data: { data: { id: "manual-revision" } } });
+    await revisePdfTranslation("d", "doc", "a1", { b1: "手工修订" });
+    expect(mocks.post.mock.calls[0][1]).toEqual({ overrides: { b1: "手工修订" } });
   });
 
   it("restores the newest unfinished translation job after refresh", () => {

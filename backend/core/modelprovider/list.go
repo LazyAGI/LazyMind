@@ -230,9 +230,13 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		}
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
 		for _, row := range configuredRows {
-			row.APIKey, _ = apiKeyForGroup(db.WithContext(ctx), &row)
-			if strings.TrimSpace(row.APIKey) != "" ||
-				!providerAPIKeyRequiredForBaseURL(ctx, db, providerByID[row.UserModelProviderID], row.BaseURL) {
+			parent := providerByID[row.UserModelProviderID]
+			apiKey, _ := apiKeyForGroup(db.WithContext(ctx), &row)
+			if strings.TrimSpace(apiKey) != "" ||
+				!providerAPIKeyRequiredForBaseURL(ctx, db, parent, row.BaseURL) ||
+				(parent.Category == "translation" &&
+					!isCustomBaseURL(ctx, db, parent.DefaultModelProviderID, row.BaseURL) &&
+					isSelectableProviderGroup(ctx, db, parent.DefaultModelProviderID, row.BaseURL, apiKey)) {
 				configuredProviderIDs[row.UserModelProviderID] = true
 			}
 		}

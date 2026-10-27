@@ -2,7 +2,7 @@ import { submitKnowledgeDecision } from "../SourceImports/api";
 import { ExecutionResults, SourceImportProvider } from "../SourceImports";
 import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
 export { ChatSourcePanel } from "../SourceImports/ReferenceSources";
-import { Button, Divider, Flex, message, Modal, Spin, Tooltip } from "antd";
+import { Button, Divider, Flex, message, Modal, Segmented, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
@@ -54,17 +54,15 @@ import {
 } from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
 import {
+  getTranslationServiceStatus,
   getTranslationStatus,
   isSingleEnglishWord,
-  translateSelectionText,
   TranslationUnavailableError,
 } from "@/modules/knowledge/api/translation";
-
-let translationStatusRequest: Promise<boolean> | undefined;
+import { usePdfSelectionTranslation } from "@/modules/knowledge/pages/knowledge/translationUiState";
 
 function loadTranslationStatus() {
-  translationStatusRequest ??= getTranslationStatus().catch(() => false);
-  return translationStatusRequest;
+  return getTranslationStatus().catch(() => false);
 }
 
 async function copyTextToClipboard(text: string) {
@@ -374,8 +372,22 @@ const AssistantMessage = (props: any) => {
   const citeSelectionTextRef = useRef("");
   const translationConfiguredRef = useRef(false);
   const [translationSource, setTranslationSource] = useState("");
-  const [translationResult, setTranslationResult] = useState("");
-  const [translationLoading, setTranslationLoading] = useState(false);
+  const onTranslationError = useCallback((error: unknown) => {
+    if (error instanceof TranslationUnavailableError && error.reason === "service_not_configured") {
+      window.location.href = "/settings?section=knowledge&tool=translation";
+    } else {
+      message.error(error instanceof TranslationUnavailableError ? t("knowledge.dictionaryNotFound") : t("knowledge.translationFailed"));
+    }
+  }, [t]);
+  const {
+    result: translationResult,
+    loading: translationLoading,
+    canChooseSource: canChooseTranslationSource,
+    sourceLanguage: translationSourceLanguage,
+    translate: translateSelectedText,
+    changeSourceLanguage: changeTranslationSourceLanguage,
+    clear: clearSelectedTranslation,
+  } = usePdfSelectionTranslation(getTranslationServiceStatus, onTranslationError);
   const onCiteMessageRef = useRef(onCiteMessage);
   onCiteMessageRef.current = onCiteMessage;
   const onOpenSideChatRef = useRef(onOpenSideChat);
@@ -461,24 +473,14 @@ const AssistantMessage = (props: any) => {
   const handleOpenSideChatRef = useRef(handleOpenSideChat);
   handleOpenSideChatRef.current = handleOpenSideChat;
 
-  const handleTranslateSelectedText = useCallback(async () => {
+  const handleTranslateSelectedText = useCallback(() => {
     const selectedText = citeSelectionTextRef.current.trim();
     if (!selectedText) return;
     setTranslationSource(selectedText);
-    setTranslationResult("");
-    setTranslationLoading(true);
     window.getSelection()?.removeAllRanges();
     hideCiteButton();
-    try {
-      const result = await translateSelectionText(selectedText);
-      setTranslationResult(result.translated_text);
-    } catch (error) {
-      if(error instanceof TranslationUnavailableError&&error.reason==="service_not_configured")window.location.href="/settings?section=knowledge&tool=translation";
-      else message.error(error instanceof TranslationUnavailableError?t("knowledge.dictionaryNotFound"):t("knowledge.translationFailed"));
-    } finally {
-      setTranslationLoading(false);
-    }
-  }, [hideCiteButton, t]);
+    void translateSelectedText(selectedText);
+  }, [hideCiteButton, translateSelectedText]);
 
   const handleTranslateSelectedTextRef = useRef(handleTranslateSelectedText);
   handleTranslateSelectedTextRef.current = handleTranslateSelectedText;
@@ -666,7 +668,7 @@ const AssistantMessage = (props: any) => {
       onCancel={() => {
         if (!translationLoading) {
           setTranslationSource("");
-          setTranslationResult("");
+          clearSelectedTranslation();
         }
       }}
     >
@@ -674,6 +676,20 @@ const AssistantMessage = (props: any) => {
         <div className="chat-translation-label">{t("knowledge.translationOriginal")}</div>
         <div className="chat-translation-text">{translationSource}</div>
       </div>
+      {canChooseTranslationSource ? (
+        <div className="chat-translation-block">
+          <div className="chat-translation-label">{t("knowledge.translationSourceLanguage")}</div>
+          <Segmented
+            aria-label={t("knowledge.translationSourceLanguage")}
+            value={translationSourceLanguage}
+            onChange={(value) => void changeTranslationSourceLanguage(value as "en" | "zh")}
+            options={[
+              { label: t("knowledge.translationSourceEnglish"), value: "en" },
+              { label: t("knowledge.translationSourceChinese"), value: "zh" },
+            ]}
+          />
+        </div>
+      ) : null}
       <div className="chat-translation-block">
         <div className="chat-translation-label">{t("knowledge.translationResult")}</div>
         {translationLoading ? <Spin size="small" /> : <div className="chat-translation-text">{translationResult}</div>}

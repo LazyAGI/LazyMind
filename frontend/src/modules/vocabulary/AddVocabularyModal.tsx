@@ -121,7 +121,7 @@ export default function AddVocabularyModal({
     if (!value) return;
     setTranslating(true);
     try {
-      const result = await translateText(value);
+      const result = await translateText(value, "zh", "en");
       form.setFieldValue("translation", result.translated_text);
     } catch {
       if (!silent) message.error("翻译失败，可手工填写后继续保存");

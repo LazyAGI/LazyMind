@@ -51,6 +51,7 @@ interface ExternalServiceConfig {
   status: "configured" | "missing" | "tbd";
   baseUrl?: string;
   baseUrlPresets?: BaseUrlPreset[];
+  capabilities?: string[];
 }
 
 interface ExternalServiceFormValues {
@@ -88,6 +89,11 @@ interface ApiExternalGroup {
   is_verified?: boolean;
   name?: string;
   user_model_provider_id?: string;
+}
+
+interface SelectedExternalProvider {
+  category: string;
+  user_model_provider_id: string;
 }
 
 interface CheckExternalServiceResult {
@@ -280,6 +286,27 @@ function isTencentTranslation(service?: ExternalServiceConfig | null) {
   return normalizeProviderName(service?.name || "") === "tencenttranslation";
 }
 
+const translationCredentialPairs: Record<string, { first: string; second: string; secondRequired?: boolean }> = {
+  tencenttranslation: { first: "tencentSecretIdPlaceholder", second: "tencentSecretKeyPlaceholder" },
+  baidutranslation: { first: "baiduAppIdPlaceholder", second: "baiduSecretPlaceholder" },
+  aliyuntranslation: { first: "aliyunAccessKeyIdPlaceholder", second: "aliyunAccessKeySecretPlaceholder" },
+  volcenginetranslation: { first: "volcengineAccessKeyIdPlaceholder", second: "volcengineSecretAccessKeyPlaceholder" },
+  youdaotranslation: { first: "youdaoAppKeyPlaceholder", second: "youdaoAppSecretPlaceholder" },
+  microsofttranslator: { first: "microsoftKeyPlaceholder", second: "microsoftRegionPlaceholder", secondRequired: false },
+};
+
+function isKeylessTranslation(service?: ExternalServiceConfig | null) {
+  return service?.category === "translation" && service.capabilities?.includes("keyless_translation") === true;
+}
+
+function translationCredentialPair(service?: ExternalServiceConfig | null) {
+  return translationCredentialPairs[normalizeProviderName(service?.name || "")];
+}
+
+function hasVisibleSecondCredentialField(service?: ExternalServiceConfig | null) {
+  return isGoogleCustomSearch(service) || normalizeProviderName(service?.name || "") === "microsofttranslator";
+}
+
 function getServiceProviderCategory(service: ExternalServiceConfig): ServiceProviderCategory {
   if (service.category === "parsing") {
     return "ocr";
@@ -334,7 +361,8 @@ function getProviderIcon(category: ServiceCategoryKey) {
 
 function getServiceFields(provider: ApiExternalProvider, category: ServiceCategoryKey): Array<keyof ExternalServiceFormValues> {
   if (category === "translation") {
-    return ["apiKey", "searchEngineId"];
+    if (provider.capabilities?.includes("keyless_translation")) return [];
+    return translationCredentialPairs[normalizeProviderName(provider.name)] ? ["apiKey", "searchEngineId"] : ["apiKey"];
   }
   if (category !== "parsing") {
     return ["apiKey"];
@@ -449,6 +477,7 @@ function mapApiProviderToService(provider: ApiExternalProvider, t: ReturnType<ty
     status: provider.is_configured ? "configured" : "missing",
     baseUrl: provider.base_url,
     baseUrlPresets: mapBaseUrlPresets(provider, fallback),
+    capabilities: provider.capabilities,
   };
 }
 
@@ -595,6 +624,8 @@ interface ExternalServiceCardProps {
   ariaLabel: string;
   onOpen: (service: ExternalServiceConfig) => void;
   service: ExternalServiceConfig;
+  selected?: boolean;
+  selectedLabel?: string;
   statusLabel: string;
 }
 
@@ -602,6 +633,8 @@ export function ExternalServiceCard({
   ariaLabel,
   onOpen,
   service,
+  selected = false,
+  selectedLabel,
   statusLabel,
 }: ExternalServiceCardProps) {
   const summaryRef = useRef<HTMLParagraphElement>(null);
@@ -668,6 +701,7 @@ export function ExternalServiceCard({
             >
               {statusLabel}
             </Tag>
+            {selected && selectedLabel ? <Tag color="processing">{selectedLabel}</Tag> : null}
           </div>
           {overflowAware ? (
             summary
@@ -739,8 +773,10 @@ export default function ExternalServicesPage({
   const [keysLoaded, setKeysLoaded] = useState(false);
   const [keysError, setKeysError] = useState(false);
   const [groupForActiveService, setGroupForActiveService] = useState<ApiExternalGroup | null>(null);
+  const [selectedTranslationProviderId, setSelectedTranslationProviderId] = useState<string | null>(null);
   const originalBaseUrlRef = useRef("");
   const loadGroupKeysGenRef = useRef(0);
+  const selectedTranslationLoadGenRef = useRef(0);
   const formValues = Form.useWatch([], form);
   const confirmConfigClose = useSettingsDraft({
     dirty: Boolean(activeService) && (Boolean(newKeyValue || newKeyEngineId) || (keysLoaded &&
@@ -781,6 +817,26 @@ export default function ExternalServicesPage({
   }, [currentLanguage, t]);
 
   useEffect(() => loadExternalServices(normalizedSearchValue), [loadExternalServices, normalizedSearchValue]);
+
+  useEffect(() => {
+    const generation = ++selectedTranslationLoadGenRef.current;
+    void modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet()
+      .then((response) => {
+        if (selectedTranslationLoadGenRef.current !== generation) return;
+        const selections = unwrapModelProviderData<{ selections?: SelectedExternalProvider[] }>(response.data).selections || [];
+        setSelectedTranslationProviderId(selections.find((item) => item.category === "translation")?.user_model_provider_id || null);
+      })
+      .catch(() => {
+        if (selectedTranslationLoadGenRef.current === generation) setSelectedTranslationProviderId(null);
+      });
+    return () => { selectedTranslationLoadGenRef.current += 1; };
+  }, []);
+
+  async function selectTranslationService(service: ExternalServiceConfig, groupId: string) {
+    await selectServiceProvider(service, groupId);
+    selectedTranslationLoadGenRef.current += 1;
+    setSelectedTranslationProviderId(service.key);
+  }
 
   useEffect(() => {
     const syncDeveloperActive = () => {
@@ -841,7 +897,7 @@ export default function ExternalServicesPage({
   }
 
   async function handleAddKey() {
-    if (!activeService || !keysLoaded || keysError) {
+    if (!activeService || !keysLoaded || keysError || isKeylessTranslation(activeService)) {
       return;
     }
     const rawKey = newKeyValue.trim();
@@ -850,27 +906,25 @@ export default function ExternalServicesPage({
     }
     const engineId = newKeyEngineId.trim();
     const isGoogle = isGoogleCustomSearch(activeService);
-    const isTencent = isTencentTranslation(activeService);
-    if ((isGoogle || isTencent) && !engineId) {
+    const pair = translationCredentialPair(activeService);
+    if ((isGoogle || (pair && pair.secondRequired !== false)) && !engineId) {
       return;
     }
-    const apiKey = isGoogle || isTencent ? `${rawKey}|${engineId}` : rawKey;
+    const apiKey = (isGoogle || pair) && engineId ? `${rawKey}|${engineId}` : rawKey;
+    const isTranslation = activeService.category === "translation";
 
     setAddingKey(true);
     try {
       if (!groupForActiveService) {
         // Create group with first key
         const baseUrl = form.getFieldValue([activeService.key, "baseUrl"]) || activeService.baseUrl || "";
-        const payload: Record<string, unknown> = {
+        const payload = {
           name: activeService.name,
           base_url: baseUrl,
           api_key: apiKey,
-          verify: !isTencent,
+          verify: !isTranslation,
         };
-        const savedGroup = await createProviderGroup(
-          activeService,
-          payload as { name: string; base_url: string; api_key?: string; verify: boolean },
-        );
+        const savedGroup = await createProviderGroup(activeService, payload);
         if (savedGroup.check && savedGroup.check.success !== true) {
           message.error(localizeErrorCode("2000509"));
           return;
@@ -878,11 +932,12 @@ export default function ExternalServicesPage({
         setGroupForActiveService(savedGroup);
 
         // Select the provider
-        await selectServiceProvider(activeService, savedGroup.id);
-      } else if (isTencent) {
+        if (isTranslation) await selectTranslationService(activeService, savedGroup.id);
+        else await selectServiceProvider(activeService, savedGroup.id);
+      } else if (isTranslation) {
         const savedGroup = await replaceProviderCredential(activeService, groupForActiveService, apiKey);
         setGroupForActiveService(savedGroup);
-        await selectServiceProvider(activeService, savedGroup.id);
+        await selectTranslationService(activeService, savedGroup.id);
       } else {
         // Add key to existing group
         await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
@@ -900,6 +955,42 @@ export default function ExternalServicesPage({
       setNewKeyValue("");
       setNewKeyEngineId("");
       void loadExternalServices(normalizedSearchValue);
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
+    } finally {
+      setAddingKey(false);
+    }
+  }
+
+  async function handleEnableKeylessTranslation() {
+    if (!activeService || !isKeylessTranslation(activeService) || !keysLoaded || keysError || addingKey) return;
+    setAddingKey(true);
+    try {
+      const group = groupForActiveService || await createProviderGroup(activeService, {
+        name: activeService.name,
+        base_url: activeService.baseUrl || "",
+        api_key: "",
+        verify: false,
+      });
+      await selectTranslationService(activeService, group.id);
+      setGroupForActiveService(group);
+      void loadExternalServices(normalizedSearchValue);
+      message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
+    } catch (error) {
+      message.error(getLocalizedErrorMessage(error));
+    } finally {
+      setAddingKey(false);
+    }
+  }
+
+  async function handleSelectExistingTranslation() {
+    if (!activeService || activeService.category !== "translation" || isKeylessTranslation(activeService)
+      || !keysLoaded || keysError || addingKey || !groupForActiveService
+      || !(groupForActiveService.has_api_key || keyList.length > 0)) return;
+    setAddingKey(true);
+    try {
+      await selectTranslationService(activeService, groupForActiveService.id);
+      message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
@@ -1125,6 +1216,8 @@ export default function ExternalServicesPage({
                 key={service.key}
                 onOpen={openConfigModal}
                 service={service}
+                selected={service.category === "translation" && selectedTranslationProviderId === service.key}
+                selectedLabel={t("modelProvider.external.translationSelected")}
                 statusLabel={t(`modelProvider.external.status.${service.status}`)}
               />
             ))}
@@ -1190,15 +1283,27 @@ export default function ExternalServicesPage({
             ? t("modelProvider.external.configModalTitle", { name: activeService.name })
             : t("modelProvider.external.configureAction")
         }
-        footer={[
+        footer={activeService?.category === "translation" && !isKeylessTranslation(activeService) ? (
+          groupForActiveService && (groupForActiveService.has_api_key || keyList.length > 0) ? [
+            <Button
+              disabled={!keysLoaded || keysError || addingKey || selectedTranslationProviderId === activeService.key}
+              key="select-translation"
+              loading={addingKey}
+              onClick={handleSelectExistingTranslation}
+              type="primary"
+            >
+              {t(selectedTranslationProviderId === activeService.key ? "modelProvider.external.translationSelected" : "modelProvider.external.selectTranslationSource")}
+            </Button>,
+          ] : null
+        ) : [
           <Button
             disabled={addingKey || !keysLoaded || keysError}
             key="save"
-            loading={savingServiceConfig}
-            onClick={handleSaveServiceConfig}
+            loading={isKeylessTranslation(activeService) ? addingKey : savingServiceConfig}
+            onClick={isKeylessTranslation(activeService) ? handleEnableKeylessTranslation : handleSaveServiceConfig}
             type="primary"
           >
-            {t("modelProvider.external.saveConfig")}
+            {t(isKeylessTranslation(activeService) ? "modelProvider.external.enableTranslationSource" : "modelProvider.external.saveConfig")}
           </Button>,
         ]}
       >
@@ -1220,6 +1325,8 @@ export default function ExternalServicesPage({
                   >
                     {t(`modelProvider.external.status.${activeServiceDisplayStatus}`)}
                   </Tag>
+                  {activeService.category === "translation" && selectedTranslationProviderId === activeService.key
+                    ? <Tag color="processing">{t("modelProvider.external.translationSelected")}</Tag> : null}
                 </div>
                 <p>{renderExternalServiceDescription(activeService.description)}</p>
               </div>
@@ -1291,9 +1398,11 @@ export default function ExternalServicesPage({
               ) : null}
             </Form>
 
-            <div className="model-provider-key-list">
+            {isKeylessTranslation(activeService) ? (
+              <Alert type="info" showIcon message={t("modelProvider.external.keylessTranslationNote")} />
+            ) : <div className="model-provider-key-list">
               <div className="model-provider-key-list-label">
-                {isTencentTranslation(activeService) ? t("modelProvider.external.tencentCredentials") : "API Keys"}
+                {isTencentTranslation(activeService) ? t("modelProvider.external.tencentCredentials") : t("modelProvider.external.credentials")}
               </div>
               {keysError ? (
                 <Alert
@@ -1312,7 +1421,7 @@ export default function ExternalServicesPage({
                       {key.masked}
                     </span>
                     <div className="model-provider-key-actions">
-                      <Tag color="success">{t("modelProvider.external.keyVerified")}</Tag>
+                      <Tag color="success">{t(activeService.category === "translation" ? "modelProvider.external.credentialSaved" : "modelProvider.external.keyVerified")}</Tag>
                       <Button
                         size="small"
                         type="text"
@@ -1327,27 +1436,38 @@ export default function ExternalServicesPage({
               )}
               <div className="model-provider-key-add">
                 <Space direction="vertical" size={10} style={{ width: "100%" }}>
-                  {isGoogleCustomSearch(activeService) || isTencentTranslation(activeService) ? (
+                  {isGoogleCustomSearch(activeService) || translationCredentialPair(activeService) ? (
                     <Space className="model-provider-key-input-row">
                       <Input.Password
                         autoComplete="new-password"
                         maxLength={512}
-                        placeholder={isTencentTranslation(activeService)
-                          ? t("modelProvider.external.tencentSecretIdPlaceholder")
+                        placeholder={translationCredentialPair(activeService)
+                          ? t(`modelProvider.external.${translationCredentialPair(activeService)!.first}`)
                           : t("modelProvider.external.keyPlaceholder")}
                         value={newKeyValue}
                         onChange={(e) => setNewKeyValue(e.target.value)}
                         visibilityToggle={false}
                       />
-                      <Input
-                        autoComplete="off"
-                        maxLength={512}
-                        placeholder={isTencentTranslation(activeService)
-                          ? t("modelProvider.external.tencentSecretKeyPlaceholder")
-                          : t("modelProvider.external.googleSearchEngineIdPlaceholder")}
-                        value={newKeyEngineId}
-                        onChange={(e) => setNewKeyEngineId(e.target.value)}
-                      />
+                      {hasVisibleSecondCredentialField(activeService) ? (
+                        <Input
+                          autoComplete="off"
+                          maxLength={512}
+                          placeholder={translationCredentialPair(activeService)
+                            ? t(`modelProvider.external.${translationCredentialPair(activeService)!.second}`)
+                            : t("modelProvider.external.googleSearchEngineIdPlaceholder")}
+                          value={newKeyEngineId}
+                          onChange={(e) => setNewKeyEngineId(e.target.value)}
+                        />
+                      ) : (
+                        <Input.Password
+                          autoComplete="off"
+                          maxLength={512}
+                          placeholder={t(`modelProvider.external.${translationCredentialPair(activeService)!.second}`)}
+                          value={newKeyEngineId}
+                          onChange={(e) => setNewKeyEngineId(e.target.value)}
+                          visibilityToggle={false}
+                        />
+                      )}
                     </Space>
                   ) : (
                     <div className="model-provider-key-input-row">
@@ -1361,20 +1481,21 @@ export default function ExternalServicesPage({
                       />
                     </div>
                   )}
-                  <div className="model-provider-key-extra">{t("modelProvider.external.keyExtra")}</div>
+                  <div className="model-provider-key-extra">{t(activeService.category === "translation" ? "modelProvider.external.translationCredentialExtra" : "modelProvider.external.keyExtra")}</div>
                   <Button
                     className="model-provider-key-add-button"
                     icon={<PlusOutlined />}
+                    aria-label={t(activeService.category === "translation" ? "modelProvider.external.saveTranslationCredential" : "modelProvider.external.verifyAndAddKey")}
                     loading={addingKey}
                     disabled={!keysLoaded || keysError}
                     onClick={handleAddKey}
                     type="primary"
                   >
-                    {t("modelProvider.external.verifyAndAddKey")}
+                    {t(activeService.category === "translation" ? "modelProvider.external.saveTranslationCredential" : "modelProvider.external.verifyAndAddKey")}
                   </Button>
                 </Space>
               </div>
-            </div>
+            </div>}
           </>
         )}
       </Modal>
