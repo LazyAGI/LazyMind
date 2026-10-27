@@ -14,10 +14,22 @@ import (
 )
 
 const (
-	MaxFiles      = 512
-	MaxFileBytes  = 32 << 20
-	MaxTotalBytes = 128 << 20
+	MaxArchiveBytes = 100 << 20
+	MaxFiles        = 512
+	MaxFileBytes    = 32 << 20
+	MaxTotalBytes   = 128 << 20
 )
+
+func openZip(zipPath string) (*zip.ReadCloser, error) {
+	info, err := os.Stat(zipPath)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > MaxArchiveBytes {
+		return nil, fmt.Errorf("skill package archive exceeds %d bytes", MaxArchiveBytes)
+	}
+	return zip.OpenReader(zipPath)
+}
 
 type Package struct {
 	Files       map[string][]byte
@@ -25,7 +37,7 @@ type Package struct {
 }
 
 func ReadZip(zipPath string) (Package, error) {
-	reader, err := zip.OpenReader(zipPath)
+	reader, err := openZip(zipPath)
 	if err != nil {
 		return Package{}, err
 	}
@@ -41,7 +53,7 @@ func ReadZipSubdirectory(zipPath, prefix string) (Package, error) {
 	if err != nil {
 		return Package{}, err
 	}
-	reader, err := zip.OpenReader(zipPath)
+	reader, err := openZip(zipPath)
 	if err != nil {
 		return Package{}, err
 	}

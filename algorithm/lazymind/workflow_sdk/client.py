@@ -14,6 +14,8 @@ from urllib.parse import quote, urlencode, urlsplit, urljoin
 import httpx
 
 CONTRACT_VERSION = 'workflow.v1'
+MAX_SKILL_ZIP_BYTES = 100 << 20
+SKILL_ZIP_SUBMISSION_TIMEOUT = 300.0
 
 
 class WorkflowClientError(RuntimeError):
@@ -569,9 +571,16 @@ class WorkflowClient:
             'idempotency_key': command_id,
         }
         try:
+            request_timeout = self.timeout
+            if skill.get('zip_base64'):
+                # A 100 MiB ZIP expands to roughly 134 MiB of JSON before the
+                # server can acknowledge the task. Keep the normal short
+                # timeout for URL sources, but do not turn a large local upload
+                # into a false TASK_SUBMISSION_UNCERTAIN result.
+                request_timeout = max(request_timeout, SKILL_ZIP_SUBMISSION_TIMEOUT)
             response = self._decode(self.transport.post(
                 self.base_url + '/external-agent/workflow-tasks',
-                json=payload, headers=self._headers(command_id), timeout=self.timeout,
+                json=payload, headers=self._headers(command_id), timeout=request_timeout,
             ))
         except httpx.RequestError as exc:
             raise WorkflowClientError(
@@ -591,11 +600,11 @@ class WorkflowClient:
         path = Path(source.pop('zip_path')).expanduser()
         try:
             with path.open('rb') as archive:
-                content = archive.read((20 << 20) + 1)
+                content = archive.read(MAX_SKILL_ZIP_BYTES + 1)
         except OSError as exc:
             raise WorkflowClientError('SKILL_ZIP_UNREADABLE', f'Cannot read Skill ZIP: {exc}') from exc
-        if not content or len(content) > 20 << 20:
-            raise WorkflowClientError('SKILL_ZIP_INVALID', 'Skill ZIP must be non-empty and no larger than 20 MiB.')
+        if not content or len(content) > MAX_SKILL_ZIP_BYTES:
+            raise WorkflowClientError('SKILL_ZIP_INVALID', 'Skill ZIP must be non-empty and no larger than 100 MiB.')
         source['zip_base64'] = base64.b64encode(content).decode('ascii')
         return source
 

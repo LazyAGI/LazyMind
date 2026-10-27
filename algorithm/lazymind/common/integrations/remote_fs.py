@@ -10,6 +10,8 @@ import requests
 from lazyllm.tools.fs import LazyLLMFSBase
 from lazymind.config import config as _cfg
 
+MAX_SKILL_PACKAGE_BYTES = 100 << 20
+
 
 class RemoteFS(LazyLLMFSBase):
     """Filesystem proxy for Core's skill, plugin, and memory RemoteFS mounts."""
@@ -65,7 +67,7 @@ class RemoteFS(LazyLLMFSBase):
             method,
             f'{self.base_url}/remote-fs/{endpoint}',
             params=params,
-            timeout=self.timeout,
+            timeout=kwargs.pop('timeout', self.timeout),
             **kwargs,
         )
         check_response(response)
@@ -213,6 +215,18 @@ class RemoteFS(LazyLLMFSBase):
                 'to': self._normalize_path(path2),
             },
         )
+
+    def install_skill(self, *, url: str = '', package_zip: bytes = b'', expected_name: str = '') -> dict:
+        """Import one complete skill through Core's shared transactional importer."""
+        if bool(url) == bool(package_zip):
+            raise ValueError('Provide exactly one skill URL or ZIP package.')
+        if package_zip and len(package_zip) > MAX_SKILL_PACKAGE_BYTES:
+            raise ValueError('Skill ZIP exceeds the 100 MiB download limit.')
+        payload = {'url': url} if url else {
+            'package_zip_base64': base64.b64encode(package_zip).decode('ascii'),
+            'expected_name': expected_name,
+        }
+        return self._request('POST', 'skills:install', json=payload, timeout=360)
 
     def trash(self, path: str) -> None:
         self._request(

@@ -1931,6 +1931,8 @@
   "2003217": { "en-US": "Document changed; native parsing must be retried", "zh-CN": "文件已发生变化，请重新执行本地解析" },
   "2003218": { "en-US": "Select a processing level before ingesting retained files", "zh-CN": "请先选择高于仅储存的处理级别，再对已储存文件执行入库" },
   "2003219": { "en-US": "Failed to update the side chat source", "zh-CN": "更新侧聊引用失败" },
+  "2003300": { "en-US": "Invalid skill package", "zh-CN": "技能包无效" },
+  "2003301": { "en-US": "Skill import failed", "zh-CN": "技能导入失败" },
   "2004901": { "en-US": "Workflow controls require an interactive single Chat run", "zh-CN": "工作流控制仅支持交互式单模型对话" },
   "2004902": { "en-US": "Native workflow controls require the LazyMind Chat executor", "zh-CN": "原生工作流控制需要使用 LazyMind 对话执行器" },
   "2004903": { "en-US": "Lease token is required", "zh-CN": "缺少执行租约令牌" },

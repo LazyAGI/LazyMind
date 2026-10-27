@@ -1103,6 +1103,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/remote-fs/content", nil, remotefs.Content)
 	handleAPI(r, "PUT", "/remote-fs/content", nil, remotefs.Content)
 	handleAPI(r, "POST", "/remote-fs/dir", nil, remotefs.Dir)
+	handleAPI(r, "POST", "/remote-fs/skills:install", nil, remotefs.InstallSkill)
 	handleAPI(r, "DELETE", "/remote-fs/path", nil, remotefs.Delete)
 	handleAPI(r, "POST", "/remote-fs/copy", nil, remotefs.Copy)
 	handleAPI(r, "POST", "/remote-fs/move", nil, remotefs.Move)
