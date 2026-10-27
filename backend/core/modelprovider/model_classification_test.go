@@ -53,6 +53,17 @@ func TestOpenRouterRuntimeSupportMatchesImplementedAdapters(t *testing.T) {
 	}
 }
 
+func TestGLMRuntimeSupportsHostedMediaAdapters(t *testing.T) {
+	for _, typ := range []string{"text2image", "text2video", "tts", "stt"} {
+		if !RuntimeSupportsModelType("GLM", typ) || !RuntimeSupportsModelType("Zhipu AI", typ) {
+			t.Errorf("GLM hosted %s adapter rejected", typ)
+		}
+	}
+	if RuntimeSupportsModelType("GLM", "image_editing") {
+		t.Error("GLM hosted API does not expose image editing")
+	}
+}
+
 func TestRuntimeSupportRejectsUnregisteredSupplierAdapters(t *testing.T) {
 	for _, provider := range []string{"DeepSeek", "Kimi", "Moonshot", "Claude", "Anthropic", "PPIO"} {
 		for _, typ := range []string{"embed", "embedding", "multimodal_embedding", "rerank", "tts", "stt", "text2image", "text2video", "image_editing"} {

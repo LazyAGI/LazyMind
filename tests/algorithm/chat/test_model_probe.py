@@ -228,6 +228,48 @@ def test_openrouter_tts_without_a_verified_voice_contract_makes_no_request(model
     assert requests == []
 
 
+def test_glm_tts_probe_uses_hosted_speech_contract():
+    result, requests = run_probe('tts', 'GLM', model='GLM-TTS', url='https://provider.example/api/paas/v4/',
+                                 response=b'RIFF1234WAVEaudio')
+    assert result['status'] == 'passed'
+    assert len(requests) == 1
+    assert requests[0].url.path == '/api/paas/v4/audio/speech'
+    assert json.loads(requests[0].content) == {
+        'model': 'glm-tts', 'input': 'OK', 'voice': 'female', 'response_format': 'wav', 'stream': False,
+    }
+
+
+@pytest.mark.parametrize(('model', 'image_count'), [
+    ('cogvideox-3', 0), ('viduq1-text', 0), ('viduq1-image', 1),
+    ('vidu2-start-end', 2), ('vidu2-reference', 1),
+])
+def test_glm_video_probe_uses_model_input_contract(model, image_count):
+    result, requests = run_probe('text2video', 'GLM', model=model,
+                                 url='https://provider.example/api/paas/v4/', response={'id': 'task-id'})
+    assert result['status'] == 'accepted'
+    assert len(requests) == 1
+    assert requests[0].url.path == '/api/paas/v4/videos/generations'
+    body = json.loads(requests[0].content)
+    assert body['model'] == model
+    assert body['prompt'] == 'A blue square.'
+    image_url = body.get('image_url')
+    assert (len(image_url) if isinstance(image_url, list) else int(image_url is not None)) == image_count
+
+
+def test_glm_custom_video_model_keeps_provider_model_case():
+    result, requests = run_probe('text2video', 'GLM', model='Private-Video-V1',
+                                 response={'id': 'task-id'})
+    assert result['status'] == 'accepted'
+    assert json.loads(requests[0].content)['model'] == 'Private-Video-V1'
+
+
+def test_glm_unknown_speech_and_video_modes_make_no_probe_request():
+    for kind, model in [('tts', 'GLM-TTS-Clone'), ('text2video', 'vidu2-future-mode')]:
+        result, requests = run_probe(kind, 'GLM', model=model, response={'id': 'task-id'})
+        assert result['status'] == 'unsupported'
+        assert requests == []
+
+
 @pytest.mark.parametrize('source', ['OpenRouter'])
 def test_video_is_only_accepted_and_never_polled_or_downloaded(source):
     result, requests = run_probe('text2video', source, response={'id': 'task-id', 'status': 'queued'})

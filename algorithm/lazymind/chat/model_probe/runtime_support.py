@@ -12,7 +12,7 @@ RUNTIME_TYPES_BY_SOURCE = {
     'claude': {'llm', 'vlm'},
     'deepseek': {'llm', 'vlm'},
     'doubao': {'llm', 'vlm', 'embed', 'multimodal_embedding', 'text2image', 'image_editing', 'text2video'},
-    'glm': {'llm', 'vlm', 'embed', 'rerank', 'text2image', 'stt'},
+    'glm': {'llm', 'vlm', 'embed', 'rerank', 'text2image', 'text2video', 'tts', 'stt'},
     'kimi': {'llm', 'vlm'},
     'minimax': {'llm', 'vlm', 'text2image', 'tts'},
     'openai': {'llm', 'vlm', 'embed', 'multimodal_embedding', 'rerank'},

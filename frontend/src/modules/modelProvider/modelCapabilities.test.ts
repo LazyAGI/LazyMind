@@ -35,6 +35,12 @@ describe("supplier model capabilities", () => {
     expect(getSelectableCapabilities(["LLM_CHAT", "EMBEDDING", "RERANK", "IMAGE_EDITING", "MULTIMODAL_EMBEDDING"], "OpenRouter"))
       .toEqual(["LLM_CHAT", "EMBEDDING"]);
   });
+  it("offers GLM hosted video and speech without inventing an image editing endpoint", () => {
+    expect(getSelectableCapabilities(["TEXT_TO_IMAGE", "TEXT_TO_VIDEO", "TTS", "ASR", "IMAGE_EDITING"], "GLM"))
+      .toEqual(["TEXT_TO_IMAGE", "TEXT_TO_VIDEO", "TTS", "ASR"]);
+    expect(isModelTypeSupportedByProtocol("text2video", "Zhipu AI")).toBe(true);
+    expect(isModelTypeSupportedByProtocol("image_editing", "GLM")).toBe(false);
+  });
   it("normalizes declared aliases before sending the real runtime type", () => {
     expect(normalizeRuntimeModelType("ASR")).toBe("stt");
     expect(normalizeRuntimeModelType("embed_main")).toBe("embed");

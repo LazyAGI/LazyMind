@@ -147,6 +147,21 @@ def build_plan(request: ProbeInput) -> ProbePlan:
                          data={'model': request.model, 'prompt': 'Make the square blue.', 'n': '1'},
                          files={'image': ('probe.png', IMAGE, 'image/png')})
     if kind == 'text2video':
+        if source == 'glm':
+            # Match LazyLLM's adapter: normalize known GLM catalog names but
+            # keep a custom model's case for a provider-hosted deployment.
+            from lazyllm.module.llms.onlinemodule.supplier.glm import _glm_model_name
+            model = _glm_model_name(request.model.strip())
+            mode = model.lower()
+            body = {'model': model, 'prompt': 'A blue square.'}
+            if mode.startswith('vidu'):
+                if mode.endswith(('-image', '-reference')):
+                    body['image_url'] = IMAGE_DATA_URL
+                elif mode.endswith('-start-end'):
+                    body['image_url'] = [IMAGE_DATA_URL, IMAGE_DATA_URL]
+                elif not mode.endswith('-text'):
+                    raise UnsupportedProbe('unsupported_provider')
+            return ProbePlan('videos/generations', 'video', json=body)
         if source == 'openrouter':
             return ProbePlan('videos', 'video', json={'model': request.model, 'prompt': 'A blue square.'})
         if source in {'openai', 'vllm'}:
@@ -173,6 +188,10 @@ def build_plan(request: ProbeInput) -> ProbePlan:
         body = {'model': request.model, 'input': 'OK', 'response_format': 'wav'}
         if source in {'openai', 'vllm'}:
             body['voice'] = 'alloy'
+        elif source == 'glm':
+            if request.model.strip().lower() != 'glm-tts':
+                raise UnsupportedProbe('unsupported_provider')
+            body.update(model='glm-tts', voice='female', stream=False)
         elif source == 'siliconflow':
             if request.model not in {'fnlp/MOSS-TTSD-v0.5', 'FunAudioLLM/CosyVoice2-0.5B'}:
                 raise UnsupportedProbe('unsupported_provider')
