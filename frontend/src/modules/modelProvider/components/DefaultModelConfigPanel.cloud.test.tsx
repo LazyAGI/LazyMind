@@ -144,9 +144,10 @@ describe("Default model services with the LazyMind Cloud system provider", () =>
     }] } });
     renderPanel();
     await waitFor(() => expect(mocks.getSelectedModels).toHaveBeenCalled());
-    fireEvent.click(await screen.findByRole("button", { name: /modelProvider\.defaults\.voiceTitle/ }));
+    expect(await screen.findByRole("button", { name: /modelProvider\.defaults\.voiceTitle/ })).toHaveAttribute("aria-expanded", "true");
+    const voice = screen.getByRole("region", { name: "modelProvider.defaults.voiceTitle" });
     expect(
-      await screen.findByRole("combobox", { name: "modelProvider.module.ttsTitle" }),
+      await within(voice).findByRole("combobox", { name: "modelProvider.module.ttsTitle" }),
     ).toBeInTheDocument();
   });
 

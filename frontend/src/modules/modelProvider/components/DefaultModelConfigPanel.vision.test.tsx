@@ -120,7 +120,7 @@ describe("compact default model options", () => {
     mocks.models.mockResolvedValue({ data: { models: [{ ...identity, id: "vlm-uuid", name: "private-vlm", model_type: "vlm", vision: false }] } });
     renderPanel();
     await screen.findByText("catalog-vision · Private gateway");
-    fireEvent.click(screen.getByRole("button", { name: /modelProvider.defaults.visualTitle/ }));
+    expect(screen.getByRole("button", { name: /modelProvider.defaults.visualTitle/ })).toHaveAttribute("aria-expanded", "true");
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "modelProvider.module.vlmTitle" }));
     await screen.findByText("private-vlm", { selector: ".model-provider-select-copy strong" });
     expect(within(optionElement("private-vlm")).queryByLabelText("modelProvider.modality.inputAria")).not.toBeInTheDocument();
