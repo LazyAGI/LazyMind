@@ -1,8 +1,10 @@
 import notifications from './notifications-en-US';
+import desktopUpdates from './desktop-updates-en-US';
 import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTranslations";
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
+  desktopUpdates,
   sourceImports: {
     "operationFailed": "Operation failed. Please try again.",
     "paperTag": "paper",

@@ -563,11 +563,8 @@ test("macOS distribution build signs packages while CI owns notarization sequenc
   assert.match(builderSource, /notarize:\s*false/);
   assert.match(builderSource, /sign:\s*macSigningMode === "developer-id"/);
   assert.doesNotMatch(builderSource, /signIgnore:/);
-  assert.match(
-    source,
-    /SIGNING_MODE}" == "adhoc"[\s\S]*codesign --force --deep --sign - "\$\{APP_PATH\}"/,
-    "local macOS builds must apply an explicit ad-hoc bundle signature",
-  );
+  assert.match(builderSource, /await adhocSignAppBundle\(appPath\)/);
+  assert.doesNotMatch(source, /codesign --force --deep --sign - "\$\{APP_PATH\}"/);
   assert.doesNotMatch(source, /notarytool submit[\s\S]*--wait/);
   assert.doesNotMatch(source, /stapler staple/);
   for (const privatePath of ["/.env", "/.lazymind-local", "/data", "/volumes", "/local/config.env"]) {
@@ -678,7 +675,7 @@ test("desktop release builds each platform once and publishes only after both pa
   assert.match(source, /macos:[\s\S]*uses: \.\/\.github\/workflows\/macos-installer\.yml/);
   assert.match(source, /windows:[\s\S]*uses: \.\/\.github\/workflows\/windows-installer\.yml/);
   assert.match(source, /release:[\s\S]*needs:\s*\n\s*- macos\s*\n\s*- windows/);
-  assert.match(source, /release:\s*\n\s*name: Create draft desktop release\s*\n\s*if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
+  assert.doesNotMatch(source, /!contains\(github\.ref_name, '-'\)/);
   assert.match(source, /release:[\s\S]*permissions:[\s\S]*contents: write/);
   assert.match(source, /GH_REPO: \$\{\{ github\.repository \}\}/);
   assert.match(source, /name: Download tested macOS installer/);

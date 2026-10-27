@@ -25,6 +25,10 @@ const { createInputRecorder } = require("./input-recording");
 const { createRecordingHelper } = require("./recording-helper");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
 const { resolveRuntimeLocalFile } = require("./runtime-local-file");
+const { createDesktopUpdater, registerUpdateIPC, sendUpdateState } = require("./update-controller");
+const { createUpdateHelperClient } = require("./update-helper-client");
+const { readRuntimeUpdateState } = require("./runtime-update-state");
+const { guardDesktopStartup } = require("./update-startup");
 const { revealDirectoryFile } = require("./directory-file");
 const {
   desktopRuntimeReady,
@@ -94,19 +98,6 @@ const isInstallerWarmup = isWindows && process.argv.includes("--installer-warmup
 const windowsDesktopPaths = isWindows
   ? resolveWindowsDesktopPaths(process.env, app.getPath("home"))
   : null;
-if (windowsDesktopPaths) {
-  for (const dir of [
-    windowsDesktopPaths.profileDir,
-    windowsDesktopPaths.logsDir,
-    windowsDesktopPaths.crashDumpsDir,
-  ]) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  app.setPath("userData", windowsDesktopPaths.profileDir);
-  app.setPath("sessionData", windowsDesktopPaths.profileDir);
-  app.setPath("crashDumps", windowsDesktopPaths.crashDumpsDir);
-  app.setAppLogsPath(windowsDesktopPaths.logsDir);
-}
 
 const isPackaged = app.isPackaged;
 const desktopDevURL = !isPackaged
@@ -138,6 +129,24 @@ const cloudRegisterLocale = String(process.env.LAZYMIND_CLOUD_REGISTER_LOCALE ||
 const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
   (isPackaged ? path.join(runtimeResourcesRoot, "app") : path.resolve(__dirname, "..", "..", ".."));
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
+const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
+  path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
+try {
+  guardDesktopStartup({ isPackaged, sidecarPath, args: sidecarArgs("startup-guard"), env: { ...process.env } });
+} catch (error) {
+  dialog.showErrorBox("LazyMind update recovery", "Startup is blocked while an update requires recovery. Open the independent LazyMind update recovery entry to continue.");
+  app.exit(1);
+  throw error;
+}
+if (windowsDesktopPaths) {
+  for (const dir of [windowsDesktopPaths.profileDir, windowsDesktopPaths.logsDir, windowsDesktopPaths.crashDumpsDir]) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  app.setPath("userData", windowsDesktopPaths.profileDir);
+  app.setPath("sessionData", windowsDesktopPaths.profileDir);
+  app.setPath("crashDumps", windowsDesktopPaths.crashDumpsDir);
+  app.setAppLogsPath(windowsDesktopPaths.logsDir);
+}
 const desktopLogsDir = app.getPath("logs");
 const desktopCredentialIdentityPath = path.join(app.getPath("userData"), "credential-device.json");
 const localFolderAccessStatePath = path.join(app.getPath("userData"), "local-folder-access.json");
@@ -150,8 +159,6 @@ const cursorWorkspaceStorageRoot = path.join(
   "workspaceStorage",
 );
 const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
-const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
-  path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
 const editablePptDependencyConfigPath = path.join(
   runtimeResourcesRoot,
   "config",
@@ -2496,6 +2503,18 @@ function assertBrowserIPC(event) {
     throw new Error("Browser control is only available from the LazyMind main window");
   }
 }
+const desktopUpdater = createDesktopUpdater({
+  currentVersion: app.getVersion(),
+  invokeHelper: createUpdateHelperClient({ helperPath: path.join(runtimeResourcesRoot, "bin", isWindows ? "lazymind-update-helper.exe" : "lazymind-update-helper") }),
+  readLocalState: () => readRuntimeUpdateState(runSidecar, process.getSystemVersion()),
+  revealPackage: (file) => shell.showItemInFolder(file),
+  report: (reason) => appendStartupLog("update", reason),
+});
+registerUpdateIPC({ ipcMain, updater: desktopUpdater,
+  authorize: (event) => isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin()),
+});
+desktopUpdater.subscribe((state) => sendUpdateState(mainWindow, notificationFrontendOrigin(), state));
+app.on("will-quit", () => desktopUpdater.dispose());
 let nativeRecordingOwner = null;
 const nativeRecording = process.platform === "darwin" ? createRecordingHelper({
   source: app.isPackaged ? path.join(process.resourcesPath, "recording-helper", "LazyMind Recorder.app") : path.resolve(__dirname, "../../build/recording-helper/LazyMind Recorder.app"),
@@ -3241,7 +3260,13 @@ if (!hasSingleInstanceLock) {
         );
         app.exit(1);
       },
-    );
+    ).then((result) => {
+      // Keep discovery out of the startup critical path, including background
+      // launches where the renderer was closed while services were preparing.
+      const updateStart = setTimeout(() => { void desktopUpdater.start(); }, 15_000);
+      updateStart.unref();
+      return result;
+    });
   });
   app.on("window-all-closed", () => {
     if (isExternalRuntimeDev) {

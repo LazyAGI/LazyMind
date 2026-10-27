@@ -235,6 +235,7 @@ type RuntimePaths struct {
 }
 
 type RuntimeConfig struct {
+	UpdateStorage      *UpdateStorageSnapshot
 	Profile            string
 	MaintenanceMode    string
 	OwnerToken         string
@@ -1027,6 +1028,7 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 		modeProfile.VectorStore.ManagedProcess = false
 	}
 	return RuntimeConfig{
+		UpdateStorage:      captureUpdateStorage(p, authServiceDatabaseURL(p.AuthServiceDBPath)),
 		Profile:            profile,
 		MaintenanceMode:    maintenanceMode,
 		OwnerToken:         strings.TrimSpace(firstNonEmpty(opts.OwnerToken, os.Getenv(runtimeOwnerTokenEnvVar))),

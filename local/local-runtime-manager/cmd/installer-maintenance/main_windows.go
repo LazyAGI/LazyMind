@@ -15,6 +15,7 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/releaseversion"
 	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winfile"
 	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winprocess"
 	"golang.org/x/sys/windows"
@@ -51,6 +52,8 @@ type runningProcess struct {
 
 type commandOptions struct {
 	Command               string
+	InstalledVersion      string
+	CandidateVersion      string
 	InstallDir            string
 	TempDir               string
 	MinimumFreeSpaceMB    uint64
@@ -61,6 +64,15 @@ func main() {
 	opts, err := parseCommandOptions(os.Args[1:])
 	if err != nil {
 		fatalf("%v", err)
+	}
+	if opts.Command == "compare-versions" {
+		order, err := releaseversion.Compare(opts.InstalledVersion, opts.CandidateVersion)
+		if err != nil {
+			fatalf("%v", err)
+		}
+		// nsExec consumes exactly -1/0/1, with no newline or locale-dependent text.
+		_, _ = fmt.Fprint(os.Stdout, order)
+		return
 	}
 	root, err := localAppDataRoot()
 	if err != nil {
@@ -119,11 +131,22 @@ func main() {
 
 func parseCommandOptions(args []string) (commandOptions, error) {
 	if len(args) == 0 {
-		return commandOptions{}, errors.New("usage: lazymind-installer-maintenance preflight|check-stopped|force-stop|purge-local-data [options]")
+		return commandOptions{}, errors.New("usage: lazymind-installer-maintenance preflight|check-stopped|force-stop|purge-local-data|compare-versions [options]")
 	}
 	opts := commandOptions{Command: args[0]}
 	for index := 1; index < len(args); index++ {
 		switch args[index] {
+		case "--installed", "--candidate":
+			name := args[index]
+			index++
+			if index >= len(args) || args[index] == "" {
+				return commandOptions{}, fmt.Errorf("%s requires a version", name)
+			}
+			if name == "--installed" {
+				opts.InstalledVersion = args[index]
+			} else {
+				opts.CandidateVersion = args[index]
+			}
 		case "--install-dir":
 			index++
 			if index >= len(args) || strings.TrimSpace(args[index]) == "" {
@@ -164,6 +187,9 @@ func parseCommandOptions(args []string) (commandOptions, error) {
 		if opts.InstallDir == "" || opts.TempDir == "" || opts.MinimumFreeSpaceMB == 0 || opts.MaximumRelativeLength == 0 {
 			return commandOptions{}, errors.New("preflight requires --install-dir, --temp-dir, --minimum-free-space-mb, and --maximum-relative-path-length")
 		}
+	}
+	if opts.Command == "compare-versions" && (opts.InstalledVersion == "" || opts.CandidateVersion == "") {
+		return commandOptions{}, errors.New("compare-versions requires --installed and --candidate")
 	}
 	return opts, nil
 }

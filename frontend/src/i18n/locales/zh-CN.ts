@@ -1,8 +1,10 @@
 import notifications from './notifications-zh-CN';
+import desktopUpdates from './desktop-updates-zh-CN';
 import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTranslations";
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
+  desktopUpdates,
   sourceImports: {
     "operationFailed": "操作失败，请重试",
     "paperTag": "论文",

@@ -29,17 +29,28 @@ jobs:
 
   release:
     name: Create draft desktop release
-    if: ${{ !contains(github.ref_name, '-') }}
     needs:
       - macos
       - windows
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Serialize publication across raw tag aliases of the same package version.
+    concurrency:
+      group: desktop-release-publish
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release channel
+        id: version_metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node desktop/scripts/resolve-release-version.mjs --tag "${RELEASE_TAG}" --package desktop/electron/package.json --github-output "${GITHUB_OUTPUT}"
+
       - name: Download tested macOS installer
         uses: actions/download-artifact@v8
         with:
@@ -81,12 +92,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_CHANNEL: ${{ steps.version_metadata.outputs.release_channel }}
+          EXPECTED_PRERELEASE: ${{ steps.version_metadata.outputs.is_prerelease }}
         run: |
           set -euo pipefail
-          expected_prerelease=false
-          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            expected_prerelease=true
-          fi
+          node desktop/scripts/validate-release-identity.mjs --tag "${RELEASE_TAG}" --repository "${GH_REPO}"
+          expected_prerelease="${EXPECTED_PRERELEASE}"
+          echo "Preparing ${RELEASE_CHANNEL} draft release ${RELEASE_TAG}"
 
           if release_json="$(gh release view "${RELEASE_TAG}" --json isDraft,isPrerelease 2>/dev/null)"; then
             if [[ "$(jq -r .isDraft <<<"${release_json}")" != "true" ]]; then

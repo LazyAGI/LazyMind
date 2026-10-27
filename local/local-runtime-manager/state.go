@@ -32,6 +32,7 @@ type ProcessComposeState struct {
 }
 
 type RuntimeConfigSnapshot struct {
+	UpdateStorage      *UpdateStorageSnapshot    `json:"updateStorage,omitempty"`
 	MaintenanceMode    string                    `json:"maintenanceMode,omitempty"`
 	FrontendPort       int                       `json:"frontendPort,omitempty"`
 	ModeProfile        RuntimeModeProfileConfig  `json:"modeProfile,omitempty"`
@@ -131,6 +132,7 @@ func defaultRuntimeState(cfg RuntimeConfig, apiPort int, tokenPath string) Runti
 
 func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 	return RuntimeConfigSnapshot{
+		UpdateStorage:   cloneUpdateStorage(cfg.UpdateStorage),
 		MaintenanceMode: cfg.MaintenanceMode,
 		FrontendPort:    cfg.FrontendPort,
 		ModeProfile:     cfg.ModeProfile,
@@ -153,6 +155,7 @@ func snapshotRuntimeConfig(cfg RuntimeConfig) RuntimeConfigSnapshot {
 }
 
 func applyStateConfig(cfg RuntimeConfig, state RuntimeState) RuntimeConfig {
+	cfg.UpdateStorage = cloneUpdateStorage(state.Config.UpdateStorage)
 	if state.Config.MaintenanceMode != "" {
 		cfg.MaintenanceMode = state.Config.MaintenanceMode
 	}

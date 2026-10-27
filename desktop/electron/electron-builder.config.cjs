@@ -1,4 +1,5 @@
 const childProcess = require("node:child_process");
+const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const util = require("node:util");
@@ -146,6 +147,22 @@ function restoreEmbeddedRuntime(appOutDir) {
   fs.renameSync(staged.stagedRuntime, staged.runtimeRoot);
   stagedRuntimePaths.delete(appOutDir);
   return staged.runtimeRoot;
+}
+
+function refreshSignedRuntimeChecksums(runtimeRoot) {
+  const checksum = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const bin = path.join(runtimeRoot, "bin");
+  // CLI identity pins refer to signed bytes. Refresh them before hashing the
+  // manifest's entire tracked set, which also contains these pin files.
+  for (const name of fs.readdirSync(bin).filter((name) => name.endsWith(".sha256"))) {
+    fs.writeFileSync(path.join(bin, name), `${checksum(path.join(bin, name.slice(0, -7)))}\n`);
+  }
+  const manifestPath = path.join(runtimeRoot, "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  for (const name of Object.keys(manifest.checksums)) {
+    manifest.checksums[name] = checksum(path.join(runtimeRoot, name));
+  }
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 async function adhocSignAppBundle(appPath) {
@@ -317,6 +334,7 @@ async function signAndStageEmbeddedRuntime(context) {
   console.log("Ad-hoc signing Electron app bundle");
   await adhocSignAppBundle(appPath);
   restoreEmbeddedRuntime(context.appOutDir);
+  refreshSignedRuntimeChecksums(runtimeRoot);
   await codesignWithRetry(["--force", "--sign", "-", "--timestamp=none", appPath], appPath);
   await execFile("/usr/bin/codesign", ["--verify", "--deep", "--strict", appPath]);
   console.log("Restored embedded runtime and resealed the outer ad-hoc app signature");
@@ -327,7 +345,8 @@ async function restoreRuntimeAndFinalizeSignature(context) {
     return;
   }
 
-  restoreEmbeddedRuntime(context.appOutDir);
+  const runtimeRoot = restoreEmbeddedRuntime(context.appOutDir);
+  refreshSignedRuntimeChecksums(runtimeRoot);
 
   const appPath = path.join(context.appOutDir, "LazyMind.app");
   const { entitlements, identity, keychainFile } = await developerIdSigningContext(context);
@@ -424,7 +443,9 @@ module.exports = {
   beforePack: async (context) => {
     if (context.electronPlatformName !== "darwin") return;
     const identity = macSigningMode === "developer-id" ? (await developerIdSigningContext(context)).identity : "-";
-    require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch: context.arch === 0 ? "x64" : "arm64", identity });
+    const arch = { 1: "x64", 3: "arm64" }[context.arch];
+    if (!arch) throw new Error(`Unsupported macOS recording helper architecture: ${context.arch}`);
+    require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch, identity });
   },
   appId: "ai.lazymind.desktop",
   productName: "LazyMind",

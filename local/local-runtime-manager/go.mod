@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/glebarez/go-sqlite v1.21.2
+	golang.org/x/mod v0.17.0
 	golang.org/x/sys v0.30.0
 	gopkg.in/yaml.v3 v3.0.1
 )
