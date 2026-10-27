@@ -8,6 +8,7 @@ import {
 } from "@ant-design/icons";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import MarkdownViewer from "@/modules/chat/components/MarkdownViewer";
+import { runStatusTitleKey } from "@/modules/chat/components/RunStatusCard";
 import { getCitationSources } from "@/modules/chat/utils/sourceAdapter";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { formatThinkingForDisplay, summarizeSearchToolsFromText } from "@/modules/chat/utils/thinking";
@@ -83,10 +84,19 @@ export default function ChatMessageContent({
   const thinkingKey = uniqueKey || item.history_id || item.id || "default";
   const citeMessageList =
     item.role === RoleTypes.USER ? getCiteMessages(item) : [];
+  const runStatus = item.run_terminal?.status || item.run_status;
   const isStreaming =
-    !item.run_status &&
+    !runStatus &&
     item.finish_reason !==
       ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
+  const thinkingTitleKey =
+    runStatus && runStatus !== "completed"
+      ? item.run_terminal
+        ? runStatusTitleKey(item.run_terminal)
+        : `chat.runStatus.${runStatus}`
+      : item.delta || !isStreaming
+        ? "chat.thinkingDone"
+        : "chat.thinking";
   const isCollapsed = isThinkingCollapsed(thinkingKey, !isStreaming);
   const searchSummary = summarizeSearchToolsFromText(
     item.raw_delta || item.reasoning_content,
@@ -171,7 +181,7 @@ export default function ChatMessageContent({
           >
             <img src={ThinkIcon} className="chat-think-icon" alt="" />
             <span className="chat-think-title">
-              {item.delta || !isStreaming ? t("chat.thinkingDone") : t("chat.thinking")}
+              {t(thinkingTitleKey)}
               {searchSummary ? ` · ${searchSummary}` : ""}
               {thinkingDuration ? ` (${thinkingDuration})` : ""}
             </span>

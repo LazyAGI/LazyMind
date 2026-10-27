@@ -272,12 +272,17 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 			return nil
 		}
 	}
-	if _, err := os.Stat(paths.AlgorithmPython); os.IsNotExist(err) {
+	_, pythonErr := os.Stat(paths.AlgorithmPython)
+	newVenv := os.IsNotExist(pythonErr)
+	if newVenv {
 		if err := m.createVenv(ctx, paths, false); err != nil {
 			return err
 		}
 	}
 	if err := m.installAlgorithmPythonDeps(ctx, paths, includeEvo, includeRAG); err != nil {
+		if !newVenv {
+			return fmt.Errorf("prepare algorithm python failed; preserving existing venv: %w", err)
+		}
 		if rebuildErr := m.createVenv(ctx, paths, true); rebuildErr != nil {
 			return fmt.Errorf("prepare algorithm python failed and venv rebuild failed: %w (original install error: %v)", rebuildErr, err)
 		}

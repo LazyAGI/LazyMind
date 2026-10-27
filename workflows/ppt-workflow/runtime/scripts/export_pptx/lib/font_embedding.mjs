@@ -475,7 +475,11 @@ export async function embedFontFacesInPptx(pptxPath, faces) {
 
 /** Best-effort end-to-end web-font embedding for an exported deck. */
 export async function embedGoogleFontsFromPages(pptxPath, pages, options = {}) {
-  const faces = await collectGoogleFontFaces(pages, options);
+  const { localFontFaces } = await import('./local_fonts.mjs');
+  const local = selectUsedFaces(await localFontFaces(), collectUsedFontWeights(pages));
+  const families = new Set(local.map(face => normalizeFamily(face.family)));
+  const remote = await collectGoogleFontFaces(pages, options);
+  const faces = [...local, ...remote.filter(face => !families.has(normalizeFamily(face.family)))];
   if (!faces.length) return [];
   const embedded = await embedFontFacesInPptx(pptxPath, faces);
   if (embedded.length) process.stderr.write(`[fonts] Embedded ${embedded.join(', ')}\n`);

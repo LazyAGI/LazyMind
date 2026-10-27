@@ -301,6 +301,27 @@ def _pick_search_engine():
     return None
 
 
+def require_image_search_configuration(engines=None) -> None:
+    """Check search configuration only when remote image discovery is needed."""
+    for engine in _SEARCH_ENGINES if engines is None else engines:
+        try:
+            if engine.__key_source__():
+                return
+        except Exception:
+            continue
+    missing = {
+        'id': 'web_search', 'label': '网络图片搜索', 'available': False,
+        'settings_url': '/settings?section=knowledge&tool=web-search',
+        'reason': '尚未配置可用的搜索引擎，请配置 Tavily 或 Bocha 后重试当前素材收集步骤。',
+    }
+    raise ToolExecutionError('MEDIA_CAPABILITY_DEPENDENCY_MISSING ' + json.dumps({
+        'status': 'blocked', 'workflow': 'image_search', 'required': ['web_search'],
+        'checks': [missing], 'missing': [missing],
+        'message': '当前任务需要搜索真实网络图片。' + missing['reason']
+                   + '不要跳过收集，也不要用 AI 生成图片替代真实图片。已有图片链接或上传素材可直接使用。',
+    }, ensure_ascii=False, separators=(',', ':')))
+
+
 def _is_http_url(value: str) -> bool:
     return str(value or '').strip().lower().startswith(('http://', 'https://'))
 
@@ -631,6 +652,7 @@ def _normalize_candidate_urls(candidate_urls: Any, limit: int) -> List[str]:
 
 
 def _search_image_candidates(query: str, limit: int) -> List[str]:
+    require_image_search_configuration()
     urls: List[str] = []
     _append_unique_urls(urls, _tavily_image_urls(query, count=limit), limit)
     if len(urls) < limit:

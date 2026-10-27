@@ -1316,7 +1316,9 @@ export interface ChatChunkResponse {
     'exports'?: Array<ChatExport>;
     'history_id'?: string;
     'message'?: string;
+    'model_output'?: ChatModelOutput;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'performance_metrics'?: RunPerformanceMetrics;
     'prompt_questions'?: Array<string>;
     'reasoning_content'?: string;
@@ -1490,6 +1492,26 @@ export const ChatModelListOpenAPIItemSourceEnum = {
 
 export type ChatModelListOpenAPIItemSourceEnum = typeof ChatModelListOpenAPIItemSourceEnum[keyof typeof ChatModelListOpenAPIItemSourceEnum];
 
+export interface ChatModelOutput {
+    /**
+     * Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run.
+     */
+    'call_index': number;
+    /**
+     * Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed.
+     */
+    'phase'?: ChatModelOutputPhaseEnum;
+    'run_id': string;
+}
+
+export const ChatModelOutputPhaseEnum = {
+    Begin: 'begin',
+    Commit: 'commit',
+    Rollback: 'rollback'
+} as const;
+
+export type ChatModelOutputPhaseEnum = typeof ChatModelOutputPhaseEnum[keyof typeof ChatModelOutputPhaseEnum];
+
 export interface ChatModelProviderOpenAPIItem {
     'id': string;
     'models'?: Array<ChatModelListOpenAPIItem>;
@@ -1533,7 +1555,8 @@ export const ChatModelRouteReasonEnum = {
     RetrySameModel: 'retry_same_model',
     Fixed: 'fixed',
     InitialSelection: 'initial_selection',
-    ModelUnavailable: 'model_unavailable'
+    ModelUnavailable: 'model_unavailable',
+    ModelFallback: 'model_fallback'
 } as const;
 
 export type ChatModelRouteReasonEnum = typeof ChatModelRouteReasonEnum[keyof typeof ChatModelRouteReasonEnum];
@@ -1588,6 +1611,42 @@ export const ChatModelSelectionOpenAPISourceEnum = {
 
 export type ChatModelSelectionOpenAPISourceEnum = typeof ChatModelSelectionOpenAPISourceEnum[keyof typeof ChatModelSelectionOpenAPISourceEnum];
 
+export interface ChatModelSwitchIdentity {
+    'candidate_id': string;
+    'model_id': string;
+    'model_name'?: string;
+    'provider_group_id': string;
+    'provider_name'?: string;
+    'source': ChatModelSwitchIdentitySourceEnum;
+}
+
+export const ChatModelSwitchIdentitySourceEnum = {
+    Own: 'own',
+    Shared: 'shared',
+    Cloud: 'cloud'
+} as const;
+
+export type ChatModelSwitchIdentitySourceEnum = typeof ChatModelSwitchIdentitySourceEnum[keyof typeof ChatModelSwitchIdentitySourceEnum];
+
+export interface ChatModelSwitchRecord {
+    'context_compacted': boolean;
+    'from': ChatModelSwitchIdentity;
+    'from_max_input_tokens': number | null;
+    'reason_code': string;
+    'switch_index': number;
+    'to': ChatModelSwitchIdentity;
+    'to_max_input_tokens': number | null;
+    'event_id': string;
+}
+export interface ChatModelSwitchedData {
+    'context_compacted': boolean;
+    'from': ChatModelSwitchIdentity;
+    'from_max_input_tokens': number | null;
+    'reason_code': string;
+    'switch_index': number;
+    'to': ChatModelSwitchIdentity;
+    'to_max_input_tokens': number | null;
+}
 export interface ChatModelsOpenAPIResponse {
     'auto_available': boolean;
     'default_selection': ChatModelSelectionOpenAPI;
@@ -1610,8 +1669,18 @@ export interface ChatRuntimeEvent {
     'event_id'?: string;
     'run_id'?: string;
     'schema_version'?: number;
-    'type'?: string;
+    'type'?: ChatRuntimeEventTypeEnum;
 }
+
+export const ChatRuntimeEventTypeEnum = {
+    ModelRetryScheduled: 'model_retry_scheduled',
+    ModelCallFinished: 'model_call_finished',
+    ModelSwitched: 'model_switched',
+    RunFinished: 'run_finished'
+} as const;
+
+export type ChatRuntimeEventTypeEnum = typeof ChatRuntimeEventTypeEnum[keyof typeof ChatRuntimeEventTypeEnum];
+
 export interface CheckDatabaseConnectionResponse {
     'message': string;
     'success': boolean;
@@ -2034,6 +2103,7 @@ export interface ConversationArchiveRequest {
 }
 export interface ConversationArchiveResponse {
     'archived_at': string;
+    'archived_ids': Array<string>;
     'conversation_id': string;
     'newly_archived': boolean;
 }
@@ -2312,7 +2382,9 @@ export interface ConversationHistoryItem {
     'fork_read_only'?: boolean;
     'id'?: string;
     'input'?: Array<object>;
+    'model_output'?: ChatModelOutput;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'performance_metrics'?: RunPerformanceMetrics;
     'query'?: string;
     'reason'?: string;
@@ -2410,6 +2482,7 @@ export type ConversationItemThinkingDepthEnum = typeof ConversationItemThinkingD
 export interface ConversationListResponse {
     'conversations'?: Array<ConversationItem>;
     'next_page_token'?: string;
+    'selection_complete'?: boolean;
     'total_size'?: number;
 }
 export interface ConversationOpeningState {
@@ -4449,6 +4522,7 @@ export interface ExternalExecutionWorkflow {
 export interface FailedRunAttempt {
     'create_time'?: string;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'result'?: string;
     'run_id'?: string;
     'run_status'?: FailedRunAttemptRunStatusEnum;
@@ -5424,6 +5498,27 @@ export const MissingCapabilityIdEnum = {
 
 export type MissingCapabilityIdEnum = typeof MissingCapabilityIdEnum[keyof typeof MissingCapabilityIdEnum];
 
+export interface ModelCallFinishedData {
+    'attempt_count': number;
+    'failure'?: ModelCallFinishedDataFailure;
+    'finish'?: string;
+    'has_semantic_output': boolean;
+    'kind': ModelCallFinishedDataKindEnum;
+    'model_call_id': string;
+}
+
+export const ModelCallFinishedDataKindEnum = {
+    Finish: 'finish',
+    Failure: 'failure'
+} as const;
+
+export type ModelCallFinishedDataKindEnum = typeof ModelCallFinishedDataKindEnum[keyof typeof ModelCallFinishedDataKindEnum];
+
+export interface ModelCallFinishedDataFailure {
+    'code'?: string;
+    'diagnostic_id'?: string;
+    'origin'?: string;
+}
 
 export const ModelFailureCode = {
     AuthenticationFailed: 'authentication_failed',
@@ -5611,7 +5706,9 @@ export interface OrdinaryTaskView {
     'conversation_id': string;
     'display_key': string;
     'execution_id': string;
+    'failure_code'?: OrdinaryTaskViewFailureCodeEnum;
     'knowledge_operations'?: Array<KnowledgeOperation>;
+    'model_switch'?: ChatModelSwitchRecord;
     'order': number;
     'pages': Pages;
     'parallel_group_id': string | null;
@@ -5639,6 +5736,12 @@ export interface OrdinaryTaskView {
     'workflow_step_id': string | null;
 }
 
+export const OrdinaryTaskViewFailureCodeEnum = {
+    ModelFallbackExhausted: 'model_fallback_exhausted',
+    ModelContextNotFit: 'model_context_not_fit'
+} as const;
+
+export type OrdinaryTaskViewFailureCodeEnum = typeof OrdinaryTaskViewFailureCodeEnum[keyof typeof OrdinaryTaskViewFailureCodeEnum];
 export const OrdinaryTaskViewSchemaVersionEnum = {
     NUMBER_1: 1
 } as const;
@@ -6151,6 +6254,7 @@ export type PublicDisplayProgressSchemaVersionEnum = typeof PublicDisplayProgres
 export interface PublicProcessStep {
     'elapsed_ms': number | null;
     'finished_at': string | null;
+    'model_switch'?: ChatModelSwitchRecord;
     'order': number;
     'revision': number;
     'started_at': string | null;
@@ -6512,6 +6616,7 @@ export interface ServerResponse {
     'url': string;
 }
 export interface SessionDTO {
+    'controller_host': string;
     'conversation_id': string;
     'created_at': string;
     'current_step_id': string;
@@ -7508,6 +7613,43 @@ export interface TaskDocumentInfo {
     'document_size'?: number;
     'document_state'?: string;
 }
+/**
+ * Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect or execution changes begin with a Core-generated task_start with snapshot=true and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. Only this DB section initializes authoritative hydration; live task_start is idempotent for an established execution. On ordinary tool_calls/tool_results, seq is the zero-based durable step sequence used to merge snapshot and live delivery once. Terminal restores any open preview before done/error.
+ */
+export interface TaskEvent {
+    'chunk_index'?: number;
+    'content_type'?: string;
+    'current_phase'?: string;
+    'delta'?: string;
+    'durable_tool_results'?: Array<object>;
+    'estimated_sec'?: number;
+    'event_id'?: string;
+    'execution_id'?: string;
+    'message'?: string;
+    'model_output'?: ChatModelOutput;
+    'process_step'?: PublicProcessStep;
+    'progress'?: number;
+    'runtime_event'?: TaskModelRuntimeEvent;
+    'scope_version'?: number;
+    'seq'?: number;
+    'slot'?: string;
+    'snapshot'?: boolean;
+    'sources'?: Array<object>;
+    'status'?: string;
+    'steps'?: Array<string>;
+    'stream_id'?: string;
+    'summary'?: string;
+    'task_id'?: string;
+    'text'?: string;
+    'think'?: string;
+    'tool_calls'?: Array<object>;
+    'tool_results'?: Array<object>;
+    'type': string;
+    'v2_artifact_id'?: string;
+    'v2_revision_id'?: string;
+    'value'?: object;
+    'writing_subtasks'?: Array<object>;
+}
 export interface TaskFile {
     'content_type'?: string;
     'display_name'?: string;
@@ -7527,6 +7669,25 @@ export interface TaskInfo {
     'total_document_count'?: number;
     'total_document_size'?: number;
 }
+export interface TaskModelRuntimeEvent {
+    'data': ChatModelSwitchedData;
+    'event_id': string;
+    'run_id': string;
+    'schema_version': TaskModelRuntimeEventSchemaVersionEnum;
+    'type': TaskModelRuntimeEventTypeEnum;
+}
+
+export const TaskModelRuntimeEventSchemaVersionEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type TaskModelRuntimeEventSchemaVersionEnum = typeof TaskModelRuntimeEventSchemaVersionEnum[keyof typeof TaskModelRuntimeEventSchemaVersionEnum];
+export const TaskModelRuntimeEventTypeEnum = {
+    ModelSwitched: 'model_switched'
+} as const;
+
+export type TaskModelRuntimeEventTypeEnum = typeof TaskModelRuntimeEventTypeEnum[keyof typeof TaskModelRuntimeEventTypeEnum];
+
 export interface TaskNotification {
     'account_id'?: string;
     'app_name'?: string;
@@ -19803,10 +19964,12 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {boolean} [selectionSnapshot]
+         * @param {string} [selectionGroupId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, selectionSnapshot?: boolean, selectionGroupId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/conversations`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -19833,6 +19996,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (pageToken !== undefined) {
                 localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            if (selectionSnapshot !== undefined) {
+                localVarQueryParameter['selection_snapshot'] = selectionSnapshot;
+            }
+
+            if (selectionGroupId !== undefined) {
+                localVarQueryParameter['selection_group_id'] = selectionGroupId;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -26898,6 +27069,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkflowEventsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/task-center/workflow-events`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {string} taskId
@@ -28776,6 +28976,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'sessionId' is not null or undefined
             assertParamExists('apiCoreWorkflowSessionsSessionIdInputBindingsPost', 'sessionId', sessionId)
             const localVarPath = `/api/core/workflow-sessions/{session_id}/input-bindings`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdPausePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdPausePost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:pause`
                 .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -30758,11 +30991,13 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {boolean} [selectionSnapshot]
+         * @param {string} [selectionGroupId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, options);
+        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, selectionSnapshot?: boolean, selectionGroupId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, selectionSnapshot, selectionGroupId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -33449,6 +33684,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterWorkflowEventsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterWorkflowEventsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {string} taskId
@@ -34185,6 +34432,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdInputBindingsPost(sessionId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdInputBindingsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdPausePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdPausePost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdPausePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -35329,7 +35589,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationListResponse> {
-            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, requestParameters.selectionSnapshot, requestParameters.selectionGroupId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -37308,6 +37568,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreTaskCenterWorkflowEventsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {DefaultApiApiCoreTasksTaskIdArtifactsGetRequest} requestParameters Request parameters.
@@ -37860,6 +38129,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdPausePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdPausePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -38539,6 +38818,10 @@ export interface DefaultApiApiCoreConversationsGetRequest {
     readonly pageSize?: number
 
     readonly pageToken?: string
+
+    readonly selectionSnapshot?: boolean
+
+    readonly selectionGroupId?: string
 }
 
 /**
@@ -40023,6 +40306,13 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequ
 }
 
 /**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdPausePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest {
+    readonly sessionId: string
+}
+
+/**
  * Request parameters for apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest {
@@ -41097,7 +41387,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, requestParameters.selectionSnapshot, requestParameters.selectionGroupId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -43281,6 +43571,16 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
+     *
+     * @summary GET /task-center/workflow-events
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterWorkflowEventsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
      * @summary Read public stage artifacts
      * @param {DefaultApiApiCoreTasksTaskIdArtifactsGetRequest} requestParameters Request parameters.
@@ -43889,6 +44189,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:pause
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdPausePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdPausePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

@@ -821,7 +821,7 @@
 
     &--grid {
       display: grid;
-      grid-template-columns: var(--workflow-grid-cols, repeat(auto-fill, minmax(200px, 1fr)));
+      grid-template-columns: var(--workflow-grid-cols, repeat(auto-fit, minmax(min(200px, 100%), 1fr)));
       gap: 16px;
       align-items: start;
 

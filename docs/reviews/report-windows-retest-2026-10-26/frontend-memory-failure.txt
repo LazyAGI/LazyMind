@@ -1,0 +1,51 @@
+
+> lazymind-frontend@1.0.0 prebuild D:\LazyMind-report-1026\frontend
+> node scripts/openapi/check-stale.mjs
+
+auth: fresh
+core: fresh
+scan: fresh
+channel-gateway: fresh
+
+> lazymind-frontend@1.0.0 build D:\LazyMind-report-1026\frontend
+> vite build
+
+[36mvite v5.4.21 [32mbuilding for production...[36m[39m
+transforming...
+DEPRECATION WARNING [import]: Sass @import rules are deprecated and will be removed in Dart Sass 3.0.0.
+
+More info and automated migrator: https://sass-lang.com/d/import
+
+     ╷
+1363 │ @import "./embedded.scss";
+     │         ^^^^^^^^^^^^^^^^^
+     ╵
+    src\modules\memory\components\SkillManagementSection\index.scss 1363:9  root stylesheet
+
+
+new URL("/批量对话模板.xlsx", import.meta.url) doesn't exist at build time, it will remain unchanged to be resolved at runtime. If this is intended, you can use the /* @vite-ignore */ comment to suppress this warning.
+[1m[33m[plugin:vite:resolve][39m[22m [33m[plugin vite:resolve] Module "stream" has been externalized for browser compatibility, imported by "D:/LazyMind-report-1026/local/build/deps/node/frontend/.pnpm/@js-preview+docx@1.6.4_core-js@3.48.0/node_modules/@js-preview/docx/lib/index.js". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.[39m
+[1m[33m[plugin:vite:resolve][39m[22m [33m[plugin vite:resolve] Module "events" has been externalized for browser compatibility, imported by "D:/LazyMind-report-1026/local/build/deps/node/frontend/.pnpm/@js-preview+docx@1.6.4_core-js@3.48.0/node_modules/@js-preview/docx/lib/index.js". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.[39m
+[1m[33m[plugin:vite:resolve][39m[22m [33m[plugin vite:resolve] Module "util" has been externalized for browser compatibility, imported by "D:/LazyMind-report-1026/local/build/deps/node/frontend/.pnpm/@js-preview+docx@1.6.4_core-js@3.48.0/node_modules/@js-preview/docx/lib/index.js". See https://vite.dev/guide/troubleshooting.html#module-externalized-for-browser-compatibility for more details.[39m
+
+<--- Last few GCs --->
+
+[31784:0000020CF9CC1000]    23320 ms: Mark-Compact 2039.5 (2052.2) -> 2038.4 (2055.2) MB, pooled: 0 MB, 832.22 / 0.00 ms  (average mu = 0.085, current mu = 0.015) allocation failure; scavenge might not succeed
+[31784:0000020CF9CC1000]    24074 ms: Mark-Compact 2042.7 (2055.5) -> 2040.7 (2057.5) MB, pooled: 0 MB, 736.81 / 0.00 ms  (average mu = 0.052, current mu = 0.022) allocation failure; scavenge might not succeed
+
+FATAL ERROR: Ineffective mark-compacts near heap limit Allocation failed - JavaScript heap out of memory
+----- Native stack trace -----
+
+ 1: 00007FF65209C36F node::OnFatalError+1343
+ 2: 00007FF652CE4D77 v8::Function::NewInstance+423
+ 3: 00007FF652AE5467 v8::base::AddressSpaceReservation::AddressSpaceReservation+322071
+ 4: 00007FF652AE9174 v8::base::AddressSpaceReservation::AddressSpaceReservation+337700
+ 5: 00007FF652AF810C v8::internal::StrongRootAllocatorBase::deallocate_impl+16604
+ 6: 00007FF652AF794B v8::internal::StrongRootAllocatorBase::deallocate_impl+14619
+ 7: 00007FF653F7DAED v8::base::UnsignedDivisionByConstant<unsigned __int64>+2791421
+ 8: 00007FF652AE2F30 v8::base::AddressSpaceReservation::AddressSpaceReservation+312544
+ 9: 00007FF652AFD7BA X509_STORE_set_cleanup+5098
+10: 00007FF652B09C56 uv_timer_set_repeat+20694
+11: 00007FF6526DCD47 v8::String::Utf8Value::~Utf8Value+143495
+12: 0000020CB7E7733A
+ ELIFECYCLE  Command failed with exit code 134.

@@ -863,6 +863,7 @@ func GetSlotOrder(ctx context.Context, db *gorm.DB, sessionID, slotID string) (*
 // version is used for optimistic locking; a mismatch returns ErrConflict.
 var (
 	ErrConflict             = errors.New("version conflict")
+	ErrInvalidOrder         = errors.New("order must be a complete permutation")
 	ErrRevisionRequired     = errors.New("revision required")
 	ErrDraftVersionConflict = errors.New("draft version conflict")
 	ErrDraftVersionRequired = errors.New("draft version required")
@@ -895,10 +896,14 @@ func ReorderSlot(ctx context.Context, db *gorm.DB,
 		for _, v := range currentListIndexes {
 			currentSet[v] = struct{}{}
 		}
+		if len(newListIndexOrder) != len(currentListIndexes) {
+			return ErrInvalidOrder
+		}
 		for _, li := range newListIndexOrder {
 			if _, ok := currentSet[li]; !ok {
-				return errors.New("order list contains hidden or unknown list_index")
+				return ErrInvalidOrder
 			}
+			delete(currentSet, li)
 		}
 		newList, _ := json.Marshal(newListIndexOrder)
 		return tx.Model(&orm.WorkflowSlotOrder{}).
@@ -1816,4 +1821,28 @@ func appendSessionStateEvent(tx *gorm.DB, session orm.WorkflowSession, eventType
 	return tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
 		ContractVersion: "workflow.v1", EventType: eventType, EntityID: session.ID,
 		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: time.Now().UTC()})
+}
+
+// SlotOrderChange identifies a list by stable item IDs, never visual page numbers.
+type SlotOrderChange struct {
+	SlotID  string `json:"slot_id"`
+	Order   []int  `json:"order"`
+	Version int    `json:"version"`
+}
+
+// ReorderSlots commits linked composite lists together, or rolls all of them back.
+func ReorderSlots(ctx context.Context, db *gorm.DB, sessionID string, changes []SlotOrderChange) error {
+	changes = append([]SlotOrderChange(nil), changes...)
+	sort.Slice(changes, func(i, j int) bool { return changes[i].SlotID < changes[j].SlotID })
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i, change := range changes {
+			if change.SlotID == "" || (i > 0 && changes[i-1].SlotID == change.SlotID) {
+				return ErrInvalidOrder
+			}
+			if err := ReorderSlot(ctx, tx, sessionID, change.SlotID, change.Order, change.Version); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

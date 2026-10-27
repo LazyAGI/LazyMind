@@ -265,26 +265,22 @@ def _commit_surviving_spills(
     plans: list[tuple[int, ToolCompactionPlan]],
     *,
     workspace: Optional[str],
-) -> list[dict[str, Any]]:
+) -> None:
     if not workspace:
-        return entries
-    committed = clone_entries(entries)
+        return
     by_content = {
         plan.content: plan
         for _index, plan in plans
         if plan.compactor == 'spill'
     }
-    for entry in committed:
-        plan = by_content.get(entry['message'].get('content'))
+    for entry in entries:
+        content = entry['message'].get('content')
+        if not isinstance(content, str):
+            continue
+        plan = by_content.get(content)
         if plan is None:
             continue
-        written = commit_tool_result_plan(plan, workspace=workspace)
-        if written.compactor == 'noop':
-            entry['message']['content'] = written.content
-            entry['kind'] = 'full'
-        else:
-            entry['message']['content'] = written.content
-    return committed
+        commit_tool_result_plan(plan, workspace=workspace)
 
 
 def _detail(index: int, entry: dict[str, Any], plan: ToolCompactionPlan) -> ToolPruneDetail:
@@ -400,6 +396,7 @@ def make_history_compactor(
     llm: Any = None,
     summarizer: Optional[Callable[[str, str], str]] = None,
     workspace: Optional[str] = None,
+    budget_provider: Optional[Callable[[], ContextBudget]] = None,
 ) -> Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
     """Build a mid-turn history projector compatible with ReactAgent/FunctionCall."""
 
@@ -408,279 +405,280 @@ def make_history_compactor(
         keep_recent if keep_recent is not None else int(config['agentic_keep_full_turns'])
     )
 
-    def _compact(
-        history: list[dict[str, Any]],
-        keep_full_turns: Optional[int] = None,
-        **kwargs: Any,
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        current_round_messages = list(kwargs.get('current_round_messages') or [])
-        combined = list(history) + current_round_messages
-        prior_len = len(history)
-        if not config['context_compression_enabled']:
-            return list(history), list(current_round_messages)
-        effective_keep = max(
-            0,
-            int(default_keep if keep_full_turns is None else keep_full_turns),
+    def _compact(history, keep_full_turns=None, **kwargs):
+        return _compact_history(
+            history, keep_full_turns, budget=budget_provider() if budget_provider is not None else budget,
+            default_keep=default_keep, trigger=trigger,
+            llm=llm, summarizer=summarizer,
+            workspace=workspace, **kwargs,
         )
-        non_history_tokens = estimate_non_history_tokens(
-            kwargs.get('prefix') or {},
-            kwargs.get('current_input'),
-        )
-        non_history_tokens += max(
-            0,
-            int(kwargs.get('reserved_runtime_context_tokens') or 0),
-        )
-        state, _rebuilt = reconcile_projection(combined, kwargs.get('runtime_state'))
-        stable = state['entries']
-        before_total = non_history_tokens + projection_tokens(stable)
-
-        mandatory_plans: list[tuple[int, ToolCompactionPlan]] = []
-        for index, entry in enumerate(stable):
-            message = entry['message']
-            if (
-                entry.get('kind') == 'full'
-                and not entry.get('model_visible')
-                and message.get('role') == 'tool'
-                and is_oversized_tool_result(message.get('content'))
-            ):
-                plan = _plan_entry(entry, workspace=workspace)
-                if plan.compactor != 'noop' and plan.after_tokens < plan.before_tokens:
-                    mandatory_plans.append((index, plan))
-
-        if mandatory_plans:
-            candidate = _apply_entry_plans(stable, mandatory_plans)
-            candidate = _commit_surviving_spills(
-                candidate,
-                mandatory_plans,
-                workspace=workspace,
-            )
-            after_total = non_history_tokens + projection_tokens(candidate)
-            metrics = transition_metrics(
-                stable,
-                candidate,
-                before_total=before_total,
-                after_total=after_total,
-            )
-            event = PruneEvent(
-                trigger=trigger,
-                decision=(
-                    'spilled'
-                    if any(plan.compactor == 'spill' for _, plan in mandatory_plans)
-                    else 'pruned'
-                ),
-                reason='first_exposure_oversized_result',
-                estimated_before=before_total,
-                estimated_after=after_total,
-                reclaimed_tokens=metrics['reclaimed_tokens'],
-                budget=budget,
-                usage_ratio_before=usage_ratio(before_total, budget),
-                usage_ratio_after=usage_ratio(after_total, budget),
-                details=tuple(
-                    _detail(index, stable[index], plan)
-                    for index, plan in mandatory_plans
-                ),
-            )
-            event = _event_with_metrics(event, metrics)
-            _log_event(event)
-            commit_entries(state, candidate)
-            stable = state['entries']
-            before_total = after_total
-
-        pressure_at = max(
-            budget.trigger_tokens,
-            int(state.get('next_pressure_tokens') or 0),
-        )
-        if (
-            before_total < pressure_at
-            and before_total <= budget.effective_input_budget
-        ):
-            mark_projection_sent(state)
-            return split_projection(state['entries'], prior_len)
-
-        tool_indices = _entry_tool_indices(stable)
-        protected = set(tool_indices[-effective_keep:]) if effective_keep else set()
-        planned: list[tuple[int, ToolCompactionPlan]] = []
-        for index in tool_indices:
-            entry = stable[index]
-            content = entry['message'].get('content')
-            if entry.get('kind') != 'full' or not entry.get('model_visible'):
-                continue
-            if index in protected and not is_oversized_tool_result(content):
-                continue
-            plan = _plan_entry(entry, workspace=workspace)
-            if plan.compactor != 'noop' and plan.after_tokens < plan.before_tokens:
-                planned.append((index, plan))
-
-        accepted_entries: Optional[list[dict[str, Any]]] = None
-        accepted_plans: list[tuple[int, ToolCompactionPlan]] = []
-        accepted_metrics: Optional[dict[str, Any]] = None
-        accepted_reason = ''
-        temporary_entries = stable
-        for count in range(1, len(planned) + 1):
-            batch = planned[:count]
-            candidate = _apply_entry_plans(stable, batch)
-            after_total = non_history_tokens + projection_tokens(candidate)
-            metrics = transition_metrics(
-                stable,
-                candidate,
-                before_total=before_total,
-                after_total=after_total,
-            )
-            accepted, reason = _candidate_acceptance(
-                metrics,
-                budget=budget,
-                remaining_rounds=kwargs.get('remaining_rounds'),
-            )
-            _record_candidate(
-                stage='prune',
-                decision='accepted' if accepted else 'rejected',
-                reason=reason,
-                metrics=metrics,
-                changed_entries=count,
-            )
-            temporary_entries = candidate
-            if accepted:
-                accepted_entries = candidate
-                accepted_plans = batch
-                accepted_metrics = metrics
-                accepted_reason = reason
-                break
-
-        if (
-            accepted_entries is None
-            and planned
-            and before_total > budget.effective_input_budget
-        ):
-            best_effort = _apply_entry_plans(stable, planned)
-            best_effort_total = non_history_tokens + projection_tokens(best_effort)
-            if best_effort_total < before_total:
-                accepted_entries = best_effort
-                accepted_plans = planned
-                accepted_metrics = transition_metrics(
-                    stable,
-                    best_effort,
-                    before_total=before_total,
-                    after_total=best_effort_total,
-                )
-                accepted_reason = 'context_safety_best_effort'
-                _record_candidate(
-                    stage='prune',
-                    decision='accepted',
-                    reason=accepted_reason,
-                    metrics=accepted_metrics,
-                    changed_entries=len(planned),
-                )
-
-        summary_input = accepted_entries or temporary_entries
-        summary_input_total = non_history_tokens + projection_tokens(summary_input)
-        summary_succeeded = False
-        final_entries: Optional[list[dict[str, Any]]] = None
-        if (
-            config['context_summary_compression_enabled']
-            and summary_input_total >= budget.trigger_tokens
-        ):
-            from .summarizer import apply_summary_compression
-            from .summary_range import select_summary_range
-
-            summary_history = [entry['message'] for entry in summary_input]
-            selected = select_summary_range(
-                summary_history,
-                effective_input_budget=budget.effective_input_budget,
-                keep_recent_ratio=float(config['context_summary_keep_recent_ratio']),
-                min_recent_user_turns=int(config['context_summary_min_recent_user_turns']),
-            )
-            if selected is not None:
-                summarized, summary_event = apply_summary_compression(
-                    summary_history,
-                    budget=budget,
-                    trigger=trigger,
-                    llm=llm,
-                    summarizer=summarizer,
-                    force=True,
-                    estimated_total_tokens=summary_input_total,
-                )
-                if summary_event.decision == 'summarized':
-                    replaced = summary_input[selected.replace_start:selected.replace_end]
-                    summary_entry = {
-                        'source_start': min(entry['source_start'] for entry in replaced),
-                        'source_end': max(entry['source_end'] for entry in replaced),
-                        'message': summarized[selected.replace_start],
-                        'kind': 'summary',
-                        'model_visible': False,
-                    }
-                    final_entries = (
-                        clone_entries(summary_input[:selected.replace_start])
-                        + [summary_entry]
-                        + clone_entries(summary_input[selected.replace_end:])
-                    )
-                    final_total = non_history_tokens + projection_tokens(final_entries)
-                    metrics = transition_metrics(
-                        stable,
-                        final_entries,
-                        before_total=before_total,
-                        after_total=final_total,
-                    )
-                    _record_candidate(
-                        stage='summary',
-                        decision='accepted',
-                        reason=summary_event.reason,
-                        metrics=metrics,
-                        changed_entries=metrics['changed_messages'],
-                    )
-                    summary_succeeded = True
-
-        if summary_succeeded and final_entries is not None:
-            final_entries = _commit_surviving_spills(
-                final_entries,
-                planned,
-                workspace=workspace,
-            )
-            final_total = non_history_tokens + projection_tokens(final_entries)
-            commit_entries(
-                state,
-                final_entries,
-                next_pressure_tokens=_pressure_rearm_tokens(final_total, budget),
-            )
-        elif accepted_entries is not None and accepted_metrics is not None:
-            accepted_entries = _commit_surviving_spills(
-                accepted_entries,
-                accepted_plans,
-                workspace=workspace,
-            )
-            accepted_total = non_history_tokens + projection_tokens(accepted_entries)
-            committed_metrics = transition_metrics(
-                stable,
-                accepted_entries,
-                before_total=before_total,
-                after_total=accepted_total,
-            )
-            event = PruneEvent(
-                trigger=trigger,
-                decision=(
-                    'spilled'
-                    if any(plan.compactor == 'spill' for _, plan in accepted_plans)
-                    else 'pruned'
-                ),
-                reason=accepted_reason,
-                estimated_before=before_total,
-                estimated_after=accepted_total,
-                reclaimed_tokens=committed_metrics['reclaimed_tokens'],
-                budget=budget,
-                usage_ratio_before=usage_ratio(before_total, budget),
-                usage_ratio_after=usage_ratio(accepted_total, budget),
-                details=tuple(
-                    _detail(index, stable[index], plan)
-                    for index, plan in accepted_plans
-                ),
-            )
-            _log_event(_event_with_metrics(event, committed_metrics))
-            commit_entries(
-                state,
-                accepted_entries,
-                next_pressure_tokens=_pressure_rearm_tokens(accepted_total, budget),
-            )
-
-        mark_projection_sent(state)
-        return split_projection(state['entries'], prior_len)
 
     return _compact
+
+
+def _finish_projection(state, prior_len):
+    mark_projection_sent(state)
+    return split_projection(state['entries'], prior_len)
+
+
+def _compact_history(history, keep_full_turns=None, *, budget, default_keep, trigger,
+                     llm=None, summarizer=None, workspace=None, **kwargs):
+    current_round_messages = list(kwargs.get('current_round_messages') or [])
+    combined = list(history) + current_round_messages
+    prior_len = len(history)
+    if not config['context_compression_enabled']:
+        return list(history), list(current_round_messages)
+    effective_keep = max(
+        0,
+        int(default_keep if keep_full_turns is None else keep_full_turns),
+    )
+    non_history_tokens = estimate_non_history_tokens(kwargs.get('prefix') or {}, kwargs.get('current_input'))
+    non_history_tokens += max(
+        0,
+        int(kwargs.get('reserved_runtime_context_tokens') or 0),
+    )
+    state, _rebuilt = reconcile_projection(combined, kwargs.get('runtime_state'))
+    stable = state['entries']
+    before_total = non_history_tokens + projection_tokens(stable)
+
+    mandatory_plans: list[tuple[int, ToolCompactionPlan]] = []
+    for index, entry in enumerate(stable):
+        message = entry['message']
+        if (
+            entry.get('kind') == 'full'
+            and not entry.get('model_visible')
+            and message.get('role') == 'tool'
+            and is_oversized_tool_result(message.get('content'))
+        ):
+            plan = _plan_entry(entry, workspace=workspace)
+            if plan.compactor != 'noop' and plan.after_tokens < plan.before_tokens:
+                mandatory_plans.append((index, plan))
+
+    if mandatory_plans:
+        candidate = _apply_entry_plans(stable, mandatory_plans)
+        _commit_surviving_spills(
+            candidate,
+            mandatory_plans,
+            workspace=workspace,
+        )
+        after_total = non_history_tokens + projection_tokens(candidate)
+        metrics = transition_metrics(
+            stable,
+            candidate,
+            before_total=before_total,
+            after_total=after_total,
+        )
+        event = PruneEvent(
+            trigger=trigger,
+            decision=(
+                'spilled'
+                if any(plan.compactor == 'spill' for _, plan in mandatory_plans)
+                else 'pruned'
+            ),
+            reason='first_exposure_oversized_result',
+            estimated_before=before_total,
+            estimated_after=after_total,
+            reclaimed_tokens=metrics['reclaimed_tokens'],
+            budget=budget,
+            usage_ratio_before=usage_ratio(before_total, budget),
+            usage_ratio_after=usage_ratio(after_total, budget),
+            details=tuple(
+                _detail(index, stable[index], plan)
+                for index, plan in mandatory_plans
+            ),
+        )
+        event = _event_with_metrics(event, metrics)
+        _log_event(event)
+        commit_entries(state, candidate)
+        stable = state['entries']
+        before_total = after_total
+
+    pressure_at = max(
+        budget.trigger_tokens,
+        int(state.get('next_pressure_tokens') or 0),
+    )
+    if (
+        before_total < pressure_at
+        and before_total <= budget.effective_input_budget
+    ):
+        return _finish_projection(state, prior_len)
+
+    tool_indices = _entry_tool_indices(stable)
+    protected = set(tool_indices[-effective_keep:]) if effective_keep else set()
+    planned: list[tuple[int, ToolCompactionPlan]] = []
+    for index in tool_indices:
+        entry = stable[index]
+        content = entry['message'].get('content')
+        if entry.get('kind') != 'full' or not entry.get('model_visible'):
+            continue
+        if index in protected and not is_oversized_tool_result(content):
+            continue
+        plan = _plan_entry(entry, workspace=workspace)
+        if plan.compactor != 'noop' and plan.after_tokens < plan.before_tokens:
+            planned.append((index, plan))
+
+    accepted_entries: Optional[list[dict[str, Any]]] = None
+    accepted_plans: list[tuple[int, ToolCompactionPlan]] = []
+    accepted_metrics: Optional[dict[str, Any]] = None
+    accepted_reason = ''
+    temporary_entries = stable
+    for count in range(1, len(planned) + 1):
+        batch = planned[:count]
+        candidate = _apply_entry_plans(stable, batch)
+        after_total = non_history_tokens + projection_tokens(candidate)
+        metrics = transition_metrics(
+            stable,
+            candidate,
+            before_total=before_total,
+            after_total=after_total,
+        )
+        accepted, reason = _candidate_acceptance(
+            metrics,
+            budget=budget,
+            remaining_rounds=kwargs.get('remaining_rounds'),
+        )
+        _record_candidate(
+            stage='prune',
+            decision='accepted' if accepted else 'rejected',
+            reason=reason,
+            metrics=metrics,
+            changed_entries=count,
+        )
+        temporary_entries = candidate
+        if accepted:
+            accepted_entries = candidate
+            accepted_plans = batch
+            accepted_metrics = metrics
+            accepted_reason = reason
+            break
+
+    if (
+        accepted_entries is None
+        and planned
+        and before_total > budget.effective_input_budget
+    ):
+        best_effort = _apply_entry_plans(stable, planned)
+        best_effort_total = non_history_tokens + projection_tokens(best_effort)
+        if best_effort_total < before_total:
+            accepted_entries = best_effort
+            accepted_plans = planned
+            accepted_metrics = transition_metrics(
+                stable,
+                best_effort,
+                before_total=before_total,
+                after_total=best_effort_total,
+            )
+            accepted_reason = 'context_safety_best_effort'
+            _record_candidate(
+                stage='prune',
+                decision='accepted',
+                reason=accepted_reason,
+                metrics=accepted_metrics,
+                changed_entries=len(planned),
+            )
+
+    summary_input = accepted_entries or temporary_entries
+    summary_input_total = non_history_tokens + projection_tokens(summary_input)
+    summary_succeeded = False
+    final_entries: Optional[list[dict[str, Any]]] = None
+    if (
+        config['context_summary_compression_enabled']
+        and summary_input_total >= budget.trigger_tokens
+    ):
+        from .summarizer import apply_summary_compression
+        from .summary_range import select_summary_range
+
+        summary_history = [entry['message'] for entry in summary_input]
+        selected = select_summary_range(
+            summary_history,
+            effective_input_budget=budget.effective_input_budget,
+            keep_recent_ratio=float(config['context_summary_keep_recent_ratio']),
+            min_recent_user_turns=int(config['context_summary_min_recent_user_turns']),
+        )
+        if selected is not None:
+            summarized, summary_event = apply_summary_compression(
+                summary_history,
+                budget=budget,
+                trigger=trigger,
+                llm=llm,
+                summarizer=summarizer,
+                force=True,
+                estimated_total_tokens=summary_input_total,
+                selected=selected,
+            )
+            if summary_event.decision == 'summarized':
+                replaced = summary_input[selected.replace_start:selected.replace_end]
+                summary_entry = {
+                    'source_start': min(entry['source_start'] for entry in replaced),
+                    'source_end': max(entry['source_end'] for entry in replaced),
+                    'message': summarized[selected.replace_start],
+                    'kind': 'summary',
+                    'model_visible': False,
+                }
+                final_entries = (
+                    clone_entries(summary_input[:selected.replace_start])
+                    + [summary_entry]
+                    + clone_entries(summary_input[selected.replace_end:])
+                )
+                final_total = non_history_tokens + projection_tokens(final_entries)
+                metrics = transition_metrics(
+                    stable,
+                    final_entries,
+                    before_total=before_total,
+                    after_total=final_total,
+                )
+                _record_candidate(
+                    stage='summary',
+                    decision='accepted',
+                    reason=summary_event.reason,
+                    metrics=metrics,
+                    changed_entries=metrics['changed_messages'],
+                )
+                summary_succeeded = True
+
+    if summary_succeeded and final_entries is not None:
+        _commit_surviving_spills(
+            final_entries,
+            planned,
+            workspace=workspace,
+        )
+        final_total = non_history_tokens + projection_tokens(final_entries)
+        commit_entries(
+            state,
+            final_entries,
+            next_pressure_tokens=_pressure_rearm_tokens(final_total, budget),
+        )
+    elif accepted_entries is not None and accepted_metrics is not None:
+        _commit_surviving_spills(
+            accepted_entries,
+            accepted_plans,
+            workspace=workspace,
+        )
+        accepted_total = accepted_metrics['estimated_after']
+        event = PruneEvent(
+            trigger=trigger,
+            decision=(
+                'spilled'
+                if any(plan.compactor == 'spill' for _, plan in accepted_plans)
+                else 'pruned'
+            ),
+            reason=accepted_reason,
+            estimated_before=before_total,
+            estimated_after=accepted_total,
+            reclaimed_tokens=accepted_metrics['reclaimed_tokens'],
+            budget=budget,
+            usage_ratio_before=usage_ratio(before_total, budget),
+            usage_ratio_after=usage_ratio(accepted_total, budget),
+            details=tuple(
+                _detail(index, stable[index], plan)
+                for index, plan in accepted_plans
+            ),
+        )
+        _log_event(_event_with_metrics(event, accepted_metrics))
+        commit_entries(
+            state,
+            accepted_entries,
+            next_pressure_tokens=_pressure_rearm_tokens(accepted_total, budget),
+        )
+
+    return _finish_projection(state, prior_len)

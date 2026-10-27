@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
+import { localFontFaces, localFontCss } from '../lib/local_fonts.mjs';
 
 import JSZip from 'jszip';
 
@@ -77,6 +79,30 @@ function makeTestTtf() {
   });
   return ttf;
 }
+
+test('local font catalog verifies content hashes and shares fonts with browser CSS', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ppt-local-fonts-'));
+  const previous = process.env.LAZYMIND_FONT_DIR;
+  process.env.LAZYMIND_FONT_DIR = root;
+  try {
+    const data = makeTestTtf();
+    const id = createHash('sha256').update(data).digest('hex');
+    await writeFile(path.join(root, `${id}.ttf`), data);
+    await writeFile(path.join(root, `${id}.json`), JSON.stringify({
+      id, file: `${id}.ttf`, family: 'Test Web Font', aliases: ['Test Web Font'],
+      weight: 400, style: 'normal', embeddable: true,
+    }));
+    assert.equal((await localFontFaces()).length, 1);
+    assert.match(await localFontCss('font-family: Test Web Font'), /@font-face.*data:font\/ttf;base64,/);
+    assert.equal(await localFontCss('font-family: Arial'), '');
+    await writeFile(path.join(root, `${id}.ttf`), 'corrupted');
+    assert.deepEqual(await localFontFaces(), []);
+  } finally {
+    if (previous === undefined) delete process.env.LAZYMIND_FONT_DIR;
+    else process.env.LAZYMIND_FONT_DIR = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('Google Fonts CSS parser selects direct TrueType font sources', () => {
   const faces = parseGoogleFontsCss(`

@@ -100,15 +100,7 @@ def clone_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def render_projection(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    rendered: list[dict[str, Any]] = []
-    for entry in entries:
-        message = entry['message']
-        model_message = model_facing_message(message)
-        if len(model_message) == len(message):
-            rendered.append(copy.deepcopy(message))
-        else:
-            rendered.append(copy.deepcopy(model_message))
-    return rendered
+    return [copy.deepcopy(model_facing_message(entry['message'])) for entry in entries]
 
 
 def split_projection(

@@ -1,0 +1,6 @@
+Full run included React/Ant Design test warnings. Summary retained below; original local log: /tmp/report-retest-1026/frontend.log
+
+ Test Files  2 passed (2)
+      Tests  53 passed (53)
+   Start at  17:23:50
+   Duration  5.09s (transform 126ms, setup 143ms, collect 1.99s, tests 2.42s, environment 1.00s, prepare 83ms)
