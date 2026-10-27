@@ -377,11 +377,15 @@ def _verify_claims(claims, allowed):
     import time
     from lazymind.chat.engine.subagent.context import require_context
     checks = {}
-    # Library parsers may provide a whole paper as one block without page numbers.
-    # Keep complete blocks, but verify each paper separately to bound the request.
-    for paper_id in dict.fromkeys(item['paper_id'] for item in evidence):
-        selected = [item for item in evidence if item['paper_id'] == paper_id and item['positions']]
-        selected_sources = {key: page for key, page in sources.items() if key.startswith(paper_id + ':')}
+    # Relationship claims need both papers. Share the complete evidence set when
+    # bounded; large library blocks still require independent per-paper batches.
+    if sum(len(page['text']) for page in sources.values()) <= 128000:
+        batches = [([item for item in evidence if item['positions']], sources)]
+    else:
+        batches = [([item for item in evidence if item['paper_id'] == paper_id and item['positions']],
+                    {key: page for key, page in sources.items() if key.startswith(paper_id + ':')})
+                   for paper_id in dict.fromkeys(item['paper_id'] for item in evidence)]
+    for selected, selected_sources in batches:
         deadline = getattr(require_context(), 'execution_deadline', None)
         remaining = deadline - time.monotonic() if deadline is not None else 90
         if not selected or sum(len(page['text']) for page in selected_sources.values()) > 128000 or remaining < 15:

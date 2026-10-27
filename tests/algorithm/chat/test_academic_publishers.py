@@ -201,6 +201,7 @@ def test_missing_or_budget_exhausted_evidence_publishes_an_uncertain_partial_res
     assert relation['claims'][0]['status'] == 'uncertain'
     assert relation['claims'][0]['positions'] == []
     assert '25%' not in relation['input']['papers'][0]['key_contribution']
+
     ctx._local_artifacts.clear()
     monkeypatch.setattr(module, '_expansion_id', lambda: 'exp')
     monkeypatch.setattr(module, '_call', lambda *args: {'status': 'budget_exhausted'})
@@ -212,3 +213,26 @@ def test_missing_or_budget_exhausted_evidence_publishes_an_uncertain_partial_res
     assert relation['claims'][0]['status'] == 'uncertain'
     assert relation['claims'][0]['positions'] == []
     assert '25%' not in relation['input']['papers'][0]['key_contribution']
+
+
+def test_relationship_verification_shares_both_papers_when_evidence_fits(publisher, monkeypatch):
+    module, _, _, _ = publisher
+    from lazymind.chat.service import llm_task
+    monkeypatch.setattr(module, '_expansion_id', lambda: 'exp')
+    monkeypatch.setattr(module, '_call', lambda method, path, payload: {
+        'status': 'ready', 'positions': [0], 'pages': [{'page': 1, 'text': payload['paper_id']}],
+        'content_hash': 'hash-' + payload['paper_id'],
+    })
+    requests = []
+
+    def verify(request, usage):
+        requests.append(request)
+        assert set(request.input.data['source_pages_by_paper_and_position']) == {'a:0', 'b:0'}
+        return {'checks': [{'index': row['index'], 'status': 'supported', 'reason': 'both sources support it'}
+                           for row in request.input.data['evidence']]}, None, None
+
+    monkeypatch.setattr(llm_task, '_run_task', verify)
+    claims = [{'paper_id': paper, 'field': 'seed_relation', 'statement': 'Relationship across both papers.', 'positions': [0]}
+              for paper in ['a', 'b']]
+    assert all(row['status'] == 'supported' for row in module._verify_claims(claims, ['a', 'b']))
+    assert len(requests) == 1
