@@ -54,7 +54,7 @@
 
 结果包含所有被冻结会话。unassigned_reason 区分 no_matching_group、below_min_group_size、no_messages、no_task_intent、summary_failed、unsupported_conversation；summary_failed 附带 summary_error_code。skip_reason 仅用于应用冲突。free_count 包含全部未归组会话，skipped_count 为应用冲突计数。手动归组后隐藏原未归组原因；未进入分析的冻结会话也可纠错与撤回。没有分析输入且存在摘要失败时，任务以 summary_preparation_failed 失败并解锁，允许重新整理以重新冻结会话和准备摘要；有可用摘要时继续分组并保留其他会话的失败原因。仅因空会话、无任务意图或不支持类型而没有分析输入时，仍生成完整结果并解锁。旧任务 preparation_json 为空时仍使用旧快照和结果语义。
 
-摘要解析会剥离模型返回内容开头的完整 `<think>…</think>` 思考段，再严格校验 JSON 和摘要字段；不修补不完整 JSON，也不删除标题或摘要正文中的同名标签。
+摘要和分组的共用模型调用通过 formatter 仅提取响应的 `content`，避免将独立的 `reasoning_content` 拼入正文。摘要继续严格校验 JSON 和摘要字段，不修补不完整 JSON；该调用链不清洗 `<think>` 标签，保留正文中的原始内容。
 
 ## 流式执行与取消确认
 

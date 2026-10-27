@@ -8,7 +8,12 @@ import pytest
 
 
 @pytest.fixture
-def provider():
+def provider_message():
+    return {}
+
+
+@pytest.fixture
+def provider(provider_message):
     calls = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -35,12 +40,17 @@ def provider():
                     inputs = json.loads(text.rsplit('开场资料：\n', 1)[1])
                     result = {'items': [{'id': item['id'], **result} for item in inputs]}
             content = json.dumps(result, ensure_ascii=False)
+            message = {'role': 'assistant', 'content': content, **provider_message}
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream' if body.get('stream') else 'application/json')
             self.end_headers()
             try:
                 if body.get('stream'):
-                    for delta, finish in [({'role': 'assistant'}, None), ({'content': content}, None), ({}, 'stop')]:
+                    deltas = [({'role': 'assistant'}, None)]
+                    if message.get('reasoning_content'):
+                        deltas.append(({'reasoning_content': message['reasoning_content']}, None))
+                    deltas.extend([({'content': message['content']}, None), ({}, 'stop')])
+                    for delta, finish in deltas:
                         event = {
                             'id': 'fixture', 'object': 'chat.completion.chunk', 'created': int(time.time()),
                             'model': body.get('model'),
@@ -52,7 +62,7 @@ def provider():
                 else:
                     self.wfile.write(json.dumps({
                         'id': 'fixture', 'object': 'chat.completion', 'model': body.get('model'),
-                        'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': content},
+                        'choices': [{'index': 0, 'message': message,
                                      'finish_reason': 'stop'}],
                         'usage': {'prompt_tokens': 10, 'completion_tokens': 10, 'total_tokens': 20},
                     }).encode())
