@@ -1,0 +1,11 @@
+{
+  "started_at": "2026-10-27T03:58:44.360374+00:00",
+  "elapsed_seconds": 0.01,
+  "method": "PATCH",
+  "path": "/workflow-sessions/ce3dbc32-0454-5928-aac0-e3a349666882/slots/competitive_brief/items/idx/-1",
+  "http_status": 500,
+  "response": {
+    "code": 2001437,
+    "message": "patch item failed"
+  }
+}

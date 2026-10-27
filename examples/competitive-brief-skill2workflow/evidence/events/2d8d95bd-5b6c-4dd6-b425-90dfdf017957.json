@@ -1,0 +1,56 @@
+{
+  "task_id": "2d8d95bd-5b6c-4dd6-b425-90dfdf017957",
+  "note": "Only tool events/errors; internal reasoning and model text omitted. Arguments hashed; artifact contents recorded separately. Event counts are not model calls.",
+  "tool_calls": {
+    "save_artifacts": 2
+  },
+  "events": [
+    {
+      "event_index": 110,
+      "type": "tool_calls",
+      "id": "call_00_UpP2abYBAHMq7ugSxAVK4791",
+      "name": "save_artifacts",
+      "arguments_sha256": "c5a81a88ae72badadc5d4d4f432d8897eb827daf3ebad69a7ffdc859d528a457",
+      "arguments_bytes": 48699
+    },
+    {
+      "event_index": 111,
+      "type": "tool_results",
+      "task_id": "2d8d95bd-5b6c-4dd6-b425-90dfdf017957",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": false, \"value\": \"Invalid arguments: arguments must be valid JSON.\"}",
+          "tool_call_id": "call_00_UpP2abYBAHMq7ugSxAVK4791"
+        }
+      ]
+    },
+    {
+      "event_index": 131,
+      "type": "tool_calls",
+      "id": "call_00_hbrHn3qrWzvoTn9qMVtE5961",
+      "name": "save_artifacts",
+      "arguments_sha256": "9a0bd0f8852ed1053b3fde7f3d34edcb1d5d8732dea4c68627224193cf6818d1",
+      "arguments_bytes": 45920
+    },
+    {
+      "event_index": 132,
+      "type": "tool_results",
+      "task_id": "2d8d95bd-5b6c-4dd6-b425-90dfdf017957",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"saved_count\": 1, \"results\": [{\"status\": \"ok\", \"key\": \"positioning_analysis\", \"message\": \"Artifact 'positioning_analysis' saved.\", \"path\": \"[LOCAL_PATH_REDACTED]\"}]}}",
+          "tool_call_id": "call_00_hbrHn3qrWzvoTn9qMVtE5961"
+        }
+      ]
+    },
+    {
+      "event_index": 169,
+      "type": "error",
+      "task_id": "2d8d95bd-5b6c-4dd6-b425-90dfdf017957",
+      "status": "failed",
+      "message": "The SubAgent did not deliver the requested Markdown PM brief. The saved artifact is a JSON positioning analysis using the generic comparative-analysis schema, not the seven-section competitive brief. The final message is only a condensed Chinese summary and lacks the required Executive Summary and Competitor Profiles sections, a dedicated product/features table, an explicit pricing table with per-plan USD annual seat subtotals and arithmetic for 20 users, and full per-claim URL/card citations plus scope/limitations. Some relevant Linear/Asana analysis, opportunities, threats, recommended actions, confidence flags, and a human-review-pending note are present, but the requested deliverable is incomplete and in the wrong format."
+    }
+  ]
+}

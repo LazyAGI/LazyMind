@@ -1,0 +1,48 @@
+{
+  "started_at": "2026-10-27T03:44:12.778364+00:00",
+  "elapsed_seconds": 0.007,
+  "method": "GET",
+  "path": "/workflow-sessions/ce3dbc32-0454-5928-aac0-e3a349666882/steps",
+  "http_status": 200,
+  "response": {
+    "code": 0,
+    "message": "ok",
+    "data": {
+      "steps": [
+        {
+          "id": "pss_c4f49da973be43ecb899975c9eea4253",
+          "session_id": "ce3dbc32-0454-5928-aac0-e3a349666882",
+          "step_id": "collect_request",
+          "attempt": 1,
+          "task_id": "17e9b8ba-335f-40f3-b1ac-f924397cb308",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-27T03:38:37Z",
+          "updated_at": "2026-10-27T03:38:49Z"
+        },
+        {
+          "id": "pss_3e99cafc171042829ba7c8a3f431eda4",
+          "session_id": "ce3dbc32-0454-5928-aac0-e3a349666882",
+          "step_id": "research_competitors",
+          "attempt": 1,
+          "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+          "status": "succeeded",
+          "validity": "effective",
+          "created_at": "2026-10-27T03:38:53Z",
+          "updated_at": "2026-10-27T03:44:04Z"
+        },
+        {
+          "id": "pss_7300ba7322fe457c8933cace402b3f8f",
+          "session_id": "ce3dbc32-0454-5928-aac0-e3a349666882",
+          "step_id": "analyze_positioning",
+          "attempt": 1,
+          "task_id": "2d8d95bd-5b6c-4dd6-b425-90dfdf017957",
+          "status": "running",
+          "validity": "effective",
+          "created_at": "2026-10-27T03:44:06Z",
+          "updated_at": "2026-10-27T03:44:07Z"
+        }
+      ]
+    }
+  }
+}

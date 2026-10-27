@@ -1,0 +1,91 @@
+{
+  "started_at": "2026-10-27T03:42:24.157589+00:00",
+  "elapsed_seconds": 0.011,
+  "method": "GET",
+  "path": "/workflow-sessions/ce3dbc32-0454-5928-aac0-e3a349666882/slots",
+  "http_status": 200,
+  "response": {
+    "code": 0,
+    "message": "ok",
+    "data": {
+      "slots": [
+        {
+          "artifact_id": "791ee6ed-7dbb-4bf7-b284-00771b826270",
+          "slot_id": "competitor_research",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "competitor_research",
+          "created_at": "2026-10-27T03:42:09.35818Z",
+          "content_type": "json",
+          "artifact_value": {
+            "data": {
+              "research_date": "2026-10-27",
+              "mode": "model_knowledge",
+              "confidence": "medium",
+              "freshness_caveat": "Offline replay of seven official-source cards (S1-S7) collected 2026-10-27; no live web access in this run.",
+              "competitors": []
+            }
+          },
+          "draft_version": 1,
+          "change_source": "host",
+          "step_id": "research_competitors",
+          "revision_count": 1,
+          "version_number": 1
+        },
+        {
+          "artifact_id": "f500fa08-bc92-41e3-ad3b-449f3a5eee9b",
+          "slot_id": "request_brief",
+          "revision": 1,
+          "sort_order": 0,
+          "selected": true,
+          "slot": "request_brief",
+          "created_at": "2026-10-27T03:38:44.783203Z",
+          "content_type": "json",
+          "artifact_value": {
+            "data": {
+              "competitors": [
+                "Linear",
+                "Asana"
+              ],
+              "company_context": null,
+              "focus_areas": [
+                "messaging and positioning",
+                "product and feature comparison",
+                "content and thought leadership",
+                "recent announcements",
+                "pricing and packaging",
+                "market presence"
+              ],
+              "deliverables": [
+                "competitive brief"
+              ],
+              "assumptions": [
+                "No company positioning or 'Your Company' input was supplied; the 'Your Company' column is omitted and company_context is null rather than invented.",
+                "Competitors are exactly the two named in the request, in first-mention order: Linear, then Asana. No additional vendors were added to the competitive set.",
+                "No explicit focus areas were stated, so all six default focus areas are applied: messaging and positioning; product and feature comparison; content and thought leadership; recent announcements; pricing and packaging; market presence.",
+                "The only requested output is the competitive brief (Markdown, PM-ready). No sales battlecard, messaging drafts or monitoring plan were requested; none will be produced.",
+                "Evidence mode is OFFLINE REPLAY of seven fixed official-source fact cards (S1-S7) collected 2026-10-27. No live web search, no third-party review sites, no SEO/traffic databases, no social listening, no hands-on product trial.",
+                "The 20-person software team is the buyer/use-case frame (product-development coordination plus cross-functional launch planning); no budget ceiling, current tooling, or procurement constraints were supplied.",
+                "No user attachments were available; the brief relies solely on the supplied fact cards.",
+                "Pricing scope is restricted to USD per user per month billed annually, with plan names and billing basis preserved, plus an arithmetic 20-seat annual subtotal per paid plan (taxes, discounts and usage charges excluded). Plan features are not treated as equivalent across vendors.",
+                "Unknown prices and allowances stay [UNKNOWN]: Linear Enterprise, Asana Enterprise, AI credits/overage charges and actual AI usage costs are not quantified in the corpus.",
+                "Unavailable metrics (independent reviews, analyst reports, traffic/SEO rankings, social engagement, win/loss data, market share, funding, headcount, sentiment, ROI) will be marked [UNKNOWN] and never estimated or inferred as zero.",
+                "External work is bounded: nothing will be sent, purchased, signed into, or drawn from private files; the brief will carry a visible 'Human review: pending' boundary and will not claim human approval.",
+                "No reliable system clock was available in this runtime; the corpus retrieval date 2026-10-27 is used as research_date and this is stated in the brief's source header."
+              ],
+              "research_date": "2026-10-27"
+            },
+            "caption": "Normalized research request: Linear vs Asana competitive brief (20-person software team)"
+          },
+          "draft_version": 1,
+          "caption": "Normalized research request: Linear vs Asana competitive brief (20-person software team)",
+          "change_source": "host",
+          "step_id": "collect_request",
+          "revision_count": 1,
+          "version_number": 1
+        }
+      ]
+    }
+  }
+}

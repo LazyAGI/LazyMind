@@ -1,0 +1,51 @@
+{
+  "started_at": "2026-10-27T03:37:53.232789+00:00",
+  "elapsed_seconds": 0.006,
+  "method": "GET",
+  "path": "/external-agent/workflow-tasks/b31a6e76-7c18-4843-961c-df85334389ef",
+  "http_status": 200,
+  "response": {
+    "code": 0,
+    "message": "ok",
+    "data": {
+      "agent_type": "codex",
+      "completed_at": null,
+      "contract_version": "external-workflow.v1",
+      "conversation_id": "",
+      "created_at": "2026-10-27T03:36:43.400563Z",
+      "display_status": "running",
+      "done": false,
+      "draft_id": "3e2c8534-6685-4f30-a291-81649795e7cc",
+      "error_code": "",
+      "error_message": "",
+      "external_conversation_id": "",
+      "external_thread_id": "",
+      "idempotency_key": "competitive-brief-20261027-tree-v1",
+      "lazymind_url": "/memory-management/workflows/3e2c8534-6685-4f30-a291-81649795e7cc",
+      "next_action": "poll",
+      "poll_after_seconds": 3,
+      "progress": null,
+      "result_artifacts": [],
+      "result_ready": false,
+      "result_summary": {},
+      "session_id": "",
+      "skill": {
+        "install_status": "installed",
+        "name": "competitive-brief-public-trial-20261027",
+        "resolved": true,
+        "source_key": "sha256:a964349d30138303a807ccc147dcc753af237b26257252da93b52f957811020c",
+        "source_type": "url",
+        "url": "https://github.com/anthropics/knowledge-work-plugins/tree/c75fda00ff0e41c8ee331ae312c8a07f1967653b/marketing/skills/competitive-brief"
+      },
+      "stage": "generate",
+      "stage_label": "生成 Workflow",
+      "status": "converting",
+      "suggestion": "",
+      "task_id": "b31a6e76-7c18-4843-961c-df85334389ef",
+      "updated_at": "2026-10-27T03:37:52.93333Z",
+      "workflow_id": "",
+      "workflow_ref": "",
+      "workflow_revision_id": ""
+    }
+  }
+}

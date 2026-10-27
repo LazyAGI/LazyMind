@@ -1,0 +1,729 @@
+{
+  "started_at": "2026-10-27T03:56:26.039950+00:00",
+  "elapsed_seconds": 8.037,
+  "method": "POST",
+  "path": "/workflow-sessions/ce3dbc32-0454-5928-aac0-e3a349666882:advance-step",
+  "http_status": 200,
+  "response": {
+    "contract_version": "workflow.v1",
+    "request_id": "server-generated",
+    "ok": true,
+    "result": {
+      "accepted": true,
+      "attempt": 1,
+      "attempt_results": [
+        {
+          "task_id": "96506dfd-8dc3-40f6-aa76-b2696ef4cee0",
+          "step_id": "build_battlecard",
+          "status": "succeeded",
+          "attempt": 1
+        }
+      ],
+      "attempt_status": "succeeded",
+      "attempt_statuses": {
+        "96506dfd-8dc3-40f6-aa76-b2696ef4cee0": "succeeded"
+      },
+      "automatic_attempts": 1,
+      "automatic_retry_remaining": 2,
+      "command_id": "competitive-brief-20261027-battlecard-noop-1",
+      "continue_steps": null,
+      "execution_mode": "synchronous",
+      "max_automatic_attempts": 3,
+      "projection": {
+        "blocked": null,
+        "bypassed": null,
+        "completed": true,
+        "continue": null,
+        "current": null,
+        "edges": [
+          {
+            "from": "synthesize_brief",
+            "state": "active",
+            "to": "build_battlecard"
+          },
+          {
+            "from": "__start__",
+            "state": "active",
+            "to": "collect_request"
+          },
+          {
+            "from": "analyze_positioning",
+            "state": "active",
+            "to": "synthesize_brief"
+          },
+          {
+            "from": "build_battlecard",
+            "state": "active",
+            "to": "__end__"
+          },
+          {
+            "from": "collect_request",
+            "state": "active",
+            "to": "research_competitors"
+          },
+          {
+            "from": "research_competitors",
+            "state": "active",
+            "to": "analyze_positioning"
+          }
+        ],
+        "end_reached": true,
+        "nodes": {
+          "analyze_positioning": {
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            },
+            "execution": "succeeded",
+            "id": "analyze_positioning",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "requires_approval": false,
+            "validity": "effective"
+          },
+          "build_battlecard": {
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            },
+            "execution": "succeeded",
+            "id": "build_battlecard",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "requires_approval": false,
+            "validity": "effective"
+          },
+          "collect_request": {
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            },
+            "execution": "succeeded",
+            "id": "collect_request",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "requires_approval": false,
+            "validity": "effective"
+          },
+          "research_competitors": {
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            },
+            "execution": "succeeded",
+            "id": "research_competitors",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "requires_approval": false,
+            "validity": "effective"
+          },
+          "synthesize_brief": {
+            "branch": "active",
+            "evaluation": {
+              "satisfied": true
+            },
+            "execution": "succeeded",
+            "id": "synthesize_brief",
+            "reachability": "unreachable",
+            "readiness": "not_applicable",
+            "requires_approval": false,
+            "validity": "effective"
+          }
+        },
+        "past": [
+          "analyze_positioning",
+          "build_battlecard",
+          "collect_request",
+          "research_competitors",
+          "synthesize_brief"
+        ],
+        "pruned": null,
+        "reachable": null,
+        "ready": null,
+        "retryable": null,
+        "rewindable": [
+          "analyze_positioning",
+          "build_battlecard",
+          "collect_request",
+          "research_competitors",
+          "synthesize_brief"
+        ],
+        "stale": [
+          "analyze_positioning"
+        ]
+      },
+      "ready_steps": null,
+      "retryable_steps": null,
+      "rewindable_steps": [
+        "analyze_positioning",
+        "build_battlecard",
+        "collect_request",
+        "research_competitors",
+        "synthesize_brief"
+      ],
+      "session_id": "ce3dbc32-0454-5928-aac0-e3a349666882",
+      "state_version": 18,
+      "step_id": "build_battlecard",
+      "step_state": "pending",
+      "task_id": "96506dfd-8dc3-40f6-aa76-b2696ef4cee0",
+      "tasks": [
+        {
+          "step_id": "build_battlecard",
+          "step_state": "pending",
+          "task_id": "96506dfd-8dc3-40f6-aa76-b2696ef4cee0"
+        }
+      ],
+      "user_retry_available": true,
+      "workflow_state": {
+        "attempt_history": {
+          "analyze_positioning": [
+            {
+              "artifact_count": 1,
+              "attempt": 1,
+              "attempt_id": "pss_7300ba7322fe457c8933cace402b3f8f",
+              "duration_sec": 350.873429,
+              "started_at": "2026-10-27T03:44:06Z",
+              "status": "failed",
+              "task_id": "2d8d95bd-5b6c-4dd6-b425-90dfdf017957",
+              "updated_at": "2026-10-27T03:49:57.43392Z",
+              "validity": "stale"
+            },
+            {
+              "artifact_count": 1,
+              "attempt": 2,
+              "attempt_id": "pss_c3cb479726564204b4761e249232cc83",
+              "duration_sec": 97.849741,
+              "started_at": "2026-10-27T03:49:57Z",
+              "status": "succeeded",
+              "task_id": "24e2a9ac-9456-4bd1-984b-cc8aa7fd579d",
+              "updated_at": "2026-10-27T03:51:35.295328Z",
+              "validity": "effective"
+            }
+          ],
+          "build_battlecard": [
+            {
+              "artifact_count": 1,
+              "attempt": 1,
+              "attempt_id": "pss_961dba584da240b8be9a13a09f0f6454",
+              "duration_sec": 7.975572,
+              "started_at": "2026-10-27T03:56:26Z",
+              "status": "succeeded",
+              "task_id": "96506dfd-8dc3-40f6-aa76-b2696ef4cee0",
+              "updated_at": "2026-10-27T03:56:34.034513Z",
+              "validity": "effective"
+            }
+          ],
+          "collect_request": [
+            {
+              "artifact_count": 1,
+              "attempt": 1,
+              "attempt_id": "pss_c4f49da973be43ecb899975c9eea4253",
+              "duration_sec": 12.184632,
+              "started_at": "2026-10-27T03:38:37Z",
+              "status": "succeeded",
+              "task_id": "17e9b8ba-335f-40f3-b1ac-f924397cb308",
+              "updated_at": "2026-10-27T03:38:49.359721Z",
+              "validity": "effective"
+            }
+          ],
+          "research_competitors": [
+            {
+              "artifact_count": 2,
+              "attempt": 1,
+              "attempt_id": "pss_3e99cafc171042829ba7c8a3f431eda4",
+              "duration_sec": 311.118392,
+              "started_at": "2026-10-27T03:38:53Z",
+              "status": "succeeded",
+              "task_id": "5d8396f1-080b-4699-9054-f927cee2edcb",
+              "updated_at": "2026-10-27T03:44:04.416663Z",
+              "validity": "effective"
+            }
+          ],
+          "synthesize_brief": [
+            {
+              "artifact_count": 1,
+              "attempt": 1,
+              "attempt_id": "pss_660626024cf74534b94e58c05abbaa0d",
+              "duration_sec": 66.090432,
+              "started_at": "2026-10-27T03:53:58Z",
+              "status": "succeeded",
+              "task_id": "9027eae4-d01f-4c4f-994a-8ce03d4426aa",
+              "updated_at": "2026-10-27T03:55:04.344503Z",
+              "validity": "effective"
+            }
+          ]
+        },
+        "current_step_id": "",
+        "graph": {
+          "control_edges": [
+            {
+              "from": "synthesize_brief",
+              "id": "synthesize_brief->build_battlecard",
+              "to": "build_battlecard"
+            },
+            {
+              "from": "__start__",
+              "id": "__start__->collect_request",
+              "to": "collect_request"
+            },
+            {
+              "from": "analyze_positioning",
+              "id": "analyze_positioning->synthesize_brief",
+              "to": "synthesize_brief"
+            },
+            {
+              "from": "build_battlecard",
+              "id": "build_battlecard->__end__",
+              "to": "__end__"
+            },
+            {
+              "from": "collect_request",
+              "id": "collect_request->research_competitors",
+              "to": "research_competitors"
+            },
+            {
+              "from": "research_competitors",
+              "id": "research_competitors->analyze_positioning",
+              "to": "analyze_positioning"
+            }
+          ],
+          "graph_hash": "caacc8f3c658bacfde36f7c5fc3fd021dbcf96a933e86e49c951d31e1f9308a3",
+          "input_expressions": {},
+          "material_cardinalities": {
+            "battlecard": "single",
+            "company_context": "single",
+            "competitive_brief": "single",
+            "competitor_names": "list",
+            "competitor_research": "single",
+            "focus_areas": "single",
+            "positioning_analysis": "single",
+            "request_brief": "single"
+          },
+          "material_producers": {
+            "battlecard": {
+              "kind": "step",
+              "step_id": "build_battlecard"
+            },
+            "company_context": {
+              "kind": "external"
+            },
+            "competitive_brief": {
+              "kind": "step",
+              "step_id": "synthesize_brief"
+            },
+            "competitor_names": {
+              "kind": "external"
+            },
+            "competitor_research": {
+              "kind": "step",
+              "step_id": "research_competitors"
+            },
+            "focus_areas": {
+              "kind": "external"
+            },
+            "positioning_analysis": {
+              "kind": "step",
+              "step_id": "analyze_positioning"
+            },
+            "request_brief": {
+              "kind": "step",
+              "step_id": "collect_request"
+            }
+          },
+          "material_types": {
+            "battlecard": "text",
+            "company_context": "text",
+            "competitive_brief": "text",
+            "competitor_names": "text",
+            "competitor_research": "json",
+            "focus_areas": "text",
+            "positioning_analysis": "json",
+            "request_brief": "json"
+          },
+          "nodes": {
+            "analyze_positioning": {
+              "capabilities": [
+                "web_search"
+              ],
+              "id": "analyze_positioning",
+              "label": "Analyze positioning",
+              "legacy_tools": [
+                "web_search"
+              ],
+              "optional_inputs": [
+                {
+                  "material": "competitor_research"
+                },
+                {
+                  "material": "request_brief"
+                }
+              ],
+              "outputs": [
+                "positioning_analysis"
+              ],
+              "prompt": "Convert competitor_research into comparative analysis, scoped by request_brief.\n\n1. Messaging comparison matrix: one row per competitor with columns for primary tagline, target buyer, key differentiator, tone and voice, and core value proposition. Add a \"Your company\" column only when request_brief.company_context is present; otherwise note that no baseline was supplied.\n2. Value-proposition comparison per competitor: promise, evidence, mechanism, uniqueness.\n3. Narrative analysis per competitor: villain, hero, transformation, stakes.\n4. Messaging scores from 1 to 5 on clarity, differentiation, proof, consistency, and resonance, each with a one-line justification.\n5. Content-gap tables: topic coverage, content-format coverage, and format-based opportunities. Label every row as \"gap for us\", \"opportunity for them\", or \"parity\", based strictly on the collected evidence.\n6. Choose the two most decision-relevant positioning axes for the market implied by request_brief and justify the choice; describe each competitor's quadrant placement and name the underserved quadrant.\n7. Derive opportunities, threats, and three to five recommended actions split into quick wins and strategic moves.\n\nPreserve traceability: every claim must reference a competitor entry from competitor_research. Carry forward any low-confidence or unverified item and flag it explicitly. Do not introduce facts that are absent from competitor_research.\n\nReturn only one JSON object with keys: \"comparison_matrix\": [], \"value_proposition_comparison\": [], \"narrative_analysis\": [], \"messaging_scores\": [], \"content_gaps\": {\"topics\": [], \"formats\": [], \"opportunities\": []}, \"positioning_axes\": {\"axis_x\": \"\", \"axis_y\": \"\", \"rationale\": \"\", \"placements\": [], \"underserved_quadrant\": \"\"}, \"opportunities\": [], \"threats\": [], \"recommended_actions\": {\"quick_wins\": [], \"strategic_moves\": []}, \"confidence_flags\": [].\n\nWorkflow execution boundaries:\n- Treat explicitly provided user inputs and upstream artifacts as the required scope; do not truncate them because of default exploration limits.\n- Limit only extra exploration such as search, pagination, discovery, parameter probing, generated alternatives, and retries.\n- Stop as soon as the declared output has enough valid results for the requested target count or quality threshold.\n- Do not keep calling tools only to make the result more exhaustive after the target is satisfied.\n- If the budget is exhausted or some items fail, save the best available partial result with skipped items and failure reasons.\n- Before finishing this step, write every declared output artifact, even when the result is partial or empty.\n- Search budget: use at most 6 search calls. Try the strongest query first, then at most 2 additional query variants only if the target is not met.",
+              "required_outputs": [
+                "positioning_analysis"
+              ],
+              "route": "all"
+            },
+            "build_battlecard": {
+              "capabilities": [
+                "web_search"
+              ],
+              "id": "build_battlecard",
+              "label": "Build battlecard",
+              "legacy_tools": [
+                "web_search"
+              ],
+              "optional_inputs": [
+                {
+                  "material": "positioning_analysis"
+                },
+                {
+                  "material": "competitor_research"
+                },
+                {
+                  "material": "request_brief"
+                }
+              ],
+              "outputs": [
+                "battlecard"
+              ],
+              "prompt": "Produce the sales battlecard from positioning_analysis, competitor_research, and request_brief.\n\nWhen request_brief.deliverables mentions a battlecard or a similar sales-facing artifact, write a compact one-page card per competitor, or a single combined card when the request asks for a summary. Each card contains: a header with the competitor name and the last-updated date from request_brief.research_date; a quick overview; their pitch; their honest strengths; their weaknesses; our differentiators with proof; an objection-handling table with objection, response, and supporting evidence; landmines to set; landmines to defuse; win and loss themes; and a maintenance cadence recommendation. Build the \"our\" side only from request_brief.company_context, and mark it as a placeholder when that context is missing.\n\nWhen no battlecard was requested, still produce this slot exactly once: a short note stating that no battlecard was requested in this run, followed by a one-line offer to generate one from the same research. Never return an empty value.\n\nDo not invent win rates, pricing figures, or review quotes; write \"not tracked\" or \"not found\" instead.\n\nWorkflow execution boundaries:\n- Treat explicitly provided user inputs and upstream artifacts as the required scope; do not truncate them because of default exploration limits.\n- Limit only extra exploration such as search, pagination, discovery, parameter probing, generated alternatives, and retries.\n- Stop as soon as the declared output has enough valid results for the requested target count or quality threshold.\n- Do not keep calling tools only to make the result more exhaustive after the target is satisfied.\n- If the budget is exhausted or some items fail, save the best available partial result with skipped items and failure reasons.\n- Before finishing this step, write every declared output artifact, even when the result is partial or empty.\n- Search budget: use at most 6 search calls. Try the strongest query first, then at most 2 additional query variants only if the target is not met.\n- HTTP/API budget: use at most 12 extra HTTP calls. Fetch at most 2 pages per query or endpoint, and try at most 1 fallback parameter strategy before moving on.\n- Code/script budget: run commands at most 3 times and attempt at most 2 fixes. If still failing, save diagnostics instead of continuing to patch/run indefinitely.",
+              "required_outputs": [
+                "battlecard"
+              ],
+              "route": "all"
+            },
+            "collect_request": {
+              "capabilities": [
+                "web_search"
+              ],
+              "id": "collect_request",
+              "label": "Collect request",
+              "legacy_tools": [
+                "web_search"
+              ],
+              "optional_inputs": [
+                {
+                  "material": "competitor_names"
+                },
+                {
+                  "material": "company_context"
+                },
+                {
+                  "material": "focus_areas"
+                }
+              ],
+              "outputs": [
+                "request_brief"
+              ],
+              "prompt": "The caller's task is {{user_input}}. Structured text slots may also be present: competitor_names (list), company_context (optional), focus_areas (optional). Treat {{user_input}} as the authoritative request and the slots as structured supplements; when they disagree, follow {{user_input}}.\n\nBuild a normalized research request:\n1. Competitors: take the competitors named in {{user_input}} and in competitor_names, de-duplicate them, and keep them in first-mention order. If no competitor is named but the request describes a market segment or product category, use that category as the competitive set and record that assumption.\n2. Company context: capture what the caller sells, to whom, its positioning, and its differentiators whenever the request or company_context supplies them. Set it to null when nothing is supplied.\n3. Focus areas: use the focus areas stated in the request or in focus_areas. When none are given, default to all of: messaging and positioning, product and feature comparison, content and thought leadership, recent announcements, pricing and packaging, market presence.\n4. Deliverables: record which outputs the request asks for, such as a competitive brief, a sales battlecard, messaging drafts, or a monitoring plan. The competitive brief is always a deliverable.\n5. Record today's date as research_date in YYYY-MM-DD form.\n\nReturn only one JSON object with exactly these keys: {\"competitors\": [], \"company_context\": {} or null, \"focus_areas\": [], \"deliverables\": [], \"assumptions\": [], \"research_date\": \"YYYY-MM-DD\"}. Never ask the user a question and never block on missing optional data; record any gap in \"assumptions\" instead.\n\nWorkflow execution boundaries:\n- Treat explicitly provided user inputs and upstream artifacts as the required scope; do not truncate them because of default exploration limits.\n- Limit only extra exploration such as search, pagination, discovery, parameter probing, generated alternatives, and retries.\n- Stop as soon as the declared output has enough valid results for the requested target count or quality threshold.\n- Do not keep calling tools only to make the result more exhaustive after the target is satisfied.\n- If the budget is exhausted or some items fail, save the best available partial result with skipped items and failure reasons.\n- Before finishing this step, write every declared output artifact, even when the result is partial or empty.\n- Search budget: use at most 6 search calls. Try the strongest query first, then at most 2 additional query variants only if the target is not met.\n- Code/script budget: run commands at most 3 times and attempt at most 2 fixes. If still failing, save diagnostics instead of continuing to patch/run indefinitely.",
+              "required_outputs": [
+                "request_brief"
+              ],
+              "route": "all"
+            },
+            "research_competitors": {
+              "capabilities": [
+                "web_search"
+              ],
+              "id": "research_competitors",
+              "label": "Research competitors",
+              "legacy_tools": [
+                "web_search"
+              ],
+              "optional_inputs": [
+                {
+                  "material": "request_brief"
+                }
+              ],
+              "outputs": [
+                "competitor_research"
+              ],
+              "prompt": "Use request_brief as the scope. Research exactly the competitors listed in request_brief.competitors and prioritise request_brief.focus_areas. Derive any search keywords from those competitor names plus the focus areas; never reuse a fixed phrase list.\n\nTool policy: if a web search or page reading tool is exposed in this run, use it for public pages such as the homepage, pricing page, newsroom, blog, and documentation, and record only the URLs actually visited. If no such tool is exposed, do not pretend to search: produce findings from model knowledge, set mode to \"model_knowledge\" and confidence to \"low\", and state in freshness_caveat that no live sources were consulted and that details may be stale. Never fabricate sources, URLs, quotes, pricing numbers, review themes, or dates.\n\nFor each competitor capture: one-sentence positioning; target audience; size or stage signals; key developments in the last six months; primary tagline; core value proposition; three to five messaging themes; tone and voice; the problem it frames; product category; emphasised features; claimed differentiators; public pricing approach; blog cadence and topics; content formats; social and thought-leadership themes; SEO observations; strengths; weaknesses; recurring complaint themes from public reviews. Use \"not found\" for any field that could not be established.\n\nReturn only one JSON object: {\"research_date\": \"YYYY-MM-DD\", \"mode\": \"live\" or \"model_knowledge\", \"confidence\": \"high\" or \"medium\" or \"low\", \"freshness_caveat\": \"string\", \"competitors\": [{\"name\": \"string\", \"overview\": {}, \"messaging\": {}, \"positioning\": {}, \"content_strategy\": {}, \"strengths\": [], \"weaknesses\": [], \"recent_developments\": [], \"sources\": []}]}.\n\nWorkflow execution boundaries:\n- Treat explicitly provided user inputs and upstream artifacts as the required scope; do not truncate them because of default exploration limits.\n- Limit only extra exploration such as search, pagination, discovery, parameter probing, generated alternatives, and retries.\n- Stop as soon as the declared output has enough valid results for the requested target count or quality threshold.\n- Do not keep calling tools only to make the result more exhaustive after the target is satisfied.\n- If the budget is exhausted or some items fail, save the best available partial result with skipped items and failure reasons.\n- Before finishing this step, write every declared output artifact, even when the result is partial or empty.\n- Search budget: use at most 6 search calls. Try the strongest query first, then at most 2 additional query variants only if the target is not met.\n- HTTP/API budget: use at most 12 extra HTTP calls. Fetch at most 2 pages per query or endpoint, and try at most 1 fallback parameter strategy before moving on.\n- Retrieval budget: use at most 4 retrieval rounds with focused queries. Stop when enough evidence is available for the declared output.",
+              "required_outputs": [
+                "competitor_research"
+              ],
+              "route": "all"
+            },
+            "synthesize_brief": {
+              "capabilities": [
+                "web_search"
+              ],
+              "id": "synthesize_brief",
+              "label": "Synthesize brief",
+              "legacy_tools": [
+                "web_search"
+              ],
+              "optional_inputs": [
+                {
+                  "material": "positioning_analysis"
+                },
+                {
+                  "material": "competitor_research"
+                },
+                {
+                  "material": "request_brief"
+                }
+              ],
+              "outputs": [
+                "competitive_brief"
+              ],
+              "prompt": "Render the user-facing competitive brief in Markdown from positioning_analysis, competitor_research, and request_brief.\n\nOpen with the research date and the research mode taken from competitor_research. If confidence is low or sources are empty, add a one-line freshness and verification caveat instead of hiding the limitation.\n\nEmit these seven sections in this order, using headings and tables:\n1. Executive Summary - two to three sentences plus the single biggest opportunity and the single biggest threat.\n2. Competitor Profiles - company overview, messaging analysis, product and solution positioning, content strategy, strengths, weaknesses, one subsection per competitor.\n3. Messaging Comparison Matrix - reuse the matrix from positioning_analysis.\n4. Content Gap Analysis - topic coverage, format coverage, and opportunities.\n5. Opportunities.\n6. Threats.\n7. Recommended Actions - quick wins and strategic moves.\n\nRespect the caller's scope: when request_brief.focus_areas is narrower than the full framework, keep every section heading but compress out-of-scope sections to a short note rather than silently dropping structure. Never invent numbers, quotes, or sources; use \"not found\" or \"not tracked\" as appropriate. Close with two or three follow-up options adapted to this specific run.\n\nWorkflow execution boundaries:\n- Treat explicitly provided user inputs and upstream artifacts as the required scope; do not truncate them because of default exploration limits.\n- Limit only extra exploration such as search, pagination, discovery, parameter probing, generated alternatives, and retries.\n- Stop as soon as the declared output has enough valid results for the requested target count or quality threshold.\n- Do not keep calling tools only to make the result more exhaustive after the target is satisfied.\n- If the budget is exhausted or some items fail, save the best available partial result with skipped items and failure reasons.\n- Before finishing this step, write every declared output artifact, even when the result is partial or empty.\n- Search budget: use at most 6 search calls. Try the strongest query first, then at most 2 additional query variants only if the target is not met.",
+              "required_outputs": [
+                "competitive_brief"
+              ],
+              "route": "all"
+            }
+          },
+          "optional_inputs": {
+            "analyze_positioning": [
+              {
+                "material": "competitor_research"
+              },
+              {
+                "material": "request_brief"
+              }
+            ],
+            "build_battlecard": [
+              {
+                "material": "positioning_analysis"
+              },
+              {
+                "material": "competitor_research"
+              },
+              {
+                "material": "request_brief"
+              }
+            ],
+            "collect_request": [
+              {
+                "material": "competitor_names"
+              },
+              {
+                "material": "company_context"
+              },
+              {
+                "material": "focus_areas"
+              }
+            ],
+            "research_competitors": [
+              {
+                "material": "request_brief"
+              }
+            ],
+            "synthesize_brief": [
+              {
+                "material": "positioning_analysis"
+              },
+              {
+                "material": "competitor_research"
+              },
+              {
+                "material": "request_brief"
+              }
+            ]
+          },
+          "runtime": {},
+          "schema_version": "3",
+          "start_route": "all",
+          "static_order": [
+            "__start__",
+            "collect_request",
+            "research_competitors",
+            "analyze_positioning",
+            "synthesize_brief",
+            "build_battlecard",
+            "__end__"
+          ]
+        },
+        "graph_hash": "caacc8f3c658bacfde36f7c5fc3fd021dbcf96a933e86e49c951d31e1f9308a3",
+        "input_witnesses": {
+          "pss_3e99cafc171042829ba7c8a3f431eda4": [
+            {
+              "material_id": "request_brief",
+              "revision_id": "f500fa08-bc92-41e3-ad3b-449f3a5eee9b"
+            }
+          ],
+          "pss_660626024cf74534b94e58c05abbaa0d": [
+            {
+              "material_id": "positioning_analysis",
+              "revision_id": "746e68fe-c3d4-4f8a-9443-1aee1b7f74bd"
+            },
+            {
+              "material_id": "competitor_research",
+              "revision_id": "5be6072d-ce64-48b9-b5a6-b343c61e938f"
+            },
+            {
+              "material_id": "request_brief",
+              "revision_id": "f500fa08-bc92-41e3-ad3b-449f3a5eee9b"
+            }
+          ],
+          "pss_7300ba7322fe457c8933cace402b3f8f": [
+            {
+              "material_id": "competitor_research",
+              "revision_id": "5be6072d-ce64-48b9-b5a6-b343c61e938f"
+            },
+            {
+              "material_id": "request_brief",
+              "revision_id": "f500fa08-bc92-41e3-ad3b-449f3a5eee9b"
+            }
+          ],
+          "pss_961dba584da240b8be9a13a09f0f6454": [
+            {
+              "material_id": "positioning_analysis",
+              "revision_id": "746e68fe-c3d4-4f8a-9443-1aee1b7f74bd"
+            },
+            {
+              "material_id": "competitor_research",
+              "revision_id": "5be6072d-ce64-48b9-b5a6-b343c61e938f"
+            },
+            {
+              "material_id": "request_brief",
+              "revision_id": "f500fa08-bc92-41e3-ad3b-449f3a5eee9b"
+            }
+          ],
+          "pss_c3cb479726564204b4761e249232cc83": [
+            {
+              "material_id": "competitor_research",
+              "revision_id": "5be6072d-ce64-48b9-b5a6-b343c61e938f"
+            },
+            {
+              "material_id": "request_brief",
+              "revision_id": "f500fa08-bc92-41e3-ad3b-449f3a5eee9b"
+            }
+          ]
+        },
+        "projection": {
+          "blocked": null,
+          "bypassed": null,
+          "completed": true,
+          "continue": null,
+          "current": null,
+          "edges": [
+            {
+              "from": "synthesize_brief",
+              "state": "active",
+              "to": "build_battlecard"
+            },
+            {
+              "from": "__start__",
+              "state": "active",
+              "to": "collect_request"
+            },
+            {
+              "from": "analyze_positioning",
+              "state": "active",
+              "to": "synthesize_brief"
+            },
+            {
+              "from": "build_battlecard",
+              "state": "active",
+              "to": "__end__"
+            },
+            {
+              "from": "collect_request",
+              "state": "active",
+              "to": "research_competitors"
+            },
+            {
+              "from": "research_competitors",
+              "state": "active",
+              "to": "analyze_positioning"
+            }
+          ],
+          "end_reached": true,
+          "nodes": {
+            "analyze_positioning": {
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              },
+              "execution": "succeeded",
+              "id": "analyze_positioning",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "requires_approval": false,
+              "validity": "effective"
+            },
+            "build_battlecard": {
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              },
+              "execution": "succeeded",
+              "id": "build_battlecard",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "requires_approval": false,
+              "validity": "effective"
+            },
+            "collect_request": {
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              },
+              "execution": "succeeded",
+              "id": "collect_request",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "requires_approval": false,
+              "validity": "effective"
+            },
+            "research_competitors": {
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              },
+              "execution": "succeeded",
+              "id": "research_competitors",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "requires_approval": false,
+              "validity": "effective"
+            },
+            "synthesize_brief": {
+              "branch": "active",
+              "evaluation": {
+                "satisfied": true
+              },
+              "execution": "succeeded",
+              "id": "synthesize_brief",
+              "reachability": "unreachable",
+              "readiness": "not_applicable",
+              "requires_approval": false,
+              "validity": "effective"
+            }
+          },
+          "past": [
+            "analyze_positioning",
+            "build_battlecard",
+            "collect_request",
+            "research_competitors",
+            "synthesize_brief"
+          ],
+          "pruned": null,
+          "reachable": null,
+          "ready": null,
+          "retryable": null,
+          "rewindable": [
+            "analyze_positioning",
+            "build_battlecard",
+            "collect_request",
+            "research_competitors",
+            "synthesize_brief"
+          ],
+          "stale": [
+            "analyze_positioning"
+          ]
+        },
+        "schema_version": "3",
+        "session_id": "ce3dbc32-0454-5928-aac0-e3a349666882",
+        "state_version": 20,
+        "status": "completed"
+      }
+    }
+  }
+}

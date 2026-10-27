@@ -1,0 +1,17 @@
+{
+  "started_at": "2026-10-27T03:58:11.016714+00:00",
+  "elapsed_seconds": 0.009,
+  "method": "PATCH",
+  "path": "/workflow-artifacts/0325ab17-89d3-4383-b100-e6ed3a7270ad",
+  "http_status": 503,
+  "response": {
+    "contract_version": "workflow.v1",
+    "request_id": "server-generated",
+    "ok": false,
+    "error": {
+      "code": "ARTIFACT_PATCH_FAILED",
+      "message": "artifact patch failed",
+      "retryable": true
+    }
+  }
+}

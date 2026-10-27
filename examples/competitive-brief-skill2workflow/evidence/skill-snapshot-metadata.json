@@ -1,0 +1,19 @@
+{
+  "skill_id": "c4413015-1b14-4656-9166-a90318ffa267",
+  "name": "competitive-brief",
+  "revision_id": "3d28b649-1d99-4232-8872-2b0c02469a57",
+  "revision_no": 1,
+  "tree_hash": "1e4b35f76bce88ba103b9ed2a0486c166372ea11730e3608dfa740a1eb77f508",
+  "files": [
+    {
+      "path": "SKILL.md",
+      "bytes": 13150,
+      "sha256": "c1e5442facbc3206ac6a77392bef009fe9aff4ba7c2678e2f4118be2f6be82b3"
+    },
+    {
+      "path": "scripts/run.py",
+      "bytes": 21,
+      "sha256": "00b931df4f38f2fc9c4c6fa79eb731e6621995037606f475d4163165df94f761"
+    }
+  ]
+}
