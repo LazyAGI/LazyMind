@@ -72,7 +72,7 @@ func normalizeJSON(raw json.RawMessage, fallback string) json.RawMessage {
 func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubAgentTask, error) {
 	now := time.Now().UTC()
 	var task *orm.SubAgentTask
-	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := taskTransaction(ctx, db, func(tx *gorm.DB) error {
 		if err := lockConversationSeq(tx, in.ConversationID); err != nil {
 			return err
 		}
