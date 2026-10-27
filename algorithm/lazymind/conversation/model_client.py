@@ -126,6 +126,8 @@ def call_structured(request: Any, prompt: str,
     try:
         raw = call_model(request, prompt, response_format={'type': 'json_object'},
                          stream_output=False, default_timeout=60, max_retries=1)
+        if isinstance(raw, str):
+            raw = _strip_leading_think_blocks(raw)
         # Strict tasks leave retries to the caller and never repair incomplete JSON.
         output = schema.model_validate_json(raw).model_dump()
     except ConversationCallError as exc:
@@ -149,8 +151,18 @@ def json_object(raw: Any) -> dict[str, Any]:
     return parsed
 
 
+def _strip_leading_think_blocks(text: str) -> str:
+    text = text.lstrip()
+    while text.startswith('<think>'):
+        _, closing, remainder = text.partition('</think>')
+        if not closing:
+            break
+        text = remainder.lstrip()
+    return text
+
+
 def _parse_json(text: str) -> Any:
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.S).strip()
+    text = _strip_leading_think_blocks(text).strip()
     fenced = re.search(r'```(?:json)?\s*(\{.*\})\s*```', text, re.S)
     if fenced:
         text = fenced.group(1)
