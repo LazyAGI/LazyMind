@@ -205,6 +205,10 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     status: "configured",
   },
   {
+    key: "openalex", name: "OpenAlex", description: "", summary: "", category: "academic",
+    fields: ["apiKey"], logo: <SearchOutlined />, logoUrl: "https://www.google.com/s2/favicons?domain=openalex.org&sz=96", tone: "green", status: "missing",
+  },
+  {
     key: "sciverse",
     name: "Sciverse",
     description: "",
@@ -463,47 +467,15 @@ async function fetchExternalProviders(keyword: string, signal: AbortSignal) {
   );
   const providers = unwrapModelProviderData<{ providers?: ApiExternalProvider[] }>(response.data).providers || [];
 
-  const shouldLoadSciverse =
-    !normalizedKeyword ||
-    normalizeProviderName("Sciverse").includes(normalizeProviderName(normalizedKeyword));
-  if (!shouldLoadSciverse) {
-    return providers;
-  }
-
-  let sciverseProvider: ApiExternalProvider | undefined;
+  const names = ['sciverse', 'openalex'];
+  if (normalizedKeyword && !names.some(name => name.includes(normalizeProviderName(normalizedKeyword)))) return providers;
   try {
-    const sciverseResponse = await modelProvidersApi.apiCoreModelProvidersGet(
-      {
-        category: "datasource",
-        keyword: "Sciverse",
-      },
-      { signal },
-    );
-    const datasourceProviders =
-      unwrapModelProviderData<{ providers?: ApiExternalProvider[] }>(sciverseResponse.data).providers || [];
-    sciverseProvider = datasourceProviders.find(
-      (provider) => normalizeProviderName(provider.name) === "sciverse",
-    );
-  } catch (error) {
-    if (
-      signal.aborted ||
-      (error && typeof error === "object" && "name" in error && error.name === "AbortError")
-    ) {
-      throw error;
-    }
-    return providers;
-  }
+    const result = await modelProvidersApi.apiCoreModelProvidersGet({ category: 'datasource', keyword: normalizedKeyword || undefined }, { signal });
+    const sources = unwrapModelProviderData<{ providers?: ApiExternalProvider[] }>(result.data).providers || [];
+    const existing = new Set(providers.map(provider => normalizeProviderName(provider.name)));
+    return [...providers, ...sources.filter(provider => names.includes(normalizeProviderName(provider.name)) && !existing.has(normalizeProviderName(provider.name)))];
+  } catch (error) { if (signal.aborted) throw error; return providers; }
 
-  if (!sciverseProvider) {
-    return providers;
-  }
-
-  const existingProviderNames = new Set(providers.map((provider) => normalizeProviderName(provider.name)));
-  if (existingProviderNames.has("sciverse")) {
-    return providers;
-  }
-
-  return [...providers, sciverseProvider];
 }
 
 async function listProviderGroups(serviceKey: string) {

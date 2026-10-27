@@ -1,50 +1,63 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Space } from 'antd';
+import { isAxiosError } from 'axios';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { axiosInstance, BASE_URL } from '@/components/request';
 import { getChatConversationPath, CHAT_CONVERSATION_LIST_REFRESH_EVENT } from '@/modules/chat/constants/chat';
-interface Context {
-    kind: string;
-    expansion_id?: string;
-    dataset_id?: string;
-    status?: string;
-    version: number;
-    next_conversation_id?: string;
-    source_conversation_id?: string;
-    source_available?: boolean;
-    ready_count?: number;
-    paper_count?: number;
-}
+import type { AcademicChatSummary } from '@/api/generated/core-client';
 export default function AcademicChatBanner({ conversation }: {
     conversation: string;
 }) {
     const { t } = useTranslation();
     const navigate = useNavigate();
     const [params] = useSearchParams();
-    const [context, setContext] = useState<Context>();
+    const [context, setContext] = useState<AcademicChatSummary>();
     const auto = params.get('paper_auto_review') === '1';
     useEffect(() => {
         if (!conversation)
             return;
         let active = true;
+        let pending = false;
+        let timer: number | undefined;
+        const schedule = () => {
+            window.clearTimeout(timer);
+            timer = window.setTimeout(() => void refresh(), 3000);
+        };
         const refresh = async () => {
+            if (!active || pending)
+                return;
+            window.clearTimeout(timer);
+            pending = true;
             try {
-                const res = await axiosInstance.get(`${BASE_URL}/api/core/academic/chat-context`, { params: { conversation_id: conversation }, silentError: true } as never);
-                if (active)
-                    setContext(res.data.data || res.data);
+                const res = await axiosInstance.get(`${BASE_URL}/api/core/academic/chat-context`, { params: { conversation_id: conversation, view: 'summary' }, silentError: true } as never);
+                if (!active)
+                    return;
+                const next: AcademicChatSummary = res.data.data || res.data;
+                setContext(next);
+                if (next.kind === 'expansion' && !next.next_conversation_id && (
+                    !['completed', 'failed', 'canceled'].includes(next.status || '') || auto && next.status === 'completed'
+                ))
+                    schedule();
             }
-            catch {
+            catch (error) {
+                if (active && !(isAxiosError(error) && [403, 404].includes(error.response?.status || 0)))
+                    schedule();
+            }
+            finally {
+                pending = false;
             }
         };
+        const onFocus = () => void refresh();
         setContext(undefined);
         void refresh();
-        const timer = window.setInterval(() => void refresh(), 3000);
+        window.addEventListener('focus', onFocus);
         return () => {
             active = false;
-            window.clearInterval(timer);
+            window.clearTimeout(timer);
+            window.removeEventListener('focus', onFocus);
         };
-    }, [conversation]);
+    }, [conversation, auto]);
     useEffect(() => {
         if (auto && context?.next_conversation_id) {
             window.dispatchEvent(new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT));

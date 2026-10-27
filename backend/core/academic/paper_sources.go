@@ -15,10 +15,10 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
 
@@ -27,19 +27,28 @@ var errUnregisteredExpansionPaper = errors.New("expansion paper is not a saved s
 // A source is frozen by the server, never supplied by the model. DatasetID is
 // the expansion's boundary even when the actual bytes come from the Internet.
 type paperSource struct {
-	Paper      PaperRef `json:"paper"`
-	DatasetID  string   `json:"dataset_id"`
-	DocumentID string   `json:"document_id,omitempty"`
-	Hash       string   `json:"hash,omitempty"`
-	Revision   int64    `json:"revision,omitempty"`
-	IsSeed     bool     `json:"is_seed"`
+	Deadline   *time.Time          `json:"deadline,omitempty"`
+	Paper      PaperRef            `json:"paper"`
+	DatasetID  string              `json:"dataset_id"`
+	DocumentID string              `json:"document_id,omitempty"`
+	Hash       string              `json:"hash,omitempty"`
+	Revision   int64               `json:"revision,omitempty"`
+	IsSeed     bool                `json:"is_seed"`
+	Candidates []FulltextCandidate `json:"candidates,omitempty"`
 }
 
 type paperDiscovery struct {
-	SessionID string     `json:"session_id"`
-	Query     string     `json:"query"`
-	CreatedAt time.Time  `json:"created_at"`
-	Papers    []PaperRef `json:"papers"`
+	PreparationRevision int64                          `json:"preparation_revision,omitempty"`
+	CacheKey            string                         `json:"cache_key,omitempty"`
+	Sources             []searchOutcome                `json:"sources,omitempty"`
+	Leads               []discoveryLead                `json:"leads,omitempty"`
+	Candidates          map[string][]FulltextCandidate `json:"candidates,omitempty"`
+	Mode                string                         `json:"mode,omitempty"`
+	PaperID             string                         `json:"paper_id,omitempty"`
+	SessionID           string                         `json:"session_id"`
+	Query               string                         `json:"query"`
+	CreatedAt           time.Time                      `json:"created_at"`
+	Papers              []PaperRef                     `json:"papers"`
 }
 
 func (s paperSource) key() string {
@@ -118,7 +127,11 @@ func expansionSource(db *gorm.DB, record orm.AcademicExpansion, paperID string) 
 			if paper.PaperID != paperID {
 				continue
 			}
-			source := paperSource{Paper: paper, DatasetID: record.DatasetID}
+			copies := []FulltextCandidate{}
+			for _, discovery := range discoveries {
+				copies = append(copies, discovery.Candidates[paperID]...)
+			}
+			source := paperSource{Paper: paper, DatasetID: record.DatasetID, Candidates: copies}
 			return matchingLibrarySource(db, source)
 		}
 	}
@@ -171,11 +184,7 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req struct {
-		ExpansionID string `json:"expansion_id"`
-		Query       string `json:"query"`
-		MaxResults  int    `json:"max_results"`
-	}
+	var req paperSearchRequest
 	if !parseJSON(r, &req) {
 		replyError(w, 400, "INVALID_REQUEST", "invalid search")
 		return
@@ -184,34 +193,100 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.PreparationRevision != nil && (record.PreparationRevision != *req.PreparationRevision || record.Status != "preparing") {
+		replyError(w, 409, "VERSION_CHANGED", "preparation attempt is no longer current")
+		return
+	}
+
 	if req.MaxResults == 0 {
 		req.MaxResults = 10
 	}
-	papers, err := arxivsource.NewClient().Search(r.Context(), strings.TrimSpace(req.Query), req.MaxResults)
-	if err != nil {
-		replyArxivImportError(w, err)
+	if req.MaxResults < 1 || req.MaxResults > 20 || len(req.Query) > 2000 {
+		replyError(w, 400, "INVALID_REQUEST", "max_results must be 1..20 and query bounded")
 		return
 	}
+	if req.Mode == "" {
+		req.Mode = "keyword"
+	}
+	if req.Mode != "keyword" && req.Mode != "references" && req.Mode != "citations" {
+		replyError(w, 400, "INVALID_REQUEST", "unsupported search mode")
+		return
+	}
+	if req.Mode == "keyword" && strings.TrimSpace(req.Query) == "" {
+		replyError(w, 400, "INVALID_REQUEST", "query is required")
+		return
+	}
+	if len(req.Sources) == 0 {
+		if req.Mode != "keyword" {
+			req.Sources = []string{"openalex"}
+		} else {
+			req.Sources = []string{"openalex", "arxiv"}
+			config, e := modelconfig.LoadAcademicSearchToolConfig(r.Context(), store.DB(), user)
+			if e == nil && config["sciverse"] != nil {
+				req.Sources = append(req.Sources, "sciverse")
+			}
+		}
+	}
+	seenSources := map[string]bool{}
+	for _, source := range req.Sources {
+		if seenSources[source] || (source != "openalex" && source != "arxiv" && source != "sciverse" && source != "web") {
+			replyError(w, 400, "INVALID_REQUEST", "unsupported or repeated source")
+			return
+		}
+		seenSources[source] = true
+	}
+	cacheKey := sourceHash(map[string]any{"query": req.Query, "mode": req.Mode, "paper_id": req.PaperID, "sources": req.Sources, "limit": req.MaxResults, "cursor": req.Cursor, "version": record.Version, "preparation_revision": record.PreparationRevision})
+	var previous []paperDiscovery
+	_ = json.Unmarshal(record.DiscoveryJSON, &previous)
+	for _, saved := range previous {
+		if saved.CacheKey != cacheKey {
+			continue
+		}
+		reusable := true
+		for _, outcome := range saved.Sources {
+			if outcome.Status != "ok" && outcome.Status != "empty" && outcome.Status != "missing_configuration" && outcome.Status != "authentication_failed" && outcome.Status != "quota_exhausted" {
+				reusable = false
+			}
+		}
+		if reusable {
+			common.ReplyJSON(w, map[string]any{"papers": saved.Papers, "leads": saved.Leads, "sources": saved.Sources, "cache_hit": true, "mock": false})
+			return
+		}
+	}
+	papers, leads, outcomes := discoverPapers(r.Context(), user, record, req)
 	refs := make([]PaperRef, 0, len(papers))
-	err = store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL", record.ID, user).Take(&record).Error; err != nil {
 			return err
 		}
 		if record.DiscoveryMode != "external" {
 			return errors.New("unsupported expansion discovery mode")
 		}
+		if req.PreparationRevision != nil && (record.PreparationRevision != *req.PreparationRevision || record.Status != "preparing") {
+			return errors.New("preparation attempt is no longer current")
+		}
 		var searches []paperDiscovery
 		if err := json.Unmarshal(record.DiscoveryJSON, &searches); err != nil {
 			return err
 		}
+		candidateMap := map[string][]FulltextCandidate{}
+		seen := map[string]bool{}
 		for _, metadata := range papers {
-			work, _, err := findOrCreateWork(r.Context(), tx, arxivWorkInput(metadata))
+			work, _, err := findOrCreateWork(r.Context(), tx, metadata.Work)
+			if errors.Is(err, errConflictingPaperIdentifiers) {
+				leads = append(leads, discoveryLead{metadata.Work.Title, metadata.PaperURL, "强标识冲突，需核对后才能归并"})
+				continue
+			}
 			if err != nil {
 				return err
 			}
 			ref := paperRef(work)
-			ref.Title, ref.Authors, ref.Abstract, ref.Year, ref.Venue = metadata.Title, metadata.Authors, &metadata.Abstract, metadata.Year, metadata.Venue
-			ref.SourceVersion, ref.SourceProvider = metadata.Version, "arxiv"
+			ref.SourceVersion, ref.SourceProvider = metadata.Version, metadata.Work.Provider
+			ref.PaperURL = metadata.PaperURL
+			if len(metadata.Candidates) > 0 {
+				ref.PDFURL = metadata.Candidates[0].URL
+			}
+			candidateMap[work.ID] = append(candidateMap[work.ID], metadata.Candidates...)
 			pinPaperURLs(&ref)
 			// One task pins one revision per paper across continued rounds.
 			for _, old := range searches {
@@ -221,18 +296,21 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			refs = append(refs, ref)
+			if !seen[ref.PaperID] {
+				refs = append(refs, ref)
+				seen[ref.PaperID] = true
+			}
 		}
 		var session orm.WorkflowSession
 		_ = tx.Where("conversation_id=?", record.ConversationID).Order("created_at DESC").Take(&session).Error
-		searches = append(searches, paperDiscovery{SessionID: session.ID, Query: req.Query, CreatedAt: time.Now().UTC(), Papers: refs})
+		searches = append(searches, paperDiscovery{PreparationRevision: record.PreparationRevision, CacheKey: cacheKey, SessionID: session.ID, Query: req.Query, CreatedAt: time.Now().UTC(), Papers: refs, Sources: outcomes, Leads: leads, Candidates: candidateMap, Mode: req.Mode, PaperID: req.PaperID})
 		return tx.Model(&record).Update("discovery_json", marshal(searches)).Error
 	})
 	if err != nil {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"papers": refs, "source": "arxiv", "mock": false})
+	common.ReplyJSON(w, map[string]any{"papers": refs, "sources": outcomes, "leads": leads, "mock": false})
 }
 
 // Resolve only the attachment selected by a server-side source snapshot.

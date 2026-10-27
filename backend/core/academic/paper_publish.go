@@ -1,6 +1,7 @@
 package academic
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -61,5 +62,13 @@ func ResolveExpansionPapers(w http.ResponseWriter, r *http.Request) {
 		}
 		contents = append(contents, state)
 	}
-	common.ReplyJSON(w, map[string]any{"papers": papers, "contents": contents})
+	var input ReviewWorkflowInput
+	_ = json.Unmarshal(record.ResultJSON, &input)
+	response := map[string]any{"papers": papers, "contents": contents}
+	if len(input.SelectedDirections) > 0 {
+		response["user_instruction"] = input.UserInstruction
+		response["candidate_directions"] = input.CandidateDirections
+		response["selected_directions"] = input.SelectedDirections
+	}
+	common.ReplyJSON(w, response)
 }

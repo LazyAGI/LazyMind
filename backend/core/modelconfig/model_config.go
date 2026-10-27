@@ -567,7 +567,7 @@ func LoadAcademicSearchToolConfig(ctx context.Context, db *gorm.DB, userID strin
 	if err != nil {
 		return nil, err
 	}
-	if row == nil {
+	if row == nil || normalizeSearchToolName(row.ProviderName) != "sciverse" {
 		row, err = loadConfiguredSciverseDatasource(ctx, db, userID)
 		if err != nil {
 			return nil, err
@@ -1189,4 +1189,25 @@ func APIKeyState(value any) string {
 func isChatTechnicalType(technical string) bool {
 	technical = strings.ToLower(strings.TrimSpace(technical))
 	return technical == "llm" || technical == "vlm"
+}
+
+// LoadOpenAlexAPIKey uses the same verified provider groups and shared selection
+// as other datasource tools. The key never leaves the server-side adapter.
+func LoadOpenAlexAPIKey(ctx context.Context, db *gorm.DB, userID string) (string, error) {
+	var row selectedProviderConfig
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").Select("p.name AS provider_name,g.base_url,g.api_key,g.api_key_ciphertext").Joins("JOIN user_model_providers p ON p.id=g.user_model_provider_id AND p.create_user_id=g.create_user_id AND p.deleted_at IS NULL").Where("g.create_user_id=? AND g.deleted_at IS NULL AND g.is_verified=? AND p.category='datasource' AND p.name='OpenAlex'", userID, true).Order("g.updated_at DESC").Limit(1).Scan(&row).Error
+	if err != nil {
+		return "", err
+	}
+	if row.ProviderName == "" {
+		shared, e := loadSelectedProviderConfig(ctx, db, "", "datasource", true)
+		if e != nil {
+			return "", e
+		}
+		if shared == nil || shared.ProviderName != "OpenAlex" {
+			return "", nil
+		}
+		row = *shared
+	}
+	return modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
 }

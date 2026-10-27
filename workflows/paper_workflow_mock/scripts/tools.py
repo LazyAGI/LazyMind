@@ -1,4 +1,7 @@
 """Publish the current Chat's frozen paper handoff in this Workflow's format."""
+import re
+from html import escape
+
 from lazymind.chat.service.academic_handoff import (
     academic_handoff_context,
     academic_read_paper,
@@ -9,13 +12,30 @@ from lazymind.chat.service.academic_handoff import (
 __all__ = ['academic_handoff_context', 'academic_read_paper', 'academic_handoff_submit']
 
 
+def _markdown_text(value):
+    return re.sub(r'([\\`*_{}\[\]()#+.!|>~-])', r'\\\1', escape(value, quote=False))
+
+
 def academic_handoff_submit():
     """Submit and publish the frozen handoff; return its handoff receipt."""
     result = submit_handoff()
     from lazymind.chat.engine.subagent.tools import _save_artifact
-    import json
-    body = ('## 任务交接\n\n' + result['feedback'] + '\n\n```json\n'
-            + json.dumps(result, ensure_ascii=False, indent=2) + '\n```')
+    task = result['input']
+    names = {'review': '论文综述', 'reflection': '阅读心得', 'ppt': '汇报 PPT'}
+    lines = ['## 任务交接', '', result['feedback'], '',
+             '任务：' + names[result['kind']], '', '### 用户要求', '', _markdown_text(task['user_instruction']), '',
+             '### 所选论文', '']
+    for item in task['papers']:
+        paper = item['paper'] if result['kind'] == 'review' else item
+        details = ' · '.join(str(paper[key]) for key in ('year', 'source_provider', 'source_version')
+                             if paper.get(key))
+        title = _markdown_text(paper.get('title') or '未命名论文')
+        lines.append('- ' + title + ('（' + _markdown_text(details) + '）' if details else ''))
+    if task.get('notes'):
+        lines.extend(['', f'已携带 {len(task["notes"])} 条已有笔记。'])
+    if result.get('reflection_markdown'):
+        lines.extend(['', '已携带上一步心得正文。'])
+    body = '\n'.join(lines)
     saved = _save_artifact('handoff_receipt', body, content_type='text',
                            source_tool='academic_handoff_submit', internal_publish=True)
     return {'status': result['status'], 'kind': result['kind'], 'paper_count': len(result['input']['papers']),

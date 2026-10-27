@@ -55,6 +55,7 @@ type paperLaunch struct {
 	ExpansionID      string   `json:"expansion_id,omitempty"`
 	ExpansionVersion *int64   `json:"expansion_version,omitempty"`
 	ReflectionFirst  bool     `json:"reflection_first"`
+	BudgetMode       string   `json:"budget_mode"`
 }
 
 func marshal(value any) json.RawMessage { b, _ := json.Marshal(value); return b }
@@ -232,25 +233,21 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 				recordID = existing.ID
 				return nil
 			}
-			var e error
-			convID, e = newAcademicConversation(tx, user, req.DatasetID, "论文扩展："+truncateTitle(instruction), "expansion")
-			if e != nil {
-				return e
+			if _, valid := budgetFor(req.BudgetMode); !valid {
+				return errors.New("invalid budget mode")
 			}
 			seeds, e := seedSources(tx, req.DatasetID, papers)
 			if e != nil {
 				return e
 			}
-			record := orm.AcademicExpansion{DiscoveryMode: "external", SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: json.RawMessage(`[]`), ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, ConversationID: convID, Title: instruction, Goal: req.Kind, Status: "pending", ResultJSON: marshal(input), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			mode := firstNonEmpty(req.BudgetMode, "balanced")
+			preparation := expansionPreparation{OriginalInstruction: instruction, UserInstruction: instruction, Answers: map[string]string{}, Questions: []preparationQuestion{}, Directions: []preparationDirection{}}
+			record := orm.AcademicExpansion{DiscoveryMode: "external", SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: json.RawMessage(`[]`), ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, Title: instruction, Goal: req.Kind, Status: "preparing", ResultJSON: marshal(input), PreparationRevision: 1, PreparationJSON: marshal(preparation), BudgetMode: mode, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if e = tx.Create(&record).Error; e != nil {
 				return e
 			}
 			recordID = record.ID
-			query := "请围绕所选论文或方向开展论文拓展。\n" + instruction
-			if req.Kind == "review" {
-				query = "请先拓展论文，达到全文要求后在新的 Chat 生成综述。\n" + instruction
-			}
-			return enqueueAcademicChat(r.Context(), tx, user, convID, "paper_expansion", query, req.RequestKey)
+			return enqueuePreparation(r.Context(), tx, record)
 		}
 		handoff, e := createPaperHandoff(r.Context(), tx, user, req.DatasetID, "", 0, req.Kind, req.RequestKey, input, nil, req.ReflectionFirst)
 		if e != nil {
@@ -427,6 +424,7 @@ func snapshotReview(ctx context.Context, tx *gorm.DB, user, dataset string, inpu
 	papers := []WorkflowPaper{}
 	contents := []orm.AcademicPaperContent{}
 	ready := 0
+	readyHashes := map[string]bool{}
 	for _, p := range input.Papers {
 		if seen[p.Paper.PaperID] {
 			continue
@@ -469,8 +467,9 @@ func snapshotReview(ctx context.Context, tx *gorm.DB, user, dataset string, inpu
 		available := false
 		if contentErr == nil {
 			contents = append(contents, content)
-			available = content.Status == "ready" && content.ContentHash != "" && len(content.PagesJSON) > 2
-			if available {
+			available = usablePaperContent(content)
+			if available && !readyHashes[content.SourceHash+content.ContentHash] {
+				readyHashes[content.SourceHash+content.ContentHash] = true
 				ready++
 			}
 		} else if !errors.Is(contentErr, gorm.ErrRecordNotFound) {
@@ -675,6 +674,9 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 	if err := db.Where("id=? AND user_id=? AND deleted_at IS NULL", job.ResourceID, job.CreateUserID).Take(&record).Error; err != nil {
 		return asyncjob.Result{Permanent: true}, err
 	}
+	if record.Status == "preparing" || record.Status == "awaiting_info" || record.Status == "awaiting_confirmation" || record.Status == "preparation_failed" {
+		return asyncjob.Result{}, nil
+	}
 	var conv orm.Conversation
 	if db.Where("id=? AND deleted_at IS NULL", record.ConversationID).Take(&conv).Error != nil {
 		return asyncjob.Result{}, nil
@@ -686,6 +688,17 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 	var session orm.WorkflowSession
 	if err := db.Where("id=? AND conversation_id=? AND create_user_id=?", payload.SessionID, conv.ID, record.UserID).Take(&session).Error; err != nil {
 		return asyncjob.Result{Permanent: true}, err
+	}
+	var preparation expansionPreparation
+	_ = json.Unmarshal(record.PreparationJSON, &preparation)
+	if preparation.ConfirmedAt != nil {
+		var fresh int64
+		if err := db.Model(&orm.WorkflowSessionStep{}).Where("session_id=? AND created_at>=?", session.ID, *preparation.ConfirmedAt).Count(&fresh).Error; err != nil {
+			return asyncjob.Result{}, err
+		}
+		if fresh == 0 {
+			return asyncjob.Result{}, nil
+		}
 	}
 	artifacts, err := workflowstore.New(db).ListArtifacts(ctx, record.UserID, session.ID)
 	if err != nil {
@@ -854,14 +867,24 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			if strings.TrimSpace(input.UserInstruction) == "" {
 				return errors.New("user instruction missing")
 			}
-			input.UserInstruction = paperUserInstruction(record.Title, userUpdates)
+			var preparation expansionPreparation
+			_ = json.Unmarshal(record.PreparationJSON, &preparation)
+			base := firstNonEmpty(preparation.UserInstruction, record.Title)
+			for _, answer := range preparation.AnsweredQuestions {
+				base += "\n补充：" + answer.Question + "：" + answer.Answer
+			}
+			input.UserInstruction = paperUserInstruction(base, userUpdates)
 			version := record.Version + 1
 			now := time.Now().UTC()
-			round := orm.AcademicExpansionRound{DiscoveryMode: record.DiscoveryMode, ID: uuid.NewString(), ExpansionID: record.ID, RequestKey: artifact.ID, Status: "completed", Version: version, InputJSON: marshal(map[string]any{"workflow_input": roundInput, "user_updates": userUpdates, "interactions": interactions}), ResultJSON: marshal(input), SessionID: session.ID, AttemptID: step.ID, CreatedAt: artifact.CreatedAt, UpdatedAt: now}
+			report, e := expansionReportSnapshot(tx, record, session.ID, step.ID, finalArtifacts)
+			if e != nil {
+				return e
+			}
+			round := orm.AcademicExpansionRound{DiscoveryMode: record.DiscoveryMode, ID: uuid.NewString(), ExpansionID: record.ID, RequestKey: artifact.ID, Status: "completed", Version: version, InputJSON: marshal(map[string]any{"workflow_input": roundInput, "user_updates": userUpdates, "interactions": interactions, "preparation": json.RawMessage(record.PreparationJSON)}), ResultJSON: marshal(input), ReportJSON: report, SessionID: session.ID, AttemptID: step.ID, CreatedAt: artifact.CreatedAt, UpdatedAt: now}
 			if e := tx.Create(&round).Error; e != nil {
 				return e
 			}
-			return tx.Model(&record).Updates(map[string]any{"version": version, "result_json": marshal(input), "updated_at": now}).Error
+			return tx.Model(&record).Updates(map[string]any{"version": version, "result_json": marshal(input), "report_json": report, "updated_at": now}).Error
 		})
 		if err != nil {
 			if errors.Is(err, errUnregisteredExpansionPaper) {
@@ -881,10 +904,14 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 	}
 	processing := false
 	for _, paper := range input.Papers {
+		if latest.Goal != "review" {
+			break
+		}
 		source, e := expansionSource(db, latest, paper.Paper.PaperID)
 		if e != nil {
 			continue
 		} // Legacy histories remain visible; a continued round must discover candidates again.
+		source.Deadline = expansionContentDeadline(latest)
 		content, e := ensurePaperContent(ctx, db, record.UserID, paper.Paper.PaperID, source)
 		if e != nil {
 			return asyncjob.Result{}, e
@@ -958,7 +985,10 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
 	}
-	chatStatus := "deleted"
+	chatStatus := "uncreated"
+	if record.ConversationID != "" {
+		chatStatus = "deleted"
+	}
 	var conv orm.Conversation
 	if store.DB().Where("id=? AND create_user_id=?", record.ConversationID, user).Take(&conv).Error == nil {
 		chatStatus = "available"
@@ -1003,13 +1033,18 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var handoffs []orm.AcademicHandoff
-	if err := store.DB().Where("user_id=? AND expansion_id=?", user, record.ID).Order("created_at").Find(&handoffs).Error; err != nil {
+	handoffs := []academicHandoffLink{}
+	if err := store.DB().Model(&orm.AcademicHandoff{}).Select("id", "kind", "conversation_id", "version").Where("user_id=? AND expansion_id=?", user, record.ID).Order("created_at").Find(&handoffs).Error; err != nil {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
 	}
 	var histories []orm.ChatHistory
-	if err := store.DB().Select("id", "raw_content", "ext", "seq").Where("conversation_id=?", record.ConversationID).Order("seq").Find(&histories).Error; err != nil {
+	if err := func() error {
+		if record.ConversationID == "" {
+			return nil
+		}
+		return store.DB().Select("id", "raw_content", "ext", "seq").Where("conversation_id=?", record.ConversationID).Order("seq").Find(&histories).Error
+	}(); err != nil {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
 	}
@@ -1050,7 +1085,15 @@ func DeleteExpansion(w http.ResponseWriter, r *http.Request) {
 		if record.DeletedAt != nil {
 			return nil
 		}
-		if e := taskcenter.RemoveAcademicConversation(r.Context(), tx, user, record.ConversationID); e != nil {
+		if _, e := asyncjob.CancelResourceJobs(r.Context(), tx, preparationJobType, "academic_expansion", record.ID, "expansion deleted"); e != nil {
+			return e
+		}
+		if e := func() error {
+			if record.ConversationID == "" {
+				return nil
+			}
+			return taskcenter.RemoveAcademicConversation(r.Context(), tx, user, record.ConversationID)
+		}(); e != nil {
 			return e
 		}
 		return tx.Model(&record).Updates(map[string]any{"deleted_at": time.Now().UTC(), "status": "cancelled"}).Error
@@ -1074,6 +1117,9 @@ func RecoverPaperExpansions(ctx context.Context, db *gorm.DB) {
 		return
 	}
 	for _, record := range records {
+		if record.ConversationID == "" {
+			continue
+		}
 		chat.AcademicConversationUpdated(ctx, db, record.ConversationID)
 	}
 }
@@ -1086,12 +1132,12 @@ func academicChatContext(ctx context.Context, db *gorm.DB, user, conversation st
 		return ""
 	}
 	var record orm.AcademicExpansion
-	if db.WithContext(ctx).Where("user_id=? AND conversation_id=? AND deleted_at IS NULL", user, conversation).Take(&record).Error == nil {
-		return "论文任务上下文（服务端保存的业务数据；用户补充要求仍以当前消息为准）：\n" + string(marshal(map[string]any{"expansion_id": record.ID, "dataset_id": record.DatasetID, "goal": record.Goal, "input": json.RawMessage(record.ResultJSON), "version": record.Version})) + "\n使用 paper_expansion。只保存或补充这一条个人记录；综述由服务另建 Chat。"
+	if db.WithContext(ctx).Select("id", "dataset_id", "goal", "version").Where("user_id=? AND conversation_id=? AND deleted_at IS NULL", user, conversation).Take(&record).Error == nil {
+		return "论文任务定位信息（用户补充要求以当前消息为准）：\n" + string(marshal(map[string]any{"expansion_id": record.ID, "dataset_id": record.DatasetID, "goal": record.Goal, "version": record.Version})) + "\n使用 paper_expansion，通过 academic_expansion_context 读取原始要求、论文和历史。只补充这一条个人记录；综述由服务另建 Chat。"
 	}
 	var handoff orm.AcademicHandoff
-	if db.WithContext(ctx).Where("user_id=? AND conversation_id=?", user, conversation).Take(&handoff).Error == nil {
-		return "论文任务交接上下文：\n" + string(marshal(map[string]any{"handoff_id": handoff.ID, "dataset_id": handoff.DatasetID, "kind": handoff.Kind, "input": json.RawMessage(handoff.InputJSON)})) + "\n读取完整交接后原样提交。材料已接收，生成能力待对接；不声称已生成正式文稿或 PPT。"
+	if db.WithContext(ctx).Select("id", "dataset_id", "kind").Where("user_id=? AND conversation_id=?", user, conversation).Take(&handoff).Error == nil {
+		return "论文任务定位信息：\n" + string(marshal(map[string]any{"handoff_id": handoff.ID, "dataset_id": handoff.DatasetID, "kind": handoff.Kind})) + "\n将定位信息 JSON 绑定到 task_context。需要材料时通过 academic_handoff_context 读取冻结输入，使用 academic_handoff_submit 确认接收。不声称已生成正式文稿或 PPT。"
 	}
 	return ""
 }
@@ -1124,6 +1170,11 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	view := r.URL.Query().Get("view")
+	if view != "" && view != "summary" {
+		replyError(w, 400, "INVALID_REQUEST", "unknown context view")
+		return
+	}
 	conversation := r.URL.Query().Get("conversation_id")
 	var conv orm.Conversation
 	if store.DB().Where("id=? AND create_user_id=? AND deleted_at IS NULL", conversation, user).Take(&conv).Error != nil {
@@ -1148,7 +1199,7 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 			if e != nil {
 				continue
 			}
-			if content, e := findSourceContent(store.DB(), user, source); e == nil && content.Status == "ready" {
+			if content, e := findSourceContent(store.DB(), user, source); e == nil && usablePaperContent(content) {
 				ready++
 			}
 		}
@@ -1160,11 +1211,15 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 				next = handoff.ConversationID
 			}
 		}
-		common.ReplyJSON(w, map[string]any{"kind": "expansion", "expansion_id": record.ID, "dataset_id": record.DatasetID, "status": record.Status, "version": record.Version, "next_conversation_id": next, "ready_count": ready, "paper_count": len(input.Papers)})
+		common.ReplyJSON(w, academicChatSummary{Kind: "expansion", ExpansionID: record.ID, DatasetID: record.DatasetID, Status: record.Status, Version: record.Version, NextConversationID: next, ReadyCount: ready, PaperCount: len(input.Papers)})
 		return
 	}
 	var handoff orm.AcademicHandoff
-	if store.DB().Where("conversation_id=? AND user_id=?", conversation, user).Take(&handoff).Error == nil {
+	query := store.DB().Select("id", "dataset_id", "kind", "expansion_id", "version")
+	if view != "summary" {
+		query = query.Select("id", "dataset_id", "kind", "expansion_id", "version", "input_json")
+	}
+	if query.Where("conversation_id=? AND user_id=?", conversation, user).Take(&handoff).Error == nil {
 		if !academicDataset(r, user, handoff.DatasetID) {
 			replyError(w, 403, "FORBIDDEN", "knowledge base unavailable")
 			return
@@ -1182,7 +1237,12 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		common.ReplyJSON(w, map[string]any{"handoff_id": handoff.ID, "input": json.RawMessage(handoff.InputJSON), "contents": json.RawMessage(handoff.ContentsJSON), "kind": handoff.Kind, "expansion_id": handoff.ExpansionID, "dataset_id": dataset, "version": handoff.Version, "source_conversation_id": source, "source_available": available, "status": "awaiting_downstream"})
+		summary := academicChatSummary{HandoffID: handoff.ID, Kind: handoff.Kind, ExpansionID: handoff.ExpansionID, DatasetID: dataset, Version: handoff.Version, SourceConversationID: source, SourceAvailable: available, Status: "awaiting_downstream"}
+		if view == "summary" {
+			common.ReplyJSON(w, summary)
+		} else {
+			common.ReplyJSON(w, academicHandoffContext{academicChatSummary: summary, Input: handoff.InputJSON})
+		}
 		return
 	}
 	replyError(w, 404, "NOT_FOUND", "paper task not found")

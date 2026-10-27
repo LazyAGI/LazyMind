@@ -273,6 +273,15 @@ const desktopNotifications = createDesktopNotifications({
       return result.session;
     }));
   },
+  isTargetVisible: (target) => {
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isFocused()) return false;
+    try {
+      const url = new URL(mainWindow.webContents.getURL());
+      return url.origin === notificationFrontendOrigin()
+        && url.pathname.endsWith(`/lib/knowledge/detail/${encodeURIComponent(target.dataset_id)}`)
+        && url.searchParams.get("expansion_id") === target.expansion_id;
+    } catch { return false; }
+  },
   getRuntime: async () => {
     const status = await readStatus({ timeout: 10000 });
     return {

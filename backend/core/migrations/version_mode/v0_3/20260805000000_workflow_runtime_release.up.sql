@@ -2875,6 +2875,9 @@ CREATE TABLE user_notification_preferences (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 CREATE TABLE task_notifications (
+ target_json JSON NOT NULL DEFAULT '{}',
+ read_at TIMESTAMP,
+
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
     task_id VARCHAR(36) NOT NULL,
@@ -2920,6 +2923,9 @@ CREATE TABLE user_notification_preferences (
     updated_at DATETIME NOT NULL
 );
 CREATE TABLE task_notifications (
+ target_json JSON NOT NULL DEFAULT '{}',
+ read_at TIMESTAMP,
+
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
     task_id VARCHAR(36) NOT NULL,
@@ -3334,6 +3340,12 @@ CREATE TABLE academic_user_paper_states (
   PRIMARY KEY (user_id, dataset_id, paper_id)
 );
 CREATE TABLE academic_expansions (
+ preparation_json JSON NOT NULL DEFAULT '{}',
+ preparation_revision BIGINT NOT NULL DEFAULT 0,
+ budget_mode VARCHAR(16) NOT NULL DEFAULT 'balanced',
+ reading_json JSON NOT NULL DEFAULT '{}',
+ report_json JSON NOT NULL DEFAULT '{}',
+
  discovery_mode VARCHAR(32) NOT NULL DEFAULT 'external',
  seed_snapshot_json JSON NOT NULL DEFAULT '[]',
  discovery_json JSON NOT NULL DEFAULT '[]',
@@ -3341,7 +3353,7 @@ CREATE TABLE academic_expansions (
   id varchar(36) NOT NULL,
   user_id varchar(255) NOT NULL,
   dataset_id varchar(255) NOT NULL,
-  conversation_id varchar(36) NOT NULL,
+  conversation_id varchar(36) DEFAULT NULL,
   request_key varchar(128) NOT NULL,
   request_owner varchar(255) NOT NULL,
   title text NOT NULL,
@@ -3361,6 +3373,8 @@ CREATE UNIQUE INDEX idx_academic_expansions_conversation_id ON academic_expansio
 CREATE UNIQUE INDEX uk_academic_expansion_request ON academic_expansions(request_key, request_owner);
 CREATE INDEX idx_academic_expansions_deleted_at ON academic_expansions(deleted_at);
 CREATE TABLE academic_expansion_rounds (
+ report_json JSON NOT NULL DEFAULT '{}',
+
  discovery_mode VARCHAR(32) NOT NULL DEFAULT 'external',
   id varchar(36) NOT NULL,
   expansion_id varchar(36) NOT NULL,
@@ -3395,6 +3409,8 @@ CREATE TABLE academic_handoffs (
 CREATE UNIQUE INDEX uk_academic_handoff ON academic_handoffs(user_id, request_key);
 CREATE INDEX idx_academic_handoffs_expansion_id ON academic_handoffs(expansion_id);
 CREATE TABLE academic_paper_contents (
+ quality_json JSON NOT NULL DEFAULT '{}',
+
  source_provider VARCHAR(64) NOT NULL DEFAULT '',
  source_kind VARCHAR(16) NOT NULL DEFAULT 'legacy',
  source_version VARCHAR(64) NOT NULL DEFAULT '',

@@ -82,7 +82,33 @@ func ensurePaperContent(ctx context.Context, db *gorm.DB, userID, paperID string
 		return orm.AcademicPaperContent{}, errors.New("paper source context required")
 	}
 	if row, err := findSourceContent(db.WithContext(ctx), userID, source); err == nil {
-		return row, nil
+		if row.Status == "unavailable" && row.Error == "任务取文执行预算已用尽" && source.Deadline != nil && source.Deadline.After(time.Now()) {
+			err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				var previous orm.AsyncJob
+				if e := tx.Where("job_type=? AND idempotency_key=?", "academic.paper_content", row.ID).Take(&previous).Error; e != nil {
+					return e
+				}
+				if previous.Status != string(asyncjob.StatusFailed) && previous.Status != string(asyncjob.StatusSucceeded) && previous.Status != string(asyncjob.StatusCanceled) {
+					return nil
+				}
+				var payload struct {
+					Source paperSource `json:"source"`
+				}
+				if e := json.Unmarshal(previous.PayloadJSON, &payload); e != nil {
+					return e
+				}
+				if payload.Source.Deadline == nil || !source.Deadline.After(*payload.Source.Deadline) {
+					return nil
+				}
+				if e := tx.Model(&row).Where("status='unavailable'").Updates(map[string]any{"status": "processing", "error": "", "quality_json": marshal(contentQuality{})}).Error; e != nil {
+					return e
+				}
+				_, e := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: userID, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3, SkipSucceeded: true})
+				row.Status = "processing"
+				return e
+			})
+		}
+		return row, err
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return row, err
 	}
@@ -120,19 +146,39 @@ func runPaperContent(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil || payload.Source.DatasetID == "" {
 		return asyncjob.Result{Permanent: true}, errors.New("legacy fulltext job requires a new expansion-context read")
 	}
-	pages, kind, hash, version, err := readKnownPaper(ctx, job.CreateUserID, payload.Source, row)
+	readCtx := ctx
+	cancel := func() {}
+	if payload.Source.Deadline != nil {
+		readCtx, cancel = context.WithDeadline(ctx, *payload.Source.Deadline)
+	}
+	defer cancel()
+	pages, kind, hash, version, err := readKnownPaper(readCtx, job.CreateUserID, payload.Source, row)
+	budgetExceeded := payload.Source.Deadline != nil && !time.Now().Before(*payload.Source.Deadline)
+
 	if err != nil {
 		status := "processing"
 		if job.AttemptCount >= job.MaxAttempts {
 			status = "failed"
 		}
-		if errors.Is(err, errFulltextUnavailable) {
+		if errors.Is(err, errFulltextUnavailable) || budgetExceeded {
 			status = "unavailable"
 		}
-		if updateErr := db.Model(&row).Updates(map[string]any{"status": status, "error": err.Error(), "updated_at": time.Now().UTC()}).Error; updateErr != nil {
+		if budgetExceeded {
+			err = errors.New("任务取文执行预算已用尽")
+		}
+		var latest orm.AcademicPaperContent
+		if e := db.Where("id=?", row.ID).Take(&latest).Error; e != nil {
+			return asyncjob.Result{}, e
+		}
+		var acquisition contentAcquisition
+		_ = json.Unmarshal(latest.QualityJSON, &acquisition)
+		quality := checkPaperQuality(payload.Source.Paper, nil, kind, hash)
+		quality.Acquisition, quality.Reason = acquisition, err.Error()
+		quality.Downloaded = quality.Downloaded || acquisition.Downloaded
+		if updateErr := db.Model(&row).Updates(map[string]any{"status": status, "quality_json": marshal(quality), "source_hash": firstNonEmpty(hash, acquisition.PDFHash), "error": err.Error(), "updated_at": time.Now().UTC()}).Error; updateErr != nil {
 			return asyncjob.Result{}, updateErr
 		}
-		return asyncjob.Result{Permanent: errors.Is(err, errFulltextUnavailable)}, err
+		return asyncjob.Result{Permanent: errors.Is(err, errFulltextUnavailable) || budgetExceeded}, err
 	}
 	data, err := json.Marshal(pages)
 	if err != nil {
@@ -140,6 +186,22 @@ func runPaperContent(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 	}
 	sum := sha256.Sum256(data)
 	updates := map[string]any{"status": "ready", "pages_json": data, "content_hash": hex.EncodeToString(sum[:]), "source_kind": kind, "source_provider": payload.Source.Paper.SourceProvider, "source_hash": hash, "source_version": version, "error": "", "updated_at": time.Now().UTC()}
+	quality := checkPaperQuality(payload.Source.Paper, pages, kind, hash)
+	var acquisition contentAcquisition
+	var latest orm.AcademicPaperContent
+	if e := db.Where("id=?", row.ID).Take(&latest).Error; e != nil {
+		return asyncjob.Result{}, e
+	}
+	_ = json.Unmarshal(latest.QualityJSON, &acquisition)
+	quality.Acquisition = acquisition
+	if acquisition.SourceProvider != "" {
+		updates["source_provider"] = acquisition.SourceProvider
+	}
+	updates["quality_json"] = marshal(quality)
+	if !quality.Eligible {
+		updates["status"] = "needs_review"
+		updates["error"] = quality.Reason
+	}
 	if kind == "external" {
 		if payload.Source.Paper.ArxivID != "" {
 			updates["source_provider"] = "arxiv"
@@ -216,9 +278,6 @@ func readKnownPaper(ctx context.Context, userID string, source paperSource, cont
 		paper.SourceProvider = "arxiv"
 		pinPaperURLs(&paper)
 	}
-	if paper.PDFURL == "" {
-		return nil, "", "", "", errFulltextUnavailable
-	}
 	var path string
 	var err error
 	if _, ok := arxivMetadataFromRef(paper); ok {
@@ -233,10 +292,8 @@ func readKnownPaper(ctx context.Context, userID string, source paperSource, cont
 			return acquirePDF(ctx, userID, candidate)
 		})
 	} else {
-		path, _, err = acquirePDF(ctx, userID, FulltextCandidate{URL: paper.PDFURL, SourceType: "official_pdf", SourceProvider: paper.SourceProvider, Version: paper.SourceVersion, ExpectedMIME: "application/pdf"})
-		if err == nil {
-			defer os.Remove(path)
-		}
+		source.Paper = paper
+		return readExternalCopies(ctx, userID, source, content)
 	}
 	if err != nil {
 		return nil, "", "", "", err
@@ -279,10 +336,10 @@ func parsePaperPDF(ctx context.Context, path, expectedHash string) ([]ContentPag
 		Pages []ContentPage `json:"pages"`
 	}
 	if err = internalAcademic(ctx, "pdf:parse", map[string]string{"file_ref": ref, "content_hash": hash}, &parsed); err != nil {
-		return nil, "", err
+		return nil, hash, err
 	}
 	if len(parsed.Pages) == 0 {
-		return nil, "", errors.New("PDF yielded no full text")
+		return nil, hash, errors.New("PDF yielded no full text")
 	}
 	return parsed.Pages, hash, nil
 }
@@ -293,6 +350,7 @@ type contentCursor struct {
 	Offset      int    `json:"offset"`
 	ExpansionID string `json:"expansion_id,omitempty"`
 	HandoffID   string `json:"handoff_id,omitempty"`
+	Positions   []int  `json:"positions,omitempty"`
 }
 
 func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
@@ -301,10 +359,15 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		PaperID     string `json:"paper_id"`
-		Cursor      string `json:"cursor"`
-		ExpansionID string `json:"expansion_id"`
-		HandoffID   string `json:"handoff_id"`
+		PaperID             string   `json:"paper_id"`
+		Cursor              string   `json:"cursor"`
+		ExpansionID         string   `json:"expansion_id"`
+		HandoffID           string   `json:"handoff_id"`
+		Keywords            []string `json:"keywords"`
+		PageStart           int      `json:"page_start"`
+		PageEnd             int      `json:"page_end"`
+		PreparationRevision *int64   `json:"preparation_revision"`
+		Positions           []int    `json:"positions"`
 	}
 	if !parseJSON(r, &req) || (req.PaperID == "") == (req.Cursor == "") || (req.ExpansionID != "" && req.HandoffID != "") {
 		replyError(w, 400, "INVALID_REQUEST", "supply paper_id with expansion_id or handoff_id, or a context-bound cursor")
@@ -355,7 +418,14 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+		if req.PreparationRevision != nil && (record.PreparationRevision != *req.PreparationRevision || record.Status != "preparing") {
+			replyError(w, 409, "VERSION_CHANGED", "preparation attempt is no longer current")
+			return
+		}
 		source, err = expansionSource(store.DB(), record, req.PaperID)
+		if record.Status == "preparing" || record.Status == "running" || record.Status == "pending" {
+			source.Deadline = expansionContentDeadline(record)
+		}
 		if err != nil {
 			replyError(w, 422, "INVALID_SELECTION", err.Error())
 			return
@@ -375,25 +445,67 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 	row = selected
 	var pages []ContentPage
 	_ = json.Unmarshal(row.PagesJSON, &pages)
+	positions := cursor.Positions
+	if req.Cursor == "" {
+		if req.Positions != nil {
+			if len(req.Positions) > 5 || req.PageStart != 0 || req.PageEnd != 0 || len(req.Keywords) > 0 {
+				replyError(w, 400, "INVALID_REQUEST", "supply 1..5 positions or a page/keyword selector")
+				return
+			}
+			seen := map[int]bool{}
+			for _, index := range req.Positions {
+				if seen[index] {
+					replyError(w, 400, "INVALID_REQUEST", "duplicate position")
+					return
+				}
+				seen[index] = true
+			}
+			positions = req.Positions
+		} else {
+			positions, err = selectedContentPositions(pages, req.Keywords, req.PageStart, req.PageEnd)
+		}
+		if err != nil {
+			replyError(w, 400, "INVALID_REQUEST", err.Error())
+			return
+		}
+	}
+	for _, index := range positions {
+		if index < 0 || index >= len(pages) {
+			replyError(w, 400, "INVALID_CURSOR", "invalid content position")
+			return
+		}
+	}
 	offset := cursor.Offset
-	if offset > len(pages) {
+	if offset > len(positions) {
 		replyError(w, 400, "INVALID_CURSOR", "invalid offset")
 		return
 	}
 	end := offset + 5
-	if end > len(pages) {
-		end = len(pages)
+	if end > len(positions) {
+		end = len(positions)
+	}
+	output := []ContentPage{}
+	delivered := []int{}
+	if usablePaperContent(row) {
+		for _, index := range positions[offset:end] {
+			output = append(output, pages[index])
+			delivered = append(delivered, index)
+		}
 	}
 	next := ""
-	if end < len(pages) {
-		next = base64.RawURLEncoding.EncodeToString(marshal(contentCursor{ID: row.ID, Hash: row.ContentHash, Offset: end, ExpansionID: req.ExpansionID, HandoffID: req.HandoffID}))
+	if end < len(positions) && usablePaperContent(row) {
+		next = base64.RawURLEncoding.EncodeToString(marshal(contentCursor{ID: row.ID, Hash: row.ContentHash, Offset: end, Positions: positions, ExpansionID: req.ExpansionID, HandoffID: req.HandoffID}))
 	}
 	level := "none"
-	if row.Status == "ready" {
+	if usablePaperContent(row) {
 		level = "fulltext"
 	}
+	if err = recordPaperRead(r.Context(), user, req.ExpansionID, row, delivered, pages); err != nil {
+		replyError(w, 500, "READ_FAILED", "could not save reading coverage")
+		return
+	}
 	warnings := []string{}
-	for _, page := range pages[offset:end] {
+	for _, page := range output {
 		if page.Page == 0 {
 			warnings = append(warnings, "原解析结果未提供可靠页码，page=0 表示位置未知")
 			break
@@ -402,7 +514,7 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 	if row.Error != "" {
 		warnings = append(warnings, row.Error)
 	}
-	common.ReplyJSON(w, map[string]any{"status": row.Status, "paper": source.Paper, "content_level": level, "content_hash": row.ContentHash, "pages": pages[offset:end], "next_cursor": next, "warnings": warnings, "parser_version": row.ParserVersion, "source_kind": row.SourceKind, "source_version": row.SourceVersion})
+	common.ReplyJSON(w, map[string]any{"status": row.Status, "paper": source.Paper, "content_level": level, "content_hash": row.ContentHash, "pages": output, "positions": delivered, "total_blocks": len(pages), "quality": json.RawMessage(row.QualityJSON), "next_cursor": next, "warnings": warnings, "parser_version": row.ParserVersion, "source_kind": row.SourceKind, "source_version": row.SourceVersion})
 }
 
 func RetryPaperContent(w http.ResponseWriter, r *http.Request) {
@@ -432,9 +544,9 @@ func RetryPaperContent(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
 	}
-	if row.Status == "failed" || row.Status == "unavailable" {
+	if row.Status == "failed" || row.Status == "unavailable" || row.Status == "needs_review" {
 		err = store.DB().Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&row).Updates(map[string]any{"status": "processing", "error": ""}).Error; err != nil {
+			if err := tx.Model(&row).Updates(map[string]any{"status": "processing", "error": "", "quality_json": json.RawMessage(`{}`)}).Error; err != nil {
 				return err
 			}
 			_, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: user, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3})

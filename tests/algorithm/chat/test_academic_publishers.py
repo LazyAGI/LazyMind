@@ -32,15 +32,18 @@ def publisher(tmp_path, monkeypatch):
                 {'paper': {'paper_id': 'a', 'title': 'model title'}, 'is_seed': False, 'is_important': False}]}
     events = []
     ctx = context.SubAgentContext('task', 'chat', 'workflow_step', 'analyze', {
-        'step_id': 'analyze_relations', 'remote_inputs': {'expanded_papers': body, 'expansion_id': 'exp'},
-        'workflow_runtime': {'publisher_owned_slots': ['paper_relations', 'expansion_result']},
-    }, str(tmp_path), [], ['paper_relations', 'expansion_result'], None, events.append)
+        'step_id': 'analyze_relations', 'remote_inputs': {'candidate_set': body, 'expansion_id': 'exp'},
+        'workflow_runtime': {'publisher_owned_slots': ['relation_analysis', 'expansion_result', 'expansion_report']},
+    }, str(tmp_path), [], ['relation_analysis', 'expansion_result', 'expansion_report'], None, events.append)
     monkeypatch.setattr(context, 'require_context', lambda: ctx)
     monkeypatch.setattr(tools, 'require_context', lambda: ctx)
     resolved = {'papers': [{'paper': {'paper_id': 'a', 'title': 'server title', 'source_version': 'v2'},
                            'is_seed': True, 'is_important': True}],
                 'contents': [{'paper_id': 'a', 'status': 'ready'}]}
     monkeypatch.setattr(module, '_resolve', lambda ids: copy.deepcopy(resolved))
+    monkeypatch.setattr(module, 'academic_expansion_context',
+                        lambda _: {'record': {'result': copy.deepcopy(body), 'reading': {}}})
+    monkeypatch.setattr(module, '_model_metrics', lambda: {})
     return module, ctx, events, resolved
 
 
@@ -51,7 +54,8 @@ def test_typed_submission_uses_bound_authoritative_metadata_and_publishes_once(p
     tool = ToolManager([module.academic_submit_relations]).all_tools[0]
     args = tool._validate_input({'analyses': [{'paper_id': 'a', 'key_contribution': 'Based on the full text.'}]})
     module.academic_submit_relations(**args)
-    result = events[0]['value']['data']
+    relation = events[0]['value']['data']
+    result = relation['input']
     assert result['papers'][0] == {
         'paper': {'paper_id': 'a', 'title': 'server title', 'source_version': 'v2'},
         'is_seed': True, 'is_important': True, 'key_contribution': 'Based on the full text.',
@@ -62,10 +66,10 @@ def test_typed_submission_uses_bound_authoritative_metadata_and_publishes_once(p
         module.academic_submit_relations([{'paper_id': 'a', 'key_contribution': 'different'}])
     assert len(events) == 1
     ctx.params['step_id'] = 'compose_result'
-    ctx.params['remote_inputs']['paper_relations'] = result
-    module.academic_publish_expansion_result()
-    assert events[-1]['slot'] == 'expansion_result'
-    assert set(events[-1]['value']['data']) == module._INPUT_KEYS
+    ctx.params['remote_inputs']['relation_analysis'] = relation
+    module.academic_publish_expansion_result('Research narrative', ['a'], [])
+    assert events[-1]['slot'] == 'expansion_report'
+    assert set(events[-2]['value']['data']) == module._INPUT_KEYS
 
 
 @pytest.mark.parametrize('analyses,reason', [
@@ -86,18 +90,18 @@ def test_fulltext_failure_and_genuine_empty_results_are_publishable(publisher):
     module, ctx, events, resolved = publisher
     resolved['contents'][0]['status'] = 'failed'
     module.academic_submit_relations([{'paper_id': 'a'}])
-    assert 'key_contribution' not in events[0]['value']['data']['papers'][0]
+    assert 'key_contribution' not in events[0]['value']['data']['input']['papers'][0]
     ctx.task_id = 'empty-task'
     ctx._local_artifacts.clear()
-    ctx.params['remote_inputs']['expanded_papers']['papers'] = []
+    ctx.params['remote_inputs']['candidate_set']['papers'] = []
     resolved['papers'], resolved['contents'] = [], []
     module.academic_submit_relations([])
-    assert events[-1]['value']['data']['papers'] == []
+    assert events[-1]['value']['data']['input']['papers'] == []
 
 
 def test_missing_bound_input_does_not_fall_back_to_other_artifacts(publisher):
     module, ctx, events, _ = publisher
-    del ctx.params['remote_inputs']['expanded_papers']
+    del ctx.params['remote_inputs']['candidate_set']
     with pytest.raises(RuntimeError, match='bound Workflow input is missing'):
         module.academic_submit_relations([])
     assert events == []
@@ -105,9 +109,9 @@ def test_missing_bound_input_does_not_fall_back_to_other_artifacts(publisher):
 
 def test_direction_entry_accepts_no_seeds_and_seed_entry_cannot_drop_them(publisher, monkeypatch):
     module, ctx, _, resolved = publisher
-    ctx.params['step_id'] = 'prepare_seed_set'
-    body = ctx.params['remote_inputs']['expanded_papers']
-    monkeypatch.setattr(module, 'academic_expansion_context', lambda _: {'record': {'result': {'papers': None}}})
+    ctx.params['step_id'] = 'prepare_plan'
+    body = ctx.params['remote_inputs']['candidate_set']
+    monkeypatch.setattr(module, 'academic_expansion_context', lambda _: {'record': {'result': {'papers': []}}})
     assert module.academic_validate_stage(body)['status'] == 'valid'
     monkeypatch.setattr(module, 'academic_expansion_context', lambda _: {
         'record': {'result': {'papers': [{'paper': {'paper_id': 'seed'}, 'is_seed': True}]}}})
@@ -116,3 +120,19 @@ def test_direction_entry_accepts_no_seeds_and_seed_entry_cannot_drop_them(publis
     for invalid in [{'test': True}, {}]:
         with pytest.raises(ToolExecutionError):
             module.academic_validate_stage(invalid)
+
+
+def test_repeated_critical_submission_does_not_repeat_verification(publisher, monkeypatch):
+    module, _, _, _ = publisher
+    calls = []
+
+    def verify(claims, allowed):
+        calls.append(claims)
+        return [dict(claims[0], status='supported')]
+
+    monkeypatch.setattr(module, '_verify_claims', verify)
+    claims = [{'paper_id': 'a', 'field': 'key_contribution', 'statement': 'Improves by 7%', 'positions': [2]}]
+    analyses = [{'paper_id': 'a', 'key_contribution': 'Improves by 7%'}]
+    module.academic_submit_relations(analyses, claims)
+    assert module.academic_submit_relations(analyses, claims)['already_published']
+    assert len(calls) == 1
