@@ -28,7 +28,7 @@ export function ModelFeaturesEditor({ disabled = false, legacyVision = false, vi
         const declaredSupport = settings?.feature_support?.[feature] ?? form.getFieldValue(["modelSettings", "feature_support", feature]);
         const legacyFallback = feature === "vision" ? visualModel || legacyVision : true;
         const featureEnabled = explicitEnabled ?? declaredSupport ?? legacyFallback;
-        const path = ["modelSettings", "feature_enabled", feature] as const;
+        const path: (string | number)[] = ["modelSettings", "feature_enabled", feature];
         return <Tooltip key={feature} title={t(`modelProvider.editor.featureTooltip.${feature}`)}>
           <Form.Item noStyle name={path} trigger="onClick" getValueFromEvent={() => !featureEnabled}
             getValueProps={(value: boolean | undefined) => ({ "aria-pressed": value ?? declaredSupport ?? legacyFallback })}>
