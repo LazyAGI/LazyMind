@@ -922,7 +922,7 @@ it('keeps saved output visible after execution fails and retries through externa
   const control: WorkflowControlView = {
     protocol: 'workflow.control.v1', session_id: stored.session_id, state_version: 4,
     continuation: 'awaiting_executor', active_executions: 1, active_execution_ids: ['attempt'],
-    reviews: [], binding: { bound: true, generation: 1 }, delivery: null,
+    reviews: [], binding: { bound: true }, delivery: null,
     admission: { can_begin: false }, available_actions: ['stop'],
   };
   const getControl = vi.fn(async () => ({ data: { data: {

@@ -1,0 +1,34 @@
+.custom-logo-picker {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+
+  // Ant Form sets file inputs to display:block, overriding the native hidden attribute.
+  > input[type="file"][hidden] { display: none; }
+}
+.custom-logo-picker-preview {
+  display: grid;
+  flex: 0 0 64px;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  padding: 6px;
+  border: 1px solid var(--ant-color-border, #d9d9d9);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container, #fff);
+  cursor: pointer;
+  img { width: 100%; height: 100%; object-fit: contain; }
+  &:focus-visible { outline: 2px solid var(--provider-blue, #2f6df6); outline-offset: 3px; }
+  &:disabled { cursor: default; opacity: .55; }
+}
+.custom-logo-picker-content { min-width: 0; }
+.custom-logo-picker-label { display: block; margin-bottom: 6px; font-size: 13px; }
+.custom-logo-picker-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.custom-logo-picker-hint,
+.custom-logo-picker-error { margin: 6px 0 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.custom-logo-picker-hint { color: var(--ant-color-text-secondary, #697586); }
+.custom-logo-picker-error { color: var(--ant-color-error, #d04747); }
+@media (pointer: coarse) {
+  .custom-logo-picker-actions .ant-btn { min-height: 44px; }
+}

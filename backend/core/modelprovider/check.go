@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -19,6 +20,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/log"
 	"lazymind/core/store"
 )
@@ -61,13 +63,15 @@ type checkModelProviderRequest struct {
 	Model        string `json:"model,omitempty"`
 }
 
-// algoModelCheckBody matches the algorithm POST /api/model/check JSON contract (lazyllm.OnlineModule).
+// algoModelCheckBody matches the read-only algorithm POST /api/model/check contract.
 type algoModelCheckBody struct {
-	Model    string `json:"model,omitempty"`
-	Source   string `json:"source"`
-	URL      string `json:"url"`
-	APIKey   string `json:"api_key"`
-	SkipAuth bool   `json:"skip_auth,omitempty"`
+	Model           string                                   `json:"model,omitempty"`
+	ModelsURL       string                                   `json:"models_url,omitempty"`
+	Source          string                                   `json:"source"`
+	URL             string                                   `json:"url"`
+	APIKey          string                                   `json:"api_key"`
+	SkipAuth        bool                                     `json:"skip_auth,omitempty"`
+	RequestAdvanced *credentialvault.ProviderRequestAdvanced `json:"request_advanced,omitempty"`
 }
 
 // modelCheckResponse mirrors the algorithm /api/model/check JSON (internal parse only).
@@ -77,22 +81,18 @@ type modelCheckResponse struct {
 	Model   string `json:"model,omitempty"`
 	Source  string `json:"source,omitempty"`
 	URL     string `json:"url,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // CheckModelProviderData is the API response for a model check (mirrors algorithm fields we expose).
 type CheckModelProviderData struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // doCheck calls the appropriate algorithm endpoint based on provider category and returns the result.
-func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
-	// The Token Plan mode of SenseNova requires a model name for connectivity check.
-	// If no model is specified, default to a representative model that the platform supports.
-	if model == "" && strings.EqualFold(providerName, "SenseNova") &&
-		normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL) {
-		model = "sensenova-6.8-flash-lite"
-	}
+func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string, advanced ...credentialvault.ProviderRequestAdvanced) (*modelCheckResponse, error) {
 	var checkEndpoint string
 	switch category {
 	case "ocr":
@@ -110,21 +110,51 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model
 		APIKey:   apiKey,
 		SkipAuth: apiKey == "",
 	}
+	if checkEndpoint == "/api/model/check" {
+		if len(advanced) > 0 && !advanced[0].Empty() {
+			body.RequestAdvanced = &advanced[0]
+		}
+		modelsURL, err := ProviderModelsListURL(providerName, baseURL)
+		if err != nil {
+			return &modelCheckResponse{Success: false, Message: "provider connection check failed", Reason: "invalid_request"}, nil
+		}
+		body.ModelsURL = modelsURL
+	}
 	var result modelCheckResponse
 	if err := common.ApiPost(ctx, upstream, body, nil, &result, modelProviderCheckTimeout); err != nil {
-		return &result, err
+		var httpErr *common.HTTPError
+		reason := FailureCodeForRemoteModels(0, nil, err)
+		if errors.As(err, &httpErr) {
+			reason = FailureCodeForRemoteModels(httpErr.StatusCode, httpErr.Body, nil)
+		}
+		return &modelCheckResponse{Success: false, Message: "provider connection check failed", Reason: reason}, errors.New("provider connection check failed")
+	}
+	if !result.Success {
+		result.Reason = safeConnectionReason(result.Reason)
+		result.Message = "provider connection check failed"
+	} else {
+		result.Reason = ""
+		result.Message = "model connection is available"
 	}
 	return &result, nil
 }
 
-func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string) (*modelCheckResponse, error) {
+func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, apiKey, model string, parents ...orm.UserModelProvider) (*modelCheckResponse, error) {
 	if category == "ocr" && isSupportedOCRCloudProvider(providerName) {
 		return doOCRCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	}
 	if usesSearchCloudServiceCheck(category, providerName) {
 		return doSearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	}
-	return doCheck(ctx, category, providerName, baseURL, apiKey, model)
+	var advanced credentialvault.ProviderRequestAdvanced
+	if len(parents) > 0 && hasSharedProviderEndpoint(parents[0]) {
+		var err error
+		advanced, err = ResolveProviderRequestAdvanced(parents[0])
+		if err != nil {
+			return nil, errors.New("read advanced request configuration failed")
+		}
+	}
+	return doCheck(ctx, category, providerName, baseURL, apiKey, model, advanced)
 }
 
 func isSupportedOCRCloudProvider(providerName string) bool {
@@ -575,19 +605,22 @@ func verifyCheckCacheKey(groupID, baseURL, apiKey string) string {
 // CheckGroup proxies to the algorithm service for connectivity validation.
 // Supports dry_run=true (test only, no DB write) and dry_run=false (test + persist the result).
 func CheckGroup(w http.ResponseWriter, r *http.Request) {
-	var req checkModelProviderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var payload struct {
+		checkModelProviderRequest
+		APIKey *string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
+	}
+	req := payload.checkModelProviderRequest
+	if payload.APIKey != nil {
+		req.APIKey = *payload.APIKey
 	}
 	urlStr := strings.TrimSpace(req.BaseURL)
 	submittedURL := urlStr
 	apiKey := strings.TrimSpace(req.APIKey)
 	model := strings.TrimSpace(req.Model)
-	if urlStr == "" {
-		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
-		return
-	}
 
 	userID := strings.TrimSpace(store.UserID(r))
 	if userID == "" {
@@ -616,8 +649,8 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	// The provider in the path is authoritative. A custom Base URL may be an
 	// official API reverse proxy, so it must not change the provider source.
-	source := parent.Name
-	urlStr = LazyLLMBaseURL(parent.Name, urlStr)
+	source := RuntimeProviderName(parent)
+	urlStr = LazyLLMBaseURL(RuntimeProviderName(parent), urlStr)
 	var group orm.UserModelProviderGroup
 	if err := db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
@@ -625,15 +658,37 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "group not found", http.StatusNotFound)
 		return
 	}
+	if hasSharedProviderEndpoint(parent) {
+		checkSharedProviderGroup(w, r, db, parent, group, req, payload.APIKey != nil)
+		return
+	}
+	urlStr = connectionBaseURL(parent, urlStr)
+	if urlStr == "" {
+		urlStr = connectionBaseURL(parent, group.BaseURL)
+	}
+	if urlStr == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
+		return
+	}
+	if payload.APIKey == nil {
+		storedKey, err := apiKeyForGroup(db.WithContext(r.Context()), &group)
+		if err != nil {
+			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
+			return
+		}
+		if keys := splitAPIKeys(storedKey); len(keys) > 0 {
+			apiKey = keys[0]
+		}
+	}
 	// Official hosted endpoints require credentials. Self-hosted/custom
 	// endpoints may deliberately run without authentication.
-	if apiKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, group.BaseURL) {
+	if apiKey == "" && providerAPIKeyRequiredForBaseURL(r.Context(), db, parent, urlStr) {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
 
 	checkStart := time.Now()
-	algo, err := doProviderGroupCheck(r.Context(), parent.Category, source, urlStr, apiKey, model)
+	algo, err := doProviderGroupCheck(r.Context(), parent.Category, source, urlStr, apiKey, model, parent)
 	if !req.DryRun {
 		verified := err == nil && algo != nil && algo.Success
 		now := time.Now()
@@ -644,20 +699,26 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		// The check request normally echoes the group's stored URL. When the
 		// official provider URL was canonicalized for verification, persist the
 		// same canonical value so runtime selection and UI display stay aligned.
-		if verified && normalizeBaseURLForCompare(group.BaseURL) == normalizeBaseURLForCompare(submittedURL) &&
+		if !hasSharedProviderEndpoint(parent) && verified && normalizeBaseURLForCompare(group.BaseURL) == normalizeBaseURLForCompare(submittedURL) &&
 			normalizeBaseURLForCompare(group.BaseURL) != normalizeBaseURLForCompare(urlStr) {
 			updates["base_url"] = urlStr
 		}
 		tx := db.WithContext(r.Context()).
 			Model(&orm.UserModelProviderGroup{}).
-			Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
+			Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL AND base_url = ? AND credential_revision = ?", groupID, parentID, userID, group.BaseURL, group.CredentialRevision).
 			Updates(updates)
 		if tx.Error != nil {
 			common.ReplyErr(w, "update group verify status failed", http.StatusInternalServerError)
 			return
 		}
 		if tx.RowsAffected == 0 {
-			common.ReplyErr(w, "group not found", http.StatusNotFound)
+			var count int64
+			db.WithContext(r.Context()).Model(&orm.UserModelProviderGroup{}).Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).Count(&count)
+			if count > 0 {
+				common.ReplyErr(w, errConnectionChanged.Error(), http.StatusConflict)
+			} else {
+				common.ReplyErr(w, "group not found", http.StatusNotFound)
+			}
 			return
 		}
 	}
@@ -681,9 +742,9 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 			cacheKey := verifyCheckCacheKey(groupID, urlStr, apiKey)
 			recentVerifyCache.Store(cacheKey, time.Now().Add(5*time.Minute))
 		}
-		common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message})
+		common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message, Reason: algo.Reason})
 		return
 	}
 
-	common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message})
+	common.ReplyOK(w, CheckModelProviderData{Success: algo.Success, Message: algo.Message, Reason: algo.Reason})
 }

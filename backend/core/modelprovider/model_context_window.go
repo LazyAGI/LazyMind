@@ -154,7 +154,7 @@ func lookupMaxInputTokens(name, modelType string) (string, bool) {
 }
 
 func resolveAddModelMaxInputTokens(modelType, modelName string, raw *string) (*string, error) {
-	if !supportsLookupMaxInputTokens(modelType) {
+	if !supportsLookupMaxInputTokens(modelType) && normalizeGroupModelType(modelType) != "" {
 		return nil, nil
 	}
 	if raw != nil && strings.TrimSpace(*raw) != "" {
@@ -163,6 +163,9 @@ func resolveAddModelMaxInputTokens(modelType, modelName string, raw *string) (*s
 			return nil, err
 		}
 		return &normalized, nil
+	}
+	if normalizeGroupModelType(modelType) == "" {
+		return nil, nil
 	}
 	if lookedUp, ok := lookupMaxInputTokens(modelName, modelType); ok {
 		return &lookedUp, nil
