@@ -930,6 +930,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 		return nil
 	}
 	ext := map[string]any{"input": input}
+	if source := syntheticSourceFromChatReq(raw); source != "" {
+		ext["synthetic_source"] = source
+	}
 	if confirmation := mailConfirmationHistoryMetadata(raw); confirmation != nil {
 		ext["mail_confirmation"] = confirmation
 	}
@@ -965,8 +968,12 @@ func buildChatHistoryExtWithTrail(
 		var previous struct {
 			Trail            json.RawMessage `json:"trail"`
 			MailConfirmation map[string]any  `json:"mail_confirmation"`
+			SyntheticSource  string          `json:"synthetic_source"`
 		}
 		if json.Unmarshal(target.Existing.Ext, &previous) == nil {
+			if previous.SyntheticSource != "" {
+				ext["synthetic_source"] = previous.SyntheticSource
+			}
 			if len(previous.Trail) > 0 {
 				ext["trail"] = json.RawMessage(previous.Trail)
 			}

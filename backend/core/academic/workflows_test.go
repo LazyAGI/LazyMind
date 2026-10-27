@@ -226,12 +226,15 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	histories := []orm.ChatHistory{
-		{ID: "direction-question", ConversationID: conversation, Seq: 1, RawContent: "请先拓展论文，达到全文要求后在新的 Chat 生成综述。\n" + original, Ext: marshal(map[string]any{
+		{ID: "original-instruction", ConversationID: conversation, Seq: 1, RawContent: "请先拓展论文，达到全文要求后在新的 Chat 生成综述。\n" + original},
+		{ID: "direction-question", ConversationID: conversation, Seq: 2, RawContent: "请根据调研结果继续，先确认研究方向。", Ext: marshal(map[string]any{
+			"synthetic_source":  "driver",
 			"ask_pending":       map[string]any{"ask_id": "direction-ask", "questions": []map[string]any{{"text": "请选择综述的研究方向（可多选）", "type": "multiple", "choices": directions}}},
 			"ask_answered":      true,
 			"ask_saved_answers": map[string]any{"0": map[string]any{"type": "multiple", "value": directions, "otherText": ""}},
 		})},
-		{ID: "direction-answer", ConversationID: conversation, Seq: 2, RawContent: answer},
+		{ID: "direction-answer", ConversationID: conversation, Seq: 3, RawContent: answer},
+		{ID: "automatic-retry", ConversationID: conversation, Seq: 4, RawContent: "关系分析因服务端 429 失败，请重试本步。", Ext: marshal(map[string]any{"synthetic_source": "auto_continue"})},
 	}
 	if err = db.Create(&histories).Error; err != nil {
 		t.Fatal(err)
@@ -296,8 +299,8 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatalf("new Chat received internal or duplicate context: %q %v", launchPayload["query"], err)
 	}
 
-	update := "每篇关系和贡献压缩成两句话，保留现有两篇论文及其版本。"
-	if err = db.Create(&orm.ChatHistory{ID: "continued-instruction", ConversationID: conversation, Seq: 3, RawContent: update}).Error; err != nil {
+	update := "请重试本步，每篇关系和贡献压缩成两句话，保留现有两篇论文及其版本。"
+	if err = db.Create(&orm.ChatHistory{ID: "continued-instruction", ConversationID: conversation, Seq: 5, RawContent: update}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Model(&artifact).Update("selected", false).Error; err != nil {
@@ -335,7 +338,7 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	var firstResult ReviewWorkflowInput
-	if err = json.Unmarshal(firstRound.ResultJSON, &firstResult); err != nil || len(firstResult.Papers) != 2 {
+	if err = json.Unmarshal(firstRound.ResultJSON, &firstResult); err != nil || len(firstResult.Papers) != 2 || firstResult.UserInstruction != expectedInstruction {
 		t.Fatal("previous round was overwritten", err)
 	}
 	var round orm.AcademicExpansionRound

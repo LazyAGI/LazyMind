@@ -62,11 +62,13 @@ func paperConversationInputs(histories []orm.ChatHistory) ([]string, []map[strin
 	updates := []string{}
 	interactions := []map[string]any{}
 	for _, history := range histories {
-		if text := strings.TrimSpace(history.RawContent); text != "" {
-			updates = append(updates, text)
-		}
 		var ext map[string]any
 		_ = json.Unmarshal(history.Ext, &ext)
+		source, _ := ext["synthetic_source"].(string)
+		if text := strings.TrimSpace(history.RawContent); text != "" && strings.TrimSpace(source) == "" {
+			updates = append(updates, text)
+		}
+		// A synthetic turn may ask a real question; retain its saved interaction.
 		if ext["ask_pending"] != nil {
 			interactions = append(interactions, map[string]any{"questions": ext["ask_pending"], "answered": ext["ask_answered"] == true, "answers": ext["ask_saved_answers"]})
 		}
