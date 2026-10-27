@@ -80,6 +80,7 @@ type selectedModelItem struct {
 	TechnicalModelType       string         `json:"model_type,omitempty" gorm:"column:technical_model_type"`
 	IsDefault                bool           `json:"is_default" gorm:"column:is_default"`
 	Enabled                  bool           `json:"enabled" gorm:"column:enabled"`
+	CreateUserID             string         `json:"-" gorm:"column:create_user_id"`
 }
 
 type selectedModelsResponse struct {
@@ -106,17 +107,18 @@ type modelReadyResponse struct {
 }
 
 type selectedModelCandidate struct {
-	LogoDataURL        string `gorm:"column:logo_data_url" json:"logo_data_url,omitempty"`
-	ModelID            string `gorm:"column:model_id"`
-	RuntimeGroupID     string `gorm:"column:runtime_group_id"`
-	UserID             string `gorm:"column:user_id"`
-	UserName           string `gorm:"column:user_name"`
-	ProviderName       string `gorm:"column:provider_name"`
-	ModelName          string `gorm:"column:model_name"`
-	BaseURL            string `gorm:"column:base_url"`
-	TechnicalModelType string `gorm:"column:technical_model_type"`
-	ModelSettings      string `gorm:"column:model_settings"`
-	IsDefault          bool   `gorm:"column:is_default"`
+	LogoDataURL         string `gorm:"column:logo_data_url" json:"logo_data_url,omitempty"`
+	ModelID             string `gorm:"column:model_id"`
+	RuntimeGroupID      string `gorm:"column:runtime_group_id"`
+	UserID              string `gorm:"column:user_id"`
+	UserName            string `gorm:"column:user_name"`
+	ProviderName        string `gorm:"column:provider_name"`
+	ModelName           string `gorm:"column:model_name"`
+	BaseURL             string `gorm:"column:base_url"`
+	TechnicalModelType  string `gorm:"column:technical_model_type"`
+	UserModelProviderID string `gorm:"column:user_model_provider_id"`
+	ModelSettings       string `gorm:"column:model_settings"`
+	IsDefault           bool   `gorm:"column:is_default"`
 }
 
 func openCodeCandidateQuery(ctx context.Context, db *gorm.DB) *gorm.DB {
@@ -202,13 +204,17 @@ func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*
 		Table("user_selected_models usm").
 		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL").
 		Where("usm.model_type = ? AND usm.share = ?", modelType, true).
-		Select("m.id AS model_id, usm.user_id, usm.user_name, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type").
+		Select("m.id AS model_id, usm.user_id, usm.user_name, m.user_model_provider_id, m.provider_name, m.name AS model_name, m.model_type AS technical_model_type").
 		Order("usm.updated_at DESC").Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
 	for i := range rows {
-		if RuntimeSupportsModelType(rows[i].ProviderName, rows[i].TechnicalModelType) {
+		var provider orm.UserModelProvider
+		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", rows[i].UserModelProviderID, rows[i].UserID).Take(&provider).Error; err != nil {
+			continue
+		}
+		if RuntimeSupportsModelTypeForProvider(ctx, db, provider, rows[i].TechnicalModelType) {
 			setCandidateProviderLogo(ctx, db, &rows[i])
 			return &rows[i], nil
 		}
@@ -571,7 +577,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.user_model_provider_group_id, "+
 				"m.name, "+
 				"m.vision, m.model_settings, "+
-				"m.provider_name, "+
+				"m.provider_name, m.create_user_id, "+
 				"m.model_type AS technical_model_type, "+
 				"m.is_default, "+
 				"m.enabled, "+
@@ -619,14 +625,17 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 		if !item.Enabled {
 			item.Availability = "unavailable"
 			item.UnavailableReason = "disabled"
-		} else if !RuntimeSupportsModelType(item.ProviderName, item.TechnicalModelType) {
-			item.Availability = "unavailable"
-			item.UnavailableReason = "runtime_unsupported"
-		} else if baseURL, _, credentialErr := ResolveProviderRuntimeCredential(ctx, db, item.UserModelProviderGroupID); credentialErr != nil {
-			item.Availability = "unavailable"
-			item.UnavailableReason = "credentials_unavailable"
 		} else {
-			item.BaseURL = baseURL
+			var provider orm.UserModelProvider
+			if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", item.UserModelProviderID, item.CreateUserID).Take(&provider).Error; err != nil || !RuntimeSupportsModelTypeForProvider(ctx, db, provider, item.TechnicalModelType) {
+				item.Availability = "unavailable"
+				item.UnavailableReason = "runtime_unsupported"
+			} else if baseURL, _, credentialErr := ResolveProviderRuntimeCredential(ctx, db, item.UserModelProviderGroupID); credentialErr != nil {
+				item.Availability = "unavailable"
+				item.UnavailableReason = "credentials_unavailable"
+			} else {
+				item.BaseURL = baseURL
+			}
 		}
 		item.IsEditable = strings.EqualFold(strings.TrimSpace(item.ModelKey), "image_editing")
 		if item.ModelKey == "vlm" {
@@ -955,12 +964,16 @@ func HasAnyMultimodalEmbeddingSelection(ctx context.Context, db *gorm.DB) (bool,
 				"m.deleted_at IS NULL",
 		).
 		Where("usm.model_type = ?", "embed_image").
-		Select("m.provider_name, m.model_type").Scan(&rows).Error
+		Select("m.user_model_provider_id, m.create_user_id, m.provider_name, m.model_type").Scan(&rows).Error
 	if err != nil {
 		return false, err
 	}
 	for _, row := range rows {
-		if RuntimeSupportsModelType(row.ProviderName, row.ModelType) {
+		var provider orm.UserModelProvider
+		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.UserModelProviderID, row.CreateUserID).Take(&provider).Error; err != nil {
+			continue
+		}
+		if RuntimeSupportsModelTypeForProvider(ctx, db, provider, row.ModelType) {
 			return true, nil
 		}
 	}
@@ -995,7 +1008,11 @@ func hasUnavailableOwnCredentialSelection(ctx context.Context, db *gorm.DB, user
 		return false, err
 	}
 	for _, row := range rows {
-		if RuntimeSupportsModelType(row.ProviderName, row.ModelType) {
+		var provider orm.UserModelProvider
+		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.UserModelProviderID, row.CreateUserID).Take(&provider).Error; err != nil {
+			continue
+		}
+		if RuntimeSupportsModelTypeForProvider(ctx, db, provider, row.ModelType) {
 			if _, _, credentialErr := ResolveProviderRuntimeCredential(ctx, db, row.UserModelProviderGroupID); credentialErr != nil {
 				return true, nil
 			}
@@ -1018,11 +1035,13 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 		}
 	}
 	var rows []struct {
-		ProviderName   string
-		ModelType      string
-		Vision         bool
-		ModelSettings  string
-		RuntimeGroupID string
+		UserModelProviderID string
+		CreateUserID        string
+		ProviderName        string
+		ModelType           string
+		Vision              bool
+		ModelSettings       string
+		RuntimeGroupID      string
 	}
 	q := db.WithContext(ctx).
 		Table("user_selected_models usm").
@@ -1039,7 +1058,7 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 	} else {
 		q = q.Where("usm.user_id = ?", userID)
 	}
-	if err := q.Select("m.provider_name, m.model_type, m.vision, m.model_settings, g.id AS runtime_group_id").Scan(&rows).Error; err != nil {
+	if err := q.Select("m.user_model_provider_id, m.create_user_id, m.provider_name, m.model_type, m.vision, m.model_settings, g.id AS runtime_group_id").Scan(&rows).Error; err != nil {
 		return false, err
 	}
 	for _, row := range rows {
@@ -1049,7 +1068,11 @@ func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType 
 				continue
 			}
 		}
-		if RuntimeSupportsModelType(row.ProviderName, row.ModelType) {
+		var provider orm.UserModelProvider
+		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.UserModelProviderID, row.CreateUserID).Take(&provider).Error; err != nil {
+			continue
+		}
+		if RuntimeSupportsModelTypeForProvider(ctx, db, provider, row.ModelType) {
 			if _, _, err := ResolveProviderRuntimeCredential(ctx, db, row.RuntimeGroupID); err == nil {
 				return true, nil
 			}

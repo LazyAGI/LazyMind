@@ -64,6 +64,7 @@ export interface ProviderOption {
   serviceKey?: string;
   isCustom?: boolean;
   protocolName?: string;
+  runtimeIdentity?: string;
   brand: string;
   logoUrl?: string;
   headline: string;
@@ -100,6 +101,7 @@ interface ApiProvider {
   service_key?: string;
   is_custom?: boolean;
   protocol_name?: string;
+  runtime_identity?: string;
   description?: string;
   base_url?: string;
 }
@@ -488,6 +490,7 @@ function mapApiProvider(
     serviceKey: provider.service_key,
     isCustom: provider.is_custom === true,
     protocolName: provider.protocol_name || provider.name,
+    runtimeIdentity: provider.runtime_identity,
     brand: provider.is_custom ? "API" : getProviderBrand(provider.brand_key || provider.name || provider.protocol_name || ""),
     logoUrl: provider.logo_data_url || getProviderLogoUrl(provider.brand_key || provider.name || provider.protocol_name || "", provider.is_custom),
     headline: getLocalizedProviderDescription(
@@ -713,7 +716,7 @@ export function useDefaultModelConfig({
           maxInputTokens: selection.max_input_tokens,
           // Cloud availability comes from the gateway, whose provider label is
           // independent of the host's local LazyLLM adapter registry.
-          availability: source === "cloud" || isModelTypeSupportedByProtocol(selection.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
+          availability: source === "cloud" || isModelTypeSupportedByProtocol(selection.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source, provider.runtimeIdentity || provider.name)
             ? selection.availability : "unavailable",
           readOnly: selection.read_only,
         };
@@ -927,7 +930,7 @@ export function useDefaultModelConfig({
               builtIn: Boolean(model.is_default),
               enabled: model.enabled !== false,
               maxInputTokens: model.max_input_tokens,
-              availability: source === "cloud" || isModelTypeSupportedByProtocol(model.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source)
+              availability: source === "cloud" || isModelTypeSupportedByProtocol(model.model_type || getModelTypeByCapability(capability), provider.protocolName || provider.source, provider.runtimeIdentity || provider.name)
                 ? model.availability : "unavailable",
               lifecycle: model.lifecycle,
               readOnly: model.read_only,

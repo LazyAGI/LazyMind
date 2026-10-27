@@ -26,6 +26,7 @@ type listItem struct {
 	ServiceKey             string              `json:"service_key,omitempty"`
 	IsCustom               bool                `json:"is_custom"`
 	ProtocolName           string              `json:"protocol_name"`
+	RuntimeIdentity        string              `json:"runtime_identity,omitempty"`
 	Description            string              `json:"description"`
 	BaseURL                string              `json:"base_url"`
 	BaseURLPresets         []baseURLPresetItem `json:"base_url_presets,omitempty"`
@@ -189,12 +190,13 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	}
 	type localizedDescriptionRow struct {
 		ID              string      `gorm:"column:id"`
+		Name            string      `gorm:"column:name"`
 		DescriptionI18n orm.RawJSON `gorm:"column:description_i18n"`
 	}
 	var descriptionRows []localizedDescriptionRow
 	if err := db.WithContext(ctx).
 		Model(&orm.DefaultModelProvider{}).
-		Select("id, description_i18n").
+		Select("id, name, description_i18n").
 		Where("id IN ? AND deleted_at IS NULL", defaultProviderIDs).
 		Find(&descriptionRows).Error; err == nil {
 		descriptionByID := make(map[string][]byte, len(descriptionRows))
@@ -202,6 +204,14 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 			descriptionByID[row.ID] = []byte(row.DescriptionI18n)
 		}
 		for i := range out {
+			for _, template := range descriptionRows {
+				if template.ID == out[i].DefaultModelProviderID {
+					if normalized := normalizeProviderName(template.Name); normalized == "vllm" || normalized == "lmdeploy" {
+						out[i].RuntimeIdentity = template.Name
+					}
+					break
+				}
+			}
 			out[i].Description = selectLocalizedDescription(
 				descriptionByID[out[i].DefaultModelProviderID],
 				locale,

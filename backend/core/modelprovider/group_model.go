@@ -472,7 +472,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	availability := "available"
-	if !RuntimeSupportsModelType(RuntimeProviderName(parent), row.ModelType) {
+	if !RuntimeSupportsModelTypeForProvider(r.Context(), db, parent, row.ModelType) {
 		availability = "unavailable"
 	}
 	identity := identityForModelProvider(parent)
@@ -555,7 +555,7 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 	for i := range rows {
 		m := rows[i]
 		availability := "available"
-		if !RuntimeSupportsModelType(RuntimeProviderName(parent), m.ModelType) {
+		if !RuntimeSupportsModelTypeForProvider(r.Context(), db, parent, m.ModelType) {
 			availability = "unavailable"
 		}
 		out = append(out, groupModelListItem{
@@ -648,6 +648,17 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider identities failed", http.StatusInternalServerError)
 		return
 	}
+	var providers []orm.UserModelProvider
+	if len(providerIDs) > 0 {
+		if err := db.WithContext(r.Context()).Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", providerIDs, userID).Find(&providers).Error; err != nil {
+			common.ReplyErr(w, "query model providers failed", http.StatusInternalServerError)
+			return
+		}
+	}
+	providerByID := make(map[string]orm.UserModelProvider, len(providers))
+	for _, provider := range providers {
+		providerByID[provider.ID] = provider
+	}
 	groupIDs := make([]string, 0)
 	seenGroup := make(map[string]struct{})
 	for i := range rows {
@@ -686,7 +697,8 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		if !ok || !grp.available || !m.Enabled {
 			continue
 		}
-		if !RuntimeSupportsModelType(m.ProviderName, m.ModelType) {
+		provider, found := providerByID[m.UserModelProviderID]
+		if !found || !RuntimeSupportsModelTypeForProvider(r.Context(), db, provider, m.ModelType) {
 			continue
 		}
 		if modelType == EvoModelKey {

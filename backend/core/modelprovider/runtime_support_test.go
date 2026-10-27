@@ -49,6 +49,65 @@ func TestLocalSupplierTemplateKeepsMediaUnsupportedAfterOpenAIProtocolSelection(
 	}
 }
 
+func TestLocalSupplierMediaRowStaysUnavailableInListsAndReadiness(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.DefaultModelProvider{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}, &orm.UserSelectedModel{}).DB
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	base := orm.BaseModel{CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}
+	template := orm.DefaultModelProvider{ID: "vllm-template", Name: "vLLM", Category: "model", CreatedAt: now, UpdatedAt: now}
+	parent := orm.UserModelProvider{ID: "local", DefaultModelProviderID: template.ID, Name: "my-local", IsCustom: true, ProtocolName: "OpenAI", Category: "model", Capabilities: "has_models", BaseModel: base}
+	group := orm.UserModelProviderGroup{ID: "local-group", UserModelProviderID: parent.ID, Name: "local", BaseURL: "http://local.example/v1/", APIKey: "key", IsVerified: true, BaseModel: base}
+	model := orm.UserModelProviderGroupModel{ID: "image", UserModelProviderID: parent.ID, UserModelProviderGroupID: group.ID, ProviderName: "OpenAI", Name: "local-image", ModelType: "text2image", BaseModel: base}
+	selection := orm.UserSelectedModel{UserID: "owner", ModelKey: "text2image", UserModelProviderGroupModelID: model.ID, Share: true, CreatedAt: now, UpdatedAt: now}
+	for _, row := range []any{&template, &parent, &group, &model, &selection} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/models?model_type=text2image", nil)
+	request.Header.Set("X-User-Id", "owner")
+	recorder := httptest.NewRecorder()
+	ListUserModelsByModelType(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("candidate list=%d %s", recorder.Code, recorder.Body.String())
+	}
+	var candidates struct {
+		Data groupModelListResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &candidates); err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates.Data.Models) != 0 {
+		t.Fatalf("unsupported local media candidate advertised: %#v", candidates.Data.Models)
+	}
+
+	request = mux.SetURLVars(httptest.NewRequest(http.MethodGet, "/models", nil), map[string]string{"model_provider_id": parent.ID, "group_id": group.ID})
+	request.Header.Set("X-User-Id", "owner")
+	recorder = httptest.NewRecorder()
+	ListGroupModels(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("inventory list=%d %s", recorder.Code, recorder.Body.String())
+	}
+	var inventory struct {
+		Data groupModelListResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &inventory); err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.Data.Models) != 1 || inventory.Data.Models[0].Availability != "unavailable" {
+		t.Fatalf("unsupported local media inventory=%#v", inventory.Data.Models)
+	}
+	if ready, err := hasValidModelSelection(t.Context(), db, "owner", "text2image", false); err != nil || ready {
+		t.Fatalf("unsupported local media ready=%v err=%v", ready, err)
+	}
+	selected, err := loadSelectedModels(t.Context(), db, "owner")
+	if err != nil || len(selected) != 1 || selected[0].Availability != "unavailable" {
+		t.Fatalf("unsupported local media selected=%#v err=%v", selected, err)
+	}
+}
+
 func TestUnsupportedOpenRouterSelectionsAreNotReadyAndRemainVisible(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProviderGroup{})
 	now := time.Now().UTC()

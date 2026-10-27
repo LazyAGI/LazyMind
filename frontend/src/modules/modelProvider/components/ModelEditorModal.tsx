@@ -53,6 +53,7 @@ function TokenLimitInput({ id, value, onChange, label, presets, placeholder, dis
 interface ModelEditorModalProps {
   model: ProviderModel | null;
   providerName: string;
+  providerIdentity?: string;
   protocolName?: string;
   capabilities: readonly ModelCapability[];
   models: readonly ProviderModel[];
@@ -270,7 +271,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
           name="capability"
           rules={[
             { required: true, message: t("modelProvider.validation.modelTypeRequired") },
-            { validator: (_, value?: ModelCapability) => value && ((value === "UNKNOWN" && props.model?.capability === "UNKNOWN") || isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(value), props.protocolName))
+            { validator: (_, value?: ModelCapability) => value && ((value === "UNKNOWN" && props.model?.capability === "UNKNOWN") || isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(value), props.protocolName, props.providerIdentity || props.providerName))
               ? Promise.resolve() : Promise.reject(new Error(t(value === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType"))) },
           ]}
         >
