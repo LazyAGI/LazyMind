@@ -443,10 +443,22 @@ def test_ordinary_image_summary_has_its_own_timeout_and_does_not_spend_soft_budg
 ):
     import base64
     import threading
-    import time
+    from types import SimpleNamespace
+    import requests
     from lazyllm.components.formatter.formatterbase import encode_query_with_filepaths
     from lazymind.chat.engine.agent_runtime.cancellation import UserCancelledError
+    from lazymind.chat.engine.agent_runtime import model_fallback
 
+    now = [0.0]
+    monkeypatch.setattr(model_fallback, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    sent = []
+    post = requests.Session.post
+
+    def record_request(session, url, **kwargs):
+        sent.append((now[0], kwargs['timeout']))
+        return post(session, url, **kwargs)
+
+    monkeypatch.setattr(requests.Session, 'post', record_request)
     a = candidate(provider, 'model-a', window=8192)
     a.llm_config['llm']['vision'] = True
     alternatives = [candidate(provider, f'text-{index}', window=8192) for index in range(text_backups)]
@@ -454,7 +466,7 @@ def test_ordinary_image_summary_has_its_own_timeout_and_does_not_spend_soft_budg
 
     def respond(request):
         summary = not request.get('stream')
-        time.sleep(0.7 if summary else 0.25)
+        now[0] += 0.7 if summary else 0.25
         if cancelled and summary:
             stop.set()
         return {'message': {'role': 'assistant', 'content': VALID_SUMMARY if summary else 'visual completed'}}
@@ -483,18 +495,19 @@ def test_ordinary_image_summary_has_its_own_timeout_and_does_not_spend_soft_budg
     with compression_settings(), config.temp('model_fallback_timeout_seconds', 0.1), \
             config.temp('agentic_workspace', str(tmp_path)):
         agent = AgentExecutor().create_agent(raw, plan)
-        started = time.monotonic()
         if cancelled:
             with pytest.raises(UserCancelledError):
                 agent(query, llm_chat_history=plan.history)
         else:
             assert agent(query, llm_chat_history=plan.history) == 'visual completed'
-        elapsed = time.monotonic() - started
     assert [request['model'] for request in provider.requests] == ['model-a'] * (1 if cancelled else 2)
     assert [request['stream'] for request in provider.requests] == ([False] if cancelled else [False, True])
     if not cancelled:
         assert image_data in json.dumps(provider.requests[-1]['messages'])
-    assert elapsed < 1.4
+    assert sent == ([(0.0, (3.0, 10.0))] if cancelled else [
+        (0.0, (3.0, 10.0)), (0.7, (3.0, 10.0)),
+    ])
+    assert now[0] == pytest.approx(0.7 if cancelled else 0.95)
     assert history == before
     assert EFFECT_RECEIPTS == []
 
