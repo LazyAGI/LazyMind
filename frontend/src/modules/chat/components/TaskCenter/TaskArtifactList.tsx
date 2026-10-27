@@ -1,4 +1,3 @@
-import type { KnowledgeOperation } from "../../utils/knowledgeOperations";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tooltip } from "antd";
@@ -7,10 +6,9 @@ import type { PublicArtifact } from "@/modules/chat/types/ordinaryTask";
 import { FilePreviewDrawer } from "../WorkflowPanel/FilePreviewDrawer";
 import { downloadArtifactFile } from "@/modules/chat/utils/artifactFileActions";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
-import type { SourceContext } from '../SourceImports/api';
-import type { ChatSource } from '../../utils/sourceAdapter';
-
-export type ArtifactSourceContext = { context: SourceContext; sources: ChatSource[]; operations?: KnowledgeOperation[] };
+import { useArtifactPreview } from "../ArtifactPreview/context";
+import { urlPreviewTarget, type ArtifactSourceContext, type WorkflowPreviewOrigin } from "../ArtifactPreview/target";
+export type { ArtifactSourceContext } from "../ArtifactPreview/target";
 
 function usableURL(raw?: string) {
   if (!raw) return "";
@@ -30,19 +28,29 @@ function fileSize(size: number | null) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function ArtifactRow({ artifact, onReload, sourceContext }: { artifact: PublicArtifact; onReload?: () => Promise<unknown>; sourceContext?: ArtifactSourceContext }) {
+function ArtifactRow({ artifact, onReload, sourceContext, workflow }: { artifact: PublicArtifact; onReload?: () => Promise<unknown>; sourceContext?: ArtifactSourceContext; workflow?: WorkflowPreviewOrigin }) {
   const { t } = useTranslation();
   const [preview, setPreview] = useState(false);
+  const sharedPreview = useArtifactPreview();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const ready = artifact.state === "ready";
   const previewUrl = usableURL(artifact.preview_url);
-  const openUrl = usableURL(artifact.open_url);
   const downloadUrl = usableURL(artifact.download_url);
   const canPreview = ready && artifact.capabilities.preview && (Boolean(previewUrl) || artifact.inline_content !== undefined);
   const canDownload = ready && artifact.capabilities.download && (Boolean(downloadUrl) || artifact.inline_content !== undefined);
+  const openPreview = () => {
+    if (!canPreview) return;
+    if (!sharedPreview) { setPreview(true); return; }
+    sharedPreview.open({
+      ...urlPreviewTarget(previewUrl, artifact.name),
+      key: `${artifact.artifact_id}:${artifact.revision}`,
+      workflow, sourceContext,
+      content: artifact.inline_content, mimeType: artifact.content_type, canDownload, downloadUrl,
+    });
+  };
   const execute = async (action: () => Promise<unknown>) => {
     if (busy) return;
     setBusy(true); setError(false);
@@ -65,17 +73,19 @@ function ArtifactRow({ artifact, onReload, sourceContext }: { artifact: PublicAr
     }
   };
   return <li className={`ordinary-artifact-row is-${artifact.state}`}>
-    <div className="ordinary-artifact-info">
+    <div className="ordinary-artifact-info" onClick={sharedPreview && canPreview ? event => {
+      if (event.target instanceof Element && event.target.closest('button')) return;
+      if (!window.getSelection()?.toString()) openPreview();
+    } : undefined}>
       <Tooltip title={artifact.name} placement="topLeft" trigger={["hover", "focus"]} styles={{ body: { overflowWrap: "anywhere" } }}>
-        {canPreview ? <button type="button" className="ordinary-artifact-name" onClick={() => setPreview(true)}>{artifact.name}</button>
+        {canPreview ? <button type="button" className="ordinary-artifact-name" onClick={openPreview}>{artifact.name}</button>
           : <strong className="ordinary-artifact-name" tabIndex={0}>{artifact.name}</strong>}
       </Tooltip>
       <span>{artifact.content_type || t("taskCenter.ordinaryUnknownType")} · {fileSize(artifact.size_bytes) ?? t("taskCenter.ordinaryUnknownSize")}</span>
       {!ready && <span role="status">{t(`taskCenter.ordinaryArtifactState_${artifact.state}`)}</span>}
     </div>
     <div className="ordinary-artifact-actions">
-      {canPreview && <button type="button" onClick={() => setPreview(true)} aria-label={`${t("taskCenter.ordinaryPreview")} ${artifact.name}`}>{t("taskCenter.ordinaryPreview")}</button>}
-      {ready && artifact.capabilities.open && openUrl && <a href={openUrl} target="_blank" rel="noopener noreferrer" aria-label={`${t("common.open")} ${artifact.name}`}>{t("common.open")}</a>}
+      {canPreview && <button type="button" onClick={openPreview} aria-label={`${t("taskCenter.ordinaryPreview")} ${artifact.name}`}>{t("taskCenter.ordinaryPreview")}</button>}
       {canDownload && <button type="button" disabled={busy} onClick={() => void execute(download)} aria-label={`${t("taskCenter.download")} ${artifact.name}`}>{t("taskCenter.download")}</button>}
     </div>
     {error && <span className="ordinary-artifact-error" role="alert">{t("taskCenter.ordinaryArtifactActionFailed")}</span>}
@@ -84,8 +94,10 @@ function ArtifactRow({ artifact, onReload, sourceContext }: { artifact: PublicAr
   </li>;
 }
 
-export function TaskArtifactList({ artifacts, final = false, onReload, sourceContexts }: {
+export function TaskArtifactList({ artifacts, final = false, onReload, sourceContexts, workflow, workflowForArtifact }: {
   artifacts: PublicArtifact[]; final?: boolean; onReload?: () => Promise<unknown>; sourceContexts?: Record<string, ArtifactSourceContext>;
+  workflow?: WorkflowPreviewOrigin;
+  workflowForArtifact?: (artifact: PublicArtifact) => WorkflowPreviewOrigin | undefined;
 }) {
   const { t } = useTranslation();
   const headingId = useId();
@@ -106,6 +118,6 @@ export function TaskArtifactList({ artifacts, final = false, onReload, sourceCon
           : <RightOutlined className="ordinary-artifact-chevron" aria-hidden="true" />}
       </button> : heading}
     </h3>
-    <ul className="ordinary-artifact-list" id={listId} hidden={final && !expanded}>{unique.map(artifact => <ArtifactRow key={artifact.artifact_id} artifact={artifact} onReload={onReload} sourceContext={sourceContexts?.[artifact.producer_display_key]} />)}</ul>
+    <ul className="ordinary-artifact-list" id={listId} hidden={final && !expanded}>{unique.map(artifact => <ArtifactRow key={artifact.artifact_id} artifact={artifact} onReload={onReload} sourceContext={sourceContexts?.[artifact.producer_display_key]} workflow={workflow ?? workflowForArtifact?.(artifact)} />)}</ul>
   </section>;
 }

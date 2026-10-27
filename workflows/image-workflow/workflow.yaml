@@ -219,6 +219,8 @@ slots:
     ordered: true
 
 ui:
+  follow_mode:
+    default: following
   tabs:
     - id: analyze_subject
       label: Analysis

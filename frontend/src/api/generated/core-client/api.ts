@@ -3996,6 +3996,56 @@ export interface DocumentImageDisplay {
     'start': number;
     'width': number;
 }
+export interface DocumentImageExportItem {
+    'error_code'?: string;
+    'filename': string;
+    'id': string;
+    'size'?: number;
+    'status': DocumentImageExportItemStatusEnum;
+}
+
+export const DocumentImageExportItemStatusEnum = {
+    Pending: 'pending',
+    Ready: 'ready',
+    Failed: 'failed'
+} as const;
+
+export type DocumentImageExportItemStatusEnum = typeof DocumentImageExportItemStatusEnum[keyof typeof DocumentImageExportItemStatusEnum];
+
+export interface DocumentImageExportRequest {
+    'base_draft_version'?: number;
+    'base_revision': number;
+    'document': DocumentConvertPreviewInputDocument;
+    'image_reference'?: string;
+}
+export interface DocumentImageExportResponse {
+    'code': number;
+    'data': DocumentImageExportState;
+    'message': string;
+}
+export interface DocumentImageExportState {
+    'completed': number;
+    'expires_at': string;
+    'filename': string;
+    'id': string;
+    'items'?: Array<DocumentImageExportItem>;
+    'ready': number;
+    'single': boolean;
+    'status': DocumentImageExportStateStatusEnum;
+    'total': number;
+}
+
+export const DocumentImageExportStateStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Ready: 'ready',
+    Partial: 'partial',
+    Failed: 'failed',
+    Expired: 'expired'
+} as const;
+
+export type DocumentImageExportStateStatusEnum = typeof DocumentImageExportStateStatusEnum[keyof typeof DocumentImageExportStateStatusEnum];
+
 export interface DocumentInvalidCrossReference {
     'target_id': string;
 }
@@ -4146,6 +4196,23 @@ export interface DocumentProvidersOpenAPIResponse {
     'data': DocumentProviderCatalog;
     'message': string;
 }
+export interface DocumentPublicationGroupRequest {
+    'base_draft_version'?: number;
+    'base_revision': number;
+    'idempotency_key': string;
+    'targets': Array<DocumentPublicationTargetInput>;
+}
+export interface DocumentPublicationGroupResponse {
+    'code': number;
+    'data': DocumentPublicationGroupState;
+    'message': string;
+}
+export interface DocumentPublicationGroupState {
+    'current_hash': string;
+    'preferred_providers': Array<string>;
+    'publication_id'?: string;
+    'targets': Array<DocumentPublicationTargetState>;
+}
 export interface DocumentPublicationLookup {
     'operation'?: DocumentPublicationStatus;
 }
@@ -4197,6 +4264,25 @@ export interface DocumentPublicationStatus {
     'status': string;
     'target_url'?: string;
     'updated_at': string;
+}
+export interface DocumentPublicationTargetInput {
+    'connection_id'?: string;
+    'parent_uri'?: string;
+    'provider': string;
+    'retry_operation_id'?: string;
+    'title'?: string;
+}
+export interface DocumentPublicationTargetState {
+    'bound': boolean;
+    'connection_id'?: string;
+    'last_success_at'?: string;
+    'last_success_hash'?: string;
+    'operation'?: DocumentPublicationStatus;
+    'operation_hash'?: string;
+    'parent_uri'?: string;
+    'provider': string;
+    'target_url'?: string;
+    'title'?: string;
 }
 export interface DocumentPublishInput {
     'idempotency_key': string;
@@ -8427,6 +8513,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'task_center_enabled': boolean;
     'updated_at': string;
     'user_preference_configured': boolean;
+    'workflow_trust_notice_dismissed': boolean;
     'workflows_enabled': boolean;
 }
 export interface UserUIPreferencesPatchOpenAPIRequest {
@@ -8441,6 +8528,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'sensitive_word_filter_enabled'?: boolean;
     'skills_enabled'?: boolean;
     'task_center_enabled'?: boolean;
+    'workflow_trust_notice_dismissed'?: boolean;
     'workflows_enabled'?: boolean;
 }
 export interface VerifiedProviderGroupOpenAPIItem {
@@ -65931,6 +66019,163 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {string} fileId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet: async (artifactId: string, exportId: string, fileId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'exportId', exportId)
+            // verify required parameter 'fileId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'fileId', fileId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}/files/{file_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)))
+                .replace(`{${"file_id"}}`, encodeURIComponent(String(fileId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet: async (artifactId: string, exportId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet', 'exportId', exportId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost: async (artifactId: string, exportId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost', 'exportId', exportId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}:retry`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {string} artifactId
+         * @param {DocumentImageExportRequest} documentImageExportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsPost: async (artifactId: string, documentImageExportRequest: DocumentImageExportRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsPost', 'artifactId', artifactId)
+            // verify required parameter 'documentImageExportRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsPost', 'documentImageExportRequest', documentImageExportRequest)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentImageExportRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {string} artifactId
          * @param {DocumentArtifactPatchRequest} documentArtifactPatchRequest
@@ -65996,6 +66241,79 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {string} artifactId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsGet: async (artifactId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsGet', 'artifactId', artifactId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/publications`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPost: async (artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPost', 'artifactId', artifactId)
+            // verify required parameter 'documentPublicationGroupRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPost', 'documentPublicationGroupRequest', documentPublicationGroupRequest)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/publications`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentPublicationGroupRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -66555,6 +66873,63 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {string} fileId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(artifactId: string, exportId: string, fileId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(artifactId, exportId, fileId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(artifactId: string, exportId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(artifactId, exportId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(artifactId: string, exportId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(artifactId, exportId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {string} artifactId
+         * @param {DocumentImageExportRequest} documentImageExportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsPost(artifactId: string, documentImageExportRequest: DocumentImageExportRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsPost(artifactId, documentImageExportRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {string} artifactId
          * @param {DocumentArtifactPatchRequest} documentArtifactPatchRequest
@@ -66578,6 +66953,33 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationGet(artifactId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {string} artifactId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdPublicationsGet(artifactId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentPublicationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationsGet(artifactId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdPublicationsPost(artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentPublicationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationsPost(artifactId, documentPublicationGroupRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationsPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -66836,6 +67238,46 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters.artifactId, requestParameters.exportId, requestParameters.fileId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters.artifactId, requestParameters.documentImageExportRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -66853,6 +67295,26 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
          */
         apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationLookupResponse> {
             return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters.artifactId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationGroupResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters.artifactId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationGroupResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -67027,6 +67489,44 @@ export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+
+    readonly fileId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest {
+    readonly artifactId: string
+
+    readonly documentImageExportRequest: DocumentImageExportRequest
+}
+
+/**
  * Request parameters for apiCoreWorkflowArtifactsArtifactIdPatch operation in WorkflowApi.
  */
 export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest {
@@ -67040,6 +67540,22 @@ export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest {
  */
 export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest {
     readonly artifactId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPublicationsGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest {
+    readonly artifactId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPublicationsPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest {
+    readonly artifactId: string
+
+    readonly documentPublicationGroupRequest: DocumentPublicationGroupRequest
 }
 
 /**
@@ -67259,6 +67775,50 @@ export class WorkflowApi extends BaseAPI {
 
     /**
      *
+     * @summary Download an owned image archive or original image
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters.artifactId, requestParameters.exportId, requestParameters.fileId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read owned image export progress and individual outcomes
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Retry missing images without changing the captured document
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Prepare images referenced by the current document snapshot
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters.artifactId, requestParameters.documentImageExportRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Save an Artifact with revision and draft preconditions
      * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -67277,6 +67837,28 @@ export class WorkflowApi extends BaseAPI {
      */
     public apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest, options?: RawAxiosRequestConfig) {
         return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read current per-platform synchronization state and confirmed preferences
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Confirm publication of the current saved document to independent targets
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

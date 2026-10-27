@@ -519,6 +519,7 @@ export function filterWorkflowTabs(
   tabs: TabDef[] = [],
   slots: SlotRevision[] = [],
   readyMaterial?: string,
+  runtime?: Pick<WorkflowSession, 'steps' | 'projection'>,
 ): TabDef[] {
   const present = new Set(
     slots.filter((slot) => slot.selected).map((slot) => slot.slot),
@@ -526,6 +527,12 @@ export function filterWorkflowTabs(
   const visibilityReady = !readyMaterial || present.has(readyMaterial);
   return tabs.filter((tab) => {
     if (!tab.hide_when_material) return true;
+    const stepIds = new Set([tab.step_id ?? tab.id, ...(tab.status_step_ids ?? [])]);
+    const effective = (id: string) => runtime?.projection?.nodes?.[id]?.validity !== 'stale'
+      && !runtime?.projection?.stale?.includes(id);
+    if (runtime?.steps?.some(step => step.validity !== 'stale' && effective(step.step_id) && stepIds.has(step.step_id))
+      || [...(runtime?.projection?.current ?? []), ...(runtime?.projection?.past ?? [])]
+        .some(id => effective(id) && stepIds.has(id))) return true;
     if (!visibilityReady) return false;
     return !present.has(tab.hide_when_material);
   });
@@ -555,6 +562,9 @@ export interface CompositeBehavior {
 export interface WorkflowUI {
   /** Root slot metadata, including slots not referenced by a tab. */
   slotDefinitions?: SlotDef[];
+  source_type?: string;
+  default_panel_mode?: 'compact' | 'expanded';
+  follow_mode?: { default?: 'following' | 'free' };
   extensions?: string[];
   group_downloads?: boolean;
   task_presentation?: { grouped?: boolean; hide_final_artifacts?: boolean; hidden_steps?: string[] };
@@ -575,9 +585,13 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
   if (!raw || typeof raw !== 'object') return {};
   const spec = raw as Record<string, unknown>;
   const rawUI = spec.ui;
-  if (rawUI != null && (typeof rawUI !== 'object' || Array.isArray(rawUI))) return {};
+  if (rawUI != null && (typeof rawUI !== 'object' || Array.isArray(rawUI))) {
+    return typeof spec.source_type === 'string' ? { source_type: spec.source_type } : {};
+  }
 
-  const ui = (rawUI ?? {}) as WorkflowUI;
+  const ui = typeof spec.source_type === 'string'
+    ? { ...(rawUI ?? {}) as WorkflowUI, source_type: spec.source_type }
+    : (rawUI ?? {}) as WorkflowUI;
   const slotDefs = new Map<string, SlotDef>();
   if (Array.isArray(spec.slots)) {
     for (const value of spec.slots) {

@@ -13,6 +13,7 @@ export type { PdfReferenceAction } from "./pdfReferenceGeometry";
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface RenderPdfProps {
+  onPreviewError?: () => void;
   fileData: string | ArrayBuffer | File | null;
   metadata?: Record<string, unknown> | null;
   content?: string | null;
@@ -79,6 +80,7 @@ function hasUsablePdfText(value: string): boolean {
 }
 
 export default function RenderPdf({
+  onPreviewError,
   fileData,
   metadata,
   defaultPageWidth,
@@ -934,6 +936,7 @@ export default function RenderPdf({
           setError(null);
         }}
         onLoadError={(err) => {
+          onPreviewError?.();
           setError(err.message || "加载失败");
           setLoading(false);
         }}

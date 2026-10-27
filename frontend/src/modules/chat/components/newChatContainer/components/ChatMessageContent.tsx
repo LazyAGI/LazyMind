@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import ChatImages from "../../ChatImages";
 import ChatFiles from "../../ChatFiles";
 import { getCiteMessages } from "../utils/citeMessage";
+import MessageArtifactLinks from '../../ArtifactPreview/MessageArtifactLinks';
 
 const ThinkIcon = new URL("../../../assets/images/think.png", import.meta.url)
   .href;
@@ -126,6 +127,7 @@ export default function ChatMessageContent({
 
   const renderMarkdown = (text: string) => (
     <MarkdownViewer
+      previewArtifacts
       sources={sources}
       IS_STREAMING={isStreaming}
       conversationId={item.fork_read_only ? undefined : conversationId}
@@ -204,6 +206,9 @@ export default function ChatMessageContent({
       <div className="chat-text">
         {renderMarkdown(item.display_delta || item.delta)}
       </div>
+      {item.role !== RoleTypes.USER && !isStreaming && !item.fork_read_only && conversationId && (item.history_id || item.id) &&
+        <MessageArtifactLinks conversationId={conversationId} historyId={item.history_id || item.id}
+          content={item.delta || ''} exports={item.exports} sources={item.sources} />}
     </Flex>
   );
 }

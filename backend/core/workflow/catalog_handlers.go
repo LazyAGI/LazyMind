@@ -38,6 +38,8 @@ func loadWorkflowCatalogSpec(r *http.Request, refOrID string, includeRawFiles bo
 	if err := yaml.Unmarshal(body, &spec); err != nil {
 		return nil, err
 	}
+	// Catalog ownership is authoritative; package YAML cannot impersonate a builtin.
+	spec["source_type"] = pkg.SourceType
 	if includeRawFiles {
 		spec["workflow_yaml_raw"] = string(body)
 		spec["state_yaml_raw"] = string(pkg.Files["scenario/state.yml"])

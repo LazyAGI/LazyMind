@@ -2854,6 +2854,19 @@
   }
 }
 
+.model-provider-cloud-doc-resource-row--obsidian {
+  .model-provider-cloud-doc-resource-copy > p {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .model-provider-cloud-doc-resource-controls {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+  }
+}
+
 .model-provider-cloud-doc-resource-count {
   display: flex;
   align-items: baseline;
