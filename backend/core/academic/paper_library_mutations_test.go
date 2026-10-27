@@ -275,3 +275,42 @@ func TestLibrarySameHashCannotBeAssociatedWithAnotherPaper(t *testing.T) {
 		t.Fatal("conflicting attachment partially committed")
 	}
 }
+
+func TestLibraryMetadataCorrectionReturnsTheUpdatedAttachmentIdentity(t *testing.T) {
+	for _, driver := range []string{"sqlite", "postgres"} {
+		t.Run(driver, func(t *testing.T) {
+			var db *gorm.DB
+			if driver == "postgres" {
+				db = paperLibraryTestDB(t, libraryPostgresDB(t))
+			} else {
+				db = paperLibraryTestDB(t)
+			}
+			paper := importDraft(t, "papers", "draft", libraryDraft("paper", "Confirmed PDF", "")).Data.Papers[0]
+			uploadReceipt(t, db, "papers", "pdf", "upload", paper.ID, "hash")
+			paper = confirmUpload(t, paper, "pdf", "upload", true).Data.Papers[0]
+			old := paper.AcademicWorkID
+			metadata := paper.Metadata
+			metadata.Identifiers.DOI = "10.1234/corrected"
+			w := libraryRequest(t, "PATCH", "/library/papers/paper", "papers", "owner", map[string]any{"revision": paper.Revision, "metadata": metadata})
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			var result libraryChanges
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			identity := result.Data.Attachments[0].AcademicState
+			if result.Data.Papers[0].AcademicWorkID == old || identity == nil || identity.PaperID != result.Data.Papers[0].AcademicWorkID || identity.DocumentID != "pdf" || !identity.Manual {
+				t.Fatalf("response has stale identity: %+v", result)
+			}
+			var link orm.AcademicWorkDocument
+			if err := db.Where("document_id=?", "pdf").Take(&link).Error; err != nil || link.AcademicWorkID != identity.PaperID {
+				t.Fatalf("link is stale: %+v %v", link, err)
+			}
+			persisted := readLibrary(t, "papers").Data.Attachments[0].AcademicState
+			if persisted == nil || *persisted != *identity {
+				t.Fatalf("read disagrees with mutation: %+v %+v", persisted, identity)
+			}
+		})
+	}
+}

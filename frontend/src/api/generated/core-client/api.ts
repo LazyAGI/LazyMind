@@ -139,16 +139,6 @@ export const AcademicDocumentStateKindEnum = {
 
 export type AcademicDocumentStateKindEnum = typeof AcademicDocumentStateKindEnum[keyof typeof AcademicDocumentStateKindEnum];
 
-export interface AcademicDocumentStatus {
-    'content_sha256'?: string;
-    'is_important'?: boolean;
-    'paper'?: AcademicPaperRef;
-    'processing_error'?: string;
-    'processing_status'?: string;
-    'source_provider'?: string;
-    'source_version'?: string;
-    'state'?: AcademicDocumentState;
-}
 export interface AcademicExpansion {
     'conversation_id': string;
     'created_at'?: string;
@@ -762,9 +752,6 @@ export interface ApiCoreAcademicChatContextGet200Response {
  */
 export type ApiCoreAcademicChatContextGet200ResponseContents = Array<object> | object;
 
-export interface ApiCoreAcademicDocumentStatesGet200Response {
-    'items'?: Array<AcademicDocumentStatus>;
-}
 export interface ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response {
     'status'?: string;
 }
@@ -5678,6 +5665,7 @@ export interface Pages {
     'stage_artifacts': CollectionPage;
 }
 export interface PaperLibraryAttachment {
+    'academicState'?: AcademicDocumentState;
     'addedAt': string;
     'available': boolean;
     'contentHash'?: string;
@@ -8397,48 +8385,6 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Read document scholarly identity and current user\'s importance
-         * @param {string} datasetId
-         * @param {string} [documentIds]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicDocumentStatesGet: async (datasetId: string, documentIds?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'datasetId' is not null or undefined
-            assertParamExists('apiCoreAcademicDocumentStatesGet', 'datasetId', datasetId)
-            const localVarPath = `/api/core/academic/document-states`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (datasetId !== undefined) {
-                localVarQueryParameter['dataset_id'] = datasetId;
-            }
-
-            if (documentIds !== undefined) {
-                localVarQueryParameter['document_ids'] = documentIds;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary Correct document identity or retry recognition
          * @param {string} documentId
          * @param {AcademicDocumentIdentity} academicDocumentIdentity
@@ -9498,20 +9444,6 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Read document scholarly identity and current user\'s importance
-         * @param {string} datasetId
-         * @param {string} [documentIds]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicDocumentStatesGet(datasetId: string, documentIds?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicDocumentStatesGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicDocumentStatesGet(datasetId, documentIds, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicDocumentStatesGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary Correct document identity or retry recognition
          * @param {string} documentId
          * @param {AcademicDocumentIdentity} academicDocumentIdentity
@@ -9887,16 +9819,6 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Read document scholarly identity and current user\'s importance
-         * @param {AcademicWorkflowsApiApiCoreAcademicDocumentStatesGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicDocumentStatesGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicDocumentStatesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicDocumentStatesGet200Response> {
-            return localVarFp.apiCoreAcademicDocumentStatesGet(requestParameters.datasetId, requestParameters.documentIds, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary Correct document identity or retry recognition
          * @param {AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -10156,15 +10078,6 @@ export interface AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest {
 }
 
 /**
- * Request parameters for apiCoreAcademicDocumentStatesGet operation in AcademicWorkflowsApi.
- */
-export interface AcademicWorkflowsApiApiCoreAcademicDocumentStatesGetRequest {
-    readonly datasetId: string
-
-    readonly documentIds?: string
-}
-
-/**
  * Request parameters for apiCoreAcademicDocumentsDocumentIdIdentityPatch operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest {
@@ -10414,17 +10327,6 @@ export class AcademicWorkflowsApi extends BaseAPI {
      */
     public apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Read document scholarly identity and current user\'s importance
-     * @param {AcademicWorkflowsApiApiCoreAcademicDocumentStatesGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicDocumentStatesGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicDocumentStatesGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicDocumentStatesGet(requestParameters.datasetId, requestParameters.documentIds, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

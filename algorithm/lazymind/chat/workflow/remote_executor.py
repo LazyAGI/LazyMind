@@ -135,6 +135,7 @@ class RemoteWorkflowExecutor:
             summary = ''
             control: Dict[str, Any] = {}
             failure: Optional[str] = None
+            failure_code = 'LAZYMIND_EXECUTION_FAILED'
             terminal_event: Optional[Dict[str, Any]] = None
             post_step_checkpoint = None
             try:
@@ -275,6 +276,7 @@ class RemoteWorkflowExecutor:
                             elif kind == 'error':
                                 terminal_event = event
                                 failure = str(event.get('message') or 'LazyMind SubAgent failed')
+                                failure_code = str(event.get('error_code') or 'LAZYMIND_EXECUTION_FAILED')
                 if not failure and not lease_lost.is_set() and not self._was_interrupted(terminal_event):
                     try:
                         await self._run_post_step_checks(
@@ -313,13 +315,12 @@ class RemoteWorkflowExecutor:
                 if self._was_interrupted(terminal_event):
                     await self.runtime.cancel(client, attempt_id, lease)
                 elif failure:
+                    failure_options = {}
+                    if failure_code != 'LAZYMIND_EXECUTION_FAILED':
+                        failure_options['error_code'] = failure_code
                     if post_step_checkpoint is not None:
-                        await self.runtime.fail(
-                            client, attempt_id, lease, failure,
-                            post_step_checkpoint=post_step_checkpoint,
-                        )
-                    else:
-                        await self.runtime.fail(client, attempt_id, lease, failure)
+                        failure_options['post_step_checkpoint'] = post_step_checkpoint
+                    await self.runtime.fail(client, attempt_id, lease, failure, **failure_options)
                 else:
                     await self.runtime.complete(client, attempt_id, lease, {
                         'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts,

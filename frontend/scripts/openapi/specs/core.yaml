@@ -181,25 +181,6 @@ components:
                 status:
                     type: string
             type: object
-        AcademicDocumentStatus:
-            properties:
-                content_sha256:
-                    type: string
-                is_important:
-                    type: boolean
-                paper:
-                    $ref: '#/components/schemas/AcademicPaperRef'
-                processing_error:
-                    type: string
-                processing_status:
-                    type: string
-                source_provider:
-                    type: string
-                source_version:
-                    type: string
-                state:
-                    $ref: '#/components/schemas/AcademicDocumentState'
-            type: object
         AcademicExpansion:
             properties:
                 conversation_id:
@@ -8437,6 +8418,8 @@ components:
             type: object
         PaperLibraryAttachment:
             properties:
+                academicState:
+                    $ref: '#/components/schemas/AcademicDocumentState'
                 addedAt:
                     format: date-time
                     type: string
@@ -16588,34 +16571,6 @@ paths:
                                 type: object
                     description: Read owned academic Chat progress and complete frozen handoff
             summary: Read owned academic Chat progress and complete frozen handoff
-            tags:
-                - AcademicWorkflows
-    /api/core/academic/document-states:
-        get:
-            parameters:
-                - in: query
-                  name: dataset_id
-                  required: true
-                  schema:
-                    type: string
-                - in: query
-                  name: document_ids
-                  required: false
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                properties:
-                                    items:
-                                        items:
-                                            $ref: '#/components/schemas/AcademicDocumentStatus'
-                                        type: array
-                                type: object
-                    description: Read document scholarly identity and current user's importance
-            summary: Read document scholarly identity and current user's importance
             tags:
                 - AcademicWorkflows
     /api/core/academic/documents/{document_id}/identity:

@@ -291,7 +291,6 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Academic references and paper imports -----
 	handleAPI(r, "POST", "/academic/mock-handoffs/{handoff_id}:submit", []string{"qa.write"}, academic.SubmitMockHandoff)
 	handleAPI(r, "GET", "/academic/chat-context", []string{"qa.read"}, academic.AcademicChatContext)
-	handleAPI(r, "GET", "/academic/document-states", []string{"document.read"}, academic.DocumentStates)
 	handleAPI(r, "PATCH", "/academic/documents/{document_id}/identity", []string{"document.write"}, academic.UpdateDocumentIdentity)
 	handleAPI(r, "PUT", "/academic/papers/{paper_id}/importance", []string{"document.read"}, academic.SetImportance)
 	handleAPI(r, "POST", "/academic/paper-selections:resolve", []string{"document.read"}, academic.ResolvePaperSelection)

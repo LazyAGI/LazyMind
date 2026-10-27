@@ -113,6 +113,50 @@ def test_actual_agent_stops_before_a_fourth_model_request(tmp_path):
                 workspace=str(tmp_path), max_retries=20,
                 workspace_permission=WorkspaceContext(local_runtime=False)))
         agent = AgentExecutor().create_agent(model, plan)
-        with pytest.raises(Exception, match='TOOL_ARGUMENT_RETRY_EXHAUSTED'):
+        with pytest.raises(ToolArgumentRetryExhausted) as failure:
             agent('Publish the selected papers')
+        assert failure.value.code == 'TOOL_ARGUMENT_RETRY_EXHAUSTED'
     assert model.requests == 3
+
+
+def test_independent_queries_in_a_protected_window_still_run_concurrently():
+    import threading
+    from lazyllm.tools import fc_register
+
+    barrier = threading.Barrier(2)
+
+    @fc_register(read_keys=lambda args: ('query', args['name']), host_file='NONE')
+    def query(name: str):
+        """Read an independent source.
+
+        Args:
+            name: Source identifier.
+        """
+        barrier.wait(timeout=3)
+        return name
+
+    manager = ToolExecutionMiddleware(
+        ToolManager([query, publish]), argument_limits={'publish': 3},
+        workspace_permission=WorkspaceContext(local_runtime=False))
+    calls = [{'id': name, 'function': {'name': 'query', 'arguments': {'name': name}}} for name in ('a', 'b')]
+    calls.append(_call({'entries': [{'paper_id': 'paper'}]}))
+    results = manager.execute_with_records(calls).results
+    assert all(result['ok'] for result in results)
+    assert [result['value'] for result in results] == ['a', 'b', {'saved': 1}]
+
+
+def test_exhausted_protected_window_does_not_start_following_side_effects():
+    effects = []
+
+    def record_result():
+        """Record a side effect."""
+        effects.append('ran')
+
+    manager = ToolExecutionMiddleware(
+        ToolManager([publish, record_result]), argument_limits={'publish': 3},
+        workspace_permission=WorkspaceContext(local_runtime=False))
+    calls = [_call({'entries': []}) for _ in range(3)]
+    calls.append({'function': {'name': 'record_result', 'arguments': {}}})
+    result = manager.execute_with_records(calls)
+    assert effects == []
+    assert 'TOOL_ARGUMENT_RETRY_EXHAUSTED' in result.results[-1]['value']

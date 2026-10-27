@@ -46,23 +46,35 @@ type Folder struct {
 	ParentID *string `json:"parentId"`
 	Revision int64   `json:"revision"`
 }
+
+// AcademicState is the document identity needed by library task controls.
+type AcademicState struct {
+	DocumentID string `json:"document_id"`
+	Kind       string `json:"kind"`
+	Status     string `json:"status"`
+	PaperID    string `json:"paper_id"`
+	Revision   int64  `json:"revision"`
+	Manual     bool   `json:"manual"`
+	Error      string `json:"error,omitempty"`
+}
 type Attachment struct {
-	ID               string    `json:"id"`
-	PaperID          string    `json:"paperId"`
-	Name             string    `json:"name"`
-	Kind             string    `json:"kind"`
-	ContentRef       string    `json:"contentRef,omitempty"`
-	Source           string    `json:"source"`
-	ImportMethod     string    `json:"importMethod,omitempty"`
-	SourceProvider   string    `json:"sourceProvider,omitempty"`
-	SourceVersion    string    `json:"sourceVersion,omitempty"`
-	SourceURL        string    `json:"sourceUrl,omitempty"`
-	ContentHash      string    `json:"contentHash,omitempty"`
-	ExpansionID      string    `json:"expansionId,omitempty"`
-	ExpansionVersion int64     `json:"expansionVersion,omitempty"`
-	IsPrimary        bool      `json:"isPrimary"`
-	Available        bool      `json:"available"`
-	AddedAt          time.Time `json:"addedAt"`
+	AcademicState    *AcademicState `json:"academicState,omitempty"`
+	ID               string         `json:"id"`
+	PaperID          string         `json:"paperId"`
+	Name             string         `json:"name"`
+	Kind             string         `json:"kind"`
+	ContentRef       string         `json:"contentRef,omitempty"`
+	Source           string         `json:"source"`
+	ImportMethod     string         `json:"importMethod,omitempty"`
+	SourceProvider   string         `json:"sourceProvider,omitempty"`
+	SourceVersion    string         `json:"sourceVersion,omitempty"`
+	SourceURL        string         `json:"sourceUrl,omitempty"`
+	ContentHash      string         `json:"contentHash,omitempty"`
+	ExpansionID      string         `json:"expansionId,omitempty"`
+	ExpansionVersion int64          `json:"expansionVersion,omitempty"`
+	IsPrimary        bool           `json:"isPrimary"`
+	Available        bool           `json:"available"`
+	AddedAt          time.Time      `json:"addedAt"`
 }
 type Note struct {
 	ID        string    `json:"id"`

@@ -112,9 +112,20 @@ type operationProcessing struct {
 	State      string `json:"processing_state"`
 }
 
+type operationDocument struct {
+	ID                  string
+	EffectiveDocumentID string
+}
+type operationObservation struct {
+	Documents map[string]string
+	Metadata  map[string]doc.DocumentMetadata
+	States    []operationProcessing
+}
+
 // Observe distinct active documents, not every historical import receipt.
 // Terminal stages need no external query unless a task was created or resumed.
-func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, batchIDs []string) ([]operationProcessing, error) {
+func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, batchIDs, pageItems []string) (operationObservation, error) {
+	out := operationObservation{Documents: map[string]string{}, Metadata: map[string]doc.DocumentMetadata{}}
 	var ids []string
 	source := operationDocuments(db, store.UserID(r), dataset, batchIDs, nil)
 	err := db.Table("(?) x", source).Select("DISTINCT d.id").
@@ -123,13 +134,34 @@ func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, ba
 		Joins("LEFT JOIN document_processing_states p ON p.document_id=d.id AND p.dataset_id=d.dataset_id").
 		Where(`ds.processing_level <> 'stored' AND (p.document_id IS NULL OR p.parse_status NOT IN ('succeeded','failed') OR (ds.processing_level IN ('chunked','indexed') AND p.chunk_status NOT IN ('succeeded','failed')) OR (ds.processing_level='indexed' AND p.index_status NOT IN ('succeeded','failed')) OR EXISTS (SELECT 1 FROM tasks t WHERE t.dataset_id=d.dataset_id AND t.doc_id=d.id AND t.deleted_at IS NULL AND (t.created_at>p.updated_at OR t.updated_at>p.updated_at)))`).
 		Pluck("d.id", &ids).Error
-	if err != nil || len(ids) == 0 {
-		return nil, err
+	if err != nil {
+		return out, err
+	}
+	if len(pageItems) > 0 {
+		var rows []operationDocument
+		if err := operationDocuments(db, store.UserID(r), dataset, batchIDs, pageItems).Scan(&rows).Error; err != nil {
+			return out, err
+		}
+		unique := map[string]bool{}
+		for _, id := range ids {
+			unique[id] = true
+		}
+		for _, row := range rows {
+			out.Documents[row.ID] = row.EffectiveDocumentID
+			if row.EffectiveDocumentID != "" && !unique[row.EffectiveDocumentID] {
+				ids = append(ids, row.EffectiveDocumentID)
+				unique[row.EffectiveDocumentID] = true
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return out, nil
 	}
 	metadata, err := processingMetadata(r, db, dataset, ids)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
+	out.Metadata = metadata
 	result := make([]operationProcessing, 0, len(metadata))
 	for id, current := range metadata {
 		status := doc.DocumentProcessingStatus(current.ProcessingLevel, current.ProcessingState)
@@ -141,7 +173,8 @@ func observeOperationProcessing(r *http.Request, db *gorm.DB, dataset string, ba
 		}
 		result = append(result, operationProcessing{DocumentID: id, State: status})
 	}
-	return result, nil
+	out.States = result
+	return out, nil
 }
 
 // Counts stay in SQL; only active task observations cross the read-only database boundary.
@@ -274,12 +307,12 @@ func ListImportOperations(w http.ResponseWriter, r *http.Request) {
 		last := batches[len(batches)-1]
 		next = nextImportCursor(last.CreatedAt, last.ID)
 	}
-	observed, err := observeOperationProcessing(r, db, dataset, nil)
+	observed, err := observeOperationProcessing(r, db, dataset, nil, nil)
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
 	}
-	operations, err := loadOperationSummaries(r.Context(), db, store.UserID(r), dataset, batches, canWrite, observed)
+	operations, err := loadOperationSummaries(r.Context(), db, store.UserID(r), dataset, batches, canWrite, observed.States)
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
@@ -288,7 +321,7 @@ func ListImportOperations(w http.ResponseWriter, r *http.Request) {
 		Active      int `json:"active"`
 		NeedsAction int `json:"needs_action"`
 	}
-	err = db.Table("(?) totals", operationSummaryQuery(db, store.UserID(r), dataset, nil, canWrite, observed)).Select("COALESCE(SUM(CASE WHEN active>0 THEN 1 ELSE 0 END),0) AS active,COALESCE(SUM(CASE WHEN needs_action>0 THEN 1 ELSE 0 END),0) AS needs_action").Scan(&totals).Error
+	err = db.Table("(?) totals", operationSummaryQuery(db, store.UserID(r), dataset, nil, canWrite, observed.States)).Select("COALESCE(SUM(CASE WHEN active>0 THEN 1 ELSE 0 END),0) AS active,COALESCE(SUM(CASE WHEN needs_action>0 THEN 1 ELSE 0 END),0) AS needs_action").Scan(&totals).Error
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
@@ -336,24 +369,29 @@ func GetImportOperation(w http.ResponseWriter, r *http.Request) {
 		last := raw[len(raw)-1]
 		next = nextImportCursor(last.CreatedAt, last.ID)
 	}
-	observed, err := observeOperationProcessing(r, db, batch.TargetDatasetID, []string{batch.ID})
+	pageIDs := make([]string, 0, len(raw))
+	for _, item := range raw {
+		pageIDs = append(pageIDs, item.ID)
+	}
+	observed, err := observeOperationProcessing(r, db, batch.TargetDatasetID, []string{batch.ID}, pageIDs)
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
 	}
-	rows, err := loadOperationPage(r.Context(), db, batch, raw, canWrite, observed)
+	rows, err := loadOperationPage(r, db, batch, raw, canWrite, observed)
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
 	}
-	operations, err := loadOperationSummaries(r.Context(), db, user, batch.TargetDatasetID, []orm.PaperImportBatch{batch}, canWrite, observed)
+	operations, err := loadOperationSummaries(r.Context(), db, user, batch.TargetDatasetID, []orm.PaperImportBatch{batch}, canWrite, observed.States)
 	if err != nil {
 		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 		return
 	}
 	common.ReplyJSON(w, map[string]any{"batch": batch, "operation": operations[0], "items": rows, "next_cursor": next})
 }
-func loadOperationPage(ctx context.Context, db *gorm.DB, batch orm.PaperImportBatch, raw []orm.PaperImportItem, canWrite bool, observed []operationProcessing) ([]ImportOperationItem, error) {
+func loadOperationPage(r *http.Request, db *gorm.DB, batch orm.PaperImportBatch, raw []orm.PaperImportItem, canWrite bool, observed operationObservation) ([]ImportOperationItem, error) {
+	ctx := r.Context()
 	result := []ImportOperationItem{}
 	if len(raw) == 0 {
 		return result, nil
@@ -406,30 +444,36 @@ func loadOperationPage(ctx context.Context, db *gorm.DB, batch orm.PaperImportBa
 		if row.ResultKind == "" {
 			row.ResultKind = map[string]string{"succeeded": "imported", "skipped": "already_present", "failed": "failed", "canceled": "canceled"}[item.Status]
 		}
-		current, err := currentImportDocument(ctx, db, row.ImportQueueItem, batch.CreatedBy)
-		if err != nil {
-			return nil, err
-		}
-		row.CurrentDocument = current
 		if item.Stage == "awaiting_association" {
 			row.ContentSHA256 = item.ContentSHA256
 			row.UploadRequestKey = batch.IdempotencyKey
 			var source struct {
 				Paper json.RawMessage `json:"paper"`
 			}
-			if err = json.Unmarshal(batch.SourceContextJSON, &source); err != nil {
+			if err := json.Unmarshal(batch.SourceContextJSON, &source); err != nil {
 				return nil, err
 			}
 			row.PendingPaper = source.Paper
 		}
 		result = append(result, row)
 	}
+	queueItems := make([]ImportQueueItem, 0, len(result))
+	for _, row := range result {
+		queueItems = append(queueItems, row.ImportQueueItem)
+	}
+	current, err := currentImportDocuments(r, db, queueItems, observed)
+	if err != nil {
+		return nil, err
+	}
+	for i := range result {
+		result[i].CurrentDocument = current[result[i].ItemID]
+	}
 	var states []struct {
 		ID            string
 		CurrentState  string
 		ResolvedLater int
 	}
-	if err := operationStates(db.WithContext(ctx), batch.CreatedBy, batch.TargetDatasetID, []string{batch.ID}, ids, observed).Scan(&states).Error; err != nil {
+	if err := operationStates(db.WithContext(ctx), batch.CreatedBy, batch.TargetDatasetID, []string{batch.ID}, ids, observed.States).Scan(&states).Error; err != nil {
 		return nil, err
 	}
 	byID := map[string]int{}

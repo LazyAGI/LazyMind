@@ -12,7 +12,6 @@ import RestartKnowledgeModal, { type IRestartKnowledgeProps } from "../pages/det
 import type { ProcessingLevel } from "../utils/processingLevel";
 import type { ParserConfig } from "@/api/generated/knowledge-client";
 import { downloadPaperCitations } from "./exportLibrary";
-import { loadPaperLibrarySources } from './libraryLoader';
 import PaperImportStatus from "./PaperImportStatus";
 import { retryAcademicImport, listAcademicImportBatches, emptyImportBatchPage, type ImportBatchPage, type PaperUploadContext } from '../api/academicReferences';
 import PaperSearch from "./PaperSearch";
@@ -20,7 +19,7 @@ import PaperFilterPanel from "./PaperFilterPanel";
 import { DEFAULT_PAPER_FILTERS, filterPaperRecords, hasPaperFilters, isReadablePdfAttachment, isStoredPdfAttachment, type PaperFilters } from "./paperFilters";
 import PaperTasks from '../components/PaperTasks';
 import PaperImportanceButton from '../components/PaperTasks/PaperImportanceButton';
-import { updatePaperIdentity, setPaperImportance, type DocumentAcademic } from '../api/paperWorkflows';
+import { updatePaperIdentity, setPaperImportance } from '../api/paperWorkflows';
 import { paperDocument } from './libraryDocuments';
 import PaperDirectoryTree, { PAPER_LIBRARY_ROOT } from './PaperDirectoryTree';
 import "./PaperLibrary.scss";
@@ -56,8 +55,9 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const datasetScope = datasetScopeRef.current;
     const isCurrentScope = () => datasetScopeRef.current === datasetScope && datasetScope.active;
     const [dataState, setData] = useState<PaperLibraryData>(emptyLibrary);
-    const [academicStates, setAcademicStates] = useState<DocumentAcademic[]>([]);
-    const [academicStatesReady, setAcademicStatesReady] = useState(false);
+    const [snapshotReady, setSnapshotReady] = useState(false);
+    const [libraryActive, setLibraryActive] = useState(false);
+    const refreshPendingRef = useRef(false);
     const [taskActionsContainer, setTaskActionsContainer] = useState<HTMLDivElement | null>(null);
     const data = dataState;
     const [loading, setLoading] = useState(true);
@@ -78,7 +78,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const syncGeneration = useRef(0);
     const [syncRevision, setSyncRevision] = useState(0);
     const [syncError, setSyncError] = useState<string | null>(null);
-    const initialLoading = !academicStatesReady && !persistenceError && !syncError;
+    const initialLoading = !snapshotReady && loading && !persistenceError;
     const [importPage, setImportPage] = useState<ImportBatchPage>(emptyImportBatchPage);
     const [detailPaperId, setDetailPaperId] = useState<string | null>(null);
     const [detailTab, setDetailTab] = useState<PaperDetailTab>("overview");
@@ -107,40 +107,51 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         canWriteRef.current = saved.canWrite;
         setCanWrite(saved.canWrite);
         applySnapshot(saved.data);
+        setSnapshotReady(true);
+        setLibraryActive(saved.active);
     }, [applySnapshot]);
     const reload = useCallback(() => {
         if (datasetScopeRef.current !== datasetScope || !datasetScope.active)
             return null;
-        if (busyRef.current)
+        if (busyRef.current) {
+            if (!reloadPromiseRef.current)
+                refreshPendingRef.current = true;
             return reloadPromiseRef.current;
+        }
+        refreshPendingRef.current = false;
         busyRef.current = true;
         const generation = ++syncGeneration.current;
         setLoading(true);
         setPersistenceError(null);
-        const request = (async () => {
-            try {
-                const saved = await loadPersistedPaperLibrary(datasetId);
-                if (generation !== syncGeneration.current || activeDatasetRef.current !== datasetId)
+        const current = () => generation === syncGeneration.current && activeDatasetRef.current === datasetId && datasetScope.active;
+        const request = Promise.all([
+            loadPersistedPaperLibrary(datasetId).then(saved => {
+                if (!current())
                     return;
                 loadedRef.current = true;
                 applySaved(saved);
-                setSyncRevision((value) => value + 1);
-            }
-            catch (error) {
-                if (generation === syncGeneration.current && activeDatasetRef.current === datasetId) {
+            }).catch(error => {
+                if (current()) {
                     loadedRef.current = false;
                     canWriteRef.current = false;
                     setCanWrite(false);
                     setPersistenceError(error instanceof Error ? error.message : "无法加载已保存的文献，请重试");
                 }
-            }
-            finally {
-                if (generation === syncGeneration.current && activeDatasetRef.current === datasetId) {
-                    busyRef.current = false;
-                    setLoading(false);
+            }),
+            listAcademicImportBatches(datasetId).then(queue => {
+                if (current()) {
+                    setImportPage(queue);
+                    setSyncError(null);
                 }
+            }).catch(error => {
+                if (current())
+                    setSyncError(error instanceof Error ? error.message : "导入任务同步失败，请重试");
+            }),
+        ]).then(() => {}).finally(() => {
+            if (current()) {
+                busyRef.current = false;
+                setLoading(false);
             }
-        })().finally(() => {
             if (reloadPromiseRef.current === request)
                 reloadPromiseRef.current = null;
         });
@@ -160,14 +171,16 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         setPersistenceError(null);
         setSyncError(null);
         setSelected([]);
-        setAcademicStates([]);
-        setAcademicStatesReady(false);
+        setSnapshotReady(false);
+        setLibraryActive(false);
+        setImportPage(emptyImportBatchPage());
+        refreshPendingRef.current = false;
         setDetailPaperId(null);
         setFolderId(null);
         setLibraryView("all");
         applySnapshot(emptyLibrary());
         void reload();
-        const onFocus = () => { void reload(); setSyncRevision(value => value + 1); };
+        const onFocus = () => { void reload(); };
         window.addEventListener("focus", onFocus);
         return () => {
             datasetScope.active = false;
@@ -217,50 +230,22 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         catch { /* Preserve the server state and visible error. */ }
     };
     useEffect(() => {
-        if (!loadedRef.current)
+        if (syncRevision > 0)
+            void reload();
+    }, [syncRevision, reload]);
+    useEffect(() => {
+        if (!saving && !confirmingImport && refreshPendingRef.current)
+            void reload();
+    }, [saving, confirmingImport, reload]);
+    useEffect(() => {
+        const active = libraryActive || importPage.notification.active > 0
+            || dataState.papers.some(paper => paper.parse === 'parsing')
+            || dataState.attachments.some(attachment => ['pending', 'processing'].includes(attachment.academicState?.status || ''));
+        if (!snapshotReady || loading || saving || confirmingImport || !active)
             return;
-        let cancelled = false;
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const retry = () => {
-            if (!cancelled)
-                timer = setTimeout(sync, 12000);
-        };
-        const sync = async () => {
-            if (busyRef.current) {
-                retry();
-                return;
-            }
-            const generation = syncGeneration.current;
-            try {
-                const [source, queue] = await Promise.all([loadPaperLibrarySources(datasetId), listAcademicImportBatches(datasetId)]);
-                if (cancelled)
-                    return;
-                if (generation !== syncGeneration.current || busyRef.current) {
-                    retry();
-                    return;
-                }
-                setAcademicStates(source.states);
-                setAcademicStatesReady(true);
-                setImportPage(queue);
-                applySaved(source);
-                if (source.active || queue.notification.active > 0)
-                    retry();
-                if (cancelled)
-                    return;
-                setSyncError(null);
-            }
-            catch (error) {
-                if (!cancelled)
-                    setSyncError(error instanceof Error ? error.message : "附件或导入任务同步失败，请重试");
-            }
-        };
-        void sync();
-        return () => {
-            cancelled = true;
-            if (timer)
-                clearTimeout(timer);
-        };
-    }, [datasetId, syncRevision, applySaved]);
+        const timer = setTimeout(() => void reload(), 12000);
+        return () => clearTimeout(timer);
+    }, [dataState, libraryActive, importPage, snapshotReady, loading, saving, confirmingImport, reload]);
     const scoped = useMemo(() => libraryView === 'directory' ? data.papers.filter(paper => paper.folderId === folderId) : data.papers, [data, folderId, libraryView]);
     const viewed = useMemo(() => filterLibraryView(scoped, libraryView), [scoped, libraryView]);
     const visible = useMemo(() => filterPaperRecords(filterPapers(viewed, keyword), dataState.attachments.filter(attachment => dataState.papers.some(paper => paper.id === attachment.paperId && paper.attachmentIds.includes(attachment.id))), filters), [viewed, keyword, dataState.attachments, dataState.papers, filters]);
@@ -269,7 +254,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const exportPapers = selectedPapers.length ? selectedPapers : visible;
     const hasFilters = hasPaperFilters(filters);
     const confirmedDocument = (id: string) => {
-        const identity = paperDocument(dataState, id, academicStates);
+        const identity = paperDocument(dataState, id);
         const paper = dataState.papers.find(item => item.id === id);
         if (paper?.associationConflict || (paper?.academicWorkId && identity?.state.paper_id && paper.academicWorkId !== identity.state.paper_id))
             return undefined;
@@ -527,13 +512,13 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                   </div>
                 <p className="paper-library-cite">{item.metadata.authors.length ? item.metadata.authors.join("、") : "作者待补全"}</p>
                 {(() => {
-                const identity = paperDocument(dataState, item.id, academicStates);
+                const identity = paperDocument(dataState, item.id);
                 const status = identity?.state.status;
                 return status && status !== 'succeeded' ? <button type="button" className="paper-library-state" onClick={() => openDetail(item.id)}>{status === 'failed' ? '论文信息识别失败' : '论文信息识别中'}</button> : null;
             })()}
                 <div className="paper-library-meta">
                   {item.tags.filter((tag) => tag !== "paper" && !tag.startsWith("arxiv:")).map((tag) => (<span key={tag} className="paper-library-tag">{tag}</span>))}
-                  {item.incomplete && academicStatesReady && <Tooltip title="尚未提取到正式论文题名，当前使用文件名。点击补全题名"><button type="button" className="paper-library-state" disabled={disabled} onClick={() => {
+                  {item.incomplete && snapshotReady && <Tooltip title="尚未提取到正式论文题名，当前使用文件名。点击补全题名"><button type="button" className="paper-library-state" disabled={disabled} onClick={() => {
                     openDetail(item.id);
                     setDetailEditing(true);
                     editingRevisionRef.current = item.revision;
@@ -586,15 +571,13 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         </label>
       </Modal>
       <PaperImportDialog imports={imports} data={data} disabled={disabled} loading={loading} saving={saving} confirmingImport={confirmingImport} fileImportDisabled={fileImportDisabled}/>
-      {detailPaper && (<PaperDetailDrawer datasetId={datasetId} key={`${detailPaperId}:${detailTab}:${detailEditing}`} initialTab={detailTab} initialEditing={detailEditing} academic={paperDocument(dataState, detailPaper.id, academicStates)} editError={editError} onEdit={() => { editingRevisionRef.current = detailPaper.revision; setEditing(data.papers.find(item => item.id === detailPaperId)!); setEditError(null); }} onSave={saveEdits} onRetryIdentification={async () => {
-                const document = paperDocument(dataRef.current, detailPaper.id, academicStates)?.state.document_id;
+      {detailPaper && (<PaperDetailDrawer datasetId={datasetId} key={`${detailPaperId}:${detailTab}:${detailEditing}`} initialTab={detailTab} initialEditing={detailEditing} academic={paperDocument(dataState, detailPaper.id)} editError={editError} onEdit={() => { editingRevisionRef.current = detailPaper.revision; setEditing(data.papers.find(item => item.id === detailPaperId)!); setEditError(null); }} onSave={saveEdits} onRetryIdentification={async () => {
+                const document = paperDocument(dataRef.current, detailPaper.id)?.state.document_id;
                 if (!document)
                     throw new Error("请先关联 PDF 附件");
                 await updatePaperIdentity(document, { reidentify: true });
                 if (isCurrentScope()) {
                     syncGeneration.current += 1;
-                    setAcademicStates(states => states.map(item => item.state.document_id === document
-                        ? { ...item, state: { ...item.state, status: 'pending', manual: false, error: undefined } } : item));
                     setSyncRevision(value => value + 1);
                 }
             }} paper={detailPaper} onReparse={() => openReparse(detailPaper)} reparseDisabledReason={reparseDisabledReason(detailPaper)} data={dataState} onClose={() => setDetailPaperId(null)} onAddNote={async (id, content) => { await mutate(() => addLibraryNote(datasetId, detailPaper.id, id, content)); }} disabled={disabled} onOpenAttachment={openDocument} onOpenPaper={id => openDetail(id, 'relations')} onAddPdf={() => openImport('upload', detailPaper.id)} onDetachAttachment={async (attachment) => { await mutate(() => detachLibraryAttachment(datasetId, detailPaper, attachment.id)); }}/>)}

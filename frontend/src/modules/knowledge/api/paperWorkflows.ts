@@ -76,7 +76,7 @@ export interface DocumentAcademic {
   content_sha256?: string;
   processing_status?: string;
   processing_error?: string;
-  state: { document_id: string; kind: 'paper' | 'other' | 'unknown'; status: string; paper_id: string; manual: boolean; error?: string };
+  state: { document_id: string; kind: 'paper' | 'other' | 'unknown'; status: string; paper_id: string; revision?: number; manual: boolean; error?: string };
   paper?: PaperRef;
   is_important: boolean;
 }
@@ -111,11 +111,6 @@ export async function getExpansion(id: string) {
 }
 export async function deleteExpansion(id: string) {
   await axiosInstance.delete(`${core}/expansions/${encodeURIComponent(id)}`, { data: { confirm: true } });
-}
-export async function documentAcademicStates(dataset: string, ids: string[]) {
-  if (!ids.length) return [];
-  const res = await axiosInstance.get(`${core}/document-states`, { params: { dataset_id: dataset, document_ids: ids.join(',') } });
-  return unwrap<{ items: DocumentAcademic[] }>(res.data).items || [];
 }
 export async function setPaperImportance(datasetId: string, id: string, value: boolean) {
   await axiosInstance.put(`${core}/papers/${encodeURIComponent(id)}/importance`, { dataset_id: datasetId, is_important: value });

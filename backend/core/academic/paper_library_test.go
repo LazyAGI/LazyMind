@@ -15,9 +15,9 @@ import (
 	"testing"
 )
 
-func paperLibraryTestDB(t *testing.T) *gorm.DB {
+func paperLibraryTestDB(t *testing.T, databases ...*gorm.DB) *gorm.DB {
 	t.Helper()
-	db := importErrorDB(t)
+	db := importErrorDB(t, databases...)
 	if e := db.AutoMigrate(&orm.PaperLibraryEntry{}, &orm.PaperLibraryFolder{}, &orm.PaperLibraryNote{}, &orm.PaperLibraryAttachment{}, &orm.AcademicUserPaperState{}, &orm.Dataset{}, &orm.ACLModel{}, &orm.ACLGroupModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); e != nil {
 		t.Fatal(e)
 	}

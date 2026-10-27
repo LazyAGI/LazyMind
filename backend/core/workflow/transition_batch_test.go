@@ -591,7 +591,7 @@ func TestParameterFailureAllowsOneAutomaticRerunAndExplicitManualRetry(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = db.Model(&old).Updates(map[string]any{"status": StepStatusFailed, "result_json": `{"error":"TOOL_ARGUMENT_RETRY_EXHAUSTED: save_artifacts: expected value"}`}).Error; err != nil {
+			if err = db.Model(&old).Updates(map[string]any{"status": StepStatusFailed, "terminal_code": "TOOL_ARGUMENT_RETRY_EXHAUSTED", "result_json": `{"error":"TOOL_ARGUMENT_RETRY_EXHAUSTED: save_artifacts: expected value"}`}).Error; err != nil {
 				t.Fatal(err)
 			}
 			for i := 0; i < tc.count; i++ {

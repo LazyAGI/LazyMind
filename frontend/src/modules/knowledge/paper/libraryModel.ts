@@ -1,8 +1,10 @@
 import type { ImportSource, PaperImportMethod } from './model';
+import type { DocumentAcademic } from '../api/paperWorkflows';
 export type { PaperRecord, PaperLibraryData, PaperMetadata } from './model';
 export type AttachmentKind = 'pdf' | 'supplement' | 'snapshot' | 'other';
 export type NoteKind = 'note' | 'ai_summary' | 'method' | 'conclusion';
 export interface Attachment {
+    academicState?: DocumentAcademic['state'];
     id: string;
     paperId: string;
     name: string;

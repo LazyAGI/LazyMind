@@ -2,18 +2,18 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { ConfigProvider, Modal, message } from 'antd';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PaperLibrary from './PaperLibrary';
+import PaperTasks from '../components/PaperTasks';
+import { MemoryRouter } from 'react-router-dom';
 import { libraryFixture, paperFixture } from './__tests__/fixtures';
 import { emptyLibrary, type PaperLibraryData } from './libraryModel';
 import type { PaperRecord } from './model';
 import * as paperModel from './model';
-import { loadPaperLibrarySources } from './libraryLoader';
 import { loadPersistedPaperLibrary, previewLibraryPapers, patchLibraryPaper, confirmLibraryPdf, createLibraryFolder } from './store';
 import { paperFromPdf } from './pdfMeta';
 import { setPaperImportance } from '../api/paperWorkflows';
 import { listAcademicImportBatches } from '../api/academicReferences';
 vi.mock('@/runtime/readiness', () => ({ waitForRuntimeCapability: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('../components/PaperTasks', () => ({ default: () => null }));
-vi.mock('./libraryLoader', () => ({ loadPaperLibrarySources: vi.fn() }));
+vi.mock('../components/PaperTasks', () => ({ default: vi.fn(() => null) }));
 vi.mock('./pdfMeta', () => ({ paperFromPdf: vi.fn() }));
 vi.mock('../utils/fileHash', () => ({ computeFileSha256: vi.fn().mockResolvedValue('hash') }));
 vi.mock('../api/paperWorkflows', async (original) => ({ ...await original<typeof import('../api/paperWorkflows')>(), setPaperImportance: vi.fn() }));
@@ -26,11 +26,11 @@ const readLibrary = (id: string) => clone(libraries.get(id) || emptyLibrary());
 const writeLibrary = (id: string, data: PaperLibraryData) => libraries.set(id, clone(data));
 const makePaper = (id: string, title: string, folderId: string | null, important = false) => paperFixture({ id, folderId, important, metadata: { title } });
 function seedLibrary() { const data = libraryFixture({ folders: [{ id: 'first', name: '第一个文件夹', revision: 1 }, { id: 'second', name: '第二个文件夹', revision: 1 }], papers: [makePaper('a', 'Folder paper', 'first', true), makePaper('b', 'Other favorite', 'second', true), makePaper('c', 'Unfiled paper', null)] }); data.attachments[0].contentRef = 'stored-pdf-a'; data.notes.push({ id: 'note-a', paperId: 'a', title: 'Reading notes', content: 'Keep these notes', kind: 'note', createdAt: '', updatedAt: '' }); data.papers[0].noteIds = ['note-a']; writeLibrary(datasetId, data); return data; }
-const snapshot = (data: PaperLibraryData, canWrite = true) => ({ data, canWrite, paperCount: data.papers.length, pdfAttachmentCount: data.attachments.filter(a => a.contentRef).length, active: false });
+const snapshot = (data: PaperLibraryData, canWrite = true) => ({ data: { ...data, attachments: data.attachments.map(attachment => attachment.contentRef ? { ...attachment, academicState: attachment.academicState || { document_id: attachment.contentRef, kind: 'paper' as const, status: 'succeeded', paper_id: data.papers.find(paper => paper.id === attachment.paperId)!.academicWorkId!, manual: true } } : attachment) }, canWrite, paperCount: data.papers.length, pdfAttachmentCount: data.attachments.filter(a => a.contentRef).length, active: false });
 function mockReload(input: {
     data: PaperLibraryData;
     canWrite: boolean;
-}) { vi.mocked(loadPersistedPaperLibrary).mockResolvedValueOnce(snapshot(input.data, input.canWrite)); vi.mocked(loadPaperLibrarySources).mockResolvedValueOnce({ ...snapshot(input.data, input.canWrite), states: [] }); }
+}) { vi.mocked(loadPersistedPaperLibrary).mockResolvedValueOnce(snapshot(input.data, input.canWrite)); }
 function changes(dataset: string, data: PaperLibraryData, ids: string[]) { writeLibrary(dataset, data); return { data: { ...emptyLibrary(), papers: data.papers.filter(p => ids.includes(p.id)), attachments: data.attachments.filter(a => ids.includes(a.paperId)), notes: data.notes.filter(n => ids.includes(n.paperId)) } }; }
 function browse() { return within(screen.getByRole('navigation', { name: '文献浏览' })); }
 function libraryTools() { return within(screen.getByRole('toolbar', { name: '文献工具' })); }
@@ -43,13 +43,13 @@ async function confirmPdfOwnership(dialog: HTMLElement) {
 }
 beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(PaperTasks).mockImplementation(() => <></>);
     libraries.clear();
     seedLibrary();
     vi.mocked(previewLibraryPapers).mockImplementation(async (_id, papers) => papers);
     ConfigProvider.config({ holderRender: (children: React.ReactNode) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider> });
     vi.mocked(listAcademicImportBatches).mockResolvedValue({ items: [], next_cursor: '', notification: { active: 0, needs_action: 0 } });
     vi.mocked(loadPersistedPaperLibrary).mockImplementation(async (id) => snapshot(readLibrary(id)));
-    vi.mocked(loadPaperLibrarySources).mockImplementation(async (id) => { const data = readLibrary(id); return { ...snapshot(data), states: data.attachments.filter(a => a.contentRef).map(a => ({ state: { document_id: a.contentRef!, kind: 'paper' as const, status: 'succeeded', paper_id: data.papers.find(p => p.id === a.paperId)!.academicWorkId!, manual: true }, is_important: false })) }; });
     vi.mocked(setPaperImportance).mockResolvedValue(undefined);
     vi.mocked(patchLibraryPaper).mockImplementation(async (id, paper, patch) => { const data = readLibrary(id); const index = data.papers.findIndex(p => p.id === paper.id); data.papers[index] = { ...data.papers[index], ...patch, revision: paper.revision + 1 }; return changes(id, data, [paper.id]); });
     vi.mocked(createLibraryFolder).mockImplementation(async (id, key, name, parentId) => { const data = readLibrary(id); const folder = { id: key, name, parentId, revision: 1 }; data.folders.push(folder); writeLibrary(id, data); return { data: { ...emptyLibrary(), folders: [folder] } }; });
@@ -97,6 +97,78 @@ async function closePopover(name: string) {
     await waitFor(() => expect(screen.queryByRole("dialog", { name })).not.toBeInTheDocument());
 }
 describe('paper library behavior', () => {
+    it('keeps real task controls available after saving a new DOI identity without another read', async () => {
+        const { default: ActualTasks } = await vi.importActual<typeof import('../components/PaperTasks')>('../components/PaperTasks');
+        vi.mocked(PaperTasks).mockImplementation(props => <MemoryRouter><ActualTasks {...props}/></MemoryRouter>);
+        vi.mocked(patchLibraryPaper).mockImplementationOnce(async (id, paper, patch) => {
+            const data = snapshot(readLibrary(id)).data;
+            const index = data.papers.findIndex(item => item.id === paper.id);
+            data.papers[index] = { ...data.papers[index], ...patch, academicWorkId: 'doi-work', revision: paper.revision + 1 };
+            for (const attachment of data.attachments.filter(item => item.paperId === paper.id && item.academicState))
+                attachment.academicState = { ...attachment.academicState!, paper_id: 'doi-work', manual: true, revision: 2 };
+            return changes(id, data, [paper.id]);
+        });
+        await renderLibrary();
+        fireEvent.click(screen.getByRole('checkbox', { name: '选择 Folder paper' }));
+        expect(screen.getByRole('button', { name: '阅读心得' })).toBeEnabled();
+        fireEvent.mouseEnter(screen.getByRole('button', { name: 'Folder paper 的更多操作' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '查看详情' }));
+        const drawer = await screen.findByRole('dialog', { name: '文献详情' });
+        fireEvent.click(within(drawer).getByRole('button', { name: /编\s*辑/ }));
+        fireEvent.change(within(drawer).getByLabelText('DOI'), { target: { value: '10.1234/corrected' } });
+        fireEvent.click(within(drawer).getByRole('button', { name: '保存题录' }));
+        await waitFor(() => expect(within(drawer).queryByRole('button', { name: '保存题录' })).not.toBeInTheDocument());
+        fireEvent.click(within(drawer).getByRole('button', { name: '关闭' }));
+        expect(screen.getByRole('button', { name: '阅读心得' })).toBeEnabled();
+        expect(vi.mocked(PaperTasks).mock.lastCall?.[0].selected).toEqual(['stored-pdf-a']);
+        expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
+    });
+    it('reads a complete library once per initial load, active poll and focus refresh', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        try {
+            const data = readLibrary(datasetId);
+            const first = data.attachments[0];
+            data.attachments = Array.from({ length: 201 }, (_, index) => ({ ...first, id: 'attachment-' + index, contentRef: 'pdf-' + index }));
+            data.papers[0].attachmentIds = data.attachments.map(item => item.id);
+            writeLibrary(datasetId, data);
+            vi.mocked(loadPersistedPaperLibrary).mockImplementation(async id => ({ ...snapshot(readLibrary(id)), active: true }));
+            await renderLibrary();
+            expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
+            expect(listAcademicImportBatches).toHaveBeenCalledOnce();
+            await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+            expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(2);
+            expect(listAcademicImportBatches).toHaveBeenCalledTimes(2);
+            await act(async () => { fireEvent.focus(window); });
+            expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(3);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+    it('shows the library when the independent import notification request fails', async () => {
+        vi.mocked(listAcademicImportBatches).mockRejectedValueOnce(new Error('通知暂时不可用'));
+        await renderLibrary();
+        expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
+        expect(screen.getByRole('alert')).toHaveTextContent('通知暂时不可用');
+        expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
+    });
+    it('defers a focus refresh until the active write finishes', async () => {
+        let finish!: (value: Awaited<ReturnType<typeof patchLibraryPaper>>) => void;
+        vi.mocked(patchLibraryPaper).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+        await renderLibrary();
+        const row = screen.getByRole('combobox', { name: 'Folder paper 的阅读状态' });
+        fireEvent.mouseDown(row);
+        fireEvent.click(await screen.findByText('已读', { selector: '.ant-select-item-option-content' }));
+        await waitFor(() => expect(patchLibraryPaper).toHaveBeenCalledOnce());
+        await act(async () => { fireEvent.focus(window); });
+        expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
+        const data = readLibrary(datasetId);
+        data.papers[0].status = 'read';
+        data.papers[0].revision++;
+        await act(async () => { finish(changes(datasetId, data, ['a'])); });
+        await waitFor(() => expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(2));
+        expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
+    });
+
     it('shows paper leaves under the named library and keeps global views independent from nested directories', async () => {
         const data = readLibrary(datasetId);
         data.folders.push({ id: 'nested', name: '子目录', parentId: 'first' });
@@ -364,7 +436,6 @@ describe('paper library behavior', () => {
         const refreshed = snapshot(shared);
         let finishRefresh!: (snapshot: typeof refreshed) => void;
         vi.mocked(loadPersistedPaperLibrary).mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve; }));
-        vi.mocked(loadPaperLibrarySources).mockResolvedValue({ ...refreshed, states: [], active: false });
         if (refreshTiming === 'before selection') {
             await act(async () => fireEvent.focus(window));
             expect(input).toBeEnabled();

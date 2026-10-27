@@ -1598,7 +1598,8 @@ def test_run_subagent_stream_missing_artifact_emits_error(monkeypatch):
 # Test: AgentExecutor raises → outer except → error frame
 # ---------------------------------------------------------------------------
 
-def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
+@pytest.mark.parametrize('argument_failure', [False, True])
+def test_run_subagent_stream_agent_exception_emits_error(monkeypatch, argument_failure):
     _install_fake_db(monkeypatch)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
@@ -1606,6 +1607,8 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
 
     class ExplodingExecutor:
         async def stream(self, llm, plan):
+            if argument_failure:
+                raise runner_mod.ToolArgumentRetryExhausted('参数修复次数已耗尽')
             raise RuntimeError('llm exploded')
             yield  # pragma: no cover
 
@@ -1620,7 +1623,12 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
     events_out = _sse_to_events(raw)
     error_events = [e for e in events_out if e.get('type') == 'error']
     assert error_events
-    assert 'llm exploded' in error_events[0]['message']
+    if argument_failure:
+        assert error_events[0]['error_code'] == 'TOOL_ARGUMENT_RETRY_EXHAUSTED'
+        assert '参数修复次数已耗尽' in error_events[0]['message']
+    else:
+        assert 'llm exploded' in error_events[0]['message']
+        assert 'error_code' not in error_events[0]
 
 
 # ---------------------------------------------------------------------------

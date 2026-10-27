@@ -1119,3 +1119,41 @@ async def test_worker_claim_loop_runs_up_to_configured_concurrency(monkeypatch):
     loop.cancel()
     with pytest.raises(asyncio.CancelledError):
         await loop
+
+
+@pytest.mark.asyncio
+async def test_argument_failure_code_reaches_the_existing_attempt_terminal_protocol(monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+    from lazymind.chat.engine.subagent import runner
+    from lazymind.chat.workflow.client import RemoteExecutorClient
+
+    request_bodies = []
+
+    async def transport(request):
+        request_bodies.append(json.loads(request.content))
+        return httpx.Response(200, json={'ok': True, 'data': {}}, request=request)
+
+    client_transport = RemoteExecutorClient('http://core.test', 'executor', 'local')
+    runtime = AsyncMock()
+    runtime.context.return_value = {'metadata': {'task_id': 'task'}, 'inputs': {}}
+    runtime.execution_spec.return_value = {
+        'task': {'input_slots': [], 'output_slots': []},
+        'workspace_path': str(tmp_path), 'params': {}, 'steps': [], 'llm_config': {},
+    }
+    runtime.fail.side_effect = client_transport.fail
+    worker = RemoteWorkflowExecutor()
+    worker.runtime = runtime
+
+    async def stream(**_kwargs):
+        yield 'data: ' + json.dumps({
+            'type': 'error', 'status': 'failed', 'message': '参数修复次数已耗尽',
+            'error_code': 'TOOL_ARGUMENT_RETRY_EXHAUSTED',
+        }) + '\n\n'
+
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
+        await worker._run_claim(client, {'attempt_id': 'attempt', 'lease_token': 'lease'})
+    assert len(request_bodies) == 1
+    assert request_bodies[0]['error_code'] == 'TOOL_ARGUMENT_RETRY_EXHAUSTED'
+    assert request_bodies[0]['result'] == {'error': '参数修复次数已耗尽'}
+    runtime.complete.assert_not_awaited()

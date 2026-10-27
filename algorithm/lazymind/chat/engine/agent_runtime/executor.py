@@ -32,6 +32,7 @@ from .telemetry import (
     telemetry_enabled,
 )
 from .tool_call_guard import (
+    DEFAULT_ARGUMENT_REPAIR_LIMIT,
     ExactRepeatMonitor,
     FailureRetryPolicy,
     OneShotNoticeBuffer,
@@ -283,7 +284,7 @@ class AgentExecutor:
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
             call_quota=ToolCallQuota(options.tool_call_limits),
-            argument_limits={name: 3 for name in plan.stop_tools},
+            argument_limits={name: DEFAULT_ARGUMENT_REPAIR_LIMIT for name in plan.stop_tools},
             expanded_round_limit=(options.expanded_round_limit if options.expanded_round_limit is not None
                                   else max(2, int(_cfg['agentic_expanded_max_rounds']))),
             cancel_check=options.extra_stop_condition,

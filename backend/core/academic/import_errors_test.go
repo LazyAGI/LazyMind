@@ -179,11 +179,17 @@ func TestListImportsPreservesFailureWhenEquivalentWorkWasImportedLater(t *testin
 	}
 }
 
-func importErrorDB(t *testing.T) *gorm.DB {
+func importErrorDB(t *testing.T, databases ...*gorm.DB) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "imports.db")), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
+	var db *gorm.DB
+	if len(databases) > 0 {
+		db = databases[0]
+	} else {
+		var err error
+		db, err = gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "imports.db")), &gorm.Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := db.AutoMigrate(&orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.AcademicExpansion{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}); err != nil {
 		t.Fatal(err)

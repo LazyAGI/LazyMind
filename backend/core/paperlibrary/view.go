@@ -193,6 +193,7 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		}
 		p.AttachmentIDs = append(p.AttachmentIDs, a.ID)
 		if state, ok := stateByID[a.DocumentID]; ok {
+			attachment.AcademicState = &AcademicState{DocumentID: state.DocumentID, Kind: state.Kind, Status: state.Status, PaperID: state.PaperID, Revision: state.Revision, Manual: state.Manual, Error: state.Error}
 			if state.Status == "pending" || state.Status == "processing" {
 				view.Active = true
 			}

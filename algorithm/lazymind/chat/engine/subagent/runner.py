@@ -29,6 +29,7 @@ from lazyllm.tools.agent.base import (
 )
 from lazymind.chat.engine.tool_auth import inject_tool_config
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
+from lazymind.chat.engine.agent_runtime.tool_call_guard import ToolArgumentRetryExhausted
 
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -1783,7 +1784,8 @@ async def run_subagent_stream(
             except Exception:
                 pass
         yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
-                    'summary': exc_summary, 'message': exc_summary})
+                    'summary': exc_summary, 'message': exc_summary,
+                    **({'error_code': exc.code} if isinstance(exc, ToolArgumentRetryExhausted) else {})})
         yield 'data: [DONE]\n\n'
     finally:
         if display_plan_task is not None:

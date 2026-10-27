@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"lazymind/core/common/orm"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 )
 
@@ -303,55 +304,40 @@ func TestExpansionImportKeepsDocumentProvenance(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.Create(&orm.Document{ID: "legacy", DatasetID: "papers", DisplayName: "legacy.pdf", BaseModel: orm.BaseModel{CreateUserID: "u"}}).Error; err != nil {
+	var item orm.PaperImportItem
+	if err := db.Where("batch_id=?", batch.ID).Take(&item).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.AcademicDocumentState{DocumentID: "legacy", DatasetID: "papers", Kind: "paper", PaperID: "a", Status: "succeeded"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&orm.AcademicWorkDocument{AcademicWorkID: "a", DatasetID: "papers", DocumentID: "legacy", SourceProvider: "arxiv"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&orm.PaperImportBatch{ID: "legacy-batch", TargetDatasetID: "papers", EntryType: "single_reference", SourceDocumentIDsJSON: marshal([]string{}), PolicySnapshotJSON: marshal(map[string]any{})}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&orm.PaperImportItem{ID: "legacy-item", BatchID: "legacy-batch", AcademicWorkID: "a", DocumentID: "legacy", Status: "succeeded", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{})}).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	response = httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/?dataset_id=papers&document_ids=a,b,legacy", nil)
-	req.Header.Set("X-User-Id", "u")
-	DocumentStates(response, req)
-	if response.Code != 200 {
-		t.Fatal(response.Code, response.Body.String())
-	}
-	var result struct {
-		Items []struct {
-			State          orm.AcademicDocumentState `json:"state"`
-			SourceProvider string                    `json:"source_provider"`
-			SourceURL      string                    `json:"source_url"`
-			SourceVersion  string                    `json:"source_version"`
-			ImportMethod   string                    `json:"import_method"`
-			ExpansionID    string                    `json:"expansion_id"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Items) != 3 {
-		t.Fatal(response.Body.String())
-	}
-	for _, item := range result.Items {
-		if item.State.DocumentID == "a" && (item.SourceProvider != "arxiv" || item.SourceURL != candidate.URL || item.SourceVersion != "v2" || item.ImportMethod != "expansion" || item.ExpansionID != record.ID) {
-			t.Fatalf("source lost in knowledge response: %+v", item)
+	for _, id := range []string{"a", "b"} {
+		method, itemID := "upload", ""
+		if id == "a" {
+			method, itemID = "expansion", item.ID
 		}
-		if item.State.DocumentID == "b" && item.ImportMethod != "upload" {
+		for _, row := range []any{
+			&orm.PaperLibraryEntry{DatasetID: "papers", ID: id, AcademicWorkID: id, Source: "unknown", ImportMethod: method, Revision: 1, TagsJSON: marshal([]string{}), MetadataJSON: marshal(map[string]any{})},
+			&orm.PaperLibraryAttachment{DatasetID: "papers", ID: "attachment-" + id, PaperID: id, DocumentID: id, Kind: "pdf", ImportItemID: itemID},
+		} {
+			if err := db.Create(row).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	view, err := paperlibrary.Load(t.Context(), db.DB, "papers", "u", nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Data.Attachments) != 2 {
+		t.Fatal(view.Data.Attachments)
+	}
+	for _, item := range view.Data.Attachments {
+		if item.AcademicState == nil || item.AcademicState.DocumentID != item.ContentRef {
+			t.Fatalf("identity lost: %+v", item)
+		}
+		if item.ContentRef == "a" && (item.SourceProvider != "arxiv" || item.SourceURL != candidate.URL || item.SourceVersion != "v2" || item.ImportMethod != "expansion" || item.ExpansionID != record.ID) {
+			t.Fatalf("source lost in library response: %+v", item)
+		}
+		if item.ContentRef == "b" && item.ImportMethod != "upload" {
 			t.Fatalf("upload mislabeled: %+v", item)
 		}
-		if item.State.DocumentID == "legacy" && item.ImportMethod != "" {
-			t.Fatalf("invented provenance for a legacy expansion import: %+v", item)
-		}
-
 	}
 }

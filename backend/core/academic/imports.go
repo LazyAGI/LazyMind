@@ -292,7 +292,6 @@ func ListImports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows := make([]ImportQueueItem, 0, len(records))
-	current := map[string]*ImportQueueDocument{}
 	for _, record := range records {
 		var details struct {
 			Message string `json:"message"`
@@ -310,19 +309,15 @@ func ListImports(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		record.SourceProvider, record.SourceVersion = candidate.SourceProvider, candidate.Version
-		key := string(marshal([]string{record.TargetDatasetID, record.WorkID, record.SourceProvider, record.SourceVersion, record.DocumentID}))
-		document, exists := current[key]
-		if !exists {
-			var err error
-			document, err = currentImportDocument(r.Context(), store.DB(), record.ImportQueueItem, userID)
-			if err != nil {
-				replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
-				return
-			}
-			current[key] = document
-		}
-		record.CurrentDocument = document
 		rows = append(rows, record.ImportQueueItem)
+	}
+	current, err := currentImportDocuments(r, store.DB(), rows, operationObservation{})
+	if err != nil {
+		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
+		return
+	}
+	for i := range rows {
+		rows[i].CurrentDocument = current[rows[i].ItemID]
 	}
 	common.ReplyJSON(w, map[string]any{"items": rows, "total": len(rows)})
 }

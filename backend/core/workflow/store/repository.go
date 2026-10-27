@@ -56,7 +56,7 @@ const MaxAutomaticWorkflowStepAttempts = controlpolicy.MaxAutomaticStepAttempts
 func AutomaticWorkflowStepAttemptLimit(ctx context.Context, db *gorm.DB, sessionID, stepID string) (int, error) {
 	var count int64
 	err := db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-		Where("session_id=? AND step_id=? AND status=? AND CAST(result_json AS TEXT) LIKE ?", sessionID, stepID, "failed", "%TOOL_ARGUMENT_RETRY_EXHAUSTED:%").Count(&count).Error
+		Where("session_id=? AND step_id=? AND status=? AND terminal_code=?", sessionID, stepID, "failed", "TOOL_ARGUMENT_RETRY_EXHAUSTED").Count(&count).Error
 	if err != nil {
 		return 0, err
 	}
