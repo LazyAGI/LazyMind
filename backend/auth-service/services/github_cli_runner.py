@@ -41,8 +41,8 @@ class GitHubCLIRunner:
     @classmethod
     def from_runtime(cls):
         # Walking parents also handles Docker's shallow /app layout without indexing past the root.
-        runtime = Path(os.environ.get('LAZYMIND_RUNTIME_RESOURCES_ROOT') or
-                       Path(__file__).resolve().parent.parent.parent.parent.parent)
+        runtime = Path(os.environ.get('LAZYMIND_RUNTIME_RESOURCES_ROOT')
+                       or Path(__file__).resolve().parent.parent.parent.parent.parent)
         binary = Path(os.environ.get('LAZYMIND_GITHUB_CLI_PATH') or runtime / 'bin/gh')
         try:
             digest = binary.with_name('gh.sha256').read_text().strip()

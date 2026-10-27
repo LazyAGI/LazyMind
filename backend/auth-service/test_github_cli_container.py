@@ -95,7 +95,9 @@ class GitHubCLIContainerSessionTest(unittest.TestCase):
         self.connections.verify_saved_github_connection.assert_called_once_with('fixture-saved', owner_user_id='owner-a')
         self.assertEqual(self.runner.auth_calls, 0)
         self.runner.probe.assert_not_called()
-        self.assertEqual(self.service.get(pending['session_id'], owner_user_id='owner-a')['connection_id'], 'fixture-saved')
+        self.assertEqual(
+            self.service.get(pending['session_id'], owner_user_id='owner-a')['connection_id'], 'fixture-saved',
+        )
 
     def test_explicit_web_skips_saved_connections_and_host_probe(self):
         self.service.start(owner_user_id='owner-a', attempt_id='fixture-web', force_web=True)
@@ -108,10 +110,14 @@ class GitHubCLIContainerSessionTest(unittest.TestCase):
         self.connections.get_connection.return_value = {
             'connection_id': 'fixture-target', 'provider': 'github', 'token_source': 'github_cli', 'status': 'ACTIVE',
         }
-        self.service.start(owner_user_id='owner-a', attempt_id='fixture-reauth', reauthorize_connection_id='fixture-target')
+        self.service.start(
+            owner_user_id='owner-a', attempt_id='fixture-reauth', reauthorize_connection_id='fixture-target',
+        )
         self.executor.run()
         self.connections.get_connection.assert_called_once_with('fixture-target', user_id='owner-a')
-        self.assertEqual(self.connections.save_github_cli_token.call_args.kwargs['reauthorize_connection_id'], 'fixture-target')
+        self.assertEqual(
+            self.connections.save_github_cli_token.call_args.kwargs['reauthorize_connection_id'], 'fixture-target',
+        )
         self.runner.probe.assert_not_called()
 
     def test_cleanup_failure_does_not_save(self):

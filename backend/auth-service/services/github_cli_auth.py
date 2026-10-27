@@ -169,7 +169,9 @@ class GitHubCLIAuthService:
         if not self.web_authorization_enabled:
             raise_error(ErrorCodes.GITHUB_CLI_DISABLED)
         if self._recovery_failed:
-            raise_error(ErrorCodes.GITHUB_CLI_FAILED if self.host_credentials_enabled else ErrorCodes.GITHUB_CLI_DISABLED)
+            raise_error(
+                ErrorCodes.GITHUB_CLI_FAILED if self.host_credentials_enabled else ErrorCodes.GITHUB_CLI_DISABLED
+            )
         if not self._recovery_ready.is_set():
             raise_error(ErrorCodes.GITHUB_CLI_BUSY)
         with self._lock:

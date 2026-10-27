@@ -241,6 +241,7 @@ class GitHubCLIRunnerTest(unittest.TestCase):
 
     def test_cancelled_flow_cleans_ram_and_never_exports_a_late_token(self):
         event = threading.Event()
+
         def cancel(*args):
             event.set()
         with self.assertRaises(self.module.GitHubCLIError):

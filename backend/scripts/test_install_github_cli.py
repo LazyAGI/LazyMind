@@ -63,7 +63,9 @@ class GitHubCLIInstallerTest(unittest.TestCase):
             self.installer.install(self.release, arch, self.destination)
         requested = fetch.call_args.args[0]
         url = requested if isinstance(requested, str) else requested.full_url
-        self.assertEqual(url, f'https://github.com/cli/cli/releases/download/v{VERSION}/gh_{VERSION}_linux_{arch}.tar.gz')
+        self.assertEqual(
+            url, f'https://github.com/cli/cli/releases/download/v{VERSION}/gh_{VERSION}_linux_{arch}.tar.gz',
+        )
         return binary
 
     def test_installs_matching_binary_digest_license_and_executable_for_both_architectures(self):

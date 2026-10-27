@@ -178,6 +178,7 @@ class GitHubCLISessionTest(unittest.TestCase):
     def test_cancel_rejects_late_authorization_result(self):
         self.runner.existing = None
         pending = self.start()
+
         def cancel(event):
             self.service.cancel(pending['session_id'], owner_user_id='owner-1')
             self.assertTrue(event.is_set())
@@ -191,6 +192,7 @@ class GitHubCLISessionTest(unittest.TestCase):
     def test_expired_device_flow_cannot_save_late_token(self):
         self.runner.existing = None
         pending = self.start()
+
         def expire(event):
             self.now += 3600
         self.runner.after_device = expire
@@ -304,7 +306,9 @@ class GitHubCLISessionStorageTest(GitHubConnectionFixture, unittest.TestCase):
                 self.assertEqual(result['status'], 'FAILED')
                 self.assertEqual(self.runner.probe_calls, 0)
                 self.assertEqual(self.runner.auth_calls, 0)
-                self.assertEqual(decrypt_json(self.row(connection_id).auth_state_ciphertext)['access_token'], FAKE_OLD_TOKEN)
+                self.assertEqual(
+                    decrypt_json(self.row(connection_id).auth_state_ciphertext)['access_token'], FAKE_OLD_TOKEN,
+                )
                 if failure.retryable:
                     self.assertEqual(self.row(connection_id).status, 'ACTIVE')
 
@@ -315,11 +319,13 @@ class GitHubCLISessionStorageTest(GitHubConnectionFixture, unittest.TestCase):
         )
         entered, release, cancelling = threading.Event(), threading.Event(), threading.Event()
         original_commit = self.sessions.class_.commit
+
         def commit(db):
             entered.set()
             if not release.wait(3):
                 raise AssertionError('fixture did not release commit')
             return original_commit(db)
+
         def cancel():
             cancelling.set()
             return self.manager.cancel(pending['session_id'], owner_user_id='owner-1')
@@ -349,6 +355,7 @@ class GitHubCLISessionStorageTest(GitHubConnectionFixture, unittest.TestCase):
         )
         app = product_app()
         user = SimpleNamespace(id='owner-1', role=SimpleNamespace(name='system-admin'))
+
         def disconnect(event):
             with patch.object(api, 'cloud_oauth_service', self.service), \
                     patch.object(api, 'github_cli_auth_service', self.manager, create=True), \

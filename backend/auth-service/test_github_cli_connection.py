@@ -298,6 +298,7 @@ class GitHubCLIConnectionTest(GitHubConnectionFixture, unittest.TestCase):
         self.seed('conn-cli')
         observed = []
         original_commit = self.sessions.class_.commit
+
         def commit(db):
             cached = self.service._cache_get('conn-cli')
             observed.append(cached.access_token if cached else None)

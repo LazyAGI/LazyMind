@@ -39,6 +39,7 @@ class GitHubCLIAPITest(unittest.TestCase):
         self.addCleanup(self.service_patch.stop)
         self.app = product_app()
         previous = dict(self.app.dependency_overrides)
+
         def restore_overrides():
             self.app.dependency_overrides.clear()
             self.app.dependency_overrides.update(previous)

@@ -82,7 +82,9 @@ class AttemptRecoveryTest(unittest.TestCase):
         first = self.start('fixture-first')
         second = self.start('fixture-second')
         self.assertEqual(first['session_id'], second['session_id'])
-        self.assertEqual(self.service.get_attempt('fixture-second', owner_user_id='owner-a')['session_id'], first['session_id'])
+        self.assertEqual(
+            self.service.get_attempt('fixture-second', owner_user_id='owner-a')['session_id'], first['session_id'],
+        )
         self.service.cancel_attempt('fixture-second', owner_user_id='owner-a')
         self.assertEqual(self.service.get_attempt('fixture-first', owner_user_id='owner-a')['status'], 'CANCELLED')
         self.assertEqual(len(self.executor.pending), 1)
@@ -133,7 +135,9 @@ class AttemptRecoveryTest(unittest.TestCase):
             self.start('fixture-alias-over-limit')
         self.assertEqual(error.exception.code, ErrorCodes.GITHUB_CLI_BUSY[1])
         self.assertEqual(len(self.executor.pending), 1)
-        self.assertEqual(self.service.get_attempt('fixture-alias-254', owner_user_id='owner-a')['session_id'], first['session_id'])
+        self.assertEqual(
+            self.service.get_attempt('fixture-alias-254', owner_user_id='owner-a')['session_id'], first['session_id'],
+        )
         self.service.cancel_attempt('fixture-attempt', owner_user_id='owner-a')
         self.now += 1201
         with self.assertRaises(AppException) as missing:
@@ -191,4 +195,3 @@ class AttemptRecoveryAPITest(unittest.TestCase):
             fn.assert_called_once_with('fixture-attempt', owner_user_id='owner-a')
             self.assertIn('no-store', response.headers.get('cache-control', ''))
             self.assertNotIn('fixture-never-return-token', response.text)
-
