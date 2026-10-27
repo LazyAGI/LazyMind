@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import TaskRemovalDialog from './TaskRemovalDialog';
 import { TASKS_REMOVED_EVENT, type TasksRemovedDetail } from './events';
+import { WORKFLOW_TASKS_CHANGED } from './events';
 import { listTasks } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
@@ -76,10 +77,12 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
       void load();
     };
     window.addEventListener(TASKS_REMOVED_EVENT, removed);
+    window.addEventListener(WORKFLOW_TASKS_CHANGED, renamed);
     window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
     window.addEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, renamed);
     return () => {
       ++request.current;
+      window.removeEventListener(WORKFLOW_TASKS_CHANGED, renamed);
       window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
       window.removeEventListener(CHAT_CONVERSATION_LIST_REFRESH_EVENT, renamed);
       window.removeEventListener(TASKS_REMOVED_EVENT, removed);
@@ -142,6 +145,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     { label: <span className='status-option status-all'><AppstoreOutlined /><span>{t('taskCenter.statusAll')}</span><b>{statusCounts.all}</b></span>, value: '' },
     { label: <span className='status-option status-pending'><HourglassOutlined /><span>{t('taskCenter.statusPending')}</span><b>{statusCounts.pending}</b></span>, value: 'pending' },
     { label: <span className='status-option status-waiting'><ClockCircleOutlined /><span>{t('taskCenter.statusWaiting')}</span><b>{statusCounts.waiting}</b></span>, value: 'waiting' },
+    { label: <span className='status-option'><StopOutlined /><span>{t('taskCenter.statusPaused')}</span></span>, value: 'paused' },
     { label: <span className='status-option status-waiting'><ClockCircleOutlined /><span>{t('taskCenter.statusWaitingInputs')}</span><b>{statusCounts.waiting_inputs}</b></span>, value: 'waiting_inputs' },
     { label: <span className='status-option status-running'><SyncOutlined /><span>{t('taskCenter.statusRunning')}</span><b>{statusCounts.running}</b></span>, value: 'running' },
     { label: <span className='status-option status-succeeded'><CheckCircleOutlined /><span>{t('taskCenter.statusCompleted')}</span><b>{statusCounts.succeeded}</b></span>, value: 'succeeded' },

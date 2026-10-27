@@ -53,6 +53,32 @@ describe("ChatMessageContent thinking duration", () => {
     expect(screen.getByText(/COMMITTED SDK THINK/)).toHaveTextContent("COMMITTED RESULT");
   });
   it.each([
+    { terminal: { run_status: "completed" }, title: "chat.thinkingDone" },
+    { terminal: { run_status: "cancelled" }, title: "chat.runStatus.cancelled" },
+    { terminal: { run_status: "interrupted" }, title: "chat.runStatus.interrupted" },
+    { terminal: { run_status: "failed" }, title: "chat.runStatus.failed" },
+    { terminal: { finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }, title: "chat.thinkingDone" },
+  ])("ends reasoning-only thinking for $title", ({ terminal, title }) => {
+    const props = {
+      isThinkingCollapsed: () => false,
+      onToggleThinkingCollapse: vi.fn(),
+    };
+    const item = {
+      role: "assistant", delta: "", reasoning_content: "reasoning",
+      thinking_duration_s: 75,
+    };
+    const { rerender } = render(<ChatMessageContent {...props} item={item} />);
+    expect(screen.getByText("chat.thinking (1m15s)")).toBeInTheDocument();
+
+    rerender(<ChatMessageContent {...props} item={{ ...item, ...terminal }} />);
+    expect(screen.getByText(`${title} (1m15s)`)).toBeInTheDocument();
+    expect(screen.queryByText("chat.thinking (1m15s)")).not.toBeInTheDocument();
+
+    rerender(<ChatMessageContent {...props} item={item} />);
+    expect(screen.getByText("chat.thinking (1m15s)")).toBeInTheDocument();
+  });
+
+  it.each([
     [20, "20s"],
     [60, "1m"],
     [66, "1m6s"],

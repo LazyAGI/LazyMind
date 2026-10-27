@@ -8,7 +8,8 @@ import { formatTaskDuration, useRunTiming } from "./runTiming";
 import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { reconcileWorkflowTasks } from "@/modules/chat/utils/workflowTaskStatus";
-import { useMemo, useState, useRef, useCallback, useEffect } from "react";
+import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
+import { useMemo, useState, useRef, useCallback, useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Image, Progress, Tooltip } from "antd";
@@ -1143,9 +1144,15 @@ const TaskCenter = (props: Props) => {
     const candidates = [...(runs ?? []), ...(workflowSession?.ordinary_runs ?? [])];
     const byRun = new Map<string, OrdinaryRunView>();
     for (const run of candidates) byRun.set(run.run_id, mergeRun(byRun.get(run.run_id), run));
-    return [...byRun.values()].filter(run => run.timing).sort((a, b) =>
+    const latest = [...byRun.values()].filter(run => run.timing).sort((a, b) =>
       Date.parse(b.timing!.requested_at) - Date.parse(a.timing!.requested_at))[0];
-  }, [runs, workflowSession?.ordinary_runs]);
+    // A continuation/approval Chat round does not own the Workflow clock.
+    // After the Workflow ends, new ordinary tasks can own the panel again.
+    const workflowFinished = ['completed', 'failed'].includes(workflowSession?.projection?.display?.status ?? '');
+    const hasNewChatTasks = latest && workflowFinished && tasks.some(task => task.agent_type !== 'workflow_step'
+      && (task.ordinary?.run_id === latest.run_id || task.trigger_history_id === latest.run_id));
+    return workflowSession && !hasNewChatTasks ? byRun.get(workflowSession.session_id) : latest;
+  }, [runs, tasks, workflowSession?.session_id, workflowSession?.projection?.display?.status, workflowSession?.ordinary_runs]);
   const runTiming = useRunTiming(currentRun);
   useEffect(() => {
     if (!sessionId) return;
@@ -1207,8 +1214,7 @@ const TaskCenter = (props: Props) => {
         hiddenSteps={taskPresentation?.hidden_steps}
         hideGroupedArtifacts={taskPresentation?.hide_final_artifacts}
         groupedStatus={taskPresentation?.grouped && workflowSession
-          ? stateLabel(workflowSession.status === 'active' ? 'running' : workflowSession.status === 'completed'
-            ? 'complete' : workflowSession.status === 'failed' ? 'failed' : workflowSession.status === 'stopped' ? 'canceled' : 'waiting', t)
+          ? t(workflowDisplayLabel(workflowSession.projection?.display?.status))
           : undefined}
         onClose={onClose}
         showHeader={showHeader}

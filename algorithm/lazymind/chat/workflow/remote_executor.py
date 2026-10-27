@@ -81,6 +81,14 @@ class RemoteWorkflowExecutor:
                     await asyncio.sleep(self.poll_seconds)
 
     async def _run_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
+        try:
+            await self._execute_claim(client, claim)
+        finally:
+            # A fenced lease stops publication immediately, but only executor
+            # exit confirms tools have finished. Never acknowledge from heartbeat.
+            await self.runtime.acknowledge_stop(client, str(claim['attempt_id']), str(claim['lease_token']))
+
+    async def _execute_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
         attempt_id = str(claim['attempt_id'])
         lease = str(claim['lease_token'])
         task_id = ''

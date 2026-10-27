@@ -29,3 +29,25 @@ func TestResolveWorkflowInputBindingValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveWorkflowControlErrors(t *testing.T) {
+	for _, sample := range []struct {
+		message string
+		status  int
+		code    int
+	}{
+		{"workflow controls require an interactive single Chat run", http.StatusBadRequest, 2004901},
+		{"native workflow controls require the LazyMind Chat executor", http.StatusConflict, 2004902},
+		{"lease_token required", http.StatusBadRequest, 2004903},
+		{"stream unavailable", http.StatusInternalServerError, 2004904},
+		{"workflow state unavailable", http.StatusInternalServerError, 2004905},
+		{"task cancellation rejected: HTTP 503", http.StatusInternalServerError, 2004906},
+	} {
+		t.Run(sample.message, func(t *testing.T) {
+			appErr := ResolveAppError(sample.message, sample.status)
+			if appErr.Code != sample.code || appErr.HTTPStatus != sample.status {
+				t.Fatalf("unexpected workflow control error: %+v", appErr)
+			}
+		})
+	}
+}

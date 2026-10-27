@@ -9,10 +9,12 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/displaystate"
 )
 
-// BindWorkflow retains the accepted chat request's earlier timestamp. A later
-// terminal-to-active transition creates a fresh round instead of resetting it.
+// BindWorkflow retains the accepted Chat request's earlier timestamp. Pauses
+// and approvals close an interval; resumption opens another without counting
+// the intervening wait. Snapshot sums those intervals for the same execution.
 func BindWorkflow(ctx context.Context, db *gorm.DB, session orm.WorkflowSession, now time.Time) error {
 	if !Available(db) {
 		return nil
@@ -27,6 +29,14 @@ func BindWorkflow(ctx context.Context, db *gorm.DB, session orm.WorkflowSession,
 	}
 	if terminal(session.Status) {
 		if err == nil {
+			// Accepting a final review can finish without another active interval.
+			// Preserve its frozen duration, but close the continuation boundary so
+			// a later, genuine rerun does not inherit this execution's time.
+			if current.FinishedAt != nil && workflowWait(current.Status) && !workflowWait(session.Status) {
+				return db.WithContext(ctx).Model(&current).Updates(map[string]any{
+					"status": session.Status, "revision": gorm.Expr("revision + 1"),
+				}).Error
+			}
 			return SetStatus(ctx, db, current.ID, session.Status, now)
 		}
 		return nil
@@ -61,6 +71,22 @@ func SyncWorkflow(ctx context.Context, db *gorm.DB, sessionID string, now time.T
 	if count == 0 {
 		return nil
 	} // Do not manufacture a start time for legacy runs.
+	view, err := displaystate.Read(db.WithContext(ctx), session)
+	if err != nil {
+		return err
+	}
+	switch view.Status {
+	case "running":
+		// Includes preparation, parallel siblings and confirmed-stop cleanup.
+		session.Status = "active"
+	case "paused":
+		session.Status = "stopped"
+	case "waiting":
+		// Internal scheduler waiting must not be mistaken for an approval.
+		session.Status = "waiting_approval"
+	case "failed":
+		session.Status = "failed"
+	}
 	return BindWorkflow(ctx, db, session, now)
 }
 func FinishChat(ctx context.Context, db *gorm.DB, id, status string, now time.Time) error {
@@ -224,11 +250,15 @@ func RecordWorkflowEvent(ctx context.Context, db *gorm.DB, event orm.WorkflowEve
 	}
 	return nil
 }
-func CancelConversation(ctx context.Context, db *gorm.DB, owner, conversationID string, now time.Time) error {
+func CancelConversation(ctx context.Context, db *gorm.DB, owner, conversationID string, now time.Time, historyID ...string) error {
 	if !Available(db) {
 		return nil
 	}
-	return db.WithContext(ctx).Model(&orm.TaskExecutionTiming{}).Where("owner_user_id = ? AND conversation_id = ? AND finished_at IS NULL", owner, conversationID).Updates(map[string]any{"status": "canceled", "finished_at": now, "revision": gorm.Expr("revision + 1")}).Error
+	query := db.WithContext(ctx).Model(&orm.TaskExecutionTiming{}).Where("owner_user_id = ? AND conversation_id = ? AND finished_at IS NULL", owner, conversationID)
+	if len(historyID) > 0 && historyID[0] != "" {
+		query = query.Where("history_id = ? AND workflow_session_id = ''", historyID[0])
+	}
+	return query.Updates(map[string]any{"status": "canceled", "finished_at": now, "revision": gorm.Expr("revision + 1")}).Error
 }
 
 // Continuations of an active Workflow keep its root clock, even when the user

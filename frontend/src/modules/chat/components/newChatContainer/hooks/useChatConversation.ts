@@ -146,6 +146,7 @@ export function useChatConversation({
   const fileRef = useRef<any>(null);
   const currentConversationIdRef = useRef<string>("");
   const messageListRef = useRef<any[]>([]);
+  const pendingStops = useRef(new Set<string>());
   const mailConfirmationReplays = useRef(new MailConfirmationReplayStore());
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const conversationMessagesCache = useRef<Map<string, any[]>>(new Map());
@@ -177,6 +178,17 @@ export function useChatConversation({
   const [mediaCapabilityDependency, setMediaCapabilityDependency] =
     useState<MediaCapabilityDependencyDetail | null>(null);
   const [mediaCapabilityChecking, setMediaCapabilityChecking] = useState(false);
+
+  const workflowDisplay = useWorkflowStore((state) =>
+    state.sessionByConversation[currentConversationIdRef.current]?.projection?.display,
+  );
+  const latestHistoryId = messageList.findLast((item) => item.role === RoleTypes.ASSISTANT)?.history_id;
+  // A completed Chat stream can still own a running, handed-off workflow.
+  // Do not take control of an independent workflow from another turn.
+  const canStopGeneration = isStreaming || runtimeWaiting || Boolean(
+    workflowDisplay?.status === 'running' && latestHistoryId
+      && workflowDisplay.chat_history_id === latestHistoryId,
+  );
 
   const scroll = useChatScroll({
     chatInputRef,
@@ -966,6 +978,15 @@ export function useChatConversation({
       messageConversationId === currentConversationIdAtStart ||
       (isUsingTempId && !!messageConversationId);
 
+    // The first frame binds the local placeholder to the server turn. Never
+    // send an unscoped stop, or apply a queued stop to another conversation.
+    if (isActiveConversation && result.history_id) {
+      const stopRequested = pendingStops.current.delete(currentConversationIdAtStart);
+      if (stopRequested && result.runtime_event?.type !== 'run_finished') {
+        requestTurnStop(messageConversationId || currentConversationIdAtStart, result.history_id);
+      }
+    }
+
     const isFirstTimeReceivingId =
       result.conversation_id &&
       isActiveConversation &&
@@ -979,6 +1000,10 @@ export function useChatConversation({
 
       const previousConversationId = currentConversationIdRef.current;
       const isPreviousTempId = previousConversationId.startsWith("temp_");
+
+      if (pendingStops.current.delete(previousConversationId)) {
+        pendingStops.current.add(result.conversation_id);
+      }
 
       if (isPreviousTempId) {
         const currentList = messageListRef.current;
@@ -1354,6 +1379,9 @@ export function useChatConversation({
           }
           const normalizedId = preparedId.trim();
           useFeaturedSelectionStore.getState().moveSelection(conversationId, normalizedId);
+          if (pendingStops.current.delete(conversationId)) {
+            pendingStops.current.add(normalizedId);
+          }
           conversationId = normalizedId;
           currentConversationIdRef.current = normalizedId;
           pendingClientConversationIdRef.current = normalizedId;
@@ -1794,6 +1822,7 @@ export function useChatConversation({
       return false;
     }
     setCreationError(undefined);
+    pendingStops.current.delete(currentConversationIdRef.current);
     if (!currentConversationIdRef.current) {
       setDraftWorkspace(params.workspace_id
         ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name }
@@ -1999,6 +2028,7 @@ export function useChatConversation({
       inputs,
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
+        ...(params.workflow_control ? { workflow_control: params.workflow_control } : {}),
         ...(params.run_in_background ? { run_in_background: true } : {}),
         ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name } : {}),
         ...(params.thinking_depth
@@ -2231,20 +2261,32 @@ export function useChatConversation({
   }
 
   function stopGeneration() {
+    if (runtimeWaitAbortRef.current) {
+      runtimeWaitAbortRef.current.abort();
+      return;
+    }
     const conversationId = currentConversationIdRef.current;
 
     if (conversationId) {
-      ChatServiceApi()
-        .conversationServiceStopChatGeneration({
-          stopChatGenerationRequest: { conversation_id: conversationId },
-        })
-        .catch((err) =>
-          console.error("Error calling stopChatGeneration:", err),
-        );
+      const historyId = messageListRef.current.findLast((item: any) => item.role === RoleTypes.ASSISTANT)?.history_id;
+      if (!historyId) {
+        pendingStops.current.add(conversationId);
+        return;
+      }
+      requestTurnStop(conversationId, historyId);
     }
 
-    // The stop request is only a control signal. Keep the business stream open
-    // until Core emits the authoritative cancelled run_finished event.
+    // Keep the business stream until the authoritative terminal event arrives.
+  }
+
+  function requestTurnStop(conversationId: string, historyId: string) {
+    const stopChatGenerationRequest = {
+      conversation_id: conversationId,
+      history_id: historyId,
+    };
+    ChatServiceApi()
+      .conversationServiceStopChatGeneration({ stopChatGenerationRequest })
+      .catch((err) => message.error(getLocalizedErrorMessage(err)));
   }
 
   async function regenerate() {
@@ -2292,6 +2334,7 @@ export function useChatConversation({
     }
 
     regenerateInProgressRef.current = true;
+    pendingStops.current.delete(currentConversationIdRef.current);
 
     const currentId = currentConversationIdRef.current;
     const previousMessageList = messageListRef.current;
@@ -2476,6 +2519,7 @@ export function useChatConversation({
     setMessageList,
     loading,
     isStreaming,
+    canStopGeneration,
     runtimeWaiting,
     runtimeWaitingOperation,
     streamRecovery,

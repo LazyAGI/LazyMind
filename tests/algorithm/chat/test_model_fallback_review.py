@@ -245,19 +245,31 @@ def test_initial_backup_and_auxiliary_calls_receive_the_same_timeout_policy(prov
     assert observed == [('model-a', initial_timeout), ('model-b', backup_timeout), ('model-b', backup_timeout)]
 
 
-def test_continuous_generation_finishes_after_soft_budget(provider):
+def test_continuous_generation_finishes_after_soft_budget(provider, monkeypatch):
+    from types import SimpleNamespace
     from fallback_test_support import sse_frame
+    from lazymind.chat.engine.agent_runtime import model_fallback
 
+    now = [0.0]
+    monkeypatch.setattr(model_fallback, 'time', SimpleNamespace(monotonic=lambda: now[0]))
     a, b = candidate(provider, 'model-a'), candidate(provider, 'model-b')
     provider.script['model-a'] = [{'message': {'role': 'assistant', 'content': ''}, 'frames': [
         sse_frame({'role': 'assistant', 'content': 'one '}),
         sse_frame({'content': 'two '}), sse_frame({'content': 'three'}, finish='stop'),
-    ], 'chunk_delay': 0.02}]
+    ]}]
     succeed(provider, 'model-b')
     events = []
-    with config.temp('model_fallback_timeout_seconds', 0.02), \
-            config.temp('model_fallback_read_timeout_seconds', 0.1):
-        assert wrapper(a, [b])('continue', stream={'_stream_sink': events.append}) == 'one two three'
+    received = []
+
+    def record(event):
+        events.append(event)
+        if event.get('tag') == 'text':
+            received.append((event['delta'], now[0]))
+            now[0] += 1.0
+
+    with config.temp('model_fallback_timeout_seconds', 0.02):
+        assert wrapper(a, [b])('continue', stream={'_stream_sink': record}) == 'one two three'
+    assert received == [('one ', 0.0), ('two ', 1.0), ('three', 2.0)]
     assert [request['model'] for request in provider.requests] == ['model-a']
     phases = [event['model_output']['phase'] for event in events if event.get('tag') == 'model_output']
     assert phases == ['begin', 'commit']
