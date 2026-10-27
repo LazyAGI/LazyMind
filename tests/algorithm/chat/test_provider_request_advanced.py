@@ -1,4 +1,5 @@
 from copy import copy, deepcopy
+from io import BytesIO
 import json
 import pickle
 
@@ -76,6 +77,8 @@ def test_dynamic_runtime_applies_options_per_role_without_changing_supplier(monk
         response = requests.Response()
         response.status_code = 200
         response._content = json.dumps({'choices': [{'message': {'content': 'ok'}, 'finish_reason': 'stop'}]}).encode()
+        response._content_consumed = True
+        response.raw = BytesIO()
         response.request = request
         return response
 
@@ -157,6 +160,8 @@ def test_runtime_feature_disables_apply_after_custom_body_even_without_gateway_o
         response = requests.Response()
         response.status_code = 200
         response._content = b'{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}'
+        response._content_consumed = True
+        response.raw = BytesIO()
         response.request = request
         return response
 

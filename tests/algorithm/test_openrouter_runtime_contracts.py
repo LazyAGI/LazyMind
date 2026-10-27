@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from lazyllm.module.llms.onlinemodule.supplier import openrouter as supplier
+from lazyllm.module.llms.onlinemodule.base.model_request import ModelCallControl
 
 
 def response(payload=None, *, status=200, content=None):
@@ -16,6 +17,7 @@ def response(payload=None, *, status=200, content=None):
     result.url = 'https://openrouter.ai/api/v1/test'
     result._content = content if content is not None else json.dumps(payload or {}).encode()
     result._content_consumed = True
+    result.raw = SimpleNamespace(enforce_content_length=False, close=lambda: None)
     result.encoding = 'utf-8'
     result.headers['Content-Type'] = 'application/json'
     return result
@@ -28,20 +30,23 @@ def forbid_live_requests(monkeypatch):
 
     monkeypatch.setattr(requests, 'post', forbidden)
     monkeypatch.setattr(requests, 'get', forbidden)
+    monkeypatch.setattr(requests.Session, 'send', forbidden)
 
 
 def test_chat_uses_chat_completions_and_parses_openai_response(monkeypatch):
     captured = {}
 
-    def post(url, **kwargs):
-        captured.update(url=url, **kwargs)
-        return response({'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'hello back'},
-                                      'finish_reason': 'stop'}],
-                         'usage': {'prompt_tokens': 2, 'completion_tokens': 2}})
+    def send(_session, request, **_kwargs):
+        captured.update(url=request.url, headers=request.headers, json=json.loads(request.body))
+        result = response({'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'hello back'},
+                                        'finish_reason': 'stop'}],
+                           'usage': {'prompt_tokens': 2, 'completion_tokens': 2}})
+        result.request = request
+        return result
 
-    monkeypatch.setattr(requests, 'post', post)
+    monkeypatch.setattr(requests.Session, 'send', send)
     module = supplier.OpenRouterChat(api_key='test-only-key', stream=False)
-    assert module.forward('hello', max_retries=1) == 'hello back'
+    assert module.forward('hello', max_retries=1, call_control=ModelCallControl()) == 'hello back'
     assert captured['url'] == 'https://openrouter.ai/api/v1/chat/completions'
     assert captured['headers']['Authorization'] == 'Bearer test-only-key'
     assert captured['json']['messages'][-1]['content'] == 'hello'

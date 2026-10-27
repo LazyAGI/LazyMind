@@ -8,6 +8,7 @@ from contextvars import ContextVar
 from copy import copy, deepcopy
 from functools import wraps
 from http import HTTPStatus
+from io import BytesIO
 import json
 import posixpath
 import re
@@ -89,7 +90,9 @@ def _sanitize_failed_response(response, policy):
     policy['failure'] = {'code': code, 'http_status': status}
     if response.raw is not None:
         response.close()
-    response.raw = None
+    # LazyLLM configures the raw stream after the request returns. Keep a
+    # harmless, empty stream there so it cannot reach the provider's body.
+    response.raw = BytesIO()
     response._content = json.dumps({'error': {'code': code, 'message': 'provider request failed'}}).encode()
     response._content_consumed = True
     response.encoding = 'utf-8'
