@@ -6251,6 +6251,9 @@ export const PreferenceOrganizerReceiptStatusEnum = {
 export type PreferenceOrganizerReceiptStatusEnum = typeof PreferenceOrganizerReceiptStatusEnum[keyof typeof PreferenceOrganizerReceiptStatusEnum];
 
 export interface PreferenceOrganizerResult {
+    'final_state'?: PreferenceOrganizerState;
+    'initial_state'?: PreferenceOrganizerState;
+    'observed_state'?: PreferenceOrganizerState;
     'outcome'?: PreferenceOrganizerResultOutcomeEnum;
     'passes'?: Array<PreferenceOrganizerPass>;
     'passes_attempted'?: number;
@@ -6275,23 +6278,43 @@ export type PreferenceOrganizerResultOutcomeEnum = typeof PreferenceOrganizerRes
 export interface PreferenceOrganizerState {
     'etag': string;
     'full_projection_chars': number;
+    'max_chars'?: number;
     'projected_chars': number;
     'projected_items': number;
     'projection_truncated': boolean;
     'stored_items': number;
+    'updated_at'?: string;
 }
 export interface PreferenceOrganizerTaskData {
     'created_at': string;
+    'current_state'?: PreferenceOrganizerState;
     'error_code'?: string;
     'error_message'?: string;
     'finished_at'?: string;
+    'invalidation_reason'?: PreferenceOrganizerTaskDataInvalidationReasonEnum;
     'result'?: PreferenceOrganizerResult;
+    'result_validity'?: PreferenceOrganizerTaskDataResultValidityEnum;
     'started_at'?: string;
     'status': PreferenceOrganizerTaskDataStatusEnum;
     'task_id': string;
     'waiting_reason'?: PreferenceOrganizerTaskDataWaitingReasonEnum;
 }
 
+export const PreferenceOrganizerTaskDataInvalidationReasonEnum = {
+    StateUnavailable: 'state_unavailable',
+    MissingSnapshot: 'missing_snapshot',
+    PreferenceChanged: 'preference_changed',
+    BudgetChanged: 'budget_changed'
+} as const;
+
+export type PreferenceOrganizerTaskDataInvalidationReasonEnum = typeof PreferenceOrganizerTaskDataInvalidationReasonEnum[keyof typeof PreferenceOrganizerTaskDataInvalidationReasonEnum];
+export const PreferenceOrganizerTaskDataResultValidityEnum = {
+    Current: 'current',
+    Stale: 'stale',
+    Unknown: 'unknown'
+} as const;
+
+export type PreferenceOrganizerTaskDataResultValidityEnum = typeof PreferenceOrganizerTaskDataResultValidityEnum[keyof typeof PreferenceOrganizerTaskDataResultValidityEnum];
 export const PreferenceOrganizerTaskDataStatusEnum = {
     Pending: 'pending',
     Running: 'running',
