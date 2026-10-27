@@ -10,6 +10,7 @@ import re
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
+from check_recovery import check as check_recovery, load_records
 
 CASE = Path(__file__).resolve().parents[1]
 EVIDENCE = CASE / 'evidence'
@@ -49,6 +50,7 @@ def report_checks(path):
 
 
 def main():
+    check_recovery(load_records())
     manifest = read('manifest.json')
     actual = {str(p.relative_to(EVIDENCE)) for p in EVIDENCE.rglob('*')
               if p.is_file() and p.name != 'manifest.json'}

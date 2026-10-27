@@ -14,6 +14,12 @@ Reproduce with the pinned directory URL, frozen task/corpus and a fresh hosted t
 
 The user-facing `/blob/.../SKILL.md` URL queued successfully but later failed installation. Using the supported directory URL recovered installation. The imported directory omits the Skill's parent-relative CONNECTORS reference; Preflight warned about missing web-search capability configuration but did not report that missing file. It also adds a default script absent from upstream. See [audit](AUDIT.md) and [snapshot metadata](evidence/skill-snapshot-metadata.json).
 
+The affected source here is `marketing/skills/competitive-brief` at the pinned
+commit, not product-management's homonym. The [local packaging supplement](PACKAGING.md)
+copies the matching marketing CONNECTORS into the generated archive and verifies
+its link locally. This repairs that standalone package's dependency closure; it
+does not fix Claude.ai's installer or prove the adapted package runs in LazyMind.
+
 ## Review and recovery boundaries
 
 Every generated node has `requires_approval: false`; no actual human approval occurred. A manual advance request took longer than the recorder's 90-second HTTP timeout, but subsequent projection showed it had succeeded. A transport timeout is not evidence that a command failed. Inspect command/session state before retrying a mutation.

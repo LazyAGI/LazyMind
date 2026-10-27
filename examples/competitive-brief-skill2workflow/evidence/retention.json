@@ -1,0 +1,85 @@
+{
+  "original_commit": "fde2e68437caffa8dc6d706271dabc6073183938",
+  "archive_url": "https://github.com/NicoYang1984/LazyMind/tree/fde2e68437caffa8dc6d706271dabc6073183938/examples/competitive-brief-skill2workflow/evidence",
+  "reason": "Remove repeated polling/projection payloads, one redundant screenshot and duplicate artifact/request bodies; retain terminal failures, unchanged graph, recovery receipts and final outputs. Original bytes remain addressable at the pinned ancestor commit.",
+  "removed": {
+    "http/tree-status-1.json": {
+      "bytes": 1794,
+      "sha256": "9d18b96e88ec3eba5ce5b5d7d81dde4b9836a6e91bb107c53487b0a8d01fed1b"
+    },
+    "http/tree-status-2.json": {
+      "bytes": 1793,
+      "sha256": "ec61f31dc05d33bad6dad36dcd8aaf06d7b7e5734ec80387180ef6c08dcbbb12"
+    },
+    "http/tree-status-3.json": {
+      "bytes": 2132,
+      "sha256": "c4a531aa7a5a619f0e808597ad33fac362e88b7a88726d2b70f881a95a15e739"
+    },
+    "http/tree-status-4.json": {
+      "bytes": 2132,
+      "sha256": "9fc6146ffb7499065a860e996de4a1a0a191ec24c5a80c9a4285b8e1d832d9f1"
+    },
+    "http/tree-status-5.json": {
+      "bytes": 2132,
+      "sha256": "ec2fc1c59f7adc7a8ce942b6680e00fe660f5d28125e973129497d32ac3186c2"
+    },
+    "http/tree-status-6.json": {
+      "bytes": 2131,
+      "sha256": "2e1151ad1dc2da4879909cf86c6ea1179c54b8282dc48402d25e99fd21904088"
+    },
+    "http/tree-status-7.json": {
+      "bytes": 2130,
+      "sha256": "a64d2d02e34f15560c13338a3edecd8e29a4f9b5b206bced22c19e4982ac91de"
+    },
+    "http/slots-1.json": {
+      "bytes": 4226,
+      "sha256": "8d9f6e12fe44714642473472851d9a6682f92be6e4b06e4c539e9fb8c672ee6c"
+    },
+    "http/slots-2.json": {
+      "bytes": 5117,
+      "sha256": "359527f85b260bf44e4d499c33fdf8840d97660d5d6330d98f450d936a00d209"
+    },
+    "http/slots-3.json": {
+      "bytes": 4880,
+      "sha256": "4f5c7f25933eed4bcbb8b095785302e9aa5ac16939ce9a44d40e44d16df2ab6e"
+    },
+    "http/steps-1.json": {
+      "bytes": 1161,
+      "sha256": "f66965b7b145c57b6f5de5cbd77544817c830c4b83e104a023bbab5d56c47765"
+    },
+    "http/steps-2.json": {
+      "bytes": 1594,
+      "sha256": "8930818f925037dc4899585d63d0907af2e8c453936bdd52a858da565d22c3a9"
+    },
+    "http/slots-after-edit.json": {
+      "bytes": 8198,
+      "sha256": "a4d8b19e50a0538dd3f69f26838e496463a3115bc867bda13fbfc16686c35068"
+    },
+    "http/projection-1.json": {
+      "bytes": 26050,
+      "sha256": "64d0b91f1352c0d1a2bffa0363d390500b5d00955509ca40401b808b68446188"
+    },
+    "http/synthesis-response.json": {
+      "bytes": 34814,
+      "sha256": "664aa2f00e9723af6dc667acd2964c6535c3591fe372d220761eb1c7cf04f82f"
+    },
+    "http/battlecard-response.json": {
+      "bytes": 35814,
+      "sha256": "84686eabb6ffed2e4070ace89507651d522b796a81a7e62355a4b7675635a068"
+    },
+    "panel-running.png": {
+      "bytes": 88431,
+      "sha256": "8675e6c87b7468a93a2d8f1a3720981037522fc4cc983acbcfe49ef59b805a81"
+    },
+    "artifacts/positioning_analysis.json": {
+      "bytes": 55262,
+      "sha256": "22330355cb2db59f678fc00e0957b4da5017f7b8ef7e72be2eb579087af84d30"
+    },
+    "requests/edit-request.json": {
+      "bytes": 46301,
+      "sha256": "81d6a40bfb51da8ba1f95fc73de5a0ec892b2c68ce13dacafc4327ae9edd2765"
+    }
+  },
+  "original_evidence_bytes": 869905,
+  "removed_bytes": 326092
+}

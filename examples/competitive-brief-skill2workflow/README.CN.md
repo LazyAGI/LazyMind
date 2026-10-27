@@ -1,10 +1,15 @@
 # Competitive Brief：真实 Skill2Workflow 兼容性实验
 
-[English](README.md) · [复现](REPRODUCTION.md) · [评估](EVALUATION.md) · [实现审计](AUDIT.md) · [来源](SOURCES.md)
+[English](README.md) · [复现](REPRODUCTION.md) · [评估](EVALUATION.md) · [实现审计](AUDIT.md) · [来源](SOURCES.md) · [独立打包](PACKAGING.md)
 
 **状态：兼容性实验，不是自主执行成功的 Showcase。** 本案例实际安装、自动转换并发布了 Anthropic 的 competitive-brief Skill，也实际启动了 Workflow。首次外部任务在五个步骤中的第三步失败。通过官方接口限定重试步骤的交付范围后，该步骤恢复成功；原始失败记录予以保留。生成的 Workflow 没有被手写版本替换。
 
 后续有干预推进完成了会话并交付报告。但报告仍有事实边界问题，两条编辑接口测试均失败，人工审核仍未完成，因此以 Draft 兼容性报告投稿。
+
+本实验输入明确是 **marketing/skills/competitive-brief**，不是同名的 product-management 版本。
+本次在同一 Example 中补充固定源哈希的独立打包方案：内置 marketing CONNECTORS，修正相对引用，保留许可与来源，并使用 marketing 专属名称避免混淆。
+15 项新增测试只覆盖本地依赖解析、可复现 ZIP 和既有步骤观测/辅助恢复记录；没有重跑模型实验，也没有把打包成功写成安装或业务 E2E 成功。
+19 份重复或非必要原始记录从当前目录移出，原 commit 与哈希可追溯，执行/编辑失败、恢复过程和最终报告均保留。
 
 ## 产品经理要解决的问题
 

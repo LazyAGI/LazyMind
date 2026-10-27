@@ -1,10 +1,15 @@
 # Competitive Brief: a real Skill2Workflow compatibility trial
 
-[中文](README.CN.md) · [Reproduction](REPRODUCTION.md) · [Evaluation](EVALUATION.md) · [Implementation audit](AUDIT.md) · [Sources](SOURCES.md)
+[中文](README.CN.md) · [Reproduction](REPRODUCTION.md) · [Evaluation](EVALUATION.md) · [Implementation audit](AUDIT.md) · [Sources](SOURCES.md) · [Portable packaging](PACKAGING.md)
 
 **Status: compatibility experiment, not a successful autonomous Showcase.** Anthropic's pinned competitive-brief Skill was genuinely installed, converted by LazyMind's hosted model-backed service, published and executed. The first external task failed at the third of five generated steps. A step-scoped retry recovered that step without changing the generated Workflow. The original failed task remains part of the evidence.
 
 Assisted continuation subsequently completed the session and produced a report. That report still has groundedness issues, both tested edit routes failed, and human review remains pending. These limits are why this case is submitted as a Draft compatibility report.
+
+The source is **marketing/skills/competitive-brief**, not the same-named
+product-management Skill. The [packaging supplement](PACKAGING.md) adds a pinned,
+dependency-complete local package and focused offline checks to this same Example;
+it does not rerun the model experiment or turn the adapted package into E2E evidence.
 
 ## Business question
 
@@ -33,9 +38,12 @@ Both modes used **offline replay of seven operator-selected, paraphrased officia
 | Runtime provenance | [Environment](evidence/environment.json) |
 | Observed product issues | [Issue record](ISSUES.md) |
 
-The real Panel screenshot below was captured during this experiment's execution, after collapsing unrelated navigation. It demonstrates the displayed running state, not successful completion or human approval.
+The real Panel screenshot below shows the recovered session alongside the original
+failed task. It demonstrates assisted session completion, not autonomous success
+or human approval. Repeated polling records and the earlier running screenshot
+remain accessible through the [retention inventory](evidence/retention.json).
 
-![Actual running Competitive Brief Workflow Panel](evidence/panel-running.png)
+![Actual recovered session beside the original failed task](evidence/panel-recovered.png)
 
 ## Limits and intended audience
 

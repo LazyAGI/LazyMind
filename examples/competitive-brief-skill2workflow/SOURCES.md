@@ -2,6 +2,12 @@
 
 ## Skill
 
+Identity is repository + commit + path + blob. **This experiment used the marketing
+Skill**. The product-management Skill has the same name but different instructions
+and Git blob `05ca7ec4314ec1a73a882562a364726870944cff`; none of this experiment's
+runtime evidence validates it. See [source-lock.json](source-lock.json) and the
+[comparison and packaging supplement](PACKAGING.md).
+
 - Author/repository: [Anthropic knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins).
 - Source commit: `c75fda00ff0e41c8ee331ae312c8a07f1967653b` (resolved from main on 2026-10-27).
 - [Original SKILL.md](https://github.com/anthropics/knowledge-work-plugins/blob/c75fda00ff0e41c8ee331ae312c8a07f1967653b/marketing/skills/competitive-brief/SKILL.md), Git blob `1a7df218996ed350c67e6899a60321f205bb69d6`, 13,150 bytes. The directory contains only this file.
@@ -11,6 +17,12 @@
 The original Skill is a research/synthesis instruction package. Inputs are competitor names, optional company positioning and focus areas. Its output is a seven-section competitive brief followed by optional follow-up choices. Public web access supports research; paid SEO, review and market data are supplementary and unavailable in this experiment. There are no executable scripts in the upstream Skill directory.
 
 The imported LazyMind snapshot has two files: byte-identical `SKILL.md` and a platform-added `scripts/run.py` placeholder. The importer adds that default in `backend/core/skillv2/service/service.go`. It does **not** bring the out-of-directory `CONNECTORS.md` into the Skill package. The baseline reads that reference separately. This is a documented input-context difference, not a claim of identical packaging. The generated Workflow does not reuse the placeholder script.
+
+The new local builder includes the exact marketing CONNECTORS and LICENSE in its
+output, with explicit local modifications and origin metadata. That generated
+package is separate from the historical imported snapshot, has not been run in
+the hosted service, and does not retroactively remove the baseline/import context
+difference. No upstream source bodies are added to this PR.
 
 Baseline 1's local Skill copy had one additional trailing newline when read; later runs use the exact upstream blob. The instruction text is otherwise identical. The original bytes and imported text hashes are recorded in the manifest.
 

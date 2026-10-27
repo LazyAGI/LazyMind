@@ -12,6 +12,11 @@ Read [Sources](SOURCES.md) before running. The pinned Skill references a parent 
 
 ## Check committed evidence without a model
 
+For the new dependency-complete marketing package and focused offline tests, use
+[PACKAGING.md](PACKAGING.md). It distinguishes the same-named upstream Skills and
+does not replace the original experiment below. No new model runs are required
+to check this supplement.
+
 From the repository root, with Python 3.10+:
 
 ```sh
@@ -86,7 +91,7 @@ This issues one official `POST /workflow-sessions/{id}:advance-step`. The record
 
 After analysis succeeded, the original external task stayed terminally failed. Two explicit advances completed synthesis using the original full input and the generated no-request battlecard branch. Record this as assisted **session** completion; do not rewrite the external-task outcome. Human review remains pending.
 
-The edit probe used `PATCH /workflow-artifacts/{artifact_id}` with base revision/draft version and an agent-only annotation; the native slot route was then tried. Both failed and left report revision 1 unchanged. The [request](evidence/requests/edit-request.json) and [responses](evidence/http/) are preserved. Successful edit/rollback and real human approval require a future run; no approval bypass or database patch was attempted.
+The edit probe used `PATCH /workflow-artifacts/{artifact_id}` with base revision/draft version and an agent-only annotation; the native slot route was then tried. Both failed and left report revision 1 unchanged. The [original full request](https://github.com/NicoYang1984/LazyMind/blob/fde2e68437caffa8dc6d706271dabc6073183938/examples/competitive-brief-skill2workflow/evidence/requests/edit-request.json) remains at the pinned ancestor commit; [responses](evidence/http/) and pre/post report metadata remain here. Successful edit/rollback and real human approval require a future run; no approval bypass or database patch was attempted.
 
 ## Relevant current-main regression checks
 

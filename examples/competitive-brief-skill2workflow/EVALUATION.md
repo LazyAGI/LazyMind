@@ -1,5 +1,11 @@
 # Evaluation: observations, not a benchmark
 
+The recorded source is the pinned **marketing** competitive-brief Skill, not
+product-management's same-named Skill. The later [packaging supplement](PACKAGING.md)
+adds local dependency-resolution and recorded-recovery tests; it contributes no
+new model run and changes none of the outcomes below. Removed redundant raw files
+remain addressable through [retention.json](evidence/retention.json).
+
 Date: 2026-10-27. Same [task](evidence/task.md), [seven fact cards](evidence/source-cards.md) and final acceptance criteria. Research was deliberately offline in both modes. Different model environments, different packaging context and assisted retry instructions prevent causal speed/cost/quality comparisons. Three baseline runs and one fresh converted Workflow are not a stability estimate.
 
 ## Results
