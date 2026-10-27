@@ -15,7 +15,7 @@ import {
   subscribeWorkflowEventStream,
   type WorkflowEventStreamSubscription,
 } from '@/modules/chat/utils/workflowEventStream';
-import { reconcileWorkflowSessionStatus } from '@/modules/chat/store/workflowStatus';
+import { reconcileWorkflowSessionStatus, type WorkflowDisplayState } from '@/modules/chat/store/workflowStatus';
 import type { OrdinaryTaskView, OrdinaryRunView } from '@/modules/chat/types/ordinaryTask';
 import { mergeRun, mergeOrdinarySnapshot, readOrdinaryTask } from '@/modules/chat/utils/ordinaryTaskState';
 
@@ -288,9 +288,10 @@ export interface WorkflowSession {
   workflow_id: string;
   /** Execution mode selected when this immutable session was created. */
   workflow_mode: 'auto' | 'dynamic';
+  controller_host?: string;
   /** Immutable package revision selected when this session was created. */
   pinned_revision_id?: string;
-  status: "active" | "completed" | "failed" | "waiting" | "stopped";
+  status: "active" | "pausing" | "completed" | "failed" | "waiting" | "stopped";
   current_step_id: string;
   /** Global intent/constraint for this session, JSON string e.g. {"text":"..."} */
   intent_context?: string;
@@ -360,6 +361,7 @@ export function applyOrdinaryWorkflowSnapshot(session: WorkflowSession, snapshot
 }
 
 export interface WorkflowRuntimeProjection {
+  display?: WorkflowDisplayState;
   status?: string;
   current_step_id?: string;
   attempt_history?: Record<string, Array<{ attempt: number; attempt_id?: string; task_id: string; status: string; validity: string; started_at: string; updated_at?: string; intent_context?: string }>>;
@@ -821,7 +823,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
             );
             const snapshot = projectionRes?.data?.data ?? {};
             session.state_version = snapshot.state_version;
-            session.projection = { ...snapshot.projection, status: snapshot.status,
+            session.projection = { ...snapshot.projection, display: snapshot.display, status: snapshot.status,
               current_step_id: snapshot.current_step_id, attempt_history: snapshot.attempt_history };
             session.steps = workflowSnapshotSteps(session.session_id, snapshot.attempt_history) ?? [];
             session.current_step_id = snapshot.current_step_id ?? session.current_step_id;

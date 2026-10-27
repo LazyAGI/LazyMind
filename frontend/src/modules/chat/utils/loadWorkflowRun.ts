@@ -1,4 +1,4 @@
-import { reconcileWorkflowSessionStatus } from '@/modules/chat/store/workflowStatus';
+import { reconcileWorkflowSessionStatus, type WorkflowDisplayState } from '@/modules/chat/store/workflowStatus';
 import type { WorkflowSession, WorkflowSessionStep, WorkflowRuntimeProjection } from '@/modules/chat/store/workflowPanel';
 import { subscribeWorkflowEventStream } from '@/modules/chat/utils/workflowEventStream';
 import type { WorkflowControlView } from '@/modules/chat/utils/workflowControl';
@@ -12,7 +12,7 @@ export interface WorkflowRunAPI {
   getControl?(
     id: string,
     options?: WorkflowRunRequestOptions,
-  ): Promise<{ data: { data: { session?: WorkflowSession; control?: WorkflowControlView; projection?: WorkflowSession['projection'] } } }>;
+  ): Promise<{ data: { data: { session?: WorkflowSession; control?: WorkflowControlView; projection?: WorkflowSession['projection']; display?: WorkflowDisplayState } } }>;
   getSession(
     id: string,
     options?: WorkflowRunRequestOptions,
@@ -20,7 +20,7 @@ export interface WorkflowRunAPI {
   getProjection(
     id: string,
     options?: WorkflowRunRequestOptions,
-  ): Promise<{ data: { data: { projection?: WorkflowSession['projection']; state_version?: number; status?: WorkflowSession['status']; current_step_id?: string; attempt_history?: WorkflowRuntimeProjection['attempt_history'] } } }>;
+  ): Promise<{ data: { data: { projection?: WorkflowSession['projection']; display?: WorkflowDisplayState; state_version?: number; status?: WorkflowSession['status']; current_step_id?: string; attempt_history?: WorkflowRuntimeProjection['attempt_history'] } } }>;
 }
 
 export interface WorkflowRunSnapshot { session: WorkflowSession; control?: WorkflowControlView }
@@ -39,7 +39,7 @@ export async function loadWorkflowRunSnapshot(
   if (api.getControl && !sessionsWithoutControl.has(id)) {
     try {
       const response = await api.getControl(id, { ...options, silentError: true });
-      const { session, control, projection } = response.data.data;
+      const { session, control, projection, display } = response.data.data;
       if (!session || session.session_id !== id || control?.protocol !== 'workflow.control.v1' || control.session_id !== id) {
         throw new Error('Invalid workflow snapshot');
       }
@@ -49,7 +49,7 @@ export async function loadWorkflowRunSnapshot(
         session: {
           ...session,
           state_version: control.state_version,
-          projection,
+          projection: { ...projection, display },
           current_step_id: pending?.step_id ?? panelCurrentStep(session.current_step_id, projection, session.steps),
           status: control.continuation === 'completed'
             ? 'completed'
@@ -106,7 +106,7 @@ export async function loadWorkflowRun(
   if (!session || session.session_id !== id) throw new Error('Workflow run not found');
   const state = await api.getProjection(id, options);
   const snapshot = state.data.data;
-  const projection = snapshot.projection;
+  const projection = { ...snapshot.projection, display: snapshot.display };
   const steps = (workflowSnapshotSteps(id, snapshot.attempt_history) ?? session.steps ?? []).filter((step) => step.step_id !== '__end__');
   return {
     ...session,

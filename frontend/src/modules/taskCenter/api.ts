@@ -92,6 +92,7 @@ export interface TaskListResponse {
     succeeded: number;
     failed: number;
     canceled: number;
+    paused?: number;
   };
 }
 

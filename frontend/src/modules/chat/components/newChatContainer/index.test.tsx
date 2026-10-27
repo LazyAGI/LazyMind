@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => ({
   latestChatInputProps: null as any,
   latestConversationOptions: null as any,
   latestUserEditOptions: null as any,
+  isStreaming: false,
+  canStopGeneration: false,
+  loading: false,
+  runtimeWaiting: false,
 }));
 
 vi.mock("react-i18next", () => ({
@@ -87,11 +91,13 @@ vi.mock("./components/MessageList", () => ({
     chatContentRef,
     regenerate,
     regenerateDisabled,
+    chatBusy,
     onOpenSources,
   }: {
     chatContentRef: typeof mocks.chatContentRef;
     regenerate: () => void;
     regenerateDisabled: boolean;
+    chatBusy: boolean;
     onOpenSources?: (sources: any[]) => void;
   }) => (
     <>
@@ -103,6 +109,7 @@ vi.mock("./components/MessageList", () => ({
           }
         }}
         data-testid="message-container"
+        data-chat-busy={chatBusy}
       />
       <button
         onClick={() => onOpenSources?.([{ title: "Source one", url: "https://example.com/source" }])}
@@ -140,8 +147,9 @@ vi.mock("./hooks/useChatConversation", () => ({
     currentConversationIdRef: { current: "conversation-1" },
     disconnectConversationStream: vi.fn(),
     ensureAutoAdvanceUserTurn: vi.fn(),
-    isStreaming: false,
-    loading: false,
+    isStreaming: mocks.isStreaming,
+    canStopGeneration: mocks.canStopGeneration,
+    loading: mocks.loading,
     messageList: [],
     messageListRef: { current: [] },
     openResumeSSE: vi.fn(),
@@ -149,11 +157,12 @@ vi.mock("./hooks/useChatConversation", () => ({
     regenerate: mocks.regenerate,
     mediaCapabilityDependency: null,
     mediaCapabilityChecking: false,
+    modelFallbackNotificationHolder: <span data-testid="model-fallback-notifications" />,
     continueAfterMediaCapabilityConfiguration: vi.fn(),
     replaceMessageList: vi.fn(),
     mergeHistoryPage: mocks.mergeHistoryPage,
     retryStreamRecovery: vi.fn(),
-    runtimeWaiting: false,
+    runtimeWaiting: mocks.runtimeWaiting,
     scroll: {
       chatContentRef: mocks.chatContentRef,
       handleInputHeightChange: vi.fn(),
@@ -233,10 +242,38 @@ describe("ChatContainerComponent wheel forwarding", () => {
     mocks.latestChatInputProps = null;
     mocks.latestConversationOptions = null;
     mocks.latestUserEditOptions = null;
+    mocks.isStreaming = false;
+    mocks.canStopGeneration = false;
+    mocks.loading = false;
+    mocks.runtimeWaiting = false;
+  });
+
+  it('passes workflow hand-off stop availability without pretending Chat is streaming', () => {
+    mocks.canStopGeneration = true;
+    render(<ChatContainerComponent sessionId="chat" setIsChatContent={vi.fn()} onOpenSSE={vi.fn()}
+      parseErrorData={vi.fn()} setChatConfigFn={vi.fn()} />);
+    expect(mocks.latestChatInputProps.canStopGeneration).toBe(true);
+    expect(mocks.latestChatInputProps.isStreaming).toBe(false);
+    expect(mocks.latestChatInputProps.onStopGeneration).toEqual(expect.any(Function));
+  });
+
+  it.each(['loading', 'isStreaming', 'runtimeWaiting'] as const)('guards workflow controls during %s without changing composer streaming', (phase) => {
+    mocks[phase] = true;
+    const props = { sessionId: 'conversation-1', onOpenSSE: vi.fn(), parseErrorData: (data: string) => data,
+      setIsChatContent: vi.fn(), setChatConfigFn: vi.fn() };
+    const view = render(<ChatContainerComponent {...props} />);
+    expect(screen.getByTestId('message-container')).toHaveAttribute('data-chat-busy', 'true');
+    expect(mocks.latestChatInputProps.isStreaming).toBe(phase === 'isStreaming');
+    expect(mocks.latestChatInputProps.onStopGeneration).toEqual(expect.any(Function));
+    mocks[phase] = false;
+    view.rerender(<ChatContainerComponent {...props} />);
+    expect(screen.getByTestId('message-container')).toHaveAttribute('data-chat-busy', 'false');
+    expect(mocks.latestChatInputProps.isStreaming).toBe(false);
   });
 
   it("disables workspace controls for document previews but enables them for ordinary chats", () => {
     const view = render(<ChatContainerComponent sessionId="pdf-preview" allowLocalWorkspace={false} />);
+    expect(screen.getByTestId("model-fallback-notifications")).toBeInTheDocument();
     expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(false);
     view.rerender(<ChatContainerComponent sessionId="conversation-1" />);
     expect(mocks.latestChatInputProps.allowLocalWorkspace).toBe(true);

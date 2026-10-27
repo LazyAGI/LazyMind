@@ -137,6 +137,7 @@ sensitive_filter = SensitiveFilter(
 # Maps conversation_id → session_id for active chat sessions.
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
 _active_sessions: dict[str, str] = {}
+_active_turn_sessions: dict[tuple[str, str], str] = {}
 _conversation_env_vars: dict[str, dict[str, str]] = {}
 _conversation_env_store = ConversationEnvStore(_conversation_env_vars)
 _observation_writer: Optional[LocalObservationWriter] = None
@@ -167,6 +168,9 @@ def _unregister_active_session(conversation_id: str, session_id: str) -> None:
     """Remove only the request that registered this exact ChatAgent session."""
     if _active_sessions.get(conversation_id) == session_id:
         _active_sessions.pop(conversation_id, None)
+    for key, value in list(_active_turn_sessions.items()):
+        if key[0] == conversation_id and value == session_id:
+            _active_turn_sessions.pop(key, None)
 
 
 def clear_conversation_env(conversation_id: str) -> bool:
@@ -1294,6 +1298,7 @@ async def _handle_chat_impl(
     is_context_inspection = runtime.context_usage_preview or runtime.context_prompt_export
     if _conv_id_key and not is_context_inspection:
         _active_sessions[_conv_id_key] = conversation.session_id
+        _active_turn_sessions[(_conv_id_key, conversation.history_id)] = conversation.session_id
     lazyllm_session_id = conversation.session_id
     if is_context_inspection:
         lazyllm_session_id = (
@@ -2220,6 +2225,9 @@ async def _handle_chat_impl(
                 else ','.join(filter(None, [_cfg['skill_fs_url'], workflow_skill_dir]))
             ),
             llm_config=runtime.llm_config or {},
+            current_model_candidate_id=runtime.model_fallback_current_id,
+            model_candidates=tuple(runtime.model_fallback_candidates),
+            initial_model_switch=runtime.model_fallback_initial_switch,
 
             max_retries=max_retries,
             tool_failure_limits={
@@ -2388,13 +2396,18 @@ async def _handle_chat_impl(
                 _unregister_active_session(_conv_id_key, conversation.session_id)
 
         cost = round(time.time() - start_time, 3)
+        fallback_state = getattr(react_agent, '_model_fallback_state', None)
         terminal_frame = translator.finish_run(
             outcome=outcome,
+            usage=fallback_state.usage_snapshot if fallback_state is not None else None,
             usage_map=lazyllm.globals.get('usage') or {},
-            module_id=getattr(executor.runtime_llm(react_agent), '_module_id', None),
-            llm_config=runtime.llm_config or {},
+            module_id=(None if fallback_state is not None
+                       else getattr(executor.runtime_llm(react_agent), '_module_id', None)),
+            llm_config=(fallback_state.current.llm_config if fallback_state is not None else runtime.llm_config or {}),
             turn_seq=message.current_turn_seq,
-            max_input_tokens=resolve_max_input_tokens(runtime.llm_config or {}),
+            max_input_tokens=(fallback_state.current.max_input_tokens if fallback_state is not None
+                              else resolve_max_input_tokens(llm_config=runtime.llm_config or {})),
+            prefer_usage_snapshot=fallback_state is not None,
         )
         terminal_frame['tool_call_turns'] = translator.tool_call_turns
         metrics = translator.last_metrics or terminal_frame.get('performance_metrics')

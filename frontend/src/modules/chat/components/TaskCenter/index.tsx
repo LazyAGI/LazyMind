@@ -8,7 +8,8 @@ import { formatTaskDuration, useRunTiming } from "./runTiming";
 import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { reconcileWorkflowTasks } from "@/modules/chat/utils/workflowTaskStatus";
-import { useMemo, useState, useRef, useCallback, useEffect } from "react";
+import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
+import { useMemo, useState, useRef, useCallback, useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Image, Progress, Tooltip } from "antd";
@@ -33,6 +34,7 @@ import {
   TaskStatus,
   WritingSubtask,
   useTaskCenterStore,
+  sameTaskModelCall,
 } from "@/modules/chat/store/taskCenter";
 import {
   basenameFromPath,
@@ -52,7 +54,8 @@ import {
   type OrdinaryTaskState,
   type OrdinaryTaskTimeline,
 } from "./taskTimeline";
-import { TaskProcessTimeline } from "./TaskProcessTimeline";
+import { TaskModelSwitchSummary, TaskProcessTimeline } from "./TaskProcessTimeline";
+import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { TaskArtifactList, type ArtifactSourceContext } from "./TaskArtifactList";
 import type { OrdinaryCollection, OrdinaryRunView } from "@/modules/chat/types/ordinaryTask";
 import "./index.scss";
@@ -219,7 +222,7 @@ function ExecutionLog({ log, isRunning }: { log: TaskLogEntry[]; isRunning: bool
   // Merge consecutive same-type text/think entries to avoid per-token line breaks during streaming.
   const mergedLog = log.reduce<TaskLogEntry[]>((acc, entry) => {
     const prev = acc[acc.length - 1];
-    if (prev && (entry.type === "text" || entry.type === "think") && prev.type === entry.type) {
+    if (prev && (entry.type === "text" || entry.type === "think") && prev.type === entry.type && sameTaskModelCall(prev, entry)) {
       acc[acc.length - 1] = { ...prev, content: prev.content + entry.content };
       return acc;
     }
@@ -691,6 +694,14 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
   const sourceContext = artifactSourceContext(item);
   const { sources, context } = sourceContext;
   return <SourceImportProvider context={context} sources={sources}><div className="ordinary-task-details" aria-busy={loadingCollection !== null}>
+    {view?.failure_code && ["model_fallback_exhausted", "model_context_not_fit"].includes(view.failure_code) && (
+      <div className="ordinary-stale-warning" role="alert">
+        <span>{t(`chat.runStatus.codes.${view.failure_code}`)}</span>
+        <a href={`/settings?${new URLSearchParams({ section: "models", view: "providers",
+          return_to: getChatConversationPath(view.conversation_id ?? item.task?.conversation_id ?? ""),
+        })}`}>{t("chat.checkModelSettings")}</a>
+      </div>
+    )}
     <TaskProcessTimeline steps={view?.process_steps ?? []} legacyPlan={view ? view.plan_steps : item.task?.plan_steps}
       state={item.state} progress={view ? view.progress_pct : item.task?.progress_pct} />
     {more("process_steps")}
@@ -742,6 +753,7 @@ function OrdinaryTaskCard({
               </Tooltip>
             )}
           </span>
+          {item.ordinary?.model_switch && <span className="ordinary-thinking-copy"><TaskModelSwitchSummary record={item.ordinary.model_switch} /></span>}
           <span className="ordinary-task-meta">
             {ordinaryTaskDurationSeconds(item) !== undefined && (
               <Tooltip title={t("taskCenter.ordinaryDurationExplanation")}>
@@ -1132,9 +1144,15 @@ const TaskCenter = (props: Props) => {
     const candidates = [...(runs ?? []), ...(workflowSession?.ordinary_runs ?? [])];
     const byRun = new Map<string, OrdinaryRunView>();
     for (const run of candidates) byRun.set(run.run_id, mergeRun(byRun.get(run.run_id), run));
-    return [...byRun.values()].filter(run => run.timing).sort((a, b) =>
+    const latest = [...byRun.values()].filter(run => run.timing).sort((a, b) =>
       Date.parse(b.timing!.requested_at) - Date.parse(a.timing!.requested_at))[0];
-  }, [runs, workflowSession?.ordinary_runs]);
+    // A continuation/approval Chat round does not own the Workflow clock.
+    // After the Workflow ends, new ordinary tasks can own the panel again.
+    const workflowFinished = ['completed', 'failed'].includes(workflowSession?.projection?.display?.status ?? '');
+    const hasNewChatTasks = latest && workflowFinished && tasks.some(task => task.agent_type !== 'workflow_step'
+      && (task.ordinary?.run_id === latest.run_id || task.trigger_history_id === latest.run_id));
+    return workflowSession && !hasNewChatTasks ? byRun.get(workflowSession.session_id) : latest;
+  }, [runs, tasks, workflowSession?.session_id, workflowSession?.projection?.display?.status, workflowSession?.ordinary_runs]);
   const runTiming = useRunTiming(currentRun);
   useEffect(() => {
     if (!sessionId) return;
@@ -1196,8 +1214,7 @@ const TaskCenter = (props: Props) => {
         hiddenSteps={taskPresentation?.hidden_steps}
         hideGroupedArtifacts={taskPresentation?.hide_final_artifacts}
         groupedStatus={taskPresentation?.grouped && workflowSession
-          ? stateLabel(workflowSession.status === 'active' ? 'running' : workflowSession.status === 'completed'
-            ? 'complete' : workflowSession.status === 'failed' ? 'failed' : workflowSession.status === 'stopped' ? 'canceled' : 'waiting', t)
+          ? t(workflowDisplayLabel(workflowSession.projection?.display?.status))
           : undefined}
         onClose={onClose}
         showHeader={showHeader}

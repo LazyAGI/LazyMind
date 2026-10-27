@@ -204,7 +204,7 @@ def _resolved_from_local_file(
                 display_name=display_name,
                 store=store,
             )
-        return resolve_text_target(str(manifest.get('file_id')))
+        return _resolved_manifest(store, manifest, target=str(manifest.get('file_id')))
     if is_chat_image_file(source):
         raise ValueError('images are not text targets; use an image or vision tool')
     if is_chat_spreadsheet_file(source):
@@ -362,6 +362,26 @@ def _resolve_file_resource(
     return store.load_manifest(str(matches[0].get('file_id')))
 
 
+def _resolved_manifest(
+    store: FileResourceStore, manifest: Dict[str, Any], *, target: str,
+) -> ResolvedTextResource:
+    if manifest.get('parse_status') != 'ready':
+        raise ValueError(
+            f"file {manifest.get('file_id')} is not ready "
+            f"(parse_status={manifest.get('parse_status')}: {manifest.get('parse_error')})"
+        )
+    parsed = os.path.realpath(os.path.join(store.workspace, str(manifest.get('parsed_path') or '')))
+    if os.path.commonpath((store.workspace, parsed)) != store.workspace:
+        raise ValueError('parsed file must stay inside the active workspace')
+    if not os.path.isfile(parsed):
+        raise FileNotFoundError(f"parsed text missing for {manifest.get('file_id')}")
+    return ResolvedTextResource(
+        target=target, path=parsed,
+        display_name=str(manifest.get('display_name') or manifest.get('file_id')),
+        kind='file_resource', workspace=store.workspace, file_id=str(manifest.get('file_id')),
+    )
+
+
 def resolve_text_target(
     target: str,
     *,
@@ -376,6 +396,22 @@ def resolve_text_target(
     from lazymind.chat.engine.tools.conversation_workspace import (
         _current_artifact_scope, _resolve_workspace_path, chat_agent_workspace,
     )
+    # Workflow inputs and parsed caches belong to an Attempt workspace, even
+    # when its caller has no LazyMind chat conversation (e.g. WorkBuddy).
+    cfg = _agentic_config()
+    workflow_workspace = str(cfg.get('workflow_workspace_path') or '').strip()
+    if cfg.get('agent_type') == 'workflow_step' and workflow_workspace:
+        workflow_store = FileResourceStore(workflow_workspace)
+        workflow_target = _workflow_workspace_target(
+            key, allow_directory=allow_directory, store=workflow_store,
+        )
+        if workflow_target:
+            return workflow_target
+        manifest = workflow_store.load_manifest(key) if key.startswith('fr_') else None
+        if manifest:
+            return _resolved_manifest(workflow_store, manifest, target=key)
+        if not cfg.get('conversation_id'):
+            raise ValueError('target must be a file in the current Workflow workspace')
     user_id, conversation_id = _current_artifact_scope()
 
     workspace = os.path.realpath(chat_agent_workspace(user_id, conversation_id))
@@ -468,7 +504,7 @@ def resolve_text_target(
             display_name=os.path.basename(resolved),
             store=store,
         )
-        return resolve_text_target(str(manifest.get('file_id')))
+        return _resolved_manifest(store, manifest, target=str(manifest.get('file_id')))
     elif is_chat_image_file(resolved):
         raise ValueError('images are not text targets; use an image or vision tool')
     elif is_chat_document_file(resolved):

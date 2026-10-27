@@ -56,6 +56,7 @@ type sessionDTO struct {
 	ConversationID string `json:"conversation_id"`
 	WorkflowID     string `json:"workflow_id"`
 	WorkflowMode   string `json:"workflow_mode"`
+	ControllerHost string `json:"controller_host"`
 	// PinnedRevisionID is retained for immutable runtime identity; version numbers
 	// are intentionally not exposed because they are not a reliable UI run label.
 	PinnedRevisionID string    `json:"pinned_revision_id,omitempty"`
@@ -129,6 +130,7 @@ func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 		ConversationID:   s.ConversationID,
 		WorkflowID:       s.WorkflowID,
 		WorkflowMode:     normalizeSessionWorkflowMode(s.WorkflowMode),
+		ControllerHost:   s.ControllerHost,
 		PinnedRevisionID: s.WorkflowRevisionID,
 		Status:           s.Status,
 		CurrentStepID:    s.CurrentStepID,
@@ -1115,7 +1117,7 @@ func DismissSessionHandler(w http.ResponseWriter, r *http.Request) {
 		// pending/running parallel SubAgent receives a Python cancel signal. Only
 		// do this for the session being dismissed: an older waiting session may
 		// share the conversation with a newer active session.
-		stopWorkflowSession(r.Context(), db, store.State(), session)
+		stopWorkflowSession(r.Context(), db, store.State(), session, "")
 	}
 	if err := DismissSession(r.Context(), db, sessionID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "session not found or already dismissed" {

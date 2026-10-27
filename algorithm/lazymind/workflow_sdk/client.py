@@ -129,7 +129,8 @@ class WorkflowClient:
                  host: str = '', timeout: float = 15.0, read_retries: int = 2,
                  execution_timeout: float = 7200.0, transport: Any = httpx,
                  trace_context: Optional[Callable[[], Any]] = None,
-                 enable_tool_retrieval: Optional[bool] = None):
+                 enable_tool_retrieval: Optional[bool] = None,
+                 trigger_history_id: str = ''):
         connection = ConnectionInfo(_connection_url(base_url), 'argument') if base_url else discover_connection()
         self.connection = connection
         self.base_url = connection.base_url
@@ -144,6 +145,7 @@ class WorkflowClient:
         self.transport = transport
         self.trace_context = trace_context
         self.enable_tool_retrieval = enable_tool_retrieval
+        self.trigger_history_id = trigger_history_id
 
     def _headers(self, command_id: str = '') -> Dict[str, str]:
         headers = {'Workflow-Contract-Version': CONTRACT_VERSION}
@@ -311,6 +313,8 @@ class WorkflowClient:
         payload = {**(fields or {}), 'workflow_id': workflow_id, 'preparation_id': command_id,
                    'idempotency_key': command_id, 'input_bindings': input_bindings or {},
                    'origin_host': self.host, 'controller_host': self.host}
+        if self.trigger_history_id:
+            payload['trigger_history_id'] = self.trigger_history_id
         return self._decode(self.transport.post(
             self.base_url + '/workflow-preparations', json=payload,
             headers=self._headers(command_id), timeout=self.timeout,

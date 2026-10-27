@@ -27,6 +27,19 @@ it('resets for a new round and leaves legacy timing unknown', () => {
  rerender({ run: snapshot({ execution_id: 'new', timing: { ...snapshot().timing!, elapsed_ms: 0, cumulative_execution_ms: 0 } }) }); expect(result.current.elapsedSeconds).toBe(0);
  rerender({ run: { run_id: 'legacy', revision: 0, final_output_refs: [] } }); expect(result.current.elapsedSeconds).toBeUndefined();
 });
+it.each(['stopped', 'waiting_approval'])('freezes a workflow %s interval and resumes its accumulated duration without counting the wait', (status) => {
+ vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date", "performance"] });
+ const paused = snapshot({ status, revision: 2, timing: { ...snapshot().timing!, finished_at: '2026-10-16T00:00:10Z', running_attempt_count: 0 } });
+ const { result, rerender } = renderHook(({ run }) => useRunTiming(run), { initialProps: { run: paused } });
+ act(() => vi.advanceTimersByTime(60000));
+ expect(result.current.elapsedSeconds).toBe(10); expect(result.current.cumulativeExecutionSeconds).toBe(5);
+ const resumed = snapshot({ execution_id: 'resumed', timing: { ...snapshot().timing!, requested_at: '2026-10-16T00:01:10Z', measured_at: '2026-10-16T00:01:10Z', running_attempt_count: 1 } });
+ rerender({ run: resumed });
+ act(() => vi.advanceTimersByTime(3000));
+ expect(result.current.elapsedSeconds).toBe(13); expect(result.current.cumulativeExecutionSeconds).toBe(8);
+ rerender({ run: paused });
+ expect(result.current.elapsedSeconds).toBe(13);
+});
 it('formats seconds through days without losing seconds', () => {
  expect(formatTaskDuration(59, true)).toBe('59秒'); expect(formatTaskDuration(60, true)).toBe('1分0秒'); expect(formatTaskDuration(3605, true)).toBe('1小时0分5秒');
  expect(formatTaskDuration(93784, true)).toBe('1天2小时3分4秒'); expect(formatTaskDuration(90061, false)).toBe('1d 1h 1m 1s');

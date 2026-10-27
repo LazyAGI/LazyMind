@@ -2,8 +2,9 @@ package orm
 
 import "time"
 
-// TaskExecutionTiming is an execution round, independent of card visibility and
-// mutable chat history. Terminal rounds remain immutable when a task is rerun.
+// TaskExecutionTiming is a Chat round or an active Workflow interval, independent
+// of card visibility and mutable chat history. A pause/review closes the interval;
+// continuation starts a new one so wait time is excluded without losing history.
 type TaskExecutionTiming struct {
 	ID                string     `gorm:"column:id;type:varchar(128);primaryKey"`
 	RunID             string     `gorm:"column:run_id;type:varchar(128);not null;index"`
