@@ -5,11 +5,12 @@ import {
 } from "@/api/generated/chatbot-client";
 import type {
   ChatModelRoute,
+  ChatModelSwitchRecord,
   ConversationHistoryItem as CoreConversationHistoryItem,
   ConversationTrailItem,
 } from "@/api/generated/core-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
-import { splitThinkingContent } from "@/modules/chat/utils/thinking";
+import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/utils/thinking";
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import { mailConfirmationMetadata, mailConfirmationTurnSignature, type MailConfirmationMetadata } from "./mailConfirmationReplay";
@@ -196,6 +197,7 @@ export type ConversationHistoryRecord = Omit<
       run_status?: "interrupted" | "failed";
       run_terminal?: Record<string, unknown>;
       model_route?: ChatModelRoute;
+      model_switches?: ChatModelSwitchRecord[];
       create_time?: string;
     }>;
     steering_messages?: Array<{
@@ -409,18 +411,20 @@ export function buildChatMessageListFromHistory(
           attempt.run_status || attempt.run_terminal?.status || "failed",
         run_terminal: attempt.run_terminal,
         model_route: attempt.model_route,
+        model_switches: attempt.model_switches,
         create_time: attempt.create_time,
         archived_failure: true,
       });
     });
 
+    const isLastRecord = record === lastRecord;
+    const isActuallyGenerating = isGenerating && isLastRecord;
     const steeringMessages = Array.isArray(record.steering_messages)
       ? record.steering_messages
       : [];
-    const splitResult = splitThinkingContent(
-      record.result,
-      record.reasoning_content,
-    );
+    const splitResult = record.model_output
+      ? splitModelOutputContent(record.result, record.reasoning_content)
+      : splitThinkingContent(record.result, record.reasoning_content);
     const hasAskPending = !!(record as any).ask_pending;
     const fullAssistantContent = stripAskUserReceipt(
       splitResult.content,
@@ -496,8 +500,6 @@ export function buildChatMessageListFromHistory(
       });
     });
 
-    const isLastRecord = record === lastRecord;
-    const isActuallyGenerating = isGenerating && isLastRecord;
     const displayAssistantContent = stripAskUserReceipt(record.assistant_remainder ?? (snapshotsAreDurablePrefixes
       ? fullAssistantContent.slice(assistantOffset)
       : fullAssistantContent), hasAskPending);
@@ -513,6 +515,7 @@ export function buildChatMessageListFromHistory(
       raw_delta: assistantOffset > 0 || record.assistant_remainder !== undefined
         ? displayAssistantContent
         : record.result || "",
+      ...(record.model_output ? { raw_reasoning_content: record.reasoning_content || "" } : {}),
       finish_reason: isActuallyGenerating
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
         : ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
@@ -529,6 +532,8 @@ export function buildChatMessageListFromHistory(
       run_terminal: isActuallyGenerating ? undefined : record.run_terminal,
       performance_metrics: (record as any).performance_metrics,
       model_route: record.model_route,
+      model_switches: record.model_switches,
+      model_output: record.model_output,
       fork_read_only: (record as any).fork_read_only,
       knowledge_operations: (record as any).knowledge_operations,
     };

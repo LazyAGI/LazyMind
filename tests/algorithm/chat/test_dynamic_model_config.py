@@ -149,6 +149,7 @@ class TestAutoModelDynamic:
 
         class FakeResponse:
             status_code = 200
+            raw = SimpleNamespace(enforce_content_length=False)
             text = json.dumps({
                 'choices': [{
                     'message': {'content': 'ok'},

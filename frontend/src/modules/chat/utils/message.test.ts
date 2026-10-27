@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
+import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { MailConfirmationReplayStore } from "./mailConfirmationReplay";
 import {
@@ -469,6 +470,20 @@ describe("buildChatMessageListFromHistory", () => {
     expect(assistantMessage.ask_answered).toBe(true);
   });
 
+  it("restores public model switch records without changing the selected route", () => {
+    const records: ChatModelSwitchRecord[] = [{ event_id: "switch", switch_index: 1,
+      reason_code: "model_config_unavailable", context_compacted: false,
+      from_max_input_tokens: null, to_max_input_tokens: null,
+      from: { candidate_id: "own:a", source: "own", model_id: "a", provider_group_id: "" },
+      to: { candidate_id: "own:b", source: "own", model_id: "b", provider_group_id: "group" } }];
+    const route = { mode: "fixed", model_id: "b" };
+    const cursor = { run_id: "restored-run", call_index: 2, phase: "rollback" as const };
+    const list = buildChatMessageListFromHistory([{ id: "history", query: "task", result: "answer",
+      model_switches: records, model_route: route, model_output: cursor }] as any);
+    expect(list[1]).toMatchObject({ model_switches: records, model_route: route, model_output: cursor });
+    expect(buildChatMessageListFromHistory([{ id: "old", query: "old task", result: "answer" }])[1].model_switches).toBeUndefined();
+  });
+
   it("restores performance metrics onto the assistant message", () => {
     const metrics = {
       schema_version: 1,
@@ -498,6 +513,11 @@ describe("buildChatMessageListFromHistory", () => {
   });
 
   it("restores archived failure attempts before the latest answer", () => {
+    const switches: ChatModelSwitchRecord[] = [{ event_id: "failed-run-switch", switch_index: 1,
+      reason_code: "rate_limited", context_compacted: false,
+      from_max_input_tokens: null, to_max_input_tokens: null,
+      from: { candidate_id: "own:a", source: "own", model_id: "a", provider_group_id: "a" },
+      to: { candidate_id: "own:b", source: "own", model_id: "b", provider_group_id: "b" } }];
     const failedTerminal = {
       status: "failed",
       reason: "model_failure",
@@ -516,6 +536,7 @@ describe("buildChatMessageListFromHistory", () => {
             run_id: "run-failed-1",
             run_status: "failed",
             run_terminal: failedTerminal,
+            model_switches: switches,
             model_route: {
               mode: "auto",
               provider_name: "Fast",
@@ -535,6 +556,7 @@ describe("buildChatMessageListFromHistory", () => {
       original_history_id: "h1",
       delta: "partial answer",
       run_terminal: failedTerminal,
+      model_switches: switches,
       model_route: {
         mode: "auto",
         provider_name: "Fast",

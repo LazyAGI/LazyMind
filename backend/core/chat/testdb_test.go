@@ -65,7 +65,7 @@ func newChatExecutionTestDB(t *testing.T) *orm.DB {
 		&orm.LocalWorkspace{}, &orm.ConversationWorkspaceBinding{}, &orm.ConversationToolGrant{},
 		&orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{},
 		&orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.ExternalChatHost{},
-		&orm.SubAgentTask{}, &orm.SubAgentArtifact{}, &orm.AgentInvocation{},
+		&orm.SubAgentTask{}, &orm.SubAgentStep{}, &orm.SubAgentArtifact{}, &orm.AgentInvocation{},
 		&orm.ConversationArtifact{}, &orm.ArtifactV2{}, &orm.ArtifactBlob{}, &orm.ArtifactBinding{},
 		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowEvent{}, &orm.WorkflowTransitionCommand{},
 		&orm.WorkflowResource{}, &orm.WorkflowRevision{}, &orm.WorkflowHumanArtifact{}, &orm.WorkflowSlotRevision{},

@@ -13,6 +13,8 @@ import {
   CHAT_KNOWLEDGE_CONFIRMATION_EVENT,
   CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
   CHAT_MEDIA_CAPABILITY_MISSING_EVENT,
+  CHAT_MODEL_SWITCH_EVENT,
+  type ChatModelSwitchNoticeDetail,
   CHAT_WORKFLOW_STEP_FEEDBACK_EVENT,
 } from "@/modules/chat/constants/chat";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
@@ -21,6 +23,7 @@ import { parseMediaCapabilityDependency } from "@/modules/chat/utils/mediaCapabi
 
 import type { OrdinaryCollection, OrdinaryRunView, OrdinaryTaskView } from "../types/ordinaryTask";
 import { mergeOrdinarySnapshot, readOrdinaryTask } from "../utils/ordinaryTaskState";
+import type { ChatModelSwitchRecord, TaskEvent } from "@/api/generated/core-client";
 
 function publicTask(task: OrdinaryTaskView, conversationId: string): SubAgentTask {
   return {
@@ -30,7 +33,7 @@ function publicTask(task: OrdinaryTaskView, conversationId: string): SubAgentTas
     status: task.status as TaskStatus, progress_pct: 0,
     created_at: task.timing.started_at ?? undefined,
     updated_at: task.timing.finished_at ?? undefined,
-    artifacts: [], sources: [], artifact_streams: [], execution_log: [], ordinary: task,
+    artifacts: [], sources: [], artifact_streams: [], execution_log: [], ordinary: task, execution_id: task.execution_id,
   };
 }
 
@@ -131,10 +134,22 @@ export interface ToolResultItem {
 export interface TaskLogEntry {
   type: "text" | "think" | "tool_calls" | "tool_results";
   content: string;
+  model_output?: TaskEvent["model_output"];
   // For tool_calls type
   tool_calls?: ToolCallItem[];
   // For tool_results type
   tool_results?: ToolResultItem[];
+}
+
+export function sameTaskModelCall(left: TaskLogEntry, right: TaskLogEntry): boolean {
+  const a = left.model_output, b = right.model_output;
+  return (!a && !b) || Boolean(a && b && a.run_id === b.run_id && a.call_index === b.call_index);
+}
+
+function notifyTaskModelSwitch(conversationId: string, runId: string, record: ChatModelSwitchRecord, live: boolean) {
+  window.dispatchEvent(new CustomEvent<ChatModelSwitchNoticeDetail>(CHAT_MODEL_SWITCH_EVENT, {
+    detail: { conversationId, runId, record, live },
+  }));
 }
 
 export interface WritingSubtask {
@@ -153,6 +168,9 @@ export interface WritingSubtask {
 
 export interface SubAgentTask {
   ordinary?: OrdinaryTaskView;
+  execution_id?: string;
+  model_output?: TaskEvent["model_output"];
+  model_output_hydrating?: boolean;
   task_id: string;
   conversation_id?: string;
   trigger_history_id?: string;
@@ -178,6 +196,16 @@ export interface SubAgentTask {
   artifact_streams: TaskArtifactStream[];
   execution_log: TaskLogEntry[];
   writing_subtasks?: WritingSubtask[];
+}
+
+function mergeTaskOutputSnapshot(current: SubAgentTask | undefined, incoming: SubAgentTask): SubAgentTask {
+  if (current && incoming.execution_id && incoming.execution_id === current.execution_id &&
+      (current.model_output_hydrating || current.model_output &&
+        (!incoming.model_output || incoming.model_output.call_index < current.model_output.call_index))) {
+    return { ...incoming, execution_log: current.execution_log, model_output: current.model_output,
+      model_output_hydrating: current.model_output_hydrating };
+  }
+  return incoming;
 }
 
 function artifactKey(a: TaskArtifact): string {
@@ -243,18 +271,20 @@ function normalizePlanSteps(value: unknown): string[] | undefined {
   return value.map((step: string) => step.trim());
 }
 
-function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
+function stepsToExecutionLog(steps: any[], executionId?: string): TaskLogEntry[] {
   if (!steps || steps.length === 0) return [];
   const entries = steps.flatMap((s): TaskLogEntry[] => {
     const role: string = s.role ?? "";
     const content = s.content ?? {};
+    if (executionId && (s.execution_id && s.execution_id !== executionId ||
+        content.model_output && content.model_output.run_id !== executionId)) return [];
     if (role === "think") {
       const text: string = content.content ?? "";
-      return text ? [{ type: "think", content: text }] : [];
+      return text ? [{ type: "think", content: text, ...(content.model_output ? { model_output: content.model_output } : {}) }] : [];
     }
     if (role === "text") {
       const text: string = content.content ?? "";
-      return text ? [{ type: "text", content: text }] : [];
+      return text ? [{ type: "text", content: text, ...(content.model_output ? { model_output: content.model_output } : {}) }] : [];
     }
     if (role === "assistant") {
       const calls: ToolCallItem[] = (content.tool_calls ?? []).map((tc: any) => ({
@@ -280,6 +310,7 @@ function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
       last
       && (entry.type === "text" || entry.type === "think")
       && last.type === entry.type
+      && sameTaskModelCall(last, entry)
     ) {
       log[log.length - 1] = { ...last, content: last.content + entry.content };
     } else {
@@ -411,11 +442,16 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         // Prefer the longer execution_log: DB snapshots only have completed steps,
         // while the live SSE stream may have buffered more content in memory.
         if (
-          current.execution_log &&
+          !task.execution_id && !task.model_output && current.execution_log &&
           task.execution_log &&
           current.execution_log.length > task.execution_log.length
         ) {
           incoming.execution_log = current.execution_log;
+        }
+        if (task.execution_id && task.execution_id !== current.execution_id) {
+          incoming.execution_log = task.execution_log ?? [];
+          incoming.model_output = task.model_output;
+          incoming.model_output_hydrating = false;
         }
         // Replayed task_created events from older deployments may not carry the
         // turn relationship. Never erase the authoritative value loaded from DB.
@@ -428,13 +464,15 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         if (task.created_at === undefined) {
           incoming.created_at = current.created_at;
         }
-        next[idx] = incoming;
+        next[idx] = mergeTaskOutputSnapshot(current, incoming);
       } else {
         const createdAt = task.created_at ?? new Date().toISOString();
         next = [
           ...list,
           {
             task_id: task.task_id,
+            execution_id: task.execution_id,
+            model_output: task.model_output,
             title: task.title ?? "",
             query: task.query,
             objective: task.objective,
@@ -484,10 +522,44 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         return state;
       }
       const task = { ...list[idx] };
+      const output: TaskEvent["model_output"] = event.model_output;
+      if (event.type !== "task_start" && event.execution_id && task.execution_id && event.execution_id !== task.execution_id) return state;
+      if (output) {
+        if (task.execution_id && output.run_id !== task.execution_id) return state;
+        const previous = task.model_output;
+        if (task.model_output_hydrating) {
+          if (event.type === "model_output" && output.phase && output.phase !== "begin") {
+            task.model_output = output;
+            task.model_output_hydrating = false;
+          }
+        } else {
+          if (previous && (previous.run_id !== output.run_id || output.call_index < previous.call_index)) return state;
+          if (output.phase === "begin") {
+            if (previous?.phase === "begin" || output.call_index !== (previous?.call_index ?? 0) + 1) return state;
+            task.model_output = output;
+          } else {
+            if (!previous || previous.phase !== "begin" || output.call_index !== previous.call_index) return state;
+            if (output.phase) task.model_output = output;
+            if (output.phase === "rollback") task.execution_log = task.execution_log.filter(item =>
+              !(["text", "think"].includes(item.type) && item.model_output?.run_id === output.run_id && item.model_output.call_index === output.call_index));
+          }
+        }
+      }
       task.updated_at = new Date().toISOString();
       switch (event.type) {
         case "task_start":
+          // DB snapshots rebuild the log on reconnect. Live starts also arrive
+          // through the conversation stream and cannot replace an established run.
+          if (event.snapshot !== true && task.execution_id) return state;
           task.status = "running";
+          if (event.execution_id) {
+            task.execution_id = event.execution_id;
+            task.execution_log = [];
+            task.model_output = undefined;
+            task.model_output_hydrating = event.snapshot === true;
+          }
+          break;
+        case "model_output":
           break;
         case "plan":
           task.plan_steps = normalizePlanSteps(event.steps) ?? task.plan_steps;
@@ -615,9 +687,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           if (textContent) {
             const log = task.execution_log ?? [];
             const last = log[log.length - 1];
-            task.execution_log = last?.type === "text"
+            const entry: TaskLogEntry = { type: "text", content: textContent, ...(output ? { model_output: output } : {}) };
+            task.execution_log = last?.type === "text" && sameTaskModelCall(last, entry)
               ? [...log.slice(0, -1), { ...last, content: last.content + textContent }]
-              : [...log, { type: "text", content: textContent }];
+              : [...log, entry];
           }
           break;
         }
@@ -626,9 +699,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           if (thinkContent) {
             const log = task.execution_log ?? [];
             const last = log[log.length - 1];
-            task.execution_log = last?.type === "think"
+            const entry: TaskLogEntry = { type: "think", content: thinkContent, ...(output ? { model_output: output } : {}) };
+            task.execution_log = last?.type === "think" && sameTaskModelCall(last, entry)
               ? [...log.slice(0, -1), { ...last, content: last.content + thinkContent }]
-              : [...log, { type: "think", content: thinkContent }];
+              : [...log, entry];
           }
           break;
         }
@@ -703,6 +777,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     if (task && TERMINAL_TASK_STATUSES.has(task.status)) return;
 
     const epoch = get()._viewEpoch;
+    let snapshotExecution = "";
+    let lastSwitchIndex = 0;
     const sse = new SSE(taskStreamUrl(taskId, get().viewMode), {
       method: Method.GET,
       headers: {
@@ -712,7 +788,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       timeout: 3600000,
       callbacks: {
         message: (e: CustomEvent) => {
-          if (get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
+          if (get()._taskStreams[taskId] !== sse || get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
           const raw = (e as any).data;
           if (!raw || raw === "[DONE]") return;
           const event = UIUtils.jsonParser(raw);
@@ -722,13 +798,38 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             void get().loadConversationTasks(conversationId);
             return;
           }
+          const before = get().getTasks(conversationId).find(item => item.task_id === taskId);
+          if (event.type !== "task_start" && event.execution_id && before?.execution_id && event.execution_id !== before.execution_id) return;
+          if (event.model_output && before?.execution_id && event.model_output.run_id !== before.execution_id) return;
           get().applyTaskEvent(conversationId, taskId, event);
+          const current = get().getTasks(conversationId).find(item => item.task_id === taskId);
+          if (event.type === "task_start" && event.execution_id && event.execution_id === current?.execution_id && snapshotExecution !== event.execution_id) {
+            snapshotExecution = event.execution_id;
+            lastSwitchIndex = 0;
+          }
           if (event.type === "task_snapshot") {
+            const incoming = readOrdinaryTask(event.data);
+            const snapshot = current?.ordinary;
+            // REST may have installed a newer snapshot before this live frame arrived.
+            if (incoming && snapshot?.execution_id === incoming.execution_id && snapshot.revision >= incoming.revision) {
+              const first = snapshotExecution !== incoming.execution_id;
+              if (first) { snapshotExecution = incoming.execution_id; lastSwitchIndex = 0; }
+              if (snapshot.model_switch && snapshot.model_switch.switch_index > lastSwitchIndex) {
+                notifyTaskModelSwitch(conversationId, incoming.execution_id, snapshot.model_switch, !first);
+                lastSwitchIndex = snapshot.model_switch.switch_index;
+              }
+            }
             void get().loadConversationTasks(conversationId);
             scheduleWorkflowSessionRefresh(conversationId);
-            const current = get().getTasks(conversationId).find(item => item.task_id === taskId);
             if (current && TERMINAL_TASK_STATUSES.has(current.status)) get().unsubscribeTask(taskId);
             return;
+          }
+          const runtime: TaskEvent["runtime_event"] = event.runtime_event;
+          if (runtime && !before?.model_output_hydrating && runtime.data.switch_index > lastSwitchIndex &&
+              current?.model_output?.phase === "commit" && current.model_output.run_id === runtime.run_id &&
+              current.model_output.call_index === event.model_output?.call_index && event.model_output.phase === "commit") {
+            notifyTaskModelSwitch(conversationId, runtime.run_id, { ...runtime.data, event_id: runtime.event_id }, true);
+            lastSwitchIndex = runtime.data.switch_index;
           }
           if (event.type === "artifact") {
             const artifact: TaskArtifact = {
@@ -750,7 +851,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           }
         },
         error: () => {
-          if (get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
+          if (get()._taskStreams[taskId] !== sse || get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
           const stream = get()._taskStreams[taskId];
           try { stream?.close(); } catch { /* ignore */ }
           set((state) => {
@@ -762,7 +863,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               tasksByConversation: {
                 ...state.tasksByConversation,
                 [conversationId]: tasks.map((item) => item.task_id === taskId && get().viewMode === "developer"
-                  ? { ...item, execution_log: [], artifacts: [] }
+                  ? { ...item, execution_log: item.model_output ? item.execution_log : [], model_output_hydrating: false }
                   : item),
               },
             };
@@ -904,6 +1005,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         const epoch = get()._viewEpoch;
         try {
           const ordinaryMode = get().viewMode === "ordinary";
+          const tasksAtRequest = ordinaryMode ? undefined : new Map(
+            (get().tasksByConversation[conversationId] ?? []).map(task => [task.task_id, task]),
+          );
           const res = await TaskServiceApi().listConversationTasks(conversationId,
             ordinaryMode ? { params: { view: "ordinary" } } : undefined);
           if (get()._viewEpoch !== epoch) { continue; }
@@ -916,6 +1020,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               .map((task: OrdinaryTaskView) => publicTask(task, conversationId))
             : tasks.map((t: any): SubAgentTask => ({
             task_id: t.task_id,
+            execution_id: t.execution_id,
+            model_output: [...(t.steps ?? [])].reverse().find((step: any) => step.role === "model_runtime" &&
+              (!step.execution_id || step.execution_id === t.execution_id) && step.content?.model_output?.run_id === t.execution_id)?.content?.model_output,
             conversation_id: conversationId,
             trigger_history_id: t.trigger_history_id,
             seq_in_conversation: t.seq_in_conversation,
@@ -937,7 +1044,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             artifacts: t.artifacts ?? [],
             sources: t.sources ?? [],
             artifact_streams: t.artifact_streams ?? [],
-            execution_log: stepsToExecutionLog(t.steps ?? []),
+            execution_log: stepsToExecutionLog(t.steps ?? [], t.execution_id),
             writing_subtasks: t.writing_subtasks ?? t.progress?.writing_subtasks,
           }));
           set((state) => {
@@ -949,6 +1056,13 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               .filter((task) => (
                 liveCreatedTaskIds.has(task.task_id) && !snapshotIds.has(task.task_id)
               ));
+            const mergedTasks = normalized.map((task) => {
+              const current = state.tasksByConversation[conversationId]?.find(live => live.task_id === task.task_id);
+              if (task.ordinary) return publicTask(mergeOrdinarySnapshot(current?.ordinary, task.ordinary), conversationId);
+              // This response cannot order an execution or log changed after its request began.
+              if (current && current !== tasksAtRequest?.get(task.task_id)) return current;
+              return mergeTaskOutputSnapshot(current, { ...task, plan_steps: task.plan_steps ?? current?.plan_steps });
+            });
             const runs: OrdinaryRunView[] = res?.data?.data?.runs ?? res?.data?.runs ?? [];
             return {
               runsByConversation: { ...state.runsByConversation, [conversationId]: runs.map(run => {
@@ -957,13 +1071,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               }) },
               tasksByConversation: {
                 ...state.tasksByConversation,
-                [conversationId]: [...normalized.map((task) => task.ordinary ? publicTask(mergeOrdinarySnapshot(
-                  state.tasksByConversation[conversationId]?.find(live => live.task_id === task.task_id)?.ordinary, task.ordinary,
-                ), conversationId) : ({
-                  ...task,
-                  plan_steps: task.plan_steps ?? state.tasksByConversation[conversationId]
-                    ?.find((live) => live.task_id === task.task_id)?.plan_steps,
-                })), ...liveAdditions],
+                [conversationId]: [...mergedTasks, ...liveAdditions],
               },
             };
           });
@@ -1135,7 +1243,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       timeout: 3600000,
       callbacks: {
         message: (e: CustomEvent) => {
-          if (get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
+          if (get()._convStream !== sse || get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
           const raw = (e as any).data;
           if (!raw || raw === '[DONE]') return;
           const event = UIUtils.jsonParser(raw);
@@ -1326,7 +1434,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           }
         },
         error: () => {
-          if (get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
+          if (get()._convStream !== sse || get().activeConversationId !== conversationId || get()._viewEpoch !== epoch) return;
           try { get()._convStream?.close(); } catch { /* ignore */ }
           set({ _convStream: null });
           cancelWorkflowSessionRefresh();

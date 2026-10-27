@@ -66,6 +66,8 @@ type ChatChunkResponse struct {
 	SteeringReplay           []steeringReplayItem         `json:"steering_replay,omitempty"`
 	SteeringApplied          []steeringApplied            `json:"steering_applied,omitempty"`
 	KnowledgeOperationResult map[string]any               `json:"knowledge_operation_result,omitempty"`
+	ModelOutput              *ChatModelOutput             `json:"model_output,omitempty"`
+	ModelSwitches            []ModelSwitchRecord          `json:"model_switches,omitempty"`
 	Exports                  *[]ChatExport                `json:"exports,omitempty"`
 	ConversationID           string                       `json:"conversation_id"`
 	Seq                      int32                        `json:"seq"`
