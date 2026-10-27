@@ -1,26 +1,52 @@
 .model-features-editor {
   margin-bottom: 20px;
-  .model-features-heading,
-  .model-feature-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 60px;
-    align-items: center;
-    gap: 10px;
-  }
   .model-features-heading {
     color: var(--ant-color-text-secondary, #667085);
     font-size: 12px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
   }
-  .model-feature-row {
-    min-height: 44px;
-    .ant-form-item { margin: 0; }
-    .ant-select { width: 100%; }
+  .model-feature-buttons {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
   }
-  .model-features-hint {
-    margin: 8px 0 0;
+  .model-feature-buttons .ant-form-item {
+    margin: 0;
+  }
+  .model-feature-button {
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid var(--ant-color-border, #d9d9d9);
+    border-radius: 8px;
     color: var(--ant-color-text-secondary, #667085);
-    font-size: 12px;
-    line-height: 1.5;
+    gap: 6px;
+    justify-content: center;
+    transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+    &:hover,
+    &:focus-visible {
+      border-color: var(--ant-color-primary, #1677ff);
+      outline: 2px solid color-mix(in srgb, var(--ant-color-primary, #1677ff) 25%, transparent);
+      outline-offset: 1px;
+    }
+    &.is-active {
+      border-color: var(--ant-color-primary, #1677ff);
+      background: var(--ant-color-primary-bg, #e6f4ff);
+      color: var(--ant-color-primary, #1677ff);
+      font-weight: 600;
+    }
+    .anticon {
+      font-size: 16px;
+    }
+  }
+  .model-feature-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }

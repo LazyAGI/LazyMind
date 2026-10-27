@@ -17,7 +17,7 @@ import { getModelTaskType } from "../modelTaskTypes";
 import { ModelTypeIcon } from "./ModelTypeBadge";
 import { ModelFeaturesEditor } from "./ModelFeaturesEditor";
 import { EmbeddingOptionsEditor } from "./EmbeddingOptionsEditor";
-import { editableModelSettings, isModelFeatureEnabled, type EmbeddingEditorValues, type ModelSettings } from "../modelSettings";
+import { declaredFeatureFlags, editableModelSettings, isModelFeatureEnabled, modelFeatures, type EmbeddingEditorValues, type ModelFeature, type ModelSettings } from "../modelSettings";
 import "./ModelEditorModal.scss";
 
 export interface ModelEditorValues extends EmbeddingEditorValues {
@@ -61,8 +61,8 @@ interface ModelEditorModalProps {
   capabilityLabel: (capability: ModelCapability) => string;
 }
 
-function normalizeValues(values: ModelEditorValues, preserveEmptySettings = false): ModelEditorValues {
-  const modelSettings = editableModelSettings(values.capability, values.modelSettings, values, preserveEmptySettings);
+function normalizeValues(values: ModelEditorValues, preserveEmptySettings = false, touchedFeatures?: ReadonlySet<ModelFeature>): ModelEditorValues {
+  const modelSettings = editableModelSettings(values.capability, values.modelSettings, values, preserveEmptySettings, touchedFeatures);
   return {
     name: values.name?.trim() || "",
     capability: values.capability,
@@ -89,6 +89,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [initialValues, setInitialValues] = useState<ModelEditorValues | null>(null);
+  const [touchedFeatures, setTouchedFeatures] = useState<Set<ModelFeature>>(new Set());
   const savingRef = useRef(false);
   const generation = useRef(0);
   // A background refresh of the same model must not replace an unsaved draft.
@@ -107,6 +108,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
     savingRef.current = false;
     setSaving(false);
     setError("");
+    setTouchedFeatures(new Set());
     const model = currentModel.current;
     if (model) {
       const values: ModelEditorValues = {
@@ -123,7 +125,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
       };
       form.resetFields();
       form.setFieldsValue(values);
-      setInitialValues(normalizeValues(values, model.modelSettings !== undefined));
+      setInitialValues(normalizeValues(values, model.modelSettings !== undefined, new Set()));
       captureSavedValues();
     } else {
       setInitialValues(null);
@@ -134,7 +136,21 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
   }, [modelId, form, captureSavedValues]);
 
   const values = { ...form.getFieldsValue(true), ...watchedValues };
-  const normalize = (submitted: ModelEditorValues) => normalizeValues(submitted, props.model?.modelSettings !== undefined);
+  const normalize = (submitted: ModelEditorValues) => {
+    const originalSettings = props.model?.modelSettings;
+    const submittedFeatureEnabled = declaredFeatureFlags(submitted.modelSettings?.feature_enabled);
+    const mergedSettings = originalSettings || submitted.modelSettings
+      ? {
+        ...originalSettings,
+        ...submitted.modelSettings,
+        ...(originalSettings?.feature_support && !submitted.modelSettings?.feature_support
+          ? { feature_support: originalSettings.feature_support } : {}),
+        ...((originalSettings?.feature_enabled || submittedFeatureEnabled)
+          ? { feature_enabled: { ...originalSettings?.feature_enabled, ...submittedFeatureEnabled } } : {}),
+      }
+      : undefined;
+    return normalizeValues({ ...submitted, modelSettings: mergedSettings }, props.model?.modelSettings !== undefined, touchedFeatures);
+  };
   const capability = values.capability || props.model?.capability;
   const hasChanges = Boolean(initialValues) &&
     JSON.stringify(normalize(values)) !== JSON.stringify(initialValues);
@@ -213,7 +229,19 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
         requiredMark={false}
         disabled={saving}
         onFinish={(submitted) => void save(submitted)}
-        onValuesChange={() => setError("")}
+        onValuesChange={(changedValues) => {
+          setError("");
+          const changedFeatures = changedValues.modelSettings?.feature_enabled;
+          if (!changedFeatures || typeof changedFeatures !== "object") return;
+          const featureNames = Object.keys(changedFeatures).filter((feature): feature is ModelFeature =>
+            (modelFeatures as readonly string[]).includes(feature));
+          if (!featureNames.length) return;
+          setTouchedFeatures((current) => {
+            const next = new Set(current);
+            featureNames.forEach((feature) => next.add(feature));
+            return next;
+          });
+        }}
       >
         <Form.Item
           label={text("apiModelId")}

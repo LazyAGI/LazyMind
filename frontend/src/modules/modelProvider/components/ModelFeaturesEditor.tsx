@@ -1,7 +1,15 @@
-import { Form, Select, Switch } from "antd";
+import { BulbOutlined, EyeOutlined, ToolOutlined } from "@ant-design/icons";
+import { Button, Form, Tooltip } from "antd";
+import type { ComponentType } from "react";
 import { useTranslation } from "react-i18next";
-import { modelFeatures, type ModelSettings } from "../modelSettings";
+import { modelFeatures, type ModelFeature, type ModelSettings } from "../modelSettings";
 import "./ModelFeaturesEditor.scss";
+
+const featureIcons: Record<ModelFeature, ComponentType> = {
+  vision: EyeOutlined,
+  tool_calling: ToolOutlined,
+  reasoning: BulbOutlined,
+};
 
 export function ModelFeaturesEditor({ disabled = false, legacyVision = false, visualModel = false }: {
   disabled?: boolean;
@@ -12,31 +20,31 @@ export function ModelFeaturesEditor({ disabled = false, legacyVision = false, vi
   const form = Form.useFormInstance();
   const settings = Form.useWatch("modelSettings", form) as ModelSettings | undefined;
   return <div className="model-features-editor" role="group" aria-label={t("modelProvider.editor.features")}>
-    <div className="model-features-heading"><span>{t("modelProvider.editor.features")}</span><span>{t("modelProvider.editor.support")}</span><span>{t("modelProvider.editor.enabled")}</span></div>
-    {modelFeatures.map((feature) => {
-      const declaredSupport = settings?.feature_support?.[feature];
-      const unsupported = declaredSupport === false;
-      const fallbackSupport = feature === "vision" && visualModel ? true : undefined;
-      return <div className="model-feature-row" key={feature}>
-        <span>{t(`modelProvider.editor.feature.${feature}`)}</span>
-        <Form.Item name={["modelSettings", "feature_support", feature]}
-          getValueProps={(value: boolean | undefined) => ({ value: value === undefined ? fallbackSupport === true ? "supported" : "unknown" : value ? "supported" : "unsupported" })}
-          normalize={(value: string) => value === "unknown" ? undefined : value === "supported"}>
-          <Select aria-label={t(`modelProvider.editor.featureSupport.${feature}`)} disabled={disabled}
-            options={[{ value: "unknown", label: t("modelProvider.editor.unknownSupport") }, { value: "supported", label: t("modelProvider.editor.supported") }, { value: "unsupported", label: t("modelProvider.editor.unsupported"), disabled: feature === "vision" && visualModel }]}
-            onChange={(value) => {
-              if (value === "unsupported" && settings?.feature_enabled?.[feature] === true)
-                form.setFieldValue(["modelSettings", "feature_enabled", feature], false);
-            }} />
-        </Form.Item>
-        <Form.Item name={["modelSettings", "feature_enabled", feature]}
-          getValueProps={(value: boolean | undefined) => ({ checked: !unsupported && (value ?? declaredSupport ?? (feature === "vision" ? visualModel || legacyVision : true)) })}
-          trigger="onChange" getValueFromEvent={(value: boolean) => value}>
-          <Switch disabled={disabled || unsupported} aria-label={feature === "vision" ? t("modelProvider.vision") : t(`modelProvider.editor.featureEnabled.${feature}`)} />
-        </Form.Item>
-      </div>;
-    })}
-    <p className="model-features-hint">{t("modelProvider.editor.featureHint")}</p>
-    <p className="model-features-hint">{t("modelProvider.editor.reasoningHint")}</p>
+    <div className="model-features-heading">{t("modelProvider.editor.features")}</div>
+    <div className="model-feature-buttons">
+      {modelFeatures.map((feature) => {
+        const Icon = featureIcons[feature];
+        const explicitEnabled = settings?.feature_enabled?.[feature] ?? form.getFieldValue(["modelSettings", "feature_enabled", feature]);
+        const declaredSupport = settings?.feature_support?.[feature] ?? form.getFieldValue(["modelSettings", "feature_support", feature]);
+        const legacyFallback = feature === "vision" ? visualModel || legacyVision : true;
+        const featureEnabled = explicitEnabled ?? declaredSupport ?? legacyFallback;
+        const path = ["modelSettings", "feature_enabled", feature] as const;
+        return <Tooltip key={feature} title={t(`modelProvider.editor.featureTooltip.${feature}`)}>
+          <Form.Item noStyle name={path} trigger="onClick" getValueFromEvent={() => !featureEnabled}
+            getValueProps={(value: boolean | undefined) => ({ "aria-pressed": value ?? declaredSupport ?? legacyFallback })}>
+            <Button
+              type="text"
+              className={`model-feature-button${featureEnabled ? " is-active" : ""}`}
+              aria-label={t(`modelProvider.editor.featureEnabled.${feature}`)}
+              aria-pressed={featureEnabled}
+              disabled={disabled}
+              icon={<Icon aria-hidden="true" />}
+            >
+              <span className="model-feature-label">{t(`modelProvider.editor.feature.${feature}`)}</span>
+            </Button>
+          </Form.Item>
+        </Tooltip>;
+      })}
+    </div>
   </div>;
 }

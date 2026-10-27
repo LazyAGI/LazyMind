@@ -62,10 +62,17 @@ async function chooseCapability(capability: string) {
 }
 
 describe("model editor", () => {
+  it("renders capability icon buttons with their computed state", () => {
+    setup(props({ ...model, vision: false, modelSettings: { feature_support: { vision: false } } }));
+    const vision = screen.getByRole("button", { name: "modelProvider.editor.featureEnabled.vision" });
+    expect(vision).toHaveAttribute("aria-pressed", "false");
+    expect(vision).not.toBeDisabled();
+  });
+
   it("uses known vision support when no separate enabled override exists", async () => {
     const options = props({ ...model, vision: false, modelSettings: { feature_support: { vision: true } } });
     setup(options);
-    expect(screen.getByRole("switch", { name: "modelProvider.vision" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "modelProvider.editor.featureEnabled.vision" })).toHaveAttribute("aria-pressed", "true");
     expect(saveButton()).toBeDisabled();
     fireEvent.change(nameInput(), { target: { value: "renamed-vision" } });
     fireEvent.click(saveButton());
@@ -104,8 +111,8 @@ describe("model editor", () => {
   it("lets an unknown tool capability be explicitly disabled without declaring support", async () => {
     const options = props();
     setup(options);
-    const tools = screen.getByRole("switch", { name: "modelProvider.editor.featureEnabled.tool_calling" });
-    expect(tools).toBeChecked();
+    const tools = screen.getByRole("button", { name: "modelProvider.editor.featureEnabled.tool_calling" });
+    expect(tools).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(tools);
     fireEvent.click(saveButton());
     await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({
@@ -113,25 +120,23 @@ describe("model editor", () => {
     })));
   });
 
-  it("keeps unsupported reasoning disabled and separate from declared support", async () => {
+  it("keeps unsupported reasoning off while allowing an explicit override", async () => {
     setup(props({ ...model, modelSettings: { feature_support: { reasoning: false } } }));
-    const reasoning = screen.getByRole("switch", { name: "modelProvider.editor.featureEnabled.reasoning" });
-    expect(reasoning).not.toBeChecked();
-    expect(reasoning).toBeDisabled();
-    expect(saveButton()).toBeDisabled();
+    const reasoning = screen.getByRole("button", { name: "modelProvider.editor.featureEnabled.reasoning" });
+    expect(reasoning).toHaveAttribute("aria-pressed", "false");
+    expect(reasoning).not.toBeDisabled();
   });
 
-  it("turns an explicitly enabled tool feature off when support is changed to unsupported", async () => {
-    const options = props({ ...model, modelSettings: { feature_enabled: { tool_calling: true } } });
+  it("enables a feature even when old support says it is unsupported", async () => {
+    const options = props({ ...model, modelSettings: { feature_support: { vision: false } } });
     setup(options);
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "modelProvider.editor.featureSupport.tool_calling" }));
-    fireEvent.click(await screen.findByText("modelProvider.editor.unsupported", { selector: ".ant-select-item-option-content" }));
-    const tools = screen.getByRole("switch", { name: "modelProvider.editor.featureEnabled.tool_calling" });
-    expect(tools).not.toBeChecked();
-    expect(tools).toBeDisabled();
+    const vision = screen.getByRole("button", { name: "modelProvider.editor.featureEnabled.vision" });
+    expect(vision).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(vision);
+    expect(vision).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(saveButton());
     await waitFor(() => expect(options.onSave).toHaveBeenCalledWith(expect.objectContaining({
-      modelSettings: { feature_support: { tool_calling: false }, feature_enabled: { tool_calling: false } },
+      modelSettings: { feature_enabled: { vision: true } },
     })));
   });
   it("retains an unclassified model and its exact discovered context when saved", async () => {
@@ -204,7 +209,7 @@ describe("model editor", () => {
     setup(options);
     expect(nameInput()).toHaveValue(model.name);
     expect(screen.queryByRole("textbox", { name: "modelProvider.maxInputTokensLabel" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /modelProvider\.editor\.featureEnabled/ })).not.toBeInTheDocument();
     fireEvent.change(nameInput(), { target: { value: "  org/new-reranker  " } });
     fireEvent.click(saveButton());
     await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({ name: "org/new-reranker", capability: "RERANK" }));
@@ -216,7 +221,7 @@ describe("model editor", () => {
     setup(options);
     const context = screen.getByRole("textbox", { name: "modelProvider.maxInputTokensLabel" });
     expect(context).toHaveValue("256K");
-    expect(screen.getByRole("switch", { name: "modelProvider.vision" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "modelProvider.editor.featureEnabled.vision" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.change(context, { target: { value: "1m" } });
     fireEvent.click(saveButton());
     await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({ name: model.name, capability: "VLM", maxInputTokens: "1M" }));
@@ -225,8 +230,8 @@ describe("model editor", () => {
   it("changes the LLM vision flag while retaining its explicit context", async () => {
     const options = props();
     setup(options);
-    const vision = screen.getByRole("switch", { name: "modelProvider.vision" });
-    expect(vision).toBeChecked();
+    const vision = screen.getByRole("button", { name: "modelProvider.editor.featureEnabled.vision" });
+    expect(vision).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(vision);
     fireEvent.click(saveButton());
     await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({
@@ -290,7 +295,7 @@ describe("model editor", () => {
     setup(options);
     await chooseCapability("EMBEDDING");
     expect(screen.queryByRole("textbox", { name: "modelProvider.maxInputTokensLabel" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /modelProvider\.editor\.featureEnabled/ })).not.toBeInTheDocument();
     fireEvent.click(saveButton());
     await waitFor(() => expect(options.onSave).toHaveBeenCalledWith({ name: model.name, capability: "EMBEDDING" }));
   });

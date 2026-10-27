@@ -489,6 +489,7 @@ const enUS = {
       feature: { vision: "Vision", tool_calling: "Tool calling", reasoning: "Reasoning" },
       featureSupport: { vision: "Vision support", tool_calling: "Tool calling support", reasoning: "Reasoning support" },
       featureEnabled: { vision: "Enable vision", tool_calling: "Enable tool calling", reasoning: "Enable reasoning" },
+      featureTooltip: { vision: "Toggle vision", tool_calling: "Toggle tool calling", reasoning: "Toggle reasoning" },
       featureHint: "Support describes the model. Enabled controls its use in requests. Unknown support keeps existing behavior.",
       reasoningHint: "Disabling reasoning stops requesting reasoning mode. The supplier controls the model’s inherent reasoning.",
       embeddingQueryPrefix: "Query prefix",

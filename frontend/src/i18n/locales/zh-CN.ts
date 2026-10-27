@@ -487,6 +487,7 @@ const zhCN = {
       feature: { vision: "视觉", tool_calling: "工具调用", reasoning: "推理" },
       featureSupport: { vision: "视觉支持情况", tool_calling: "工具调用支持情况", reasoning: "推理支持情况" },
       featureEnabled: { vision: "启用视觉", tool_calling: "启用工具调用", reasoning: "启用推理" },
+      featureTooltip: { vision: "切换视觉", tool_calling: "切换工具调用", reasoning: "切换推理" },
       featureHint: "支持情况描述模型本身的能力，启用控制实际请求中的使用。未知支持情况会保留现有行为。",
       reasoningHint: "关闭后不主动请求推理模式，模型自身的思考行为由供应商决定。",
       embeddingQueryPrefix: "查询前缀",

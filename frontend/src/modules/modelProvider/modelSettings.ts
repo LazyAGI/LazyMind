@@ -29,12 +29,19 @@ export interface EmbeddingEditorValues {
   embeddingBatchSize?: number | null;
 }
 
-export function editableModelSettings(capability: string | undefined, settings?: ModelSettings, embeddingValues: EmbeddingEditorValues = {}, preserveEmpty = false): ModelSettings | undefined {
+export function editableModelSettings(capability: string | undefined, settings?: ModelSettings, embeddingValues: EmbeddingEditorValues = {}, preserveEmpty = false, touchedFeatures?: ReadonlySet<ModelFeature>): ModelSettings | undefined {
   const result: ModelSettings = {};
   if (["LLM_CHAT", "VLM", "LLM_SELF_EVOLUTION"].includes(capability || "")) {
     const support = declaredFeatureFlags(settings?.feature_support);
     const enabled = declaredFeatureFlags(settings?.feature_enabled);
-    if (support) result.feature_support = support;
+    for (const feature of touchedFeatures || []) {
+      const explicitEnabled = settings?.feature_enabled?.[feature];
+      if (typeof explicitEnabled === "boolean" && enabled) {
+        enabled[feature] = explicitEnabled;
+        if (explicitEnabled && support?.[feature] === false) delete support[feature];
+      }
+    }
+    if (support && Object.keys(support).length) result.feature_support = support;
     if (enabled) result.feature_enabled = enabled;
   }
   if (capability === "EMBEDDING") {
