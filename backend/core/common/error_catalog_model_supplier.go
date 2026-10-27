@@ -68,6 +68,7 @@ func init() {
 		{2005067, http.StatusBadRequest, "Embedding batch size must be between 1 and 2048", []string{"embedding batch size must be between 1 and 2048"}},
 		{2005070, http.StatusBadRequest, "A supplier name or logo is required", []string{"name or logo_data_url is required"}},
 		{2005071, http.StatusInternalServerError, "Failed to load model supplier identities", []string{"query model provider identities failed"}},
+		{2001059, http.StatusInternalServerError, "query model provider failed", []string{"query model providers failed"}},
 		{2005072, http.StatusBadRequest, "Add between 1 and 1000 models at a time", []string{"models must contain between 1 and 1000 entries"}},
 		{2005073, http.StatusInternalServerError, "Failed to save models", []string{"save models failed"}},
 		{2005074, http.StatusBadGateway, "Supplier connection check failed", []string{"provider connection check failed"}},
