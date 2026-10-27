@@ -15,6 +15,7 @@ import {
 interface ArchiveBatchResult {
   receipts: ConversationArchiveReceipt[];
   skippedIds: string[];
+  affectedIds: string[];
 }
 
 interface ArchiveConversationModalProps {
@@ -23,6 +24,8 @@ interface ArchiveConversationModalProps {
   title?: string;
   itemKind?: "dialog" | "task";
   open: boolean;
+  submitDisabled?: boolean;
+  onSubmittingChange?: (submitting: boolean) => void;
   onCancel: () => void;
   onArchived: (archivedIds: string[], failedIds: string[], batch?: ArchiveBatchResult) => void;
 }
@@ -33,6 +36,8 @@ export default function ArchiveConversationModal({
   title,
   itemKind = "dialog",
   open,
+  submitDisabled = false,
+  onSubmittingChange,
   onCancel,
   onArchived,
 }: ArchiveConversationModalProps) {
@@ -77,13 +82,15 @@ export default function ArchiveConversationModal({
   };
 
   const submit = async () => {
-    if (!ids.length || submittingRef.current) return;
+    if (!ids.length || submittingRef.current || submitDisabled) return;
     submittingRef.current = true;
+    onSubmittingChange?.(true);
     setLoading(true);
     const archivedIds: string[] = [];
     const failedIds: string[] = [];
     const receipts: ConversationArchiveReceipt[] = [];
     const skippedIds: string[] = [];
+    const affectedIds = new Set<string>();
     try {
       // Keep requests bounded and retain failed items for an explicit retry.
       for (const id of ids) {
@@ -97,6 +104,8 @@ export default function ArchiveConversationModal({
             continue;
           }
           archivedIds.push(id);
+          affectedIds.add(id);
+          receipt?.archived_ids?.forEach(affectedId => affectedIds.add(affectedId));
           // Older servers may acknowledge without a version. Never undo those unconditionally.
           if (receipt?.conversation_id === id && receipt.newly_archived === true &&
               typeof receipt.archived_at === "string" && Number.isFinite(Date.parse(receipt.archived_at))) {
@@ -111,12 +120,12 @@ export default function ArchiveConversationModal({
         message.error(t(archivedIds.length ? "chat.batchArchivePartialFailure" : "settingsPage.recovery.operationFailed", { count: failedIds.length }));
       }
       if (archivedIds.length || skippedIds.length) {
-        if (conversationIds) onArchived(archivedIds, failedIds, { receipts, skippedIds });
-        else onArchived(archivedIds, failedIds);
+        onArchived(archivedIds, failedIds, { receipts, skippedIds, affectedIds: [...affectedIds] });
       }
     } finally {
       submittingRef.current = false;
       setLoading(false);
+      onSubmittingChange?.(false);
     }
   };
 
@@ -132,7 +141,7 @@ export default function ArchiveConversationModal({
       foldersLoading={folderLoading}
       folderLoadError={folderError}
       submitting={loading}
-      submitDisabled={!ids.length}
+      submitDisabled={!ids.length || submitDisabled}
       createFolder={createArchiveFolder}
       onFolderCreated={handleFolderCreated}
       onSelectFolder={setFolderId}

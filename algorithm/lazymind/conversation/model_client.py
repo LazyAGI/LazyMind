@@ -16,6 +16,7 @@ from lazyllm.module.llms.onlinemodule.base import ModelCallError, ModelFinish
 from pydantic import BaseModel
 
 from lazymind.model_config import inject_model_config
+from lazymind.model_token_limits import capped_output_kwargs
 from .schemas import ConversationResult
 
 
@@ -84,6 +85,7 @@ def call_model(request: Any, prompt: str, *, stream_output: bool = True,
         model = AutoModel(source='dynamic', type='llm', name='llm', dynamic_auth=True)
     except Exception as exc:
         raise ConversationCallError('model_configuration') from exc
+    options = capped_output_kwargs(request.llm_config['llm'], options)
     return model(prompt, stream_output=stream_output, temperature=request.options.get('temperature', 0),
                  timeout=timeout, **options)
 

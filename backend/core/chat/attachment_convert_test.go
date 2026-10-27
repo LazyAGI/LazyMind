@@ -83,7 +83,19 @@ func TestResolveChatAttachmentFilesKeepsOfficialMinerUPPT(t *testing.T) {
 	}
 }
 
-func TestResolveChatAttachmentFilesReusesExistingPDF(t *testing.T) {
+func TestChatPPTXBypassesUnavailableConversionService(t *testing.T) {
+	t.Setenv("LAZYMIND_OFFICE_CONVERT_URL", "http://127.0.0.1:1/unavailable")
+	body := map[string]any{"files": map[string][]string{"1": {"/tmp/template.PPTX"}},
+		"ocr_config": map[string]any{"ocr_type": "mineru", "ocr_url": "http://local-mineru"}}
+	if err := applyChatAttachmentConversion(context.Background(), body); err != nil {
+		t.Fatal(err)
+	}
+	if body["files"].(map[string][]string)["1"][0] != "/tmp/template.PPTX" {
+		t.Fatal("PPTX source was replaced")
+	}
+}
+
+func TestResolveChatAttachmentFilesKeepsPPTXDespiteExistingPDF(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "deck.pptx")
 	pdf := filepath.Join(dir, "deck.pdf")
@@ -103,12 +115,12 @@ func TestResolveChatAttachmentFilesReusesExistingPDF(t *testing.T) {
 		t.Fatalf("resolveChatAttachmentFiles() error = %v", err)
 	}
 	paths, ok := out.([]string)
-	if !ok || len(paths) != 1 || paths[0] != pdf {
-		t.Fatalf("expected reused pdf path %q, got %#v", pdf, out)
+	if !ok || len(paths) != 1 || paths[0] != source {
+		t.Fatalf("expected original pptx path %q, got %#v", source, out)
 	}
 }
 
-func TestResolveChatAttachmentFilesConvertsFilesGroupedByTurn(t *testing.T) {
+func TestResolveChatAttachmentFilesKeepsPPTXGroupedByTurn(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "deck.pptx")
 	pdf := filepath.Join(dir, "deck.pdf")
@@ -134,8 +146,8 @@ func TestResolveChatAttachmentFilesConvertsFilesGroupedByTurn(t *testing.T) {
 		t.Fatalf("expected turn map, got %#v", out)
 	}
 	paths, ok := turns["1"].([]any)
-	if !ok || len(paths) != 1 || paths[0] != pdf {
-		t.Fatalf("expected reused pdf path %q, got %#v", pdf, turns["1"])
+	if !ok || len(paths) != 1 || paths[0] != source {
+		t.Fatalf("expected original pptx path %q, got %#v", source, turns["1"])
 	}
 }
 

@@ -113,6 +113,31 @@ def test_forward_uses_default_chunk_size_without_embedding_limit(monkeypatch):
     assert [len(chunk.text) for chunk in chunks] == [2048]
 
 
+def test_passage_prefix_is_included_in_embedding_input_budget(monkeypatch):
+    import lazyllm
+    from lazymind.embedding_options import configure_embedding_options
+
+    parser = GeneralParser(max_length=2048)
+    monkeypatch.setattr(general_parser_module, '_runtime_embed_max_input_tokens', lambda: 512)
+    with lazyllm.new_session():
+        configure_embedding_options({'embed_main': {'type': 'embed', 'embedding': {'passage_prefix': '前' * 100}}})
+        chunks = parser.forward(DocNode(text='a' * 180))
+    assert [len(chunk.text) for chunk in chunks] == [84, 84, 12]
+    assert ''.join(chunk.text for chunk in chunks) == 'a' * 180
+    assert all(len(('前' * 100 + chunk.text).encode()) <= 384 for chunk in chunks)
+
+
+def test_prefix_larger_than_embedding_budget_fails_before_indexing(monkeypatch):
+    import lazyllm
+    from lazymind.embedding_options import configure_embedding_options
+
+    monkeypatch.setattr(general_parser_module, '_runtime_embed_max_input_tokens', lambda: 128)
+    with lazyllm.new_session():
+        configure_embedding_options({'embed_main': {'type': 'embed', 'embedding': {'passage_prefix': 'x' * 100}}})
+        with pytest.raises(ValueError, match='prefix'):
+            GeneralParser().forward(DocNode(text='source text'))
+
+
 def test_general_parser_rejects_invalid_constructor_args():
     with pytest.raises(AssertionError, match='max_length'):
         GeneralParser(max_length=0)

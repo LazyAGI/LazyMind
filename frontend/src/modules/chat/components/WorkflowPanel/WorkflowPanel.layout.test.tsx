@@ -99,6 +99,34 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('shared workflow compact layout', () => {
+  it('keeps automatic grids from reintroducing hidden output when every tab is hidden', async () => {
+    fixture.ui.slotDefinitions = [{ id: 'document', label: '内部数据', type: 'text', user_visible: false }];
+    fixture.ui.tabs = [{ id: 'internal', label: '内部数据', slots: fixture.ui.slotDefinitions }];
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await waitFor(() => expect(screen.getByText('示例工作流')).toBeInTheDocument());
+    expect(screen.queryByText('正文 document')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '内部数据' })).not.toBeInTheDocument();
+    act(() => setDeveloperModeActive(true));
+    expect(await screen.findByText('正文 document')).toBeInTheDocument();
+  });
+
+  it('switches declared output visibility with developer mode without changing the workflow session', async () => {
+    fixture.ui.tabs![0].slots = [{ id: 'internal_prompt', label: '生成提示词', type: 'text', user_visible: false }];
+    fixture.session.slots!.push({ ...fixture.session.slots![0], slot_id: 'internal_prompt', slot: 'internal_prompt', step_id: 'prepare' });
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(screen.queryByRole('tab', { name: '写作准备' })).not.toBeInTheDocument();
+    expect(screen.queryByText('正文 internal_prompt')).not.toBeInTheDocument();
+    act(() => setDeveloperModeActive(true));
+    fireEvent.click(await screen.findByRole('tab', { name: '写作准备' }));
+    expect(screen.getByText('正文 internal_prompt')).toBeInTheDocument();
+    act(() => setDeveloperModeActive(false));
+    expect(screen.queryByRole('tab', { name: '写作准备' })).not.toBeInTheDocument();
+    expect(fixture.session.slots!.some(slot => slot.slot_id === 'internal_prompt')).toBe(true);
+  });
+
   it('keeps a replacement document action when the previous registration cleans up', async () => {
     render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('tab', { name: '成稿', selected: true });
@@ -891,7 +919,7 @@ it('keeps saved output visible after execution fails and retries through externa
   const control: WorkflowControlView = {
     protocol: 'workflow.control.v1', session_id: stored.session_id, state_version: 4,
     continuation: 'awaiting_executor', active_executions: 1, active_execution_ids: ['attempt'],
-    reviews: [], binding: { bound: true, generation: 1 }, delivery: null,
+    reviews: [], binding: { bound: true }, delivery: null,
     admission: { can_begin: false }, available_actions: ['stop'],
   };
   const getControl = vi.fn(async () => ({ data: { data: {

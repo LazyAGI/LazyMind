@@ -94,6 +94,7 @@ from .context import (
     set_context,
 )
 from .db import MemorySubAgentStore
+from .extensions import resolve_runtime_extension
 
 WORKFLOW_TOOL_FAILURE_LIMITS = {
     'get_artifact': 2,
@@ -207,6 +208,8 @@ def _generate_display_plan(llm: Any, objective: str, scope: Optional[Dict[str, A
 
 def _publisher_owns_outputs(ctx: 'SubAgentContext') -> bool:
     """Return whether this step's outputs are written by package publisher tools."""
+    if resolve_runtime_extension(ctx.agent_type, ctx.params).publisher_owned_outputs:
+        return True
     policy = (ctx.params or {}).get('workflow_runtime') or {}
     owned = {
         str(key).strip()
@@ -397,6 +400,7 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
 
 def _resolve_runtime_tools(
     explicit: Optional[List[str]], params: Optional[Dict[str, Any]] = None,
+    *, agent_type: str = '',
 ) -> List[Any]:
     """Build the runtime tool list for a SubAgent.
 
@@ -411,6 +415,9 @@ def _resolve_runtime_tools(
     publisher-owned output slots.
     Names of base tools in the explicit list are silently ignored.
     """
+    extension = resolve_runtime_extension(agent_type, params)
+    if extension.tools is not None:
+        return extension.tools()
     disabled = set((lazyllm.globals.get('agentic_config') or {}).get('disabled_tools') or [])
     if explicit is not None:
         core_tool_names = set(SUBAGENT_CORE_TOOL_NAMES)
@@ -870,7 +877,10 @@ def _build_subagent_plan(
     publisher_owned_outputs = _publisher_owns_outputs(ctx)
     _, required_keys = resolve_output_contract(ctx.agent_type, ctx.output_slots, ctx.params)
     output_lines = []
-    if publisher_owned_outputs:
+    extension = resolve_runtime_extension(ctx.agent_type, ctx.params)
+    if extension.output_instruction:
+        output_lines.append(extension.output_instruction)
+    elif publisher_owned_outputs:
         output_lines.append(
             'The declared output slots are publisher-owned. The Workflow package tool '
             'writes them at the correct list_index and revision automatically. Do not call '
@@ -948,7 +958,7 @@ def _build_subagent_plan(
         str(getattr(tool, '__name__', '') or '') for tool in tools
     }
     inherited_skills = (
-        [] if str(ctx.agent_type or '') == 'workflow_step'
+        [] if str(ctx.agent_type or '') == 'workflow_step' or not extension.inherit_skills
         else _coerce_str_list(ctx.params.get(SUBAGENT_SKILLS_CONTEXT_KEY))
     )
     inherited_prompt_skills = (
@@ -987,8 +997,10 @@ def _build_subagent_plan(
             tool_state_scope=f'subagent:{ctx.task_id}',
             preload_all_tools=str(ctx.agent_type or '') == 'workflow_step',
             enable_builtin_tools=False if (
-                str(ctx.agent_type or '') == 'workflow_step'
-                and (lazyllm.globals.get('agentic_config') or {}).get('enable_tool_retrieval')
+                ctx.params.get('tools_only') or (
+                    str(ctx.agent_type or '') == 'workflow_step'
+                    and (lazyllm.globals.get('agentic_config') or {}).get('enable_tool_retrieval')
+                )
             ) else None,
             required_tool_groups=('KBToolkit',) if ctx.params.get('filters', {}).get('kb_id') else (),
             workspace_permission=workspace_permission,
@@ -1007,8 +1019,11 @@ def _build_subagent_plan(
             current_model_candidate_id=model_fallback_current_id,
             model_candidates=tuple(model_fallback_candidates or ()),
             initial_model_switch=model_fallback_initial_switch,
-            tool_failure_limits=WORKFLOW_TOOL_FAILURE_LIMITS,
-            tool_call_limits={**WORKFLOW_TOOL_CALL_LIMITS, **(execution_policy.calls if execution_policy else {})},
+            tool_failure_limits={**WORKFLOW_TOOL_FAILURE_LIMITS, **extension.tool_failure_limits},
+            tool_call_limits={
+                **WORKFLOW_TOOL_CALL_LIMITS, **extension.tool_call_limits,
+                **(execution_policy.calls if execution_policy else {}),
+            },
         ),
     )
 
@@ -1451,7 +1466,7 @@ async def run_subagent_stream(
         yield _sse({'type': 'task_start', 'task_id': task_id})
 
         llm = AutoModel(model='llm')
-        runtime_tools = _resolve_runtime_tools(tools, params)
+        runtime_tools = _resolve_runtime_tools(tools, params, agent_type=effective_agent_type)
         visible_runtime_tools = _model_visible_runtime_tools(runtime_tools, params)
         attachment_configs = _resolve_attachment_configs(
             agentic_config, effective_agent_type, params,
@@ -1463,7 +1478,9 @@ async def run_subagent_stream(
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
         from lazymind.chat.service.knowledge_management import build_knowledge_runtime, BUILTIN_ID
-        knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
+        knowledge_management = None
+        if not ctx.params.get('tools_only') or 'knowledge_management' in (tools or []):
+            knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
         if knowledge_management is not None:
             from lazymind.chat.service.chat_service import _load_mcp_server_tools
             server = next(item for item in agentic_config.get('system_mcp_config') or []
@@ -1471,7 +1488,8 @@ async def run_subagent_stream(
             subagent_tools_all.extend(await asyncio.to_thread(
                 _load_mcp_server_tools, knowledge_management.server_config(server), 'system'))
         host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or bool(agentic_config.get('_core_workspace_context'))
-        if host_filesystem_enabled and effective_agent_type != 'workflow_step':
+        if (host_filesystem_enabled and effective_agent_type != 'workflow_step'
+                and not ctx.params.get('tools_only')):
             from lazyllm.tools.agent import FileSystemToolkit
             subagent_tools_all.append(FileSystemToolkit())
             from lazymind.chat.engine.tools.native_search import native_search, native_search_available
@@ -1580,6 +1598,8 @@ async def run_subagent_stream(
             executor.stream_agent(agent, plan) if agent is not None else executor.stream(llm, plan),
             stream_events,
         )
+        extension = resolve_runtime_extension(effective_agent_type, ctx.params)
+        extension_state = {}
         async with aclosing(merged_events):
             async for source, merged_payload in merged_events:
                 if source == 'stream':
@@ -1629,6 +1649,8 @@ async def run_subagent_stream(
                             _pending_text = ''
                         durable_step = _persist_step(ctx, step_seq, item)
                         step_seq += 1
+                        if tag == 'tool_results' and extension.on_tool_results is not None:
+                            extension.on_tool_results(item, extension_state)
                         if effective_agent_type == 'workflow_step' and tag == 'tool_results':
                             terminal_error = _terminal_tool_failure(
                                 item, terminal_workflow_tools,

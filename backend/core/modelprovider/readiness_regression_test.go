@@ -34,20 +34,22 @@ func TestTTSReadinessWithoutRuntimeRole(t *testing.T) {
 			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
 			roleTypeCache.Delete("tts")
 			t.Cleanup(func() { roleTypeCache.Delete("tts") })
-			db := orm.MigrateTestDB(t, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{})
+			db := orm.MigrateTestDB(t, &orm.UserSelectedModel{}, &orm.UserModelProviderGroupModel{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{})
 			store.Init(db.DB, db.DB, nil)
 			t.Cleanup(func() { store.Init(nil, nil, nil) })
 			if tc.owner != "" {
 				now := time.Now().UTC()
 				model := orm.UserModelProviderGroupModel{
-					ID: "speech-model", Name: "Demo speech", ProviderName: "Demo", ModelType: "tts",
+					ID: "speech-model", UserModelProviderID: "supplier", UserModelProviderGroupID: "connection", Name: "Demo speech", ProviderName: "SiliconFlow", ModelType: "tts",
 					BaseModel: orm.BaseModel{CreateUserID: tc.owner, CreatedAt: now, UpdatedAt: now},
 				}
 				selection := orm.UserSelectedModel{
 					UserID: tc.owner, UserName: "Demo admin", ModelKey: "tts", Share: tc.shared,
 					UserModelProviderGroupModelID: model.ID, CreatedAt: now, UpdatedAt: now,
 				}
-				for _, row := range []any{&model, &selection} {
+				parent := orm.UserModelProvider{ID: "supplier", Name: "SiliconFlow", Capabilities: "has_models", BaseModel: model.BaseModel}
+				group := orm.UserModelProviderGroup{ID: "connection", UserModelProviderID: "supplier", BaseURL: "https://api.siliconflow.cn/v1/", APIKey: "saved-key", IsVerified: true, BaseModel: model.BaseModel}
+				for _, row := range []any{&parent, &group, &model, &selection} {
 					if err := db.DB.Create(row).Error; err != nil {
 						t.Fatal(err)
 					}

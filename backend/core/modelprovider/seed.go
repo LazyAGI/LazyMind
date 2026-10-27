@@ -16,14 +16,18 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/log"
+	"lazymind/core/modelsettings"
 )
 
 type catalogModel struct {
+	ModelSettings          string   `yaml:"-"`
 	Vision                 bool     `yaml:"vision"`
 	Name                   string   `yaml:"name"`
 	Type                   string   `yaml:"type"`
 	FreeAutoSelectPriority int      `yaml:"free_auto_select_priority"`
 	FreeAutoSelectBaseURLs []string `yaml:"free_auto_select_base_urls"`
+	// MaxInputTokensOverride is set by the upstream catalog seeder. YAML leaves it empty.
+	MaxInputTokensOverride string `yaml:"-"`
 }
 
 type catalogSupplier struct {
@@ -98,7 +102,12 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, category string, caps []s
 
 	baseURL := normalizeBaseURL(item.BaseURL)
 	var row orm.DefaultModelProvider
-	err = tx.Where("name = ?", name).Take(&row).Error
+	lookup := tx.Where("name = ?", name)
+	if name == "vLLM" {
+		// Correct the old all-caps spelling without duplicating the catalog ID.
+		lookup = tx.Where("LOWER(name) = ?", "vllm")
+	}
+	err = lookup.Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.DefaultModelProvider{
 			ID:              common.GenerateID(),
@@ -120,6 +129,7 @@ func upsertDefaultProvider(tx *gorm.DB, now time.Time, category string, caps []s
 	return row.ID, tx.Model(&orm.DefaultModelProvider{}).
 		Where("id = ?", row.ID).
 		Updates(map[string]any{
+			"name":             name,
 			"description":      descriptionZh,
 			"description_i18n": orm.RawJSON(descriptionI18n),
 			"base_url":         baseURL,
@@ -136,9 +146,22 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	if name == "" || modelType == "" {
 		return errors.New("model name and type are required")
 	}
-	maxInputTokens, err := resolveSeededMaxInputTokens(modelType, name)
+	settings, err := modelsettings.Decode(item.ModelSettings)
 	if err != nil {
 		return err
+	}
+	settingsJSON, err := modelsettings.Normalize(modelType, &settings)
+	if err != nil {
+		return err
+	}
+	var maxInputTokens *string
+	if override := strings.TrimSpace(item.MaxInputTokensOverride); override != "" {
+		maxInputTokens = &override
+	} else {
+		maxInputTokens, err = resolveSeededMaxInputTokens(modelType, name)
+		if err != nil {
+			return err
+		}
 	}
 	if item.FreeAutoSelectPriority < 0 {
 		return errors.New("model free_auto_select_priority must not be negative")
@@ -161,6 +184,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			Name:                   name,
 			ModelType:              modelType,
 			Vision:                 item.Vision,
+			ModelSettings:          settingsJSON,
 			MaxInputTokens:         maxInputTokens,
 			FreeAutoSelectPriority: item.FreeAutoSelectPriority,
 			FreeAutoSelectBaseURLs: freeAutoSelectBaseURLs,
@@ -172,7 +196,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 		}
 		return syncDefaultModelToUserGroups(
 			tx, now, providerID, providerName, name, modelType, maxInputTokens,
-			item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision,
+			item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision, settingsJSON,
 		)
 	}
 	if err != nil {
@@ -185,6 +209,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			"provider_name":              providerName,
 			"model_type":                 modelType,
 			"vision":                     item.Vision,
+			"model_settings":             settingsJSON,
 			"max_input_tokens":           maxInputTokens,
 			"free_auto_select_priority":  item.FreeAutoSelectPriority,
 			"free_auto_select_base_urls": freeAutoSelectBaseURLs,
@@ -195,7 +220,7 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	}
 	return syncDefaultModelToUserGroups(
 		tx, now, providerID, providerName, name, modelType, maxInputTokens,
-		item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision,
+		item.FreeAutoSelectPriority, freeAutoSelectBaseURLs, item.Vision, settingsJSON,
 	)
 }
 
@@ -234,7 +259,12 @@ func syncDefaultModelToUserGroups(
 	freeAutoSelectPriority int,
 	freeAutoSelectBaseURLs string,
 	vision bool,
+	modelSettings ...string,
 ) error {
+	settingsJSON := "{}"
+	if len(modelSettings) > 0 {
+		settingsJSON = modelSettings[0]
+	}
 	providerIDs := tx.Model(&orm.UserModelProvider{}).
 		Select("id").
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", providerID)
@@ -246,13 +276,20 @@ func syncDefaultModelToUserGroups(
 		"free_auto_select_base_urls": freeAutoSelectBaseURLs,
 		"updated_at":                 now,
 	}
-	if maxInputTokens != nil {
-		updates["max_input_tokens"] = *maxInputTokens
+	updates["max_input_tokens"] = maxInputTokens
+	if !supportsUserMaxInputTokens(modelType) {
+		updates["input_token_limit"] = nil
+		updates["max_output_tokens"] = nil
 	}
 	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
 		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
 		Updates(updates).Error; err != nil {
 		return err
+	}
+	if isChatTechnicalType(modelType) {
+		if err := inheritCatalogModelSupport(tx, providerID, modelName, modelType, settingsJSON); err != nil {
+			return err
+		}
 	}
 
 	var catalog orm.DefaultModelProvider
@@ -261,6 +298,12 @@ func syncDefaultModelToUserGroups(
 			return nil
 		}
 		return err
+	}
+	// A catalog refresh repairs imported metadata without selecting newly
+	// discovered models for existing suppliers. Auxiliary services retain their
+	// original catalog synchronization behavior.
+	if strings.EqualFold(strings.TrimSpace(catalog.Category), defaultProviderCategory) {
+		return nil
 	}
 	catalogBaseURL := normalizeBaseURLForCompare(catalog.BaseURL)
 
@@ -296,7 +339,8 @@ func syncDefaultModelToUserGroups(
 		}
 		var count int64
 		if err := tx.Model(&orm.UserModelProviderGroupModel{}).
-			Where("user_model_provider_group_id = ? AND name = ? AND deleted_at IS NULL", group.GroupID, modelName).
+			// A deleted model is a user decision, not a missing catalog entry.
+			Where("user_model_provider_group_id = ? AND name = ?", group.GroupID, modelName).
 			Count(&count).Error; err != nil {
 			return err
 		}
@@ -311,6 +355,7 @@ func syncDefaultModelToUserGroups(
 			Name:                     modelName,
 			ModelType:                modelType,
 			Vision:                   vision,
+			ModelSettings:            settingsJSON,
 			MaxInputTokens:           maxInputTokens,
 			FreeAutoSelectPriority:   freeAutoSelectPriority,
 			FreeAutoSelectBaseURLs:   freeAutoSelectBaseURLs,
@@ -400,16 +445,23 @@ func reconcileCatalogScope(
 // SeedModelCatalog upserts default_model_providers and default_models from the YAML catalog file.
 // Section keys ending with "_providers" derive their category by trimming that suffix.
 func SeedModelCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
-	return seedCatalog(ctx, db, yamlPath, "_providers", "")
+	return seedCatalog(ctx, db, yamlPath, "_providers", "", nil)
+}
+
+// SeedProviderCatalog upserts providers from YAML. Model suppliers listed in
+// skipModelSuppliers keep their provider row, but their hardcoded model list is
+// left for the upstream catalog seeder.
+func SeedProviderCatalog(ctx context.Context, db *gorm.DB, yamlPath string, skipModelSuppliers map[string]struct{}) error {
+	return seedCatalog(ctx, db, yamlPath, "_providers", "", skipModelSuppliers)
 }
 
 // SeedDatasourceCatalog upserts default_model_providers from the datasource YAML catalog file.
 // All suppliers are seeded with category "datasource" regardless of section key.
 func SeedDatasourceCatalog(ctx context.Context, db *gorm.DB, yamlPath string) error {
-	return seedCatalog(ctx, db, yamlPath, "_sources", "datasource")
+	return seedCatalog(ctx, db, yamlPath, "_sources", "datasource", nil)
 }
 
-func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, forceCategory string) error {
+func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, forceCategory string, skipModelSuppliers map[string]struct{}) error {
 	yamlPath = strings.TrimSpace(yamlPath)
 	if yamlPath == "" {
 		return errors.New("catalog yaml path is required")
@@ -437,10 +489,8 @@ func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, for
 				if err != nil {
 					return err
 				}
-				if strings.EqualFold(supplier.Name, "SenseNova") {
-					if err := upgradeLegacyTokenPlanURL(tx, providerID); err != nil {
-						return err
-					}
+				if _, skipModels := skipModelSuppliers[supplier.Name]; skipModels {
+					continue
 				}
 				for _, model := range supplier.Models {
 					if err := upsertDefaultModel(tx, now, providerID, supplier.Name, model); err != nil {
@@ -470,14 +520,4 @@ func MustSeedDatasourceCatalog(ctx context.Context, db *gorm.DB, yamlPath string
 		log.Logger.Fatal().Err(err).Str("path", yamlPath).Msg("seed datasource catalog failed")
 	}
 	log.Logger.Info().Str("path", yamlPath).Msg("datasource catalog seeded from YAML")
-}
-
-// upgradeLegacyTokenPlanURL updates only the former official Token Plan preset.
-func upgradeLegacyTokenPlanURL(tx *gorm.DB, defaultProviderID string) error {
-	providerIDs := tx.Model(&orm.UserModelProvider{}).Select("id").Where("default_model_provider_id = ?", defaultProviderID)
-	return tx.Model(&orm.UserModelProviderGroup{}).
-		Where("user_model_provider_id IN (?) AND base_url IN ?", providerIDs, []string{
-			"https://token.sensenova.cn/v1/chat/completions/",
-			"https://token.sensenova.cn/v1/chat/completions",
-		}).Update("base_url", sensenovaNewPlatformBaseURL).Error
 }

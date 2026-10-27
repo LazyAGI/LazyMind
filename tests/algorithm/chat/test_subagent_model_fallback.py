@@ -38,7 +38,7 @@ def ordinary_runtime(monkeypatch):
         return value
 
     monkeypatch.setattr(runner, 'MemorySubAgentStore', store)
-    monkeypatch.setattr(runner, '_resolve_runtime_tools', lambda *_: [record_fallback_effect])
+    monkeypatch.setattr(runner, '_resolve_runtime_tools', lambda *_, **_kwargs: [record_fallback_effect])
     monkeypatch.setattr(runner, '_build_subagent_tools', lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(runner, 'AutoModel', lambda **_: lazyllm.OnlineChatModule(
         source='openai', model='model-a', type='llm', url=provider.url,

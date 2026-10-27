@@ -15,6 +15,7 @@ from lazymind.chat.api import (
     knowledge_search_routes,
     llm_task_routes,
     model_check_routes,
+    model_probe_routes,
     mail_read_routes,
     directory_file_routes,
     model_features_routes,
@@ -73,6 +74,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
         app.include_router(skill_review_routes.router)
         app.include_router(model_features_routes.router)
         app.include_router(model_check_routes.router)
+        app.include_router(model_probe_routes.router)
         app.include_router(llm_task_routes.router)
     return app
 

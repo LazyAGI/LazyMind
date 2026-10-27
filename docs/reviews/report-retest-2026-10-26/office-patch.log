@@ -1,0 +1,8 @@
+..................                                                     [100%]
+=============================== warnings summary ===============================
+algorithm/lazymind/parsing/engine/transform/para_parser.py:124
+  /Users/cuishaoting/Documents/LazyMind/algorithm/lazymind/parsing/engine/transform/para_parser.py:124: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'gte'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    chunk_overlap: int = Field(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+18 passed, 1 warning, 2 subtests passed in 1.54s

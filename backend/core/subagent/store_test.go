@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -92,6 +93,46 @@ func TestCreateTaskRetriesSQLiteWriterContention(t *testing.T) {
 	}
 	if task.SeqInConversation != 1 {
 		t.Fatalf("expected seq 1 after retry, got %d", task.SeqInConversation)
+	}
+}
+
+func TestCreateTaskAllocatesConcurrentSequenceWithoutSQLiteBusy(t *testing.T) {
+	db := newTestDB(t)
+	const count = 12
+	start := make(chan struct{})
+	results := make(chan *orm.SubAgentTask, count)
+	errors := make(chan error, count)
+	var workers sync.WaitGroup
+	for i := range count {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			task, err := CreateTask(t.Context(), db.DB, CreateTaskInput{
+				TaskID: fmt.Sprintf("parallel-%d", i), ConversationID: "conv-parallel", AgentType: "research",
+			})
+			if err != nil {
+				errors <- err
+				return
+			}
+			results <- task
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(errors)
+	close(results)
+	for err := range errors {
+		t.Errorf("concurrent CreateTask: %v", err)
+	}
+	seen := make(map[int]bool, count)
+	for task := range results {
+		seen[task.SeqInConversation] = true
+	}
+	for seq := 1; seq <= count; seq++ {
+		if !seen[seq] {
+			t.Errorf("missing sequence %d from %v", seq, seen)
+		}
 	}
 }
 

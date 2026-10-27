@@ -1,0 +1,1 @@
+{"requests":100,"distinct_client_ports":1,"result":"pass","query":"SELECT 1","server":"Windows native localhost:39081"}

@@ -65,6 +65,7 @@ def _install_stubs() -> None:
     if existing_cfg is None or not hasattr(existing_cfg, 'config'):
         config_mod = types.ModuleType('lazymind.config')
         config_mod.config = _FakeConfig()  # type: ignore[attr-defined]
+        config_mod.EMBED_IMAGE = 'embed_image'  # type: ignore[attr-defined]
         sys.modules['lazymind.config'] = config_mod
 
 

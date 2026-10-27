@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactElement } from "react";
 import { Alert, Button, Select, Skeleton, Switch, Tag, Tooltip } from "antd";
 import {
   CheckCircleOutlined,
+  AudioOutlined,
   CloudServerOutlined,
   CompassOutlined,
   DownOutlined,
@@ -9,11 +10,16 @@ import {
   GoogleOutlined,
   MinusCircleOutlined,
   QuestionCircleOutlined,
+  PictureOutlined,
+  RightOutlined,
+  RocketOutlined,
   ScanOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
+import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
+import { useFocusModality } from "../hooks/useFocusModality";
 import {
   cloudServiceConfigs,
   normalizeProviderKey,
@@ -26,6 +32,9 @@ import {
   type UseDefaultModelConfigOptions,
   type VerifiedCloudServiceResponse,
 } from "../hooks/useDefaultModelConfig";
+import { formatContextWindow } from "../maxInputTokens";
+import { probeHealthVersion, readModelProbeHealth, subscribeProbeHealth } from "../modelProbeHealth";
+import "./DefaultModelConfigPanel.scss";
 
 export type {
   CloudServiceSlotKey,
@@ -34,6 +43,19 @@ export type {
 } from "../hooks/useDefaultModelConfig";
 
 const LAZYMIND_CLOUD_PROVIDER_KEY = "lazymind_cloud";
+
+const defaultCapabilityGroups = [
+  { key: "visual", icon: PictureOutlined, capabilities: ["vlm", "image_generator", "video_generator"] },
+  { key: "retrieval", icon: SearchOutlined, capabilities: ["searchEngine", "cloudParsing", "reranker", "embed_image"] },
+  { key: "voice", icon: AudioOutlined, capabilities: ["speech_to_text", "tts"] },
+  { key: "evolution", icon: RocketOutlined, capabilities: ["evo_llm"] },
+] as const;
+
+function getDefaultCapabilityGroup(target?: ModelCapability) {
+  return defaultCapabilityGroups.find((group) =>
+    group.capabilities.some((capability) => capability === target),
+  )?.key;
+}
 
 interface DefaultModelConfigPanelProps extends UseDefaultModelConfigOptions {
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
@@ -148,22 +170,25 @@ function getCloudServiceReadyTooltip(
 
 function ProviderLogo({
   provider,
+  logoUrl,
   compact = false,
 }: {
   provider: ProviderOption;
+  logoUrl?: string;
   compact?: boolean;
 }) {
   return (
     <span
       aria-hidden="true"
-      className={`model-provider-logo is-${normalizeProviderKey(provider.name)}${compact ? " is-compact" : ""}`}
+      className={`model-provider-logo is-${provider.isCustom ? "custom" : normalizeProviderKey(provider.source || provider.name)}${compact ? " is-compact" : ""}`}
     >
       <span className="model-provider-logo-fallback">{provider.brand}</span>
-      {provider.logoUrl ? (
+      {logoUrl || provider.logoUrl ? (
         <img
           alt=""
           loading="lazy"
-          src={provider.logoUrl}
+          src={logoUrl || provider.logoUrl}
+          onLoad={(event) => { event.currentTarget.style.display = ""; }}
           onError={(event) => {
             event.currentTarget.style.display = "none";
           }}
@@ -183,7 +208,10 @@ export default function DefaultModelConfigPanel({
   highlightTarget,
   onHighlightResolved,
 }: DefaultModelConfigPanelProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const focusModality = useFocusModality();
+  const language = i18n?.resolvedLanguage || i18n?.language;
+  const probeHealth = useSyncExternalStore(subscribeProbeHealth, probeHealthVersion, () => 0);
   const {
     visibleModuleConfigs,
     isAdmin,
@@ -225,9 +253,22 @@ export default function DefaultModelConfigPanel({
   const [cloudServiceSearchKeywords, setCloudServiceSearchKeywords] = useState<
     Partial<Record<CloudServiceSlotKey, string>>
   >({});
+  const [collapsedSuppliers, setCollapsedSuppliers] = useState<Partial<Record<ModelCapability, string[]>>>({});
   const [keyboardNavigation, setKeyboardNavigation] = useState(false);
+  const groupId = useId();
+  const highlightedGroup = getDefaultCapabilityGroup(highlightTarget);
+  const [expandedGroups, setExpandedGroups] = useState<string[]>(() =>
+    defaultCapabilityGroups.map(({ key }) => key),
+  );
+
+  useEffect(() => {
+    if (highlightedGroup) {
+      setExpandedGroups((current) => current.includes(highlightedGroup)
+        ? current : [...current, highlightedGroup]);
+    }
+  }, [highlightedGroup, highlightTarget]);
   const selectInteractionProps = {
-    popupClassName: `model-provider-select-dropdown${keyboardNavigation ? " is-keyboard-navigation" : ""}`,
+    popupClassName: `model-provider-select-dropdown model-defaults-select-dropdown${keyboardNavigation ? " is-keyboard-navigation" : ""}`,
     onMouseDown: () => setKeyboardNavigation(false),
     onInputKeyDown: () => setKeyboardNavigation(true),
     popupRender: (menu: ReactElement) => (
@@ -240,6 +281,7 @@ export default function DefaultModelConfigPanel({
   const focusedHighlightRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!highlightTarget) focusedHighlightRef.current = null;
     if (
       !highlightTarget ||
       !highlightedRowRef.current ||
@@ -247,16 +289,17 @@ export default function DefaultModelConfigPanel({
     ) {
       return;
     }
-    focusedHighlightRef.current = highlightTarget;
     const frame = window.requestAnimationFrame(() => {
+      if (!highlightedRowRef.current) return;
+      focusedHighlightRef.current = highlightTarget;
       highlightedRowRef.current?.scrollIntoView({
-        behavior: "smooth",
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
         block: "center",
       });
       highlightedRowRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [highlightTarget, modelProviderSetupState, moduleModelOptions, defaultLoadState]);
+  }, [highlightTarget, modelProviderSetupState, moduleModelOptions, defaultLoadState, expandedGroups]);
 
   const modelCards = visibleModuleConfigs.map((module) => {
     const options = (moduleModelOptions[module.key] || []).filter(
@@ -270,12 +313,29 @@ export default function DefaultModelConfigPanel({
     );
     const keyword = (moduleModelSearchKeywords[module.key] || "").trim().toLowerCase();
     const visibleOptions = options.filter((option) =>
-      !keyword || `${option.model.name} ${option.provider.name} ${option.group.name}`.toLowerCase().includes(keyword),
+      !keyword || `${option.model.name} ${getProviderSearchText(option.provider, language)}`.toLowerCase().includes(keyword),
+    );
+    const supplierGroups = new Map<string, { provider: ProviderOption; options: typeof options }>();
+    for (const option of visibleOptions) {
+      const key = `${option.source}:${option.provider.id || normalizeProviderKey(option.provider.name)}`;
+      const group = supplierGroups.get(key);
+      if (group) group.options.push(option);
+      else supplierGroups.set(key, { provider: option.provider, options: [option] });
+    }
+    const renderModelValue = (option: typeof options[number]) => (
+      <span className="model-provider-select-value">
+        <ProviderLogo provider={option.provider} logoUrl={option.model.logoDataUrl} compact />
+        <span className="model-provider-select-value-text">
+          {module.key === "image_generator"
+            ? formatUnifiedImageDisplayName(option, t("modelProvider.editableModelSuffix"))
+            : option.model.name} · {getProviderDisplayName(option.provider, language)}
+        </span>
+      </span>
     );
     const moduleTitle = t(module.titleKey);
     const moduleSubtitle = t(module.subtitleKey);
     const maxInputTokens = selectedModelMaxInputTokens[module.key];
-    const shouldShowMaxInputTokens = Boolean(maxInputTokens?.trim());
+    const contextWindow = formatContextWindow(maxInputTokens);
     const selectedOption = options.find(
       (option) => option.value === selectedModels[module.key],
     );
@@ -303,13 +363,6 @@ export default function DefaultModelConfigPanel({
             ) : null}
             <span className="model-provider-default-title-text">{moduleTitle}</span>
           </label>
-          {configured && shouldShowMaxInputTokens ? (
-            <span className="model-provider-max-input-tokens">
-              {t("modelProvider.maxInputTokens", {
-                value: maxInputTokens,
-              })}
-            </span>
-          ) : null}
           <Tooltip placement="top" title={moduleSubtitle} trigger={["hover", "focus"]}>
             <button
               aria-label={t("modelProvider.moduleHelpAria", {
@@ -337,30 +390,6 @@ export default function DefaultModelConfigPanel({
               </span>
             </Tooltip>
           ) : null}
-          {configured && isAdmin && !runtimeFeatures.hideUserGroupSurfaces && !selectedIsCloud ? (
-            <Tooltip
-              title={
-                shareStatus[module.key]
-                  ? t("modelProvider.shareOn")
-                  : t("modelProvider.shareOff")
-              }
-            >
-              <Switch
-                aria-label={t("modelProvider.shareToggleAria", {
-                  title: moduleTitle,
-                })}
-                checked={!!shareStatus[module.key]}
-                disabled={saving}
-                checkedChildren={t("modelProvider.shared")}
-                className="model-provider-share-switch"
-                size="small"
-                unCheckedChildren={t("modelProvider.unshared")}
-                onChange={(checked) =>
-                  void toggleShareModel(module.key, checked)
-                }
-              />
-            </Tooltip>
-          ) : null}
           {!isAdmin && capabilityReadyStates[module.key] === "ready" ? (
             <Tooltip
               title={getModelReadyTooltip(t, modelReadyStatus[module.key])}
@@ -381,6 +410,8 @@ export default function DefaultModelConfigPanel({
           ) : null}
         </div>
 
+        <div className="model-provider-default-controls">
+        <div className="model-provider-default-input">
         {!configured && <p className="model-provider-pending-description">{moduleSubtitle}</p>}
         {!isAdmin && (capabilityReadyStates[module.key] === "error" || capabilityReadyStates[module.key] === "loading") ? (
           <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
@@ -396,23 +427,38 @@ export default function DefaultModelConfigPanel({
             action={<Button size="small" onClick={modelProviderSetupState === "error" ? onRetrySetup : () => void loadModuleModels(module.key, true)}>{t("common.retry")}</Button>} />
         ) : null}
         {modelProviderSetupState === "empty" || (!configured && modelProviderSetupState === "ready" && optionState === "ready" && !hasAvailableOptions) ? (
-          <Button className="model-provider-configure-capability" size="small"
+          <Button className="model-provider-configure-capability" type="text" size="small"
             disabled={(module.restricted && !isAdmin) || saving} onClick={onConfigureProviders}>
             {t(module.restricted && !isAdmin
               ? "modelProvider.contactAdminToConfigure"
               : "modelProvider.configureCapability")}
+            <RightOutlined aria-hidden="true" />
           </Button>
         ) : null}
         {modelProviderSetupState === "ready" && (configured || hasAvailableOptions) && <Select
           allowClear={!module.required}
-          className="model-provider-model-select"
+          className={`model-provider-model-select${configured && contextWindow ? " has-context-window" : ""}`}
           disabled={(module.restricted && !isAdmin) || saving}
           filterOption={false}
           id={`model-provider-${module.key.toLowerCase()}`}
           listHeight={340}
+          virtual={false}
           optionLabelProp="label"
+          labelRender={({ value, label }) => {
+            const option = options.find((item) => item.value === value);
+            return option ? renderModelValue(option) : label;
+          }}
           placeholder={
-            modelReadyStatus[module.key]?.model_name || (module.restricted && !isAdmin
+            (modelReadyStatus[module.key]?.model_name && modelReadyStatus[module.key]?.logo_data_url
+              ? <span className="model-provider-select-value">
+                  <span className="model-provider-logo is-custom is-compact" aria-hidden="true">
+                    <img src={modelReadyStatus[module.key]?.logo_data_url} alt="" />
+                  </span>
+                  <span className="model-provider-select-value-text">
+                    {modelReadyStatus[module.key]?.model_name}
+                  </span>
+                </span>
+              : modelReadyStatus[module.key]?.model_name) || (module.restricted && !isAdmin
               ? t("modelProvider.restrictedPlaceholder")
               : module.required
                 ? t("modelProvider.requiredModelPlaceholder")
@@ -421,11 +467,21 @@ export default function DefaultModelConfigPanel({
           {...selectInteractionProps}
           showSearch
           suffixIcon={
-            <DownOutlined className="model-provider-select-caret" />
+            <span className="model-provider-select-suffix">
+              {configured && contextWindow ? (
+                <span className="model-provider-context-badge" title={t("modelProvider.maxInputTokens", { value: maxInputTokens })}>
+                  {contextWindow}
+                </span>
+              ) : null}
+              <DownOutlined className="model-provider-select-caret" />
+            </span>
           }
           value={selectedModels[module.key]}
           onChange={(value) => handleModelSelection(module.key, value)}
           onSearch={(value) => {
+            if (value.trim()) {
+              setCollapsedSuppliers((current) => ({ ...current, [module.key]: [] }));
+            }
             setModuleModelSearchKeywords((current) => ({
               ...current,
               [module.key]: value,
@@ -448,60 +504,97 @@ export default function DefaultModelConfigPanel({
                 </div>
           }
         >
-          {visibleOptions.map((option) => {
-            const { provider, group, model, value } = option;
-            const displayName =
-              module.key === "image_generator"
-                ? formatUnifiedImageDisplayName(
-                    option,
-                    t("modelProvider.editableModelSuffix"),
-                  )
-                : model.name;
+          {Array.from(supplierGroups, ([supplierKey, supplier]) => {
+            const collapsed = collapsedSuppliers[module.key]?.includes(supplierKey) ?? false;
+            const supplierName = getProviderDisplayName(supplier.provider, language);
             return (
-              <Select.Option
-                key={value}
-                title={`${displayName} · ${group.name || provider.name}`}
-                disabled={
-                  model.availability === "unavailable" ||
-                  model.lifecycle === "deprecated" ||
-                  model.lifecycle === "retired"
-                }
-                label={
-                  <span className="model-provider-select-value">
-                    <ProviderLogo provider={provider} compact />
-                    <span className="model-provider-select-value-text">
-                      {displayName} · {group.name || provider.name}
-                    </span>
-                  </span>
-                }
-                value={value}
-              >
-                <Tooltip
-                  title={`${displayName} · ${group.name || provider.name}`}
-                  placement="right"
-                  overlayClassName="model-provider-option-tooltip"
-                >
-                  <span className="model-provider-select-option" title="">
-                    <ProviderLogo provider={provider} compact />
-                    <span className="model-provider-select-copy">
-                      <strong>{displayName}</strong>
-                      <small>
-                        {option.source === "cloud"
-                          ? t("modelProvider.cloudSystemReadOnly")
-                          : `${provider.name} / ${group.name}`}
-                        {option.source === "cloud"
-                          ? ""
-                          : model.builtIn
-                          ? t("modelProvider.builtInModelSuffix")
-                          : t("modelProvider.customModelSuffix")}
-                      </small>
-                    </span>
-                  </span>
-                </Tooltip>
-              </Select.Option>
+              <Select.OptGroup key={supplierKey} label={
+                <button type="button" className="model-provider-supplier-group-toggle"
+                  aria-expanded={!collapsed}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setCollapsedSuppliers((current) => {
+                      const keys = current[module.key] || [];
+                      return { ...current, [module.key]: collapsed
+                        ? keys.filter((key) => key !== supplierKey) : [...keys, supplierKey] };
+                    });
+                  }}>
+                  <ProviderLogo provider={supplier.provider} compact />
+                  <span className="model-provider-supplier-group-name">{supplierName}</span>
+                  <span className="model-provider-supplier-group-count">{supplier.options.length}</span>
+                  <DownOutlined className={collapsed ? "is-collapsed" : ""} aria-hidden="true" />
+                </button>
+              }>
+                {(collapsed ? [] : supplier.options).map((option) => {
+                  const { provider, model, value } = option;
+                  const supplierDisplayName = getProviderDisplayName(provider, language);
+                  const displayName =
+                    module.key === "image_generator"
+                      ? formatUnifiedImageDisplayName(
+                          option,
+                          t("modelProvider.editableModelSuffix"),
+                        )
+                      : model.name;
+                  return (
+                    <Select.Option
+                      key={value}
+                      title={`${displayName} · ${supplierDisplayName}`}
+                      disabled={
+                        model.availability === "unavailable" ||
+                        model.enabled === false ||
+                        model.lifecycle === "deprecated" ||
+                        model.lifecycle === "retired" ||
+                        (probeHealth >= 0 && readModelProbeHealth(model.id)?.status === "failed")
+                      }
+                      label={renderModelValue(option)}
+                      value={value}
+                    >
+                      <Tooltip
+                        title={`${displayName} · ${supplierDisplayName}`}
+                        placement="right"
+                        overlayClassName="model-provider-option-tooltip"
+                      >
+                        <span className="model-provider-select-option is-child" title="">
+                          <ProviderLogo provider={provider} logoUrl={model.logoDataUrl} compact />
+                          <span className="model-provider-select-copy">
+                            <strong>{displayName}</strong>
+                            <small>
+                              {option.source === "cloud"
+                                ? t("modelProvider.cloudSystemReadOnly")
+                                : supplierDisplayName}
+                            </small>
+                          </span>
+                          {formatContextWindow(model.maxInputTokens) ? (
+                            <span className="model-provider-context-badge">{formatContextWindow(model.maxInputTokens)}</span>
+                          ) : null}
+                        </span>
+                      </Tooltip>
+                    </Select.Option>
+                  );
+                })}
+              </Select.OptGroup>
             );
           })}
         </Select>}
+        </div>
+        {configured && isAdmin && !runtimeFeatures.hideUserGroupSurfaces && !selectedIsCloud ? (
+          <Tooltip title={t(shareStatus[module.key] ? "modelProvider.shareOn" : "modelProvider.shareOff")}>
+            <span className="model-provider-share-control">
+              <span aria-hidden="true">{t(shareStatus[module.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
+              <Switch
+                aria-label={t("modelProvider.shareToggleAria", { title: moduleTitle })}
+                checked={!!shareStatus[module.key]}
+                disabled={saving}
+                className="model-provider-share-switch"
+                size="small"
+                onChange={(checked) => void toggleShareModel(module.key, checked)}
+              />
+            </span>
+          </Tooltip>
+        ) : null}
+        </div>
       </div>
     ) };
   });
@@ -547,30 +640,6 @@ export default function DefaultModelConfigPanel({
               <QuestionCircleOutlined />
             </button>
           </Tooltip>
-          {configured && setupState === "ready" && isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
-            <Tooltip
-              title={
-                cloudServiceShareStatus[service.key]
-                  ? t("modelProvider.shareOn")
-                  : t("modelProvider.shareOff")
-              }
-            >
-              <Switch
-                aria-label={t("modelProvider.shareToggleAria", {
-                  title: serviceTitle,
-                })}
-                checked={!!cloudServiceShareStatus[service.key]}
-                disabled={saving}
-                checkedChildren={t("modelProvider.shared")}
-                className="model-provider-share-switch"
-                size="small"
-                unCheckedChildren={t("modelProvider.unshared")}
-                onChange={(checked) =>
-                  toggleShareCloudService(service.key, checked)
-                }
-              />
-            </Tooltip>
-          ) : null}
           {setupState === "ready" && !isAdmin && capabilityReadyStates[service.key] === "ready" ? (
             <Tooltip
               title={getCloudServiceReadyTooltip(t, cloudReady)}
@@ -591,6 +660,8 @@ export default function DefaultModelConfigPanel({
           ) : null}
         </div>
 
+        <div className="model-provider-default-controls">
+        <div className="model-provider-default-input">
         {!configured && <p className="model-provider-pending-description">{t(service.setupDescriptionKey)}</p>}
         {!isAdmin && (capabilityReadyStates[service.key] === "error" || capabilityReadyStates[service.key] === "loading") ? (
           <Alert type="warning" showIcon message={t("modelProvider.capabilityStatusLoadFailed")}
@@ -604,11 +675,6 @@ export default function DefaultModelConfigPanel({
         {setupState === "error" || (!configured && optionState === "error") ? (
           <Alert type="error" showIcon message={t("modelProvider.cloudServiceSetupLoadFailed")}
             action={<Button size="small" onClick={setupState === "error" ? onRetrySetup : () => void loadVerifiedCloudService(service)}>{t("common.retry")}</Button>} />
-        ) : null}
-        {setupState === "empty" || (!configured && setupState === "ready" && optionState === "ready" && !options.length) ? (
-          <Button className="model-provider-configure-capability" size="small" disabled={saving} onClick={() => onConfigureCloudService(service.key)}>
-            {t("modelProvider.configureCapability")}
-          </Button>
         ) : null}
         {setupState === "ready" && (configured || options.length > 0) && <Select
           allowClear
@@ -688,17 +754,41 @@ export default function DefaultModelConfigPanel({
             </Select.Option>
           ))}
         </Select>}
+        {setupState === "empty" || setupState === "ready" ? (
+          <Button className="model-provider-configure-capability" type="text" size="small" disabled={saving} onClick={() => onConfigureCloudService(service.key)}>
+            {t("modelProvider.configureCapability")}
+            <RightOutlined aria-hidden="true" />
+          </Button>
+        ) : null}
+
+        </div>
+        {configured && setupState === "ready" && isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
+          <Tooltip title={t(cloudServiceShareStatus[service.key] ? "modelProvider.shareOn" : "modelProvider.shareOff")}>
+            <span className="model-provider-share-control">
+              <span aria-hidden="true">{t(cloudServiceShareStatus[service.key] ? "modelProvider.shared" : "modelProvider.unshared")}</span>
+              <Switch
+                aria-label={t("modelProvider.shareToggleAria", { title: serviceTitle })}
+                checked={!!cloudServiceShareStatus[service.key]}
+                disabled={saving}
+                className="model-provider-share-switch"
+                size="small"
+                onChange={(checked) => toggleShareCloudService(service.key, checked)}
+              />
+            </span>
+          </Tooltip>
+        ) : null}
+        </div>
       </div>
     ) };
   });
 
   const cards = [...modelCards, ...cloudCards];
-  const configuredCards = cards.filter((card) => card.configured);
-  const pendingCards = cards.filter((card) => !card.configured);
+  const basicCards = cards.filter((card) => card.key === "llm" || card.key === "embed_main");
 
   return (
     <section
-      className="model-provider-config-panel"
+      className={`model-provider-config-panel model-defaults-panel model-provider-focus-${focusModality}`}
+      data-focus-modality={focusModality}
       aria-label={t("modelProvider.defaultConfigAria")}
     >
       <div className="model-provider-panel-title-row">
@@ -706,8 +796,8 @@ export default function DefaultModelConfigPanel({
           <h2 className="model-provider-section-title">
             {t("modelProvider.defaultTitle")}
           </h2>
-          <p className="model-provider-section-subtitle">
-            {t("modelProvider.defaultSubtitle")}
+          <p className="model-provider-section-subtitle model-defaults-intro">
+            {t("modelProvider.defaults.intro")}
           </p>
         </div>
       </div>
@@ -732,23 +822,50 @@ export default function DefaultModelConfigPanel({
           action={<Button onClick={retryDefaultModelState}>{t("common.retry")}</Button>} />
       ) : (
         <>
-          <section className="model-provider-capability-section" aria-label={t("modelProvider.configuredCapabilities")}>
-            <div className="model-provider-capability-heading">
-              <h3>{t("modelProvider.configuredCapabilities")} <span>{configuredCards.length}</span></h3>
+          <section className="model-defaults-basic" aria-label={t("modelProvider.defaults.basicTitle")}>
+            <div className="model-defaults-section-heading">
+              <h3>{t("modelProvider.defaults.basicTitle")}</h3>
+              <span className="model-defaults-save-note">{t("modelProvider.defaults.autoSave")}</span>
             </div>
-            {configuredCards.length ? (
-              <div className="model-provider-default-list">{configuredCards.map((card) => card.node)}</div>
-            ) : <p className="model-provider-capability-empty">{t("modelProvider.configuredCapabilitiesEmpty")}</p>}
+            <div className="model-defaults-rows">{basicCards.map((card) => card.node)}</div>
           </section>
-          <section className="model-provider-capability-section model-provider-pending-section" aria-label={t("modelProvider.pendingCapabilities")}>
-            <div className="model-provider-capability-heading">
-              <h3>{t("modelProvider.pendingCapabilities")} <span>{pendingCards.length}</span></h3>
-
-            </div>
-            {pendingCards.length ? (
-              <div className="model-provider-pending-list">{pendingCards.map((card) => card.node)}</div>
-            ) : <p className="model-provider-capability-empty">{t("modelProvider.pendingCapabilitiesEmpty")}</p>}
-          </section>
+          <div className="model-defaults-extensions-heading">
+            <h3>{t("modelProvider.defaults.extensionsTitle")}</h3>
+            <p>{t("modelProvider.defaults.extensionsDescription")}</p>
+          </div>
+          <div className="model-defaults-groups">
+            {defaultCapabilityGroups.map(({ key, icon: Icon, capabilities }) => {
+              const groupCards = capabilities.flatMap((capability) => cards.filter((card) => card.key === capability));
+              if (!groupCards.length) return null;
+              const expanded = expandedGroups.includes(key);
+              const title = t(`modelProvider.defaults.${key}Title`);
+              const contentId = `${groupId}-${key}`;
+              const count = groupCards.filter((card) => card.configured).length;
+              return (
+                <div className={`model-defaults-group${expanded ? " is-expanded" : ""}`} key={key}>
+                  <h3 className="model-defaults-group-heading">
+                    <button type="button" className="model-defaults-group-toggle"
+                      aria-expanded={expanded} aria-controls={contentId}
+                      onClick={() => setExpandedGroups((current) => expanded
+                        ? current.filter((item) => item !== key) : [...current, key])}>
+                      <span className="model-defaults-group-icon" aria-hidden="true"><Icon /></span>
+                      <span className="model-defaults-group-copy">
+                        <span className="model-defaults-group-title">{title}</span>
+                        <span className="model-defaults-group-description">{t(`modelProvider.defaults.${key}Description`)}</span>
+                      </span>
+                      <span className={`model-defaults-group-count${count ? " has-configured" : ""}`}>
+                        {t("modelProvider.defaults.configuredCount", { configured: count, total: groupCards.length })}
+                      </span>
+                      <DownOutlined className="model-defaults-group-caret" aria-hidden="true" />
+                    </button>
+                  </h3>
+                  <section id={contentId} aria-label={title} hidden={!expanded}>
+                    {expanded && <div className="model-defaults-rows">{groupCards.map((card) => card.node)}</div>}
+                  </section>
+                </div>
+              );
+            })}
+          </div>
         </>
       )}
     </section>

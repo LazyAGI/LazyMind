@@ -1,11 +1,11 @@
 import base64
 import datetime
+import http.client
 import json
 import os
 import sqlite3
 import threading
-import urllib.error
-import urllib.request
+import urllib.parse
 from collections import defaultdict
 
 
@@ -249,6 +249,12 @@ class Connection:
         if not self._base_url:
             raise sqlite3.OperationalError(f'{_SERVER_URL_ENV} is empty')
         self._token = _read_token()
+        url = urllib.parse.urlsplit(self._base_url)
+        if url.scheme not in {'http', 'https'} or not url.hostname:
+            raise sqlite3.OperationalError('sqlite proxy server URL must use HTTP or HTTPS')
+        connection_type = http.client.HTTPSConnection if url.scheme == 'https' else http.client.HTTPConnection
+        self._http = connection_type(url.hostname, url.port, timeout=300)
+        self._http_path = url.path.rstrip('/')
         self._tx_id = None
         self._closed = False
         self._lock = threading.RLock()
@@ -297,12 +303,15 @@ class Connection:
         with self._lock:
             if self._closed:
                 return
-            if self._tx_id is not None:
-                try:
-                    self._call('/v1/rollback')
-                finally:
-                    self._tx_id = None
-            self._closed = True
+            try:
+                if self._tx_id is not None:
+                    try:
+                        self._call('/v1/rollback')
+                    finally:
+                        self._tx_id = None
+            finally:
+                self._closed = True
+                self._http.close()
 
     def create_function(self, name, num_params, func, deterministic=False):
         return None
@@ -342,25 +351,22 @@ class Connection:
     def _call(self, path, values=None):
         with self._lock:
             self._check_open()
-            request = urllib.request.Request(
-                self._base_url + path,
-                data=self._encoded_payload(values),
-                headers={
+            try:
+                self._http.request('POST', self._http_path + path, body=self._encoded_payload(values), headers={
                     'Authorization': 'Bearer ' + self._token,
                     'Content-Type': 'application/json',
-                },
-                method='POST',
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=300) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-            except urllib.error.HTTPError as exc:
-                try:
-                    detail = json.loads(exc.read().decode('utf-8')).get('error')
-                except Exception:
-                    detail = None
-                raise sqlite3.OperationalError(detail or str(exc)) from exc
-            except (OSError, ValueError) as exc:
+                })
+                response = self._http.getresponse()
+                body = response.read()
+                if response.status >= 400:
+                    try:
+                        detail = json.loads(body.decode('utf-8')).get('error')
+                    except (ValueError, AttributeError):
+                        detail = None
+                    raise sqlite3.OperationalError(detail or f'HTTP {response.status}')
+                result = json.loads(body.decode('utf-8'))
+            except (OSError, ValueError, http.client.HTTPException) as exc:
+                self._http.close()
                 raise sqlite3.OperationalError(f'sqlite proxy request failed: {exc}') from exc
             if result.get('error'):
                 raise sqlite3.OperationalError(result['error'])

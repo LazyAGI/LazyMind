@@ -1,0 +1,10 @@
+package auth
+import("context";"net/http";"testing")
+func TestReportInvalidBootstrapCredentialsFail(t *testing.T){
+ calls:=0
+ client:=&http.Client{Transport:roundTripFunc(func(r *http.Request)(*http.Response,error){calls++;return makeResponse(http.StatusUnauthorized,`{"detail":"invalid credentials"}`),nil})}
+ m:=NewAdminSessionManager("http://auth",client)
+ _,err:=m.Ensure(context.Background(),true)
+ if err==nil{t.Fatal("expected invalid credentials error")};if calls!=1{t.Fatalf("calls %d",calls)}
+ t.Log("invalid bootstrap credentials are surfaced; no silent recovery or retry loop")
+}

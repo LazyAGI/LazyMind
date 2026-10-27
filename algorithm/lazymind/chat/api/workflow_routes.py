@@ -575,8 +575,6 @@ async def export_ppt_from_html(req: PptExportRequest):
     pages = [page for page in (req.pages or []) if (page.html or '').strip()]
     if not pages:
         raise HTTPException(status_code=400, detail='pages with html are required')
-    if len(pages) > 30:
-        raise HTTPException(status_code=400, detail='too many pages (max 30)')
 
     def sanitize_html(raw: str) -> str:
         value = (raw or '').strip()
