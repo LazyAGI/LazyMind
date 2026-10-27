@@ -48,6 +48,17 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe('paper relations in the detail drawer', () => {
+    it('reports failed reference loading to notifications and resolves it after retry', async () => {
+        const notify = vi.fn(); const resolve = vi.fn();
+        vi.mocked(listAcademicReferences).mockRejectedValueOnce(new Error('references unavailable'));
+        show(fixture(), { onNotification: notify, onNotificationResolved: resolve });
+        await waitFor(() => expect(notify).toHaveBeenCalledWith(expect.objectContaining({ id: 'references:current', message: 'references unavailable' })));
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+        expect(screen.queryByText('references unavailable')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: '重试' }));
+        await waitFor(() => expect(resolve).toHaveBeenCalledWith('references:current'));
+    });
+
     it('merges references from PDF versions and opens the related paper and PDF', async () => {
         const data = fixture();
         data.attachments.push({ ...data.attachments[0], id: 'second-version', contentRef: 'pdf-v1', sourceVersion: 'v1', isPrimary: false });

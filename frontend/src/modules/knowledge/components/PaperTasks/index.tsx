@@ -9,6 +9,7 @@ import { getChatConversationPath, CHAT_CONVERSATION_LIST_REFRESH_EVENT } from '@
 import { deleteExpansion, getExpansion, launchPaperTask, listExpansions, resolvePaperSelection, retryPaperContent, type Expansion, type ExpansionDetail, type PaperTask, type WorkflowPaper } from '../../api/paperWorkflows';
 import { previewPaperImport, startReferenceImport, getPaperImportStatus, type ImportPreviewItem, isImportPreviewExpired } from '../../api/academicReferences';
 import './index.scss';
+import type { PaperNotification } from '../../paper/usePaperNotifications';
 
 interface Props {
     dataset: string;
@@ -18,6 +19,8 @@ interface Props {
     selectionError?: string;
     onImportSubmitted: () => void;
     actionsContainer?: HTMLElement | null;
+    onNotification?: (notice: PaperNotification) => void;
+    onNotificationResolved?: (id: string) => void;
 }
 interface ResultSelection {
     source: ExpansionDetail;
@@ -53,7 +56,7 @@ function currentPaperDocument(detail: ExpansionDetail, item: WorkflowPaper, prev
 }
 const stages = ['direction_research', 'seed_set', 'expanded_papers', 'paper_relations', 'expansion_result'];
 
-export default function PaperTasks({ dataset, selected, selectedTitles = [], selectionError, canImport, onImportSubmitted, actionsContainer }: Props) {
+export default function PaperTasks({ dataset, selected, selectedTitles = [], selectionError, canImport, onImportSubmitted, actionsContainer, onNotification, onNotificationResolved }: Props) {
     const { t } = useTranslation();
     const navigate = useNavigate();
     const [params, setParams] = useSearchParams();
@@ -62,6 +65,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const [reflectionFirst, setReflectionFirst] = useState(false);
     const [busy, setBusy] = useState(false);
     const [history, setHistory] = useState(false);
+    const [historyError, setHistoryError] = useState(false);
     const [records, setRecords] = useState<Expansion[]>([]);
     const [detail, setDetail] = useState<ExpansionDetail>();
     const [importBatches, setImportBatches] = useState<{ id: string; keys: string[] }[]>([]);
@@ -87,13 +91,23 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         if (!direction) {
             if (selectedPaperTaskError) { message.warning(selectedPaperTaskError); return; }
         }
+        setActionError('');
         setInstruction('');
         setReflectionFirst(false);
         setLaunch({ kind, direction });
         requestKey.current = crypto.randomUUID();
         requestInput.current = '';
     }, [selectedPaperTaskError]);
-    const refreshHistory = async () => setRecords(await listExpansions(dataset));
+    const refreshHistory = async () => {
+        try {
+            setRecords(await listExpansions(dataset, !!onNotification));
+            setHistoryError(false);
+            onNotificationResolved?.('expansion-history');
+        } catch (error) {
+            setHistoryError(true);
+            onNotification?.({ id: 'expansion-history', title: '论文扩展记录加载失败', message: error instanceof Error ? error.message : '记录加载失败，请重试', action: { label: '重新加载', onClick: refreshHistory } });
+        }
+    };
     const openHistory = () => {
         setHistory(true);
         void refreshHistory().catch(() => {});
@@ -110,11 +124,24 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         }
         detailTarget.current = id;
         const request = ++detailRequest.current;
-        const pending = pendingDetail.current?.id === id ? pendingDetail.current : { id, promise: getExpansion(id) };
+        const pending = pendingDetail.current?.id === id ? pendingDetail.current : { id, promise: getExpansion(id, !!onNotification) };
         pendingDetail.current = pending;
         try {
             const result = await pending.promise;
-            if (request === detailRequest.current) setDetail(result);
+            if (request === detailRequest.current) {
+                setDetail(result);
+                onNotificationResolved?.(`expansion-detail:${id}`);
+                for (const content of result.contents) {
+                    const noticeId = `expansion-content:${id}:${content.paper_id}`;
+                    if (content.status === 'failed' && content.error) {
+                        const paper = result.record.result.papers.find(item => item.paper.paper_id === content.paper_id)?.paper;
+                        onNotification?.({ id: noticeId, title: `《${paper?.title || content.paper_id}》全文获取失败`, message: content.error, action: { label: '查看扩展结果', closeOnClick: true, onClick: () => openDetail(id).catch(() => {}) } });
+                    } else onNotificationResolved?.(noticeId);
+                }
+            }
+        } catch (error) {
+            if (request === detailRequest.current) onNotification?.({ id: `expansion-detail:${id}`, title: '论文扩展结果加载失败', message: error instanceof Error ? error.message : '扩展结果加载失败', action: { label: '重新加载', closeOnClick: true, onClick: () => openDetail(id).catch(() => {}) } });
+            throw error;
         } finally { if (pendingDetail.current === pending) pendingDetail.current = undefined; }
     };
     const expansionID = params.get('expansion_id');
@@ -152,7 +179,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 if (!active) return;
                 const completed = statuses.filter(item => ['succeeded', 'completed_with_errors', 'failed', 'canceled'].includes(item.status)).map(item => item.id);
                 if (completed.length) {
-                    if (statuses.some(item => ['failed', 'completed_with_errors'].includes(item.status))) setActionError(t('paperTasks.importIncomplete'));
+                    if (!onNotification && statuses.some(item => ['failed', 'completed_with_errors'].includes(item.status))) setActionError(t('paperTasks.importIncomplete'));
                     setImportBatches(current => current.filter(batch => !completed.includes(batch.id)));
                     importsChanged.current();
                     if (detailTarget.current) void openDetail(detailTarget.current).then(() => { if (detail) void refreshImportPreview(detail); }).catch(() => {});
@@ -182,7 +209,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         setBusy(true);
         try {
             if (!launch.direction) {
-                const selection = await resolvePaperSelection(dataset, selected);
+                const selection = await resolvePaperSelection(dataset, selected, !!onNotification);
                 if (selection.invalid.length) {
                     Modal.error({ title: t('paperTasks.invalidSelection'), content: <List dataSource={selection.invalid} renderItem={item => <List.Item>{item.document_id}：{item.reason}</List.Item>} /> });
                     return;
@@ -200,11 +227,15 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             const fingerprint = JSON.stringify(body);
             if (requestInput.current && requestInput.current !== fingerprint) requestKey.current = crypto.randomUUID();
             requestInput.current = fingerprint;
-            const result = await launchPaperTask({ ...body, request_key: requestKey.current });
+            const result = await launchPaperTask({ ...body, request_key: requestKey.current }, !!onNotification);
+            onNotificationResolved?.('paper-task-launch');
             setLaunch(undefined);
             goChat(result.conversation_id, launch.kind === 'review');
-        } catch {
-            // The request client displays the server error; keep the form for retry.
+        } catch (error) {
+            if (onNotification) {
+                setActionError('任务尚未创建，请重试或查看通知。');
+                onNotification({ id: 'paper-task-launch', title: '论文任务创建失败', message: error instanceof Error ? error.message : '任务创建失败，请重试' });
+            }
         } finally {
             setBusy(false);
         }
@@ -227,14 +258,17 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             ? current : { sourceKey, items: [], status: 'loading' });
         try {
             const key = `${sourceKey}:${ids.join(',')}`;
-            const pending = pendingPreview.current?.key === key ? pendingPreview.current : { key, promise: ids.length ? previewPaperImport(ids, target.record.dataset_id, target.record.id) : Promise.resolve([]) };
+            const pending = pendingPreview.current?.key === key ? pendingPreview.current : { key, promise: ids.length ? previewPaperImport(ids, target.record.dataset_id, target.record.id, !!onNotification) : Promise.resolve([]) };
             pendingPreview.current = pending;
             let items: ImportPreviewItem[];
             try { items = await pending.promise; }
             finally { if (pendingPreview.current === pending) pendingPreview.current = undefined; }
-            if (request === previewRequest.current) setPreview({ sourceKey, items, status: 'ready' });
-        } catch {
-            if (request === previewRequest.current) setPreview({ sourceKey, items: [], status: 'error' });
+            if (request === previewRequest.current) { setPreview({ sourceKey, items, status: 'ready' }); onNotificationResolved?.(`expansion-preview:${target.record.id}`); }
+        } catch (error) {
+            if (request === previewRequest.current) {
+                setPreview({ sourceKey, items: [], status: 'error' });
+                onNotification?.({ id: `expansion-preview:${target.record.id}`, title: '论文导入预览加载失败', message: error instanceof Error ? error.message : '导入预览加载失败', action: { label: '重新加载预览', onClick: () => refreshImportPreview(target) } });
+            }
         }
     };
     useEffect(() => {
@@ -290,10 +324,12 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 kind: 'review', dataset_id: source.record.dataset_id,
                 expansion_id: source.record.id, expansion_version: source.record.version,
                 paper_ids: selection.selected, request_key: selection.requestKey,
-            });
+            }, !!onNotification);
+            onNotificationResolved?.(`expansion-review:${source.record.id}`);
             goChat(result.conversation_id);
-        } catch {
-            setActionError(t('paperTasks.submitFailed'));
+        } catch (error) {
+            setActionError(onNotification ? '提交尚未完成，请重试或查看通知。' : t('paperTasks.submitFailed'));
+            onNotification?.({ id: `expansion-review:${source.record.id}`, title: '论文综述任务创建失败', message: error instanceof Error ? error.message : '任务创建失败' });
         } finally {
             submitting.current = undefined;
             setBusy(false);
@@ -306,7 +342,8 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         setActionError('');
         try {
             const items = chosen.map(item => previewItem(target, item)!);
-            const result = await startReferenceImport(target.record.dataset_id, [], items, key);
+            const result = await startReferenceImport(target.record.dataset_id, [], items, key, !!onNotification);
+            onNotificationResolved?.(`expansion-import:${target.record.id}`);
             setImportBatches(current => [...current, { id: result.batch_id, keys: chosen.map(item => importKey(target, item)) }]);
             setPreview(current => current?.sourceKey === resultKey(target) ? {
                 ...current,
@@ -325,7 +362,8 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 setActionError('导入预览已刷新，请确认论文及版本后重试');
                 return;
             }
-            setActionError(t('paperTasks.submitFailed'));
+            setActionError(onNotification ? '导入尚未提交，请重试或查看通知。' : t('paperTasks.submitFailed'));
+            onNotification?.({ id: `expansion-import:${target.record.id}`, title: '扩展论文导入提交失败', message: error instanceof Error ? error.message : '导入提交失败' });
         } finally {
             submitting.current = undefined;
             setBusy(false);
@@ -385,6 +423,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         <Modal okText={t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
             title={launch ? taskLabel(launch.kind) : ''}
             onCancel={() => !busy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
+            {actionError && onNotification && <p role="status">{actionError}</p>}
             {launch?.kind === 'review' && <Alert type="info" showIcon message={t('paperTasks.reviewStartHint')} />}
             {launch && !launch.direction && <div className="paper-task-launch-selection">
                 <Typography.Text type="secondary">{t('paperTasks.selectedLibraryPapers', { count: selected.length })}</Typography.Text>
@@ -398,7 +437,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         </Modal>
         <Drawer open={history} title={t('paperTasks.personalRecords')} width={780} onClose={() => setHistory(false)}>
             <Button onClick={() => void refreshHistory()}>{t('paperTasks.refresh')}</Button>
-            <List dataSource={records} locale={{ emptyText: t('paperTasks.noRecords') }} renderItem={record => <List.Item actions={[
+            <List dataSource={records} locale={{ emptyText: historyError ? '记录暂时无法加载，请重试。' : t('paperTasks.noRecords') }} renderItem={record => <List.Item actions={[
                 <Button key="view" onClick={() => void openDetail(record.id).catch(() => {})}>{t('paperTasks.viewResult')}</Button>,
             ]}><List.Item.Meta title={record.title} description={`${statusLabel(record.status)} · ${t('paperTasks.paperCount', { count: distinctPapers(record.result?.papers || []).length })}`} /></List.Item>} />
         </Drawer>
@@ -415,7 +454,10 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     <Button disabled={detail.chat_status !== 'available'} onClick={() => goChat(detail.record.conversation_id)}>{t('paperTasks.returnExpansion')}</Button>
                     <Button danger onClick={() => Modal.confirm({
                         title: t('paperTasks.deleteTitle'), content: t('paperTasks.deleteHint'), okText: t('paperTasks.confirmDelete'), cancelText: t('paperTasks.cancel'), okButtonProps: { danger: true },
-                        onOk: async () => { await deleteExpansion(detail.record.id); closeDetail(); await refreshHistory(); },
+                        onOk: async () => {
+                            try { await deleteExpansion(detail.record.id, !!onNotification); onNotificationResolved?.(`expansion-delete:${detail.record.id}`); closeDetail(); await refreshHistory(); }
+                            catch (error) { onNotification?.({ id: `expansion-delete:${detail.record.id}`, title: '论文扩展记录删除失败', message: error instanceof Error ? error.message : '删除失败，请重试' }); throw error; }
+                        },
                     })}>{t('paperTasks.deleteResult')}</Button>
                 </Space>
                 <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }} style={{ whiteSpace: 'pre-wrap', marginTop: 12 }}>{detail.record.result.user_instruction}</Typography.Paragraph>
@@ -433,7 +475,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     </Space>
                 </div>
                 {selection && detail.record.version !== selection.source.record.version && <Alert type="info" message={t('paperTasks.selectionVersion', { version: selection.source.record.version })} style={{ marginBottom: 12 }} />}
-                {actionError && !confirmation && <Alert type="error" showIcon message={actionError} style={{ marginBottom: 12 }} />}
+                {actionError && !confirmation && (onNotification ? <p role="status">{actionError}</p> : <Alert type="error" showIcon message={actionError} style={{ marginBottom: 12 }} />)}
                 {canImport && preview?.status === 'error' && <Alert type="warning" message={t('paperTasks.previewFailed')} action={<Button onClick={() => void refreshImportPreview(source)}>{t('paperTasks.retry')}</Button>} style={{ marginBottom: 12 }} />}
                 <Table<WorkflowPaper> className={`paper-expansion-result-table${selection?.selected.length ? ' has-selection' : ''}`} rowKey={(item: WorkflowPaper) => item.paper.paper_id} dataSource={papers} pagination={false} scroll={{ x: 960 }}
                     rowSelection={{ selectedRowKeys: selection?.selected || [], onChange: changeSelection, getCheckboxProps: (item: WorkflowPaper) => ({ disabled: busy || !!confirmation, 'aria-label': t('paperTasks.selectPaper', { title: item.paper.title || item.paper.paper_id }) }) }}
@@ -461,8 +503,11 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     { title: t('paperTasks.fullText'), width: 140, render: (_: unknown, item: WorkflowPaper) => {
                         const content = source.contents.find(entry => entry.paper_id === item.paper.paper_id);
                         return <Space direction="vertical"><span>{contentStatus(source, item.paper.paper_id)}</span>
-                            {content?.error && <Typography.Text type="danger">{content.error}</Typography.Text>}
-                            {(content?.status === 'failed' || content?.status === 'unavailable') && <Button disabled={source.record.version !== detail.record.version} onClick={async () => { await retryPaperContent(item.paper.paper_id, detail.record.id); await openDetail(detail.record.id); }}>{t('paperTasks.retryContent')}</Button>}
+                            {content?.error && <Typography.Text type={onNotification ? 'secondary' : 'danger'}>{onNotification ? '全文尚未获取，详情见通知。' : content.error}</Typography.Text>}
+                            {(content?.status === 'failed' || content?.status === 'unavailable') && <Button disabled={source.record.version !== detail.record.version} onClick={async () => {
+                                try { await retryPaperContent(item.paper.paper_id, detail.record.id, !!onNotification); onNotificationResolved?.(`content-retry:${item.paper.paper_id}`); await openDetail(detail.record.id); }
+                                catch (error) { onNotification?.({ id: `content-retry:${item.paper.paper_id}`, title: `《${item.paper.title || item.paper.paper_id}》全文重试失败`, message: error instanceof Error ? error.message : "重试失败" }); }
+                            }}>{t('paperTasks.retryContent')}</Button>}
                         </Space>;
                     } },
                     { title: t('paperTasks.importState'), width: 155, render: (_: unknown, item: WorkflowPaper) => {
@@ -499,7 +544,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             cancelText={t('paperTasks.cancel')} confirmLoading={busy} okText={t('paperTasks.confirmImport', { count: confirmationImportable.length })}
             okButtonProps={{ disabled: !confirmationImportable.length || !canImport }}>
             <Alert type="info" message={t('paperTasks.importSummary', { count: confirmationImportable.length, skipped: confirmationPapers.length - confirmationImportable.length })} />
-            {actionError && <Alert type="error" showIcon message={actionError} style={{ marginTop: 12 }} />}
+            {actionError && (onNotification ? <p role="status">{actionError}</p> : <Alert type="error" showIcon message={actionError} style={{ marginTop: 12 }} />)}
             <List dataSource={confirmationPapers} renderItem={item => <List.Item><List.Item.Meta title={item.paper.title || item.paper.paper_id}
                 description={confirmation && (importReason(confirmation.source, item) || t('paperTasks.canImport'))} /></List.Item>} />
         </Modal>

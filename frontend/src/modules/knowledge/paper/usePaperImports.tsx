@@ -10,6 +10,7 @@ import { computeFileSha256 } from '../utils/fileHash';
 import { isArxivInput } from './arxivImport';
 import { pdfIdentityMatch, pdfTargetCandidates, type PdfPaper } from './pdfAssociation';
 import PdfImportReview from './PdfImportReview';
+import type { PaperNotification } from './usePaperNotifications';
 type ImportMethod = 'upload' | 'identifier' | 'bibliography';
 const importTitles: Record<ImportMethod, string> = { upload: '上传文献', identifier: '通过链接导入', bibliography: '导入文献题录' };
 interface ImportOptions {
@@ -26,7 +27,9 @@ interface ImportOptions {
     reloadPromiseRef: MutableRefObject<Promise<void> | null>;
     reload: () => Promise<void> | null;
     isCurrentScope: () => boolean;
-    mutate: (operation: () => Promise<LibraryChanges>) => Promise<void>;
+    mutate: (operation: () => Promise<LibraryChanges>, notice?: Omit<PaperNotification, "message">) => Promise<void>;
+    notify: (notice: PaperNotification) => void;
+    resolve: (id: string) => void;
     applySnapshot: (data: PaperLibraryData) => void;
     setConfirmingImport: Dispatch<SetStateAction<boolean>>;
     setSyncRevision: Dispatch<SetStateAction<number>>;
@@ -35,7 +38,7 @@ interface ImportOptions {
     onUploadPdf?: (file: File, context?: PaperUploadContext) => Promise<string | void>;
 }
 export function usePaperImports(options: ImportOptions) {
-    const { datasetId, dataState, dataRef, disabled, saving, confirmingImport, busyRef, loadedRef, canWriteRef, syncGeneration, reloadPromiseRef, reload, isCurrentScope, mutate, applySnapshot, setConfirmingImport, setSyncRevision, libraryView, folderId, onUploadPdf } = options;
+    const { datasetId, dataState, dataRef, disabled, saving, confirmingImport, busyRef, loadedRef, canWriteRef, syncGeneration, reloadPromiseRef, reload, isCurrentScope, mutate, applySnapshot, setConfirmingImport, setSyncRevision, libraryView, folderId, onUploadPdf, notify, resolve } = options;
     const [linkPreview, setLinkPreview] = useState<ImportPreviewItem>();
     const pendingImportKey = useRef(uuidv4());
     const bibliographyFile = useRef<string>();
@@ -100,7 +103,13 @@ export function usePaperImports(options: ImportOptions) {
             setPending(null);
             throw new Error("没有识别到文献，请检查文件内容或题录格式");
         }
-        items = await previewLibraryPapers(datasetId, items);
+        try {
+            items = await previewLibraryPapers(datasetId, items);
+            if (isCurrentScope()) resolve('bibliography-preview');
+        } catch (error) {
+            reportImportError(error, '题录导入预览失败', 'bibliography-preview');
+            return;
+        }
         if (!isCurrentScope())
             return;
         const current = dataRef.current;
@@ -111,6 +120,11 @@ export function usePaperImports(options: ImportOptions) {
         if (!planned.fresh.length)
             message.info(`库中已有，跳过 ${planned.skipped.length} 篇`);
     };
+    const reportImportError = (error: unknown, title: string, id = "import-submit") => {
+        if (!isCurrentScope()) return;
+        notify({ id, title, message: error instanceof Error ? error.message : title });
+        setImportError("导入尚未完成，已保留当前输入；请重试或查看通知。");
+    };
     const commit = async () => {
         if (disabled || busyRef.current || searching || !pending || (pendingPdf && !pdfReviewComplete))
             return;
@@ -118,6 +132,7 @@ export function usePaperImports(options: ImportOptions) {
         syncGeneration.current += 1;
         setConfirmingImport(true);
         setImportError(null);
+        let submitting = false;
         try {
             const current = dataRef.current;
             if (pendingPdf) {
@@ -135,6 +150,7 @@ export function usePaperImports(options: ImportOptions) {
                 if (!documentId) {
                     if (!onUploadPdf || !pendingPdf.file)
                         throw new Error('PDF 文件不可用，请重新选择后重试');
+                    submitting = true;
                     const uploaded = await onUploadPdf(pendingPdf.file, { idempotency_key: pendingImportKey.current, library_paper_id: target.id, title: target.metadata.title, paper: target, source_version: pendingPdf.metadata.arxivVersion });
                     if (!isCurrentScope())
                         return;
@@ -144,25 +160,30 @@ export function usePaperImports(options: ImportOptions) {
                     setPendingPdf({ ...pendingPdf, documentId });
                 }
                 busyRef.current = false;
-                await mutate(() => confirmLibraryPdf(datasetId, target, documentId!, pendingImportKey.current, pendingPdf.metadata.arxivVersion));
+                submitting = true;
+                await mutate(() => confirmLibraryPdf(datasetId, target, documentId!, pendingImportKey.current, pendingPdf.metadata.arxivVersion), { id: "import-submit", title: "PDF 关联保存失败" });
                 message.success('PDF 已关联，原有题录与版本均已保留');
             }
             else {
                 const folders = pending.folders.filter(f => !current.folders.some(saved => saved.id === f.id));
                 const papers = [...pending.fresh, ...pending.skipped];
                 busyRef.current = false;
-                await mutate(() => importLibraryPapers(datasetId, papers, folders, pendingImportKey.current, format, bibliographyFile.current));
+                submitting = true;
+                await mutate(() => importLibraryPapers(datasetId, papers, folders, pendingImportKey.current, format, bibliographyFile.current), { id: "import-submit", title: "题录导入保存失败" });
                 message.success(`导入已完成，共 ${papers.length} 条；已有论文保留原题录与归档`);
             }
             if (!isCurrentScope())
                 return;
+            resolve("import-submit");
             clearImportResult();
             setImportMethod(null);
             setSyncRevision(value => value + 1);
         }
         catch (error) {
-            if (isCurrentScope())
-                showImportError(error, '文献保存失败，请重试');
+            if (isCurrentScope()) {
+                if (submitting) reportImportError(error, '文献导入保存失败');
+                else showImportError(error, '文献保存失败，请重试');
+            }
         }
         finally {
             if (isCurrentScope()) {
@@ -184,7 +205,7 @@ export function usePaperImports(options: ImportOptions) {
             return;
         const snapshot = item.pending_paper;
         if (!snapshot?.id || !snapshot.metadata || !Array.isArray(snapshot.metadata.authors)) {
-            message.error('上传回执缺少有效题录，请重新选择原文件');
+            notify({ id: `association:${item.item_id}`, title: '上传记录无法恢复关联', message: '上传回执缺少有效题录，请重新选择原文件。' });
             return;
         }
         clearImportResult();
@@ -228,9 +249,10 @@ export function usePaperImports(options: ImportOptions) {
         }
         setSearching(true);
         try {
-            const result = await previewPaperLink(identifier, datasetId);
+            const result = await previewPaperLink(identifier, datasetId, true);
             if (!isCurrentScope())
                 return;
+            resolve("import-preview");
             const paper = result.paper;
             const item: PaperRecord = { revision: 0, attachmentIds: [], noteIds: [], id: `link-${result.work_id}`,
                 arxivVersion: result.fulltext_candidates[0]?.version,
@@ -250,8 +272,7 @@ export function usePaperImports(options: ImportOptions) {
             setPendingArxiv(item);
         }
         catch (error) {
-            if (isCurrentScope())
-                showImportError(error, "没有查到这篇论文");
+            if (isCurrentScope()) reportImportError(error, '论文链接查询失败', 'import-preview');
         }
         finally {
             if (isCurrentScope())
@@ -264,7 +285,7 @@ export function usePaperImports(options: ImportOptions) {
         setSearching(true);
         setImportError(null);
         try {
-            const result = await importPaperLink(datasetId, linkPreview, linkRequestKey.current, libraryView === 'directory' ? folderId : null);
+            const result = await importPaperLink(datasetId, linkPreview, linkRequestKey.current, libraryView === 'directory' ? folderId : null, true);
             if (!isCurrentScope())
                 return;
             if ('data' in result && result.data)
@@ -272,6 +293,7 @@ export function usePaperImports(options: ImportOptions) {
             setSyncRevision(value => value + 1);
             clearImportResult();
             setImportMethod(null);
+            resolve('import-link');
             message.success('已提交导入，可在导入记录中查看进度');
         }
         catch (error) {
@@ -280,8 +302,7 @@ export function usePaperImports(options: ImportOptions) {
                 setPendingArxiv(null);
                 setImportError('导入预览已过期，请重新查询');
             }
-            else if (isCurrentScope())
-                showImportError(error, '链接导入失败，请重试');
+            else if (isCurrentScope()) reportImportError(error, '链接导入提交失败', 'import-link');
         }
         finally {
             if (isCurrentScope())

@@ -65,7 +65,7 @@ export function mergeLibraryChanges(current: PaperLibraryData, change: LibraryCh
     return data;
 }
 export async function previewLibraryPapers(dataset: string, papers: PaperRecord[]): Promise<PaperRecord[]> {
-    const { data } = await axiosInstance.post(`${core}/imports:preview`, { target_dataset_id: dataset, papers: papers.map(importPaper), resolve_external: false });
+    const { data } = await axiosInstance.post(`${core}/imports:preview`, { target_dataset_id: dataset, papers: papers.map(importPaper), resolve_external: false }, { silentError: true } as never);
     const ids = new Map<string, string>((data.items || []).map((item: {
         library_paper_id: string;
         work_id: string;

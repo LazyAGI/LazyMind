@@ -3,7 +3,7 @@ import { Button, Tooltip, message } from 'antd';
 import { StarFilled, StarOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
-export default function PaperImportanceButton({important,onToggle}:{important:boolean;onToggle:(important:boolean)=>Promise<void>}) {
+export default function PaperImportanceButton({important,onToggle,onError}:{important:boolean;onToggle:(important:boolean)=>Promise<void>;onError?:(error:unknown)=>void}) {
     const { t } = useTranslation();
     const [busy, setBusy] = useState(false);
     const label = t(important ? 'paperTasks.unmarkImportant' : 'paperTasks.markImportant');
@@ -12,8 +12,9 @@ export default function PaperImportanceButton({important,onToggle}:{important:bo
         setBusy(true);
         try {
             await onToggle(!important);
-        } catch {
-            message.error(t('paperTasks.importanceFailed'));
+        } catch (error) {
+            if (onError) onError(error);
+            else message.error(t('paperTasks.importanceFailed'));
         } finally {
             setBusy(false);
         }

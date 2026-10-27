@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Spin, Typography } from 'antd';
 import { ArrowRightOutlined, BranchesOutlined, ExportOutlined, LinkOutlined, ReadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { extractAcademicReferences, listAcademicReferences, type AcademicReference } from '../api/academicReferences';
@@ -8,6 +8,7 @@ import { safePaperUrl } from './model';
 import { isStoredPdfAttachment } from './paperFilters';
 import { findLibraryPaper, paperExpansions, referenceRelations, type RelatedPaper } from './relationModel';
 import './PaperRelations.scss';
+import type { PaperNotification } from './usePaperNotifications';
 interface Props {
     datasetId: string;
     paper: PaperRecord;
@@ -15,6 +16,8 @@ interface Props {
     attachments: Attachment[];
     onOpenPaper?: (id: string) => void;
     onAttachments: () => void;
+    onNotification?: (notice: PaperNotification) => void;
+    onNotificationResolved?: (id: string) => void;
 }
 function PaperCard({ item, onOpenPaper }: {
     item: RelatedPaper;
@@ -30,7 +33,9 @@ function PaperCard({ item, onOpenPaper }: {
     {item.detail && <Typography.Paragraph className="paper-relation-detail" ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>{item.detail}</Typography.Paragraph>}
   </article>;
 }
-export default function PaperRelations({ datasetId, paper, data, attachments, onOpenPaper, onAttachments }: Props) {
+export default function PaperRelations({ datasetId, paper, data, attachments, onOpenPaper, onAttachments, onNotification, onNotificationResolved }: Props) {
+    const notifications = useRef({ notify: onNotification, resolve: onNotificationResolved, open: onOpenPaper });
+    notifications.current = { notify: onNotification, resolve: onNotificationResolved, open: onOpenPaper };
     const [references, setReferences] = useState<AcademicReference[]>([]);
     const [records, setRecords] = useState<Expansion[]>([]);
     const [referencesLoading, setReferencesLoading] = useState(false);
@@ -66,8 +71,10 @@ export default function PaperRelations({ datasetId, paper, data, attachments, on
             if (cancelled)
                 return;
             setReferences(results.flatMap(result => result.status === 'fulfilled' ? result.value : []));
-            if (results.some(result => result.status === 'rejected'))
+            if (results.some(result => result.status === 'rejected')) {
                 setReferencesError('部分 PDF 的参考文献暂时无法加载，请重试。');
+                notifications.current.notify?.({ id: `references:${paper.id}`, title: `《${paper.metadata.title}》参考文献加载失败`, message: results.flatMap(result => result.status === 'rejected' ? [result.reason instanceof Error ? result.reason.message : '参考文献加载失败'] : []).join('；'), action: { label: '查看关系', onClick: () => notifications.current.open?.(paper.id) } });
+            } else notifications.current.resolve?.(`references:${paper.id}`);
             setReferencesLoading(false);
         });
         return () => { cancelled = true; };
@@ -77,12 +84,16 @@ export default function PaperRelations({ datasetId, paper, data, attachments, on
         setRecords([]);
         setExpansionsError('');
         setExpansionsLoading(true);
-        void listExpansions(datasetId).then(items => {
-            if (!cancelled)
+        void listExpansions(datasetId, !!notifications.current.notify).then(items => {
+            if (!cancelled) {
                 setRecords(items);
-        }).catch(() => {
-            if (!cancelled)
+                notifications.current.resolve?.(`relations:${paper.id}`);
+            }
+        }).catch(error => {
+            if (!cancelled) {
                 setExpansionsError('论文扩展关系暂时无法加载，请重试。');
+                notifications.current.notify?.({ id: `relations:${paper.id}`, title: `《${paper.metadata.title}》扩展关系加载失败`, message: error instanceof Error ? error.message : '扩展关系加载失败', action: { label: '查看关系', onClick: () => notifications.current.open?.(paper.id) } });
+            }
         }).finally(() => { if (!cancelled)
             setExpansionsLoading(false); });
         return () => { cancelled = true; };
@@ -102,14 +113,14 @@ export default function PaperRelations({ datasetId, paper, data, attachments, on
     <section className="paper-relation-section" aria-label="引用文献">
       <div className="paper-relation-heading"><h3><ReadOutlined />引用文献<span>{citations.length}</span></h3>{referencesLoading && <Spin size="small"/>}</div>
       <p className="paper-relation-caption">本篇参考文献及已记录的引用关系</p>
-      {referencesError && <Alert type="warning" showIcon message={referencesError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => setReferenceRevision(value => value + 1)}>重试</Button>}/>}
+      {referencesError && (onNotification ? <p role="status">参考文献未完全加载。<Button type="link" size="small" onClick={() => setReferenceRevision(value => value + 1)}>重试</Button></p> : <Alert type="warning" showIcon message={referencesError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => setReferenceRevision(value => value + 1)}>重试</Button>}/>)}
       {citations.length ? <>{cardList(allCitations ? citations : citations.slice(0, 5))}{citations.length > 5 && <button type="button" className="paper-relation-show-more" aria-expanded={allCitations} onClick={() => setAllCitations(value => !value)}>{allCitations ? '收起参考文献' : `查看全部 ${citations.length} 条参考文献`}</button>}</> : !referencesLoading && !referencesError && <div className="paper-relation-empty"><ReadOutlined /><div><strong>{documentKey ? '暂无已识别的参考文献' : '还没有可识别的 PDF'}</strong><p>{documentKey ? paper.parse === 'ready' ? '可打开全文，查看原文中的参考文献。' : '全文解析完成后，可在这里查看参考文献。' : '添加并解析 PDF 后，可在这里查看参考文献。'}</p>{!documentKey && <button type="button" className="paper-detail-tab-link" onClick={onAttachments}>前往附件<ArrowRightOutlined /></button>}</div></div>}
     </section>
 
 
     {(expansionsLoading || expansionsError || expansions.length > 0) && <section className="paper-relation-section" aria-label="论文扩展">
       <div className="paper-relation-heading"><h3><BranchesOutlined />论文扩展<span>{expansions.length}</span></h3>{expansionsLoading && <Spin size="small"/>}</div>
-      {expansionsError && <Alert type="warning" showIcon message={expansionsError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => setExpansionRevision(value => value + 1)}>重试</Button>}/>}
+      {expansionsError && (onNotification ? <p role="status">扩展关系暂时无法加载。<Button type="link" size="small" onClick={() => setExpansionRevision(value => value + 1)}>重试</Button></p> : <Alert type="warning" showIcon message={expansionsError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => setExpansionRevision(value => value + 1)}>重试</Button>}/>)}
       {expansions.map(({ record, current, others }) => <article className="paper-expansion-relation" key={record.id}>
         <div className="paper-relation-card-top"><span>论文扩展 · 第 {record.version} 版</span><span className="paper-relation-badge">{current.is_seed ? '种子文献' : '扩展发现'}</span></div>
         <Typography.Paragraph className="paper-relation-card-title" ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>{record.title}</Typography.Paragraph>

@@ -93,35 +93,35 @@ export interface PaperLaunch {
   paper_ids?: string[];
   reflection_first?: boolean;
 }
-export async function launchPaperTask(input: PaperLaunch) {
-  const res = await axiosInstance.post(`${core}/workflow-launches`, input);
+export async function launchPaperTask(input: PaperLaunch, silentError = false) {
+  const res = await axiosInstance.post(`${core}/workflow-launches`, input, { silentError } as never);
   return unwrap<{ conversation_id: string; expansion_id?: string }>(res.data);
 }
-export async function resolvePaperSelection(dataset: string, documents: string[]) {
-  const res = await axiosInstance.post(`${core}/paper-selections:resolve`, { dataset_id: dataset, document_ids: documents });
+export async function resolvePaperSelection(dataset: string, documents: string[], silentError = false) {
+  const res = await axiosInstance.post(`${core}/paper-selections:resolve`, { dataset_id: dataset, document_ids: documents }, { silentError } as never);
   return unwrap<{ papers: WorkflowPaper[]; invalid: Array<{ document_id: string; reason: string }> }>(res.data);
 }
-export async function listExpansions(dataset: string) {
-  const res = await axiosInstance.get(`${core}/expansions`, { params: { dataset_id: dataset } });
+export async function listExpansions(dataset: string, silentError = false) {
+  const res = await axiosInstance.get(`${core}/expansions`, { params: { dataset_id: dataset }, silentError } as never);
   return unwrap<{ items: Expansion[] }>(res.data).items || [];
 }
-export async function getExpansion(id: string) {
-  const res = await axiosInstance.get(`${core}/expansions/${encodeURIComponent(id)}`);
+export async function getExpansion(id: string, silentError = false) {
+  const res = await axiosInstance.get(`${core}/expansions/${encodeURIComponent(id)}`, { silentError } as never);
   return unwrap<ExpansionDetail>(res.data);
 }
-export async function deleteExpansion(id: string) {
-  await axiosInstance.delete(`${core}/expansions/${encodeURIComponent(id)}`, { data: { confirm: true } });
+export async function deleteExpansion(id: string, silentError = false) {
+  await axiosInstance.delete(`${core}/expansions/${encodeURIComponent(id)}`, { data: { confirm: true }, silentError } as never);
 }
-export async function setPaperImportance(datasetId: string, id: string, value: boolean) {
-  await axiosInstance.put(`${core}/papers/${encodeURIComponent(id)}/importance`, { dataset_id: datasetId, is_important: value });
+export async function setPaperImportance(datasetId: string, id: string, value: boolean, silentError = false) {
+  await axiosInstance.put(`${core}/papers/${encodeURIComponent(id)}/importance`, { dataset_id: datasetId, is_important: value }, { silentError } as never);
 }
 export async function updatePaperIdentity(id: string, input: {
   kind?: string; reidentify?: boolean;
   paper?: { title?: string; authors?: string[]; year?: number; venue?: string; abstract?: string; doi?: string; arxiv_id?: string };
-}) {
-  const response = await axiosInstance.patch(`${core}/documents/${encodeURIComponent(id)}/identity`, input);
+}, silentError = false) {
+  const response = await axiosInstance.patch(`${core}/documents/${encodeURIComponent(id)}/identity`, input, { silentError } as never);
   return unwrap<{ status: string; paper_id?: string }>(response.data);
 }
-export async function retryPaperContent(id: string, expansionId: string) {
-  await axiosInstance.post(`${core}/paper-contents:retry`, { paper_id: id, expansion_id: expansionId });
+export async function retryPaperContent(id: string, expansionId: string, silentError = false) {
+  await axiosInstance.post(`${core}/paper-contents:retry`, { paper_id: id, expansion_id: expansionId }, { silentError } as never);
 }

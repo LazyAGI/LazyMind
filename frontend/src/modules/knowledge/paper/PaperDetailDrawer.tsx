@@ -11,6 +11,7 @@ import type { DocumentAcademic } from '../api/paperWorkflows';
 import PaperMetadataForm from '../components/PaperTasks/PaperMetadataForm';
 import { isStoredPdfAttachment } from './paperFilters';
 import PaperRelations from './PaperRelations';
+import type { PaperNotification } from './usePaperNotifications';
 import './PaperDetailDrawer.scss';
 export type PaperDetailTab = 'overview' | 'attachments' | 'notes' | 'annotations' | 'relations';
 interface Props {
@@ -37,6 +38,8 @@ interface Props {
     reparseDisabledReason?: string;
     onAddPdf?: () => void;
     onDetachAttachment?: (attachment: Attachment) => Promise<void>;
+    onNotification?: (notice: PaperNotification) => void;
+    onNotificationResolved?: (id: string) => void;
 }
 function sourceName(attachment?: Attachment) {
     if (!attachment)
@@ -50,7 +53,7 @@ function sourceName(attachment?: Attachment) {
         return new URL(url).hostname;
     return attachment.sourceProvider && attachment.sourceProvider !== 'manual' ? attachment.sourceProvider : '未记录';
 }
-export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenAttachment, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, onAddPdf, onDetachAttachment, disabled = false }: Props) {
+export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenAttachment, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, onAddPdf, onDetachAttachment, onNotification, onNotificationResolved, disabled = false }: Props) {
     const [tab, setTab] = useState(initialTab);
     const [editing, setEditing] = useState(initialEditing);
     const [note, setNote] = useState('');
@@ -82,7 +85,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
             await action();
         }
         catch (failure) {
-            setError(failure instanceof Error ? failure.message : fallback);
+            setError(onNotification ? '操作尚未完成，已保留当前内容；请重试或查看通知。' : failure instanceof Error ? failure.message : fallback);
         }
         finally {
             savingRef.current = false;
@@ -125,7 +128,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
         <span className="paper-detail-count"><b>{summary.notes}</b> 条笔记</span>
 
       </div>
-      {error && <Alert className="paper-detail-error" type="error" showIcon message="操作未完成" description={error}/>}
+      {error && (onNotification ? <p className="paper-detail-error" role="status">{error}</p> : <Alert className="paper-detail-error" type="error" showIcon message="操作未完成" description={error}/>)}
       {current.associationConflict && <Alert type="warning" showIcon message="附件归属待核对" description={current.associationConflict}/>}
       <Tabs activeKey={tab} onChange={(next: string) => { if (!saving && !editing)
         setTab(next as PaperDetailTab); }} items={[
@@ -138,7 +141,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
             </div>
           </div>
           {editing ? <>
-            {editError && <Alert type="error" showIcon message="题录尚未保存" description={editError}/>}
+            {editError && (onNotification ? <p role="status">{editError}</p> : <Alert type="error" showIcon message="题录尚未保存" description={editError}/>)}
             <PaperMetadataForm value={{...current.metadata,authors:current.metadata.authors.join('; '),doi:current.metadata.identifiers.doi,arxiv_id:current.metadata.identifiers.arxiv,tags:current.tags.join(';')}} disabled={disabled || saving} includeTags onSave={value => run(async () => {
                             const saved = await onSave!({ title: value.title, authors: value.authors || '', venue: value.venue || '', year: value.year || 0, doi: value.doi, arxiv: value.arxiv_id, abstract: value.abstract, tags: (value.tags || '').split(/[;；]/) });
                             if (saved)
@@ -173,7 +176,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
             </div> : <div className="paper-detail-section"><p className="paper-detail-muted">仅题录，尚未添加 PDF。</p>{onAddPdf && <Button disabled={disabled || saving || editing} onClick={onAddPdf}>添加 PDF</Button>}</div> },
             { key: 'notes', label: `笔记 ${summary.notes}`, children: <div className="paper-detail-section"><p className="paper-detail-muted">这篇论文的所有 PDF 附件共用笔记。</p><Input.TextArea disabled={disabled || saving} value={note} rows={3} placeholder="写下这篇文献的阅读笔记" onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setNote(event.target.value)}/><Button type="primary" loading={saving} disabled={disabled || saving || !note.trim()} onClick={addNote}>添加笔记</Button>{notes.map(item => <div className="paper-detail-note" key={item.id}><strong>{item.title}</strong><p>{item.content}</p></div>)}</div> },
             { key: 'annotations', label: '批注', children: <div className="paper-detail-section"><p className="paper-detail-muted">PDF 批注会显示在这里，并保留页码、原文和评论。</p></div> },
-            { key: 'relations', label: '关系', children: <PaperRelations key={current.id} datasetId={datasetId} paper={current} data={data} attachments={attachments} onOpenPaper={onOpenPaper} onAttachments={() => setTab('attachments')}/> },
+            { key: 'relations', label: '关系', children: <PaperRelations key={current.id} datasetId={datasetId} paper={current} data={data} attachments={attachments} onOpenPaper={onOpenPaper} onAttachments={() => setTab('attachments')} onNotification={onNotification} onNotificationResolved={onNotificationResolved}/> },
         ]}/>
     </section>
   </div>;

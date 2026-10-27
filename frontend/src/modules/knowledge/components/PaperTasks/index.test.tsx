@@ -22,12 +22,12 @@ const detail: ExpansionDetail = { record, paper_importance: {}, chat_status: 'av
 const third = { paper: { paper_id: 'c', abstract: null, title: 'C' }, is_seed: false, is_important: false };
 const threePapers: ExpansionDetail = { ...detail, record: { ...record, result: { ...input, papers: [...input.papers, third] } }, contents: [...detail.contents, { id: 'cc', paper_id: 'c', status: 'ready', content_hash: 'c' }] };
 const preview = (id: string, disposition: ImportPreviewItem['disposition'] = 'downloadable'): ImportPreviewItem => ({ work_id: id, title: id, disposition, presence: { status: '', current_dataset: [], other_datasets: [], importing: false, coverage_complete: true }, fulltext_candidates: disposition === 'downloadable' ? [{ url: `https://arxiv.org/pdf/${id}v2`, source_type: 'official_pdf', source_provider: 'arxiv', version: 'v2' }] : [], paper: { paper_id: id, abstract: null, source_provider: 'arxiv', source_version: 'v2' } });
-function Harness({ selected = ['a'], canImport = true, selectionError }: { selected?: string[]; canImport?: boolean; selectionError?: string }) {
+function Harness({ selected = ['a'], canImport = true, selectionError, onNotification, onNotificationResolved }: { selected?: string[]; canImport?: boolean; selectionError?: string; onNotification?: React.ComponentProps<typeof PaperTasks>["onNotification"]; onNotificationResolved?: (id: string) => void }) {
     const [actionsContainer, setActionsContainer] = useState<HTMLDivElement | null>(null);
     const location = useLocation();
-    return <><aside aria-label="论文工具栏"><div ref={setActionsContainer} /></aside><main><PaperTasks dataset="d" selected={selected} selectedTitles={selected.map(id => id.toUpperCase())} selectionError={selectionError} canImport={canImport} onImportSubmitted={importsChanged} actionsContainer={actionsContainer} /></main><div data-testid="location">{location.pathname}</div></>;
+    return <><aside aria-label="论文工具栏"><div ref={setActionsContainer} /></aside><main><PaperTasks dataset="d" selected={selected} selectedTitles={selected.map(id => id.toUpperCase())} selectionError={selectionError} canImport={canImport} onImportSubmitted={importsChanged} actionsContainer={actionsContainer} onNotification={onNotification} onNotificationResolved={onNotificationResolved} /></main><div data-testid="location">{location.pathname}</div></>;
 }
-function mount(selected?: string[], query = '', canImport = true, options: { selectionError?: string; initialMode?: PaperTask } = {}) {
+function mount(selected?: string[], query = '', canImport = true, options: { selectionError?: string; initialMode?: PaperTask; onNotification?: React.ComponentProps<typeof PaperTasks>["onNotification"]; onNotificationResolved?: (id: string) => void } = {}) {
     return render(<I18nextProvider i18n={i18n}><MemoryRouter initialEntries={['/knowledge' + query]}><ConfigProvider theme={{ token: { motion: false } }}><Harness selected={selected} canImport={canImport} {...options} /></ConfigProvider></MemoryRouter></I18nextProvider>);
 }
 beforeEach(() => {
@@ -54,6 +54,20 @@ async function selectMultiple(...ids: string[]) {
 const reviewButton = () => screen.getByRole('button', { name: '生成综述' });
 const rowImport = (title: string) => screen.getByRole('button', { name: `加入知识库：${title}` });
 describe('paper task startup routes', () => {
+    it('reports a failed task launch without discarding the instruction and resolves it after retry', async () => {
+        const onNotification = vi.fn(); const onNotificationResolved = vi.fn();
+        vi.mocked(launchPaperTask).mockRejectedValueOnce(new Error('launch unavailable'));
+        mount(['a'], '', true, { onNotification, onNotificationResolved });
+        fireEvent.click(screen.getByRole('button', { name: '阅读心得' }));
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep this instruction' } });
+        fireEvent.click(screen.getByRole('button', { name: /^开\s*始$/ }));
+        await waitFor(() => expect(onNotification).toHaveBeenCalledWith(expect.objectContaining({ id: 'paper-task-launch', message: 'launch unavailable' })));
+        expect(screen.getByRole('textbox')).toHaveValue('Keep this instruction');
+        expect(launchPaperTask).toHaveBeenLastCalledWith(expect.objectContaining({ user_instruction: 'Keep this instruction' }), true);
+        await submit();
+        expect(onNotificationResolved).toHaveBeenCalledWith('paper-task-launch');
+    });
+
     it('opens selected-paper expansion directly with the current selection', async () => {
         mount(['a']);
         const sidebar = within(screen.getByRole('complementary', { name: '论文工具栏' }));
@@ -66,8 +80,8 @@ describe('paper task startup routes', () => {
         expect(screen.getAllByRole('textbox')).toHaveLength(1);
         expect(screen.getByLabelText('补充要求（选填）')).toBeInTheDocument();
         await submit();
-        expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a']);
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: ['a'] }));
+        expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a'], false);
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: ['a'] }), false);
     });
     it('starts direction expansion with one topic input and no papers', async () => {
         mount([]);
@@ -76,7 +90,7 @@ describe('paper task startup routes', () => {
         expect(screen.getAllByRole('textbox')).toHaveLength(1);
         fireEvent.change(screen.getByLabelText('研究主题与要求'), { target: { value: 'tool agents' } });
         await submit();
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: [], direction: 'tool agents', user_instruction: undefined }));
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: [], direction: 'tool agents', user_instruction: undefined }), false);
     });
     it.each([['基于选中论文生成综述', false], ['指定方向生成', true]] as const)('starts review through %s', async (label, direction) => {
         mount(direction ? [] : ['a']);
@@ -89,7 +103,7 @@ describe('paper task startup routes', () => {
         expect(screen.getByText('系统将查找相关论文，并基于结果生成综述')).toBeInTheDocument();
         expect(screen.getAllByRole('textbox')).toHaveLength(1);
         await submit();
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'review', document_ids: direction ? [] : ['a'] }));
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'review', document_ids: direction ? [] : ['a'] }), false);
     });
     describe.each([['自动扩展', '基于选中论文扩展'], ['论文综述', '基于选中论文生成综述']])('%s selection requirements', (task, label) => {
         it('shows the selection hint only while hovering the disabled paper entry', async () => {
@@ -131,8 +145,8 @@ describe('paper task startup routes', () => {
             fireEvent.click(reflection);
         }
         await submit();
-        expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a', 'b']);
-        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind, document_ids: ['a', 'b'], direction: undefined, user_instruction: 'Focus on the main contributions', reflection_first: kind === 'ppt' }));
+        expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a', 'b'], false);
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind, document_ids: ['a', 'b'], direction: undefined, user_instruction: 'Focus on the main contributions', reflection_first: kind === 'ppt' }), false);
     });
     it.each(['阅读心得', '汇报 PPT'])('shows the selection hint only while hovering disabled %s', async label => {
         mount([]);
@@ -163,7 +177,7 @@ describe('paper task startup routes', () => {
         fireEvent.click(await screen.findByRole('button', { name: '查看扩展成果' }));
         await selectMultiple('a', 'b');
         fireEvent.click(reviewButton());
-        await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ expansion_id: 'r', expansion_version: 1, paper_ids: ['a', 'b'] })));
+        await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ expansion_id: 'r', expansion_version: 1, paper_ids: ['a', 'b'] }), false));
     });
     it('returns to paper expansion through a single named action', async () => {
         mount(undefined, '?expansion_id=r');
@@ -279,7 +293,7 @@ describe('result list actions', () => {
         expect(reviewButton()).toBeDisabled();
         fireEvent.click(screen.getByRole('checkbox', { name: '选择 C' }));
         fireEvent.click(reviewButton());
-        await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ paper_ids: ['a', 'b'] })));
+        await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ paper_ids: ['a', 'b'] }), false));
     });
     it('keeps the request key on retry and changes it when the selection changes', async () => {
         vi.mocked(getExpansion).mockResolvedValue(threePapers);
@@ -307,7 +321,7 @@ describe('result list actions', () => {
         expect(screen.queryByRole('checkbox', { name: '选择 C' })).not.toBeInTheDocument();
         expect(screen.getByText('成果已有更新，本次选择仍使用第 1 版；清空选择后可查看最新结果。')).toBeInTheDocument();
         fireEvent.click(reviewButton());
-        await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ expansion_version: 1, paper_ids: ['a', 'b'] })));
+        await waitFor(() => expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ expansion_version: 1, paper_ids: ['a', 'b'] }), false));
         await waitFor(() => expect(reviewButton()).toBeEnabled());
         fireEvent.click(screen.getByRole('button', { name: '清空选择' }));
         await selectMultiple();
@@ -351,7 +365,7 @@ describe('result list actions', () => {
         expect(startReferenceImport).toHaveBeenCalledTimes(1);
         expect(screen.queryByText('确认批量入库')).not.toBeInTheDocument();
         await act(async () => { finish({ batch_id: 'batch' }); });
-        expect(startReferenceImport).toHaveBeenCalledWith('d', [], [preview('b')], expect.any(String));
+        expect(startReferenceImport).toHaveBeenCalledWith('d', [], [preview('b')], expect.any(String), false);
         await waitFor(() => expect(importsChanged).toHaveBeenCalledTimes(2));
         expect(vi.mocked(getExpansion).mock.calls.length).toBeGreaterThanOrEqual(3);
     });
@@ -395,7 +409,7 @@ describe('result list actions', () => {
         await within(dialog).findByText('提交失败，请检查提示后重试，已保留本次选择。');
         fireEvent.click(within(dialog).getByRole('button', { name: '确认入库（1 篇）' }));
         await waitFor(() => expect(startReferenceImport).toHaveBeenCalledTimes(2));
-        expect(startReferenceImport).toHaveBeenNthCalledWith(1, 'd', [], [preview('b')], expect.any(String));
+        expect(startReferenceImport).toHaveBeenNthCalledWith(1, 'd', [], [preview('b')], expect.any(String), false);
         expect(vi.mocked(startReferenceImport).mock.calls[1]).toEqual(vi.mocked(startReferenceImport).mock.calls[0]);
         expect(launchPaperTask).not.toHaveBeenCalled();
     });
@@ -447,7 +461,7 @@ describe('result list actions', () => {
         expect((await screen.findAllByText('删除扩展结果？')).length).toBeGreaterThan(0);
         expect(screen.getByText('将删除本次扩展结果及对应论文扩展，并停止相关任务。已入库论文与已生成综述保留。')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
-        await waitFor(() => expect(deleteExpansion).toHaveBeenCalledWith('r'));
+        await waitFor(() => expect(deleteExpansion).toHaveBeenCalledWith('r', false));
     });
     it('renders result actions in English', async () => {
         await i18n.changeLanguage('en-US');

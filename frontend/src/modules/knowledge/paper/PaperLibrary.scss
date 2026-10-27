@@ -427,7 +427,6 @@
   .paper-library-search.is-open { flex: 1; min-width: 0; width: auto; }
 }
 
-.paper-library-sync-error { margin: 0 0 16px; }
 .paper-library-arxiv-source { display: flex; align-items: center; gap: 9px; margin-bottom: 14px; color: #667085;
   > span { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; color: #b34e46; background: #fbefed; border-radius: 4px; padding: 3px 6px; }
   code { font-size: 12px; }
@@ -445,12 +444,17 @@
 .paper-library-notification .ant-badge { color: inherit; line-height: 1; }
 .paper-library-notification .ant-badge-count { min-width: 16px; height: 16px; padding: 0 4px; font-size: 10px; line-height: 16px; box-shadow: 0 0 0 2px #fff; }
 .paper-library-import-popover { max-width: calc(100vw - 24px); }
-.paper-library-import-popover .ant-popover-inner { width: min(420px, calc(100vw - 24px)); padding: 12px; border-radius: 8px; }
+.paper-library-import-popover .ant-popover-inner { width: min(440px, calc(100vw - 24px)); padding: 12px; border-radius: 8px; }
 .paper-library-import-popover section { color: var(--ink); font-size: 13px; }
 .paper-library-import-notice-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 2px 4px 12px; border-bottom: 1px solid #f0f2f5; }
 .paper-library-import-notice-head strong { font-size: 14px; font-weight: 600; }
 .paper-library-import-notice-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .paper-library-import-notice-head .ant-btn { color: var(--faint); }
+.paper-library-import-popover .ant-tabs-nav { margin-bottom: 0; }
+.paper-library-notice { padding: 12px 8px; overflow-wrap: anywhere; }
+.paper-library-notice + .paper-library-notice { border-top: 1px solid #f0f2f5; }
+.paper-library-notice > strong { display: block; font-size: 13px; font-weight: 500; }
+.paper-library-notice > .ant-btn { height: auto; padding: 4px 0 0; font-size: 12px; }
 .paper-library-import-notice-body { max-height: min(520px, calc(100dvh - 180px)); padding-top: 4px; overflow-y: auto; overscroll-behavior-y: contain; overflow-wrap: anywhere; }
 .paper-library-import-notice-body > .ant-btn { max-width: 100%; height: auto; min-height: 32px; white-space: normal; font-size: 12px; }
 
