@@ -47,6 +47,23 @@ def test_invalid_output_is_not_repaired_or_retried(provider, provider_message, r
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize('message', [
+    {'reasoning_content': '只有思考，没有正文'},
+    {'reasoning_content': '只有思考，没有正文', 'content': None},
+    {'reasoning_content': '只有思考，没有正文', 'content': ''},
+])
+def test_missing_or_empty_content_is_invalid_output(provider, provider_message, message):
+    config, calls = provider
+    provider_message.update(message)
+
+    result = generate_title(request(llm_config=config))
+
+    assert result.status == 'failed'
+    assert result.error_code == 'invalid_output'
+    assert not result.retryable
+    assert len(calls) == 1
+
+
 def test_batch_titles_accept_reasoning_without_changing_summary_text(provider, provider_message):
     config, calls = provider
     summary = '解释 <think>示例</think> 标签的用途。'

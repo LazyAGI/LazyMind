@@ -83,7 +83,7 @@ def call_model(request: Any, prompt: str, *, stream_output: bool = True,
     try:
         validate_model_config(request.llm_config)
         model = (AutoModel(source='dynamic', type='llm', name='llm', dynamic_auth=True)
-                 .formatter(lambda response: response['content']))
+                 .formatter(lambda response: response.get('content')))
     except Exception as exc:
         raise ConversationCallError('model_configuration') from exc
     options = capped_output_kwargs(request.llm_config['llm'], options)

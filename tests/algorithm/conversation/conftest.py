@@ -40,7 +40,7 @@ def provider(provider_message):
                     inputs = json.loads(text.rsplit('开场资料：\n', 1)[1])
                     result = {'items': [{'id': item['id'], **result} for item in inputs]}
             content = json.dumps(result, ensure_ascii=False)
-            message = {'role': 'assistant', 'content': content, **provider_message}
+            message = {'role': 'assistant', **(provider_message or {'content': content})}
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream' if body.get('stream') else 'application/json')
             self.end_headers()
@@ -49,7 +49,9 @@ def provider(provider_message):
                     deltas = [({'role': 'assistant'}, None)]
                     if message.get('reasoning_content'):
                         deltas.append(({'reasoning_content': message['reasoning_content']}, None))
-                    deltas.extend([({'content': message['content']}, None), ({}, 'stop')])
+                    if 'content' in message:
+                        deltas.append(({'content': message['content']}, None))
+                    deltas.append(({}, 'stop'))
                     for delta, finish in deltas:
                         event = {
                             'id': 'fixture', 'object': 'chat.completion.chunk', 'created': int(time.time()),
