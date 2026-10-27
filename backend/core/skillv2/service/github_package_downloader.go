@@ -276,7 +276,9 @@ func githubPackageAPIGet(ctx context.Context, client *http.Client, endpoint stri
 	}
 	return nil
 }
-func githubRetrieve(message string) error { return &githubRetrievalError{err: errors.New(message)} }
+func githubRetrieve(message string) error {
+	return &githubRetrievalError{err: fmt.Errorf("%s", message)}
+}
 func githubPackageTooLarge(message string) error {
 	return httperr.New(http.StatusRequestEntityTooLarge, httperr.CodePayloadTooLarge, message)
 }
