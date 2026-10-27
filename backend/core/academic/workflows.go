@@ -88,7 +88,7 @@ func resolvePaperSelection(r *http.Request, user, dataset string, ids []string) 
 	if !academicDataset(r, user, dataset) {
 		return nil, nil, errors.New("academic knowledge base is not accessible")
 	}
-	var result []WorkflowPaper
+	result := []WorkflowPaper{}
 	invalid := []map[string]string{}
 	seenNodes := map[string]bool{}
 	seenPapers := map[string]bool{}
@@ -996,7 +996,7 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 			chatStatus = "trashed"
 		}
 	}
-	var contents []orm.AcademicPaperContent
+	contents := []orm.AcademicPaperContent{}
 	var input ReviewWorkflowInput
 	_ = json.Unmarshal(record.ResultJSON, &input)
 	ids := []string{}

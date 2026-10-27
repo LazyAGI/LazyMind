@@ -161,6 +161,16 @@ func TestPaperNotificationDeduplicatesAndReadDoesNotConfirm(t *testing.T) {
 		t.Fatal("notice did not identify its record")
 	}
 	w := httptest.NewRecorder()
+	PaperNotifications(w, paperRequest(`{}`))
+	var response struct {
+		Items []struct {
+			Navigation map[string]string `json:"navigation"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &response) != nil || len(response.Items) != 1 || response.Items[0].Navigation["expansion_id"] != record.ID {
+		t.Fatal("paper bell needs a structured navigation target", w.Body.String())
+	}
+	w = httptest.NewRecorder()
 	ReadPaperNotification(w, mux.SetURLVars(paperRequest(`{}`), map[string]string{"notification_id": notices[0].ID}))
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())

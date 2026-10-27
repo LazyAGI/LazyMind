@@ -10497,6 +10497,7 @@ const enUS = {
     "undetermined": "Not yet determined",
     "paperCount": "{{count}} papers",
     "progress": "Progress",
+    "stage": { "expansion_plan": "Reference papers and search plan", "candidate_set": "Expansion and screening", "relation_analysis": "Paper relationships", "expansion_result": "Paper collection" },
     "rounds": "Expansion history",
     "round": "Result {{count}}",
     "generated": "Generated content",

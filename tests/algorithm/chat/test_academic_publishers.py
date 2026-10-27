@@ -153,3 +153,62 @@ def test_verification_checks_the_published_analysis_not_an_easier_claim(publishe
     )
     assert checked[0]['statement'] == 'Improves accuracy by 25%.'
     assert '25%' not in events[0]['value']['data']['input']['papers'][0]['key_contribution']
+
+
+def test_claim_schema_requires_the_published_analysis_key(publisher):
+    module, _, _, _ = publisher
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+    ensure_lazyllm_tool_docs([module.academic_submit_relations])
+    tool = ToolManager([module.academic_submit_relations]).all_tools[0]
+    args = {'analyses': [{'paper_id': 'a', 'key_contribution': 'Improves by 7%'}],
+            'claims': [{'paper_id': 'a', 'field': 'key_contribution',
+                        'positions': [0]}]}
+    assert tool._validate_input(args)['claims'][0]['field'] == 'key_contribution'
+    args['claims'][0]['field'] = 'method'
+    with pytest.raises(Exception, match='seed_relation|key_contribution'):
+        tool._validate_input(args)
+
+
+def test_verification_batches_large_library_blocks_without_losing_context(publisher, monkeypatch):
+    module, _, _, _ = publisher
+    from lazymind.chat.service import llm_task
+    monkeypatch.setattr(module, '_expansion_id', lambda: 'exp')
+    monkeypatch.setattr(module, '_call', lambda *args: {
+        'status': 'ready', 'positions': [0], 'pages': [{'page': 0, 'text': 'complete paper ' * 6000}],
+        'content_hash': 'hash',
+    })
+    requests = []
+
+    def verify(request, usage):
+        requests.append(request)
+        return {'checks': [{'index': row['index'], 'status': 'supported', 'reason': 'source supports it'}
+                           for row in request.input.data['evidence']]}, None, None
+
+    monkeypatch.setattr(llm_task, '_run_task', verify)
+    claims = [{'paper_id': paper, 'field': 'key_contribution', 'statement': 'A critical claim.', 'positions': [0]}
+              for paper in ['a', 'b']]
+    checked = module._verify_claims(claims, ['a', 'b'])
+    assert [row['status'] for row in checked] == ['supported', 'supported']
+    assert len(requests) == 2
+    assert all(next(iter(request.input.data['source_pages_by_paper_and_position'].values()))['text'] == 'complete paper ' * 6000
+               for request in requests)
+
+
+def test_missing_or_budget_exhausted_evidence_publishes_an_uncertain_partial_result(publisher, monkeypatch):
+    module, ctx, events, _ = publisher
+    module.academic_submit_relations([{'paper_id': 'a', 'key_contribution': 'Improves accuracy by 25%.'}])
+    relation = events[-1]['value']['data']
+    assert relation['claims'][0]['status'] == 'uncertain'
+    assert relation['claims'][0]['positions'] == []
+    assert '25%' not in relation['input']['papers'][0]['key_contribution']
+    ctx._local_artifacts.clear()
+    monkeypatch.setattr(module, '_expansion_id', lambda: 'exp')
+    monkeypatch.setattr(module, '_call', lambda *args: {'status': 'budget_exhausted'})
+    module.academic_submit_relations(
+        [{'paper_id': 'a', 'key_contribution': 'Improves accuracy by 25%.'}],
+        [{'paper_id': 'a', 'field': 'key_contribution', 'positions': [0]}],
+    )
+    relation = events[-1]['value']['data']
+    assert relation['claims'][0]['status'] == 'uncertain'
+    assert relation['claims'][0]['positions'] == []
+    assert '25%' not in relation['input']['papers'][0]['key_contribution']
