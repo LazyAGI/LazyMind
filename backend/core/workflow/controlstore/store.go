@@ -17,6 +17,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/controlpolicy"
+	"lazymind/core/workflow/displaystate"
 )
 
 type Error struct {
@@ -300,6 +301,12 @@ func BumpEvent(tx *gorm.DB, session *orm.WorkflowSession, kind, entity, commandI
 	}
 	if err := tx.Where("id = ?", session.ID).First(session).Error; err != nil {
 		return err
+	}
+	if kind == "workflow.patch" || kind == "workflow.snapshot" {
+		data, err = displaystate.Enrich(tx, *session, data)
+		if err != nil {
+			return err
+		}
 	}
 	return tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
 		ContractVersion: "workflow.v1", EventType: kind, EntityID: entity, StateVersion: session.StateVersion,

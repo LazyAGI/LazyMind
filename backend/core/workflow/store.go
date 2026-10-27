@@ -22,6 +22,7 @@ import (
 	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/document"
 	workflowstore "lazymind/core/workflow/store"
 )
@@ -111,12 +112,11 @@ func CreateSession(ctx context.Context, db *gorm.DB, in CreateSessionInput) (*or
 }
 
 // GetActiveSession returns the in-progress plugin session for a conversation, or nil if none.
-// Only 'active' and non-dismissed sessions are considered: used by HandleWorkflowStepCreated
-// to guard against duplicate cold-start sessions.
+// Pausing still owns a live executor: it must also prevent duplicate cold starts.
 func GetActiveSession(ctx context.Context, db *gorm.DB, conversationID string) (*orm.WorkflowSession, error) {
 	var s orm.WorkflowSession
 	err := db.WithContext(ctx).
-		Where("conversation_id = ? AND status = ? AND dismissed = false", conversationID, SessionStatusActive).
+		Where("conversation_id = ? AND status IN ? AND dismissed = false", conversationID, []string{SessionStatusActive, "pausing"}).
 		Order("created_at DESC").
 		First(&s).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -304,10 +304,68 @@ func ListDismissedSessions(ctx context.Context, db *gorm.DB, conversationID stri
 	return rows, nil
 }
 
+// prepareContinuation serializes driver admission with pause. A completion
+// callback may have started before the user's pause acquired the session lock.
+func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bool, error) {
+	admitted := false
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var session orm.WorkflowSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return err
+		}
+		view, err := displaystate.Read(tx, session)
+		if err != nil {
+			return err
+		}
+		if view.Status == "paused" || view.Status == "waiting" || session.Status == "pausing" || session.Status == SessionStatusCompleted {
+			return nil
+		}
+		if session.Status != SessionStatusActive {
+			session.Status = SessionStatusActive
+			session.StateVersion++
+			session.UpdatedAt = time.Now().UTC()
+			if err := tx.Model(&session).Updates(map[string]any{"status": session.Status, "state_version": session.StateVersion, "updated_at": session.UpdatedAt}).Error; err != nil {
+				return err
+			}
+			if err := appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"active"}`)); err != nil {
+				return err
+			}
+		}
+		admitted = true
+		return nil
+	})
+	return admitted, err
+}
+
+// failIdleSession fences late driver callbacks against user pause, completion,
+// and a newer dispatch. A failed controller must never manufacture an approval.
+func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		busy := tx.Model(&orm.WorkflowSessionStep{}).Select("1").Where("session_id = ? AND validity <> ? AND status IN ?", sessionID, "stale", []string{"pending", "queued", "claimed", "running"})
+		result := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status = ?", sessionID, SessionStatusActive).
+			Where("NOT EXISTS (?)", busy).Updates(map[string]any{"status": SessionStatusFailed, "updated_at": time.Now().UTC(), "state_version": gorm.Expr("state_version + 1")})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		var session orm.WorkflowSession
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return err
+		}
+		return appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"failed"}`))
+	})
+	if err == nil && OnAcademicRuntimeChanged != nil {
+		OnAcademicRuntimeChanged(ctx, db, sessionID)
+	}
+	return err
+}
+
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status <> ?", sessionID, status)
+		query := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status <> ? AND status <> ?", sessionID, status, "pausing")
 		if status == SessionStatusWaiting {
 			// Delayed pause callbacks cannot overwrite a terminal session or a
 			// newly dispatched attempt (which may still be queued/claimed).
@@ -1748,6 +1806,13 @@ func SaveDocumentArtifactValue(ctx context.Context, db *gorm.DB, owner, id strin
 // State and its notification commit together. The stream polls this durable
 // log as well as accepting in-process wakeups.
 func appendSessionStateEvent(tx *gorm.DB, session orm.WorkflowSession, eventType string, payload json.RawMessage) error {
+	if eventType == "workflow.patch" || eventType == "workflow.snapshot" {
+		var err error
+		payload, err = displaystate.Enrich(tx, session, payload)
+		if err != nil {
+			return err
+		}
+	}
 	return tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
 		ContractVersion: "workflow.v1", EventType: eventType, EntityID: session.ID,
 		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: time.Now().UTC()})

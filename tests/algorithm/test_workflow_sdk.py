@@ -557,3 +557,16 @@ def test_advance_inherits_retrieval_snapshot_only_when_host_provides_it():
         else:
             restored = _build_agentic_config({'conversation_id': 'c'}, payload, 'workflow_step')
             assert restored['enable_tool_retrieval'] is enabled
+
+
+@pytest.mark.parametrize('history_id', ['', 'foreground-history'])
+def test_prepare_preserves_explicit_host_chat_turn(history_id):
+    from lazymind.workflow_sdk import WorkflowClient
+
+    transport = MagicMock()
+    transport.post.return_value = httpx.Response(200, json={'result': {}})
+    client = WorkflowClient('http://core', 'user', transport=transport, trigger_history_id=history_id)
+    client.prepare_workflow('writer', fields={'conversation_id': 'chat'})
+    payload = transport.post.call_args.kwargs['json']
+    assert payload.get('trigger_history_id', '') == history_id
+    assert ('trigger_history_id' in payload) == bool(history_id)

@@ -4,7 +4,6 @@ package tasktiming
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -33,10 +32,14 @@ func Available(db *gorm.DB) bool {
 }
 func terminal(status string) bool {
 	switch status {
-	case "completed", "succeeded", "failed", "canceled", "cancelled", "interrupted", "stopped":
+	case "completed", "succeeded", "failed", "canceled", "cancelled", "interrupted", "stopped", "waiting_approval":
 		return true
 	}
 	return false
+}
+
+func workflowWait(status string) bool {
+	return status == "stopped" || status == "waiting_approval"
 }
 
 func Begin(ctx context.Context, db *gorm.DB, executionID, runID, conversationID, owner string, at time.Time) error {
@@ -98,13 +101,6 @@ func recordAttempt(ctx context.Context, db *gorm.DB, executionID, attemptID stri
 	return db.WithContext(ctx).Model(&orm.TaskExecutionTiming{}).Where("id = ?", executionID).UpdateColumn("revision", gorm.Expr("revision + 1")).Error
 }
 
-func snapshot(ctx context.Context, db *gorm.DB, row orm.TaskExecutionTiming, now time.Time) (*taskdisplay.OrdinaryRunView, error) {
-	var attempts []orm.TaskAttemptTiming
-	if err := db.WithContext(ctx).Where("execution_id = ?", row.ID).Find(&attempts).Error; err != nil {
-		return nil, err
-	}
-	return measure(row, attempts, now), nil
-}
 func measure(row orm.TaskExecutionTiming, attempts []orm.TaskAttemptTiming, now time.Time) *taskdisplay.OrdinaryRunView {
 	cutoff := now
 	if row.FinishedAt != nil {
@@ -140,15 +136,15 @@ func snapshotRun(ctx context.Context, db *gorm.DB, owner, conversationID, runID 
 	if !Available(db) {
 		return nil, nil
 	}
-	var row orm.TaskExecutionTiming
-	err := db.WithContext(ctx).Where("owner_user_id = ? AND conversation_id = ? AND run_id = ?", owner, conversationID, runID).Order("requested_at DESC, id DESC").First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
+	var rows []orm.TaskExecutionTiming
+	if err := db.WithContext(ctx).Where("owner_user_id = ? AND conversation_id = ? AND run_id = ?", owner, conversationID, runID).Order("requested_at DESC, id DESC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	return snapshot(ctx, db, row, now)
+	runs, err := measureRuns(ctx, db, rows, now)
+	if err != nil || len(runs) == 0 {
+		return nil, err
+	}
+	return &runs[0], nil
 }
 func List(ctx context.Context, db *gorm.DB, owner, conversationID string, now time.Time) (out []taskdisplay.OrdinaryRunView, err error) {
 	if !Available(db) {
@@ -171,15 +167,28 @@ func listRuns(ctx context.Context, db *gorm.DB, owner, conversationID string, no
 		return nil, err
 	}
 
-	seen := map[string]bool{}
-	selected := []orm.TaskExecutionTiming{}
+	return measureRuns(ctx, db, rows, now)
+}
+
+// Rows are newest first. A Workflow's pause, approval and failed-step retry
+// intervals belong to the same unfinished execution. Completion ends that
+// accumulation; ordinary Chat rounds remain independent.
+func measureRuns(ctx context.Context, db *gorm.DB, rows []orm.TaskExecutionTiming, now time.Time) ([]taskdisplay.OrdinaryRunView, error) {
+	out := []taskdisplay.OrdinaryRunView{}
+	groups := map[string][]orm.TaskExecutionTiming{}
+	order := []string{}
+	closed := map[string]bool{}
 	ids := []string{}
 	for _, row := range rows {
-		if !seen[row.RunID] {
-			seen[row.RunID] = true
-			selected = append(selected, row)
-			ids = append(ids, row.ID)
+		group := groups[row.RunID]
+		if len(group) == 0 {
+			order = append(order, row.RunID)
+		} else if closed[row.RunID] || row.WorkflowSessionID == "" || !(workflowWait(row.Status) || row.Status == "failed") {
+			closed[row.RunID] = true
+			continue
 		}
+		groups[row.RunID] = append(group, row)
+		ids = append(ids, row.ID)
 	}
 	if len(ids) == 0 {
 		return out, nil
@@ -192,8 +201,15 @@ func listRuns(ctx context.Context, db *gorm.DB, owner, conversationID string, no
 	for _, attempt := range attempts {
 		byExecution[attempt.ExecutionID] = append(byExecution[attempt.ExecutionID], attempt)
 	}
-	for _, row := range selected {
-		out = append(out, *measure(row, byExecution[row.ID], now))
+	for _, runID := range order {
+		group := groups[runID]
+		view := measure(group[0], byExecution[group[0].ID], now)
+		for _, interval := range group[1:] {
+			previous := measure(interval, byExecution[interval.ID], now)
+			*view.Timing.ElapsedMS += *previous.Timing.ElapsedMS
+			*view.Timing.CumulativeExecutionMS += *previous.Timing.CumulativeExecutionMS
+		}
+		out = append(out, *view)
 	}
 
 	return out, nil

@@ -160,8 +160,6 @@ func projectOrdinarySession(ctx context.Context, db *gorm.DB, session *orm.Workf
 				view.Status = publicNode.Branch
 			case publicNode.Readiness == "blocked":
 				view.Status = "blocked"
-			case publicNode.RequiresApproval && publicNode.Readiness == "ready":
-				view.Status = "waiting"
 			}
 		}
 		if exists {

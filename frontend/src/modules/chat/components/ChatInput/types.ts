@@ -19,6 +19,7 @@ export interface ChatFileList {
 
 export interface SendMessageParams {
   text: string;
+  workflow_control?: import('@/modules/chat/store/workflowStatus').NativeWorkflowControl;
   /** Preserve the resource selection when the welcome composer unmounts. */
   chatConfigSnapshot?: ChatConfig;
   mentions?: ChatMention[];

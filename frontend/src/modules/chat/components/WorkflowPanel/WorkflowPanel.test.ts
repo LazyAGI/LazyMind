@@ -50,7 +50,7 @@ function checkpoint(requiresApproval: boolean, execution = 'succeeded'): Workflo
     status: 'waiting', current_step_id: 'analyze', created_at: '', updated_at: '',
     steps: [{ id: 'a', task_id: 'a', session_id: 's', step_id: 'analyze', attempt: 1,
       status: execution, validity: 'effective', created_at: '', updated_at: '' }],
-    projection: { current: execution === 'succeeded' ? [] : ['analyze'], ready: ['collect'], nodes: {
+    projection: { display: { status: requiresApproval && execution === 'succeeded' ? 'waiting' : 'failed', reason: '', approval_step_id: requiresApproval && execution === 'succeeded' ? 'analyze' : '' }, current: execution === 'succeeded' ? [] : ['analyze'], ready: ['collect'], nodes: {
       analyze: { requires_approval: requiresApproval, execution, validity: 'effective',
         reachability: 'reachable', readiness: 'not_applicable', branch: 'active' },
       collect: { requires_approval: true, execution: 'none', validity: 'effective',
@@ -60,6 +60,14 @@ function checkpoint(requiresApproval: boolean, execution = 'succeeded'): Workflo
 }
 
 describe('workflow continuation checkpoints', () => {
+  it('resumes a confirmed pause before dispatch but not an unclassified failure', () => {
+    const session = checkpoint(false, 'none');
+    session.steps = [];
+    expect(resolveWorkflowContinueAction(session, 'stopped')).toEqual({ kind: 'resume', stepId: 'collect' });
+    expect(resolveWorkflowContinueAction(checkpoint(false), 'stopped')).toEqual({ kind: 'resume', stepId: 'collect' });
+    expect(resolveWorkflowContinueAction(checkpoint(false), 'failed')).toBeUndefined();
+    expect(resolveWorkflowContinueAction(checkpoint(false, 'interrupted'), 'failed')).toBeUndefined();
+  });
   it('hides continue between automatic steps even when a later step requires approval', () => {
     const session = checkpoint(false);
     expect(resolveWorkflowContinueAction(session, 'waiting')).toBeUndefined();
@@ -71,12 +79,14 @@ describe('workflow continuation checkpoints', () => {
     const session = checkpoint(true);
     expect(resolveWorkflowContinueAction(session, 'waiting')).toEqual({ kind: 'approval', stepId: 'analyze' });
     session.projection!.nodes!.analyze.requires_approval = false;
+    session.projection!.display = { status: 'failed', reason: 'no_advance', approval_step_id: '' };
     expect(resolveWorkflowContinueAction(session, 'waiting')).toBeUndefined();
   });
 
   it.each(['pending', 'queued', 'claimed', 'running'])('hides stale approval when the next step is %s', (execution) => {
     const session = checkpoint(true);
     session.projection!.nodes!.collect.execution = execution;
+    session.projection!.display = { status: 'running', reason: 'executing', approval_step_id: '' };
     expect(resolveWorkflowContinueAction(session, 'waiting')).toBeUndefined();
   });
 
@@ -104,6 +114,7 @@ describe('workflow continuation checkpoints', () => {
     session.steps!.push({ ...session.steps![0], id: 'b', task_id: 'b', step_id: 'collect', attempt: 2 });
     session.projection!.nodes!.collect.execution = 'succeeded';
     session.projection!.nodes!.collect.requires_approval = false;
+    session.projection!.display = { status: 'failed', reason: 'no_advance', approval_step_id: '' };
     expect(resolveWorkflowContinueAction(session, 'waiting')).toBeUndefined();
   });
 });

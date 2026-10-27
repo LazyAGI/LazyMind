@@ -2056,6 +2056,10 @@ func handleStreamChat(
 	historyExt json.RawMessage,
 ) {
 	reqCtx := r.Context()
+	if _, controlled := reqBody["_workflow_control"].(*workflow.NativeControlCommand); controlled && stateStore == nil {
+		common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		common.ReplyErr(w, "streaming not supported", http.StatusInternalServerError)
@@ -2155,7 +2159,7 @@ func handleStreamChat(
 		_ = setChatInput(chatCtx, stateStore, convID, historyID, query, target.Seq, historyExt)
 		if requestUsesRunDecision(reqBody) {
 			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, historyID, "generating", "", primaryRunID, nil); err != nil {
-				terminal, persistedID := failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns, target, mergeConversationConfigSnapshot(historyExt, reqBody))
+				terminal, persistedID := failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns, target, mergeConversationConfigSnapshot(historyExt, reqBody), "state_store_unavailable")
 				if dualReply {
 					common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
 				} else {
@@ -2168,7 +2172,7 @@ func handleStreamChat(
 		if dualReply {
 			_ = setChatInput(chatCtx, stateStore, convID, secondaryHistoryID, query, target.Seq, historyExt)
 			if err := setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil); err != nil {
-				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns, target, historyExt)
+				failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns, target, historyExt, "state_store_unavailable")
 				common.ReplyErr(w, "store not initialized", http.StatusServiceUnavailable)
 				return
 			}
@@ -2178,6 +2182,25 @@ func handleStreamChat(
 		go cancelChatOnStop(chatCtx, stateStore, convID, historyID, chatCancel)
 	}
 
+	if control, ok := reqBody["_workflow_control"].(*workflow.NativeControlCommand); ok {
+		owner, _ := reqBody["_workflow_control_owner"].(string)
+		delete(reqBody, "_workflow_control")
+		delete(reqBody, "_workflow_control_owner")
+		control.HistoryID = historyID
+		version, err := workflow.BeginNativeControlTurn(chatCtx, db, owner, convID, *control)
+		if err != nil {
+			terminal, persistedID := failPreStreamChatRuns(chatCtx, db, stateStore, convID, dualReply, registeredRuns, target, historyExt, "workflow_control_rejected")
+			replyChatTerminalError(w, err.Error(), http.StatusConflict, terminal, persistedID)
+			return
+		}
+		defer func() {
+			finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := workflow.FinishNativeControlTurn(finishCtx, db, control.SessionID, version); err != nil {
+				log.Logger.Error().Err(err).Str("session_id", control.SessionID).Msg("failed to settle workflow control turn")
+			}
+		}()
+	}
 	w.WriteHeader(http.StatusOK)
 	if !dualReply {
 		streamSingleAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, target, historyExt)
@@ -2186,7 +2209,7 @@ func handleStreamChat(
 	streamDualAnswer(chatCtx, reqCtx, w, flusher, db, stateStore, baseURL, reqBody, convID, query, historyID, secondaryHistoryID, target, historyExt)
 }
 
-func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, dualReply bool, runs [][2]string, target chatPersistTarget, historyExt json.RawMessage) (*RunTerminal, string) {
+func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string, dualReply bool, runs [][2]string, target chatPersistTarget, historyExt json.RawMessage, code string) (*RunTerminal, string) {
 	statusCtx, cancel := terminalWriteContext(ctx)
 	defer cancel()
 	var primaryTerminal *RunTerminal
@@ -2195,7 +2218,7 @@ func failPreStreamChatRuns(ctx context.Context, db *gorm.DB, stateStore state.St
 	persistedID := ""
 	for _, run := range runs {
 		historyID, runID := run[0], run[1]
-		terminal, _ := failedRunEvent(runID, "state_store_unavailable", false).Terminal()
+		terminal, _ := failedRunEvent(runID, code, false).Terminal()
 		if primaryTerminal == nil {
 			primaryTerminal = terminal
 		}
