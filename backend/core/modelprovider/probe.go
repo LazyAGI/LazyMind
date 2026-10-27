@@ -146,7 +146,7 @@ func loadProbeSnapshot(ctx context.Context, db *gorm.DB, userID, providerID, gro
 			reject("unsupported", "unknown_type")
 			return nil
 		}
-		if validateSupplierModelType(parent, modelType) != nil {
+		if validateSupplierModelType(ctx, tx, parent, modelType) != nil {
 			reject("unsupported", "unsupported_type")
 			return nil
 		}

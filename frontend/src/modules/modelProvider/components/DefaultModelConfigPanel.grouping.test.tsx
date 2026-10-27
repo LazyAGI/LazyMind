@@ -276,6 +276,29 @@ describe("default capability configuration groups", () => {
     expect(screen.getByRole("group", { name: "modelProvider.module.textToImageTitle" })).toBeInTheDocument();
   });
 
+  it("reopens a manually collapsed group when a new highlight targets it", async () => {
+    const { rerender } = renderPanel();
+    await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
+    fireEvent.click(categoryButton("voice"));
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "false");
+
+    rerender(<DefaultModelConfigPanel
+      cloudServiceSetupStates={{ cloudParsing: "ready", searchEngine: "empty" }}
+      modelProviderSetupState="ready"
+      onConfigureCloudService={mocks.configureService}
+      onConfigureProviders={mocks.configureProviders}
+      onModelSelectionChanged={mocks.changed}
+      onRetrySetup={vi.fn()}
+      highlightTarget="tts"
+    />);
+
+    const voice = await screen.findByRole("region", { name: "modelProvider.defaults.voiceTitle" });
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "true");
+    const target = within(voice).getByRole("group", { name: "modelProvider.module.ttsTitle" });
+    expect(target).toHaveClass("is-config-highlighted");
+    await waitFor(() => expect(target).toHaveFocus());
+  });
+
   it("automatically reveals and focuses a deep-linked capability in a collapsed category", async () => {
     const resolved = vi.fn();
     renderPanel("ready", "image_generator", resolved);

@@ -41,7 +41,9 @@ const runtimeModelTypesBySource: Record<string, readonly string[]> = {
   siliconflow: ["llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "image_editing", "text2video", "tts", "stt"],
 };
 
-function runtimeSource(protocol?: string) {
+function runtimeSource(protocol?: string, providerIdentity?: string) {
+  const identity = (providerIdentity || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (identity === "vllm" || identity === "lmdeploy") return identity;
   const source = (protocol || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const aliases: Record<string, string> = {
     anthropic: "claude", bigmodel: "glm", moonshot: "kimi", tongyiqianwen: "qwen",
@@ -62,9 +64,9 @@ export function getRuntimeModelTypeForCapability(capability: ModelCapability): s
 }
 
 /** A protocol determines which real runtime adapters can serve a model. */
-export function isModelTypeSupportedByProtocol(modelType: string, protocol?: string) {
+export function isModelTypeSupportedByProtocol(modelType: string, protocol?: string, providerIdentity?: string) {
   const normalized = normalizeRuntimeModelType(modelType);
-  const source = runtimeSource(protocol);
+  const source = runtimeSource(protocol, providerIdentity);
   return runtimeModelTypes.has(normalized) && Object.prototype.hasOwnProperty.call(runtimeModelTypesBySource, source) &&
     runtimeModelTypesBySource[source].includes(normalized);
 }
@@ -72,11 +74,12 @@ export function isModelTypeSupportedByProtocol(modelType: string, protocol?: str
 export function getSelectableCapabilities(
   capabilities: readonly ModelCapability[],
   protocol?: string,
+  providerIdentity?: string,
 ): ModelCapability[] {
   const distinct = [...new Set(capabilities.map((capability) =>
     capability === "LLM_SELF_EVOLUTION" ? "LLM_CHAT" : capability,
   ))];
-  return distinct.filter((capability) => isModelTypeSupportedByProtocol(capabilityRuntimeTypes[capability], protocol));
+  return distinct.filter((capability) => isModelTypeSupportedByProtocol(capabilityRuntimeTypes[capability], protocol, providerIdentity));
 }
 
 export function supportsModelContext(capability?: string) {

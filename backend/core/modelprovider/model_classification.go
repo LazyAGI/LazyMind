@@ -1,6 +1,12 @@
 package modelprovider
 
-import "strings"
+import (
+	"context"
+	"strings"
+
+	"gorm.io/gorm"
+	"lazymind/core/common/orm"
+)
 
 func normalizedDeclaredModelType(value string) string {
 	switch value = strings.ToLower(strings.TrimSpace(value)); value {
@@ -113,14 +119,33 @@ var runtimeModelTypesBySource = map[string][]string{
 func RuntimeSupportsModelType(providerName, modelType string) bool {
 	modelType = normalizedDeclaredModelType(modelType)
 	source := LazyLLMSource(providerName)
-	// vLLM and LMDeploy use OpenAI's wire protocol, but their local runtime
-	// adapters do not expose OpenAI's image/video generation tasks.
 	switch normalizeProviderName(providerName) {
 	case "vllm":
 		source = "vllm"
 	case "lmdeploy":
 		source = "lmdeploy"
 	}
+	return runtimeSupportsModelTypeFromSource(source, modelType)
+}
+
+// RuntimeSupportsModelTypeForProvider preserves a local supplier's executable
+// identity when its saved request protocol is OpenAI-compatible. The protocol
+// controls the wire source, while the catalog template controls available
+// runtime adapters for vLLM and LMDeploy.
+func RuntimeSupportsModelTypeForProvider(ctx context.Context, db *gorm.DB, provider orm.UserModelProvider, modelType string) bool {
+	modelType = normalizedDeclaredModelType(modelType)
+	source := LazyLLMSource(RuntimeProviderName(provider))
+	if isVLLMSupplier(ctx, db, provider) {
+		source = "vllm"
+	} else if isLMDeploySupplier(ctx, db, provider) {
+		source = "lmdeploy"
+	}
+	return runtimeSupportsModelTypeFromSource(source, modelType)
+}
+
+func runtimeSupportsModelTypeFromSource(source, modelType string) bool {
+	// vLLM and LMDeploy use OpenAI's wire protocol, but their local runtime
+	// adapters do not expose OpenAI's image/video generation tasks.
 	for _, supported := range runtimeModelTypesBySource[source] {
 		if modelType == supported {
 			return true

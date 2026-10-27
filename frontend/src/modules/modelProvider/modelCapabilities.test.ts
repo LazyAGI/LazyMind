@@ -19,6 +19,11 @@ describe("supplier model capabilities", () => {
     expect(getSelectableCapabilities(["EMBEDDING", "RERANK", "MULTIMODAL_EMBEDDING", "TEXT_TO_IMAGE", "TEXT_TO_VIDEO", "TTS", "ASR"], protocol))
       .toEqual(["EMBEDDING", "RERANK", "MULTIMODAL_EMBEDDING"]);
   });
+  it.each(["vLLM", "LMDeploy"])("keeps local supplier identity restricted when its active protocol is OpenAI (%s)", (identity) => {
+    expect(isModelTypeSupportedByProtocol("text2image", "OpenAI", identity)).toBe(false);
+    expect(isModelTypeSupportedByProtocol("text2video", "OpenAI", identity)).toBe(false);
+    expect(isModelTypeSupportedByProtocol("embed", "OpenAI", identity)).toBe(true);
+  });
   it("rejects unknown supplier adapters", () => {
     expect(isModelTypeSupportedByProtocol("llm", "UnknownProvider")).toBe(false);
   });

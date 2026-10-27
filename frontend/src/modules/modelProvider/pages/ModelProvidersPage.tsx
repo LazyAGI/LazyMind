@@ -95,8 +95,9 @@ export type ModelCapability =
 export function getSelectableModelCapabilities(
   capabilities: readonly ModelCapability[],
   protocol?: string,
+  providerIdentity?: string,
 ): ModelCapability[] {
-  return getSelectableCapabilities(capabilities, protocol);
+  return getSelectableCapabilities(capabilities, protocol, providerIdentity);
 }
 
 export interface ProviderModel {
@@ -1223,7 +1224,7 @@ export default function ModelProviderPage({
     customModelForm.setFieldsValue({
       providerId: provider.id,
       groupId: group.id,
-      capability: getSelectableModelCapabilities(provider.capabilities, provider.protocolName || provider.source)[0] || "LLM_CHAT",
+      capability: getSelectableModelCapabilities(provider.capabilities, provider.protocolName || provider.source, provider.name)[0] || "LLM_CHAT",
       name: "",
       maxInputTokens: undefined,
     });
@@ -1234,7 +1235,7 @@ export default function ModelProviderPage({
     const currentProvider = addedProviderListRef.current.find((provider) => provider.id === providerId);
     const currentGroup = currentProvider?.groups.find((group) => group.id === groupId);
     if (!currentGroup) throw new Error(t("modelProvider.workspace.savedRefreshFailed"));
-    if (choice.model_type && !isModelTypeSupportedByProtocol(choice.model_type, currentProvider?.protocolName || currentProvider?.source))
+    if (choice.model_type && !isModelTypeSupportedByProtocol(choice.model_type, currentProvider?.protocolName || currentProvider?.source, currentProvider?.name))
       throw new Error(t("modelProvider.catalog.unsupportedType"));
     if (currentGroup.models.some((model) => normalizeModelName(model.name) === normalizeModelName(choice.name))) return;
     const response = await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost({
@@ -1367,7 +1368,7 @@ export default function ModelProviderPage({
         if (current.models.some((saved) => normalizeModelName(saved.name) === normalizeModelName(model.name))) continue;
         const metadata = resolveRemoteModelMetadata(protocol, model);
         const modelType = metadata.modelType;
-        if (!isModelTypeSupportedByProtocol(modelType, protocol)) {
+        if (!isModelTypeSupportedByProtocol(modelType, protocol, provider.name)) {
           openCatalog();
           continue;
         }
@@ -1411,7 +1412,7 @@ export default function ModelProviderPage({
   const saveEditedModel = async (values: ModelEditorValues) => {
     const target = editModelWindowModal;
     if (!target) return;
-    if (!(values.capability === "UNKNOWN" && target.model.capability === "UNKNOWN") && !isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), target.provider.protocolName || target.provider.source))
+    if (!(values.capability === "UNKNOWN" && target.model.capability === "UNKNOWN") && !isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), target.provider.protocolName || target.provider.source, target.provider.name))
       throw new Error(t(values.capability === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType"));
     const updated = await updateGroupModel(target.provider.id, target.group.id, target.model.id, {
       name: values.name.trim(),
@@ -1454,7 +1455,7 @@ export default function ModelProviderPage({
       return;
     }
 
-    if (!isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), provider.protocolName || provider.source)) {
+    if (!isModelTypeSupportedByProtocol(getModelTypeForCapability(values.capability), provider.protocolName || provider.source, provider.name)) {
       customModelForm.setFields([{ name: "capability", errors: [t(values.capability === "UNKNOWN" ? "modelProvider.catalog.unclassifiedType" : "modelProvider.catalog.unsupportedType")] }]);
       return;
     }
@@ -1714,7 +1715,7 @@ export default function ModelProviderPage({
         model={editModelWindowModal?.model || null}
         providerName={editModelWindowModal ? getProviderDisplayName(editModelWindowModal.provider, currentLanguage) : ""}
         protocolName={editModelWindowModal?.provider.protocolName || editModelWindowModal?.provider.source}
-        capabilities={editModelWindowModal ? getSelectableModelCapabilities(editModelWindowModal.provider.capabilities, editModelWindowModal.provider.protocolName || editModelWindowModal.provider.source) : []}
+        capabilities={editModelWindowModal ? getSelectableModelCapabilities(editModelWindowModal.provider.capabilities, editModelWindowModal.provider.protocolName || editModelWindowModal.provider.source, editModelWindowModal.provider.name) : []}
         models={editModelWindowModal?.group.models || []}
         capabilityLabel={getCapabilityLabel}
         onSave={saveEditedModel}
@@ -1831,7 +1832,7 @@ export default function ModelProviderPage({
                 }
               }}
             >
-              {getSelectableModelCapabilities(customModelModal?.provider.capabilities || [], customModelModal?.provider.protocolName || customModelModal?.provider.source).map((capability) => (
+              {getSelectableModelCapabilities(customModelModal?.provider.capabilities || [], customModelModal?.provider.protocolName || customModelModal?.provider.source, customModelModal?.provider.name).map((capability) => (
                 <Select.Option key={capability} value={capability}>
                   <span className="provider-model-task-option">
                     <ModelTypeIcon type={getModelTaskType(capability)} size={16} />

@@ -436,7 +436,11 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 			if credentialErr != nil {
 				return credentialErr
 			}
-			if !modelSupportsSelection(model, slot, baseURL) {
+			var parent orm.UserModelProvider
+			if err := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", model.UserModelProviderID, userID).Take(&parent).Error; err != nil {
+				return errConnectionChanged
+			}
+			if !modelSupportsSelectionForProvider(r.Context(), tx, parent, model, slot, baseURL) {
 				return errSelectionModelType
 			}
 		}

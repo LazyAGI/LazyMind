@@ -1,6 +1,7 @@
 package modelprovider
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ func validateModelName(name string) error {
 	return nil
 }
 
-func validateSupplierModelType(parent orm.UserModelProvider, modelType string) error {
+func validateSupplierModelType(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider, modelType string) error {
 	modelType = normalizeGroupModelType(modelType)
 	if modelType == "" {
 		return nil // An unclassified inventory entry has no runtime capability.
@@ -48,7 +49,7 @@ func validateSupplierModelType(parent orm.UserModelProvider, modelType string) e
 	if strings.EqualFold(RuntimeProviderName(parent), "Claude") && modelType != "llm" && modelType != "vlm" {
 		return errSupplierModelType
 	}
-	if !RuntimeSupportsModelType(RuntimeProviderName(parent), modelType) {
+	if !RuntimeSupportsModelTypeForProvider(ctx, db, parent, modelType) {
 		return errSupplierModelType
 	}
 	return nil
@@ -100,6 +101,13 @@ func modelSupportsSelection(m orm.UserModelProviderGroupModel, slot, baseURL str
 	default:
 		return m.ModelType == slot
 	}
+}
+
+func modelSupportsSelectionForProvider(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider, m orm.UserModelProviderGroupModel, slot, baseURL string) bool {
+	if !RuntimeSupportsModelTypeForProvider(ctx, db, parent, m.ModelType) {
+		return false
+	}
+	return modelSupportsSelection(m, slot, baseURL)
 }
 
 // The model UUID is kept stable. Reject changes that would make its existing

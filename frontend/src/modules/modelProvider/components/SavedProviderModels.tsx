@@ -77,7 +77,7 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
     <ul className="saved-provider-models saved-provider-model-list">
       {sortCustomModelsFirst(props.models).map((model) => {
         const type = getModelTaskType(model.capability);
-        const unsupported = type !== "unknown" && !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(model.capability), props.providerName);
+        const unsupported = type !== "unknown" && !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(model.capability), props.providerName, props.supplierName);
         const chat = isLlmChatCapability(model.capability);
         const showContext =
           chat ||

@@ -16,7 +16,7 @@ import (
 func TestUnsupportedOpenRouterTypesCannotBecomeRuntimeSelections(t *testing.T) {
 	for _, typ := range []string{"rerank", "image_editing", "multimodal_embedding"} {
 		parent := orm.UserModelProvider{Name: "Custom gateway", ProtocolName: "OpenRouter"}
-		if validateSupplierModelType(parent, typ) == nil {
+		if validateSupplierModelType(t.Context(), nil, parent, typ) == nil {
 			t.Errorf("save accepted %s", typ)
 		}
 		model := orm.UserModelProviderGroupModel{ProviderName: "OpenRouter", ModelType: typ}
@@ -25,6 +25,27 @@ func TestUnsupportedOpenRouterTypesCannotBecomeRuntimeSelections(t *testing.T) {
 				t.Errorf("selection accepted %s as %s", typ, slot)
 			}
 		}
+	}
+}
+
+func TestLocalSupplierTemplateKeepsMediaUnsupportedAfterOpenAIProtocolSelection(t *testing.T) {
+	for _, name := range []string{"vLLM", "LMDeploy"} {
+		t.Run(name, func(t *testing.T) {
+			db := orm.MigrateTestDB(t, &orm.DefaultModelProvider{}, &orm.UserModelProvider{}).DB
+			template := orm.DefaultModelProvider{ID: "template", Name: name}
+			if err := db.Create(&template).Error; err != nil {
+				t.Fatal(err)
+			}
+			parent := orm.UserModelProvider{Name: "my-local", IsCustom: true, ProtocolName: "OpenAI", DefaultModelProviderID: template.ID}
+			for _, typ := range []string{"text2image", "text2video"} {
+				if validateSupplierModelType(t.Context(), db, parent, typ) == nil {
+					t.Errorf("%s template accepted OpenAI media type %s", name, typ)
+				}
+			}
+			if validateSupplierModelType(t.Context(), db, parent, "embed") != nil {
+				t.Errorf("%s template rejected compatible embedding", name)
+			}
+		})
 	}
 }
 

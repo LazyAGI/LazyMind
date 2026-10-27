@@ -1,6 +1,7 @@
 package modelprovider
 
 import (
+	"context"
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 )
@@ -9,6 +10,10 @@ import (
 // is_default=false, including older imports whose origin cannot be established.
 // Keep its UUID and metadata rather than guessing at the user's intent.
 func reconcileCatalogModelSelections(tx *gorm.DB, providerID string) error {
+	ctx := tx.Statement.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if !tx.Migrator().HasTable(&orm.UserSelectedModel{}) {
 		return nil
 	}
@@ -46,7 +51,7 @@ func reconcileCatalogModelSelections(tx *gorm.DB, providerID string) error {
 	for _, selection := range selections {
 		model := modelByID[selection.UserModelProviderGroupModelID]
 		parent := parentByID[model.UserModelProviderID]
-		if !RuntimeSupportsModelType(RuntimeProviderName(parent), model.ModelType) || !modelSupportsSelection(model, selection.ModelKey, parent.BaseURL) {
+		if !RuntimeSupportsModelTypeForProvider(ctx, tx, parent, model.ModelType) || !modelSupportsSelectionForProvider(ctx, tx, parent, model, selection.ModelKey, parent.BaseURL) {
 			invalid = append(invalid, selection.ID)
 		}
 	}

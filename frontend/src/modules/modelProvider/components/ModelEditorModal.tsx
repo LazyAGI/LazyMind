@@ -159,7 +159,7 @@ export function ModelEditorModal(props: ModelEditorModalProps) {
     ...(props.model ? [props.model.capability] : []),
   ])].map((option) => ({
     value: option,
-    disabled: option !== "UNKNOWN" && !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(option), props.protocolName),
+    disabled: option !== "UNKNOWN" && !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(option), props.protocolName, props.providerName),
     label: (
       <span className="model-editor-type-option">
         <ModelTypeIcon type={getModelTaskType(option)} size={18} />

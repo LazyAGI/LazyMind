@@ -123,7 +123,7 @@ func BatchAddGroupModels(w http.ResponseWriter, r *http.Request) {
 			}
 			candidate, err := prepareGroupModelAddition(model)
 			if err == nil {
-				err = validateSupplierModelType(parent, candidate.ModelType)
+				err = validateSupplierModelType(r.Context(), tx, parent, candidate.ModelType)
 			}
 			if err != nil {
 				response.Failures = append(response.Failures, batchAddGroupModelFailure{Name: name, Message: err.Error()})

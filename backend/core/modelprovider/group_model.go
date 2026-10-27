@@ -163,7 +163,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", group.ID, parent.ID, userID).Take(&group).Error; err != nil {
 			return errConnectionChanged
 		}
-		if err := validateSupplierModelType(parent, modelType); err != nil {
+		if err := validateSupplierModelType(r.Context(), tx, parent, modelType); err != nil {
 			return err
 		}
 		err := tx.Where("user_model_provider_group_id = ? AND create_user_id = ? AND name = ?", group.ID, userID, name).Take(&row).Error
@@ -314,7 +314,7 @@ func UpdateGroupModel(w http.ResponseWriter, r *http.Request) {
 		if err := validateModelName(next.Name); err != nil {
 			return err
 		}
-		if err := validateSupplierModelType(parent, next.ModelType); err != nil {
+		if err := validateSupplierModelType(r.Context(), tx, parent, next.ModelType); err != nil {
 			return err
 		}
 		if req.Vision != nil {
