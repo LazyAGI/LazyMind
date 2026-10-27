@@ -68,33 +68,7 @@ type chatModelSnapshot struct {
 	SuccessfulRunID string `json:"successful_run_id,omitempty"`
 }
 
-type availableChatModel struct {
-	LogoDataURL         string   `gorm:"column:logo_data_url"`
-	Vision              bool     `gorm:"column:vision"`
-	ModelSettings       string   `gorm:"column:model_settings"`
-	ID                  string   `gorm:"column:model_id"`
-	ProviderID          string   `gorm:"column:provider_id"`
-	ProviderGroupID     string   `gorm:"column:provider_group_id"`
-	OwnerUserID         string   `gorm:"column:owner_user_id"`
-	ProviderName        string   `gorm:"column:provider_name"`
-	ProviderDisplayName string   `gorm:"column:provider_display_name"`
-	ProviderIsCustom    bool     `gorm:"column:provider_is_custom"`
-	GroupName           string   `gorm:"column:group_name"`
-	ModelName           string   `gorm:"column:model_name"`
-	ModelType           string   `gorm:"column:model_type"`
-	BaseURL             string   `gorm:"column:base_url"`
-	APIKey              string   `gorm:"column:api_key"`
-	APIKeyCiphertext    string   `gorm:"column:api_key_ciphertext"`
-	GroupVerified       bool     `gorm:"column:group_verified"`
-	MaxInputTokens      *string  `gorm:"column:max_input_tokens"`
-	InputTokenLimit     *string  `gorm:"column:input_token_limit"`
-	MaxOutputTokens     *string  `gorm:"column:max_output_tokens"`
-	Source              string   `gorm:"-"`
-	Availability        string   `gorm:"-"`
-	Lifecycle           string   `gorm:"-"`
-	Capabilities        []string `gorm:"-"`
-	DefaultForType      bool     `gorm:"-"`
-}
+type availableChatModel = modelconfig.AvailableChatModel
 
 type chatModelRoute struct {
 	Mode             string `json:"mode"`
@@ -214,112 +188,7 @@ func validChatModelSelection(mode, modelID string) bool {
 }
 
 func loadAvailableChatModels(ctx context.Context, db *gorm.DB, userID string) ([]availableChatModel, error) {
-	if db == nil {
-		return nil, nil
-	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return nil, nil
-	}
-	rows := make([]availableChatModel, 0)
-	err := db.WithContext(ctx).
-		Table("user_model_provider_group_models m").
-		Select(
-			"m.id AS model_id, m.user_model_provider_id AS provider_id, "+
-				"m.user_model_provider_group_id AS provider_group_id, "+
-				"m.create_user_id AS owner_user_id, m.provider_name, m.name AS model_name, p.logo_data_url, "+
-				"p.name AS provider_display_name, p.is_custom AS provider_is_custom, "+
-				"m.model_type, m.vision, m.model_settings, m.max_input_tokens, m.input_token_limit, m.max_output_tokens, g.name AS group_name, g.base_url, g.is_verified AS group_verified, "+
-				"g.api_key, g.api_key_ciphertext",
-		).
-		Joins(
-			"JOIN user_model_provider_groups g ON "+
-				"g.id = m.user_model_provider_group_id AND g.create_user_id = m.create_user_id "+
-				"AND g.deleted_at IS NULL",
-		).
-		Joins(
-			"JOIN user_model_providers p ON "+
-				"p.id = m.user_model_provider_id AND p.create_user_id = m.create_user_id "+
-				"AND p.deleted_at IS NULL",
-		).
-		Where("m.deleted_at IS NULL AND m.enabled = ? AND LOWER(TRIM(m.model_type)) = ?", true, "llm").
-		Where(
-			"(m.create_user_id = ? OR EXISTS ("+
-				"SELECT 1 FROM user_selected_models shared "+
-				"WHERE shared.user_model_provider_group_model_id = m.id "+
-				"AND shared.user_id = m.create_user_id "+
-				"AND shared.model_type = ? AND shared.share = ?"+
-				"))",
-			userID, "llm", true,
-		).
-		Order("m.provider_name ASC, g.name ASC, m.name ASC, m.id ASC").
-		Scan(&rows).Error
-	if err != nil {
-		return nil, err
-	}
-	available := rows[:0]
-	for index := range rows {
-		if rows[index].OwnerUserID == userID {
-			rows[index].Source = "own"
-		} else {
-			rows[index].Source = "shared"
-		}
-		// Verification is a discovery signal. A selected, owner-scoped model may
-		// still be usable after key or advanced-request changes invalidate the
-		// probe result, so admit it when the runtime credential resolver can
-		// produce a valid endpoint/configuration. Shared models retain the
-		// explicit verification boundary.
-		if !rows[index].GroupVerified && rows[index].OwnerUserID == userID {
-			var selected int64
-			if err := db.WithContext(ctx).Table("user_selected_models").
-				Where("user_id = ? AND user_model_provider_group_model_id = ? AND model_type = ?", userID, rows[index].ID, "llm").
-				Count(&selected).Error; err != nil || selected == 0 {
-				continue
-			}
-			if _, err := modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, rows[index].ProviderGroupID); err != nil {
-				continue
-			}
-		} else if !rows[index].GroupVerified {
-			continue
-		}
-		rows[index].Availability = chatModelAvailabilityAvailable
-		rows[index].Lifecycle = "active"
-		rows[index].Capabilities = []string{"chat"}
-		available = append(available, rows[index])
-	}
-	rows = available
-	catalog, _ := modelprovider.ResolveCloudModelCatalog(ctx)
-	for _, item := range catalog.Models {
-		if item.ModelType != "llm" || item.Lifecycle == "retired" {
-			continue
-		}
-		rows = append(rows, availableChatModel{
-			ID: item.ModelKey, ProviderID: modelprovider.CloudSystemProviderID,
-			ProviderName: modelprovider.CloudSystemProviderName, ModelName: item.DisplayName,
-			ModelType: "llm", Source: "cloud", Availability: item.Status,
-			Lifecycle:    item.Lifecycle,
-			Capabilities: append([]string(nil), item.Capabilities...), DefaultForType: item.DefaultForType,
-		})
-	}
-	if catalog.Known && db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
-		var selected orm.UserSelectedCloudModel
-		err := db.WithContext(ctx).
-			Where("user_id = ? AND model_type = ?", userID, "llm").
-			Take(&selected).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
-		}
-		if err == nil && findAvailableChatModelBySource(rows, selected.PublicModelKey, "cloud") == nil {
-			rows = append(rows, availableChatModel{
-				ID: selected.PublicModelKey, ProviderID: modelprovider.CloudSystemProviderID,
-				ProviderName: modelprovider.CloudSystemProviderName, ModelName: selected.DisplayNameSnapshot,
-				ModelType: "llm", Source: "cloud", Availability: chatModelAvailabilityUnavailable,
-				Lifecycle:    "retired",
-				Capabilities: []string{"chat"},
-			})
-		}
-	}
-	return rows, nil
+	return modelconfig.LoadAvailableChatModels(ctx, db, userID)
 }
 
 func findAvailableChatModelBySource(models []availableChatModel, modelID, source string) *availableChatModel {
@@ -345,74 +214,10 @@ func chatModelSelectable(model *availableChatModel) bool {
 }
 
 func resolveOwnDefaultChatModel(ctx context.Context, db *gorm.DB, userID string, models []availableChatModel) (*availableChatModel, error) {
-	type selectedID struct {
-		ModelID string `gorm:"column:model_id"`
-	}
-	var own []selectedID
-	if err := db.WithContext(ctx).
-		Table("user_selected_models").
-		Select("user_model_provider_group_model_id AS model_id").
-		Where("user_id = ? AND model_type = ?", strings.TrimSpace(userID), "llm").
-		Order("updated_at DESC").
-		Scan(&own).Error; err != nil {
-		return nil, err
-	}
-	for _, item := range own {
-		if model := findAvailableChatModelBySource(models, item.ModelID, "own"); chatModelUsable(model) {
-			return model, nil
-		}
-	}
-	return nil, nil
+	return modelconfig.ResolveOwnDefaultChatModel(ctx, db, userID, models)
 }
-
 func resolveDefaultChatModel(ctx context.Context, db *gorm.DB, userID string, models []availableChatModel) (*availableChatModel, error) {
-	if db.Migrator().HasTable(&orm.UserSelectedCloudModel{}) {
-		var selected orm.UserSelectedCloudModel
-		err := db.WithContext(ctx).
-			Where("user_id = ? AND model_type = ?", strings.TrimSpace(userID), "llm").
-			Take(&selected).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
-		}
-		if err == nil {
-			if model := findAvailableChatModelBySource(models, selected.PublicModelKey, "cloud"); chatModelUsable(model) {
-				return model, nil
-			}
-		}
-	}
-	ownDefault, err := resolveOwnDefaultChatModel(ctx, db, userID, models)
-	if err != nil || ownDefault != nil {
-		return ownDefault, err
-	}
-	type selectedID struct {
-		ModelID string `gorm:"column:model_id"`
-	}
-
-	var shared []selectedID
-	if err := db.WithContext(ctx).
-		Table("user_selected_models").
-		Select("user_model_provider_group_model_id AS model_id").
-		Where("model_type = ? AND share = ?", "llm", true).
-		Order("updated_at DESC").
-		Scan(&shared).Error; err != nil {
-		return nil, err
-	}
-	for _, item := range shared {
-		if model := findAvailableChatModelBySource(models, item.ModelID, "shared"); chatModelUsable(model) {
-			return model, nil
-		}
-	}
-	for index := range models {
-		if models[index].Source == "cloud" && models[index].DefaultForType && chatModelSelectable(&models[index]) {
-			return &models[index], nil
-		}
-	}
-	for index := range models {
-		if models[index].Source == "cloud" && chatModelSelectable(&models[index]) {
-			return &models[index], nil
-		}
-	}
-	return nil, nil
+	return modelconfig.ResolveDefaultChatModel(ctx, db, userID, models)
 }
 
 type chatModelHistory struct {
@@ -445,7 +250,10 @@ func successfulChatModelSnapshot(conversation *orm.Conversation, histories []cha
 	for _, history := range histories {
 		terminal, err := parseRunTerminal(history.RunTerminal)
 		route := chatModelRouteFromHistoryExt(history.Ext)
-		if err != nil || !terminal.modelWasInvoked() || terminal.Status != "completed" || route == nil || route.ModelID == "" {
+		if err != nil || !chatModelWasInvoked(terminal, route, modelSwitchesFromExt(history.Ext)) || terminal.Status != "completed" || route == nil || route.ModelID == "" {
+			continue
+		}
+		if !terminal.modelWasInvoked() && (route.SelectionVersion == nil || *route.SelectionVersion != conversation.ChatModelVersion) {
 			continue
 		}
 		if snapshot.ModelID != route.ModelID || snapshot.Source != route.Source {
@@ -511,7 +319,7 @@ func unavailableAutoChatModels(conversation *orm.Conversation, histories []chatM
 			continue
 		}
 		terminal, err := parseRunTerminal(history.RunTerminal)
-		if err != nil || !terminal.modelWasInvoked() {
+		if err != nil || !chatModelWasInvoked(terminal, route, modelSwitchesFromExt(history.Ext)) {
 			continue
 		}
 		if terminal.Status == "completed" {
@@ -1139,34 +947,58 @@ func PatchConversationModel(w http.ResponseWriter, r *http.Request) {
 func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) error {
 	conversationID, _ := body["conversation_id"].(string)
 	conversationID = strings.TrimSpace(conversationID)
-	if conversationID == "" {
+	if db == nil {
 		return nil
 	}
 	var conversation orm.Conversation
-	if err := db.WithContext(ctx).
-		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, strings.TrimSpace(userID)).
-		Take(&conversation).Error; err != nil {
-		return err
+	if conversationID != "" {
+		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", conversationID, strings.TrimSpace(userID)).Take(&conversation).Error; err != nil {
+			return err
+		}
 	}
-	if conversation.ChatModelMode == nil || strings.TrimSpace(*conversation.ChatModelMode) == "" {
-		return nil
+	prepared, _ := body[chatModelPreparedBodyKey].(*modelconfig.ChatRuntimeConfig)
+	if prepared == nil {
+		var err error
+		prepared, err = modelconfig.LoadChatModelCandidates(ctx, db, userID)
+		if err != nil {
+			return err
+		}
 	}
-	mode := strings.ToLower(strings.TrimSpace(*conversation.ChatModelMode))
+	clearChatFallbackInput(body)
+	mode := chatModelModeFixed
+	legacy := conversation.ChatModelMode == nil || strings.TrimSpace(*conversation.ChatModelMode) == ""
+	if !legacy {
+		mode = strings.ToLower(strings.TrimSpace(*conversation.ChatModelMode))
+	}
+	if legacy {
+		if config, ok := body["llm_config"].(map[string]any); ok && config["llm"] != nil {
+			return nil
+		}
+	}
 	if mode != chatModelModeAuto && mode != chatModelModeFixed {
 		return errChatModelUnavailable
 	}
-	models, err := loadAvailableChatModels(ctx, db, userID)
-	if err != nil {
-		return err
-	}
+	models := prepared.Models
 	var model *availableChatModel
 	var route *chatModelRoute
-	if mode == chatModelModeAuto {
+	var unavailableSticky *chatModelSnapshot
+	if legacy {
+		var err error
+		model, err = resolveDefaultChatModel(ctx, db, userID, models)
+		if err != nil {
+			return err
+		}
+		route = fixedChatModelRoute(model)
+	} else if mode == chatModelModeAuto {
 		reason := "initial_selection"
 		retryRoute, _ := body[chatModelRetryRouteBodyKey].(*chatModelRoute)
 		if chatModelRouteMatchesSelection(retryRoute, &conversation) {
 			model = findAvailableChatModelBySource(models, retryRoute.ModelID, retryRoute.Source)
 			reason = "retry_same_model"
+			if model == nil {
+				copy := *retryRoute
+				route = &copy
+			}
 		} else {
 			histories, historyErr := loadConversationChatModelHistory(ctx, db, conversation.ID)
 			if historyErr != nil {
@@ -1174,16 +1006,9 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 			}
 			unavailable := unavailableAutoChatModels(&conversation, histories)
 			usable := make([]availableChatModel, 0, len(models))
-			hasLocalCandidates := false
-			for index := range models {
-				if models[index].Source != "cloud" && chatModelUsable(&models[index]) {
-					hasLocalCandidates = true
-					break
-				}
-			}
 			for _, candidate := range models {
 				key := chatModelIdentityKey(candidate.Source, candidate.ID)
-				if chatModelUsable(&candidate) && !unavailable[key] && (!hasLocalCandidates || candidate.Source != "cloud") {
+				if chatModelUsable(&candidate) && !unavailable[key] {
 					usable = append(usable, candidate)
 				}
 			}
@@ -1193,6 +1018,10 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 					reason = "session_sticky"
 					if model == nil {
 						reason = "model_unavailable"
+						prior := findAvailableChatModelBySource(models, previous.ModelID, previous.Source)
+						if !chatModelUsable(prior) || unavailable[chatModelIdentityKey(previous.Source, previous.ModelID)] {
+							unavailableSticky = previous
+						}
 					}
 				}
 			}
@@ -1203,7 +1032,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 						continue
 					}
 					terminal, err := parseRunTerminal(history.RunTerminal)
-					if err != nil || !terminal.modelWasInvoked() {
+					if err != nil || !chatModelWasInvoked(terminal, previousRoute, modelSwitchesFromExt(history.Ext)) {
 						continue
 					}
 					model = findAvailableChatModelBySource(usable, previousRoute.ModelID, previousRoute.Source)
@@ -1224,6 +1053,25 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 				}
 			}
 			if model == nil {
+				// Restore a successful Cloud binding before applying the existing
+				// local-first policy to a new selection. Catalog visibility alone
+				// must not enable Cloud when local models have failed this session.
+				hasLocalCandidates := false
+				for index := range models {
+					if models[index].Source != "cloud" && chatModelUsable(&models[index]) {
+						hasLocalCandidates = true
+						break
+					}
+				}
+				if hasLocalCandidates {
+					local := usable[:0]
+					for _, candidate := range usable {
+						if candidate.Source != "cloud" {
+							local = append(local, candidate)
+						}
+					}
+					usable = local
+				}
 				defaultModel, defaultErr := resolveDefaultChatModel(ctx, db, userID, usable)
 				if defaultErr != nil {
 					return defaultErr
@@ -1246,20 +1094,43 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 		model = findAvailableChatModelBySource(models, strings.TrimSpace(*conversation.ChatModelID), source)
 		route = fixedChatModelRoute(model)
 	}
-	if model == nil {
+	original := model
+	originalRoute := route
+	if originalRoute == nil {
+		originalRoute = chatModelRouteFromSnapshot(&conversation, mode)
+	}
+	if !legacy && mode == chatModelModeFixed && conversation.ChatModelID != nil && original == nil && originalRoute == nil {
 		return errChatModelUnavailable
 	}
-	fixedLLM, err := buildChatLLMConfig(ctx, db, model)
-	if err != nil {
-		return err
+	var current *modelconfig.ChatModelCandidate
+	if model != nil {
+		current = prepared.PrepareCandidate(ctx, *model)
+	}
+	if current == nil {
+		model, current = initialFallbackChatCandidate(prepared, original)
+	}
+	if current == nil {
+		if legacy {
+			return nil
+		}
+		return errChatModelUnavailable
+	}
+	fixedLLM := current.LLMConfig["llm"]
+	if route == nil {
+		route = originalRoute
+	}
+	if route == nil {
+		route = fixedChatModelRoute(model)
+		route.Mode = mode
 	}
 	if inherited := forkConfigForConversation(conversation); inherited != nil && inherited.Model != nil && inherited.Model.ModelID == model.ID && conversation.ChatModelVersion == 1 {
 		if limit, err := strconv.ParseInt(inherited.MaxInputTokens, 10, 64); err == nil && limit > 0 {
 			if cfg, ok := fixedLLM.(map[string]any); ok {
-				current, _ := cfg["max_input_tokens"].(string)
-				currentLimit, _ := strconv.ParseInt(current, 10, 64)
+				currentWindow, _ := cfg["max_input_tokens"].(string)
+				currentLimit, _ := strconv.ParseInt(currentWindow, 10, 64)
 				if currentLimit <= 0 || limit < currentLimit {
 					cfg["max_input_tokens"] = inherited.MaxInputTokens
+					current.MaxInputTokens = modelconfig.ConfiguredChatWindow(&inherited.MaxInputTokens)
 				}
 			}
 		}
@@ -1272,7 +1143,29 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 	body["llm_config"] = config
 	body[chatModelRouteBodyKey] = route
 	route.SelectionVersion = &conversation.ChatModelVersion
-	route.snapshot = chatModelSnapshotForModel(model)
+	if original != nil {
+		route.snapshot = chatModelSnapshotForModel(original)
+	}
+	if originalRoute == nil {
+		originalRoute = route
+	}
+	state := newChatFallbackState(prepared, current.CandidateID)
+	if unavailableSticky != nil && modelconfig.ChatCandidateID(unavailableSticky.Source, unavailableSticky.ModelID) != current.CandidateID {
+		from := &chatModelRoute{Mode: mode, Strategy: route.Strategy, TaskClass: route.TaskClass, Reason: "model_unavailable", SelectionVersion: route.SelectionVersion, ModelID: unavailableSticky.ModelID, ProviderID: unavailableSticky.ProviderID, ProviderName: unavailableSticky.ProviderName, ModelName: unavailableSticky.ModelName, Source: unavailableSticky.Source, snapshot: unavailableSticky}
+		var window *int64
+		if prior := findAvailableChatModelBySource(models, from.ModelID, from.Source); prior != nil {
+			window = modelconfig.ConfiguredChatWindow(prior.MaxInputTokens)
+		}
+		state.setInitialSwitch(from, window)
+		body[chatModelRouteBodyKey] = from
+	} else if originalRoute != nil && modelconfig.ChatCandidateID(originalRoute.Source, originalRoute.ModelID) != current.CandidateID {
+		var window *int64
+		if original != nil {
+			window = modelconfig.ConfiguredChatWindow(original.MaxInputTokens)
+		}
+		state.setInitialSwitch(originalRoute, window)
+	}
+	body[chatModelFallbackBodyKey] = state
 	if route != nil {
 		log.Logger.Info().
 			Str("conversation_id", conversation.ID).
@@ -1289,7 +1182,7 @@ func applyConversationChatModelConfig(ctx context.Context, db *gorm.DB, userID s
 
 func persistSuccessfulChatModel(ctx context.Context, db *gorm.DB, userID, conversationID, runID string, body map[string]any, terminal *RunTerminal) {
 	route := chatModelRouteFromBody(body)
-	if db == nil || !terminal.modelWasInvoked() || terminal.Status != "completed" || route == nil || route.snapshot == nil || route.SelectionVersion == nil || runID == "" {
+	if db == nil || route == nil || route.Mode != chatModelModeAuto || !chatModelWasInvoked(terminal, route, modelSwitchesFromBody(body)) || terminal.Status != "completed" || route.snapshot == nil || route.SelectionVersion == nil || runID == "" {
 		return
 	}
 	snapshot := *route.snapshot
@@ -1300,10 +1193,20 @@ func persistSuccessfulChatModel(ctx context.Context, db *gorm.DB, userID, conver
 	}
 	writeCtx, cancel := terminalWriteContext(ctx)
 	defer cancel()
-	if err := db.WithContext(writeCtx).Model(&orm.Conversation{}).
-		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL AND chat_model_mode = ? AND chat_model_version = ?",
-			conversationID, strings.TrimSpace(userID), route.Mode, *route.SelectionVersion).
-		UpdateColumn("chat_model_snapshot", raw).Error; err != nil {
+	if err := conversationCheckpoint(writeCtx, db, conversationID, func(tx *gorm.DB) error {
+		var latest orm.ChatHistory
+		err := tx.Where("conversation_id = ?", conversationID).Order("seq DESC, create_time DESC, id DESC").Take(&latest).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err == nil && latest.RunID != runID {
+			return nil
+		}
+		return tx.Model(&orm.Conversation{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL AND chat_model_mode = ? AND chat_model_version = ?",
+				conversationID, strings.TrimSpace(userID), route.Mode, *route.SelectionVersion).
+			UpdateColumn("chat_model_snapshot", raw).Error
+	}); err != nil {
 		log.Logger.Warn().Err(err).Str("conversation_id", conversationID).Str("run_id", runID).Msg("failed to save successful chat model")
 	}
 }
@@ -1317,6 +1220,12 @@ func LoadOrganizerChatLLMConfig(ctx context.Context, db *gorm.DB, userID, conver
 	body := map[string]any{"conversation_id": conversationID}
 	if err := applyConversationChatModelConfig(ctx, db, userID, body); err != nil {
 		return nil, err
+	}
+	// Organizer calls do not run the chat fallback protocol to confirm a fixed-model switch.
+	if fallback, _ := body[chatModelFallbackBodyKey].(*chatFallbackState); fallback != nil && fallback.initialSwitch != nil {
+		if route := chatModelRouteFromBody(body); route != nil && route.Mode == chatModelModeFixed {
+			return nil, errChatModelUnavailable
+		}
 	}
 	if config, ok := body["llm_config"].(map[string]any); ok {
 		return config, nil

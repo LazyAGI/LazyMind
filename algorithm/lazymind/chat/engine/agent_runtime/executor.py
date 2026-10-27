@@ -149,6 +149,11 @@ class AgentExecutor:
         from lazymind.model_features import feature_is_enabled
         tools_enabled = feature_is_enabled('tool_calling', options.llm_config)
         llm = bounded_model_for_role(llm, options.llm_config)
+        fallback_state = None
+        if options.model_candidates and not options.context_preview:
+            from .model_fallback import FallbackLLM, create_fallback_state
+            fallback_state = create_fallback_state(llm, options)
+            llm = FallbackLLM(fallback_state, cancel_check=options.extra_stop_condition)
         keep_full_turns = options.keep_full_turns
         if keep_full_turns is None:
             keep_full_turns = int(_cfg['agentic_keep_full_turns'])
@@ -162,6 +167,8 @@ class AgentExecutor:
                 keep_recent=keep_full_turns,
                 trigger='mid_turn',
                 llm=llm,
+                summarizer=llm.auxiliary_call if fallback_state is not None else None,
+                budget_provider=(lambda: fallback_state.budget) if fallback_state is not None else None,
                 workspace=options.workspace,
             )
         run_id = uuid.uuid4().hex[:12]
@@ -179,6 +186,8 @@ class AgentExecutor:
 
             def history_compactor(history, keep_full_turns=None, **kwargs):
                 import inspect
+                if fallback_state is not None:
+                    kwargs['budget_provider'] = lambda: fallback_state.budget
                 state = kwargs.get('runtime_state', {})
                 previous = state.get('compression_revision', 0)
                 parameters = inspect.signature(compact_history).parameters
@@ -265,8 +274,11 @@ class AgentExecutor:
             'extra_stop_condition': stop_condition if options.stop_on_repeated_results else options.extra_stop_condition,
             'runtime_observer': runtime_observer,
             'model_context_provider': model_context,
-            'before_model_request': (prepare_request if configuration_runtime is not None
-                                     else options.before_model_request) if not options.context_preview else None,
+            'before_model_request': (
+                prepare_request if configuration_runtime is not None
+                else options.before_model_request) if not options.context_preview else None,
+            'final_summary_call': (
+                (lambda prompt: llm.auxiliary_call('', prompt)) if fallback_state is not None else None),
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
         if not tools_enabled:
@@ -284,9 +296,13 @@ class AgentExecutor:
             configuration_runtime.bind(agent._tools_manager)
         configure_skill_sandbox(getattr(agent, '_skill_manager', None))
         from .tool_retrieval import configure_tool_retrieval
-        if tools_enabled:
-            configure_tool_retrieval(agent, plan)
-            restore_loaded_skill_runtime(getattr(agent, '_skill_manager', None), plan.history)
+        agent._model_fallback_state = fallback_state
+        configure_tool_retrieval(
+            agent, plan,
+            budget_provider=(lambda: fallback_state.budget) if fallback_state is not None else None,
+            initialization_budget_provider=llm.initialization_budget if fallback_state is not None else None,
+            defer_request_validation=fallback_state is not None)
+        restore_loaded_skill_runtime(getattr(agent, '_skill_manager', None), plan.history)
         trusted_opaque_tools = tuple(
             tool for name in (getattr(agent, '_skill_tool_names', set()) & {'run_script', 'run_skill_script'})
             if (tool := agent._tools_manager.tools_info.get(name)) is not None
@@ -389,7 +405,7 @@ class AgentExecutor:
         stream = helper.astream(plan.prompt.current_input, **kwargs)
         try:
             async for item in stream:
-                if is_model_failure_event(item):
+                if is_model_failure_event(item) and getattr(agent, '_model_fallback_state', None) is None:
                     item = await asyncio.to_thread(
                         refine_unavailable_model_event,
                         item,
@@ -401,14 +417,18 @@ class AgentExecutor:
                 result = helper.future.result()
             except Exception as exc:
                 failed = True
+                if any(getattr(error, '_model_fallback_local_failure', False)
+                       for error in self._exception_chain(exc)):
+                    yield 'event', {'tag': 'model_fallback_failed', 'fallback_code': 'runtime_failure'}
                 terminal = self._find_model_terminal(exc)
                 model_call_id = str((terminal or {}).get('model_call_id') or '')
                 if terminal and model_call_id not in finished_model_calls:
-                    terminal = await asyncio.to_thread(
-                        refine_unavailable_model_terminal,
-                        terminal,
-                        llm_config,
-                    )
+                    if getattr(agent, '_model_fallback_state', None) is None:
+                        terminal = await asyncio.to_thread(
+                            refine_unavailable_model_terminal,
+                            terminal,
+                            llm_config,
+                        )
                     yield 'event', {
                         'tag': 'runtime_event',
                         'runtime_event': {
@@ -453,15 +473,25 @@ class AgentExecutor:
             seen.add(str(data['model_call_id']))
 
     @staticmethod
-    def _find_model_terminal(exc: Exception) -> Optional[dict[str, Any]]:
+    def _exception_chain(exc: Exception):
         seen = set()
         while exc is not None and id(exc) not in seen:
             seen.add(id(exc))
-            terminal = getattr(exc, 'terminal', None)
-            if terminal is not None:
-                public_dict = getattr(terminal, 'public_dict', None)
-                return public_dict() if callable(public_dict) else terminal
+            yield exc
             exc = exc.__cause__ or exc.__context__
+
+    @staticmethod
+    def _find_model_terminal(exc: Exception) -> Optional[dict[str, Any]]:
+        for error in AgentExecutor._exception_chain(exc):
+            if getattr(error, '_model_fallback_local_failure', False):
+                return None
+            terminal = getattr(error, 'terminal', None)
+            if terminal is not None:
+                if getattr(terminal, 'attempt_count', None) == 0:
+                    return None
+                public_dict = getattr(terminal, 'public_dict', None)
+                result = public_dict() if callable(public_dict) else terminal
+                return result
         return None
 
     def run(self, llm: Any, plan: AgentRunPlan) -> Any:

@@ -131,6 +131,28 @@ func TestResolveAppErrorPreservesCallerHTTPStatus(t *testing.T) {
 	}
 }
 
+func TestResolveModelFallbackErrorsUseCanonicalMessages(t *testing.T) {
+	for _, sample := range []struct {
+		source  string
+		status  int
+		code    int
+		message string
+	}{
+		{"save model output failed", 500, 2000000, "Internal server error"},
+		{"task model configuration unavailable", 500, 2000000, "Internal server error"},
+		{"model switch has no authorized candidates", 502, 2002077, "algorithm chat stream failed"},
+		{"model output sequence mismatch", 502, 2002077, "algorithm chat stream failed"},
+		{"task initial model requires successful switch", 502, 2002077, "algorithm chat stream failed"},
+	} {
+		t.Run(sample.source, func(t *testing.T) {
+			appErr := ResolveAppError(sample.source, sample.status)
+			if appErr.Code != sample.code || appErr.HTTPStatus != sample.status || appErr.Message != sample.message || appErr.Detail != nil {
+				t.Fatalf("resolved error = %#v, want code %d, HTTP status %d and message %q without detail", appErr, sample.code, sample.status, sample.message)
+			}
+		})
+	}
+}
+
 func TestResolveDisplayNameLengthErrorsUseSameCode(t *testing.T) {
 	for _, message := range []string{"display_name too long", "display_name must be 255 characters or fewer"} {
 		t.Run(message, func(t *testing.T) {

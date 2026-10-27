@@ -3,6 +3,7 @@ package modelconfig
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -219,8 +220,10 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string, scope
 }
 
 type SelectedRuntimeModel struct {
-	RuntimeGroupID    string `gorm:"column:runtime_group_id"`
-	RuntimeProviderID string `gorm:"column:runtime_provider_id"`
+	RuntimeGroupID     string `gorm:"column:runtime_group_id"`
+	RuntimeProviderID  string `gorm:"column:runtime_provider_id"`
+	ProviderGroupID    string `gorm:"column:provider_group_id"`
+	CredentialRevision int64  `gorm:"column:credential_revision"`
 	// RuntimeIdentity is the catalog identity used to choose a LazyLLM
 	// adapter. It is separate from ProviderName, which may be an
 	// OpenAI-compatible protocol for local vLLM/LMDeploy providers.
@@ -301,9 +304,18 @@ func LoadLLMConfigWithEvolution(ctx context.Context, db *gorm.DB, userID string,
 }
 
 func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolution bool) (map[string]any, error) {
+	return loadLLMConfigWithOptions(ctx, db, userID, omitEvolution, false, runtimeCredentials{})
+}
+
+// loadLLMConfigWithOptions keeps the legacy role loading behavior while allowing
+// chat runtime preparation to omit the chat role and reuse credential results.
+func loadLLMConfigWithOptions(ctx context.Context, db *gorm.DB, userID string, omitEvolution, omitChat bool, credentials runtimeCredentials) (map[string]any, error) {
 	selectionScope := func(query *gorm.DB) *gorm.DB {
 		if omitEvolution {
-			return query.Where("usm.model_type <> ?", "evo_llm")
+			query = query.Where("usm.model_type <> ?", "evo_llm")
+		}
+		if omitChat {
+			query = query.Where("LOWER(TRIM(usm.model_type)) <> ?", "llm")
 		}
 		return query
 	}
@@ -318,7 +330,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, m.user_model_provider_id AS runtime_provider_id, "+
-				"g.id AS runtime_group_id, g.base_url, "+
+				"g.id AS runtime_group_id, g.id AS provider_group_id, g.credential_revision, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
 				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
 		).
@@ -347,7 +359,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	var ownCredentialError error
 	for _, row := range ownRows {
 		candidate := []SelectedRuntimeModel{row}
-		if err := decryptRuntimeModels(ctx, db, candidate); err != nil {
+		if err := decryptRuntimeModelsWithCache(ctx, db, candidate, credentials); err != nil {
 			blockedOwnTypes[strings.ToLower(strings.TrimSpace(row.ModelType))] = struct{}{}
 			if ownCredentialError == nil {
 				ownCredentialError = err
@@ -371,6 +383,9 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 	unresolvedCloudTypes := make(map[string]struct{}, len(cloudSelections))
 	resolvedCloudRows := make([]SelectedRuntimeModel, 0, len(cloudSelections))
 	for _, selection := range cloudSelections {
+		if omitChat && strings.EqualFold(strings.TrimSpace(selection.ModelType), "llm") {
+			continue
+		}
 		resolved, available, err := ResolveCloudRuntimeModel(ctx, selection.ModelType, selection.PublicModelKey)
 		if err != nil || !available {
 			// Keep the user's stored Cloud preference, but let the dormant local
@@ -418,7 +433,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 				"m.is_default, "+
 				"m.provider_name, "+
 				"m.name AS model_name, m.user_model_provider_id AS runtime_provider_id, "+
-				"g.id AS runtime_group_id, g.base_url, "+
+				"g.id AS runtime_group_id, g.id AS provider_group_id, g.credential_revision, g.base_url, "+
 				"g.api_key, g.api_key_ciphertext, "+
 				"m.max_input_tokens, m.input_token_limit, m.max_output_tokens",
 		).
@@ -449,7 +464,7 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		normalized := strings.ToLower(strings.TrimSpace(row.ModelType))
 		if _, covered := coveredTypes[normalized]; !covered {
 			candidate := []SelectedRuntimeModel{row}
-			if err := decryptRuntimeModels(ctx, db, candidate); err != nil {
+			if err := decryptRuntimeModelsWithCache(ctx, db, candidate, credentials); err != nil {
 				continue
 			}
 			rows = append(rows, candidate[0])
@@ -468,6 +483,15 @@ func loadLLMConfig(ctx context.Context, db *gorm.DB, userID string, omitEvolutio
 		rows = filtered
 	}
 
+	if omitChat {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if !strings.EqualFold(strings.TrimSpace(row.ModelType), "llm") {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
 	return BuildLLMConfig(rows), nil
 }
 
@@ -909,14 +933,62 @@ func populateRuntimeIdentities(ctx context.Context, db *gorm.DB, rows []Selected
 }
 
 func decryptRuntimeModels(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel) error {
+	return decryptRuntimeModelsWithCache(ctx, db, rows, runtimeCredentials{})
+}
+
+// decryptRuntimeModelsWithCache resolves the provider runtime once per group
+// revision while retaining the advanced request settings used by legacy
+// providers. The cache is an optimization; an empty cache keeps old callers
+// fully compatible.
+func decryptRuntimeModelsWithCache(ctx context.Context, db *gorm.DB, rows []SelectedRuntimeModel, credentials runtimeCredentials) error {
 	for i := range rows {
-		runtimeConfig, err := modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, rows[i].RuntimeGroupID)
-		if err != nil {
-			return err
+		groupID := strings.TrimSpace(rows[i].RuntimeGroupID)
+		if groupID == "" {
+			groupID = strings.TrimSpace(rows[i].ProviderGroupID)
 		}
-		rows[i].BaseURL, rows[i].APIKey = runtimeConfig.BaseURL, runtimeConfig.APIKey
-		rows[i].RequestAdvanced = runtimeConfig.Advanced
-		rows[i].SkipAuth = strings.TrimSpace(runtimeConfig.APIKey) == "" && strings.TrimSpace(runtimeConfig.BaseURL) != ""
+		if credentials != nil && groupID != "" {
+			key := runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}
+			if cached, ok := credentials[key]; ok &&
+				(cached.err != nil || strings.TrimSpace(cached.key) != "" || strings.TrimSpace(cached.baseURL) != "") {
+				if cached.err != nil {
+					return cached.err
+				}
+				rows[i].APIKey = cached.key
+				if strings.TrimSpace(cached.baseURL) != "" {
+					rows[i].BaseURL = cached.baseURL
+				}
+				rows[i].SkipAuth = strings.TrimSpace(cached.key) == "" && strings.TrimSpace(rows[i].BaseURL) != ""
+				continue
+			}
+		}
+		resolvedKey, resolveErr := credentials.resolve(groupID, rows[i].CredentialRevision, rows[i].APIKey, rows[i].APIKeyCiphertext)
+		runtimeConfig, runtimeErr := modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, groupID)
+		if runtimeErr == nil {
+			rows[i].BaseURL, rows[i].APIKey = runtimeConfig.BaseURL, runtimeConfig.APIKey
+			rows[i].RequestAdvanced = runtimeConfig.Advanced
+			rows[i].SkipAuth = strings.TrimSpace(runtimeConfig.APIKey) == "" && strings.TrimSpace(runtimeConfig.BaseURL) != ""
+			if groupID != "" && credentials != nil {
+				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: runtimeConfig.APIKey, baseURL: runtimeConfig.BaseURL}
+			}
+			continue
+		}
+		// A legacy envelope can be valid even when the group row predates the
+		// current credential-version column. Preserve that key and the stored
+		// endpoint instead of rejecting the whole role.
+		if resolveErr == nil && strings.TrimSpace(resolvedKey) != "" &&
+			!errors.Is(runtimeErr, modelprovider.ErrProviderKeyDisabled) &&
+			!errors.Is(runtimeErr, modelprovider.ErrProviderKeyUnverified) {
+			rows[i].APIKey = resolvedKey
+			rows[i].SkipAuth = strings.TrimSpace(resolvedKey) == "" && strings.TrimSpace(rows[i].BaseURL) != ""
+			if groupID != "" && credentials != nil {
+				credentials[runtimeCredentialKey{groupID: groupID, revision: rows[i].CredentialRevision}] = runtimeCredentialResult{key: resolvedKey, baseURL: rows[i].BaseURL}
+			}
+			continue
+		}
+		if runtimeErr != nil {
+			return runtimeErr
+		}
+		return resolveErr
 	}
 	return nil
 }

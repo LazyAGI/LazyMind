@@ -3,6 +3,10 @@
     "specHash": "2b096fbf341f0e607db123f2aabbfa4dc97951b0a2706994ca765df3b9b46117",
     "outputHash": "e859606d52fb3da60f243f7e971a271bf8184a0245530e76b56f75fa86251248"
   },
+  "core": {
+    "specHash": "b9ae1951747180beb6c40f93ef535bc6061e34e6d9820142b6848eed448dc5e0",
+    "outputHash": "9f7512fc2ccb888e8707ed6aaccb60aaeba5abf643448d30ca657cb94c665167"
+  },
   "scan": {
     "specHash": "f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389",
     "outputHash": "c5dd06b3e78c67d87fecb99ec1604e30358f493945dc0660ad1ea60e52262354"
@@ -10,9 +14,5 @@
   "channel-gateway": {
     "specHash": "594f7d903505a551e0976b9e0901a55f089a381ea6f0f33a75a87f6ac683a0a4",
     "outputHash": "a2b8d43e94b3e9b3195ecd62e4a575ee6ac7b8fa9cb364c43146f290f6a26af3"
-  },
-  "core": {
-    "specHash": "ea03da087c1adce5eb37c9226c5b6f45f0e36812828875a78313a90cd4e0d6ff",
-    "outputHash": "a3ec94125d67304c2d4ab70abbd6788b2af192e5ff7443ffb2f1e773586ebd84"
   }
 }

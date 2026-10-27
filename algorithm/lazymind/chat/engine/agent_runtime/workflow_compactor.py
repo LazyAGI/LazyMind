@@ -18,6 +18,7 @@ from .compactors import (
     tool_result_utf8_size,
 )
 from .context_estimator import estimate_non_history_tokens
+from .models import ContextBudget
 from .pruner import estimate_history_tokens
 
 
@@ -72,8 +73,11 @@ def make_workflow_history_compactor(
     def _compact(
         history: list[dict[str, Any]],
         keep_full_turns: Optional[int] = None,
+        *,
+        budget_provider: Optional[Callable[[], ContextBudget]] = None,
         **kwargs: Any,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        active_budget = budget_provider() if budget_provider is not None else budget
         prior = list(history)
         current = list(kwargs.get('current_round_messages') or [])
         prefix = kwargs.get('prefix') or {}
@@ -85,7 +89,7 @@ def make_workflow_history_compactor(
             current_input=current_input,
             reserved_runtime_context_tokens=reserved,
         )
-        if total <= budget.effective_input_budget:
+        if total <= active_budget.effective_input_budget:
             return prior, current
 
         effective_keep = max(
@@ -114,7 +118,7 @@ def make_workflow_history_compactor(
                 prefix=prefix,
                 current_input=current_input,
                 reserved_runtime_context_tokens=reserved,
-            ) <= budget.effective_input_budget
+            ) <= active_budget.effective_input_budget
 
         # Keep recent turn structure, but allow every result body to be replaced
         # with a recoverable reference before removing any older turns.

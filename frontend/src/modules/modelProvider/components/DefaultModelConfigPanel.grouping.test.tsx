@@ -219,6 +219,15 @@ describe("default capability configuration groups", () => {
       expect(screen.getByRole("button", { name: new RegExp(`modelProvider.defaults.${category}Title`) })).toHaveAttribute("aria-expanded", "true");
       expect(screen.getByRole("region", { name: `modelProvider.defaults.${category}Title` })).toBeInTheDocument();
     }
+    const retrievalRows = screen
+      .getByRole("region", { name: "modelProvider.defaults.retrievalTitle" })
+      .querySelectorAll(".model-provider-default-row");
+    expect([...retrievalRows].map((row) => row.getAttribute("aria-label"))).toEqual([
+      "modelProvider.module.searchEngineServiceTitle",
+      "modelProvider.module.cloudParsingServiceTitle",
+      "modelProvider.module.rerankTitle",
+      "modelProvider.module.multimodalEmbeddingTitle",
+    ]);
     expect(screen.getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
   });
 

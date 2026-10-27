@@ -764,8 +764,14 @@ components:
                     type: string
                 message:
                     type: string
+                model_output:
+                    $ref: '#/components/schemas/ChatModelOutput'
                 model_route:
                     $ref: '#/components/schemas/ChatModelRoute'
+                model_switches:
+                    items:
+                        $ref: '#/components/schemas/ChatModelSwitchRecord'
+                    type: array
                 performance_metrics:
                     $ref: '#/components/schemas/RunPerformanceMetrics'
                 prompt_questions:
@@ -866,6 +872,25 @@ components:
                             type: object
                     type: object
             type: object
+        ChatModelOutput:
+            properties:
+                call_index:
+                    description: Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run.
+                    minimum: 0
+                    type: integer
+                phase:
+                    description: Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed.
+                    enum:
+                        - begin
+                        - commit
+                        - rollback
+                    type: string
+                run_id:
+                    type: string
+            required:
+                - run_id
+                - call_index
+            type: object
         ChatModelRoute:
             properties:
                 mode:
@@ -892,6 +917,7 @@ components:
                         - fixed
                         - initial_selection
                         - model_unavailable
+                        - model_fallback
                     type: string
                 selection_version:
                     format: int64
@@ -914,6 +940,71 @@ components:
                         - auto
                     type: string
             type: object
+        ChatModelSwitchIdentity:
+            properties:
+                candidate_id:
+                    type: string
+                model_id:
+                    type: string
+                model_name:
+                    type: string
+                provider_group_id:
+                    type: string
+                provider_name:
+                    type: string
+                source:
+                    enum:
+                        - own
+                        - shared
+                        - cloud
+                    type: string
+            required:
+                - candidate_id
+                - source
+                - model_id
+                - provider_group_id
+            type: object
+        ChatModelSwitchRecord:
+            allOf:
+                - $ref: '#/components/schemas/ChatModelSwitchedData'
+                - properties:
+                    event_id:
+                        type: string
+                  required:
+                    - event_id
+                  type: object
+        ChatModelSwitchedData:
+            properties:
+                context_compacted:
+                    type: boolean
+                from:
+                    $ref: '#/components/schemas/ChatModelSwitchIdentity'
+                from_max_input_tokens:
+                    format: int64
+                    minimum: 1
+                    nullable: true
+                    type: integer
+                reason_code:
+                    type: string
+                switch_index:
+                    minimum: 1
+                    type: integer
+                to:
+                    $ref: '#/components/schemas/ChatModelSwitchIdentity'
+                to_max_input_tokens:
+                    format: int64
+                    minimum: 1
+                    nullable: true
+                    type: integer
+            required:
+                - switch_index
+                - from
+                - to
+                - reason_code
+                - from_max_input_tokens
+                - to_max_input_tokens
+                - context_compacted
+            type: object
         ChatRuntimeEvent:
             properties:
                 data:
@@ -926,6 +1017,11 @@ components:
                 schema_version:
                     type: integer
                 type:
+                    enum:
+                        - model_retry_scheduled
+                        - model_call_finished
+                        - model_switched
+                        - run_finished
                     type: string
             type: object
         CheckDatabaseConnectionResponse:
@@ -2260,8 +2356,14 @@ components:
                         properties: {}
                         type: object
                     type: array
+                model_output:
+                    $ref: '#/components/schemas/ChatModelOutput'
                 model_route:
                     $ref: '#/components/schemas/ChatModelRoute'
+                model_switches:
+                    items:
+                        $ref: '#/components/schemas/ChatModelSwitchRecord'
+                    type: array
                 performance_metrics:
                     $ref: '#/components/schemas/RunPerformanceMetrics'
                 query:
@@ -6204,6 +6306,10 @@ components:
                     type: string
                 model_route:
                     $ref: '#/components/schemas/ChatModelRoute'
+                model_switches:
+                    items:
+                        $ref: '#/components/schemas/ChatModelSwitchRecord'
+                    type: array
                 result:
                     type: string
                 run_id:
@@ -7309,6 +7415,36 @@ components:
                 - reason
                 - settings_url
             type: object
+        ModelCallFinishedData:
+            properties:
+                attempt_count:
+                    type: integer
+                failure:
+                    properties:
+                        code:
+                            type: string
+                        diagnostic_id:
+                            type: string
+                        origin:
+                            type: string
+                    type: object
+                finish:
+                    type: string
+                has_semantic_output:
+                    type: boolean
+                kind:
+                    enum:
+                        - finish
+                        - failure
+                    type: string
+                model_call_id:
+                    type: string
+            required:
+                - model_call_id
+                - attempt_count
+                - kind
+                - has_semantic_output
+            type: object
         ModelFailureCode:
             enum:
                 - authentication_failed
@@ -7688,10 +7824,17 @@ components:
                     type: string
                 execution_id:
                     type: string
+                failure_code:
+                    enum:
+                        - model_fallback_exhausted
+                        - model_context_not_fit
+                    type: string
                 knowledge_operations:
                     items:
                         $ref: '#/components/schemas/KnowledgeOperation'
                     type: array
+                model_switch:
+                    $ref: '#/components/schemas/ChatModelSwitchRecord'
                 order:
                     type: integer
                 pages:
@@ -8418,6 +8561,8 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                model_switch:
+                    $ref: '#/components/schemas/ChatModelSwitchRecord'
                 order:
                     maximum: 1000
                     minimum: 0
@@ -9639,6 +9784,95 @@ components:
                 document_state:
                     type: string
             type: object
+        TaskEvent:
+            description: Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect or execution changes begin with a Core-generated task_start with snapshot=true and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. Only this DB section initializes authoritative hydration; live task_start is idempotent for an established execution. On ordinary tool_calls/tool_results, seq is the zero-based durable step sequence used to merge snapshot and live delivery once. Terminal restores any open preview before done/error.
+            properties:
+                chunk_index:
+                    format: int64
+                    type: integer
+                content_type:
+                    type: string
+                current_phase:
+                    type: string
+                delta:
+                    type: string
+                durable_tool_results:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                estimated_sec:
+                    type: integer
+                event_id:
+                    type: string
+                execution_id:
+                    type: string
+                message:
+                    type: string
+                model_output:
+                    $ref: '#/components/schemas/ChatModelOutput'
+                process_step:
+                    $ref: '#/components/schemas/PublicProcessStep'
+                progress:
+                    type: integer
+                runtime_event:
+                    $ref: '#/components/schemas/TaskModelRuntimeEvent'
+                scope_version:
+                    type: integer
+                seq:
+                    type: integer
+                slot:
+                    type: string
+                snapshot:
+                    type: boolean
+                sources:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                status:
+                    type: string
+                steps:
+                    items:
+                        type: string
+                    type: array
+                stream_id:
+                    type: string
+                summary:
+                    type: string
+                task_id:
+                    type: string
+                text:
+                    type: string
+                think:
+                    type: string
+                tool_calls:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                tool_results:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                type:
+                    type: string
+                v2_artifact_id:
+                    type: string
+                v2_revision_id:
+                    type: string
+                value:
+                    properties: {}
+                    type: object
+                writing_subtasks:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+            required:
+                - type
+            type: object
         TaskFile:
             properties:
                 content_type:
@@ -9683,6 +9917,29 @@ components:
                 total_document_size:
                     format: int64
                     type: integer
+            type: object
+        TaskModelRuntimeEvent:
+            properties:
+                data:
+                    $ref: '#/components/schemas/ChatModelSwitchedData'
+                event_id:
+                    type: string
+                run_id:
+                    type: string
+                schema_version:
+                    enum:
+                        - 1
+                    type: integer
+                type:
+                    enum:
+                        - model_switched
+                    type: string
+            required:
+                - schema_version
+                - event_id
+                - run_id
+                - type
+                - data
             type: object
         TaskNotification:
             properties:
