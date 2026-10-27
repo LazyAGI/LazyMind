@@ -76,6 +76,103 @@ func TestImportOperationViewsPageInDatabaseAndKeepDefaultContract(t *testing.T) 
 	}
 }
 
+func TestImportOperationsFollowLibraryRemovalAndReimport(t *testing.T) {
+	for _, driver := range []string{"sqlite", "postgres"} {
+		t.Run(driver, func(t *testing.T) {
+			var db *gorm.DB
+			if driver == "postgres" {
+				db = paperLibraryTestDB(t, libraryPostgresDB(t))
+			} else {
+				db = paperLibraryTestDB(t)
+			}
+			draft := libraryDraft("paper", "Paper", "10.1234/removed")
+			paper := importDraft(t, "papers", "metadata", draft).Data.Papers[0]
+			uploadReceipt(t, db, "papers", "pdf", "upload", paper.ID, "hash")
+			path := filepath.Join(t.TempDir(), "paper.pdf")
+			if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.Document{}).Where("id='pdf'").Update("ext", marshal(map[string]string{"stored_path": path})).Error; err != nil {
+				t.Fatal(err)
+			}
+			confirmUpload(t, paper, "pdf", "upload", true)
+			importDraft(t, "papers", "duplicate", draft)
+			var receipts []orm.PaperImportItem
+			if err := db.Find(&receipts).Error; err != nil {
+				t.Fatal(err)
+			}
+			originalStatus := map[string]string{}
+			originalBatches := map[string]bool{}
+			for _, item := range receipts {
+				originalStatus[item.ID] = item.Status
+				originalBatches[item.BatchID] = true
+			}
+			check := func(removed bool, operationCount int) {
+				t.Helper()
+				view := readLibrary(t, "papers")
+				wantCount := int64(1)
+				if removed {
+					wantCount = 0
+				}
+				if view.PaperCount != wantCount || view.PDFAttachmentCount != wantCount {
+					t.Fatalf("library membership disagrees: %+v", view.Counts)
+				}
+				w := libraryRequest(t, "GET", "/imports?view=operations", "papers", "owner", nil)
+				var page struct {
+					Items        []ImportOperation `json:"items"`
+					Notification struct {
+						Active      int `json:"active"`
+						NeedsAction int `json:"needs_action"`
+					} `json:"notification"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != 200 || len(page.Items) != operationCount || page.Notification.Active != 0 || page.Notification.NeedsAction != 0 {
+					t.Fatal(w.Code, w.Body.String())
+				}
+				for _, operation := range page.Items {
+					if !originalBatches[operation.ID] {
+						continue
+					}
+					w = libraryRequest(t, "GET", "/imports/"+operation.ID+"?view=operations", "papers", "owner", nil)
+					var detail struct {
+						Batch     orm.PaperImportBatch  `json:"batch"`
+						Operation ImportOperation       `json:"operation"`
+						Items     []ImportOperationItem `json:"items"`
+					}
+					if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil || w.Code != 200 || len(detail.Items) != 1 {
+						t.Fatal(w.Code, w.Body.String())
+					}
+					if detail.Operation.Summary != operation.Summary || detail.Operation.Status != operation.Status {
+						t.Fatalf("list and detail disagree: %+v %+v", operation, detail.Operation)
+					}
+					item := detail.Items[0]
+					if item.Status != originalStatus[item.ItemID] || detail.Batch.Status != "succeeded" {
+						t.Fatalf("historical import result changed: %+v", detail)
+					}
+					if item.DocumentID != "" && (item.CurrentDocument == nil || item.CurrentDocument.DocumentID != "pdf" || item.DocumentDeleted) {
+						t.Fatalf("original PDF is no longer readable: %+v", item)
+					}
+					if removed {
+						if operation.Status != "removed" || operation.Summary.Removed != 1 || operation.Summary.Ready+operation.Summary.MetadataOnly+operation.Summary.Skipped != 0 || item.CurrentState != "removed" || item.LibraryPaperID != "" || item.ResolvedLater || item.CanRetry {
+							t.Fatalf("removed paper still appears in the library: %+v %+v", operation, item)
+						}
+					} else if operation.Summary.Removed != 0 || item.CurrentState == "removed" || item.LibraryPaperID != paper.ID {
+						t.Fatalf("active membership was lost: %+v %+v", operation, item)
+					}
+				}
+			}
+			check(false, 3)
+			paper = readLibrary(t, "papers").Data.Papers[0]
+			w := libraryRequest(t, "POST", "/library/papers:remove", "papers", "owner", map[string]any{"items": []libraryTarget{{ID: paper.ID, Revision: paper.Revision}}})
+			if w.Code != 200 {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			check(true, 3)
+			importDraft(t, "papers", "reimport", draft)
+			check(false, 4)
+		})
+	}
+}
+
 func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
 	for _, driver := range []string{"sqlite", "postgres"} {
 		t.Run(driver, func(t *testing.T) {
@@ -212,7 +309,7 @@ func TestImportOperationsPreserveFailureAndRecognizeLaterResolution(t *testing.T
 
 func TestImportOperationPostgresProcessingProjection(t *testing.T) {
 	db := libraryPostgresDB(t)
-	if err := db.AutoMigrate(&orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{}, &orm.AcademicWorkDocument{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}); err != nil {
+	if err := db.AutoMigrate(&orm.Dataset{}, &orm.Document{}, &orm.DocumentProcessingState{}, &orm.AcademicWorkDocument{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.PaperLibraryEntry{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, row := range []any{

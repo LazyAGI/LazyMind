@@ -333,6 +333,8 @@ components:
                             type: integer
                         ready:
                             type: integer
+                        removed:
+                            type: integer
                         resolved_later:
                             type: integer
                         retryable:

@@ -315,6 +315,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         const papers = dataRef.current.papers.filter(p => ids.includes(p.id));
         try {
             await mutate(() => removeLibraryPapers(datasetId, papers));
+            setSyncRevision(value => value + 1);
             setSelected(current => current.filter(id => !ids.includes(id)));
             if (editing && ids.includes(editing.id))
                 setEditing(null);

@@ -40,6 +40,7 @@ type ImportOperationSummary struct {
 	Failed        int `json:"failed"`
 	Canceled      int `json:"canceled"`
 	Deleted       int `json:"deleted"`
+	Removed       int `json:"removed"`
 	ResolvedLater int `json:"resolved_later"`
 	Retryable     int `json:"retryable"`
 	NeedsAction   int `json:"needs_action"`
@@ -94,7 +95,7 @@ func operationDocuments(db *gorm.DB, user, dataset string, batchIDs, itemIDs []s
 		version = "(CAST(i.selected_candidate_json AS jsonb)->>'version')"
 	}
 	fallback := "(SELECT l.document_id FROM academic_work_documents l WHERE l.academic_work_id=i.academic_work_id AND l.dataset_id=b.target_dataset_id AND COALESCE(" + provider + ",'')<>'' AND COALESCE(" + version + ",'')<>'' AND l.source_provider=" + provider + " AND l.source_version=" + version + " ORDER BY l.is_preferred_version DESC,l.updated_at DESC LIMIT 1)"
-	source := db.Table("paper_import_items i").Select("i.id,i.batch_id,i.status,i.stage,i.result_kind,b.status AS batch_status,b.target_dataset_id,COALESCE(NULLIF(i.document_id,''),"+fallback+") AS effective_document_id").Joins("JOIN paper_import_batches b ON b.id=i.batch_id").Where("b.created_by=?", user)
+	source := db.Table("paper_import_items i").Select("i.id,i.batch_id,i.status,i.stage,i.result_kind,b.status AS batch_status,b.target_dataset_id,e.removed_at AS library_removed_at,COALESCE(NULLIF(i.document_id,''),"+fallback+") AS effective_document_id").Joins("JOIN paper_import_batches b ON b.id=i.batch_id").Joins("LEFT JOIN paper_library_entries e ON e.dataset_id=b.target_dataset_id AND e.id=i.library_paper_id").Where("b.created_by=?", user)
 	if dataset != "" {
 		source = source.Where("b.target_dataset_id=?", dataset)
 	}
@@ -199,8 +200,9 @@ func operationStates(db *gorm.DB, user, dataset string, batchIDs, itemIDs []stri
 	}
 	joined = joined.Select("x.*,CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END AS document_available," + state + " AS processing_state")
 	return db.Table("(?) state", joined).Select(`state.id,state.batch_id,
- CASE WHEN state.status='failed' AND state.document_available=1 AND state.processing_state='ready' THEN 1 ELSE 0 END AS resolved_later,
+ CASE WHEN state.status='failed' AND state.library_removed_at IS NULL AND state.document_available=1 AND state.processing_state='ready' THEN 1 ELSE 0 END AS resolved_later,
  CASE WHEN state.stage='awaiting_association' THEN 'awaiting_association'
+ WHEN state.library_removed_at IS NOT NULL THEN 'removed'
  WHEN state.result_kind='metadata_only' THEN 'metadata_only'
  WHEN state.status='failed' AND state.batch_status IN ('pending','running') THEN 'importing'
  WHEN state.status='failed' AND state.document_available=1 AND state.processing_state='processing' THEN 'processing'
@@ -226,6 +228,7 @@ func operationSummaryQuery(db *gorm.DB, user, dataset string, batchIDs []string,
  SUM(CASE WHEN current_state IN ('failed','processing_failed') THEN 1 ELSE 0 END) AS failed,
  SUM(CASE WHEN current_state='canceled' THEN 1 ELSE 0 END) AS canceled,
  SUM(CASE WHEN current_state='deleted' THEN 1 ELSE 0 END) AS deleted,
+ SUM(CASE WHEN current_state='removed' THEN 1 ELSE 0 END) AS removed,
  SUM(resolved_later) AS resolved_later,
  SUM(CASE WHEN resolved_later=0 AND current_state IN ('failed','processing_failed') THEN ? ELSE 0 END) AS retryable,
  SUM(CASE WHEN current_state='awaiting_association' OR (resolved_later=0 AND current_state IN ('failed','processing_failed')) THEN 1 ELSE 0 END) AS needs_action`, retry).Group("s.batch_id")
@@ -237,10 +240,12 @@ func operationStatus(s ImportOperationSummary) string {
 	case s.Active > 0:
 		return "running"
 	case s.Failed > 0:
-		if s.Ready+s.Skipped+s.MetadataOnly+s.Deleted > 0 {
+		if s.Ready+s.Skipped+s.MetadataOnly+s.Deleted+s.Removed > 0 {
 			return "partial_failed"
 		}
 		return "failed"
+	case s.Total > 0 && s.Removed == s.Total:
+		return "removed"
 	case s.Total > 0 && s.Canceled == s.Total:
 		return "canceled"
 	case s.Total > 0 && s.Skipped == s.Total:
@@ -484,7 +489,7 @@ func loadOperationPage(r *http.Request, db *gorm.DB, batch orm.PaperImportBatch,
 		row := &result[byID[s.ID]]
 		row.CurrentState = s.CurrentState
 		row.ResolvedLater = s.ResolvedLater > 0
-		if row.DocumentID != "" && row.CurrentDocument == nil && row.CurrentState != "importing" && row.CurrentState != "awaiting_association" && row.CurrentState != "metadata_only" && row.Status != "failed" && row.Status != "canceled" {
+		if row.DocumentID != "" && row.CurrentDocument == nil && row.CurrentState != "importing" && row.CurrentState != "awaiting_association" && row.CurrentState != "metadata_only" && row.CurrentState != "removed" && row.Status != "failed" && row.Status != "canceled" {
 			row.CurrentState = "deleted"
 		}
 		row.DocumentDeleted = row.CurrentState == "deleted"

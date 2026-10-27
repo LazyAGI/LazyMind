@@ -216,7 +216,7 @@ export interface PaperUploadContext {
 export interface ImportOperationItem extends AcademicImportQueueItem {
   library_paper_id?: string;
   result_kind: string;
-  current_state: 'importing' | 'processing' | 'ready' | 'metadata_only' | 'skipped' | 'failed' | 'processing_failed' | 'canceled' | 'deleted' | 'awaiting_association';
+  current_state: 'importing' | 'processing' | 'ready' | 'metadata_only' | 'skipped' | 'failed' | 'processing_failed' | 'canceled' | 'deleted' | 'removed' | 'awaiting_association';
   document_deleted: boolean;
   resolved_later: boolean;
   can_retry: boolean;
@@ -231,7 +231,7 @@ export interface ImportOperation {
   source: { title?: string; expansion_id?: string; expansion_version?: number; file_name?: string; format?: string };
   status: string;
   created_at: string;
-  summary: { total: number; ready: number; metadata_only: number; skipped: number; active: number; failed: number; canceled: number; deleted: number; resolved_later: number; retryable: number; needs_action: number };
+  summary: { total: number; ready: number; metadata_only: number; skipped: number; active: number; failed: number; canceled: number; deleted: number; removed: number; resolved_later: number; retryable: number; needs_action: number };
 }
 export interface ImportBatchPage {
   items: ImportOperation[];

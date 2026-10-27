@@ -247,6 +247,7 @@ export interface AcademicImportOperationSummary {
     'metadata_only'?: number;
     'needs_action'?: number;
     'ready'?: number;
+    'removed'?: number;
     'resolved_later'?: number;
     'retryable'?: number;
     'skipped'?: number;

@@ -191,7 +191,7 @@ func importErrorDB(t *testing.T, databases ...*gorm.DB) *gorm.DB {
 			t.Fatal(err)
 		}
 	}
-	if err := db.AutoMigrate(&orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.AcademicExpansion{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}); err != nil {
+	if err := db.AutoMigrate(&orm.AcademicWork{}, &orm.AcademicWorkDocument{}, &orm.AcademicDocumentState{}, &orm.AcademicReference{}, &orm.PaperImportBatch{}, &orm.PaperImportItem{}, &orm.PaperLibraryEntry{}, &orm.AcademicExpansion{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}); err != nil {
 		t.Fatal(err)
 	}
 	previous, previousLazy, previousState := store.DB(), store.LazyLLMDB(), store.State()

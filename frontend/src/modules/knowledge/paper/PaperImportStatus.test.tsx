@@ -8,7 +8,7 @@ afterEach(cleanup);
 beforeEach(() => vi.clearAllMocks());
 const operation = (id: string, extra: Partial<ImportOperation> = {}): ImportOperation => ({
   id, entry_type: 'paper_expansion', target_dataset_id: 'papers', source: { title: '研究方向' }, status: 'succeeded', created_at: '2026-10-23T02:00:00Z',
-  summary: { total: 2, ready: 1, metadata_only: 0, skipped: 1, active: 0, failed: 0, canceled: 0, deleted: 0, resolved_later: 0, retryable: 0, needs_action: 0 }, ...extra,
+  summary: { total: 2, ready: 1, metadata_only: 0, skipped: 1, active: 0, failed: 0, canceled: 0, deleted: 0, removed: 0, resolved_later: 0, retryable: 0, needs_action: 0 }, ...extra,
 });
 const paper = (id: string, extra: Partial<ImportOperationItem> = {}): ImportOperationItem => ({
   item_id: id, batch_id: 'batch', work_id: id, title: `Paper ${id}`, target_dataset_id: 'papers', source_provider: 'arxiv', source_version: 'v2',
@@ -37,6 +37,19 @@ describe('paper import operations', () => {
     expect(await screen.findByRole('link', { name: 'Paper flash' })).toHaveAttribute('href', '/lib/knowledge/knowledge/papers/flash');
     expect(screen.getByText('本次跳过，复用已有 PDF')).toBeInTheDocument();
     expect(screen.queryByText('查看文档')).not.toBeInTheDocument(); expect(screen.queryByText(/历史记录/)).not.toBeInTheDocument();
+  });
+  it('shows removed membership while keeping the original PDF readable', async () => {
+    const batch = operation('removed', { status: 'removed', summary: { ...operation('removed').summary, ready: 0, skipped: 0, removed: 2 } });
+    vi.mocked(getAcademicImportBatch).mockResolvedValue({ operation: batch, items: [paper('pdf', { status: 'succeeded', result_kind: 'imported', current_state: 'removed' }), paper('metadata', { current_document: undefined, current_state: 'removed' })], next_cursor: '' });
+    render(<Notice canWrite onRetry={vi.fn()} page={{ ...emptyImportBatchPage(), items: [batch] }} />); openNotice();
+    expect(screen.getByText('已移出论文库')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
+    expect(await screen.findByRole('link', { name: 'Paper pdf' })).toHaveAttribute('href', '/lib/knowledge/knowledge/papers/pdf');
+    expect(screen.getAllByText('已移出论文库')).toHaveLength(3);
+    expect(screen.queryByRole('button', { name: 'Paper metadata' })).not.toBeInTheDocument();
+    expect(screen.queryByText('已入库')).not.toBeInTheDocument();
+    expect(screen.queryByText(/本次跳过/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重试失败项/ })).not.toBeInTheDocument();
   });
   it('opens metadata details and disables links for deleted documents', async () => {
     const batch = operation('metadata'); const onOpen = vi.fn();
