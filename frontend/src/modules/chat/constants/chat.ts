@@ -12,10 +12,24 @@ export const CHAT_CONVERSATION_FILTER_EVENT = "lazymind:chat-conversation-filter
 export const CHAT_CAPTURE_MODE_DRAFT_EVENT = "lazymind:chat-capture-mode-draft";
 export const CHAT_SELECT_CONVERSATION_EVENT = "lazymind:chat-select-conversation";
 export const CHAT_AUTO_ADVANCE_EVENT = "lazymind:chat-auto-advance";
+export const CHAT_KNOWLEDGE_CONFIRMATION_EVENT = "lazymind:chat-knowledge-confirmation";
+export interface ChatKnowledgeConfirmationDetail {
+  conversationId: string;
+  historyId: string;
+  confirmationId: string;
+}
 export const CHAT_WORKFLOW_STEP_FEEDBACK_EVENT =
   "lazymind:chat-workflow-step-feedback";
 export const CHAT_OPEN_MODEL_SELECTOR_EVENT =
   "lazymind:chat-open-model-selector";
+export const CHAT_MODEL_SWITCH_EVENT = "lazymind:chat-model-switch";
+export const CHAT_MODEL_SELECTION_CHANGED_EVENT = "lazymind:chat-model-selection-changed";
+export interface ChatModelSwitchNoticeDetail {
+  conversationId: string;
+  runId: string;
+  record: import("@/api/generated/core-client").ChatModelSwitchRecord;
+  live: boolean;
+}
 export const CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT =
   "lazymind:chat-ffmpeg-dependency-missing";
 export const CHAT_MEDIA_CAPABILITY_MISSING_EVENT =

@@ -3,9 +3,11 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react";
 import { Modal, Form, Input, Select } from "antd";
+import { isEqual } from "lodash";
 import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
 import type { Dataset as CoreDataset } from "@/api/generated/core-client";
@@ -21,7 +23,7 @@ import {
   PROCESSING_LEVEL_ORDER,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
-import { getKnowledgeBaseCapabilities, getLearningCatalog, saveKnowledgeBaseCapabilities, type LearningCapability } from "@/modules/learning/api";
+import { getKnowledgeBaseCapabilities, getLearningCatalog,  type LearningCapability, type CapabilityRef } from "@/modules/learning/api";
 import CapabilitySettings, { capabilityRefsFromForm, parseCapabilitySettings } from "@/modules/learning/CapabilitySettings";
 import "./index.scss";
 
@@ -48,6 +50,7 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
     const [hasTagLengthError, setHasTagLengthError] = useState(false);
     const [learningCapabilities, setLearningCapabilities] = useState<LearningCapability[]>([]);
 
+    const initialCapabilityRefs = useRef<CapabilityRef[]>([]);
     const [form] = Form.useForm();
     useImperativeHandle(ref, () => ({
       onOpen,
@@ -94,11 +97,20 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
 
     function onOpen(sourceData: Dataset | undefined) {
       getTags();
+      initialCapabilityRefs.current = [];
       setData(sourceData);
       setHasTagLengthError(false);
       getLearningCatalog().then((catalog) => setLearningCapabilities(catalog.capabilities)).catch(() => setLearningCapabilities([]));
       if (sourceData?.dataset_id) {
-        getKnowledgeBaseCapabilities(sourceData.dataset_id).then((items) => form.setFieldsValue({learning_capability_keys:items.filter((item)=>item.enabled).sort((a,b)=>a.display_order-b.display_order).map((item)=>item.capability_key),learning_capability_settings:parseCapabilitySettings(items)})).catch(() => form.setFieldValue("learning_capability_keys", []));
+        getKnowledgeBaseCapabilities(sourceData.dataset_id).then((items) => {
+          const enabled = items.filter((item) => item.enabled).sort((a, b) => a.display_order - b.display_order);
+          const settings = parseCapabilitySettings(items);
+          initialCapabilityRefs.current = enabled.map((item, index) => ({
+            key: item.capability_key, version: item.capability_version,
+            enabled: true, display_order: index + 1, settings: settings[item.capability_key],
+          }));
+          form.setFieldsValue({ learning_capability_keys: enabled.map((item) => item.capability_key), learning_capability_settings: settings });
+        }).catch(() => form.setFieldValue("learning_capability_keys", []));
       } else {
         form.setFieldValue("learning_capability_keys", ["general_translation"]);
       }
@@ -168,10 +180,9 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
         }
         setLoading(true);
         try {
+          const capabilityRefs = capabilityRefsFromForm(learningCapabilityKeys, learningCapabilitySettings, learningCapabilities);
+          if (!isEqual(capabilityRefs, initialCapabilityRefs.current)) params.reading_capabilities = capabilityRefs;
           await onUpdate({ ...params, dataset_id: data?.dataset_id });
-          if (data?.dataset_id) {
-            await saveKnowledgeBaseCapabilities(data.dataset_id, capabilityRefsFromForm(learningCapabilityKeys,learningCapabilitySettings,learningCapabilities));
-          }
           setLoading(false);
           onCancel();
         } catch (error) {

@@ -231,7 +231,7 @@ func LoadUserUIPreferences(ctx context.Context, db *gorm.DB, userID string) (orm
 			WorkflowsEnabled:           true,
 			MCPEnabled:                 true,
 			DocumentParsingEnabled:     true,
-			DocumentDirectoriesEnabled: true,
+			DocumentDirectoriesEnabled: false,
 			PerformanceStatsEnabled:    false,
 		}, nil
 	}
@@ -253,7 +253,7 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 			WorkflowsEnabled:           true,
 			MCPEnabled:                 true,
 			DocumentParsingEnabled:     true,
-			DocumentDirectoriesEnabled: true,
+			DocumentDirectoriesEnabled: false,
 			PerformanceStatsEnabled:    false,
 			CreatedAt:                  now,
 			UpdatedAt:                  now,
@@ -294,8 +294,8 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		if req.PerformanceStatsEnabled != nil {
 			row.PerformanceStatsEnabled = *req.PerformanceStatsEnabled
 		}
-		// Feature controls default to true. Map-based create preserves an explicit
-		// false from a first-time user instead of applying GORM's model default.
+		// Map-based create preserves explicit values from a first-time user
+		// instead of applying GORM's model defaults to zero values.
 		if err := db.WithContext(ctx).Model(&orm.UserUIPreferences{}).Create(map[string]any{
 			"user_id":                          row.UserID,
 			"chat_preference_notice_dismissed": row.ChatPreferenceNoticeDismissed,

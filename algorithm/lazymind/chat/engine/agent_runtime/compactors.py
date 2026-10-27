@@ -30,8 +30,7 @@ class ToolCompactionPlan:
     after_tokens: int
     spill_path: str = ''
     spill_bytes: int = 0
-    tool_name: str = ''
-    original_content: Any = None
+    spill_text: str = ''
 
 
 def _as_text(content: Any) -> str:
@@ -458,7 +457,7 @@ def _spill_filename(tool_name: str, content: str) -> str:
 
 def _is_browser_tool(tool_name: str) -> bool:
     normalized = str(tool_name or '').strip().lower()
-    return normalized.startswith('browser_') or normalized.startswith('browser.')
+    return normalized.startswith(('mcp_browser_', 'browser_', 'browser.'))
 
 
 def _browser_json_envelope(text: str) -> tuple[str, Any, str] | None:
@@ -574,9 +573,13 @@ def spill_tool_result_to_workspace(
     if not root:
         return None
     text, filename = _spill_text_and_name(root, tool_name, content, observation)
+    return _write_spill(root, os.path.join('tool_spills', filename), text)
+
+
+def _write_spill(root: str, rel_path: str, text: str) -> str:
     spill_dir = os.path.join(root, 'tool_spills')
     os.makedirs(spill_dir, exist_ok=True)
-    path = os.path.join(spill_dir, filename)
+    path = os.path.join(root, rel_path)
     temporary = ''
     try:
         with tempfile.NamedTemporaryFile(
@@ -651,13 +654,6 @@ def compact_or_spill_tool_result(
         if rel_path:
             notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes, workspace)
             return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
-    if _file_result_details(tool_name, content, observation):
-        compacted, compactor, before_tokens, after_tokens = compact_tool_result(
-            tool_name,
-            content,
-            observation,
-        )
-        return compacted, compactor, before_tokens, after_tokens, '', 0
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
         content,
@@ -694,19 +690,8 @@ def plan_tool_result_compaction(
                 after,
                 spill_path=rel_path,
                 spill_bytes=spill_bytes,
-                tool_name=tool_name,
-                original_content=content,
+                spill_text=spill_text,
             )
-    if _file_result_details(tool_name, content, observation):
-        compacted, compactor, before_tokens, after_tokens = compact_tool_result(
-            tool_name,
-            content,
-            observation,
-        )
-        return ToolCompactionPlan(
-            compacted, compactor, before_tokens, after_tokens,
-            tool_name=tool_name, original_content=content,
-        )
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
         content,
@@ -714,7 +699,6 @@ def plan_tool_result_compaction(
     )
     return ToolCompactionPlan(
         compacted, compactor, before_tokens, after_tokens,
-        tool_name=tool_name, original_content=content,
     )
 
 
@@ -725,36 +709,5 @@ def commit_tool_result_plan(
 ) -> ToolCompactionPlan:
     if plan.compactor != 'spill' or not plan.spill_path or not workspace:
         return plan
-    rel_path = spill_tool_result_to_workspace(
-        workspace,
-        plan.tool_name,
-        plan.original_content,
-    )
-    if not rel_path:
-        return ToolCompactionPlan(
-            _as_text(plan.original_content),
-            'noop',
-            plan.before_tokens,
-            plan.before_tokens,
-            tool_name=plan.tool_name,
-            original_content=plan.original_content,
-        )
-    if rel_path == plan.spill_path:
-        return plan
-    notice = format_spilled_tool_notice(
-        plan.tool_name,
-        plan.original_content,
-        rel_path,
-        plan.spill_bytes,
-        workspace,
-    )
-    return ToolCompactionPlan(
-        notice,
-        'spill',
-        plan.before_tokens,
-        estimate_tokens(notice),
-        spill_path=rel_path,
-        spill_bytes=plan.spill_bytes,
-        tool_name=plan.tool_name,
-        original_content=plan.original_content,
-    )
+    _write_spill(os.path.realpath(workspace), plan.spill_path, plan.spill_text)
+    return plan

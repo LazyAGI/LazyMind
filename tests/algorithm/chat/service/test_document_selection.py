@@ -45,6 +45,8 @@ def test_resolve_document_selection_falls_back_to_paragraph(monkeypatch):
 def test_positioned_lookup_uses_page_and_bbox_to_disambiguate(monkeypatch):
     from lazymind.chat.engine.tools import algo
 
+    from lazymind.chat.engine.tools.infra import kb_ownership
+    monkeypatch.setattr(kb_ownership, 'filter_active_nodes', lambda nodes: nodes)
     monkeypatch.setattr(algo, 'DOCUMENT', _Document([
         {'content': 'first occurrence of batch size tokens', 'metadata': {'page': 1, 'bbox': [0, 0, 20, 20]}},
         {'content': 'wanted occurrence of batch size tokens', 'metadata': {'page': 3, 'bbox': [10, 10, 80, 40]}},
@@ -62,6 +64,8 @@ def test_positioned_lookup_uses_page_and_bbox_to_disambiguate(monkeypatch):
 def test_ambiguous_unpositioned_matches_fall_back_to_paragraph(monkeypatch):
     from lazymind.chat.engine.tools import algo
 
+    from lazymind.chat.engine.tools.infra import kb_ownership
+    monkeypatch.setattr(kb_ownership, 'filter_active_nodes', lambda nodes: nodes)
     monkeypatch.setattr(algo, 'DOCUMENT', _Document([
         {'content': 'first batch size tokens'},
         {'content': 'second batch size tokens'},
@@ -83,3 +87,17 @@ def test_render_document_selection_marks_the_instruction_target():
 
     assert 'Selected text (the target of the user instruction):\nbatch size tokens' in rendered
     assert 'Surrounding passage (reference context only):' in rendered
+
+
+def test_hidden_positioned_segments_never_override_the_safe_fallback(monkeypatch):
+    from lazymind.chat.engine.tools import algo
+    from lazymind.chat.engine.tools.infra import kb_ownership
+    monkeypatch.setattr(algo, 'DOCUMENT', _Document([
+        {'content': 'hidden batch size tokens', 'metadata': {'page': 3, 'bbox': [10, 10, 80, 40]}},
+    ]))
+    monkeypatch.setattr(kb_ownership, 'filter_active_nodes', lambda _: [])
+    result = document_selection.resolve_document_selection_context({
+        'dataset_id': 'kb-1', 'document_id': 'doc-1', 'page': 4,
+        'bbox': [20, 15, 60, 30], 'paragraph_text': 'safe fallback',
+    }, 'batch size tokens')
+    assert result == 'safe fallback'

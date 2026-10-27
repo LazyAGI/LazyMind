@@ -36,6 +36,17 @@ def _tool(contribution, name):
     raise StopIteration(name)
 
 
+def test_chat_workflow_client_binds_host_history_not_model_fields():
+    from lazymind.chat.workflow.workflow_manager import _client
+
+    lazyllm.globals['agentic_config'] = {
+        'user_id': 'owner', '_workspace_execution': {'history_id': 'foreground-turn', 'run_id': 'run'},
+    }
+    with patch('lazymind.chat.workflow.workflow_manager.WorkflowClient') as client:
+        _client()
+    assert client.call_args.kwargs['trigger_history_id'] == 'foreground-turn'
+
+
 def _tool_names(contribution):
     names = set()
     pending = list(contribution.tools)

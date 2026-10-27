@@ -31,12 +31,12 @@ func TestHistoricalBackgroundTaskResolvesWorkflowStepsAndStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, path := range []string{"/task-center/tasks?status=waiting", "/task-center/tasks/background"} {
+	for _, path := range []string{"/task-center/tasks?status=failed", "/task-center/tasks/background"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		req.Header.Set("X-User-Id", "owner")
 		rec := httptest.NewRecorder()
 		var got taskResponse
-		if path == "/task-center/tasks?status=waiting" {
+		if path == "/task-center/tasks?status=failed" {
 			ListTasks(rec, req)
 			var response struct {
 				Items  []taskResponse `json:"items"`
@@ -45,8 +45,8 @@ func TestHistoricalBackgroundTaskResolvesWorkflowStepsAndStatus(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 				t.Fatal(err)
 			}
-			if len(response.Items) != 1 || response.Counts["waiting"] != 1 {
-				t.Fatalf("missing waiting workflow: %s", rec.Body.String())
+			if len(response.Items) != 1 || response.Counts["failed"] != 1 {
+				t.Fatalf("non-approval waiting must be failed: %s", rec.Body.String())
 			}
 			got = response.Items[0]
 		} else {
@@ -56,7 +56,7 @@ func TestHistoricalBackgroundTaskResolvesWorkflowStepsAndStatus(t *testing.T) {
 			}
 		}
 		if rec.Code != http.StatusOK || got.WorkflowSessionID == nil || *got.WorkflowSessionID != "writer" ||
-			got.Status != "waiting" || got.FinishedAt != nil || len(got.Steps) != 1 || got.Steps[0].StepID != "prepare" {
+			got.Status != "failed" || got.FinishedAt == nil || len(got.Steps) != 1 || got.Steps[0].StepID != "prepare" {
 			t.Fatalf("%s: incorrect task detail: %#v", path, got)
 		}
 	}
@@ -117,7 +117,10 @@ func TestHistoricalWorkflowMatchingDoesNotStealOtherRuns(t *testing.T) {
 			if err := db.Create(&session).Error; err != nil {
 				t.Fatal(err)
 			}
-			got := resolveTaskForResponse(context.Background(), db.DB, task)
+			got, err := resolveTaskForResponse(context.Background(), db.DB, task)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got.WorkflowSessionID != nil || got.Status != task.Status {
 				t.Fatalf("incorrect association in %s: %#v", scenario, got)
 			}
@@ -127,12 +130,12 @@ func TestHistoricalWorkflowMatchingDoesNotStealOtherRuns(t *testing.T) {
 
 func TestLinkedTaskUsesWorkflowLifecycleWithoutRevivingCanceledTasks(t *testing.T) {
 	for _, sample := range []struct{ task, workflow, want string }{
-		{"succeeded", "waiting", "waiting"}, {"succeeded", "active", "running"},
+		{"succeeded", "waiting", "running"}, {"succeeded", "active", "running"},
 		{"running", "completed", "succeeded"}, {"running", "failed", "failed"},
-		{"running", "stopped", "canceled"}, {"canceled", "active", "canceled"},
+		{"running", "stopped", "paused"}, {"canceled", "active", "canceled"},
 	} {
 		t.Run(sample.task+"_"+sample.workflow, func(t *testing.T) {
-			db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.WorkflowSession{})
+			db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{})
 			now := time.Now().UTC()
 			session := orm.WorkflowSession{ID: "writer", ConversationID: "conv", CreateUserID: "owner", WorkflowID: "writer",
 				Status: sample.workflow, CreatedAt: now.Add(-time.Minute), UpdatedAt: now}
@@ -141,7 +144,10 @@ func TestLinkedTaskUsesWorkflowLifecycleWithoutRevivingCanceledTasks(t *testing.
 			}
 			task := orm.TaskCenterTask{ID: "background", UserID: "owner", ConversationID: "conv", TaskType: "background_chat",
 				WorkflowSessionID: &session.ID, Status: sample.task, CreatedAt: session.CreatedAt, UpdatedAt: now, FinishedAt: &now}
-			got := resolveTaskForResponse(t.Context(), db.DB, task)
+			got, err := resolveTaskForResponse(t.Context(), db.DB, task)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got.Status != sample.want {
 				t.Fatalf("status=%q want=%q", got.Status, sample.want)
 			}
@@ -152,7 +158,7 @@ func TestLinkedTaskUsesWorkflowLifecycleWithoutRevivingCanceledTasks(t *testing.
 	}
 }
 
-func TestStoppedWorkflowIsCanceledUntilExplicitRetry(t *testing.T) {
+func TestStoppedWorkflowIsPausedUntilExplicitRetry(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.TaskCenterTask{}, &orm.Conversation{}, &orm.UserSchedule{},
 		&orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.SubAgentTask{}, &orm.SubAgentArtifact{})
 	store.Init(db.DB, nil, nil)
@@ -167,7 +173,7 @@ func TestStoppedWorkflowIsCanceledUntilExplicitRetry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, filter := range []string{"waiting", "canceled"} {
+	for _, filter := range []string{"waiting", "paused"} {
 		req := httptest.NewRequest(http.MethodGet, "/task-center/tasks?status="+filter, nil)
 		req.Header.Set("X-User-Id", "owner")
 		rec := httptest.NewRecorder()
@@ -179,14 +185,14 @@ func TestStoppedWorkflowIsCanceledUntilExplicitRetry(t *testing.T) {
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)
 		}
-		if rec.Code != http.StatusOK || response.Counts["waiting"] != 0 || response.Counts["canceled"] != 1 {
+		if rec.Code != http.StatusOK || response.Counts["waiting"] != 0 || response.Counts["paused"] != 1 || response.Counts["canceled"] != 0 {
 			t.Fatalf("%s: %s", filter, rec.Body.String())
 		}
 		if filter == "waiting" && len(response.Items) != 0 {
 			t.Fatal("stopped workflow leaked into approvals")
 		}
-		if filter == "canceled" && (len(response.Items) != 1 || response.Items[0].FinishedAt == nil) {
-			t.Fatal("stopped workflow missing canceled result")
+		if filter == "paused" && (len(response.Items) != 1 || response.Items[0].FinishedAt != nil) {
+			t.Fatal("paused workflow must remain resumable")
 		}
 	}
 	// Read-time status must not permanently cancel the resumable workflow task.
@@ -217,7 +223,7 @@ func TestStoppedWorkflowIsCanceledUntilExplicitRetry(t *testing.T) {
 	if err := db.Model(&session).Update("status", "active").Error; err != nil {
 		t.Fatal(err)
 	}
-	if got := resolveTaskForResponse(t.Context(), db.DB, task); got.Status != "running" {
+	if got, err := resolveTaskForResponse(t.Context(), db.DB, task); err != nil || got.Status != "running" {
 		t.Fatalf("retry status=%s", got.Status)
 	}
 	if err := db.Model(&retry).Update("status", "succeeded").Error; err != nil {
@@ -226,7 +232,7 @@ func TestStoppedWorkflowIsCanceledUntilExplicitRetry(t *testing.T) {
 	if err := db.Model(&session).Update("status", "waiting").Error; err != nil {
 		t.Fatal(err)
 	}
-	if got := resolveTaskForResponse(t.Context(), db.DB, task); got.Status != "waiting" {
-		t.Fatalf("new approval status=%s", got.Status)
+	if got, err := resolveTaskForResponse(t.Context(), db.DB, task); err != nil || got.Status != "failed" {
+		t.Fatalf("waiting without an approval checkpoint status=%s error=%v", got.Status, err)
 	}
 }

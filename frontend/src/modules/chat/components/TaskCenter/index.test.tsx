@@ -7,12 +7,15 @@ import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
 import TaskCenter from "./index";
 import type { OrdinaryTaskView } from "@/modules/chat/types/ordinaryTask";
 import { ordinary } from "./ordinaryTestFixtures";
+import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
+import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 
 vi.mock("@/modules/knowledge/components/FileViewer", () => ({ default: () => <div>File viewer</div> }));
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
   useTranslation: () => ({
+    i18n: { language: "en-US" },
     t: ((key: string, values?: Record<string, unknown>) => {
       if (key === "taskCenter.ordinaryTaskLabel") {
         return `Subtask ${values?.index}`;
@@ -107,7 +110,58 @@ const workflowSteps = [
 ];
 
 describe("TaskCenter display modes", () => {
+  it("keeps developer text from separate model calls in separate visible log entries", () => {
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("model", 1, "running"), execution_log: [
+      { type: "text", content: "FIRST CALL", model_output: { run_id: "execution", call_index: 1 } },
+      { type: "text", content: "SECOND CALL", model_output: { run_id: "execution", call_index: 2 } },
+    ] as any }] } });
+    render(<TaskCenter sessionId="conversation-1" developerMode />);
+    expect(screen.getByText("FIRST CALL")).toBeVisible();
+    expect(screen.getByText("SECOND CALL")).toBeVisible();
+  });
+
+  it.each([
+    ["rate_limited", "chat.runStatus.codes.rate_limited"],
+    ["model_context_not_fit", "chat.modelFallbackReason.model_context_not_fit"],
+  ])("shows structured model switches in the ordinary header and process history after reload (%s)", (reasonCode, reasonText) => {
+    const record: ChatModelSwitchRecord = { event_id: "switch", switch_index: 1, reason_code: reasonCode, context_compacted: true,
+      from_max_input_tokens: 131072, to_max_input_tokens: 65536,
+      from: { candidate_id: "own:a", source: "own", model_id: "a", model_name: "Original A", provider_group_id: "a" },
+      to: { candidate_id: "own:b", source: "own", model_id: "b", model_name: "Replacement B", provider_group_id: "b" } };
+    const view = ordinary("model", { status: "succeeded", model_switch: record, process_state: "available", process_steps: [{
+      step_id: "switch", revision: 1, order: 1, title: "Model switched", status: "succeeded", model_switch: record,
+      started_at: null, finished_at: null, elapsed_ms: null,
+    }] });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("model", 1, "succeeded"), ordinary: view }] } });
+    const rendered = render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getAllByText("Original A (128K)")).toHaveLength(2);
+    expect(screen.getAllByText("Replacement B (64K)")).toHaveLength(2);
+    expect(screen.getAllByText(reasonText)).toHaveLength(2);
+    expect(screen.getAllByText("chat.modelFallbackContextAdapted")).toHaveLength(2);
+    rendered.unmount();
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getAllByText("Replacement B (64K)")).toHaveLength(2);
+    expect(screen.queryByText(/raw trace/)).not.toBeInTheDocument();
+  });
+
+  it.each(["model_fallback_exhausted", "model_context_not_fit"] as const)("links %s to existing model settings without starting another task", (failure_code) => {
+    const view = ordinary("model", { status: "failed", failure_code });
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("model", 1, "failed"), ordinary: view }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByRole("link", { name: "chat.checkModelSettings" })).toHaveAttribute("href",
+      "/settings?section=models&view=providers&return_to=%2Fagent%2Fchat%2Fhome%2Fconversation-1");
+    expect(screen.getByText(`chat.runStatus.codes.${failure_code}`)).toBeVisible();
+    expect(screen.queryByText("chat.continueAfterConfiguration")).not.toBeInTheDocument();
+  });
+
+  it("does not infer model recovery actions from a failed task summary", () => {
+    useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [{ ...task("model", 1, "failed"),
+      summary: "model_fallback_exhausted completion_evaluation_failed", ordinary: ordinary("model", { status: "failed" }) }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.queryByRole("link", { name: "chat.checkModelSettings" })).not.toBeInTheDocument();
+  });
   beforeEach(() => {
+    useWorkflowStore.setState({ sessionByConversation: {} });
     useTaskCenterStore.setState({
       tasksByConversation: { "conversation-1": tasks },
       _loadingTasks: {},
@@ -118,6 +172,7 @@ describe("TaskCenter display modes", () => {
 
   afterEach(() => {
     cleanup();
+    useWorkflowStore.setState({ sessionByConversation: {} });
     useTaskCenterStore.setState({
       tasksByConversation: {},
       _loadingTasks: {},
@@ -137,7 +192,57 @@ describe("TaskCenter display modes", () => {
     expect(screen.getByText(/Subtasks 0/)).toBeInTheDocument();
   });
 
+  it("keeps paused workflow timing when a newer Chat turn runs, and accumulates after resume", () => {
+    const frozen = {
+      run_id: "session-1", execution_id: "first-interval", revision: 2, status: "stopped", final_output_refs: [],
+      timing: { requested_at: iso(0), finished_at: iso(20), measured_at: iso(30), elapsed_ms: 20000, cumulative_execution_ms: 8000, running_attempt_count: 0 },
+    };
+    useWorkflowStore.setState({ sessionByConversation: { "conversation-1": {
+      session_id: "session-1", conversation_id: "conversation-1", workflow_id: "writer-workflow", status: "waiting",
+      workflow_mode: "dynamic", current_step_id: "outline", created_at: iso(0), updated_at: iso(20),
+      projection: { display: { status: "paused", reason: "user_stopped", approval_step_id: "" } },
+      ordinary_runs: [frozen],
+    } } });
+    useTaskCenterStore.setState({ runsByConversation: { "conversation-1": [{
+      run_id: "new-chat", execution_id: "chat-interval", revision: 1, status: "running", final_output_refs: [],
+      timing: { requested_at: iso(40), finished_at: null, measured_at: iso(45), elapsed_ms: 5000, cumulative_execution_ms: 0, running_attempt_count: 0 },
+    }] } });
+    render(<TaskCenter sessionId="conversation-1" />);
+    expect(screen.getByText(/Elapsed 20/)).toBeInTheDocument();
+    expect(screen.getByText(/Subtasks 8/)).toBeInTheDocument();
+    act(() => useTaskCenterStore.setState({ runsByConversation: { "conversation-1": [{
+      ...frozen, execution_id: "resumed-interval", revision: 1, status: "active",
+      timing: { ...frozen.timing, requested_at: iso(60), finished_at: null, measured_at: iso(65), elapsed_ms: 25000, cumulative_execution_ms: 11000, running_attempt_count: 1 },
+    }] } }));
+    expect(screen.getByText(/Elapsed 25/)).toBeInTheDocument();
+    expect(screen.getByText(/Subtasks 11/)).toBeInTheDocument();
+    act(() => {
+      const workflow = useWorkflowStore.getState().sessionByConversation["conversation-1"]!;
+      useWorkflowStore.setState({ sessionByConversation: { "conversation-1": {
+        ...workflow, projection: { ...workflow.projection, display: { status: "completed", reason: "completed", approval_step_id: "" } },
+      } } });
+      useTaskCenterStore.setState({ runsByConversation: { "conversation-1": [
+        ...useTaskCenterStore.getState().runsByConversation["conversation-1"].map(run => ({
+          ...run, status: "completed", revision: 2,
+          timing: { ...run.timing!, finished_at: iso(65), running_attempt_count: 0 },
+        })),
+        { ...frozen, run_id: "final-approval-chat", execution_id: "approval-chat", status: "running",
+          timing: { ...frozen.timing, requested_at: iso(80), finished_at: null, elapsed_ms: 1000, cumulative_execution_ms: 0 } },
+      ] } });
+    });
+    expect(screen.getByText(/Elapsed 25/)).toBeInTheDocument();
+    expect(screen.getByText(/Subtasks 11/)).toBeInTheDocument();
+  });
+
   it("shows a resumed ordinary task associated with the new chat round", () => {
+    // A previous completed Workflow must not hide subsequent ordinary Chat work.
+    useWorkflowStore.setState({ sessionByConversation: { "conversation-1": {
+      session_id: "old-workflow", conversation_id: "conversation-1", workflow_id: "writer-workflow", status: "completed",
+      workflow_mode: "dynamic", current_step_id: "", created_at: iso(0), updated_at: iso(10),
+      projection: { display: { status: "completed", reason: "completed", approval_step_id: "" } },
+      ordinary_runs: [{ run_id: "old-workflow", execution_id: "old", revision: 2, status: "completed", final_output_refs: [],
+        timing: { requested_at: iso(0), finished_at: iso(10), measured_at: iso(10), elapsed_ms: 10000, cumulative_execution_ms: 8000, running_attempt_count: 0 } }],
+    } } });
     const resumed = { ...task("resumed", 1, "running"), agent_type: "research", trigger_history_id: "new-history",
       ordinary: ordinary("resumed", { title: "Resumed research", status: "running", run_id: "new-history", execution_id: "new-attempt" }) };
     useTaskCenterStore.setState({ tasksByConversation: { "conversation-1": [resumed] }, runsByConversation: { "conversation-1": [{
@@ -146,6 +251,7 @@ describe("TaskCenter display modes", () => {
     }] } });
     render(<TaskCenter sessionId="conversation-1" />);
     expect(screen.getByText("Resumed research")).toBeInTheDocument();
+    expect(screen.getByText(/Elapsed 5/)).toBeInTheDocument();
     expect(screen.queryByText("taskCenter.ordinaryInitializing")).not.toBeInTheDocument();
   });
 
@@ -535,11 +641,12 @@ describe("TaskCenter display modes", () => {
     expect(panel).toHaveAttribute("role", "region");
     expect(trigger).toHaveAttribute("aria-controls", panel?.id);
     expect(panel).toHaveAttribute("aria-labelledby", trigger?.id);
-    expect(panel?.querySelectorAll("button")).toHaveLength(0);
+    expect(panel?.querySelectorAll("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /chat.references/ })).toBeInTheDocument();
     expect(panel?.querySelector(".ant-progress")).not.toBeInTheDocument();
     expect(panel?.querySelector(".ordinary-thinking-item.is-running")).not.toBeInTheDocument();
     expect(screen.getByText("taskCenter.ordinaryThinking")).toBeInTheDocument();
-    expect(screen.getByText("taskCenter.ordinarySources")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /chat.references/ })).toBeInTheDocument();
   });
 
   it("does not read private task fields in the ordinary process projection", () => {
@@ -560,7 +667,7 @@ describe("TaskCenter display modes", () => {
       .toBeInTheDocument();
   });
 
-  it("uses native links for public sources and summarizes dependencies", () => {
+  it("opens public sources through the shared reference panel and summarizes dependencies", () => {
     useTaskCenterStore.setState({
       tasksByConversation: {
         "conversation-1": [{
@@ -583,14 +690,9 @@ describe("TaskCenter display modes", () => {
 
     expect(screen.getByText("taskCenter.ordinaryDependencyCount"))
       .toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("href", "https://example.com/article");
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("rel", "noopener noreferrer");
-    expect(screen.getByRole("link", { name: /Example source/ }))
-      .toHaveAttribute("target", "_blank");
-    expect(screen.queryByRole("link", { name: /Unsafe source/ }))
-      .not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /chat.references/ }));
+    expect(screen.getByRole("button", { name: /Example source/ })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Unsafe source/ })).not.toBeInTheDocument();
     expect(screen.getByText("Unsafe source")).toBeInTheDocument();
   });
 

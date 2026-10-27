@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import copy
 import re
 import time
 from typing import Any, Optional
@@ -136,6 +137,48 @@ class AgentEventFrameTranslator:
         self.model_events: list[dict[str, Any]] = []
         self.last_metrics: Optional[dict[str, Any]] = None
         self.text_scanner, self.citation_plugin = build_stream_citation_scanner(self.citation_state)
+        self._model_output_index = 0
+        self._model_output_checkpoint = None
+
+    def _snapshot_model_output(self):
+        mapper = self.citation_plugin.display_mapper
+        return {
+            'scanner_state': self.text_scanner.state,
+            'scanner_buf': self.text_scanner.buf,
+            'code_state': self.text_scanner.code_state.copy(),
+            'collected': copy.deepcopy(self.citation_plugin._collected),
+            'streamed_indices': list(self.citation_plugin._streamed_indices),
+            'display_map': dict(mapper._doc_display_map),
+            'next_display_index': mapper._next_display_index,
+            'cited_indices': list(self.citation_state.get('_cited_source_indices') or []),
+            'export': {name: copy.deepcopy(getattr(self.export_stream, name)) for name in
+                       ('raw', 'pending', 'emitted', 'offset', 'fence', 'depth', 'candidate', 'blocks')}
+            if self.export_stream is not None else None,
+            'streamed_text': self.streamed_text,
+            'semantic_output': self.run.semantic_output,
+        }
+
+    def _restore_model_output(self):
+        checkpoint = self._model_output_checkpoint
+        if checkpoint is None:
+            return
+        self.text_scanner.state = checkpoint['scanner_state']
+        self.text_scanner.buf = checkpoint['scanner_buf']
+        self.text_scanner.code_state = checkpoint['code_state'].copy()
+        self.citation_plugin._collected = copy.deepcopy(checkpoint['collected'])
+        self.citation_plugin._streamed_indices = list(checkpoint['streamed_indices'])
+        mapper = self.citation_plugin.display_mapper
+        mapper._doc_display_map = dict(checkpoint['display_map'])
+        mapper._next_display_index = checkpoint['next_display_index']
+        # The shared registry contains real tool results. Restore only the
+        # model's citation projection, keeping the original config dictionary.
+        self.citation_state['_cited_source_indices'] = list(checkpoint['cited_indices'])
+        if checkpoint['export'] is not None:
+            for key, value in checkpoint['export'].items():
+                setattr(self.export_stream, key, copy.deepcopy(value))
+        self.streamed_text = checkpoint['streamed_text']
+        self.run.semantic_output = checkpoint['semantic_output']
+        self._model_output_checkpoint = None
 
     def _export_frame(self, frame):
         if self.export_stream is not None and frame.get('text'):
@@ -143,8 +186,69 @@ class AgentEventFrameTranslator:
         return frame
 
     def feed(self, event: Any) -> list[dict[str, Any]]:
+        output = event.get('model_output')
+        if output is None:
+            return self._feed(event)
+        if not isinstance(output, dict):
+            raise ValueError('model_output must be an object')
+        if output.get('run_id') not in (None, '', self.run.run_id):
+            return []
+        index, phase = output.get('call_index'), output.get('phase')
+        if type(index) is not int or index < 1 or phase not in (None, 'begin', 'commit', 'rollback'):
+            raise ValueError('invalid model output boundary')
+        metadata = {'run_id': self.run.run_id, 'call_index': index}
+        if phase is not None:
+            metadata['phase'] = phase
+        if phase is None and event.get('tag') == 'runtime_event' and (
+            event.get('runtime_event') or {}
+        ).get('type') in {'model_call_started', 'model_retry_scheduled', 'model_call_finished'}:
+            semantic_output = self.run.semantic_output
+            last_model_terminal = self.run.last_model_terminal
+            frames = self._feed(event)
+            if index != self._model_output_index or self._model_output_checkpoint is None:
+                self.run.semantic_output = semantic_output
+                self.run.last_model_terminal = last_model_terminal
+            return frames
+        if phase == 'begin':
+            if index <= self._model_output_index:
+                return []
+            if self._model_output_checkpoint is not None or index != self._model_output_index + 1:
+                raise ValueError('model output began without closing the previous call')
+            self._model_output_index = index
+            self._model_output_checkpoint = self._snapshot_model_output()
+            return [_stream_frame(extra={'model_output': metadata})]
+        if index != self._model_output_index or self._model_output_checkpoint is None:
+            return []
+        if phase == 'rollback':
+            self._restore_model_output()
+            return [_stream_frame(extra={'model_output': metadata})]
+        if phase == 'commit':
+            if event.get('tag') == 'runtime_event':
+                if (event.get('runtime_event') or {}).get('type') != 'model_switched':
+                    raise ValueError('only model_switched can accompany output commit')
+                frames = self._feed(event)
+            elif event.get('tag') == 'model_output':
+                frames = [_stream_frame()]
+            else:
+                raise ValueError('model output commit must not contain semantic data')
+            self._model_output_checkpoint = None
+        else:
+            if event.get('tag') not in {'text', 'think'}:
+                raise ValueError('model output identity is only valid on model content')
+            frames = self._feed(event)
+        for frame in frames:
+            frame['model_output'] = dict(metadata)
+        return frames
+
+    def _feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         event_type = str(event.get('tag', '') or '')
+        if event_type == 'model_fallback_failed':
+            code = event.get('fallback_code')
+            if code not in {'model_fallback_exhausted', 'model_context_not_fit', 'runtime_failure'}:
+                raise ValueError('invalid model fallback terminal code')
+            self.run.fallback_code = code
+            return frames
         if event_type == 'runtime_event':
             value = event.get('runtime_event')
             if not isinstance(value, dict):
@@ -154,12 +258,17 @@ class AgentEventFrameTranslator:
             if value.get('schema_version') != 1:
                 raise ValueError('unsupported runtime_event schema_version')
             if value.get('type') not in {
-                'model_call_started', 'model_retry_scheduled', 'model_call_finished',
+                'model_call_started', 'model_retry_scheduled', 'model_call_finished', 'model_switched',
             }:
                 raise ValueError('unexpected upstream runtime_event type')
             if not isinstance(value.get('data'), dict):
                 raise ValueError('runtime_event data must be an object')
+            semantic_output = self.run.semantic_output
             self.run.observe_model_event(value)
+            if self._model_output_index and self._model_output_checkpoint is None:
+                # A late SDK terminal is still an observed call, but cannot
+                # resurrect semantic output after the Host closed its output.
+                self.run.semantic_output = semantic_output
             self.model_events.append(value)
             if value.get('type') == 'model_call_started':
                 self.metrics.on_model_call_started()
@@ -179,12 +288,22 @@ class AgentEventFrameTranslator:
             task_created = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'task_created': task_created}))
             return frames
+        if event_type == 'knowledge_operation_result':
+            operation_result = {k: v for k, v in event.items() if k != 'tag'}
+            frames.append(_stream_frame(extra={'knowledge_operation_result': operation_result}))
+            return frames
         if event_type == 'artifact_created':
             artifact = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'artifact_created': artifact}))
             return frames
         if event_type == 'ask_pending':
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
+            if isinstance(ask_data.get('knowledge_management'), dict):
+                # This tool waits for Core's decision and continues in the same
+                # run. Unlike ask_user, its card must not suppress the final
+                # result or mark a completed run as awaiting another user turn.
+                frames.append(_stream_frame(extra={'ask_pending': ask_data}))
+                return frames
             mail_draft = ask_data.get('mail_draft')
             extra_drafts = ask_data.get('mail_drafts')
             has_mail_draft = (
@@ -333,7 +452,15 @@ class AgentEventFrameTranslator:
         llm_config: Optional[dict[str, Any]] = None,
         turn_seq: Optional[int] = None,
         max_input_tokens: Optional[int] = None,
+        prefer_usage_snapshot: bool = False,
     ) -> dict[str, Any]:
+        output = None
+        if self._model_output_checkpoint is not None:
+            output = {'run_id': self.run.run_id, 'call_index': self._model_output_index, 'phase': 'rollback'}
+            self._restore_model_output()
+            if outcome == RunOutcome.SUCCEEDED:
+                outcome = RunOutcome.FAILED
+                self.run.fallback_code = 'runtime_failure'
         metrics = self.metrics.snapshot(
             usage=usage,
             usage_map=usage_map,
@@ -342,6 +469,7 @@ class AgentEventFrameTranslator:
             llm_config=llm_config,
             turn_seq=turn_seq,
             max_input_tokens=max_input_tokens,
+            prefer_usage_snapshot=prefer_usage_snapshot,
         )
         self.last_metrics = metrics
         client_metrics = {
@@ -357,7 +485,9 @@ class AgentEventFrameTranslator:
             # observation; the browser only needs the normalized summary.
             'performance_metrics': client_metrics,
         })
-        if self.export_stream is not None and (
+        if output is not None:
+            frame['model_output'] = output
+        elif self.export_stream is not None and (
             ':::export' in ''.join(self.export_stream.raw)
             or len(self.export_stream.pending) > self.export_stream.emitted
         ):

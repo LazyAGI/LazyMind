@@ -84,7 +84,11 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	task.Params, _ = json.Marshal(params)
+	task.Params, err = json.Marshal(params)
+	if err != nil {
+		common.ReplyErr(w, "invalid execution parameters", http.StatusServiceUnavailable)
+		return
+	}
 	config, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), task.CreateUserID)
 	if err != nil {
 		common.ReplyErr(w, "model config unavailable", http.StatusServiceUnavailable)
@@ -115,19 +119,29 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyAppErr(w, common.NewAppError(http.StatusServiceUnavailable, common.ErrCodeInternal, "User environment configuration unavailable"))
 		return
 	}
-	steps, _ := LoadSteps(r.Context(), store.DB(), taskID)
+	visibility, err := captureTaskVisibility(r.Context(), store.DB(), task)
+	if err != nil {
+		common.ReplyErr(w, "tool visibility unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	steps, err := LoadSteps(r.Context(), store.DB(), taskID)
+	if err != nil {
+		common.ReplyErr(w, "task steps unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	stepDTOs := make([]stepDTO, 0, len(steps))
 	for i := range steps {
 		stepDTOs = append(stepDTOs, toStepDTO(&steps[i]))
 	}
-	privateTaskBody, _ := json.Marshal(toTaskDTO(task))
-	privateTask := map[string]any{}
-	_ = json.Unmarshal(privateTaskBody, &privateTask)
-	privateTask["params"] = params
-	privateTask["execution_id"] = task.ExecutionID
-	common.ReplyOK(w, map[string]any{"task": privateTask, "params": params,
-		"steps": stepDTOs, "create_user_id": task.CreateUserID, "llm_config": config,
-		"tool_config": toolConfig, "user_env_vars": userEnvVars, "workspace_path": task.WorkspacePath})
+	params["_tool_visibility"] = visibility
+	privateTask := executionTaskDTO{taskDTO: toTaskDTO(task), Params: params, ExecutionID: visibility.ExecutionID}
+	common.ReplyOK(w, map[string]any{
+		"task": privateTask, "params": params, "steps": stepDTOs,
+		"create_user_id": task.CreateUserID, "llm_config": config,
+		"disabled_tools":    visibility.Disabled,
+		"system_mcp_config": visibleKnowledgeConfig(append([]string{}, runtimeParams.LegacyTools...), visibility.Disabled),
+		"tool_config":       toolConfig, "user_env_vars": userEnvVars, "workspace_path": task.WorkspacePath,
+	})
 }
 
 func workflowToolConfigCapabilities(capabilities, legacyTools []string) []string {
@@ -258,13 +272,25 @@ func remoteStepContent(event TaskEvent) (string, json.RawMessage) {
 	if role == "" {
 		return "", nil
 	}
+	if event.ModelOutput != nil && (role == "text" || role == "think") {
+		value.(map[string]any)["model_output"] = event.ModelOutput
+	}
 	raw, _ := json.Marshal(value)
 	return role, raw
 }
 
 // taskDTO is the JSON shape returned to the frontend for a task.
+// This response is private to the authenticated executor. Public task DTOs do
+// not acquire execution parameters or credentials.
+type executionTaskDTO struct {
+	taskDTO
+	Params      map[string]any `json:"params"`
+	ExecutionID string         `json:"execution_id"`
+}
+
 type taskDTO struct {
 	TaskID           string          `json:"task_id"`
+	ExecutionID      string          `json:"execution_id"`
 	ConversationID   string          `json:"conversation_id"`
 	TriggerHistoryID string          `json:"trigger_history_id"`
 	Seq              int             `json:"seq_in_conversation"`
@@ -321,9 +347,10 @@ type taskProgressDTO struct {
 }
 
 type stepDTO struct {
-	Seq     int             `json:"seq"`
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	ExecutionID string          `json:"execution_id,omitempty"`
+	Seq         int             `json:"seq"`
+	Role        string          `json:"role"`
+	Content     json.RawMessage `json:"content"`
 }
 
 type artifactDTO struct {
@@ -342,6 +369,7 @@ type internalArtifactDTO struct {
 func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 	return taskDTO{
 		TaskID:           t.ID,
+		ExecutionID:      t.ExecutionID,
 		ConversationID:   t.ConversationID,
 		TriggerHistoryID: t.TriggerHistoryID,
 		Seq:              t.SeqInConversation,
@@ -378,9 +406,10 @@ func toArtifactDTO(a *orm.SubAgentArtifact, workspacePath string) artifactDTO {
 
 func toStepDTO(s *orm.SubAgentStep) stepDTO {
 	return stepDTO{
-		Seq:     s.Seq,
-		Role:    s.Role,
-		Content: normalizeJSON(s.Content, "{}"),
+		Seq:         s.Seq,
+		ExecutionID: s.ExecutionID,
+		Role:        s.Role,
+		Content:     normalizeJSON(s.Content, "{}"),
 	}
 }
 
@@ -443,6 +472,9 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		steps, _ := LoadSteps(ctx, db, tasks[i].ID)
 		for j := range steps {
+			if tasks[i].AgentType != "workflow_step" && steps[j].ExecutionID != "" && steps[j].ExecutionID != tasks[i].ExecutionID {
+				continue
+			}
 			dto.Steps = append(dto.Steps, toStepDTO(&steps[j]))
 		}
 		out = append(out, dto)

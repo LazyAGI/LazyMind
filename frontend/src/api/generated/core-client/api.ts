@@ -356,6 +356,12 @@ export interface AggregateDocumentsRequest {
     'document_stages'?: Array<string>;
     'file_types'?: Array<string>;
     'group_by'?: Array<string>;
+    'match'?: string;
+    'name'?: string;
+    'parent_id'?: string;
+    'path'?: string;
+    'recursive'?: boolean;
+    'resource_ids'?: Array<string>;
     'tags'?: Array<string>;
 }
 export interface AggregateDocumentsResponse {
@@ -697,7 +703,6 @@ export interface BindingView {
     'bound': boolean;
     'connector_id'?: string;
     'driver_session_id'?: string;
-    'generation': number;
     'provider'?: string;
 }
 export interface BuiltinSkillListOpenAPIResponse {
@@ -744,6 +749,13 @@ export const CapabilityDependencyStatusEnum = {
 
 export type CapabilityDependencyStatusEnum = typeof CapabilityDependencyStatusEnum[keyof typeof CapabilityDependencyStatusEnum];
 
+export interface CapabilityRef {
+    'display_order': number;
+    'enabled': boolean;
+    'key': string;
+    'settings'?: { [key: string]: object; };
+    'version': number;
+}
 export interface ChatChunkResponse {
     'capability_dependency'?: object;
     'conversation_id'?: string;
@@ -753,7 +765,9 @@ export interface ChatChunkResponse {
     'exports'?: Array<ChatExport>;
     'history_id'?: string;
     'message'?: string;
+    'model_output'?: ChatModelOutput;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'performance_metrics'?: RunPerformanceMetrics;
     'prompt_questions'?: Array<string>;
     'reasoning_content'?: string;
@@ -927,6 +941,26 @@ export const ChatModelListOpenAPIItemSourceEnum = {
 
 export type ChatModelListOpenAPIItemSourceEnum = typeof ChatModelListOpenAPIItemSourceEnum[keyof typeof ChatModelListOpenAPIItemSourceEnum];
 
+export interface ChatModelOutput {
+    /**
+     * Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run.
+     */
+    'call_index': number;
+    /**
+     * Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed.
+     */
+    'phase'?: ChatModelOutputPhaseEnum;
+    'run_id': string;
+}
+
+export const ChatModelOutputPhaseEnum = {
+    Begin: 'begin',
+    Commit: 'commit',
+    Rollback: 'rollback'
+} as const;
+
+export type ChatModelOutputPhaseEnum = typeof ChatModelOutputPhaseEnum[keyof typeof ChatModelOutputPhaseEnum];
+
 export interface ChatModelProviderOpenAPIItem {
     'id': string;
     'models'?: Array<ChatModelListOpenAPIItem>;
@@ -970,7 +1004,8 @@ export const ChatModelRouteReasonEnum = {
     RetrySameModel: 'retry_same_model',
     Fixed: 'fixed',
     InitialSelection: 'initial_selection',
-    ModelUnavailable: 'model_unavailable'
+    ModelUnavailable: 'model_unavailable',
+    ModelFallback: 'model_fallback'
 } as const;
 
 export type ChatModelRouteReasonEnum = typeof ChatModelRouteReasonEnum[keyof typeof ChatModelRouteReasonEnum];
@@ -1025,6 +1060,42 @@ export const ChatModelSelectionOpenAPISourceEnum = {
 
 export type ChatModelSelectionOpenAPISourceEnum = typeof ChatModelSelectionOpenAPISourceEnum[keyof typeof ChatModelSelectionOpenAPISourceEnum];
 
+export interface ChatModelSwitchIdentity {
+    'candidate_id': string;
+    'model_id': string;
+    'model_name'?: string;
+    'provider_group_id': string;
+    'provider_name'?: string;
+    'source': ChatModelSwitchIdentitySourceEnum;
+}
+
+export const ChatModelSwitchIdentitySourceEnum = {
+    Own: 'own',
+    Shared: 'shared',
+    Cloud: 'cloud'
+} as const;
+
+export type ChatModelSwitchIdentitySourceEnum = typeof ChatModelSwitchIdentitySourceEnum[keyof typeof ChatModelSwitchIdentitySourceEnum];
+
+export interface ChatModelSwitchRecord {
+    'context_compacted': boolean;
+    'from': ChatModelSwitchIdentity;
+    'from_max_input_tokens': number | null;
+    'reason_code': string;
+    'switch_index': number;
+    'to': ChatModelSwitchIdentity;
+    'to_max_input_tokens': number | null;
+    'event_id': string;
+}
+export interface ChatModelSwitchedData {
+    'context_compacted': boolean;
+    'from': ChatModelSwitchIdentity;
+    'from_max_input_tokens': number | null;
+    'reason_code': string;
+    'switch_index': number;
+    'to': ChatModelSwitchIdentity;
+    'to_max_input_tokens': number | null;
+}
 export interface ChatModelsOpenAPIResponse {
     'auto_available': boolean;
     'default_selection': ChatModelSelectionOpenAPI;
@@ -1047,8 +1118,18 @@ export interface ChatRuntimeEvent {
     'event_id'?: string;
     'run_id'?: string;
     'schema_version'?: number;
-    'type'?: string;
+    'type'?: ChatRuntimeEventTypeEnum;
 }
+
+export const ChatRuntimeEventTypeEnum = {
+    ModelRetryScheduled: 'model_retry_scheduled',
+    ModelCallFinished: 'model_call_finished',
+    ModelSwitched: 'model_switched',
+    RunFinished: 'run_finished'
+} as const;
+
+export type ChatRuntimeEventTypeEnum = typeof ChatRuntimeEventTypeEnum[keyof typeof ChatRuntimeEventTypeEnum];
+
 export interface CheckDatabaseConnectionResponse {
     'message': string;
     'success': boolean;
@@ -1753,7 +1834,9 @@ export interface ConversationHistoryItem {
     'fork_read_only'?: boolean;
     'id'?: string;
     'input'?: Array<object>;
+    'model_output'?: ChatModelOutput;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'performance_metrics'?: RunPerformanceMetrics;
     'query'?: string;
     'reason'?: string;
@@ -2582,6 +2665,8 @@ export interface DatabaseConnectionSecretResponse {
 export interface Dataset {
     'acl'?: Array<string>;
     'algo': Algo;
+    'algo_id'?: string;
+    'allowed_actions'?: Array<string>;
     'capabilities': DatasetCapabilities;
     'cover_image': string;
     'create_time': string;
@@ -2596,10 +2681,15 @@ export interface Dataset {
     'is_empty': boolean;
     'is_owner': boolean;
     'name': string;
+    'operation_result'?: ResourceOperationResult;
     'parsers'?: Array<ParserConfig>;
     'processing_level'?: string;
     'processing_revision'?: number;
+    'profile_id'?: string;
     'reader_fallback_accepted': boolean;
+    'reading_capabilities'?: Array<CapabilityRef>;
+    'resource_version'?: number;
+    'scene'?: string;
     'segment_count': number;
     'share_type': string;
     'source_type'?: string;
@@ -2794,10 +2884,13 @@ export interface Doc {
     'name': string;
     'p_id': string;
     'pdf_convert_result'?: string;
+    'processing_error'?: ProcessingDiagnostic;
+    'processing_status'?: string;
     'recursive_document_count'?: number;
     'recursive_file_size'?: number;
     'recursive_folder_count'?: number;
     'rel_path': string;
+    'retained_only': boolean;
     'tags'?: Array<string>;
     'type': string;
     'update_time': string;
@@ -3880,6 +3973,7 @@ export interface ExternalExecutionWorkflow {
 export interface FailedRunAttempt {
     'create_time'?: string;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'result'?: string;
     'run_id'?: string;
     'run_status'?: FailedRunAttemptRunStatusEnum;
@@ -4313,6 +4407,19 @@ export interface KnowledgeMarketTaskResultOpenAPIResponse {
     'submitted': number;
     'task_ids'?: Array<string>;
     'updated_items'?: Array<string>;
+}
+export interface KnowledgeOperation {
+    'action': string;
+    'call_id': string;
+    'items'?: Array<ResourceOperationItem>;
+    'processing_summary'?: { [key: string]: number; };
+    'status': string;
+    'summary': ResourceOperationSummary;
+}
+export interface KnowledgeOperationError {
+    'code': string;
+    'details'?: { [key: string]: object; };
+    'message': string;
 }
 export interface LatestVersionChangeOpenAPIResponse {
     'change_source': string;
@@ -4842,6 +4949,27 @@ export const MissingCapabilityIdEnum = {
 
 export type MissingCapabilityIdEnum = typeof MissingCapabilityIdEnum[keyof typeof MissingCapabilityIdEnum];
 
+export interface ModelCallFinishedData {
+    'attempt_count': number;
+    'failure'?: ModelCallFinishedDataFailure;
+    'finish'?: string;
+    'has_semantic_output': boolean;
+    'kind': ModelCallFinishedDataKindEnum;
+    'model_call_id': string;
+}
+
+export const ModelCallFinishedDataKindEnum = {
+    Finish: 'finish',
+    Failure: 'failure'
+} as const;
+
+export type ModelCallFinishedDataKindEnum = typeof ModelCallFinishedDataKindEnum[keyof typeof ModelCallFinishedDataKindEnum];
+
+export interface ModelCallFinishedDataFailure {
+    'code'?: string;
+    'diagnostic_id'?: string;
+    'origin'?: string;
+}
 
 export const ModelFailureCode = {
     AuthenticationFailed: 'authentication_failed',
@@ -5029,6 +5157,9 @@ export interface OrdinaryTaskView {
     'conversation_id': string;
     'display_key': string;
     'execution_id': string;
+    'failure_code'?: OrdinaryTaskViewFailureCodeEnum;
+    'knowledge_operations'?: Array<KnowledgeOperation>;
+    'model_switch'?: ChatModelSwitchRecord;
     'order': number;
     'pages': Pages;
     'parallel_group_id': string | null;
@@ -5056,6 +5187,12 @@ export interface OrdinaryTaskView {
     'workflow_step_id': string | null;
 }
 
+export const OrdinaryTaskViewFailureCodeEnum = {
+    ModelFallbackExhausted: 'model_fallback_exhausted',
+    ModelContextNotFit: 'model_context_not_fit'
+} as const;
+
+export type OrdinaryTaskViewFailureCodeEnum = typeof OrdinaryTaskViewFailureCodeEnum[keyof typeof OrdinaryTaskViewFailureCodeEnum];
 export const OrdinaryTaskViewSchemaVersionEnum = {
     NUMBER_1: 1
 } as const;
@@ -5077,6 +5214,7 @@ export interface OrdinaryWorkflowResponse {
     'message': string;
 }
 export interface Pages {
+    'knowledge_operations': CollectionPage;
     'process_steps': CollectionPage;
     'sources': CollectionPage;
     'stage_artifacts': CollectionPage;
@@ -5251,6 +5389,13 @@ export interface PreferenceOrganizerTaskResponse {
     'code': number;
     'data': PreferenceOrganizerTaskData | null;
     'message': string;
+}
+export interface ProcessingDiagnostic {
+    'code': string;
+    'message': string;
+    'recovery': string;
+    'stage': string;
+    'task_id'?: string;
 }
 export interface ProjectionError {
     'code': string;
@@ -5446,6 +5591,7 @@ export type PublicDisplayProgressSchemaVersionEnum = typeof PublicDisplayProgres
 export interface PublicProcessStep {
     'elapsed_ms': number | null;
     'finished_at': string | null;
+    'model_switch'?: ChatModelSwitchRecord;
     'order': number;
     'revision': number;
     'started_at': string | null;
@@ -5490,6 +5636,49 @@ export interface QuestionTypeOptionsResponse {
 }
 export interface RecoveryDeleteCountResponse {
     'deleted_count'?: number;
+}
+export interface ResourceError {
+    'code': string;
+    'details'?: { [key: string]: object; };
+    'message': string;
+}
+export interface ResourceOperationItem {
+    'after'?: { [key: string]: object; };
+    'before'?: { [key: string]: object; };
+    'cleanup_status'?: string;
+    'document_count'?: number;
+    'error'?: ResourceError;
+    'folder_count'?: number;
+    'id_mapping'?: { [key: string]: string; };
+    'input_index'?: number;
+    'name': string;
+    'parent_id': string;
+    'previous_ref'?: ResourceRef;
+    'processing_error'?: ProcessingDiagnostic;
+    'processing_status'?: string;
+    'resource_ref': ResourceRef;
+    'resource_status': string;
+    'task_id'?: string;
+}
+export interface ResourceOperationResult {
+    'action': string;
+    'items'?: Array<ResourceOperationItem>;
+    'processing_summary'?: { [key: string]: number; };
+    'status': string;
+    'summary': ResourceOperationSummary;
+}
+export interface ResourceOperationSummary {
+    'failed': number;
+    'skipped': number;
+    'succeeded': number;
+    'total': number;
+    'unconfirmed': number;
+}
+export interface ResourceRef {
+    'document_id'?: string;
+    'folder_id'?: string;
+    'kind': string;
+    'knowledge_base_id': string;
 }
 export interface ResourceUpdateTaskOpenAPIResponse {
     'attempt_count': number;
@@ -6286,6 +6475,49 @@ export interface SkillNormalizationWarningOpenAPIResponse {
     'code': string;
     'message': string;
 }
+export interface SkillOrganizeApprovalItemOpenAPIResponse {
+    'content'?: string;
+    'delete_keys'?: Array<string>;
+    'depends_on'?: Array<string>;
+    'id': string;
+    'source_keys'?: Array<string>;
+    'source_skill_ids'?: Array<string>;
+    'status': string;
+    'target_name': string;
+    'target_skill_id': string;
+    'target_source_key': string;
+    'type': string;
+}
+export interface SkillOrganizeApprovalListOpenAPIResponse {
+    'tasks'?: Array<SkillOrganizeApprovalTaskOpenAPIResponse>;
+}
+export interface SkillOrganizeApprovalResolveItemOpenAPIResponse {
+    'error'?: string;
+    'id': string;
+    'status': string;
+}
+export interface SkillOrganizeApprovalResolveOpenAPIRequest {
+    'action': SkillOrganizeApprovalResolveOpenAPIRequestActionEnum;
+    'item_ids'?: Array<string>;
+    'request_id': string;
+}
+
+export const SkillOrganizeApprovalResolveOpenAPIRequestActionEnum = {
+    Accept: 'accept',
+    Reject: 'reject',
+    Revoke: 'revoke'
+} as const;
+
+export type SkillOrganizeApprovalResolveOpenAPIRequestActionEnum = typeof SkillOrganizeApprovalResolveOpenAPIRequestActionEnum[keyof typeof SkillOrganizeApprovalResolveOpenAPIRequestActionEnum];
+
+export interface SkillOrganizeApprovalResolveOpenAPIResponse {
+    'results'?: Array<SkillOrganizeApprovalResolveItemOpenAPIResponse>;
+}
+export interface SkillOrganizeApprovalTaskOpenAPIResponse {
+    'error'?: string;
+    'items'?: Array<SkillOrganizeApprovalItemOpenAPIResponse>;
+    'request_id': string;
+}
 export interface SkillOrganizeOpenAPIRequest {
     'artifact_dir'?: string;
     /**
@@ -6716,6 +6948,43 @@ export interface TaskDocumentInfo {
     'document_size'?: number;
     'document_state'?: string;
 }
+/**
+ * Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect or execution changes begin with a Core-generated task_start with snapshot=true and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. Only this DB section initializes authoritative hydration; live task_start is idempotent for an established execution. On ordinary tool_calls/tool_results, seq is the zero-based durable step sequence used to merge snapshot and live delivery once. Terminal restores any open preview before done/error.
+ */
+export interface TaskEvent {
+    'chunk_index'?: number;
+    'content_type'?: string;
+    'current_phase'?: string;
+    'delta'?: string;
+    'durable_tool_results'?: Array<object>;
+    'estimated_sec'?: number;
+    'event_id'?: string;
+    'execution_id'?: string;
+    'message'?: string;
+    'model_output'?: ChatModelOutput;
+    'process_step'?: PublicProcessStep;
+    'progress'?: number;
+    'runtime_event'?: TaskModelRuntimeEvent;
+    'scope_version'?: number;
+    'seq'?: number;
+    'slot'?: string;
+    'snapshot'?: boolean;
+    'sources'?: Array<object>;
+    'status'?: string;
+    'steps'?: Array<string>;
+    'stream_id'?: string;
+    'summary'?: string;
+    'task_id'?: string;
+    'text'?: string;
+    'think'?: string;
+    'tool_calls'?: Array<object>;
+    'tool_results'?: Array<object>;
+    'type': string;
+    'v2_artifact_id'?: string;
+    'v2_revision_id'?: string;
+    'value'?: object;
+    'writing_subtasks'?: Array<object>;
+}
 export interface TaskFile {
     'content_type'?: string;
     'display_name'?: string;
@@ -6735,6 +7004,25 @@ export interface TaskInfo {
     'total_document_count'?: number;
     'total_document_size'?: number;
 }
+export interface TaskModelRuntimeEvent {
+    'data': ChatModelSwitchedData;
+    'event_id': string;
+    'run_id': string;
+    'schema_version': TaskModelRuntimeEventSchemaVersionEnum;
+    'type': TaskModelRuntimeEventTypeEnum;
+}
+
+export const TaskModelRuntimeEventSchemaVersionEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type TaskModelRuntimeEventSchemaVersionEnum = typeof TaskModelRuntimeEventSchemaVersionEnum[keyof typeof TaskModelRuntimeEventSchemaVersionEnum];
+export const TaskModelRuntimeEventTypeEnum = {
+    ModelSwitched: 'model_switched'
+} as const;
+
+export type TaskModelRuntimeEventTypeEnum = typeof TaskModelRuntimeEventTypeEnum[keyof typeof TaskModelRuntimeEventTypeEnum];
+
 export interface TaskNotification {
     'account_id'?: string;
     'app_name'?: string;
@@ -7273,7 +7561,6 @@ export interface WorkflowExecutionStopBody {
 }
 export interface WorkflowHostAction {
     'accepted_at'?: string;
-    'binding_generation': number;
     'command_id': string;
     'connector_id': string;
     'consumed_at'?: string;
@@ -7294,6 +7581,7 @@ export interface WorkflowHostActionPage {
     'next_page_token'?: string;
 }
 export interface WorkflowHostBindingRequest {
+    'cancellation'?: string;
     'connector_id': string;
     'credential': string;
     'driver_session_id': string;
@@ -13601,6 +13889,36 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
                 options: localVarRequestOptions,
             };
         },
+        /**
+         *
+         * @summary Available knowledge configuration and upload limits
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeOptionsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/knowledge/options`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -13710,6 +14028,18 @@ export const DatasetsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         *
+         * @summary Available knowledge configuration and upload limits
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeOptionsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeOptionsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreKnowledgeOptionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -13788,6 +14118,15 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
          */
         apiCoreDatasetsPost(requestParameters: DatasetsApiApiCoreDatasetsPostRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<Dataset> {
             return localVarFp.apiCoreDatasetsPost(requestParameters.datasetId, requestParameters.dataset, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Available knowledge configuration and upload limits
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeOptionsGet(options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCoreKnowledgeOptionsGet(options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -13944,6 +14283,16 @@ export class DatasetsApi extends BaseAPI {
      */
     public apiCoreDatasetsPost(requestParameters: DatasetsApiApiCoreDatasetsPostRequest = {}, options?: RawAxiosRequestConfig) {
         return DatasetsApiFp(this.configuration).apiCoreDatasetsPost(requestParameters.datasetId, requestParameters.dataset, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Available knowledge configuration and upload limits
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeOptionsGet(options?: RawAxiosRequestConfig) {
+        return DatasetsApiFp(this.configuration).apiCoreKnowledgeOptionsGet(options).then((request) => request(this.axios, this.basePath));
     }
 }
 
@@ -14226,6 +14575,64 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          */
         apiCoreAcademicReferencesResolvePost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/academic/references:resolve`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /academic/source-targets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourceTargetsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/source-targets`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /academic/sources:inspect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourcesInspectPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/sources:inspect`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -18358,6 +18765,43 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}:reparse
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReparsePost: async (dataset: string, document: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'dataset' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReparsePost', 'dataset', dataset)
+            // verify required parameter 'document' is not null or undefined
+            assertParamExists('apiCoreDatasetsDatasetDocumentsDocumentReparsePost', 'document', document)
+            const localVarPath = `/api/core/datasets/{dataset}/documents/{document}:reparse`
+                .replace(`{${"dataset"}}`, encodeURIComponent(String(dataset)))
+                .replace(`{${"document"}}`, encodeURIComponent(String(document)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -25707,6 +26151,146 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
+         * @param {string} sessionId
+         * @param {string} stage
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet: async (sessionId: string, stage: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet', 'sessionId', sessionId)
+            // verify required parameter 'stage' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet', 'stage', stage)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/product-artifacts/{stage}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"stage"}}`, encodeURIComponent(String(stage)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/product-decisions/{decision_id}
+         * @param {string} sessionId
+         * @param {string} decisionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost: async (sessionId: string, decisionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost', 'sessionId', sessionId)
+            // verify required parameter 'decisionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost', 'decisionId', decisionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/product-decisions/{decision_id}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"decision_id"}}`, encodeURIComponent(String(decisionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/product-stage-relay
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProductStageRelayGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdProductStageRelayGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/product-stage-relay`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/product-stage-relay
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProductStageRelayPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdProductStageRelayPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/product-stage-relay`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public workflow attempts, including hosted attempts
          * @param {string} sessionId
@@ -26585,6 +27169,30 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicReferencesResolvePost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicReferencesResolvePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /academic/source-targets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicSourceTargetsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicSourceTargetsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicSourceTargetsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /academic/sources:inspect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicSourcesInspectPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicSourcesInspectPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -28147,6 +28755,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReadGet(dataset, document, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReadGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}:reparse
+         * @param {string} dataset
+         * @param {string} document
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDatasetsDatasetDocumentsDocumentReparsePost(dataset: string, document: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsDatasetDocumentsDocumentReparsePost(dataset, document, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreDatasetsDatasetDocumentsDocumentReparsePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -30969,6 +31591,60 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
+         * @param {string} sessionId
+         * @param {string} stage
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet(sessionId: string, stage: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet(sessionId, stage, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/product-decisions/{decision_id}
+         * @param {string} sessionId
+         * @param {string} decisionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost(sessionId: string, decisionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost(sessionId, decisionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/product-stage-relay
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdProductStageRelayGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdProductStageRelayGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdProductStageRelayGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/product-stage-relay
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdProductStageRelayPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdProductStageRelayPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdProductStageRelayPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public workflow attempts, including hosted attempts
          * @param {string} sessionId
@@ -31350,6 +32026,24 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicReferencesResolvePost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicReferencesResolvePost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /academic/source-targets
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourceTargetsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicSourceTargetsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /academic/sources:inspect
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAcademicSourcesInspectPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -32499,6 +33193,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /datasets/{dataset}/documents/{document}:reparse
+         * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDatasetsDatasetDocumentsDocumentReparsePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreDatasetsDatasetDocumentsDocumentReparsePost(requestParameters.dataset, requestParameters.document, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -34598,6 +35302,46 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
         },
         /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet(requestParameters.sessionId, requestParameters.stage, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/product-decisions/{decision_id}
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost(requestParameters.sessionId, requestParameters.decisionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/product-stage-relay
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProductStageRelayGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdProductStageRelayGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/product-stage-relay
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProductStageRelayPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdProductStageRelayPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public workflow attempts, including hosted attempts
          * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
@@ -35571,6 +36315,15 @@ export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentPdfTranslation
  * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReadGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest {
+    readonly dataset: string
+
+    readonly document: string
+}
+
+/**
+ * Request parameters for apiCoreDatasetsDatasetDocumentsDocumentReparsePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest {
     readonly dataset: string
 
     readonly document: string
@@ -36727,6 +37480,38 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequ
 }
 
 /**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest {
+    readonly sessionId: string
+
+    readonly stage: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPostRequest {
+    readonly sessionId: string
+
+    readonly decisionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdProductStageRelayGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdProductStageRelayPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayPostRequest {
+    readonly sessionId: string
+}
+
+/**
  * Request parameters for apiCoreWorkflowSessionsSessionIdProjectionGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest {
@@ -36990,6 +37775,26 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicReferencesResolvePost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicReferencesResolvePost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /academic/source-targets
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicSourceTargetsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicSourceTargetsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /academic/sources:inspect
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicSourcesInspectPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAcademicSourcesInspectPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -38257,6 +39062,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReadGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReadGet(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /datasets/{dataset}/documents/{document}:reparse
+     * @param {DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDatasetsDatasetDocumentsDocumentReparsePost(requestParameters: DefaultApiApiCoreDatasetsDatasetDocumentsDocumentReparsePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreDatasetsDatasetDocumentsDocumentReparsePost(requestParameters.dataset, requestParameters.document, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -40571,6 +41387,50 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet(requestParameters.sessionId, requestParameters.stage, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/product-decisions/{decision_id}
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdProductDecisionsDecisionIdPost(requestParameters.sessionId, requestParameters.decisionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/product-stage-relay
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdProductStageRelayGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdProductStageRelayGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/product-stage-relay
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdProductStageRelayPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProductStageRelayPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdProductStageRelayPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -53862,6 +54722,71 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
+         * Returns pending and accepted plan items after the organize task has finished writing. Items from a running task are omitted.
+         * @summary List completed skill organize approvals
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillOrganizeApprovalsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/skill_organize/approvals`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Applies one plan item at a time. A merge updates the target skill and removes its source skills together. Reject discards a pending item. Revoke restores an accepted item when no later edit exists.
+         * @summary Accept, reject, or revoke skill organize items
+         * @param {SkillOrganizeApprovalResolveOpenAPIRequest} skillOrganizeApprovalResolveOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillOrganizeApprovalsResolvePost: async (skillOrganizeApprovalResolveOpenAPIRequest: SkillOrganizeApprovalResolveOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'skillOrganizeApprovalResolveOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreSkillOrganizeApprovalsResolvePost', 'skillOrganizeApprovalResolveOpenAPIRequest', skillOrganizeApprovalResolveOpenAPIRequest)
+            const localVarPath = `/api/core/skill_organize/approvals:resolve`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(skillOrganizeApprovalResolveOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest
@@ -54783,6 +55708,31 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Returns pending and accepted plan items after the organize task has finished writing. Items from a running task are omitted.
+         * @summary List completed skill organize approvals
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSkillOrganizeApprovalsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillOrganizeApprovalListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillOrganizeApprovalsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillOrganizeApprovalsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Applies one plan item at a time. A merge updates the target skill and removes its source skills together. Reject discards a pending item. Revoke restores an accepted item when no later edit exists.
+         * @summary Accept, reject, or revoke skill organize items
+         * @param {SkillOrganizeApprovalResolveOpenAPIRequest} skillOrganizeApprovalResolveOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSkillOrganizeApprovalsResolvePost(skillOrganizeApprovalResolveOpenAPIRequest: SkillOrganizeApprovalResolveOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillOrganizeApprovalResolveOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillOrganizeApprovalsResolvePost(skillOrganizeApprovalResolveOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillOrganizeApprovalsResolvePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest
@@ -55135,6 +56085,25 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.apiCoreBuiltinSkillsGet(options).then((request) => request(axios, basePath));
         },
         /**
+         * Returns pending and accepted plan items after the organize task has finished writing. Items from a running task are omitted.
+         * @summary List completed skill organize approvals
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillOrganizeApprovalsGet(options?: RawAxiosRequestConfig): AxiosPromise<SkillOrganizeApprovalListOpenAPIResponse> {
+            return localVarFp.apiCoreSkillOrganizeApprovalsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Applies one plan item at a time. A merge updates the target skill and removes its source skills together. Reject discards a pending item. Revoke restores an accepted item when no later edit exists.
+         * @summary Accept, reject, or revoke skill organize items
+         * @param {SkillsApiApiCoreSkillOrganizeApprovalsResolvePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillOrganizeApprovalsResolvePost(requestParameters: SkillsApiApiCoreSkillOrganizeApprovalsResolvePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillOrganizeApprovalResolveOpenAPIResponse> {
+            return localVarFp.apiCoreSkillOrganizeApprovalsResolvePost(requestParameters.skillOrganizeApprovalResolveOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Submits 2 to 20 internal SkillV2 files for organization. Light mode is the default and changes descriptions and search metadata only; deep mode also permits refactoring, merging and deduplication. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillsApiApiCoreSkillOrganizePostRequest} requestParameters Request parameters.
@@ -55380,6 +56349,13 @@ export interface SkillsApiApiCoreBuiltinSkillsBuiltinSkillUidEnablePostRequest {
 }
 
 /**
+ * Request parameters for apiCoreSkillOrganizeApprovalsResolvePost operation in SkillsApi.
+ */
+export interface SkillsApiApiCoreSkillOrganizeApprovalsResolvePostRequest {
+    readonly skillOrganizeApprovalResolveOpenAPIRequest: SkillOrganizeApprovalResolveOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreSkillOrganizePost operation in SkillsApi.
  */
 export interface SkillsApiApiCoreSkillOrganizePostRequest {
@@ -55578,6 +56554,27 @@ export class SkillsApi extends BaseAPI {
      */
     public apiCoreBuiltinSkillsGet(options?: RawAxiosRequestConfig) {
         return SkillsApiFp(this.configuration).apiCoreBuiltinSkillsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns pending and accepted plan items after the organize task has finished writing. Items from a running task are omitted.
+     * @summary List completed skill organize approvals
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSkillOrganizeApprovalsGet(options?: RawAxiosRequestConfig) {
+        return SkillsApiFp(this.configuration).apiCoreSkillOrganizeApprovalsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Applies one plan item at a time. A merge updates the target skill and removes its source skills together. Reject discards a pending item. Revoke restores an accepted item when no later edit exists.
+     * @summary Accept, reject, or revoke skill organize items
+     * @param {SkillsApiApiCoreSkillOrganizeApprovalsResolvePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSkillOrganizeApprovalsResolvePost(requestParameters: SkillsApiApiCoreSkillOrganizeApprovalsResolvePostRequest, options?: RawAxiosRequestConfig) {
+        return SkillsApiFp(this.configuration).apiCoreSkillOrganizeApprovalsResolvePost(requestParameters.skillOrganizeApprovalResolveOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

@@ -41,12 +41,26 @@ func OrdinaryTask(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask) (tas
 		out.Title = fmt.Sprintf("子任务 %d", task.SeqInConversation)
 	}
 	out.Status = task.Status
+	if task.Status == StatusFailed && (task.CurrentPhase == "model_fallback_exhausted" || task.CurrentPhase == "model_context_not_fit") {
+		out.FailureCode = task.CurrentPhase
+	}
 	if task.Status == StatusFailed {
 		out.CapabilityDependency = taskdisplay.CapabilityRecovery(task.Summary)
 	}
 	progress := min(100, max(0, task.ProgressPct))
 	out.ProgressPct = &progress
 	out.Revision = task.DisplayRevision
+	var operationRows []orm.SubAgentStep
+	if err := db.WithContext(ctx).Where("task_id = ? AND execution_id = ? AND role = ?", task.ID, task.ExecutionID, "knowledge_op").Order("seq ASC").Find(&operationRows).Error; err != nil {
+		return out, err
+	}
+	for _, row := range operationRows {
+		receipt, err := taskdisplay.DecodeKnowledgeOperation(row.Content)
+		if err != nil {
+			return out, err
+		}
+		out.KnowledgeOperations = append(out.KnowledgeOperations, receipt)
+	}
 	out.Sources = taskdisplay.NormalizeSources(json.RawMessage(task.Sources))
 	plan, err := ordinaryPlan(ctx, db, task)
 	if err != nil {
@@ -68,6 +82,9 @@ func OrdinaryTask(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask) (tas
 		}
 	}
 	for _, step := range steps {
+		if step.ModelSwitch != nil && (out.ModelSwitch == nil || step.ModelSwitch.SwitchIndex > out.ModelSwitch.SwitchIndex) {
+			out.ModelSwitch = step.ModelSwitch
+		}
 		out.ProcessSteps = append(out.ProcessSteps, step)
 	}
 	sort.Slice(out.ProcessSteps, func(i, j int) bool {
@@ -97,7 +114,7 @@ func OrdinaryTask(ctx context.Context, db *gorm.DB, task *orm.SubAgentTask) (tas
 			out.Timing.ExecutionElapsedMS = &elapsed
 		}
 	}
-	out.Pages = taskdisplay.Pages{ProcessSteps: taskdisplay.CollectionPage{Total: len(out.ProcessSteps), Revision: out.Revision}, Sources: taskdisplay.CollectionPage{Total: len(out.Sources), Revision: out.Revision}, StageArtifacts: taskdisplay.CollectionPage{Total: len(out.StageArtifacts), Revision: out.Revision}}
+	out.Pages = taskdisplay.Pages{KnowledgeOperations: taskdisplay.CollectionPage{Total: len(out.KnowledgeOperations), Revision: out.Revision}, ProcessSteps: taskdisplay.CollectionPage{Total: len(out.ProcessSteps), Revision: out.Revision}, Sources: taskdisplay.CollectionPage{Total: len(out.Sources), Revision: out.Revision}, StageArtifacts: taskdisplay.CollectionPage{Total: len(out.StageArtifacts), Revision: out.Revision}}
 	return out, nil
 }
 

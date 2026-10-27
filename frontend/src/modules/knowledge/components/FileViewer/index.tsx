@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { Spin, message, Empty } from "antd";
 import { useTranslation } from "react-i18next";
@@ -46,6 +47,7 @@ export interface FileViewerRef {
 }
 
 interface FileViewerProps {
+  renderMarkdown?: (markdown: string) => ReactNode;
   file?: string;
   fileName: string;
   segment?: Segment;
@@ -358,7 +360,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     }
     switch (fileType) {
       case "markdown":
-        return <RenderMarkdown fileData={fileData} />;
+        return <RenderMarkdown fileData={fileData} renderMarkdown={props.renderMarkdown} />;
       case "text":
         return <RenderTxt fileData={fileData} content={content} />;
       case "html":
@@ -473,6 +475,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     meta,
     pdfPreviewData,
     props.fileName,
+    props.renderMarkdown,
     props.onPdfSelection,
     props.onPdfKindDetected,
     props.onPdfTranslateSelection,

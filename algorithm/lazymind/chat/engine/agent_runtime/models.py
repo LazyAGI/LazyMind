@@ -50,6 +50,7 @@ class AgentExecutionOptions:
     before_model_request: Optional[Callable[[], None]] = None
     model_context_provider: Optional[Callable[[], Optional[str]]] = None
     configuration_runtime: Any = None
+    knowledge_management: Any = None
     directory_runtime: Any = None
     skills: Any = None
     prompt_skills: Optional[list[str]] = None
@@ -67,6 +68,9 @@ class AgentExecutionOptions:
     tool_failure_limits: Optional[dict[str, int]] = None
     tool_call_limits: Optional[dict[str, int]] = None
     llm_config: Optional[dict[str, Any]] = None
+    current_model_candidate_id: str = ''
+    model_candidates: tuple[ModelCandidate, ...] = field(default_factory=tuple, repr=False)
+    initial_model_switch: Optional[dict[str, Any]] = field(default=None, repr=False)
     max_input_tokens: Optional[Any] = None
     history_compactor: Optional[Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]] = None
     authorization_gate: Optional[Callable[..., Any]] = None
@@ -88,6 +92,32 @@ class ContextBudget:
     trigger_ratio: float
     target_ratio: float
     source: str = 'fallback'
+
+
+@dataclass(frozen=True)
+class ModelCandidate:
+    candidate_id: str
+    source: str
+    model_id: str
+    provider_group_id: str = ''
+    credential_revision: int = 0
+    credential_count: int = 1
+    max_input_tokens: Optional[int] = None
+    llm_config: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass
+class FallbackRunState:
+    current: ModelCandidate
+    raw_llm: Any = field(repr=False)
+    budget: ContextBudget
+    candidates: tuple[ModelCandidate, ...] = ()
+    failed_candidates: set[str] = field(default_factory=set)
+    failed_credentials: set[tuple[str, int]] = field(default_factory=set)
+    switch_index: int = 0
+    initial_model_switch: Optional[dict[str, Any]] = field(default=None, repr=False)
+    usage_snapshot: dict[str, Any] = field(default_factory=dict, repr=False)
+    model_output_index: int = 0
 
 
 @dataclass(frozen=True)

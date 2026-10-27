@@ -1,5 +1,7 @@
 # Mac ARM64 固定复用已发布 RAG 组件
 
+安装完成但服务重启失败、出现 `reader signature mismatch` 或节点组指纹冲突时，参见 [2026-10-22 macOS RAG 旧注册冲突与恢复记录](macos-rag-registration-recovery-20261022.md)。该问题与 Team ID、下载 SHA 校验不同；文档包含保留数据与清空知识库两种处理边界。
+
 ## 当前正式发布流程（2026-10-21）
 
 以下替代下文历史记录中的“正式包固定复用旧 ZIP”流程。Developer ID 和 ad-hoc CI 构建均重新生成与宿主配套的组件；ad-hoc 可以上传测试依赖，但不代表正式签名或公证。

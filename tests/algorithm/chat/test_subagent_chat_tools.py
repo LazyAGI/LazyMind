@@ -95,6 +95,16 @@ def test_create_subagent_manual_returns_immediately(monkeypatch):
     assert write_calls[0][0] == 'task_created'
     assert write_calls[0][1]['title'] == '素材收集'
     assert write_calls[0][1]['mode'] == 'manual'
+    assert write_calls[0][1]['tools'] is None
+
+
+def test_create_subagent_keeps_explicit_empty_tool_selection(monkeypatch):
+    cfg = _patch_config(monkeypatch)
+    cfg['mode'] = 'manual'
+    calls = []
+    monkeypatch.setattr(sct, '_write_agent_data', lambda tag, **kw: calls.append(kw))
+    sct.create_subagent(agent_type='research', title='no tools', objective='reason', tools=[])
+    assert calls[0]['tools'] == []
 
 
 def test_create_subagent_propagates_max_thinking_depth(monkeypatch):

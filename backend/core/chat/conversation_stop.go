@@ -2,6 +2,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -31,15 +32,21 @@ func StopConversationExecution(ctx context.Context, db *gorm.DB, stateStore stat
 	}
 	// Fence workflow attempts before signalling Python. Otherwise a fast cancel
 	// callback can be committed as a failure while its workflow is still active.
-	workflow.StopActiveWorkflowSession(ctx, db, stateStore, conversationID)
+	var workflowStopErr error
+	if historyID == "" {
+		workflowStopErr = workflow.StopActiveWorkflowSession(ctx, db, stateStore, conversationID)
+	} else {
+		workflowStopErr = workflow.StopWorkflowTurn(ctx, db, stateStore, userID, conversationID, historyID)
+	}
 	var stopSignalErr error
 	if stateStore != nil {
-		ids, err := getGeneratingHistoryIDs(ctx, stateStore, conversationID)
+		ids := []string{historyID}
+		var err error
+		if historyID == "" {
+			ids, err = getGeneratingHistoryIDs(ctx, stateStore, conversationID)
+		}
 		if err != nil {
 			stopSignalErr = err
-		}
-		if len(ids) == 0 && historyID != "" {
-			ids = append(ids, historyID)
 		}
 		external := map[string]struct{}{}
 		if len(ids) > 0 {
@@ -66,7 +73,7 @@ func StopConversationExecution(ctx context.Context, db *gorm.DB, stateStore stat
 	if err := newExternalChatApplication(db).requestStop(ctx, userID, conversationID, historyID); err != nil {
 		return err
 	}
-	taskIDs, err := subagent.InterruptConversation(ctx, db, conversationID, reason)
+	taskIDs, err := subagent.InterruptConversation(ctx, db, conversationID, reason, historyID)
 	if err != nil {
 		return err
 	}
@@ -80,12 +87,12 @@ func StopConversationExecution(ctx context.Context, db *gorm.DB, stateStore stat
 	notifyCtx, cancel := terminalWriteContext(ctx)
 	go func() {
 		defer cancel()
-		if err := workflow.NotifyChatCancel(notifyCtx, conversationID); err != nil {
+		if err := workflow.NotifyChatCancel(notifyCtx, conversationID, historyID); err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", conversationID).Msg("failed to notify Python chat cancellation")
 		}
 	}()
 	if stopSignalErr == nil {
-		return tasktiming.CancelConversation(ctx, db, userID, conversationID, time.Now().UTC())
+		return errors.Join(workflowStopErr, tasktiming.CancelConversation(ctx, db, userID, conversationID, time.Now().UTC(), historyID))
 	}
-	return stopSignalErr
+	return errors.Join(workflowStopErr, stopSignalErr)
 }

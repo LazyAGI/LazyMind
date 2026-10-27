@@ -24,6 +24,27 @@ beforeEach(() => {
 });
 
 describe('versioned workflow synchronization', () => {
+  it('keeps resumed Chat stop ownership across snapshots and rejects stale bindings', () => {
+    const store = useWorkflowStore.getState();
+    store.setSession('c', session());
+    const resumed = { status: 'running', reason: 'executing', approval_step_id: '', chat_history_id: 'resumed-turn' };
+    store.applyWorkflowEvent('c', 's', { ...snapshot(2, 2, 'active'),
+      payload: { ...snapshot(2, 2, 'active').payload, display: resumed } });
+    store.applyWorkflowEvent('c', 's', { ...snapshot(1, 3, 'active'),
+      payload: { ...snapshot(1, 3, 'active').payload, display: { ...resumed, chat_history_id: 'original-turn' } } });
+    expect(useWorkflowStore.getState().sessionByConversation.c?.projection?.display).toEqual(resumed);
+  });
+
+  it('replaces approval metadata on pause and rejects an older approval snapshot', () => {
+    let state = reduceWorkflowEvent(emptyWorkflowProjection(), {
+      ...snapshot(1, 1, 'waiting'), payload: { display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'review' } },
+    });
+    state = reduceWorkflowEvent(state, { type: 'workflow.patch', cursor: 2, state_version: 2,
+      payload: { display: { status: 'paused', reason: 'user_stopped', approval_step_id: '' } } });
+    const old = reduceWorkflowEvent(state, { ...snapshot(1, 3, 'waiting'),
+      payload: { display: { status: 'waiting', reason: 'approval_required', approval_step_id: 'review' } } });
+    expect(old.projection.display).toEqual({ status: 'paused', reason: 'user_stopped', approval_step_id: '' });
+  });
   it('clears automatic execution when a chat stop arrives as a waiting snapshot', () => {
     const store = useWorkflowStore.getState();
     store.setSession('c', { ...session(), status: 'active' });

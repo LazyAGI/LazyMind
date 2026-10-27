@@ -820,6 +820,11 @@ func joinPathList(parts ...string) string {
 }
 
 func algorithmRegisterPolicy(cfg RuntimeConfig, paths RuntimePaths) string {
+	// Desktop packages may reuse a version while changing registration fingerprints.
+	// This opt-out override only replaces definitions; it never resets knowledge data.
+	if envBool("LAZYMIND_FORCE_ALGO_REGISTER", cfg.Profile == "desktop") {
+		return "force"
+	}
 	if policy := strings.TrimSpace(os.Getenv("LAZYLLM_ALGO_REGISTER_POLICY")); policy != "" {
 		return policy
 	}

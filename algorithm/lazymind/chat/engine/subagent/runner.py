@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import copy
 import json
 import os
 import re
@@ -59,12 +60,12 @@ from lazymind.common.token_estimation import estimate_tokens
 from lazymind.chat.engine.tools.skill_listing import core_skill_search
 from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
+from lazymind.chat.runtime_events import RunOutcome
 from lazymind.chat.service.component.tool_registry import (
-    ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
-    USER_ATTACHMENT_TOOL_CONFIGS,
     collect_system_prompt_appendices,
     filter_tools,
+    visible_attachment_configs,
     tool_is_active,
 )
 from lazymind.chat.service.utils import (
@@ -142,13 +143,25 @@ _COMPLETION_CONCERN = re.compile(
     r'无法|不能|失败|未完成|未能|缺少|尚未|没有(?:完成|生成|交付)',
     re.IGNORECASE,
 )
+# Remove only explicit zero failure counters before checking for unresolved work.
+_ZERO_FAILURE_COUNT = re.compile(
+    r'(?<![\w])(?:failed|failures?)\s*[:：=]\s*0(?![\d.])(?:\s+(?:pages?|files?|items?))?'
+    r'|失败\s*[:：=]?\s*0(?![\d.])(?:\s*[页个项次])?', re.IGNORECASE,
+)
+
+
+def _has_completion_concern(result: Any) -> bool:
+    return bool(_COMPLETION_CONCERN.search(_ZERO_FAILURE_COUNT.sub('', str(result or ''))))
+
+
 _COMPLETION_EVALUATION_POLL_SECONDS = 0.05
 
 
 def _silent_background_model_call(llm: Any, prompt: str) -> Any:
     """Call a background model in streaming-compatible mode without publishing deltas."""
     # Keep structured content separate from reasoning instead of adding <think> to JSON.
-    return llm.share(format=lambda response: response, stream={'_stream_sink': lambda _event: None})(prompt)
+    return llm.share(prompt='', format=lambda response: response,
+                     stream={'_stream_sink': lambda _event: None})(prompt)
 
 
 def _generate_display_plan(llm: Any, objective: str, scope: Optional[Dict[str, Any]] = None) -> List[str]:
@@ -391,18 +404,19 @@ def _resolve_runtime_tools(
       1. DEFAULT_TOOLS registry (framework / global tools).
     If a name is not found in either source it is silently skipped and a warning is logged.
 
-    When explicit is None/empty, fall back to all DEFAULT_TOOLS.
+    When explicit is None, fall back to DEFAULT_TOOLS. An empty list grants no domain tools.
 
     Note: artifact infrastructure tools are managed separately by _build_subagent_tools.
     Generic artifact writes are intentionally omitted for package-declared
     publisher-owned output slots.
     Names of base tools in the explicit list are silently ignored.
     """
-    if explicit:
+    disabled = set((lazyllm.globals.get('agentic_config') or {}).get('disabled_tools') or [])
+    if explicit is not None:
         core_tool_names = set(SUBAGENT_CORE_TOOL_NAMES)
         name_list = [
             name for item in explicit
-            if (name := str(item).strip()) and name not in core_tool_names
+            if (name := str(item).strip()) and name not in core_tool_names and name not in disabled
         ]
         # Published Workflow script functions are resolved from the exact
         # revision before falling back to framework/global tools.
@@ -420,6 +434,9 @@ def _resolve_runtime_tools(
                 file_tools['native_search'] = native_search
         result = []
         for name in name_list:
+            # Core binds this group to per-run MCP tools after native resolution.
+            if name == 'knowledge_management' or name.startswith('knowledge.'):
+                continue
             if name in {'kb', 'web_search'} and name not in default_by_name:
                 continue
             if name in package_by_name:
@@ -427,11 +444,19 @@ def _resolve_runtime_tools(
             elif name in file_tools:
                 result.append(file_tools[name])
             elif name in default_by_name:
-                result.append(default_by_name[name].tool)
+                if (name == 'kb' and (params or {}).get('workflow_id')
+                        and (params or {}).get('revision_id') and 'knowledge_management' not in name_list
+                        and 'knowledge_management' not in disabled):
+                    # load_workflow_tools above validated the exact Core-owned pin.
+                    # Old revisions declared kb before management became a separate group.
+                    from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+                    result.append(KBToolkit(legacy_management=True))
+                else:
+                    result.append(default_by_name[name].tool)
             else:
                 LOG.warning(f'[SubAgent] public Attempt tool {name!r} is unavailable on LazyMind Host')
         return result
-    return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS)]
+    return [cfg.tool for cfg in filter_tools(DEFAULT_TOOLS) if cfg.name not in disabled]
 
 
 def _build_subagent_tools(
@@ -443,8 +468,8 @@ def _build_subagent_tools(
 ) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    Read-only artifact tools are always included; knowledge discovery requires
-    configured knowledge bases. Publisher-owned workflow steps can disable generic artifact
+    Read-only artifact tools are always included; knowledge discovery comes from
+    the scoped management MCP provider. Publisher-owned workflow steps can disable generic artifact
     writes so domain tools remain the only authority for their output slots.
     Attachment tools are included as one group when the parent task carries attachment
     context, so the runtime tool list and its system prompt stay consistent.
@@ -460,8 +485,6 @@ def _build_subagent_tools(
         list_skill_files,
         subagent_tools.find_artifact,
     ]
-    if any(cfg.name == 'kb' and tool_is_active(cfg) for cfg in DEFAULT_TOOLS):
-        base.append(subagent_tools.list_knowledge_bases)
     if include_artifact_writes:
         base.extend([
             subagent_tools.save_artifacts,
@@ -478,7 +501,7 @@ def _build_subagent_tools(
 def _resolve_attachment_configs(
     agentic_config: Dict[str, Any], agent_type: str, params: Dict[str, Any],
 ) -> List[Any]:
-    configs = [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+    configs = visible_attachment_configs(agentic_config.get('disabled_tools') or [])
     if agent_type == 'workflow_step':
         declared = params.get('legacy_tools') or params.get('tools') or []
         declared_names = {str(name).strip() for name in declared}
@@ -701,6 +724,10 @@ def _build_subagent_plan(
     llm_config: Optional[Dict[str, Any]] = None,
     workspace_permission=None,
     tool_context: ToolResolutionContext | None = None,
+    model_fallback_current_id: str = '',
+    model_fallback_candidates: Optional[List[Dict[str, Any]]] = None,
+    model_fallback_initial_switch: Optional[Dict[str, Any]] = None,
+    knowledge_management=None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -713,6 +740,13 @@ def _build_subagent_plan(
         tool_prompt_appendices=tool_prompt_appendices,
         include_editable_writing=False,
     )
+    if knowledge_management is not None:
+        from lazymind.chat.engine.prompts.guidance import KNOWLEDGE_OPERATIONS_GUIDANCE
+        builder.runtime(
+            'knowledge_operations', 'Knowledge operation results',
+            KNOWLEDGE_OPERATIONS_GUIDANCE,
+            'chat.protocol', priority=39, content_kind='instruction',
+        )
     parent_context = (ctx.params.get('parent_agentic_config') or {}).get('model_context')
     pin_task_goals_into_builder(
         builder,
@@ -959,6 +993,7 @@ def _build_subagent_plan(
             required_tool_groups=('KBToolkit',) if ctx.params.get('filters', {}).get('kb_id') else (),
             workspace_permission=workspace_permission,
             tool_context=tool_context,
+            knowledge_management=knowledge_management,
             skills=inherited_skills or None,
             prompt_skills=inherited_prompt_skills,
             skill_search=None if not inherited_skills else core_skill_search,
@@ -969,6 +1004,9 @@ def _build_subagent_plan(
                          max(1, int(_cfg['agentic_expanded_max_rounds']) - 1)),
             expanded_round_limit=execution_policy.rounds if execution_policy else None,
             llm_config=llm_config or {},
+            current_model_candidate_id=model_fallback_current_id,
+            model_candidates=tuple(model_fallback_candidates or ()),
+            initial_model_switch=model_fallback_initial_switch,
             tool_failure_limits=WORKFLOW_TOOL_FAILURE_LIMITS,
             tool_call_limits={**WORKFLOW_TOOL_CALL_LIMITS, **(execution_policy.calls if execution_policy else {})},
         ),
@@ -1159,7 +1197,12 @@ async def run_subagent_stream(
     task_spec: Optional[Dict[str, Any]] = None,
     initial_steps: Optional[List[Dict[str, Any]]] = None,
     workspace_execution: Optional[Dict[str, Any]] = None,
+    system_mcp_config: Optional[List[Dict[str, Any]]] = None,
+    disabled_tools: Optional[List[str]] = None,
     user_env_vars: Optional[Dict[str, str]] = None,
+    model_fallback_current_id: str = '',
+    model_fallback_candidates: Optional[List[Dict[str, Any]]] = None,
+    model_fallback_initial_switch: Optional[Dict[str, Any]] = None,
 ):
     """Async generator yielding Task SSE lines.
 
@@ -1183,9 +1226,14 @@ async def run_subagent_stream(
     outbound_text_type = ''
     outbound_text = ''
     outbound_text_started = 0.0
+    outbound_model_output: Optional[Dict[str, Any]] = None
+    translator: Optional[AgentEventFrameTranslator] = None
+    output_checkpoint: Optional[tuple[str, str]] = None
+    _pending_text = ''
+    _pending_think = ''
 
     def _drain_outbound_text() -> Optional[Dict[str, Any]]:
-        nonlocal outbound_text_type, outbound_text, outbound_text_started
+        nonlocal outbound_text_type, outbound_text, outbound_text_started, outbound_model_output
         if not outbound_text_type or not outbound_text:
             return None
         event = {
@@ -1193,24 +1241,30 @@ async def run_subagent_stream(
             'task_id': task_id,
             outbound_text_type: outbound_text,
         }
+        if outbound_model_output is not None:
+            event.update(execution_id=outbound_model_output['run_id'],
+                         model_output=outbound_model_output)
         outbound_text_type = ''
         outbound_text = ''
         outbound_text_started = 0.0
+        outbound_model_output = None
         return event
 
-    def _buffer_outbound_text(event_type: str, content: str) -> List[Dict[str, Any]]:
-        nonlocal outbound_text_type, outbound_text, outbound_text_started
+    def _buffer_outbound_text(event_type: str, content: str,
+                              model_output: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        nonlocal outbound_text_type, outbound_text, outbound_text_started, outbound_model_output
         if not content:
             return []
         ready: List[Dict[str, Any]] = []
         now = time.monotonic()
-        if outbound_text_type and outbound_text_type != event_type:
+        if outbound_text_type and (outbound_text_type != event_type or outbound_model_output != model_output):
             event = _drain_outbound_text()
             if event is not None:
                 ready.append(event)
         if not outbound_text_type:
             outbound_text_type = event_type
             outbound_text_started = now
+            outbound_model_output = dict(model_output) if model_output is not None else None
         outbound_text += content
         if (
             len(outbound_text) >= SUBAGENT_TEXT_STREAM_CHUNK_CHARS
@@ -1220,6 +1274,51 @@ async def run_subagent_stream(
             if event is not None:
                 ready.append(event)
         return ready
+
+    def _translate_frame(frame: Dict[str, Any]) -> List[Dict[str, Any]]:
+        nonlocal _pending_text, _pending_think, output_checkpoint
+        metadata = frame.get('model_output')
+        phase = (metadata or {}).get('phase')
+        if phase:
+            ready = []
+            pending = _drain_outbound_text()
+            if pending is not None:
+                ready.append(pending)
+            if phase == 'begin':
+                output_checkpoint = (_pending_text, _pending_think)
+            elif phase == 'rollback':
+                if output_checkpoint is not None:
+                    _pending_text, _pending_think = output_checkpoint
+                output_checkpoint = None
+            elif phase == 'commit':
+                output_checkpoint = None
+            event = {'type': 'model_output', 'task_id': task_id,
+                     'execution_id': metadata['run_id'], 'model_output': metadata}
+            runtime = frame.get('runtime_event')
+            if runtime is not None and runtime.get('type') == 'model_switched':
+                event['runtime_event'] = runtime
+            ready.append(event)
+            return ready
+        # SDK lifecycle events remain translator metrics observations. Only the
+        # Host's confirmed switch accompanies a task output commit above.
+        if frame.get('runtime_event') is not None:
+            return []
+        ready = []
+        for event_type in ('think', 'text'):
+            content = frame.get(event_type) or ''
+            ready.extend(_buffer_outbound_text(event_type, content, metadata))
+            if event_type == 'think':
+                _pending_think += content
+            else:
+                _pending_text += content
+        return ready
+
+    def _rollback_open_output(outcome: RunOutcome) -> List[Dict[str, Any]]:
+        if translator is None or output_checkpoint is None:
+            return []
+        frame = translator.finish_run(outcome=outcome)
+        metadata = frame.get('model_output')
+        return _translate_frame({'model_output': metadata}) if metadata else []
 
     def _sources_event() -> Optional[Dict[str, Any]]:
         nonlocal last_sources_snapshot
@@ -1307,7 +1406,7 @@ async def run_subagent_stream(
         if effective_agent_type == 'workflow_step':
             # Strip any remaining {{slot}} placeholders so they don't confuse the LLM.
             ctx.objective = re.sub(r'\{\{[^}]+\}\}', '', ctx.objective).strip()
-            if not tools:
+            if tools is None:
                 tools = _resolve_workflow_step_tools(params)
 
         sid = task_id
@@ -1339,6 +1438,9 @@ async def run_subagent_stream(
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
         agentic_config['_workspace_execution'] = execution_identity
+        # Only the current Core launch can grant this task management capabilities.
+        agentic_config['disabled_tools'] = list(disabled_tools or [])
+        agentic_config['system_mcp_config'] = copy.deepcopy(system_mcp_config or [])
         agentic_config['_subagent_workspace'] = ctx.workspace_path
         agentic_config['citation_state'] = source_state
         agentic_config['citation_mode'] = 'collect_only'
@@ -1360,6 +1462,14 @@ async def run_subagent_stream(
             tools_only=bool(ctx.params.get('tools_only')),
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
+        from lazymind.chat.service.knowledge_management import build_knowledge_runtime, BUILTIN_ID
+        knowledge_management = build_knowledge_runtime(agentic_config, cancel_check=make_cancel_stop_condition())
+        if knowledge_management is not None:
+            from lazymind.chat.service.chat_service import _load_mcp_server_tools
+            server = next(item for item in agentic_config.get('system_mcp_config') or []
+                          if item.get('id') == BUILTIN_ID)
+            subagent_tools_all.extend(await asyncio.to_thread(
+                _load_mcp_server_tools, knowledge_management.server_config(server), 'system'))
         host_filesystem_enabled = bool(_cfg['trusted_local_mode']) or bool(agentic_config.get('_core_workspace_context'))
         if host_filesystem_enabled and effective_agent_type != 'workflow_step':
             from lazyllm.tools.agent import FileSystemToolkit
@@ -1379,6 +1489,10 @@ async def run_subagent_stream(
             ),
             resume=resume,
             llm_config=model_config,
+            model_fallback_current_id=model_fallback_current_id,
+            model_fallback_candidates=model_fallback_candidates,
+            model_fallback_initial_switch=model_fallback_initial_switch,
+            knowledge_management=knowledge_management,
             workspace_permission=WorkspaceContext.from_snapshot(
                 agentic_config.get('_core_workspace_context'),
                 local_runtime=agentic_config.get('_core_local_runtime', True),
@@ -1447,24 +1561,24 @@ async def run_subagent_stream(
             yield _sse({'type': 'plan', 'task_id': task_id, 'steps': display_plan, 'scope_version': 2})
 
         # translator unifies text/think output with ChatAgent frame semantics.
-        translator = AgentEventFrameTranslator(query=ctx.objective)
+        translator = AgentEventFrameTranslator(query=ctx.objective, run_id=str(task.get('execution_id') or task_id))
         final_result: Any = None
         workflow_control: Dict[str, str] = {}
         declared_workflow_tools = set(_coerce_str_list(ctx.params.get('legacy_tools')))
         terminal_workflow_tools = set(_coerce_str_list(ctx.params.get('terminal_tools')))
         # Accumulate streaming text/think chunks; flush to DB when a tool step follows or at end.
-        _pending_text: str = ''
-        _pending_think: str = ''
         workflow_tool_in_flight = False
 
         executor = AgentExecutor()
+        agent = executor.create_agent(llm, plan) if plan.execution_options.model_candidates else None
         # Package publisher tools can emit several durable artifacts during one
         # long-running tool call (for example, one HTML artifact per completed
         # PPT page). Route those events through the live queue while the Agent
         # iterator is running instead of holding them until tool_results.
         stream_merge_active = True
         merged_events = merge_agent_and_stream_events(
-            executor.stream(llm, plan), stream_events,
+            executor.stream_agent(agent, plan) if agent is not None else executor.stream(llm, plan),
+            stream_events,
         )
         async with aclosing(merged_events):
             async for source, merged_payload in merged_events:
@@ -1489,6 +1603,16 @@ async def run_subagent_stream(
                 if kind == 'event':
                     item = payload
                     tag = item.get('tag')
+                    if tag == 'knowledge_operation_result':
+                        yield _sse({'type': 'knowledge_operation_result', 'task_id': task_id,
+                                    'execution_id': (task.get('execution_id')
+                                                     or execution_identity.get('execution_id', '')),
+                                    'knowledge_operation': {key: value for key, value in item.items() if key != 'tag'}})
+                        continue
+                    if tag == 'ask_pending' and isinstance(item.get('knowledge_management'), dict):
+                        yield _sse({'type': 'ask_pending', 'task_id': task_id,
+                                    'ask_pending': {key: value for key, value in item.items() if key != 'tag'}})
+                        continue
                     # Persist tool steps for resume / breakpoint recovery.
                     if tag in ('tool_calls', 'tool_results'):
                         pending_event = _drain_outbound_text()
@@ -1581,14 +1705,8 @@ async def run_subagent_stream(
                         # not the SubAgent's user-facing execution log.
                         if tag in ('tool_calls', 'tool_results') or workflow_tool_in_flight:
                             continue
-                        ev_type = 'think' if frame.get('think') else 'text'
-                        content = frame.get(ev_type) or ''
-                        for buffered_event in _buffer_outbound_text(ev_type, content):
+                        for buffered_event in _translate_frame(frame):
                             yield _sse(buffered_event)
-                        if ev_type == 'think':
-                            _pending_think += content
-                        else:
-                            _pending_text += content
                 else:  # 'final' -- AgentExecutor propagates future exceptions before yielding this.
                     final_result = payload
                     # Flush any remaining accumulated text/think as the final step.
@@ -1610,9 +1728,7 @@ async def run_subagent_stream(
 
         # Flush any buffered text/think from translator (e.g. citation scanning remainder).
         for frame in translator.finish(final_result):
-            ev_type = 'think' if frame.get('think') else 'text'
-            content = frame.get(ev_type) or ''
-            for buffered_event in _buffer_outbound_text(ev_type, content):
+            for buffered_event in _translate_frame(frame):
                 yield _sse(buffered_event)
 
         pending_event = _drain_outbound_text()
@@ -1660,14 +1776,14 @@ async def run_subagent_stream(
             return
 
         summary = _result_summary(final_result, required_output_keys)
-        # Uncontracted ordinary tasks and final reports of trouble need review.
-        # Otherwise satisfied contracts, including Workflow rules, are sufficient.
-        if (
-            (effective_agent_type != 'workflow_step' and not required_output_keys)
-            or _COMPLETION_CONCERN.search(str(final_result or ''))
+        # Workflow completion follows declared outputs, package post-step checks
+        # and configured human review. Narrative wording must not introduce an
+        # additional model verdict. Ordinary SubAgents retain completion review.
+        if effective_agent_type != 'workflow_step' and (
+            not required_output_keys or _has_completion_concern(final_result)
         ):
             is_ok, summary, failure_phase = await _evaluate_completion_async(
-                llm=llm,
+                llm=(agent._model_fallback_state.raw_llm if agent is not None else llm),
                 objective=ctx.objective,
                 steps=db.load_steps(task_id),
                 artifacts=deliverable_artifacts,
@@ -1700,11 +1816,15 @@ async def run_subagent_stream(
         })
         yield 'data: [DONE]\n\n'
     except UserCancelledError:
+        for event in _rollback_open_output(RunOutcome.CANCELLED):
+            yield _sse(event)
         yield _sse({'type': 'done', 'task_id': task_id, 'status': 'interrupted',
                     'summary': 'stopped by user'})
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')
+        for event in _rollback_open_output(RunOutcome.FAILED):
+            yield _sse(event)
         pending_event = _drain_outbound_text()
         if pending_event is not None:
             yield _sse(pending_event)
@@ -1719,8 +1839,12 @@ async def run_subagent_stream(
                 exc_summary = f'异常：{exc}\n执行路径：\n{trace}'
             except Exception:
                 pass
+        failure_phase = translator.run.fallback_code if translator is not None else ''
         yield _sse({'type': 'error', 'task_id': task_id, 'status': 'failed',
-                    'summary': exc_summary, 'message': exc_summary})
+                    'summary': exc_summary, 'message': exc_summary,
+                    **({'current_phase': failure_phase} if failure_phase in {
+                        'model_fallback_exhausted', 'model_context_not_fit',
+                    } else {})})
         yield 'data: [DONE]\n\n'
     finally:
         if display_plan_task is not None:
@@ -1893,37 +2017,64 @@ def _evaluate_completion(
     ]
     eval_prompt = '\n'.join(prompt_lines)
 
-    try:
-        resp = _silent_background_model_call(llm, eval_prompt)
-        text = resp if isinstance(resp, str) else (
-            resp.get('content', '') if isinstance(resp, dict) else ''
-        )
-        text = (text or '').strip()
-        verdict = json.loads(text)
-        if (
-            not isinstance(verdict, dict)
-            or not isinstance(verdict.get('completed'), bool)
-            or not isinstance(verdict.get('requires_artifact'), bool)
-            or not isinstance(verdict.get('artifact_keys'), list)
-            or not all(isinstance(key, str) and key.strip() for key in verdict['artifact_keys'])
-            or not isinstance(verdict.get('reason'), str)
-            or not verdict['reason'].strip()
-        ):
-            raise ValueError('Invalid completion verdict')
-        summary = verdict['reason'].strip()
-        delivered = set(verdict['artifact_keys'])
-        saved = {artifact.get('slot') for artifact in artifacts}
-        if verdict['requires_artifact'] and (not delivered or not delivered.issubset(saved)):
-            message = 'Required deliverables were not saved as artifacts.'
-            if not verdict['completed']:
-                message += f' {summary}'
-            return False, message, 'missing_required_artifacts'
+    # Retry malformed reviewer output once. A valid negative verdict is final.
+    verdict = None
+    for attempt in range(2):
+        try:
+            resp = _silent_background_model_call(llm, eval_prompt)
+            text = resp if isinstance(resp, str) else (
+                resp.get('content', '') if isinstance(resp, dict) else ''
+            )
+            if not isinstance(text, str):
+                raise ValueError('Completion response content must be text')
+            text = text.strip()
+            fenced = re.fullmatch(r'```(?:json)?\s*\n?(.*?)\n?```', text, re.DOTALL | re.IGNORECASE)
+            if fenced:
+                text = fenced.group(1).strip()
+            verdict = json.loads(text)
+            if (
+                not isinstance(verdict, dict)
+                or not isinstance(verdict.get('completed'), bool)
+                or not isinstance(verdict.get('requires_artifact'), bool)
+                or not isinstance(verdict.get('artifact_keys'), list)
+                or not all(isinstance(key, str) and key.strip() for key in verdict['artifact_keys'])
+                or not isinstance(verdict.get('reason'), str)
+                or not verdict['reason'].strip()
+            ):
+                raise ValueError('Invalid completion verdict schema')
+            break
+        except (ValueError, TypeError) as exc:
+            LOG.warning(f'[SubAgent] Invalid completion verdict (attempt {attempt + 1}/2): {exc}')
+            if attempt == 1:
+                return (
+                    False,
+                    'Completion reviewer returned an invalid verdict twice; saved artifacts remain available.',
+                    'completion_evaluation_failed',
+                )
+            eval_prompt += (
+                '\nYour previous response could not be parsed as the required verdict. '
+                'Return only the JSON object with completed and requires_artifact booleans, '
+                'artifact_keys as an array of strings, and a nonempty reason. '
+                'Re-evaluate the same evidence; do not assume success.'
+            )
+        except Exception as exc:
+            LOG.warning(f'[SubAgent] Completion reviewer call failed: {exc}')
+            return (
+                False,
+                'Completion reviewer could not be reached; saved artifacts remain available.',
+                'completion_evaluation_failed',
+            )
+    summary = verdict['reason'].strip()
+    delivered = set(verdict['artifact_keys'])
+    saved = {artifact.get('slot') for artifact in artifacts}
+    if verdict['requires_artifact'] and (not delivered or not delivered.issubset(saved)):
+        message = 'Required deliverables were not saved as artifacts.'
         if not verdict['completed']:
-            return False, summary, 'objective_incomplete'
-        return True, summary, ''
-    except Exception as e:
-        LOG.warning(f'[SubAgent] _evaluate_completion LLM call failed: {e}')
-        return False, 'Could not verify task completion.', 'completion_evaluation_failed'
+            message += f' {summary}'
+        return False, message, 'missing_required_artifacts'
+    if not verdict['completed']:
+        return False, summary, 'objective_incomplete'
+    return True, summary, ''
 
 
 async def _evaluate_completion_async(

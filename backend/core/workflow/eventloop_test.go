@@ -63,6 +63,7 @@ func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 		WorkflowStepParams{
 			WorkflowID: "ppt-workflow", StepID: "analyze_requirements",
 			IsColdStart: true, WorkflowMode: "dynamic", Capabilities: []string{"web_search"},
+			UserInput: "生成赛博朋克 PPT", LaunchUserInput: "生成赛博朋克 PPT", CurrentUserInput: "生成赛博朋克 PPT",
 		},
 		nil, nil, nil, nil, false, false,
 	)
@@ -89,6 +90,11 @@ func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
 		t.Fatalf("decode params: %v", err)
 	}
 	capabilities, _ := params["capabilities"].([]any)
+	for _, key := range []string{"user_input", "launch_user_input", "current_user_input"} {
+		if params[key] != "生成赛博朋克 PPT" {
+			t.Fatalf("cold-start request field %q not persisted: %#v", key, params)
+		}
+	}
 	if len(capabilities) != 1 || capabilities[0] != "web_search" {
 		t.Fatalf("capabilities not persisted: %#v", params)
 	}
@@ -610,7 +616,7 @@ func TestCheckAndFallbackIfStuck_SkipsWhenSubAgentRunning(t *testing.T) {
 	}
 }
 
-func TestCheckAndFallbackIfStuck_DemotesWhenIdle(t *testing.T) {
+func TestCheckAndFallbackIfStuck_FailsWhenIdle(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 
@@ -641,11 +647,11 @@ func TestCheckAndFallbackIfStuck_DemotesWhenIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if s.Status != SessionStatusWaiting {
-		t.Fatalf("expected waiting when idle, got %q", s.Status)
+	if s.Status != SessionStatusFailed {
+		t.Fatalf("expected failed when idle, got %q", s.Status)
 	}
-	if gotEvent != "step_waiting" {
-		t.Fatalf("expected step_waiting event, got %q", gotEvent)
+	if gotEvent != "" {
+		t.Fatalf("must use the durable workflow event rather than manufacture an approval: %q", gotEvent)
 	}
 }
 
@@ -783,8 +789,12 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 		if step.LeaseExpiresAt != nil {
 			t.Errorf("step %s retained a lease after stop", taskID)
 		}
-		if step.TerminalCode != "WORKFLOW_STOPPED" {
-			t.Errorf("step %s terminal code = %q, want WORKFLOW_STOPPED", taskID, step.TerminalCode)
+		expectedCode := "WORKFLOW_STOPPED"
+		if taskID == "stop-task-running" || step.LeaseToken != "" {
+			expectedCode = "WORKFLOW_STOP_REQUESTED"
+		}
+		if step.TerminalCode != expectedCode {
+			t.Errorf("step %s terminal code = %q, want %s", taskID, step.TerminalCode, expectedCode)
 		}
 		mu.Lock()
 		wasCancelled := cancelled[taskID]
@@ -796,6 +806,11 @@ func TestStopActiveWorkflowSession_CancelsAllPendingAndRunningAttempts(t *testin
 			func(string, map[string]any) { t.Error("stopped attempt emitted a retry/advance event") },
 			&WorkflowChatContext{SessionID: "stop-sess-parallel", StepID: step.StepID,
 				ConvID: "stop-conv-parallel", WorkflowMode: "auto"})
+		if step.LeaseToken != "" {
+			if err := ConfirmNativeStop(ctx, db.DB, step.ID, step.LeaseToken); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	session, err := GetSession(ctx, db.DB, "stop-sess-parallel")
 	if err != nil || session.Status != SessionStatusWaiting {

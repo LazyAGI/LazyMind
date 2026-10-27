@@ -277,6 +277,15 @@ config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
 config.add('url_fetch_pdf_max_bytes', int, 100 * 1024 * 1024, 'URL_FETCH_PDF_MAX_BYTES',
            description='Maximum PDF download size for url_fetch ingestion.')
+config.add('model_fallback_timeout_seconds', float, 30, 'MODEL_FALLBACK_TIMEOUT_SECONDS',
+           description='Soft seconds for starting model attempts, including the initial model; '
+                       'active generation may finish.')
+config.add('model_fallback_connect_timeout_seconds', float, 3, 'MODEL_FALLBACK_CONNECT_TIMEOUT_SECONDS',
+           description='Connection timeout for every fallback-managed model call.')
+config.add('model_fallback_read_timeout_seconds', float, 10, 'MODEL_FALLBACK_READ_TIMEOUT_SECONDS',
+           description='Idle read timeout for every fallback-managed model call; a model timeout may override it.')
+config.add('model_fallback_max_candidates', int, 4, 'MODEL_FALLBACK_MAX_CANDIDATES',
+           description='Maximum model candidates per main request, including its initial model.')
 config.add('max_retries', int, 20, 'MAX_RETRIES', description='Max retries for agentic function call loop.')
 config.add('agentic_max_rounds_low', int, 6, 'AGENTIC_MAX_ROUNDS_LOW',
            description='Maximum ChatAgent ReAct rounds in low thinking-depth mode.')
@@ -470,6 +479,8 @@ config.add('startup_timeout', str, '0', 'STARTUP_TIMEOUT',
            description='Startup wait timeout in seconds (0 = no timeout).')
 config.add('reset_algo_on_startup', bool, False, 'RESET_ALGO_ON_STARTUP',
            description='Drop all vector/segment data and algorithm registration on startup, then rebuild from scratch.')
+config.add('force_algo_register', bool, False, 'FORCE_ALGO_REGISTER',
+           description='Use force registration without resetting stored documents or vectors.')
 config.add('rag_image_path_prefix', str, '/mnt/lustre/share_data/mineru/images/', 'RAG_IMAGE_PATH_PREFIX',
            description='Image path prefix for RAG documents.')
 

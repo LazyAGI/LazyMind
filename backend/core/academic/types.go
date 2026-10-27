@@ -3,17 +3,18 @@ package academic
 import "time"
 
 type WorkInput struct {
-	WorkID         string         `json:"work_id,omitempty"`
-	Title          string         `json:"title,omitempty"`
-	Authors        []string       `json:"authors,omitempty"`
-	Year           int            `json:"year,omitempty"`
-	Venue          string         `json:"venue,omitempty"`
-	Abstract       string         `json:"abstract,omitempty"`
-	DOI            string         `json:"doi,omitempty"`
-	ArxivID        string         `json:"arxiv_id,omitempty"`
-	Provider       string         `json:"provider,omitempty"`
-	ProviderWorkID string         `json:"provider_work_id,omitempty"`
-	Provenance     map[string]any `json:"provenance,omitempty"`
+	TrustedFulltext bool           `json:"-"`
+	WorkID          string         `json:"work_id,omitempty"`
+	Title           string         `json:"title,omitempty"`
+	Authors         []string       `json:"authors,omitempty"`
+	Year            int            `json:"year,omitempty"`
+	Venue           string         `json:"venue,omitempty"`
+	Abstract        string         `json:"abstract,omitempty"`
+	DOI             string         `json:"doi,omitempty"`
+	ArxivID         string         `json:"arxiv_id,omitempty"`
+	Provider        string         `json:"provider,omitempty"`
+	ProviderWorkID  string         `json:"provider_work_id,omitempty"`
+	Provenance      map[string]any `json:"provenance,omitempty"`
 }
 
 type FulltextCandidate struct {

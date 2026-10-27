@@ -267,11 +267,13 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:complete", nil, remoteExecutorHandler.Complete)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:fail", nil, remoteExecutorHandler.Fail)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, remoteExecutorHandler.Cancel)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:stop-ack", nil, workflow.ConfirmNativeStopHTTP)
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
 	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
 
 	// ----- Datasettext -----
+	handleAPI(r, "GET", "/knowledge/options", []string{"document.read"}, doc.GetKnowledgeOptions)
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, systemdeps.RequireRAG(doc.ListAlgos))
 	handleAPI(r, "GET", "/dataset/tags", []string{"document.read"}, doc.AllDatasetTags)
 	handleAPI(r, "GET", "/datasets", []string{"document.read"}, doc.ListDatasets)
@@ -283,6 +285,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/datasets/{dataset}", []string{"document.write"}, systemdeps.RequireRAG(doc.UpdateDataset))
 	handleAPI(r, "PATCH", "/datasets/{dataset}/processing-level", []string{"document.write"}, doc.UpdateProcessingLevel)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:ensure-parsed", []string{"document.read"}, doc.EnsureParsed)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}:reparse", []string{"document.write"}, doc.ReparseDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:read", []string{"document.read"}, doc.ReadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
@@ -290,6 +293,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/academic/documents/{document_id}/references", []string{"document.read"}, systemdeps.RequireRAG(academic.ListReferences))
 	handleAPI(r, "POST", "/academic/documents/{document_id}/references:extract", []string{"document.write"}, systemdeps.RequireRAG(academic.ExtractReferences))
 	handleAPI(r, "POST", "/academic/references:resolve", []string{"document.write"}, academic.ResolveReferences)
+	handleAPI(r, "POST", "/academic/sources:inspect", []string{"document.read"}, academic.InspectSources)
+	handleAPI(r, "GET", "/academic/source-targets", []string{"document.read"}, academic.ListSourceTargets)
 	handleAPI(r, "POST", "/academic/works:presence", []string{"document.read"}, systemdeps.RequireRAG(academic.CheckPresence))
 	handleAPI(r, "POST", "/academic/imports:preview", []string{"document.read"}, systemdeps.RequireRAG(academic.PreviewImport))
 	handleAPI(r, "POST", "/academic/imports", []string{"document.write"}, systemdeps.RequireRAG(academic.CreateImport))
@@ -588,6 +593,7 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "GET", "/task-center/workflow-events", []string{"qa.read"}, taskcenter.WorkflowChanges)
 	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)
 	handleAPI(r, "GET", "/user/wechat-notification-targets", []string{"qa.read"}, taskcenter.WeChatNotificationTargets)
 	handleAPI(r, "GET", "/notification-account-references/{account_id}", []string{"qa.read"}, taskcenter.NotificationAccountReferences)
@@ -689,6 +695,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.PatchArtifact)
 	handleAPI(r, "DELETE", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.DeleteArtifact)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:stop", []string{"qa.write"}, workflowFacade.StopWorkflow)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:pause", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PauseNativeWorkflowHTTP)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:resume", []string{"qa.write"}, workflowFacade.ResumeWorkflow)
 	handleAPI(r, "GET", "/workflow-commands/{command_id}", []string{"qa.read"}, workflowFacade.GetCommand)
 	workflowEvents := workflowstream.Handler{Store: workflowRepository, Snapshot: func(req *http.Request, sessionID, owner string) (any, error) {
@@ -1008,7 +1015,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/learning/review/sessions", []string{"document.write"}, learning.CreateReviewSession)
 	handleAPI(r, "GET", "/learning/review/sessions/{session_id}", []string{"document.read"}, learning.GetReviewSession)
 	handleAPI(r, "POST", "/learning/review/sessions/{session_id}/answers", []string{"document.write"}, learning.AnswerReviewQuestion)
-	handleAPI(r, "POST", "/learning/preanalysis/tasks", []string{"document.write"}, learning.CreatePreanalysisTask)
+	handleAPI(r, "POST", "/learning/preanalysis/tasks", []string{"document.write"}, doc.CreatePreanalysisTask)
 	handleAPI(r, "GET", "/learning/preanalysis/tasks/latest", []string{"document.read"}, learning.GetLatestPreanalysisTask)
 	handleAPI(r, "GET", "/learning/preanalysis/tasks/{task_id}", []string{"document.read"}, learning.GetPreanalysisTask)
 	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}:run", []string{"document.write"}, learning.RunPreanalysisTask)

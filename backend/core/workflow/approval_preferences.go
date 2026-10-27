@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
 	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -19,6 +21,138 @@ type approvalPreferenceRequest struct {
 	StepID           string `json:"step_id"`
 	Scope            string `json:"scope"`
 	ApprovalRequired bool   `json:"approval_required"`
+}
+
+// NativeControlCommand travels with the Chat request that actually continues
+// execution. Ordinary chat text never grants approval or resume permission.
+type NativeControlCommand struct {
+	SessionID            string `json:"session_id"`
+	Kind                 string `json:"kind"`
+	StepID               string `json:"step_id"`
+	ExpectedStateVersion int64  `json:"expected_state_version"`
+	PreferenceScope      string `json:"preference_scope"`
+	// Assigned by Chat after admission, never accepted from the browser.
+	HistoryID string `json:"-"`
+}
+
+// Native controllers bind their current Chat turn separately from the immutable
+// trigger history. A resumed workflow belongs to the newly admitted turn.
+type nativeTurnBinding struct {
+	HistoryID string `json:"chat_history_id"`
+}
+
+// BeginNativeControlTurn is called only after Chat has accepted a streaming run.
+// An unsent/refused request cannot change the workflow's state.
+func BeginNativeControlTurn(ctx context.Context, db *gorm.DB, owner, conversationID string, req NativeControlCommand) (int64, error) {
+	var version int64
+	if req.Kind != "approve" && req.Kind != "resume" && req.Kind != "retry" && req.Kind != "rewind" {
+		return 0, controlstore.Reject("INVALID_COMMAND", "expected approve, resume, retry or rewind")
+	}
+	approval := req.Kind == "approve"
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var session orm.WorkflowSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND create_user_id = ? AND conversation_id = ? AND dismissed = false", req.SessionID, owner, conversationID).First(&session).Error; err != nil {
+			return err
+		}
+		if controlstore.Controlled(session) {
+			return controlstore.Reject("CONTROL_PROTOCOL_REQUIRED", "use workflow control to confirm this checkpoint")
+		}
+		if session.StateVersion != req.ExpectedStateVersion {
+			return controlstore.Reject("STATE_VERSION_CONFLICT", "workflow changed; reload before approving")
+		}
+		display, err := displaystate.Read(tx, session)
+		if err != nil {
+			return err
+		}
+		if approval && (display.Status != "waiting" || req.StepID == "" || display.ApprovalStepID != req.StepID) {
+			return controlstore.Reject("INVALID_COMMAND", "no matching approval checkpoint")
+		}
+		if req.Kind == "resume" && (display.Status != "paused" || req.PreferenceScope != "") {
+			return controlstore.Reject("INVALID_COMMAND", "no paused workflow to resume")
+		}
+		if req.Kind == "retry" && (display.Status != "failed" || req.PreferenceScope != "") {
+			return controlstore.Reject("INVALID_COMMAND", "no failed workflow to retry")
+		}
+		if req.Kind == "rewind" {
+			if (display.Status != "completed" && display.Status != "failed") || req.StepID == "" || req.PreferenceScope != "" {
+				return controlstore.Reject("INVALID_COMMAND", "no completed or failed workflow to rewind")
+			}
+			projected, err := projectSession(ctx, tx, &session)
+			if err != nil {
+				return err
+			}
+			if !containsProjectionStep(projected.Projection.Rewindable, req.StepID) &&
+				!(display.Status == "completed" && containsProjectionStep(projected.Projection.Continue, req.StepID)) {
+				return controlstore.Reject("INVALID_COMMAND", "step is not available for rewind or completed continuation")
+			}
+		}
+		if approval {
+			var step orm.WorkflowSessionStep
+			if err := tx.Where("session_id = ? AND step_id = ? AND validity <> ? AND status = ?", session.ID, req.StepID, "stale", "succeeded").Order("attempt DESC").First(&step).Error; err != nil {
+				return err
+			}
+			now := time.Now().UTC()
+			if err := tx.Create(&orm.WorkflowReviewCheckpoint{ID: common.GenerateID(), SessionID: session.ID, AttemptID: step.ID, StepID: step.StepID, Status: "accepted", AcceptedBy: owner, AcceptedAt: &now, CreatedAt: now, UpdatedAt: now}).Error; err != nil {
+				return err
+			}
+		}
+		if req.PreferenceScope != "" {
+			if _, err := saveWorkflowApprovalPreference(tx, session.CreateUserID, session.WorkflowID, req.StepID, req.PreferenceScope); err != nil {
+				return err
+			}
+		}
+		status := SessionStatusActive
+		if req.Kind == "rewind" {
+			// Only transfer Chat ownership here. The existing transition command
+			// must still see completed/failed to apply its original recovery rules.
+			status = session.Status
+		}
+		if approval {
+			projected, err := projectSession(ctx, tx, &session)
+			if err != nil {
+				return err
+			}
+			if projected.Display.Status == "waiting" {
+				status = SessionStatusWaiting
+			} else if projected.Projection.Completed {
+				status = SessionStatusCompleted
+			}
+		}
+		binding, err := json.Marshal(nativeTurnBinding{HistoryID: req.HistoryID})
+		if err != nil {
+			return err
+		}
+		result := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND state_version = ?", session.ID, req.ExpectedStateVersion).
+			Updates(map[string]any{"status": status, "control_binding_json": string(binding), "state_version": gorm.Expr("state_version + 1"), "updated_at": time.Now().UTC()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return controlstore.Reject("STATE_VERSION_CONFLICT", "workflow changed; reload before approving")
+		}
+		session.StateVersion++
+		version = session.StateVersion
+		session.Status = status
+		session.ControlBindingJSON = string(binding)
+		payload, _ := json.Marshal(map[string]any{"status": status})
+		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
+	})
+	return version, err
+}
+
+// A rejected/failed Chat run must not leave a released workflow pretending to
+// execute. The version fence protects a newer dispatch, pause or user decision.
+func FinishNativeControlTurn(ctx context.Context, db *gorm.DB, sessionID string, version int64) error {
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var session orm.WorkflowSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", sessionID).First(&session).Error; err != nil {
+			return err
+		}
+		if session.StateVersion != version || session.Status != SessionStatusActive {
+			return nil
+		}
+		return failIdleSession(ctx, tx, sessionID)
+	})
 }
 
 // workflowApprovalPreferenceAllSteps is stored as a sentinel rather than
@@ -37,36 +171,15 @@ func applyApprovalPreferences(ctxDB *gorm.DB, userID, workflowID string, project
 		// has reached every local/dev database.
 		return projection
 	}
-	workflowWideApprovalRequired := true
-	for _, row := range rows {
-		if row.StepID == workflowApprovalPreferenceAllSteps {
-			workflowWideApprovalRequired = row.ApprovalRequired
-			break
-		}
-	}
-	if !workflowWideApprovalRequired {
-		for stepID, node := range projection.Nodes {
-			node.RequiresApproval = false
-			node.Mode = "auto"
-			projection.Nodes[stepID] = node
-		}
-	}
-	for _, row := range rows {
-		if row.StepID == workflowApprovalPreferenceAllSteps {
-			continue
-		}
-		node, ok := projection.Nodes[row.StepID]
-		if !ok {
-			continue
-		}
-		node.RequiresApproval = row.ApprovalRequired
+	for stepID, node := range projection.Nodes {
+		node.RequiresApproval = displaystate.ApprovalRequired(node.RequiresApproval, stepID, rows)
 		// Expose the effective mode to every controller, not the package default.
 		// Otherwise agents can still hand off while the UI hides approval controls.
 		node.Mode = "auto"
-		if row.ApprovalRequired {
+		if node.RequiresApproval {
 			node.Mode = "human"
 		}
-		projection.Nodes[row.StepID] = node
+		projection.Nodes[stepID] = node
 	}
 	return projection
 }
@@ -115,7 +228,7 @@ func SetWorkflowApprovalPreference(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if controlstore.Controlled(session) && !IsWorkflowUserControlRequest(r) {
+	if !IsWorkflowUserControlRequest(r) {
 		common.ReplyErr(w, "use the authenticated workflow page to change approval preferences", http.StatusForbidden)
 		return
 	}

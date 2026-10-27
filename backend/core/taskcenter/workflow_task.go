@@ -87,23 +87,6 @@ func workflowForTask(ctx context.Context, db *gorm.DB, task orm.TaskCenterTask) 
 	return &session
 }
 
-func workflowTaskStatus(status string) string {
-	switch status {
-	case "active":
-		return "running"
-	case "waiting":
-		return "waiting"
-	case "completed":
-		return "succeeded"
-	case "failed":
-		return "failed"
-	case "stopped", "cancelled", "canceled":
-		return "canceled"
-	default:
-		return ""
-	}
-}
-
 // WorkflowWasStopped reports whether a stopped workflow stays resumable in the workflow UI, but is not an approval
 // request. Only current attempts count; an explicit retry supersedes its old stop.
 func WorkflowWasStopped(ctx context.Context, db *gorm.DB, sessionID string) bool {

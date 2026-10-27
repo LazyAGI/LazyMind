@@ -81,6 +81,14 @@ class RemoteWorkflowExecutor:
                     await asyncio.sleep(self.poll_seconds)
 
     async def _run_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
+        try:
+            await self._execute_claim(client, claim)
+        finally:
+            # A fenced lease stops publication immediately, but only executor
+            # exit confirms tools have finished. Never acknowledge from heartbeat.
+            await self.runtime.acknowledge_stop(client, str(claim['attempt_id']), str(claim['lease_token']))
+
+    async def _execute_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
         attempt_id = str(claim['attempt_id'])
         lease = str(claim['lease_token'])
         task_id = ''
@@ -193,6 +201,8 @@ class RemoteWorkflowExecutor:
                         'generation': str(claim.get('fencing_generation') or ''),
                         'lease_token': lease,
                     }
+                    agentic_config['system_mcp_config'] = spec.get('system_mcp_config') or []
+                    agentic_config['disabled_tools'] = spec.get('disabled_tools') or []
                     agentic_config['_subagent_workspace'] = workspace
                     lazyllm.globals['agentic_config'] = agentic_config
                     artifacts = list(checkpoint['artifacts'])
@@ -215,6 +225,8 @@ class RemoteWorkflowExecutor:
                         model_config=spec.get('llm_config'),
                         tool_config=spec.get('tool_config'),
                         user_env_vars=spec.get('user_env_vars'),
+                        system_mcp_config=spec.get('system_mcp_config') or [],
+                        disabled_tools=spec.get('disabled_tools') or [],
                         agent_type='workflow_step',
                         task_spec=task,
                         initial_steps=initial_steps,

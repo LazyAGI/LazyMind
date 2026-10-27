@@ -120,6 +120,7 @@ class RunMetricsTracker:
         turn_seq: Optional[int] = None,
         max_input_tokens: Optional[int] = None,
         model_events: Optional[list[dict[str, Any]]] = None,
+        prefer_usage_snapshot: bool = False,
     ) -> dict[str, Any]:
         wall_ms = max(0.0, (self._clock() - self._started) * 1000.0)
         event_usages = [
@@ -128,8 +129,10 @@ class RunMetricsTracker:
             and isinstance((data := event.get('data')), dict)
             and isinstance(data.get('usage'), dict)
         ]
-        chosen = ({'provider_usages': event_usages} if event_usages
-                  else choose_usage_record(usage, usage_map, module_id))
+        recorded = choose_usage_record(usage, usage_map, module_id)
+        chosen = recorded if prefer_usage_snapshot and recorded else (
+            {'provider_usages': event_usages} if event_usages else recorded
+        )
         frames = usage_frames(chosen)
         adapted_frames = [adapt_usage_frame(frame) for frame in frames]
         provider = combine_adapted_usage(adapted_frames)
@@ -148,6 +151,14 @@ class RunMetricsTracker:
         model_duration_complete = (
             self.model_steps > 0 and self._measured_model_steps == self.model_steps
         )
+        if prefer_usage_snapshot:
+            observed_usage = [adapt_usage_frame(frame) for frame in
+                              usage_frames({'provider_usages': event_usages})]
+            # A snapshot can include native usage without corresponding SDK
+            # timing events. Unknown-token placeholders carry no extra usage.
+            model_duration_complete = model_duration_complete and (
+                [frame for frame in adapted_frames if frame] == [frame for frame in observed_usage if frame]
+            )
         tok_s = None
         if completion and model_duration_complete and self.model_ms > 0:
             tok_s = completion / (self.model_ms / 1000.0)

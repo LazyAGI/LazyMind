@@ -40,6 +40,22 @@ func TestWorkflowStepParamsExposePinnedScriptTools(t *testing.T) {
 	}
 }
 
+func TestWorkflowStepParamsPreserveRequestIdentity(t *testing.T) {
+	params := WorkflowStepParams{
+		UserInput: "继续", LaunchUserInput: "写一篇科普文章", CurrentUserInput: "继续",
+	}
+	got := params.asMap()
+	if got["user_input"] != params.UserInput || got["launch_user_input"] != params.LaunchUserInput || got["current_user_input"] != params.CurrentUserInput {
+		t.Fatalf("lost request identity: %#v", got)
+	}
+	legacy := (WorkflowStepParams{UserInput: "原始请求"}).asMap()
+	for _, key := range []string{"launch_user_input", "current_user_input"} {
+		if _, exists := legacy[key]; exists {
+			t.Fatalf("unset field %q should remain omitted: %#v", key, legacy)
+		}
+	}
+}
+
 // TestLoadWorkflowChatContextFromDB_WrongAgentType returns nil.
 func TestLoadWorkflowChatContextFromDB_WrongAgentType(t *testing.T) {
 	db := newTestDB(t)

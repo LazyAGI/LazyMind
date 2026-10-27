@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -20,6 +22,7 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow/controlstore"
+	"lazymind/core/workflow/displaystate"
 )
 
 var chatCancelHTTPClient = &http.Client{Timeout: 5 * time.Second}
@@ -189,15 +192,37 @@ func loadWorkflowChatContextFromDB(ctx context.Context, db *gorm.DB, taskID stri
 	}
 }
 
-// StopActiveWorkflowSession marks all queued or running steps as interrupted and puts the session
-// into waiting status. Python task cancellation and UI notification use the generic
-// task lifecycle paths; no workflow-specific step completion queue is involved.
-func StopActiveWorkflowSession(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string) {
-	session, err := GetActiveSession(ctx, db, convID)
-	if err != nil || session == nil {
-		return
+// StopActiveWorkflowSession fences queued/running attempts. The session remains
+// pausing until every executor has acknowledged exit.
+func StopActiveWorkflowSession(ctx context.Context, db *gorm.DB, stateStore state.Store, convID string) error {
+	var sessions []orm.WorkflowSession
+	err := db.WithContext(ctx).Where("conversation_id = ? AND dismissed = false", convID).Find(&sessions).Error
+	if err != nil {
+		return err
 	}
-	stopWorkflowSession(ctx, db, stateStore, session)
+	for i := range sessions {
+		if err := stopWorkflowSession(ctx, db, stateStore, &sessions[i], ""); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// StopWorkflowTurn never selects another run merely because it shares a chat.
+func StopWorkflowTurn(ctx context.Context, db *gorm.DB, stateStore state.Store, owner, convID, historyID string) error {
+	var sessions []orm.WorkflowSession
+	if historyID == "" {
+		return nil
+	}
+	if err := db.WithContext(ctx).Where("create_user_id = ? AND conversation_id = ? AND dismissed = false AND controller_host = ?", owner, convID, "lazymind").Find(&sessions).Error; err != nil {
+		return err
+	}
+	for i := range sessions {
+		if err := stopWorkflowSession(ctx, db, stateStore, &sessions[i], historyID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // stopWorkflowSession cancels one specific session. Callers that already resolved a
@@ -208,59 +233,109 @@ func stopWorkflowSession(
 	db *gorm.DB,
 	stateStore state.Store,
 	session *orm.WorkflowSession,
-) {
-	if session == nil || session.Status != SessionStatusActive {
-		return
+	turnHistoryID string,
+) error {
+	if session == nil {
+		return nil
 	}
 	if controlstore.Controlled(*session) {
+		if session.Status != SessionStatusActive && session.Status != "pausing" {
+			return nil
+		}
 		_, err := (WorkflowControlService{DB: db}).Execute(ctx, session.CreateUserID, session.ID,
 			WorkflowControlCommand{Kind: "stop", CommandID: "chat-stop:" + common.GenerateID()})
-		if err != nil {
-			fmt.Printf("[Workflow] stop controlled session %s: %v\n", session.ID, err)
-		}
-		return
+		return err
 	}
 
 	// A transition persists the task and step before the runner emits task_start.
 	// Include pending attempts so a stop racing with that launch cannot leave a
 	// parallel subtask behind. Waiting/failed/interrupted attempts have no live
 	// runner and therefore do not need a cancellation signal.
-	steps, err := ListSteps(ctx, db, session.ID)
-	if err != nil {
-		return
-	}
-	for _, step := range steps {
-		if step.Validity == "stale" || (step.Status != StepStatusPending && step.Status != StepStatusRunning &&
-			step.Status != "queued" && step.Status != "claimed") {
-			continue
-		}
-		// Mark the task first. If a terminal completion won the race, preserve it
-		// and do not create a contradictory interrupted workflow-step projection.
-		accepted, err := subagent.AcceptFinalStatus(
-			ctx, db, step.TaskID, subagent.StatusInterrupted, "stopped by user",
-		)
-		if err != nil || !accepted {
-			continue
-		}
-		// Mirror into workflow_session_steps.
-		_ = UpdateStepStatus(ctx, db, step.TaskID, StepStatusInterrupted)
-		// Reuse the Host stop reason so task-center projections can distinguish
-		// an explicit stop from an ordinary approval checkpoint after reload.
-		_ = db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
-			Where("task_id = ? AND status = ?", step.TaskID, StepStatusInterrupted).
-			UpdateColumns(map[string]any{"terminal_code": "WORKFLOW_STOPPED", "lease_expires_at": nil}).Error
-		// Notify Python to cancel the ReAct loop for this task.
-		go notifyTaskCancel(step.TaskID)
-	}
-
-	// Preserve the reason even when stop wins before the first attempt exists.
-	// Keep waiting as the resumable UI state and do not overwrite a terminal session.
-	now := time.Now().UTC()
 	changed := false
-	err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var cancelledTaskIDs []string
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current orm.WorkflowSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", session.ID).First(&current).Error; err != nil {
+			return err
+		}
+		if turnHistoryID != "" {
+			bound, err := displaystate.ChatHistoryID(current)
+			if err != nil {
+				return err
+			}
+			if bound != turnHistoryID {
+				return nil
+			}
+		}
+		if current.Status == "pausing" {
+			var pending []orm.WorkflowSessionStep
+			if err := tx.Where("session_id = ? AND terminal_code = ?", session.ID, "WORKFLOW_STOP_REQUESTED").Find(&pending).Error; err != nil {
+				return err
+			}
+			for _, step := range pending {
+				cancelledTaskIDs = append(cancelledTaskIDs, step.TaskID)
+			}
+			changed = true
+			return nil
+		}
+		steps, err := ListSteps(ctx, tx, session.ID)
+		if err != nil {
+			return err
+		}
+		live := false
+		for _, step := range steps {
+			if step.Validity == "stale" || (step.Status != StepStatusPending && step.Status != StepStatusRunning &&
+				step.Status != "queued" && step.Status != "claimed") {
+				continue
+			}
+			live = true
+			// Mark the task first. If a terminal completion won the race, preserve it
+			// and do not create a contradictory interrupted workflow-step projection.
+			accepted, err := subagent.AcceptFinalStatus(
+				ctx, tx, step.TaskID, subagent.StatusInterrupted, "stopped by user",
+			)
+			if err != nil {
+				return err
+			}
+			if !accepted {
+				continue
+			}
+			// Mirror into workflow_session_steps.
+			if err := UpdateStepStatus(ctx, tx, step.TaskID, StepStatusInterrupted); err != nil {
+				return err
+			}
+			// Reuse the Host stop reason so task-center projections can distinguish
+			// an explicit stop from an ordinary approval checkpoint after reload.
+			code := "WORKFLOW_STOPPED"
+			if step.LeaseToken != "" || step.Status == StepStatusRunning {
+				code = "WORKFLOW_STOP_REQUESTED"
+			}
+			if err := tx.Model(&orm.WorkflowSessionStep{}).
+				Where("task_id = ? AND status = ?", step.TaskID, StepStatusInterrupted).
+				UpdateColumns(map[string]any{"terminal_code": code, "lease_expires_at": nil}).Error; err != nil {
+				return err
+			}
+			// Notify Python to cancel the ReAct loop for this task.
+			cancelledTaskIDs = append(cancelledTaskIDs, step.TaskID)
+		}
+		if !live && current.Status != SessionStatusActive {
+			return nil
+		}
+
+		// Preserve the reason even when stop wins before the first attempt exists.
+		// Internal waiting remains resumable; the shared display is explicitly paused.
+		now := time.Now().UTC()
+		var pending int64
+		if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND terminal_code = ?", session.ID, "WORKFLOW_STOP_REQUESTED").Count(&pending).Error; err != nil {
+			return err
+		}
+		status := SessionStatusWaiting
+		if pending > 0 {
+			status = "pausing"
+		}
 		result := tx.Model(&orm.WorkflowSession{}).
-			Where("id = ? AND status = ?", session.ID, SessionStatusActive).
-			Updates(map[string]any{"status": SessionStatusWaiting, "last_stopped_at": now,
+			Where("id = ? AND status = ?", session.ID, current.Status).
+			Updates(map[string]any{"status": status, "last_stopped_at": now,
 				"state_version": gorm.Expr("state_version + 1"), "updated_at": now})
 		if result.Error != nil {
 			return result.Error
@@ -281,7 +356,7 @@ func stopWorkflowSession(
 		for _, step := range interrupted {
 			nodes[step.StepID] = map[string]any{"execution": StepStatusInterrupted}
 		}
-		payload, _ := json.Marshal(map[string]any{"status": SessionStatusWaiting, "user_stopped": true, "nodes": nodes})
+		payload, _ := json.Marshal(map[string]any{"status": status, "user_stopped": true, "nodes": nodes})
 		if err := appendSessionStateEvent(tx, updated, "workflow.patch", payload); err != nil {
 			return err
 		}
@@ -289,7 +364,13 @@ func stopWorkflowSession(
 		return nil
 	})
 	if err != nil || !changed {
-		return
+		return err
+	}
+	var cancelErrors []error
+	for _, taskID := range cancelledTaskIDs {
+		if err := notifyTaskCancel(taskID); err != nil {
+			cancelErrors = append(cancelErrors, err)
+		}
 	}
 
 	// Push step_waiting SSE event to the conversation channel.
@@ -302,38 +383,51 @@ func stopWorkflowSession(
 			"reason":       "user_stopped",
 		})
 	}
+	return errors.Join(cancelErrors...)
 }
 
 // notifyTaskCancel posts a cancel signal to the Python chat service so that
 // the SubAgent ReAct loop terminates at the next iteration boundary.
-// Called in a goroutine; errors are logged and suppressed.
-func notifyTaskCancel(taskID string) {
+// A failed notification leaves the durable pause pending and is returned to the caller.
+func notifyTaskCancel(taskID string) error {
 	body, _ := json.Marshal(map[string]string{
 		"task_id": taskID,
 	})
 	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/workflow/task-cancel")
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		fmt.Printf("[plugin] notifyTaskCancel: %v\n", err)
-		return
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
 	}
 	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("task cancellation rejected: HTTP %d", resp.StatusCode)
+	}
+	return nil
 }
 
 // CancelRemovedTaskExecutions runs after committed removal. Restore is fenced
 // until its durable cancellation job completes, so this cannot stop a new run.
 func CancelRemovedTaskExecutions(ctx context.Context, db *gorm.DB, stateStore state.Store, owner, convID string, before time.Time, executionIDs []string) error {
 	var sessions []orm.WorkflowSession
-	if err := db.WithContext(ctx).Where("create_user_id=? AND conversation_id=? AND created_at<=? AND status=?", owner, convID, before, SessionStatusActive).Find(&sessions).Error; err != nil {
+	if err := db.WithContext(ctx).Where("create_user_id=? AND conversation_id=? AND created_at<=? AND status IN ?", owner, convID, before, []string{SessionStatusActive, "pausing"}).Find(&sessions).Error; err != nil {
 		return err
 	}
 	for index := range sessions {
-		stopWorkflowSession(ctx, db, stateStore, &sessions[index])
+		if err := stopWorkflowSession(ctx, db, stateStore, &sessions[index], ""); err != nil {
+			return err
+		}
 		var current orm.WorkflowSession
 		if err := db.WithContext(ctx).Where("id=?", sessions[index].ID).Take(&current).Error; err != nil {
 			return err
 		}
-		if current.Status == SessionStatusActive {
+		if current.Status == SessionStatusActive || current.Status == "pausing" {
 			return fmt.Errorf("workflow stop pending")
 		}
 	}
@@ -377,9 +471,14 @@ func cancelRemovedChatExecution(ctx context.Context, executionID string) error {
 // NotifyChatCancel posts a cancel signal to the Python chat service so that
 // the active ChatAgent session for the given conversation terminates.
 // Callers own retry/logging policy; the request itself is always bounded.
-func NotifyChatCancel(ctx context.Context, convID string) error {
+func NotifyChatCancel(ctx context.Context, convID string, historyID ...string) error {
+	history := ""
+	if len(historyID) > 0 {
+		history = historyID[0]
+	}
 	body, _ := json.Marshal(map[string]string{
 		"conversation_id": convID,
+		"history_id":      history,
 	})
 	url := common.JoinURL(common.ChatServiceEndpoint(), "/api/workflow/task-cancel")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
