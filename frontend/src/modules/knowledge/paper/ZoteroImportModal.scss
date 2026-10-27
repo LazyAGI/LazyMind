@@ -1,9 +1,16 @@
 .zotero-import-modal {
-  .ant-modal-content { padding: 26px 28px 22px; border-radius: 16px; }
+  .ant-modal-content {
+    display: flex; flex-direction: column; box-sizing: border-box;
+    max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px);
+    padding: 26px 28px 22px; border-radius: 16px;
+  }
+  .ant-modal-header, .ant-modal-footer { flex-shrink: 0; }
+  .ant-modal-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .ant-modal-footer { margin-top: 16px; padding-top: 14px; border-top: 1px solid #edf0f5; }
   .ant-modal-title { font-size: 20px; font-weight: 650; color: #172b4d; }
   .ant-modal-header { margin-bottom: 5px; }
   .zotero-import-description { margin: 0 0 21px; font-size: 13px; color: #748096; line-height: 1.65; }
-  .zotero-source-picker { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; margin-bottom: 22px; }
+  .zotero-source-picker { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; width: 100%; margin-bottom: 22px; }
   .zotero-source-picker .ant-radio-button-wrapper {
     height: auto; min-height: 76px; padding: 13px 12px; border: 1px solid #e3e8f0; border-radius: 10px;
     line-height: 1.4; background: #fff; color: #5d6a7f; box-shadow: none;
@@ -38,17 +45,47 @@
   .zotero-file-picker > span { color: #8290a5; font-size: 12px; overflow-wrap: anywhere; }
   .zotero-options { margin-top: 17px; padding-top: 15px; border-top: 1px solid #edf0f5; display: grid; gap: 10px; }
   .zotero-options .ant-checkbox-wrapper { font-size: 12px; color: #56657b; }
-  .zotero-preview { margin-top: 19px; border: 1px solid #dce7f6; border-radius: 10px; overflow: hidden; background: #fff; }
-  .zotero-preview-heading { display: flex; align-items: center; gap: 7px; color: #245fe7; padding: 12px 15px 0; font-weight: 600; font-size: 12px; }
-  .zotero-preview-counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 15px; }
-  .zotero-preview-count { border-left: 1px solid #edf0f5; padding-left: 13px; &:first-child { border-left: 0; padding-left: 0; } }
-  .zotero-preview-count strong { display: block; font-size: 21px; line-height: 1.1; font-weight: 600; color: #263c5d; }
-  .zotero-preview-count span { display: block; margin-top: 5px; font-size: 11px; color: #8a96a7; }
-  .zotero-preview-titles { margin: 0; padding: 10px 15px 11px; background: #f8fafc; list-style: none; color: #617089; font-size: 11px; line-height: 1.9; }
-  .zotero-preview-titles li { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  .zotero-database-info { display: grid; gap: 9px; margin-bottom: 15px; }
+  .zotero-database-info p { margin: 0; color: #65758e; font-size: 12px; line-height: 1.8; }
+  .zotero-database-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #8a96a7; }
+  .zotero-api-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+  .zotero-api-heading .ant-radio-button-wrapper { font-size: 12px; }
+  .zotero-json-fallback { color: #65758e; font-size: 12px; line-height: 1.7; }
+  .zotero-json-fallback summary { cursor: pointer; }
+  .zotero-json-fallback > .ant-checkbox-wrapper { margin: 10px 0; font-size: 12px; }
+  .zotero-selection { margin-top: 19px; border: 1px solid #dce5f1; border-radius: 11px; overflow: hidden; background: #fff; }
+  .zotero-selection-heading { display: flex; align-items: center; justify-content: space-between; padding: 17px 18px 14px; }
+  .zotero-selection-heading > div { color: #6b7e99; font-size: 11px; }
+  .zotero-selection-heading .anticon { margin-right: 5px; color: #3975e8; }
+  .zotero-selection-heading strong { display: block; margin-top: 6px; color: #263c5d; font-size: 16px; font-weight: 600; }
+  .zotero-selection-heading > span { color: #74849c; font-size: 12px; }
+  .zotero-search { display: flex; width: calc(100% - 36px); margin: 0 18px; border-radius: 7px; }
+  .zotero-search .ant-input-prefix { color: #8997ab; margin-right: 8px; }
+  .zotero-selection-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px 9px 18px; border-bottom: 1px solid #e7edf5; }
+  .zotero-selection-toolbar > span { color: #3569b8; font-size: 12px; font-weight: 500; }
+  .zotero-selection-toolbar .ant-btn { font-size: 11px; color: #62758f; }
+  .zotero-selection-toolbar .ant-btn:disabled { color: #b2bdcc; }
+  .zotero-paper-list { max-height: 320px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .zotero-paper-row { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #eef2f7; transition: background-color .15s; }
+  .zotero-paper-row:last-child { border-bottom: 0; }
+  .zotero-paper-row:hover { background: #f8faff; }
+  .zotero-paper-row.is-selected { background: #f1f6ff; }
+  .zotero-paper-row > .ant-checkbox-wrapper { margin-top: 1px; }
+  .zotero-paper-details { flex: 1; min-width: 0; }
+  .zotero-paper-title { display: block; color: #293e5c; font-size: 13px; font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; cursor: pointer; }
+  .zotero-paper-meta { display: flex; align-items: baseline; gap: 13px; margin-top: 5px; color: #7c8a9e; font-size: 11px; line-height: 1.5; }
+  .zotero-paper-meta > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .zotero-paper-meta > span:last-child { flex-shrink: 0; }
+  .zotero-paper-collections { display: flex; gap: 5px; margin-top: 5px; color: #8796ab; font-size: 10px; overflow-wrap: anywhere; }
+  .zotero-paper-materials { display: grid; justify-items: end; gap: 6px; padding-top: 3px; color: #7b8ba2; font-size: 10px; white-space: nowrap; }
+  .zotero-paper-materials .anticon { margin-right: 3px; color: #6f8eb8; }
+  .zotero-pdf-unavailable { color: #a66b19; }
+  .zotero-list-empty { padding: 35px 20px; text-align: center; color: #8190a6; font-size: 12px; }
+  .zotero-list-pagination { display: flex; justify-content: flex-end; border-top: 1px solid #e7edf5; padding: 10px 14px; }
+  .zotero-selection-materials { font-size: 11px; color: #8190a6; }
   .zotero-import-alert { margin-top: 14px; }
   .zotero-import-alert .ant-alert-message, .zotero-import-alert .ant-alert-description { font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; }
-  .zotero-import-footer { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin-top: 21px; }
+  .zotero-import-footer { display: flex; align-items: center; justify-content: flex-end; gap: 9px; }
   .zotero-import-footer .ant-btn { border-radius: 7px; min-width: 78px; }
   .zotero-private-hint { margin-right: auto; color: #9aa4b3; font-size: 11px; }
   .zotero-private-hint .anticon { margin-right: 5px; }
@@ -62,5 +99,13 @@
     .zotero-source-name { gap: 5px; font-size: 12px; }
     .zotero-form-row { grid-template-columns: 110px minmax(0, 1fr); gap: 9px; }
     .zotero-private-hint { display: none; }
+    .zotero-paper-row { gap: 9px; padding: 12px; }
+    .zotero-paper-materials { max-width: 75px; white-space: normal; text-align: right; }
+    .zotero-selection-heading { padding: 15px 12px; }
+    .zotero-search { width: calc(100% - 24px); margin: 0 12px; }
+    .zotero-selection-toolbar { padding-left: 12px; }
+    .zotero-paper-list { max-height: 280px; }
   }
 }
+
+@media (prefers-reduced-motion: reduce) { .zotero-import-modal .zotero-paper-row { transition: none; } }

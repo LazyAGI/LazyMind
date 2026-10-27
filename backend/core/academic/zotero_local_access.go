@@ -13,22 +13,26 @@ import (
 	"lazymind/core/systemdeps"
 )
 
-// The native runtime manager explicitly configures both local mode and the
-// bootstrap account used by its local proxy's auto-login. Shared deployments
-// must never turn destination-dataset permissions into host-library access.
+// Native runtimes use the bootstrap owner. Containers must opt in with both a
+// trusted mounted data directory and its owner; destination write permission
+// alone never grants access to the host's private Zotero library.
 // Verify the owner using only the Bearer token, not forwarded identity headers.
 func authorizeLocalZoteroSource(r *http.Request, source string) error {
-	if source != "local" {
+	if source != "local" && source != "database" {
 		return nil
 	}
 	forbidden := func() error {
-		return zoteroFailure(http.StatusForbidden, "ZOTERO_LOCAL_ACCESS_FORBIDDEN", "Local Zotero access requires the authenticated owner of a local desktop runtime")
+		return zoteroFailure(http.StatusForbidden, "ZOTERO_LOCAL_ACCESS_FORBIDDEN", "本地 Zotero 仅允许已验证的本机所有者访问；容器运行时需配置只读数据目录及所有者")
 	}
 	unavailable := func() error {
 		return zoteroFailure(http.StatusServiceUnavailable, "ZOTERO_LOCAL_AUTH_UNAVAILABLE", "Local Zotero owner authentication is unavailable")
 	}
-	owner := strings.TrimSpace(os.Getenv("LAZYMIND_BOOTSTRAP_ADMIN_USERNAME"))
-	if !systemdeps.IsLocalRuntime() || owner == "" {
+	owner := strings.TrimSpace(os.Getenv("LAZYMIND_ZOTERO_LOCAL_OWNER"))
+	mounted := owner != "" && strings.TrimSpace(os.Getenv("LAZYMIND_ZOTERO_DATA_DIR")) != ""
+	if systemdeps.IsLocalRuntime() && owner == "" {
+		owner = strings.TrimSpace(os.Getenv("LAZYMIND_BOOTSTRAP_ADMIN_USERNAME"))
+	}
+	if (!systemdeps.IsLocalRuntime() && !mounted) || owner == "" {
 		return forbidden()
 	}
 	authorization := strings.TrimSpace(r.Header.Get("Authorization"))

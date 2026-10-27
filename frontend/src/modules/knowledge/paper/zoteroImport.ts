@@ -5,14 +5,20 @@ import type { PaperLibraryData } from './model';
 import { normalizeDoi } from './model';
 
 export interface ZoteroImportConfig {
-  source: 'local' | 'remote' | 'webdav';
+  source: 'database' | 'local' | 'remote' | 'webdav';
   library_type: 'users' | 'groups';
   library_id: string;
   api_key?: string;
   local_url?: string;
   webdav?: { url: string; username: string; password: string };
 }
-export interface ZoteroPreview { items: unknown[]; collections: unknown[]; source_id: string; warnings: string[] }
+export interface ZoteroDatabaseInfo {
+  path: string;
+  libraries: Array<{ type: 'users' | 'groups'; id: string; name: string }>;
+  library_type: 'users' | 'groups';
+  library_id: string;
+}
+export interface ZoteroPreview { items: unknown[]; collections: unknown[]; source_id: string; warnings: string[]; database?: ZoteroDatabaseInfo }
 export interface ZoteroImportOptions { includeAttachments: boolean; localFiles: File[]; targetFolderId?: string | null }
 export interface ZoteroImportResult { imported: number; attachments: number; failures?: string[] }
 export interface ZoteroAttachmentCandidate { id: string; paperId: string; key: string; name: string; md5?: string; localPath?: string }
@@ -56,7 +62,18 @@ function decodePreview(value: unknown): ZoteroPreview {
     throw new Error('Zotero 返回的数据格式无效，未导入任何文献');
   }
   if (body.items.length > 50000 || body.collections.length > 10000 || text(body.source_id).length > 2000) throw new Error('Zotero 文献库超过单次导入上限，请分批导入');
-  return { items: body.items, collections: body.collections, source_id: text(body.source_id), warnings: (body.warnings || []) as string[] };
+  let database: ZoteroDatabaseInfo | undefined;
+  if (body.database !== undefined) {
+    const info = object(body.database);
+    if (!info || typeof info.path !== 'string' || !['users', 'groups'].includes(text(info.library_type)) || !/^\d+$/.test(text(info.library_id))
+      || !Array.isArray(info.libraries) || info.libraries.length > 10000 || !info.libraries.every(value => {
+        const library = object(value);
+        return library && ['users', 'groups'].includes(text(library.type)) && /^\d+$/.test(text(library.id)) && !!text(library.name);
+      })) throw new Error('本地 Zotero 文献库信息无效，请重新读取数据库');
+    database = { path: info.path, library_type: info.library_type as 'users' | 'groups', library_id: info.library_id as string,
+      libraries: info.libraries.map(value => { const library = value as Record<string, string>; return { type: library.type as 'users' | 'groups', id: library.id, name: library.name }; }) };
+  }
+  return { items: body.items, collections: body.collections, source_id: text(body.source_id), warnings: (body.warnings || []) as string[], ...(database ? { database } : {}) };
 }
 export async function previewZotero(datasetId: string, config: ZoteroImportConfig, signal?: AbortSignal): Promise<ZoteroPreview> {
   try {
@@ -265,13 +282,14 @@ export function buildZoteroImport(preview: ZoteroPreview, current: PaperLibraryD
     counts.pdfs++;
   });
   rawItems.forEach((data, key) => {
-    if (data.itemType !== 'note') return;
-    const paperId = paperIDs.get(text(data.parentItem));
+    const attachmentNote = data.itemType === 'attachment' && pdfAttachment(data) && !!text(data.note);
+    if (data.itemType !== 'note' && !attachmentNote) return;
+    const paperId = paperIDs.get(text(data.parentItem) || (attachmentNote ? key : ''));
     if (!paperId) {
       if (text(data.parentItem)) throw new Error('Zotero 笔记缺少对应文献，未导入');
       return; // Standalone notes have no paper parent; the preview lists this limitation.
     }
-    const id = recordID(preview.source_id, 'note', key); const paper = library.papers.find(item => item.id === paperId)!;
+    const id = recordID(preview.source_id, attachmentNote ? 'attachment-note' : 'note', key); const paper = library.papers.find(item => item.id === paperId)!;
     if (!library.notes.some(note => note.id === id)) {
       const content = noteText(data.note);
       library.notes.push({ id, paperId, title: content.split('\n')[0].slice(0, 80) || 'Zotero 笔记', content, kind: 'note', createdAt: timestamp(data.dateAdded, now), updatedAt: timestamp(data.dateModified, now) });

@@ -173,11 +173,12 @@ type zoteroClient struct {
 	version       string
 	serverID      string
 	metadataBytes int
+	database      *zoteroDatabaseLocation
 }
 
 func newZoteroClient(config zoteroConfig) (*zoteroClient, error) {
 	config.Source = strings.ToLower(strings.TrimSpace(config.Source))
-	if config.Source != "local" && config.Source != "remote" && config.Source != "webdav" {
+	if config.Source != "database" && config.Source != "local" && config.Source != "remote" && config.Source != "webdav" {
 		return nil, zoteroFailure(400, "INVALID_ZOTERO_SOURCE", "请选择本地 Zotero、远端 Zotero 或 WebDAV 来源")
 	}
 	if config.LibraryType == "" {
@@ -186,14 +187,17 @@ func newZoteroClient(config zoteroConfig) (*zoteroClient, error) {
 	if config.LibraryType != "users" && config.LibraryType != "groups" {
 		return nil, zoteroFailure(400, "INVALID_ZOTERO_LIBRARY", "文献库类型必须为个人或群组")
 	}
-	if config.Source == "local" && config.LibraryID == "" {
+	if (config.Source == "local" || config.Source == "database") && config.LibraryID == "" {
 		config.LibraryID = "0"
 	}
-	if !zoteroLibraryID.MatchString(config.LibraryID) || (config.Source != "local" && config.LibraryID == "0") {
+	if !zoteroLibraryID.MatchString(config.LibraryID) || (config.Source != "local" && config.Source != "database" && config.LibraryID == "0") {
 		return nil, zoteroFailure(400, "INVALID_ZOTERO_LIBRARY", "请填写有效的 Zotero 数字文献库 ID")
 	}
 	if len(config.APIKey) > 256 || strings.ContainsAny(config.APIKey, "\r\n") {
 		return nil, zoteroFailure(400, "INVALID_ZOTERO_CREDENTIALS", "Zotero API Key 格式无效")
+	}
+	if config.Source == "database" {
+		return newZoteroDatabaseClient(config)
 	}
 	base, _ := url.Parse("https://api.zotero.org")
 	if config.Source == "local" {
@@ -233,10 +237,11 @@ func newZoteroClient(config zoteroConfig) (*zoteroClient, error) {
 }
 
 type zoteroPreview struct {
-	Items       []json.RawMessage `json:"items"`
-	Collections []json.RawMessage `json:"collections"`
-	SourceID    string            `json:"source_id"`
-	Warnings    []string          `json:"warnings"`
+	Items       []json.RawMessage       `json:"items"`
+	Collections []json.RawMessage       `json:"collections"`
+	SourceID    string                  `json:"source_id"`
+	Warnings    []string                `json:"warnings"`
+	Database    *zoteroDatabaseMetadata `json:"database,omitempty"`
 }
 
 func (c *zoteroClient) apiURL(resource string) *url.URL {
@@ -397,6 +402,9 @@ func (c *zoteroClient) readAll(ctx context.Context, resource string) ([]json.Raw
 }
 
 func (c *zoteroClient) preview(ctx context.Context) (zoteroPreview, error) {
+	if c.config.Source == "database" {
+		return c.previewDatabase(ctx)
+	}
 	result := zoteroPreview{Warnings: []string{}}
 	var err error
 	if result.Collections, err = c.readAll(ctx, "collections"); err != nil {
@@ -445,6 +453,9 @@ type zoteroFile struct {
 }
 
 func (c *zoteroClient) attachment(ctx context.Context, key string) (zoteroFile, error) {
+	if c.config.Source == "database" {
+		return c.attachmentDatabase(ctx, key)
+	}
 	var file zoteroFile
 	if !zoteroItemKey.MatchString(key) {
 		return file, zoteroFailure(400, "INVALID_ZOTERO_ITEM_KEY", "Zotero 附件编号无效")

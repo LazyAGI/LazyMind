@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { emptyLibrary } from './libraryModel';
 import { buildZoteroImport, parseZoteroJSON, matchLocalZoteroFile, previewZotero, type ZoteroPreview } from './zoteroImport';
 import { axiosInstance } from '@/components/request';
+import { filterZoteroPreview, listZoteroPapers } from './zoteroSelection';
 
 vi.mock('@/components/request', () => ({ BASE_URL: '', axiosInstance: { post: vi.fn() } }));
 const sample = (): ZoteroPreview => ({
@@ -16,6 +18,23 @@ const sample = (): ZoteroPreview => ({
 });
 
 describe('Zotero import graph', () => {
+  it.skipIf(!process.env.ZOTERO_REAL_PREVIEW_PATH)('builds the opt-in local database preview with valid paper and material ownership', () => {
+    const input = JSON.parse(readFileSync(process.env.ZOTERO_REAL_PREVIEW_PATH!, 'utf8')) as ZoteroPreview;
+    const papers = listZoteroPapers(input);
+    const plan = buildZoteroImport(filterZoteroPreview(input, papers.map(paper => paper.key)), emptyLibrary());
+    expect(plan.counts.papers + plan.counts.existing).toBe(papers.length);
+    const paperIds = new Set(plan.library.papers.map(paper => paper.id));
+    const attachmentIds = new Set(plan.library.attachments.map(attachment => attachment.id));
+    expect(plan.library.notes.every(note => paperIds.has(note.paperId))).toBe(true);
+    expect(plan.library.attachments.every(attachment => paperIds.has(attachment.paperId))).toBe(true);
+    expect(plan.library.annotations.every(annotation => paperIds.has(annotation.paperId) && attachmentIds.has(annotation.attachmentId!))).toBe(true);
+  }, 15000);
+  it('preserves detected database libraries for selection and subsequent attachment requests', async () => {
+    const database = { path: '/data/Zotero/zotero.sqlite', libraries: [{ type: 'users', id: '0', name: '我的文献库' }], library_type: 'users', library_id: '0' };
+    vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: { ...sample(), database } });
+    const result = await previewZotero('dataset', { source: 'database', library_type: 'users', library_id: '0' });
+    expect(result.database).toEqual(database);
+  });
   it('preserves nested collections, authors, memberships, notes and PDF annotations without pretending files are stored', () => {
     const plan = buildZoteroImport(sample(), emptyLibrary());
     expect(plan.library.folders).toHaveLength(2);
@@ -42,6 +61,37 @@ describe('Zotero import graph', () => {
     expect(next.library.annotations).toHaveLength(1);
     expect(next.attachments).toEqual([]);
     expect(next.counts).toMatchObject({ papers: 0, existing: 1, folders: 0, notes: 0 });
+  });
+
+  it('imports selected PDF attachment notes under their paper with stable replay identities', () => {
+    const input = sample();
+    Object.assign((input.items[1] as { data: Record<string, unknown> }).data, { note: '<p>PDF <b>reading note</b></p><script>hidden()</script>', dateAdded: '2024-04-01T00:00:00Z' });
+    input.items.push(
+      { key: 'SOLOPDF1', data: { itemType: 'attachment', filename: 'standalone.pdf', note: '<p>Standalone note</p>' } },
+      { key: 'PAPER002', data: { itemType: 'book', title: 'Unselected' } },
+      { key: 'PDF00002', data: { itemType: 'attachment', parentItem: 'PAPER002', filename: 'other.pdf', note: '<p>Unselected attachment note</p>' } },
+      { key: 'EMPTY001', data: { itemType: 'attachment', parentItem: 'PAPER001', filename: 'empty.pdf', note: '  \n ' } },
+      { key: 'HTML0001', data: { itemType: 'attachment', parentItem: 'PAPER001', contentType: 'text/html', note: 'Excluded snapshot note' } },
+    );
+    const selected = filterZoteroPreview(input, ['PAPER001', 'SOLOPDF1']);
+    const first = buildZoteroImport(selected, emptyLibrary());
+    expect(first.library.notes.map(note => note.content).sort()).toEqual(['PDF reading note', 'Standalone note', 'Useful note']);
+    const childNote = first.library.notes.find(note => note.content === 'PDF reading note')!;
+    const standaloneNote = first.library.notes.find(note => note.content === 'Standalone note')!;
+    const paper = first.library.papers.find(item => item.metadata.title === 'A paper')!;
+    const standalone = first.library.papers.find(item => item.metadata.title === 'standalone.pdf')!;
+    expect(childNote).toMatchObject({ paperId: paper.id, createdAt: '2024-04-01T00:00:00.000Z' });
+    expect(standaloneNote.paperId).toBe(standalone.id);
+    expect(paper.noteIds).toContain(childNote.id);
+    expect(standalone.noteIds).toEqual([standaloneNote.id]);
+    expect(first.counts.notes).toBe(3);
+    childNote.content = 'Personal edit';
+    const replay = buildZoteroImport(selected, first.library);
+    expect(replay.library.notes.map(note => note.id)).toEqual(first.library.notes.map(note => note.id));
+    expect(replay.library.notes.find(note => note.id === childNote.id)?.content).toBe('Personal edit');
+    expect(replay.counts.notes).toBe(0);
+    const otherSource = buildZoteroImport({ ...selected, source_id: 'groups:17' }, emptyLibrary());
+    expect(otherSource.library.notes.some(note => note.id === childNote.id)).toBe(false);
   });
 
   it('matches an existing DOI and augments relationships without overwriting existing organization', () => {

@@ -108,3 +108,18 @@ it('uses the authoritative paper identity returned after a concurrent metadata m
   });
   expect(uploaded).toEqual(['existing']);
 });
+
+it('streams database PDFs without a manual folder and saves them on their confirmed paper', async () => {
+  vi.mocked(axiosInstance.post).mockReset();
+  vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: new Blob(['%PDF-1.7 database file'], { type: 'application/pdf' }) });
+  let current = emptyLibrary();
+  const savedFiles: Array<{ name: string; paperId: string }> = [];
+  const result = await executeZoteroImport({ datasetId: 'ds', preview, config: { source: 'database', library_type: 'users', library_id: '0' },
+    options: { includeAttachments: true, localFiles: [] }, getLibrary: () => current,
+    saveLibrary: async data => { current = data; },
+    storeAttachment: async (file, candidate) => { savedFiles.push({ name: file.name, paperId: candidate.paperId }); },
+  });
+  expect(result).toMatchObject({ imported: 1, attachments: 1, failures: [] });
+  expect(savedFiles).toEqual([{ name: 'article.pdf', paperId: current.papers[0].id }]);
+  expect(axiosInstance.post).toHaveBeenCalledWith('/api/core/academic/zotero/attachment', { source: 'database', library_type: 'users', library_id: '0', item_key: 'FILE1234' }, expect.objectContaining({ responseType: 'blob' }));
+});
