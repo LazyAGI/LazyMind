@@ -590,6 +590,9 @@ type PublicationRequestOptions = RawAxiosRequestConfig & { silentError?: boolean
 // Workflow Session API.
 export function WorkflowSessionApi() {
   return {
+    pauseSession(sessionId: string) {
+      return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}:pause`);
+    },
     getControl(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
     },
@@ -1008,7 +1011,9 @@ export function ChatServiceApi() {
       );
     },
     conversationServiceStopChatGeneration(
-      requestParameters: ConversationServiceApiConversationServiceStopChatGenerationRequest,
+      requestParameters: ConversationServiceApiConversationServiceStopChatGenerationRequest & {
+        stopChatGenerationRequest: { conversation_id: string; history_id?: string };
+      },
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.post(

@@ -1528,8 +1528,8 @@ const AssistantMessage = (props: any) => {
             <WorkflowPanel
               key={sessionId}
               conversationId={sessionId}
-              onSendMessage={(text) => props.sendMessage?.(text)}
-              onStop={props.stopGeneration}
+              onSendMessage={(text, control) => props.sendMessage?.(text, undefined, control ? { workflow_control: control } : undefined)}
+              chatBusy={props.chatBusy}
             />
           )}
         </div>
@@ -1602,8 +1602,8 @@ const AssistantMessage = (props: any) => {
           <WorkflowPanel
             key={sessionId}
             conversationId={sessionId}
-            onSendMessage={(text) => props.sendMessage?.(text)}
-            onStop={props.stopGeneration}
+            onSendMessage={(text, control) => props.sendMessage?.(text, undefined, control ? { workflow_control: control } : undefined)}
+            chatBusy={props.chatBusy}
           />
         )}
       </div>

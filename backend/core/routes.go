@@ -267,6 +267,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:complete", nil, remoteExecutorHandler.Complete)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:fail", nil, remoteExecutorHandler.Fail)
 	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:cancel", nil, remoteExecutorHandler.Cancel)
+	handleAPI(r, "POST", "/internal/workflow-attempts/{attempt_id}:stop-ack", nil, workflow.ConfirmNativeStopHTTP)
 	hostedHandler := workflowhosted.Handler{Service: hostedService}
 	workflowControl := workflow.WorkflowControlHandler{Service: workflow.WorkflowControlService{DB: corestore.DB()}}
 	handleAPI(r, "GET", "/workflow-control/capabilities", []string{"qa.read"}, workflowControl.Capabilities)
@@ -601,6 +602,7 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- Task Center -----
 	handleAPI(r, "GET", "/task-center/tasks", []string{"qa.read"}, taskcenter.ListTasks)
+	handleAPI(r, "GET", "/task-center/workflow-events", []string{"qa.read"}, taskcenter.WorkflowChanges)
 	handleAPI(r, "GET", "/user/notification-preferences", []string{"qa.read"}, taskcenter.NotificationPreferences)
 	handleAPI(r, "GET", "/user/wechat-notification-targets", []string{"qa.read"}, taskcenter.WeChatNotificationTargets)
 	handleAPI(r, "GET", "/notification-account-references/{account_id}", []string{"qa.read"}, taskcenter.NotificationAccountReferences)
@@ -702,6 +704,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.PatchArtifact)
 	handleAPI(r, "DELETE", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.DeleteArtifact)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:stop", []string{"qa.write"}, workflowFacade.StopWorkflow)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}:pause", []string{"qa.write"}, workflowFacade.SessionAccess(http.HandlerFunc(workflow.PauseNativeWorkflowHTTP)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:resume", []string{"qa.write"}, workflowFacade.ResumeWorkflow)
 	handleAPI(r, "GET", "/workflow-commands/{command_id}", []string{"qa.read"}, workflowFacade.GetCommand)
 	workflowEvents := workflowstream.Handler{Store: workflowRepository, Snapshot: func(req *http.Request, sessionID, owner string) (any, error) {

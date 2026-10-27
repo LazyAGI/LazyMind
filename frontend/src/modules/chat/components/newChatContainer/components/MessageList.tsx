@@ -129,6 +129,7 @@ interface MessageListProps {
   ) => void | Promise<boolean | void>;
   regenerate: () => void;
   regenerateDisabled?: boolean;
+  chatBusy?: boolean;
   stopGeneration: () => void;
   renderText: (item: any) => React.ReactNode;
   updateAssistantMessage: (data: any, id?: string, index?: number) => void;
@@ -311,6 +312,7 @@ const MessageList: React.FC<MessageListProps> = ({
   sendMessage,
   regenerate,
   regenerateDisabled = false,
+  chatBusy = false,
   stopGeneration,
   renderText,
   updateAssistantMessage,
@@ -618,6 +620,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   sendMessage={sendMessage}
                   regenerate={regenerate}
                   regenerateDisabled={regenerateDisabled}
+                  chatBusy={chatBusy}
                   stopGeneration={stopGeneration}
                   renderText={renderText}
                   updateMessage={(msg: any) =>

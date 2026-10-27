@@ -453,6 +453,8 @@ interface ChatInputProps {
   /** Optional persistence key for composers that do not have a conversation yet. */
   draftKey?: string;
   isStreaming?: boolean;
+  /** Stop availability can outlive the Chat stream during workflow hand-off. */
+  canStopGeneration?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
@@ -531,7 +533,7 @@ export interface SkillDepositStats {
 }
 
 interface SendButtonProps {
-  isStreaming: boolean;
+  canStopGeneration: boolean;
   hasDraft: boolean;
   sendDisabled: boolean;
   disabled: boolean;
@@ -541,7 +543,7 @@ interface SendButtonProps {
   onStop?: () => void;
 }
 const SendButton: React.FC<SendButtonProps> = ({
-  isStreaming,
+  canStopGeneration,
   hasDraft,
   sendDisabled,
   disabled,
@@ -553,8 +555,9 @@ const SendButton: React.FC<SendButtonProps> = ({
   // While a response is running, an empty composer controls that response.
   // As soon as the user types a valid follow-up, the same control submits the
   // draft to the queue so it can subsequently be steered or sent normally.
-  const isStopMode = isStreaming && Boolean(onStop) && !hasDraft;
-  const isDisabled = isStopMode ? disabled : sendDisabled || disabled;
+  const isStopMode = canStopGeneration && Boolean(onStop) && !hasDraft;
+  // Send prerequisites (empty input, runtime/config readiness) must not block stop.
+  const isDisabled = !isStopMode && (sendDisabled || disabled);
 
   return (
     <button
@@ -1849,7 +1852,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton
-                      isStreaming={isStreaming}
+                      canStopGeneration={props.canStopGeneration ?? isStreaming}
                       hasDraft={Boolean(value.trim())}
                       sendDisabled={isSendDisabled || featuredBusy}
                       disabled={disabled}

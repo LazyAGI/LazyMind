@@ -1,38 +1,11 @@
 import type { WorkflowSession } from '@/modules/chat/store/workflowPanel';
 
-/**
- * A completed attempt is removed from projection.current, and the runtime may
- * clear session.current_step_id before entering `waiting`. Resolve the approval
- * checkpoint from the latest effective attempt instead of relying only on the
- * mutable current-step pointer.
- */
+/** Approval is a backend decision, never a synonym for internal waiting. */
 export function resolvePendingApprovalStep(
   session: Pick<WorkflowSession, 'status' | 'current_step_id' | 'steps' | 'projection'>,
   displayStatus: string,
 ): string | undefined {
   if (displayStatus !== 'waiting' || session.projection?.completed) return undefined;
-  if (Object.values(session.projection?.nodes ?? {}).some((node) =>
-    node.validity !== 'stale' && ['pending', 'queued', 'claimed', 'running'].includes(node.execution),
-  )) return undefined;
-
-  const isSucceededApproval = (stepId?: string) => Boolean(
-    stepId
-    && session.projection?.nodes?.[stepId]?.execution === 'succeeded'
-    && session.projection.nodes[stepId].validity !== 'stale'
-    && session.projection.nodes[stepId].requires_approval,
-  );
-
-  const latestEffectiveStep = [...(session.steps ?? [])]
-    .filter((step) => step.validity !== 'stale')
-    .sort((left, right) => {
-      const timeDelta = Date.parse(right.created_at) - Date.parse(left.created_at);
-      return timeDelta || right.attempt - left.attempt;
-    })[0];
-  if (!latestEffectiveStep) {
-    return isSucceededApproval(session.current_step_id) ? session.current_step_id : undefined;
-  }
-  if (latestEffectiveStep.status !== 'succeeded') return undefined;
-  return isSucceededApproval(latestEffectiveStep.step_id)
-    ? latestEffectiveStep.step_id
-    : undefined;
+  return session.projection?.display?.status === 'waiting'
+    ? session.projection.display.approval_step_id || undefined : undefined;
 }

@@ -304,7 +304,10 @@ describe("NewChatPage featured templates", () => {
 
   it('preserves the welcome draft and uploaded files when switching entry mode', async () => {
     window.sessionStorage.setItem('chat_new_run_in_background', '0');
-    render(<MemoryRouter initialEntries={['/agent/chat/home']}><NewChatPage /></MemoryRouter>);
+    // Finish loading entry defaults and showcase data before simulating typing.
+    await act(async () => {
+      render(<MemoryRouter initialEntries={['/agent/chat/home']}><NewChatPage /></MemoryRouter>);
+    });
     await waitFor(() => expect(mocks.latestChatInputProps).not.toBeNull());
     act(() => mocks.latestChatInputProps.onChange('Keep this draft @'));
     const cleared = mocks.clearFiles.mock.calls.length;

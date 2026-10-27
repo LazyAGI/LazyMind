@@ -18,6 +18,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/displaystate"
 )
 
 // OnCancelHook is called by CancelTaskByID after the DB status is updated to "canceled".
@@ -538,14 +539,19 @@ func resolveTaskStatus(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) s
 	return "running"
 }
 
-func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) orm.TaskCenterTask {
+func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) (orm.TaskCenterTask, error) {
 	if t.ArchivedAt == nil && t.Status != "canceled" {
 		if session := workflowForTask(ctx, db, t); session != nil {
 			t.WorkflowSessionID = &session.ID
-			if status := workflowTaskStatus(session.Status); status != "" {
-				if status == "waiting" && WorkflowWasStopped(ctx, db, session.ID) {
-					status = "canceled"
-				}
+			display, err := displaystate.Read(db.WithContext(ctx), *session)
+			if err != nil {
+				return t, err
+			}
+			status := display.Status
+			if status == "completed" {
+				status = "succeeded"
+			}
+			if status != "" {
 				t.Status = status
 				t.FinishedAt = nil
 				if isTerminal(status) {
@@ -554,7 +560,7 @@ func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTa
 				if session.UpdatedAt.After(t.UpdatedAt) {
 					t.UpdatedAt = session.UpdatedAt
 				}
-				return t
+				return t, nil
 			}
 		}
 	}
@@ -565,7 +571,7 @@ func resolveTaskForResponse(ctx context.Context, db *gorm.DB, t orm.TaskCenterTa
 		time.Since(t.CreatedAt) > 2*time.Hour {
 		t.ProgressJSON = progressWithFailureReason(t.ProgressJSON, taskExecutionTimeoutReason)
 	}
-	return t
+	return t, nil
 }
 
 func waitingDependencyReason(ctx context.Context, db *gorm.DB, t orm.TaskCenterTask) string {
@@ -693,9 +699,14 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		"succeeded":      0,
 		"failed":         0,
 		"canceled":       0,
+		"paused":         0,
 	}
 	for _, row := range rows {
-		t := resolveTaskForResponse(r.Context(), db, row.TaskCenterTask)
+		t, err := resolveTaskForResponse(r.Context(), db, row.TaskCenterTask)
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		statusCounts["all"]++
 		if _, tracked := statusCounts[t.Status]; tracked {
 			statusCounts[t.Status]++
@@ -780,7 +791,12 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	t = resolveTaskForResponse(r.Context(), db, t)
+	var resolveErr error
+	t, resolveErr = resolveTaskForResponse(r.Context(), db, t)
+	if resolveErr != nil {
+		common.ReplyErr(w, resolveErr.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	var steps []stepInfo
 	if t.WorkflowSessionID != nil && *t.WorkflowSessionID != "" {
@@ -975,7 +991,12 @@ func ListScheduleTasks(w http.ResponseWriter, r *http.Request) {
 	schedName := sched.Name
 	items := make([]taskResponse, 0, len(rows))
 	for _, t := range rows {
-		t = resolveTaskForResponse(r.Context(), db, t)
+		var resolveErr error
+		t, resolveErr = resolveTaskForResponse(r.Context(), db, t)
+		if resolveErr != nil {
+			common.ReplyErr(w, resolveErr.Error(), http.StatusInternalServerError)
+			return
+		}
 		var steps []stepInfo
 		if t.WorkflowSessionID != nil && *t.WorkflowSessionID != "" {
 			steps = loadStepsForWorkflowSession(r.Context(), db, *t.WorkflowSessionID)
