@@ -48,6 +48,7 @@ interface Props {
   open: boolean;
   providerId: string;
   providerName: string;
+  runtimeIdentity?: string;
   providerLogoDataUrl?: string;
   protocolName: string;
   groupId: string;
@@ -192,7 +193,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
         existing,
         missing: false,
         vendor: getModelIdentity(model.name, props.providerName).vendor,
-        unsupportedType: Boolean(modelType) && !isModelTypeSupportedByProtocol(modelType, props.protocolName, props.providerName),
+        unsupportedType: Boolean(modelType) && !isModelTypeSupportedByProtocol(modelType, props.protocolName, props.runtimeIdentity || props.providerName),
       });
     }
     for (const model of props.models) {
@@ -207,7 +208,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
           existing: model,
           missing: loaded,
           vendor: getModelIdentity(model.name, props.providerName).vendor,
-          unsupportedType: Boolean(savedModelType(model)) && !isModelTypeSupportedByProtocol(savedModelType(model), props.protocolName, props.providerName),
+          unsupportedType: Boolean(savedModelType(model)) && !isModelTypeSupportedByProtocol(savedModelType(model), props.protocolName, props.runtimeIdentity || props.providerName),
         });
     }
     return [...unique.values()].sort(

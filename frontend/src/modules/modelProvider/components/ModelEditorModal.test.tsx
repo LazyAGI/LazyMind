@@ -183,6 +183,13 @@ describe("model editor", () => {
     await visibleText("modelProvider.catalog.unsupportedType");
     expect(options.onSave).not.toHaveBeenCalled();
   });
+  it("disables media options for a local template using OpenAI protocol", async () => {
+    const options = { ...props(), protocolName: "OpenAI", providerIdentity: "vLLM", capabilities: ["LLM_CHAT", "TEXT_TO_IMAGE"] as ModelCapability[] };
+    setup(options);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "modelProvider.modelType" }));
+    const media = await screen.findByText("TEXT_TO_IMAGE", { selector: ".model-editor-type-option" });
+    expect(media.closest(".ant-select-item")).toHaveClass("ant-select-item-option-disabled");
+  });
   it("uses separate context, input and output presets and preserves their values", async () => {
     const options = props();
     setup(options);

@@ -150,6 +150,14 @@ describe("provider model catalog drawer", () => {
     await waitFor(() => expect(props.onAdd).toHaveBeenCalledTimes(2));
     expect(props.onAdd.mock.calls.map(([item]) => item.model_type)).toEqual(["text2image", "embed"]);
   });
+  it("uses template identity when filtering media for an OpenAI-compatible local supplier", async () => {
+    mocks.remote.mockResolvedValueOnce({ models: [{ id: "image", name: "image", model_type: "text2image" }] });
+    const props = { ...fixture([]), runtimeIdentity: "vLLM" };
+    draw(props);
+    const add = await screen.findByRole("button", { name: "modelProvider.catalog.addModel:image" });
+    expect(add).toBeDisabled();
+    expect(screen.getByText("modelProvider.catalog.unsupportedType")).toBeInTheDocument();
+  });
   it("blocks incompatible remote types and bulk imports for the current protocol", async () => {
     const props = { ...fixture([]), protocolName: "Claude" };
     draw(props);

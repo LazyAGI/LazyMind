@@ -1695,6 +1695,7 @@ export default function ModelProviderPage({
         open={!!catalogTarget}
         providerId={catalogProvider.id}
         providerName={getProviderDisplayName(catalogProvider, currentLanguage)}
+        runtimeIdentity={catalogProvider.runtimeIdentity}
         providerLogoDataUrl={catalogProvider.logoDataUrl}
         protocolName={catalogProvider.protocolName || catalogProvider.source}
         groupId={catalogGroup.id}

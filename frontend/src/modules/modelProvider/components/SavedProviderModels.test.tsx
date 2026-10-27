@@ -127,6 +127,15 @@ describe("saved supplier models", () => {
     }
     expect(upstream.probe).not.toHaveBeenCalled();
   });
+  it("uses template identity when an OpenAI-compatible local supplier exposes media", () => {
+    setup({
+      providerName: "OpenAI",
+      runtimeIdentity: "vLLM",
+      models: [{ ...models[1], name: "local-image", capability: "TEXT_TO_IMAGE" }],
+      probe: { providerId: "supplier", groupId: "group", configurationKey: "config" },
+    });
+    expect(screen.getByRole("button", { name: "modelProvider.probe.action:local-image" })).toBeDisabled();
+  });
 
   it("names the minus tooltip as remove model", async () => {
     setup();

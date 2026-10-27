@@ -29,6 +29,7 @@ export interface SavedProviderModelsProps {
   loading: boolean;
   emptyDescription?: ReactNode;
   providerName: string;
+  runtimeIdentity?: string;
   supplierName?: string;
   providerLogoDataUrl?: string;
   capabilityLabel: (capability: ModelCapability) => string;
@@ -77,7 +78,7 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
     <ul className="saved-provider-models saved-provider-model-list">
       {sortCustomModelsFirst(props.models).map((model) => {
         const type = getModelTaskType(model.capability);
-        const unsupported = type !== "unknown" && !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(model.capability), props.providerName, props.supplierName);
+        const unsupported = type !== "unknown" && !isModelTypeSupportedByProtocol(getRuntimeModelTypeForCapability(model.capability), props.providerName, props.runtimeIdentity || props.supplierName || props.providerName);
         const chat = isLlmChatCapability(model.capability);
         const showContext =
           chat ||

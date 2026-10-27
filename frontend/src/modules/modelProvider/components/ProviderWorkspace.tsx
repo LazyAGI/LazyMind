@@ -1072,6 +1072,7 @@ export function ProviderWorkspace(props: Props) {
                     providerName={
                       provider.protocolName || provider.source || provider.name
                     }
+                    runtimeIdentity={provider.runtimeIdentity}
                     supplierName={provider.name}
                     providerLogoDataUrl={provider.logoDataUrl}
                     probe={group ? {
