@@ -20,6 +20,7 @@ import { documentPublicationErrorMessage } from './documentPublicationError';
 import { DocumentPublicationRecoveryPanel } from './DocumentPublicationRecoveryPanel';
 import { documentPublicationTargetUrl } from './documentPublicationUrl';
 import { WriterProviderIcon } from './DocumentProviderChoice';
+import { pendingImageGroups, keepVerticalImageGroups, imageGroupKey } from './writerImageGroups';
 import type { SlotVersionPopover } from './SlotComponents';
 
 function unwrap(value: unknown): unknown {
@@ -403,6 +404,7 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     } finally { publishPending.current = false; setPublishingProvider(null);setPublicationRefresh(value=>value+1); }
   }, [accept, busy, publicationBlocked, onRefresh, availability.refresh]);
   const publishRef = useRef(publish); publishRef.current = publish;
+  const imageGroupReminders = useRef(new Set<string>());
 
   const providerLabel = (provider: string) => i18n.exists(`chat.writerIR.providers.${provider}`) ? String(i18n.t(`chat.writerIR.providers.${provider}`)) : provider;
   const chooseProvider = (provider: string) => {
@@ -414,12 +416,31 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
       return;
     }
     setAuthorizationNeeded(''); setError(''); setErrorAction(null);
+    const content = draftContent.current;
+    const pending = provider === 'wechat' && (typeof content === 'string' || isWriterDocument(content))
+      ? pendingImageGroups(content).filter(group => !imageGroupReminders.current.has(imageGroupKey(group.images))) : [];
     try { localStorage.setItem('writer-publish-provider', provider); } catch { /* Storage preferences are optional. */ }
-    if (slot.provider === provider && (slot.provider_document_id || slot.write_back_ready)) {
-      const safeTarget = documentPublicationTargetUrl({ uri: slot.write_back_url, doc_id: slot.provider_document_id }, slot.provider);
-      Modal.confirm({ title: i18n.t('chat.writerLocal.update', { provider: providerLabel(provider) }),
-        content: <div>{i18n.t('chat.writerLocal.updateConfirm')}{safeTarget && <p><a href={safeTarget} target='_blank' rel='noreferrer'>{safeTarget}</a></p>}</div>,
-        onOk: () => publishRef.current(provider),
+    const updating = slot.provider === provider && (slot.provider_document_id || slot.write_back_ready);
+    if (updating || pending.length) {
+      const safeTarget = updating ? documentPublicationTargetUrl({ uri: slot.write_back_url, doc_id: slot.provider_document_id }, slot.provider) : '';
+      pending.forEach(group => imageGroupReminders.current.add(imageGroupKey(group.images)));
+      Modal.confirm({ title: updating ? i18n.t('chat.writerLocal.update', { provider: providerLabel(provider) }) : i18n.t('chat.writerImageGroups.title'),
+        content: <div>{updating && i18n.t('chat.writerLocal.updateConfirm')}{safeTarget && <p><a href={safeTarget} target='_blank' rel='noreferrer'>{safeTarget}</a></p>}
+          {pending.length > 0 && <p>{i18n.t('chat.writerImageGroups.reminder', { count: pending.length })}</p>}</div>,
+        ...(pending.length ? { okText: i18n.t('chat.writerImageGroups.keepVertical'), cancelText: i18n.t('chat.writerImageGroups.returnToDocument'), onCancel: () => {
+          const group = Array.from(window.document.querySelectorAll<HTMLElement>('.writer-image-group'))
+            .find(element => pending.some(candidate => imageGroupKey(candidate.images) === element.dataset.imageGroupKey));
+          group?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          group?.querySelector<HTMLButtonElement>('button')?.focus();
+        } } : {}),
+        onOk: async () => {
+          if (pending.length) {
+            const current = draftContent.current;
+            if (typeof current !== 'string' && !isWriterDocument(current)) throw new Error('Document content is unavailable.');
+            await save(keepVerticalImageGroups(current, pending), latest.current.revision, 'draft');
+          }
+          await publishRef.current(provider);
+        },
       });
     } else { void publishRef.current(provider); }
   };

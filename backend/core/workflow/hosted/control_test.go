@@ -25,7 +25,7 @@ func controlledService(t *testing.T) (*Service, *gorm.DB, Execution) {
 	t.Helper()
 	service, db := hostedTestService(t)
 	service.Completion = &execution.Service{DB: db, Store: service.Store, Attempts: service.Attempts, Contexts: service.Contexts}
-	if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowApprovalPreference{}); err != nil {
+	if err := db.AutoMigrate(&orm.WorkflowReviewCheckpoint{}, &orm.WorkflowHostAction{}, &orm.WorkflowApprovalPreference{}, &orm.WorkflowTransitionCommand{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "session-1").Updates(map[string]any{

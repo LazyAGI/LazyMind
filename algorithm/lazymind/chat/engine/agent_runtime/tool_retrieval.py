@@ -113,15 +113,20 @@ class ToolStateStore:
             payload = json.loads(self.path.read_text(encoding='utf-8'))
         except FileNotFoundError:
             return {}
-        if (not isinstance(payload, dict) or payload.get('version') not in (1, 2)
+        if (not isinstance(payload, dict) or payload.get('version') not in (1, 2, 3)
                 or not isinstance(payload.get('loaded'), list)
                 or not all(isinstance(name, str) for name in payload['loaded'])
                 or not isinstance(payload.get('skills'), dict)):
             raise ValueError('Invalid tool retrieval state')
-        if payload['version'] == 1:
+        if payload['version'] in (1, 2):
             # Old public names cannot identify their original provider. Rebuild
             # required tools and Skill dependencies, never reuse optional names.
-            return {'version': 2, 'loaded': [], 'skills': payload['skills']}
+            return {'version': 3, 'loaded': [], 'skills': payload['skills'], 'mcp_bindings': {}}
+        bindings = payload.get('mcp_bindings')
+        if not isinstance(bindings, dict) or not all(
+                isinstance(name, str) and isinstance(identity, str) and identity
+                for name, identity in bindings.items()):
+            raise ValueError('Invalid MCP tool bindings')
         return payload
 
     def update(self, update):
@@ -129,7 +134,7 @@ class ToolStateStore:
             raise RuntimeError('Context preview cannot change tool loading state')
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(self.path) + '.lock'):
-            state = {**update(self.read()), 'version': 2}
+            state = {'mcp_bindings': {}, **update(self.read()), 'version': 3}
             temporary = None
             try:
                 with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=self.path.parent,
@@ -145,12 +150,14 @@ class ToolStateStore:
             return state
 
 
-def configure_tool_retrieval(agent, plan):
+def configure_tool_retrieval(agent, plan, *, budget_provider=None, initialization_budget_provider=None,
+                             defer_request_validation=False):
     options = plan.execution_options
     cfg = lazyllm.globals.get('agentic_config') or {}
     manager = agent._tools_manager
     skill_manager = agent._skill_manager
     budget = build_context_budget(options.max_input_tokens, llm_config=options.llm_config)
+    initializing = False
 
     def validate_load(definitions):
         # Use candidate schemas directly: reading manager.tools_description here would
@@ -161,7 +168,10 @@ def configure_tool_retrieval(agent, plan):
             'skills_prompt': skill_manager.build_prompt() if skill_manager else '',
             'skill_prompt_parts': skill_manager.describe_prompt() if skill_manager else [],
         }
-        if estimate_non_history_tokens(prefix, plan.prompt.current_input) > budget.effective_input_budget:
+        active_budget = budget_provider() if budget_provider is not None else budget
+        if initializing and initialization_budget_provider is not None:
+            active_budget = initialization_budget_provider()
+        if estimate_non_history_tokens(prefix, plan.prompt.current_input) > active_budget.effective_input_budget:
             raise ToolExecutionError('加载失败，原因是新增工具定义导致固定上下文超过有效输入上限；'
                                      '请释放可选工具，或只加载所需成员。')
 
@@ -221,7 +231,11 @@ def configure_tool_retrieval(agent, plan):
         skill_dependencies=skill_dependencies,
     )
     if not options.context_preview:
-        controller.initialize()
+        initializing = True
+        try:
+            controller.initialize()
+        finally:
+            initializing = False
     if skill_manager:
         skill_manager.on_skill_loaded = controller.load_skill
         skill_tool = manager.tools_info.get('get_skill')
@@ -231,6 +245,10 @@ def configure_tool_retrieval(agent, plan):
                 write_keys=(*(skill_tool._runtime_metadata.write_keys or ()), f'tool-retrieval:{manager._module_id}'))
 
     def validate_context(prefix, history, current_input):
+        if defer_request_validation:
+            # FallbackLLM validates the fully serialized candidate request and
+            # can try a larger candidate before FunctionCall clears its state.
+            return
         total = estimate_non_history_tokens(prefix, current_input)
         total += sum(estimate_tokens(json.dumps(message, ensure_ascii=False, separators=(',', ':'),
                                                 default=str)) + 4 for message in history)

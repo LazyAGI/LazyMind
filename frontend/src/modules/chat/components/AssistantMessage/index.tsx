@@ -1,4 +1,8 @@
-import { Button, Divider, Flex, message, Modal, Popover, Spin, Tooltip } from "antd";
+import { submitKnowledgeDecision } from "../SourceImports/api";
+import { ExecutionResults, SourceImportProvider } from "../SourceImports";
+import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
+export { ChatSourcePanel } from "../SourceImports/ReferenceSources";
+import { Button, Divider, Flex, message, Modal, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
@@ -8,21 +12,19 @@ import "./index.scss";
 import {
   CopyOutlined,
   BranchesOutlined,
-  CloseOutlined,
   DislikeFilled,
   DislikeOutlined,
   ExclamationCircleOutlined,
-  FileTextOutlined,
   LikeFilled,
   LikeOutlined,
   ReloadOutlined,
-  RightOutlined,
 } from "@ant-design/icons";
 import {
   ChatConversationsResponseFinishReasonEnum,
   FeedBackChatHistoryRequestTypeEnum,
 } from "@/api/generated/chatbot-client";
-import type { ChatModelRoute } from "@/api/generated/core-client";
+import type { ChatModelRoute, ChatModelSwitchRecord } from "@/api/generated/core-client";
+import { formatModelSwitchLabel } from "@/modules/chat/utils/modelSwitchDisplay";
 import { AgentAppsAuth } from "@/components/auth";
 import {
   isAskPendingReadOnly,
@@ -48,16 +50,7 @@ import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorC
 import RunStatusCard from "@/modules/chat/components/RunStatusCard";
 import type { RealtimeRefusal } from "@/modules/chat/utils/realtimeTransport";
 import {
-  type ChatSource,
   type ChatSourceCollection,
-  getReferenceSources,
-  getSourceDedupKey,
-  getSourceEvidenceText,
-  getSourceFaviconUrl,
-  getSourceLabel,
-  getSourceSubtitle,
-  isExternalSource,
-  openSource,
 } from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
 import {
@@ -73,180 +66,6 @@ function loadTranslationStatus() {
   translationStatusRequest ??= getTranslationStatus().catch(() => false);
   return translationStatusRequest;
 }
-
-const SOURCE_ICON_TONES = 6;
-
-function getSourceIconTone(source: ChatSource) {
-  const value = getSourceSubtitle(source) || getSourceLabel(source);
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash * 31 + value.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash) % SOURCE_ICON_TONES;
-}
-
-function getSourceIconInitial(source: ChatSource) {
-  const value = (getSourceSubtitle(source) || getSourceLabel(source)).trim();
-  return value ? value[0].toLocaleUpperCase() : "S";
-}
-
-function SourceFavicon({
-  source,
-  compact = false,
-}: {
-  source: ChatSource;
-  compact?: boolean;
-}) {
-  const [hasFaviconError, setHasFaviconError] = useState(false);
-  const faviconUrl = getSourceFaviconUrl(source);
-  const showFavicon = Boolean(faviconUrl && !hasFaviconError);
-
-  return (
-    <span
-      className={`chat-source-brand-icon tone-${getSourceIconTone(source)}${compact ? " is-compact" : ""}`}
-      aria-hidden="true"
-    >
-      {showFavicon ? (
-        <img
-          src={faviconUrl}
-          alt=""
-          loading="lazy"
-          referrerPolicy="no-referrer"
-          onError={() => setHasFaviconError(true)}
-        />
-      ) : isExternalSource(source) ? (
-        <span className="chat-source-brand-initial">
-          {getSourceIconInitial(source)}
-        </span>
-      ) : (
-        <FileTextOutlined />
-      )}
-    </span>
-  );
-}
-
-export function ChatSourcePanel({
-  sources,
-  onClose,
-  embedded = false,
-}: {
-  sources: ChatSource[];
-  onClose: () => void;
-  embedded?: boolean;
-}) {
-  const { t } = useTranslation();
-  const [selected, setSelected] = useState<ChatSource | null>(null);
-  useEffect(() => { setSelected(null); }, [sources]);
-
-  return (
-    <aside className="chat-source-panel" aria-label={t("chat.references")}>
-      {!embedded && <div className="chat-source-panel-header">
-        <h2 className="chat-source-panel-title">
-          <span>{t("chat.references")}</span>
-          <span className="chat-source-panel-count">{sources.length}</span>
-        </h2>
-        <Button
-          type="text"
-          className="chat-source-panel-close"
-          icon={<CloseOutlined />}
-          onClick={onClose}
-          aria-label={t("common.close")}
-        />
-      </div>}
-      <div className="chat-source-panel-body">
-        {selected ? <div className="chat-source-detail">
-          <Button type="text" onClick={() => setSelected(null)}>{t("chat.contextPanel.backToSources")}</Button>
-          <h3>{getSourceLabel(selected)}</h3>
-          <small>{getSourceSubtitle(selected)}</small>
-          <p>{getSourceEvidenceText(selected) || t("chat.contextPanel.noExcerpt")}</p>
-          <Button onClick={() => openSource(selected)}>{t("chat.contextPanel.openOriginal")}</Button>
-        </div> : <div className="chat-source-list">
-          {sources.map((source, sourceIndex) => (
-            <button
-              type="button"
-              className="chat-source-item"
-              key={getSourceDedupKey(source, sourceIndex)}
-              onClick={() => embedded ? setSelected(source) : openSource(source)}
-              title={getSourceLabel(source)}
-            >
-              <SourceFavicon source={source} />
-              <span className="chat-source-item-copy">
-                <span className="chat-source-item-heading">
-                  {getSourceSubtitle(source) || t("chat.references")}
-                </span>
-                <strong className="chat-source-item-title">
-                  {getSourceLabel(source)}
-                </strong>
-                {getSourceEvidenceText(source) && (
-                  <span className="chat-source-item-content">
-                    {getSourceEvidenceText(source)}
-                  </span>
-                )}
-              </span>
-              <RightOutlined
-                className="chat-source-item-arrow"
-                aria-hidden="true"
-              />
-            </button>
-          ))}
-        </div>}
-      </div>
-    </aside>
-  );
-}
-
-function ReferenceSourcesButton({ sources }: { sources?: ChatSourceCollection }) {
-  const { t } = useTranslation();
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-    const displaySources = getReferenceSources(sources);
-    if (!displaySources.length) return null;
-    return (
-      <Popover
-        trigger="click"
-        placement="topLeft"
-        open={sourcesOpen}
-        onOpenChange={setSourcesOpen}
-        destroyOnHidden
-        overlayClassName="chat-sources-popover"
-        content={
-          <div role="dialog" aria-label={t("chat.references")} onKeyDown={event => {
-            if (event.key === "Escape") { event.stopPropagation(); setSourcesOpen(false); }
-          }}>
-            <div className="chat-source-panel-header">
-              <h2 className="chat-source-panel-title">{t("chat.references")}<span className="chat-source-panel-count">{displaySources.length}</span></h2>
-              <Button type="text" icon={<CloseOutlined />} aria-label={t("common.close")} onClick={() => setSourcesOpen(false)} />
-            </div>
-            <ChatSourcePanel sources={displaySources} embedded onClose={() => setSourcesOpen(false)} />
-          </div>
-        }
-      >
-        <Button
-          className="tool-btn source-btn"
-          aria-expanded={sourcesOpen}
-          aria-haspopup="dialog"
-          onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => { if (event.key === "Escape") setSourcesOpen(false); }}
-          aria-label={`${t("chat.references")} (${displaySources.length})`}
-        >
-          <span className="chat-source-button-icons" aria-hidden="true">
-            {displaySources.slice(0, 3).map((source, sourceIndex) => (
-              <SourceFavicon
-                source={source}
-                compact
-                key={getSourceDedupKey(source, sourceIndex)}
-              />
-            ))}
-          </span>
-          <span className="chat-source-button-label">
-            {t("chat.references")}
-          </span>
-          <span className="chat-source-button-count">
-            {displaySources.length}
-          </span>
-        </Button>
-      </Popover>
-    );
-  }
-
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -392,6 +211,30 @@ function ModelRouteSummary({ route }: { route?: ChatModelRoute }) {
     </div>
   );
   return reason ? <Tooltip title={reason}>{content}</Tooltip> : content;
+}
+
+function ModelSwitchHistory({ records }: { records?: ChatModelSwitchRecord[] }) {
+  const { t } = useTranslation();
+  if (!records?.length) return null;
+  const unknownWindow = t("chat.modelFallbackWindowUnknown");
+  return (
+    <details style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+      <summary>{t("chat.modelFallbackHistory")}</summary>
+      <ol>
+        {records.map(record => (
+          <li key={record.event_id}>
+            <span>{formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow)}</span>{" → "}
+            <span>{formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow)}</span>
+            <div>{record.reason_code === "model_config_unavailable" || record.reason_code === "model_context_not_fit"
+              ? t(`chat.modelFallbackReason.${record.reason_code}`)
+              : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") })}</div>
+            <div>{t("chat.modelFallbackSucceeded")}</div>
+            {record.context_compacted === true ? <div>{t("chat.modelFallbackContextAdapted")}</div> : null}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
 }
 
 type FeedbackAction =
@@ -540,12 +383,17 @@ const AssistantMessage = (props: any) => {
   // Debounced backend persistence for ask-card answers. Created once per component
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
-    debounce((sid: string, hid: string, answers: Record<number, any>) => {
+    debounce((sid: string, hid: string, askId: string, answers: Record<number, any>) => {
       ChatServiceApi()
-        .conversationServiceSaveAskAnswers(sid, hid, answers)
+        .conversationServiceSaveAskAnswers(sid, hid, askId, answers)
         .catch(() => {});
     }, 600),
   );
+  useEffect(() => () => {
+    // Preserve the last edit when navigating away. The bound ask ID prevents
+    // this pending save from writing into a replacement card.
+    persistAskAnswersRef.current.flush();
+  }, [sessionId, item.history_id, item.ask_pending?.ask_id]);
   const [feedbackState, dispatch] = useReducer(feedbackReducer, {
     showModal: false,
     isSubmitting: false,
@@ -1170,6 +1018,7 @@ const AssistantMessage = (props: any) => {
               </Tooltip>
             )}
             {renderSourceButton(answer.sources)}
+            <ExecutionResults operations={answer.knowledge_operations || (answerIndex === 0 ? item.knowledge_operations : [])} />
           </div>
           {showFullToolbar && (
             <Flex>
@@ -1281,6 +1130,7 @@ const AssistantMessage = (props: any) => {
               </Tooltip>
             )}
             {renderSourceButton(item.sources)}
+            <ExecutionResults operations={item.knowledge_operations} />
             {renderForkAction()}
           </div>
           <Flex>
@@ -1391,14 +1241,20 @@ const AssistantMessage = (props: any) => {
       );
       const hasMailDrafts = Boolean(askPending.mail_draft || askPending.mail_drafts?.length);
       const independentQuestion = hasMailDrafts && askPending.mail_draft_only === false;
-      // A mail confirmation is a later user turn, but does not answer this question.
-      const isReadOnly = independentQuestion
-        ? Boolean(item.ask_answered || props.supersededAskPending)
-        : isAskPendingReadOnly(
-            item.ask_answered,
-            index === length - 1,
-            !!hasLaterUserMessage,
-          );
+      let isReadOnly: boolean;
+      if (askPending.knowledge_management) {
+        // Work confirmations remain pending independently of later chat turns.
+        isReadOnly = Boolean(item.ask_answered);
+      } else if (independentQuestion) {
+        // A mail confirmation is a later user turn, but does not answer this question.
+        isReadOnly = Boolean(item.ask_answered || props.supersededAskPending);
+      } else {
+        isReadOnly = isAskPendingReadOnly(
+          item.ask_answered,
+          index === length - 1,
+          !!hasLaterUserMessage,
+        );
+      }
       let mailCards: ReactNode = null;
       if (askPending.mail_draft || (askPending.mail_drafts && askPending.mail_drafts.length)) {
         const drafts: MailDraftPreview[] =
@@ -1522,6 +1378,7 @@ const AssistantMessage = (props: any) => {
           key={askPending.ask_id}
           askPending={askPending}
           disabled={isReadOnly}
+          answered={!!item.ask_answered}
           savedAnswers={item.ask_saved_answers}
           onAnswerChange={(idx, ans) => {
             const currentAnswers = {
@@ -1535,14 +1392,28 @@ const AssistantMessage = (props: any) => {
               persistAskAnswersRef.current(
                 sessionId,
                 item.history_id,
+                askPending.ask_id,
                 currentAnswers,
               );
             }
           }}
           onSubmit={async (payload) => {
             persistAskAnswersRef.current.cancel();
+            if (askPending.knowledge_management) {
+              const answer = payload.structured.questions[0]?.answer;
+              await submitKnowledgeDecision(askPending.knowledge_management,
+                answer?.type === "boolean" && answer.value === "__ask_user_yes__");
+              const current = currentItemRef.current;
+              if (current.ask_pending?.ask_id === payload.structured.ask_id) {
+                updateMessage({ ...current, ask_answered: true,
+                  ask_saved_answers: Object.fromEntries(payload.structured.questions.map((question, idx) => [idx, question.answer])),
+                });
+              }
+              return true;
+            }
             const started = await props.sendMessage?.(payload.text, undefined, {
               ask_answers_structured: payload.structured,
+              ...(payload.files?.length ? { files: payload.files } : {}),
             });
             if (!started) return false;
             // Deletion confirmations are consumed by Core; history remains authoritative.
@@ -1668,6 +1539,7 @@ const AssistantMessage = (props: any) => {
 
             {}
             <MultiAnswerDisplay
+              conversationId={sessionId}
               key={item.history_id || item.id || `multi-answer-${index}`}
               answers={item.answers}
               showPreference={isLatestDualAnswer}
@@ -1700,7 +1572,7 @@ const AssistantMessage = (props: any) => {
               }}
               onSelectAnswer={onSelectAnswer}
               disabled={!runCompleted}
-              renderFooter={runCompleted ? renderAnswerFooter : undefined}
+              renderFooter={(answerIndex, full) => runCompleted ? renderAnswerFooter(answerIndex, full) : <div className="chat-assistant-msg-tool-actions">{renderSourceButton(item.answers[answerIndex]?.sources)}<ExecutionResults operations={item.answers[answerIndex]?.knowledge_operations || (answerIndex === 0 ? item.knowledge_operations : [])} /></div>}
               initialSelectedIndex={item.selected_answer_index}
               initialPreference={item.answer_preference}
               isStreaming={
@@ -1725,8 +1597,8 @@ const AssistantMessage = (props: any) => {
             <WorkflowPanel
               key={sessionId}
               conversationId={sessionId}
-              onSendMessage={(text) => props.sendMessage?.(text)}
-              onStop={props.stopGeneration}
+              onSendMessage={(text, control) => props.sendMessage?.(text, undefined, control ? { workflow_control: control } : undefined)}
+              chatBusy={props.chatBusy}
             />
           )}
         </div>
@@ -1753,6 +1625,7 @@ const AssistantMessage = (props: any) => {
       <div className="chat-bot-box-single">
         <div className="chat-bot">
           <ModelRouteSummary route={item.model_route} />
+          <ModelSwitchHistory records={item.model_switches} />
           <ExternalExecutionSummary execution={item.execution} />
           <RunStatusCard
             terminal={item.run_terminal}
@@ -1782,6 +1655,7 @@ const AssistantMessage = (props: any) => {
 
           {}
           {runCompleted && !item.onboardingInfo && renderFooter()}
+          {!runCompleted && <div className="chat-assistant-msg-tool-actions">{renderSourceButton(item.sources)}<ExecutionResults operations={item.knowledge_operations} /></div>}
           {item.fork_read_only && !item.delta && <span>{t("chat.fork.emptyTerminal")}</span>}
         </div>
         {!item.fork_read_only && sessionId && item.history_id && <ToolConfigurationCard
@@ -1798,8 +1672,8 @@ const AssistantMessage = (props: any) => {
           <WorkflowPanel
             key={sessionId}
             conversationId={sessionId}
-            onSendMessage={(text) => props.sendMessage?.(text)}
-            onStop={props.stopGeneration}
+            onSendMessage={(text, control) => props.sendMessage?.(text, undefined, control ? { workflow_control: control } : undefined)}
+            chatBusy={props.chatBusy}
           />
         )}
       </div>
@@ -1816,4 +1690,6 @@ const AssistantMessage = (props: any) => {
   );
 };
 
-export default AssistantMessage;
+export default function AssistantMessageWithSources(props: any) {
+  return <SourceImportProvider context={{ conversation_id: props.sessionId, history_id: props.item.history_id || props.item.id }} sources={props.item.sources}><AssistantMessage {...props} /></SourceImportProvider>;
+}

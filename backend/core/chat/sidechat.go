@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"lazymind/core/toolpolicy"
 	"net/http"
 	"strings"
 	"time"
@@ -601,6 +602,9 @@ func conversationRelationMetadata(c orm.Conversation, parentDisplayName string, 
 }
 
 func mergeConversationRelationMetadata(item map[string]any, c orm.Conversation, parentDisplayName string, includeContext bool) {
+	if c.SourceType == "academic" {
+		item["academic_task"] = true
+	}
 	for key, value := range conversationRelationMetadata(c, parentDisplayName, includeContext) {
 		item[key] = value
 	}
@@ -834,7 +838,7 @@ func enforceSidechatRequestPolicy(raw map[string]any, inheritedSearchConfig json
 		config["enable_subagent"] = false
 	}
 	delete(raw, "available_skills")
-	raw["disabled_tools"] = mergeDisabledToolNames(
+	raw["disabled_tools"] = toolpolicy.Merge(
 		stringSliceFromAny(raw["disabled_tools"]), []string{"set_session_env"},
 	)
 	delete(raw, "workflow_context")

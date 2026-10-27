@@ -6,6 +6,21 @@ import (
 	"testing"
 )
 
+func TestRuntimeEnvCarriesAlgorithmRegistrationPolicy(t *testing.T) {
+	cfg := RuntimeConfig{Profile: "local"}
+	paths := RuntimePaths{}
+	for _, policy := range []string{"", "force"} {
+		t.Run(policy, func(t *testing.T) {
+			t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", policy)
+			want := policy
+			if want == "" {
+				want = "update"
+			}
+			assertEnvContains(t, runtimeCommandEnv(paths, cfg), "LAZYLLM_ALGO_REGISTER_POLICY="+want)
+		})
+	}
+}
+
 func TestServiceRuntimeEnvDisablesPythonBytecodeWrites(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

@@ -1,20 +1,35 @@
 # Paper library persistence
 
-The production paper library must use the server as its source of truth. Browser storage is limited to the explicit preview and recovery of data created before server persistence existed.
+The server is the source of truth. The library uses normalized `paper_library_entries`, `paper_library_folders`, `paper_library_attachments`, and `paper_library_notes`. Entries own reading state, tags, filing, revisions, and confirmed bibliography. `academic_works` owns scholarly identity; attachments retain document and import identities. Removing an entry or detaching an attachment does not delete the original document.
 
-Implementation and verification:
+## Upgrading existing libraries
 
-1. Store the complete version 3 document graph per dataset in the core database, with dataset permissions, bounded validation, and optimistic revision checks. Preserve papers, folders, collections, tags, attachment references, notes, annotations, relations, merge snapshots, and removal markers together.
-2. Load the server before editing. Await every write before changing saved state or reporting success. Reject stale revisions and surface failures without falling back to browser-only saves.
-3. Migrate legacy browser data only after fetching the server. Preserve the original snapshot on the server, retain the browser copy, and never overwrite an existing server record during migration. Use a content fingerprint to make migration idempotent.
-4. Load exports from the server. Refresh shared views on focus and keep arXiv synchronization compatible with versioned writes.
-5. Test independent clients, fresh browser storage, denied access, failed reads/writes, conflicts, migration, and preservation of the complete graph. Build and deploy core/frontend at port 8090, then verify against the running database.
+The pending normalized-entity migration retains `paper_libraries`. Its original `data_json`, revision, and timestamps form an immutable archive. The subsequent preservation migration creates `paper_library_legacy_states` and converts `datasets.ext.library_kind = 'paper'` to `datasets.scene = 'academic_papers'`, without removing other dataset settings.
 
-Import confirmation and recovery:
+`paperlibrary.EnsureLegacy` converts an archived library in one database transaction before its first library access or statistics query. The transaction locks the dataset, imports papers, folder hierarchy, attachments, notes, and the owner's important-paper marks, and commits `migrated_at` with the normalized rows. Failed conversions roll back completely; the original graph remains available for a safe retry. A committed marker prevents subsequent reads, restarts, or catalog refreshes from replaying old state over normalized edits or removed memberships.
 
-- Selecting a PDF only stages its metadata and browser `File`. Uploading and document-task creation begin after the user confirms adding it. Cancelling before confirmation performs no backend write.
-- Once an upload returns a document ID, retain it while the confirmation remains open so retrying a failed library snapshot save does not upload the same file again.
-- Batch import retries first recover the saved document and processing task. Download a replacement only if the prior document/file is unavailable; preserve processing errors and save document identity before association writes.
-- Persist partial document identity with a bounded detached context when the job is cancelled, then stop processing. Cancellation must not erase the identity needed by the next retry.
-- Optional metadata-provider failures do not stop the fallback chain. Successful fallbacks retain provider diagnostics; exhausted failures return their combined errors. Unpaywall 404 is an absent record, not a service outage.
-- Cross-process arXiv imports use database-backed coordination; deployment requirements and subprocess tests are documented in `backend/core/academic/arxivsource/README.md`.
+Duplicate legacy bibliography identities keep separate private work identities when necessary to retain distinct entries, with their confirmed identifiers and a visible association warning. Existing scholarly work IDs are reused even when no public identifier is available. Hidden papers and orphaned historical child materials are retained behind removed-entry tombstones, so migration does not resurrect previously removed papers. Ambiguous document memberships, foreign-dataset documents, or invalid folder trees fail conversion atomically and leave the archive intact for explicit resolution. No migration silently discards such records.
+
+## Auxiliary data and complete backups
+
+`paper_library_legacy_states.extras_json` stores auxiliary data that is not represented by normalized columns: collections, annotations, relations, merge and migration snapshots, source identities, additional metadata, and unknown future fields. Reads merge these fields behind the current normalized entities. Current revisions, bibliography, filing, notes, attachments, and removal state take precedence; an archived entity cannot reappear merely because it remains in auxiliary JSON.
+
+The API returns auxiliary fields alongside `data.folders`, `data.papers`, `data.attachments`, and `data.notes`. `data.legacy` contains the immutable original graph for complete backup and audit. Per-entity extensions such as `zoteroSources`, `collectionIds`, metadata confidence, PMID, ISBN, attachment MIME type, and file size round-trip through the projection. A complete backup should serialize the entire returned `data`, including unknown fields and `legacy`. Restoring a backup into another library preserves its original archive in `restoredArchives`, deduplicated by a SHA-256 content identity; it never overwrites the destination archive. Backup/import envelopes support up to 48 MiB.
+
+## Mutations and imports
+
+`GET /academic/library?target_dataset_id=…` returns the current data, write permission, counts, and processing activity. Paper and folder mutations use their current entity revision; stale writes return `409 PAPER_LIBRARY_CONFLICT`. The former whole-graph `PUT` contract is retired. The normalized PATCH/POST endpoints perform individual changes transactionally.
+
+Moving a paper replaces its source collection memberships with the destination folder, or clears them when moving to the library root. Deleting a folder subtree moves normalized papers to the deleted root's parent and removes the deleted folder IDs from live auxiliary collections and paper memberships, including hidden historical records. Original notes, annotations, document files, and the immutable graph archive remain retained.
+
+`POST /academic/zotero/import` submits confirmed metadata to `paperlibrary.ImportSnapshot`. One transaction adds new stable entities, resolves scholarly identity, remaps dependent references, and merges auxiliary data. Repeating the same source import reuses existing records. Existing corrected bibliography, reading state, filing, and notes take precedence over source snapshots. Each attachment retains its own source even when its paper matches an existing bibliography from another provider. Attachment upload happens after metadata confirmation and preserves its saved document identity when processing or response delivery fails.
+
+Attachment availability requires an existing, non-deleted document backed by a regular original file. Missing files remain visible as unavailable historical references. Their presence does not enable reader actions or silently recreate removed membership.
+
+Complete version 3 and 4 snapshots include the folders, papers, attachments, and notes arrays. They may retain children of previously removed papers and unavailable original-document references. Import preserves those children behind removed-entry tombstones and retains their source snapshot in backup history. Missing or deleted originals never create new scholarly document links; references to another dataset are rejected. Partial imports still require existing parent papers and document references.
+
+## Verification
+
+`paperlibrary/legacy_test.go` covers populated conversion, full auxiliary preservation, idempotent imports, injected transactional failure, normalized edits after migration, and SQLite close/reopen. The same package tests run on PostgreSQL with the isolated-schema ORM test configuration.
+
+`migrate/legacy_paper_library_test.go` inserts a populated graph immediately before the normalized-entity SQL migration, executes the remaining real migration sequence, and checks the archive, dataset scene, normalized projection, auxiliary fields, and repeated reads on SQLite and an isolated PostgreSQL database. Aggregate/dev schema parity and rollback tests remain in `migrate/paper_library_test.go`.

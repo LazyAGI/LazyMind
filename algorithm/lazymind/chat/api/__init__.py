@@ -4,6 +4,7 @@ from . import (
     agent_control_routes,
     chat_routes,
     document_routes,
+    academic_routes,
     health_routes,
     knowledge_search_routes,
     llm_task_routes,
@@ -12,6 +13,7 @@ from . import (
 )
 
 __all__ = [
+    'academic_routes',
     'agent_control_routes',
     'chat_routes',
     'document_routes',

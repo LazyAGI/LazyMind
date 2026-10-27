@@ -443,6 +443,22 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("medium");
   });
 
+  it.each([
+    { session_id: "workflow", kind: "resume", expected_state_version: 4 },
+    { session_id: "workflow", kind: "approve", step_id: "review", expected_state_version: 5 },
+    { session_id: "workflow", kind: "approve", step_id: "review", expected_state_version: 5, preference_scope: "step" },
+  ])("includes the explicit workflow decision in the actual Chat request: %j", async (control) => {
+    render(<ChatLayout setIsChatContent={vi.fn()} initchatConfig={{}} setChatConfigFn={vi.fn()} canChat />);
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE([], "chat_action_next", {}, { workflow_control: control });
+    });
+    expect(JSON.parse(mocks.sseConstructor.mock.calls[0][1].payload).workflow_control).toEqual(control);
+    await act(async () => {
+      await mocks.latestChatContainerProps.onOpenSSE([], "chat_action_next", {}, {});
+    });
+    expect(JSON.parse(mocks.sseConstructor.mock.calls[1][1].payload)).not.toHaveProperty("workflow_control");
+  });
+
   it("sends an initial model selection only for the first new-conversation request", async () => {
     const initialModelSelection = { mode: "fixed", model_id: "model-1" };
     mocks.pendingMessage = {

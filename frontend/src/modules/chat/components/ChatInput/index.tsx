@@ -450,6 +450,8 @@ interface ChatInputProps {
   configResetKey?: number | string;
   sessionId?: string;
   isStreaming?: boolean;
+  /** Stop availability can outlive the Chat stream during workflow hand-off. */
+  canStopGeneration?: boolean;
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
@@ -528,7 +530,7 @@ export interface SkillDepositStats {
 }
 
 interface SendButtonProps {
-  isStreaming: boolean;
+  canStopGeneration: boolean;
   sendDisabled: boolean;
   disabled: boolean;
   sendLabel: string;
@@ -537,7 +539,7 @@ interface SendButtonProps {
   onStop?: () => void;
 }
 const SendButton: React.FC<SendButtonProps> = ({
-  isStreaming,
+  canStopGeneration,
   sendDisabled,
   disabled,
   sendLabel,
@@ -545,8 +547,9 @@ const SendButton: React.FC<SendButtonProps> = ({
   onSend,
   onStop,
 }) => {
-  const isStopMode = isStreaming && Boolean(onStop);
-  const isDisabled = isStopMode ? disabled : sendDisabled || disabled;
+  const isStopMode = canStopGeneration && Boolean(onStop);
+  // Send prerequisites (empty input, runtime/config readiness) must not block stop.
+  const isDisabled = !isStopMode && (sendDisabled || disabled);
 
   return (
     <button
@@ -1830,7 +1833,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   </div>
                   <div className="input-bottom-actions-right-item">
                     <SendButton
-                      isStreaming={isStreaming}
+                      canStopGeneration={props.canStopGeneration ?? isStreaming}
                       sendDisabled={isSendDisabled || featuredBusy}
                       disabled={disabled}
                       sendLabel={t("chat.send")}

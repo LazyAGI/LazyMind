@@ -272,7 +272,8 @@ model_providers:
     - name: GLM
       description:
         zh-CN: |
-          清华出身的国产大模型，Coding 能力已对齐顶尖闭源模型，深度适配 Agent 工作流、工具调用与超长上下文解析。
+          智谱模型覆盖对话、视觉理解、图片生成与音视频任务。GLM-5.3-Flash / FlashX / Legal 支持多模态输入，GLM-V 系列支持视觉理解。
+          当前智谱托管 GLM-Image API 接入文生图；开源 GLM-Image 虽支持图片编辑，托管 API 文档尚未提供对应编辑接口，本目录不将其列为图片编辑模型。
 
           获取 API Key：
           https://open.bigmodel.cn/usercenter/apikeys
@@ -285,7 +286,8 @@ model_providers:
 
           3. 点击"添加新的 API Key"，设置便于区分的名称，生成后复制完整的 Key 即可使用。
         en-US: |
-          GLM offers strong coding, agent workflow, tool-calling, and long-context capabilities across its model family.
+          GLM covers chat, vision understanding, image generation, and audio/video tasks. GLM-5.3-Flash / FlashX / Legal accept multimodal input; GLM-V models support vision understanding.
+          The hosted GLM-Image integration supports text-to-image. The open-source model supports image editing, but the hosted API documentation does not yet specify an editing endpoint, so this catalog does not advertise image editing.
 
           Get an API key:
           https://open.bigmodel.cn/usercenter/apikeys
@@ -298,6 +300,7 @@ model_providers:
 
           3. Click Add API Key, assign a recognizable name, and copy the generated key.
       base_url: "https://open.bigmodel.cn/api/paas/v4/"
+      # Model catalog verified 2026-10-26; separate Realtime/OCR/voice-clone APIs are not ordinary model roles.
       # Verified-free model source: https://docs.bigmodel.cn/cn/guide/start/model-overview
       models:
         - name: glm-5.3
@@ -310,6 +313,9 @@ model_providers:
         - name: glm-5.3-flashx
           type: llm
           vision: true
+        - name: glm-5.3-flashx-legal
+          type: llm
+          vision: true
         - name: AutoGLM-Phone
           type: vlm
         - name: CharGLM-4
@@ -319,7 +325,10 @@ model_providers:
         - name: CogView-3-Flash
           type: text2image
           free_auto_select_priority: 1
+        # Keep the legacy name so existing selections survive catalog reconciliation.
         - name: CogView-4
+          type: text2image
+        - name: cogview-4-250304
           type: text2image
         - name: Embedding-2
           type: embed
@@ -332,8 +341,6 @@ model_providers:
           type: llm
         - name: GLM-4-Long
           type: llm
-        - name: GLM-4-Voice
-          type: tts
         - name: GLM-4.1V-Thinking-Flash
           type: vlm
           free_auto_select_priority: 2
@@ -373,12 +380,30 @@ model_providers:
           type: vlm
         - name: GLM-ASR-2512
           type: stt
+        # Hosted API: text input -> image output; do not infer hosted editing from open-source I2I support.
+        # https://docs.bigmodel.cn/cn/guide/models/image-generation/glm-image
+        # Open-source editing: https://github.com/zai-org/GLM-Image
         - name: GLM-Image
           type: text2image
         - name: GLM-TTS
           type: tts
-        - name: GLM-TTS-Clone
-          type: tts
+        - name: cogvideox-3
+          type: text2video
+        - name: cogvideox-flash
+          type: text2video
+          free_auto_select_priority: 1
+        - name: viduq1-text
+          type: text2video
+        - name: viduq1-image
+          type: text2video
+        - name: viduq1-start-end
+          type: text2video
+        - name: vidu2-image
+          type: text2video
+        - name: vidu2-start-end
+          type: text2video
+        - name: vidu2-reference
+          type: text2video
         - name: Rerank
           type: rerank
 

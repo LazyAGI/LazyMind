@@ -16,6 +16,7 @@ func TestRegistrySearchUsesVerifiedOwnConfigAndFreshGrant(t *testing.T) {
 	db := testDB(t)
 	now := time.Now().UTC()
 	for _, row := range []any{
+		&orm.UserDisabledTool{ToolName: "web_search", CreateUserID: "user-1"},
 		&orm.UserModelProvider{ID: "search-provider", Name: "Tavily", Category: "search", BaseModel: orm.BaseModel{CreateUserID: "user-1"}},
 		&orm.UserModelProviderGroup{ID: "search-group", UserModelProviderID: "search-provider", APIKey: "test-search-key", IsVerified: true, BaseModel: orm.BaseModel{CreateUserID: "user-1"}},
 		&orm.UserSelectedProvider{UserID: "user-1", Category: "search", UserModelProviderGroupID: "search-group", CreatedAt: now, UpdatedAt: now},
@@ -30,10 +31,14 @@ func TestRegistrySearchUsesVerifiedOwnConfigAndFreshGrant(t *testing.T) {
 			t.Error("missing internal auth")
 		}
 		var input struct {
-			ToolConfig map[string]any `json:"tool_config"`
+			ToolConfig    map[string]any `json:"tool_config"`
+			DisabledTools []string       `json:"disabled_tools"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			t.Fatal(err)
+		}
+		if len(input.DisabledTools) != 0 {
+			t.Error("internal visibility leaked into external MCP")
 		}
 		available := input.ToolConfig["tavily"] == "test-search-key"
 		if r.URL.Path == "/api/chat/tools/external-catalog" {

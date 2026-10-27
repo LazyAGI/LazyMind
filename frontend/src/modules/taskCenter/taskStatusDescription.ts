@@ -9,6 +9,8 @@ export function taskStatusDescription(task: Task, t: TFunction) {
   const status = task.status.toLowerCase();
   const subject = statusSubject(task, status, t);
 
+  if (status === 'paused') return t('taskCenter.taskStatePaused', { task: subject });
+
   if (status === 'failed') {
     return t('taskCenter.taskStateFailed', {
       task: subject,

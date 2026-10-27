@@ -1,5 +1,5 @@
-import type { PaperFolder, PaperItem } from './model';
-import type { Collection, PaperLibraryDataV3, PaperRecord } from './libraryModel';
+import type { PaperFolder, PaperRecord } from './model';
+import type { Collection, CompletePaperLibrary } from './libraryModel';
 
 export const MAX_FOLDER_DEPTH = 32;
 
@@ -90,7 +90,7 @@ export function validateFolderChange(folders: PaperFolder[], proposed: PaperFold
   }
 }
 
-export function paperBelongsToFolders(paper: PaperItem & { collectionIds?: string[] }, ids: Set<string>): boolean {
+export function paperBelongsToFolders(paper: PaperRecord & { collectionIds?: string[] }, ids: Set<string>): boolean {
   return !!paper.folderId && ids.has(paper.folderId) || !!paper.collectionIds?.some((id) => ids.has(id));
 }
 
@@ -99,7 +99,7 @@ export function movePaperRecords(papers: PaperRecord[], ids: string[], folderId:
   return papers.map((paper) => wanted.has(paper.id) ? { ...paper, folderId, collectionIds: folderId ? [folderId] : [] } : paper);
 }
 
-export function updateFolderTree(data: PaperLibraryDataV3, folder: PaperFolder): PaperLibraryDataV3 {
+export function updateFolderTree(data: CompletePaperLibrary, folder: PaperFolder): CompletePaperLibrary {
   validateFolderChange(data.folders, folder);
   const exists = data.folders.some((item) => item.id === folder.id);
   const folders = exists ? data.folders.map((item) => item.id === folder.id ? { ...item, ...folder, parentId: folder.parentId || null } : item) : [...data.folders, folder];
@@ -111,7 +111,7 @@ export function updateFolderTree(data: PaperLibraryDataV3, folder: PaperFolder):
 }
 
 /** Legacy folders also need collection identities before papers refer to them. */
-export function syncFolderCollections(data: Pick<PaperLibraryDataV3, 'folders' | 'collections'>): Collection[] {
+export function syncFolderCollections(data: Pick<CompletePaperLibrary, 'folders' | 'collections'>): Collection[] {
   const byId = new Map(data.folders.map((item) => [item.id, item]));
   const collectionIds = new Set(data.collections.map((item) => item.id));
   return [
@@ -120,13 +120,13 @@ export function syncFolderCollections(data: Pick<PaperLibraryDataV3, 'folders' |
   ];
 }
 
-export function deleteFolderSubtree(data: PaperLibraryDataV3, folderId: string): PaperLibraryDataV3 {
+export function deleteFolderSubtree(data: CompletePaperLibrary, folderId: string): CompletePaperLibrary {
   const folderIds = new Set(data.folders.map((folder) => folder.id));
   const removed = descendantFolderIds([...data.folders, ...data.collections.filter((collection) => !folderIds.has(collection.id))], folderId);
   const clean = (paper: PaperRecord): PaperRecord => ({
     ...paper,
     folderId: paper.folderId && removed.has(paper.folderId) ? null : paper.folderId,
-    collectionIds: paper.collectionIds.filter((id) => !removed.has(id)),
+    collectionIds: (paper.collectionIds || []).filter((id) => !removed.has(id)),
   });
   return {
     ...data,

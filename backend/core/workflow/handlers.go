@@ -56,6 +56,7 @@ type sessionDTO struct {
 	ConversationID string `json:"conversation_id"`
 	WorkflowID     string `json:"workflow_id"`
 	WorkflowMode   string `json:"workflow_mode"`
+	ControllerHost string `json:"controller_host"`
 	// PinnedRevisionID is retained for immutable runtime identity; version numbers
 	// are intentionally not exposed because they are not a reliable UI run label.
 	PinnedRevisionID string    `json:"pinned_revision_id,omitempty"`
@@ -129,6 +130,7 @@ func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 		ConversationID:   s.ConversationID,
 		WorkflowID:       s.WorkflowID,
 		WorkflowMode:     normalizeSessionWorkflowMode(s.WorkflowMode),
+		ControllerHost:   s.ControllerHost,
 		PinnedRevisionID: s.WorkflowRevisionID,
 		Status:           s.Status,
 		CurrentStepID:    s.CurrentStepID,
@@ -774,8 +776,9 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Order   []int `json:"order"`
-		Version int   `json:"version"`
+		Order        []int             `json:"order"`
+		Version      int               `json:"version"`
+		LinkedOrders []SlotOrderChange `json:"linked_orders"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Order) == 0 {
 		common.ReplyErr(w, "invalid body: order required", http.StatusBadRequest)
@@ -801,7 +804,12 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := ReorderSlot(ctx, db, sessionID, slotID, body.Order, body.Version); err != nil {
+	changes := append([]SlotOrderChange{{SlotID: slotID, Order: body.Order, Version: body.Version}}, body.LinkedOrders...)
+	if err := ReorderSlots(ctx, db, sessionID, changes); err != nil {
+		if err == ErrInvalidOrder {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		if err == ErrConflict {
 			common.ReplyErr(w, "version conflict", http.StatusConflict)
 			return
@@ -809,6 +817,7 @@ func ReorderSlotItems(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "reorder failed", http.StatusInternalServerError)
 		return
 	}
+	NotifyWorkflowArtifactUpdated(ctx, db, sessionID, "", slotID, slotID, 0, nil, "reorder")
 	// Return updated order_version.
 	updated, _ := GetSlotOrder(ctx, db, sessionID, slotID)
 	newVersion := body.Version + 1
@@ -1115,7 +1124,7 @@ func DismissSessionHandler(w http.ResponseWriter, r *http.Request) {
 		// pending/running parallel SubAgent receives a Python cancel signal. Only
 		// do this for the session being dismissed: an older waiting session may
 		// share the conversation with a newer active session.
-		stopWorkflowSession(r.Context(), db, store.State(), session)
+		stopWorkflowSession(r.Context(), db, store.State(), session, "")
 	}
 	if err := DismissSession(r.Context(), db, sessionID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) || err.Error() == "session not found or already dismissed" {

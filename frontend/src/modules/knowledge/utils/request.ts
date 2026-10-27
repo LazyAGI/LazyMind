@@ -1,3 +1,4 @@
+import type { PaperUploadContext } from "../api/academicReferences";
 import {
   Configuration,
   type DatasetServiceApiDatasetServiceCreateDatasetRequest,
@@ -434,7 +435,7 @@ export interface CreateTaskItem {
   cross_dataset?: boolean;
 }
 
-export type CreateTaskRequest = CoreCreateTaskRequest;
+export type CreateTaskRequest = CoreCreateTaskRequest & { paper_import?: PaperUploadContext };
 
 export interface TaskDocumentInfo {
   display_name: string;
@@ -752,4 +753,20 @@ export function UsersServiceApi() {
 
 export function GroupsServiceApi() {
   return GroupsApiFactory(Config, `${baseUrl}/authservice/v1`, axiosInstance);
+}
+
+export interface KnowledgeOptions {
+  scenes: import("@/modules/learning/api").CapabilityProfile[];
+  profiles: import("@/modules/learning/api").CustomCapabilityProfile[];
+  capabilities: import("@/modules/learning/api").LearningCapability[];
+  local_available: boolean;
+  algorithms: import("@/api/generated/knowledge-client").Algo[];
+  processing_levels: string[];
+  default_processing_level: string;
+  default_scene: string;
+  default_algo_id: string;
+  upload: { max_files: number; max_file_bytes: number; max_batch_bytes: number; file_types: string[] };
+}
+export async function getKnowledgeOptions(): Promise<KnowledgeOptions> {
+  return (await axiosInstance.get<KnowledgeOptions>(`${coreApiBaseUrl}/knowledge/options`)).data;
 }

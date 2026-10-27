@@ -1,6 +1,6 @@
 # arXiv source
 
-独立的 arXiv 标识符解析和官方元数据客户端。该包不写数据库、不创建文献、不下载 PDF，也不依赖浏览器开发代理。文献与附件入库由 `academic/arxiv_import.go` 负责，PDF 下载由 `academic/acquirer.go` 负责。
+独立的 arXiv 标识符解析和官方元数据客户端。该包不写数据库、不创建文献、不下载 PDF，也不依赖浏览器开发代理。导入由 `academic/source_import_worker.go` 统一执行，文件下载、原文绑定和解析提交复用 Core 的 `doc.OriginalService`；论文适配层负责身份、版本与缓存校验。
 
 ```go
 identifier, err := arxivsource.Parse("arXiv:2404.06654v3")
@@ -42,9 +42,9 @@ paper, err := arxivsource.NewClient().Lookup(ctx, identifier.ID())
 
 ## 应用接口
 
-- `POST /api/core/academic/arxiv:lookup`：`{ "input": "..." }`，只查询真实题录。
-- `POST /api/core/academic/arxiv:import`：`{ "input": "...", "target_dataset_id": "..." }`，保存文献父条目和实际 PDF 附件。
-- `GET /api/core/academic/arxiv/library?target_dataset_id=...`：恢复已保存附件及真实处理状态。
+- `POST /api/core/academic/imports:preview`：解析编号或链接并确认目标论文与版本。
+- `POST /api/core/academic/imports`：提交预览回执、所选候选、目标知识库和幂等标识，进入统一导入队列。
+- `GET /api/core/academic/imports?view=operations`：读取批次回执及文档处理状态。
 
 接口使用现有登录身份和知识库权限。导入按 base ID 关联父条目、按知识库和版本去重 PDF。`processing_status` 区分 `ready`、`parsing`、`failed`；文件已保存但后续处理失败仍返回错误，文档 ID 保留用于恢复。前端只走这些 Core 接口，不需要 `/arxiv` 开发代理。
 
@@ -54,7 +54,7 @@ PDF 存在性检查、下载、文件入库和关联保存全程由数据库连�
 
 PostgreSQL 锁连接单独禁用 `idle_session_timeout`，避免下载期间空闲超时释放锁；应用连接池仍保留原有超时策略。导入会定期检查锁连接，并在下载完成、创建文档前再次检查；检测到会话丢失后取消下载和后续数据库操作，返回明确的锁丢失错误。
 
-SQLite 使用主数据库旁的 `<数据库文件>.academic-import-locks/` 目录，按编号散列到最多 128 个按需创建的协调数据库，在其中持有 `BEGIN IMMEDIATE`。这样不会锁住文档写入所用的主数据库。多个 Core 进程必须访问同一主库和协调目录；桌面本地 SQLite proxy 通过 `PRAGMA database_list` 获取该路径。远程 proxy、内存数据库或不可访问的数据库路径会明确失败，不会退回进程内锁。运行期间不要删除协调目录。两种数据库的锁都随连接关闭或进程退出释放，无需过期租约或数据库迁移；已经保存的文档继续通过恢复标记或可信导入任务恢复。
+SQLite 使用主数据库旁的 `<数据库文件>.academic-import-locks/` 目录，按编号散列到最多 128 个按需创建的协调数据库，在其中持有 `BEGIN IMMEDIATE`。这样不会锁住文档写入所用的主数据库。多个 Core 进程必须访问同一主库和协调目录；桌面本地 SQLite proxy 通过 `PRAGMA database_list` 获取该路径。远程 proxy、内存数据库或不可访问的数据库路径会明确失败，不会退回进程内锁。运行期间不要删除协调目录。两种数据库的锁都随连接关闭或进程退出释放，无需过期租约或数据库迁移；文档、解析任务、论文关联与导入回执在同一事务中提交；中断后从回执中的文档及任务标识恢复。
 
 数据库锁语义参考：[PostgreSQL advisory locks](https://www.postgresql.org/docs/current/explicit-locking.html#ADVISORY-LOCKS)、[SQLite transactions](https://www.sqlite.org/lang_transaction.html)。
 
@@ -62,8 +62,8 @@ SQLite 使用主数据库旁的 `<数据库文件>.academic-import-locks/` 目�
 
 在 `backend/core` 运行 `go test -race ./academic/arxivsource`。测试使用本地 HTTP 服务，覆盖格式解析、版本锁定、错误传播、恶意或错误响应、请求串行化、间隔和取消，不依赖真实网络。下载 URL 的版本保留与冲突测试位于 `academic/acquirer_arxiv_test.go`。
 
-`go test ./academic -run '^(TestArxivImport|TestSQLiteArxivImport)'` 验证独立进程的并发去重、进程退出后恢复、取消等待和本地 SQLite proxy 锁共享。设置 `TEST_DB_DRIVER=postgres` 与测试用 `TEST_DB_DSN` 可对 PostgreSQL 执行相同的导入和进程测试。
+`go test ./academic -run '^(TestUnified|TestSQLiteArxivImport|TestArxivImportLock)'` 验证统一导入的版本去重、缓存复用、并发导入、解析失败与取消后的恢复，以及本地 SQLite proxy 锁共享。
 
 依据：[标识符规范](https://info.arxiv.org/help/arxiv_identifier.html)、[旧编号规范化](https://info.arxiv.org/help/arxiv_identifier_for_services.html)、[API 和版本语义](https://info.arxiv.org/help/api/user-manual.html)、[API 请求限制](https://info.arxiv.org/help/api/tou.html)。
 
-可选真实网络集成验证：在 `backend/core` 执行 `LAZYMIND_TEST_ARXIV_LIVE=1 go test ./academic -run '^TestArxivLiveImport$' -count=1 -v`。使用 RULER v3 官方题录及真实 PDF，验证生产下载器、文件入库、服务重建后恢复、同版本去重；数据库和附件均位于临时测试空间，不写用户文献库。官方限流或网络失败会直接使测试失败，默认测试不会访问外网。
+可选真实网络集成验证：在 `backend/core` 执行 `LAZYMIND_TEST_ARXIV_LIVE=1 go test ./academic -run '^TestArxivLiveUnifiedImport$' -count=1 -v`。使用 RULER v3 官方题录及真实 PDF，验证统一生产下载器、事务入库与同版本去重；数据库和附件均位于临时测试空间，不写用户文献库。官方限流或网络失败会直接使测试失败，默认测试不会访问外网。

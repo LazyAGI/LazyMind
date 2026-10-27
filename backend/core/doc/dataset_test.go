@@ -304,6 +304,8 @@ func TestCreateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 				return testJSONResponse(http.StatusBadRequest, `{"message":"bad request"}`), nil
 			}
 			return testJSONResponse(http.StatusOK, `{"kb_id":"kb-returned"}`), nil
+		case "/v1/algo/list":
+			return testJSONResponse(http.StatusOK, `{"code":200,"data":{"items":[{"algo_id":"general_algo","display_name":"General"}]}}`), nil
 		case "/v1/algo/general_algo/groups":
 			return testJSONResponse(http.StatusOK, `{"code":200,"data":[]}`), nil
 		default:
@@ -314,7 +316,7 @@ func TestCreateDatasetUsesNamespacedAlgoDisplayName(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
 
-	body := `{"display_name":"datasource-bendi","desc":"local data","algo":{"algo_id":"general_algo","display_name":"General"},"tags":["local"]}`
+	body := `{"processing_level":"stored","display_name":"datasource-bendi","desc":"local data","algo":{"algo_id":"general_algo","display_name":"General"},"tags":["local"]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets?dataset_id=ds_test", strings.NewReader(body))
 	req.Header.Set("X-User-Id", "user-123")
 	req.Header.Set("X-User-Name", "Alice")
@@ -433,7 +435,7 @@ func TestCreateDatasetRejectsDuplicateDisplayNameForSameUser(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets", strings.NewReader(`{"display_name":"Duplicate_Name"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets", strings.NewReader(`{"display_name":"Duplicate_Name","processing_level":"stored","tags":["test"]}`))
 	req.Header.Set("X-User-Id", "user-123")
 	req.Header.Set("X-User-Name", "Alice")
 	rec := httptest.NewRecorder()
@@ -482,6 +484,8 @@ func TestCreateDatasetAllowsSameDisplayNameForDifferentUsers(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/kbs":
 			return testJSONResponse(http.StatusOK, `{"kb_id":"kb-returned"}`), nil
+		case "/v1/algo/list":
+			return testJSONResponse(http.StatusOK, `{"code":200,"data":{"items":[{"algo_id":"general_algo","display_name":"General"}]}}`), nil
 		case "/v1/algo/general_algo/groups":
 			return testJSONResponse(http.StatusOK, `{"code":200,"data":[]}`), nil
 		default:
@@ -492,7 +496,7 @@ func TestCreateDatasetAllowsSameDisplayNameForDifferentUsers(t *testing.T) {
 	t.Cleanup(func() { http.DefaultTransport = prevTransport })
 	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", "http://algo.test")
 
-	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets?dataset_id=ds_new", strings.NewReader(`{"display_name":"Shared_Name","algo":{"algo_id":"general_algo"}}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/core/datasets?dataset_id=ds_new", strings.NewReader(`{"processing_level":"stored","tags":["test"],"display_name":"Shared_Name","algo":{"algo_id":"general_algo"}}`))
 	req.Header.Set("X-User-Id", "user-123")
 	req.Header.Set("X-User-Name", "Alice")
 	rec := httptest.NewRecorder()

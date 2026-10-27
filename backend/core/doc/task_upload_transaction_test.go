@@ -2,8 +2,10 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,6 +21,9 @@ func TestCreateTaskFromUploadedFileUsesTransactionConnection(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			db := newDocumentTestDB(t)
+			installOriginalSourceTransport(t)
+			uploadRoot := t.TempDir()
+			t.Setenv("LAZYMIND_UPLOAD_ROOT", uploadRoot)
 			if err := db.AutoMigrate(&orm.DocumentProcessingState{}); err != nil {
 				t.Fatal(err)
 			}
@@ -33,7 +38,15 @@ func TestCreateTaskFromUploadedFileUsesTransactionConnection(t *testing.T) {
 			if !missingDataset {
 				seedDocumentServiceDatasetWithKBAndAlgo(t, db, "dataset-source", "dataset-source", "general_algo", "user-1", now)
 			}
-			upload := newTestUploadedFile("upload-1", "user-1", "", UploadedFileStateUploaded, filepath.Join(t.TempDir(), "source.txt"), now)
+			upload := newTestUploadedFile("upload-1", "user-1", "", UploadedFileStateUploaded, filepath.Join(uploadRoot, "source.txt"), now)
+			var meta uploadedFileExt
+			_ = json.Unmarshal(upload.Ext, &meta)
+			data := []byte("hello")
+			if err := os.WriteFile(meta.StoredPath, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			meta.FileSize = int64(len(data))
+			upload.Ext = mustJSON(meta)
 			if err := db.Create(&upload).Error; err != nil {
 				t.Fatal(err)
 			}

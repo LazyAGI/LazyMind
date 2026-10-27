@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -17,8 +16,10 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 )
 
@@ -84,41 +85,32 @@ func StoreZoteroAttachment(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(result)
 }
 
-func zoteroGraphTarget(result paperLibraryResponse, paperID, attachmentID string) (map[string]any, map[string]any, map[string]any, error) {
-	var graph map[string]any
-	if err := json.Unmarshal(result.Data, &graph); err != nil {
-		return nil, nil, nil, err
+// Metadata and documents share one authoritative normalized library.
+func zoteroTarget(db *gorm.DB, dataset, paperID, attachmentID string) (orm.PaperLibraryEntry, orm.PaperLibraryAttachment, error) {
+	var entry orm.PaperLibraryEntry
+	var member orm.PaperLibraryAttachment
+	err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND id=? AND removed_at IS NULL", dataset, paperID).Take(&entry).Error
+	if err == nil {
+		err = db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND paper_id=? AND id=? AND detached_at IS NULL", dataset, paperID, attachmentID).Take(&member).Error
 	}
-	var paper, attachment map[string]any
-	for _, raw := range graph["papers"].([]any) {
-		item := raw.(map[string]any)
-		if item["id"] == paperID {
-			paper = item
-		}
-	}
-	for _, raw := range graph["attachments"].([]any) {
-		item := raw.(map[string]any)
-		if item["id"] == attachmentID && item["paperId"] == paperID && item["source"] == "zotero" {
-			attachment = item
-		}
-	}
-	if paper == nil || attachment == nil {
-		return nil, nil, nil, errors.New("Zotero 文献或附件已移除，请重新读取论文库")
-	}
-	linked := false
-	for _, id := range paper["attachmentIds"].([]any) {
-		if id == attachmentID {
-			linked = true
-		}
-	}
-	if !linked {
-		return nil, nil, nil, errors.New("Zotero 附件不属于目标文献")
-	}
-	return graph, paper, attachment, nil
+	return entry, member, err
 }
 
-func storeZoteroFile(ctx context.Context, db *gorm.DB, datasetID, paperID, attachmentID, path, name, userID, userName string) (paperLibraryResponse, error) {
-	var empty paperLibraryResponse
+func zoteroView(ctx context.Context, db *gorm.DB, dataset, user string) (paperlibrary.View, error) {
+	r, _ := http.NewRequestWithContext(ctx, http.MethodGet, "/internal/zotero", nil)
+	r.Header.Set("X-User-Id", user)
+	view, err := loadLibraryView(r, db, dataset, nil, true)
+	if err != nil {
+		return view, err
+	}
+	counts, err := paperlibrary.Statistics(ctx, db, []string{dataset})
+	view.Counts = counts[dataset]
+	view.CanWrite = true
+	return view, err
+}
+
+func storeZoteroFile(ctx context.Context, db *gorm.DB, datasetID, paperID, attachmentID, path, name, userID, userName string) (paperlibrary.View, error) {
+	var empty paperlibrary.View
 	file, err := os.Open(path)
 	if err != nil {
 		return empty, err
@@ -138,109 +130,181 @@ func storeZoteroFile(ctx context.Context, db *gorm.DB, datasetID, paperID, attac
 	}
 	defer guard.release()
 	ctx = guard.ctx
-	current, err := readPaperLibrary(ctx, db, datasetID)
+	if err = paperlibrary.EnsureLegacy(ctx, db, datasetID); err != nil {
+		return empty, err
+	}
+	// Source membership is checked before acquisition, and again under the commit lock.
+	view, err := paperlibrary.Load(ctx, db, datasetID, userID, []string{paperID}, false)
 	if err != nil {
 		return empty, err
 	}
-	_, _, attachment, err := zoteroGraphTarget(current, paperID, attachmentID)
+	valid := false
+	for _, a := range view.Data.Attachments {
+		if a.ID == attachmentID && a.PaperID == paperID && a.Source == "zotero" {
+			valid = true
+		}
+	}
+	if !valid {
+		return empty, errors.New("Zotero 文献或附件已移除，请重新读取论文库")
+	}
+	_, member, err := zoteroTarget(db.WithContext(ctx), datasetID, paperID, attachmentID)
 	if err != nil {
 		return empty, err
 	}
-	// A previous successful import may already have an older document identity.
-	if saved, ok := attachment["contentRef"].(string); ok && saved != "" {
-		documentID = saved
+	if member.DocumentID != "" {
+		documentID = member.DocumentID
 	}
 	var document orm.Document
-	findErr := db.WithContext(ctx).Where("id = ? AND dataset_id = ?", documentID, datasetID).Take(&document).Error
+	findErr := db.WithContext(ctx).Where("id=? AND dataset_id=?", documentID, datasetID).Take(&document).Error
+	if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return empty, findErr
+	}
+	if (findErr == nil && document.DeletedAt != nil) || (errors.Is(findErr, gorm.ErrRecordNotFound) && member.DocumentID != "") {
+		return empty, doc.ErrImportedDocumentUnavailable
+	}
 	var imported doc.LocalFileImportResult
 	var importErr error
-	switch {
-	case errors.Is(findErr, gorm.ErrRecordNotFound):
-		// Never replace a removed historical PDF silently. A new explicit import
-		// has its own attachment identity and can be selected by the user.
-		if saved, _ := attachment["contentRef"].(string); saved != "" {
-			return empty, doc.ErrImportedDocumentUnavailable
+	if errors.Is(findErr, gorm.ErrRecordNotFound) {
+		var dataset orm.Dataset
+		if err = db.WithContext(ctx).Where("id=? AND deleted_at IS NULL", datasetID).Take(&dataset).Error; err != nil {
+			return empty, err
 		}
-		imported, importErr = doc.ImportLocalFile(ctx, doc.LocalFileImportRequest{DatasetID: datasetID, DocumentID: documentID, SourcePath: path, DisplayName: name, ContentType: "application/pdf", DataSourceType: "ZOTERO", UserID: userID, UserName: userName})
-	case findErr != nil:
-		return empty, findErr
-	case document.DeletedAt != nil:
-		return empty, doc.ErrImportedDocumentUnavailable
-	default:
+		caller := doc.DatasetCatalogCaller{UserID: userID, UserName: userName, TenantID: dataset.TenantID, Permissions: []string{"document.write"}}
+		svc, e := doc.NewOriginalService(doc.OriginalServiceDeps{DB: db})
+		if e != nil {
+			return empty, e
+		}
+		input, e := os.Open(path)
+		if e != nil {
+			return empty, e
+		}
+		defer input.Close()
+		source, e := svc.AcquireOriginal(ctx, caller, doc.AcquireOriginalRequest{Filename: name, ContentType: "application/pdf", Reader: input})
+		if e != nil {
+			return empty, e
+		}
+		// Acquired source is temporary; its bound copy becomes durable with membership.
+		defer svc.ReleaseOriginal(context.WithoutCancel(ctx), caller, source.FileRef)
+		displayName := name
+		var collisions int64
+		if e = db.WithContext(ctx).Model(&orm.Document{}).Where("dataset_id=? AND display_name=? AND deleted_at IS NULL", datasetID, name).Count(&collisions).Error; e != nil {
+			return empty, e
+		}
+		if collisions > 0 {
+			displayName = strings.TrimSuffix(name, filepath.Ext(name)) + "-" + hex.EncodeToString(identity[:4]) + filepath.Ext(name)
+		}
+		prepared, e := svc.PrepareOriginalBinding(ctx, caller, doc.ImportOriginalRequest{FileRef: source.FileRef, DatasetID: datasetID, DocumentID: documentID, DisplayName: displayName, DataSourceType: "ZOTERO"})
+		if e != nil {
+			return empty, e
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				_ = svc.CleanupPreparedBinding(prepared)
+			}
+		}()
+		ctx, e = doc.PrepareResourceAuthorization(ctx, caller, prepared.AuthorizationRequests())
+		if e != nil {
+			return empty, e
+		}
+		var bound doc.OriginalImportResult
+		e = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if e := lockZoteroDataset(tx, datasetID); e != nil {
+				return e
+			}
+			entry, target, e := zoteroTarget(tx, datasetID, paperID, attachmentID)
+			if e != nil {
+				return e
+			}
+			if target.DocumentID != "" {
+				return paperlibrary.ErrConflict
+			}
+			bound, e = svc.BindOriginalTx(ctx, tx, caller, prepared)
+			if e != nil {
+				return e
+			}
+			if e = guard.check(); e != nil {
+				return e
+			}
+			return bindZoteroAttachment(ctx, tx, &entry, &target, bound.Document, bound.ContentSHA256, info.Size())
+		})
+		if e != nil {
+			return empty, e
+		}
+		committed = true
+		bound = svc.SubmitOriginalProcessing(ctx, caller, bound)
+		imported = doc.LocalFileImportResult{DocumentID: bound.Document.ID, TaskID: bound.Task.ID, ContentSHA256: bound.ContentSHA256, Start: bound.Start}
+		if bound.SubmissionStatus == "failed" {
+			importErr = errors.New(bound.SubmissionError)
+		}
+	} else {
 		imported, importErr = doc.ResumeLocalFileImport(ctx, doc.ResumeLocalFileImportRequest{DatasetID: datasetID, DocumentID: documentID, UserID: userID, UserName: userName})
-	}
-	if imported.DocumentID == "" {
-		return empty, fmt.Errorf("Zotero 附件保存失败：%w", importErr)
-	}
-	// ImportLocalFile allows stored-only imports to keep their saved document
-	// after task bookkeeping fails. Keep that recovery behavior, but surface the
-	// rejected task here instead of reporting a completed Zotero import.
-	if importErr == nil && imported.Start.Status != "STARTED" {
-		if imported.Start.Message != "" {
-			importErr = fmt.Errorf("PDF 已保存，但处理未成功，请在文档任务中重试：%s", imported.Start.Message)
-		} else {
-			importErr = errors.New("文献处理任务未能启动")
+		if errors.Is(importErr, doc.ErrImportedDocumentUnavailable) {
+			return empty, importErr
+		}
+		// Recover a document created by the pre-normalization importer before its graph commit.
+		if imported.DocumentID != "" && member.DocumentID == "" {
+			err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				if e := lockZoteroDataset(tx, datasetID); e != nil {
+					return e
+				}
+				entry, target, e := zoteroTarget(tx, datasetID, paperID, attachmentID)
+				if e != nil {
+					return e
+				}
+				if target.DocumentID != "" && target.DocumentID != documentID {
+					return paperlibrary.ErrConflict
+				}
+				return bindZoteroAttachment(ctx, tx, &entry, &target, document, documentFileHash(document), info.Size())
+			})
+			if err != nil {
+				return empty, err
+			}
 		}
 	}
-	if err = guard.check(); err != nil {
+	if importErr == nil && imported.Start.Status != "STARTED" {
+		importErr = errors.New("PDF 已保存，但处理任务未能启动，请重试")
+	}
+	// Keep the saved PDF and report task rejection, never turn it into false success.
+	fields := map[string]any{"processingError": nil}
+	if importErr != nil {
+		fields["processingError"] = importErr.Error()
+	}
+	if err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if e := lockZoteroDataset(tx, datasetID); e != nil {
+			return e
+		}
+		return paperlibrary.MergeEntityExtras(ctx, tx, datasetID, "attachments", attachmentID, fields)
+	}); err != nil {
 		return empty, err
 	}
-	if err = db.WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", documentID, datasetID).Take(&document).Error; err != nil {
-		return empty, err
-	}
-	_, size, exists, err := readArxivDocument(document)
+	result, err := zoteroView(ctx, db, datasetID, userID)
 	if err != nil {
 		return empty, err
 	}
-	if !exists {
-		return empty, doc.ErrImportedDocumentUnavailable
+	return result, importErr
+}
+
+func bindZoteroAttachment(ctx context.Context, tx *gorm.DB, entry *orm.PaperLibraryEntry, member *orm.PaperLibraryAttachment, document orm.Document, hash string, size int64) error {
+	now := time.Now().UTC()
+	if err := tx.Model(member).Updates(map[string]any{"document_id": document.ID, "updated_at": now}).Error; err != nil {
+		return err
 	}
-	// Each CAS attempt starts from the newest graph, preserving concurrent notes,
-	// folder edits and attachments. The deterministic document ID survives a crash
-	// between document creation and this graph update.
-	for attempt := 0; attempt < 5; attempt++ {
-		current, err = readPaperLibrary(ctx, db, datasetID)
-		if err != nil {
-			return empty, err
-		}
-		graph, paper, att, targetErr := zoteroGraphTarget(current, paperID, attachmentID)
-		if targetErr != nil {
-			return empty, targetErr
-		}
-		if prior, _ := att["contentRef"].(string); prior != "" && prior != documentID {
-			return empty, errors.New("Zotero 附件已在其他窗口更新，请重新读取论文库")
-		}
-		att["contentRef"], att["size"], att["mimeType"] = documentID, size, "application/pdf"
-		if imported.ContentSHA256 != "" {
-			att["contentHash"] = imported.ContentSHA256
-		}
-		if importErr != nil {
-			att["processingError"] = importErr.Error()
-			paper["processingError"], paper["parse"] = importErr.Error(), "failed"
-		} else {
-			oldError, _ := att["processingError"].(string)
-			delete(att, "processingError")
-			if paper["processingError"] == oldError && oldError != "" {
-				delete(paper, "processingError")
-				paper["parse"] = "ready"
-			}
-		}
-		raw, marshalErr := json.Marshal(graph)
-		if marshalErr != nil {
-			return empty, marshalErr
-		}
-		if _, err = validatePaperLibrary(raw); err != nil {
-			return empty, err
-		}
-		saved, saveErr := savePaperLibrary(ctx, db, datasetID, current.Revision, raw)
-		if saveErr != nil {
-			return empty, saveErr
-		}
-		if !saved {
-			continue
-		}
-		result := paperLibraryResponse{Data: raw, Revision: current.Revision + 1, CanWrite: true}
-		return result, importErr
+	link := orm.AcademicWorkDocument{AcademicWorkID: entry.AcademicWorkID, DatasetID: entry.DatasetID, DocumentID: document.ID, SourceProvider: "zotero", SourceLocator: member.SourceURL, ContentSHA256: hash, MatchMethod: "manual", MatchConfidence: 1, CreatedAt: now, UpdatedAt: now}
+	if err := saveDocumentWorkLink(tx, link); err != nil {
+		return err
 	}
-	return empty, errors.New("论文库正在其他窗口更新，PDF 已保留，请重试关联")
+	state := orm.AcademicDocumentState{DocumentID: document.ID, DatasetID: entry.DatasetID, Kind: "paper", Status: "succeeded", PaperID: entry.AcademicWorkID, Revision: 1, Manual: true, MetadataJSON: marshal(map[string]any{}), UpdatedAt: now}
+	if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "document_id"}}, DoUpdates: clause.AssignmentColumns([]string{"kind", "status", "paper_id", "manual", "metadata_json", "updated_at"})}).Create(&state).Error; err != nil {
+		return err
+	}
+	if err := paperlibrary.SaveEntry(tx, entry); err != nil {
+		return err
+	}
+	return paperlibrary.MergeEntityExtras(ctx, tx, entry.DatasetID, "attachments", member.ID, map[string]any{"size": size, "mimeType": "application/pdf", "source": "zotero"})
+}
+
+func lockZoteroDataset(tx *gorm.DB, dataset string) error {
+	var ds orm.Dataset
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND deleted_at IS NULL", dataset).Take(&ds).Error
 }

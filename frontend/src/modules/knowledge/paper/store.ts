@@ -1,207 +1,101 @@
-import { emptyLibrary, normalizeLibrary, sampleLibrary, type PaperLibraryData } from "./model";
-import { asLegacyLibrary, migratePaperLibrary, type PaperLibraryDataV3 } from "./libraryModel";
+import { parseLibraryBackup } from './libraryBackup';
 import { computeTextSha256 } from '../utils/fileHash';
-
-const kindKey = "lazymind.paper-library.ids";
-const dataKey = (datasetId: string) => `lazymind.paper-library.data.v2.${datasetId}`;
-const dataKeyV3 = (datasetId: string) => `lazymind.paper-library.data.v3.${datasetId}`;
-
-function readIds(): string[] {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(kindKey) || "[]");
-    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-export function isPaperLibrary(datasetId?: string, libraryKind?: "paper" | "document") {
-  if (!datasetId) return false;
-  if (libraryKind !== undefined) return libraryKind === "paper";
-  return readIds().includes(datasetId);
-}
-
-export function markPaperLibrary(datasetId: string) {
-  const ids = new Set(readIds());
-  ids.add(datasetId);
-  localStorage.setItem(kindKey, JSON.stringify([...ids]));
-}
-
-/** Read browser data only for the explicit demo. Production reads use loadPersistedPaperLibrary. */
-export function loadPreviewPaperLibrary(datasetId: string, preview = false): PaperLibraryDataV3 {
-  const modernRaw = localStorage.getItem(dataKeyV3(datasetId));
-  if (modernRaw) {
-    try {
-      const parsed = migratePaperLibrary(JSON.parse(modernRaw));
-      return parsed;
-    } catch { /* fall through */ }
-  }
-  const raw = localStorage.getItem(dataKey(datasetId));
-  if (raw) {
-    try {
-      return migratePaperLibrary(normalizeLibrary(JSON.parse(raw) as PaperLibraryData));
-    } catch {
-      /* fall through */
-    }
-  }
-  return migratePaperLibrary(preview ? sampleLibrary() : emptyLibrary());
-}
-
-/** Browser-only preview/legacy helper. Production mutations must use savePersistedPaperLibrary. */
-export function savePreviewPaperLibrary(datasetId: string, data: PaperLibraryDataV3) {
-  saveLibraryRecords(datasetId, JSON.stringify(data), JSON.stringify(asLegacyLibrary(data)));
-}
-
-function saveLibraryRecords(datasetId: string, modern: string, legacy: string) {
-  const records = [[dataKeyV3(datasetId), modern], [dataKey(datasetId), legacy]];
-  const previous = records.map(([key]) => localStorage.getItem(key));
-  const written: number[] = [];
-  try {
-    records.forEach(([key, value], index) => {
-      localStorage.setItem(key, value);
-      written.push(index);
-    });
-  } catch (error) {
-    const failures: unknown[] = [error];
-    written.reverse().forEach((index) => {
-      try {
-        const old = previous[index];
-        if (old === null) localStorage.removeItem(records[index][0]);
-        else localStorage.setItem(records[index][0], old);
-      } catch (rollbackError) { failures.push(rollbackError); }
-    });
-    if (failures.length > 1) throw Object.assign(new Error("文献保存失败，恢复原数据也失败，请检查浏览器存储空间"), { errors: failures });
-    throw error;
-  }
-}
-
+import type { PaperLibraryData, PaperRecord, PaperMetadata, PaperFolder } from './model';
+import { axiosInstance, BASE_URL } from '@/components/request';
+export const isPaperLibrary = (scene?: string) => scene === 'academic_papers';
 export interface PersistedPaperLibrary {
-  data: PaperLibraryDataV3;
-  revision: number;
-  canWrite: boolean;
+    data: PaperLibraryData;
+    canWrite: boolean;
+    paperCount: number;
+    pdfAttachmentCount: number;
+    active: boolean;
 }
-
-const entityKeys = ['folders', 'collections', 'papers', 'attachments', 'notes', 'annotations', 'relations', 'mergeSnapshots'] as const;
-const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-
-function validateLibrary(value: unknown): asserts value is PaperLibraryDataV3 {
-  if (!object(value) || value.schemaVersion !== 3 || entityKeys.some((key) => !Array.isArray(value[key]))) {
-    throw new Error('服务器文献库数据格式无效，已停止加载以保护原数据');
-  }
-  for (const key of entityKeys) {
-    if (!(value[key] as unknown[]).every((item) => object(item) && typeof item.id === 'string' && item.id)) {
-      throw new Error('服务器文献库记录格式无效，已停止加载以保护原数据');
-    }
-  }
-  if (!(value.papers as unknown[]).every((item) => object(item) && typeof item.title === 'string' && Array.isArray(item.tags)
-    && object(item.metadata) && object(item.metadata.identifiers) && object(item.metadata.confidence)
-    && ['attachmentIds', 'noteIds', 'annotationIds', 'collectionIds', 'relatedPaperIds'].every((key) => Array.isArray(item[key])))) {
-    throw new Error('服务器文献条目格式无效，已停止加载以保护原数据');
-  }
-  for (const key of ['hiddenArxivWorkIds', 'hiddenArxivPapers', 'migrationSnapshots']) {
-    if (value[key] !== undefined && !Array.isArray(value[key])) throw new Error('服务器文献库关联数据格式无效');
-  }
+export interface LibraryChanges {
+    data: PaperLibraryData;
+    removedPaperIds?: string[];
+    removedFolderIds?: string[];
+    batch_id?: string;
+    status?: string;
 }
-
+const core = `${BASE_URL}/api/core/academic`;
+function checkData(data: PaperLibraryData): PaperLibraryData {
+    if (!data || !['papers', 'folders', 'attachments', 'notes'].every(key => Array.isArray(data[key as keyof PaperLibraryData])))
+        throw new Error('服务器论文库数据格式无效，请重试');
+    if (!data.papers.every(p => p.id && Number.isSafeInteger(p.revision) && p.revision > 0 && p.metadata && typeof p.metadata.title === 'string' && Array.isArray(p.metadata.authors) && p.metadata.identifiers && Array.isArray(p.tags) && Array.isArray(p.attachmentIds) && Array.isArray(p.noteIds)))
+        throw new Error('服务器论文条目格式无效，请重试');
+    return data;
+}
 export function decodePersistedLibrary(value: unknown): PersistedPaperLibrary {
-  if (!object(value) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0 || typeof value.can_write !== 'boolean') {
-    throw new Error('服务器文献库响应格式无效，请重试');
-  }
-  validateLibrary(value.data);
-  return { data: value.data, revision: value.revision as number, canWrite: value.can_write };
+    if (!value || typeof value !== 'object' || typeof (value as { can_write?: unknown }).can_write !== 'boolean')
+        throw new Error('服务器论文库响应格式无效');
+    const data = value as { data: PaperLibraryData; can_write: boolean; paper_count: number; pdf_attachment_count: number; active: boolean };
+    return { data: checkData(data.data), canWrite: data.can_write, paperCount: data.paper_count, pdfAttachmentCount: data.pdf_attachment_count, active: data.active };
 }
-
-function persistenceError(error: unknown): Error {
-  const response = object(error) && object(error.response) ? error.response : undefined;
-  const body = response && object(response.data) ? response.data : undefined;
-  const detail = body && typeof body.message === 'string' && body.message.trim();
-  const message = detail || (error instanceof Error ? error.message : '文献库请求失败，请重试');
-  return Object.assign(new Error(message), { status: response?.status, cause: error });
-}
-
-async function fetchPersistedLibrary(datasetId: string): Promise<PersistedPaperLibrary> {
-  const { axiosInstance, BASE_URL } = await import('@/components/request');
-  try {
-    const response = await axiosInstance.get(`${BASE_URL}/api/core/academic/library`, {
-      params: { target_dataset_id: datasetId }, timeout: 30_000, ...{ silentError: true },
-    });
-    return decodePersistedLibrary(response.data);
-  } catch (error) { throw persistenceError(error); }
-}
-
-/** Production writes never fall back to browser storage. A revision conflict must be resolved by reloading. */
-export async function savePersistedPaperLibrary(datasetId: string, data: PaperLibraryDataV3, revision: number): Promise<PersistedPaperLibrary> {
-  validateLibrary(data);
-  const { axiosInstance, BASE_URL } = await import('@/components/request');
-  try {
-    const response = await axiosInstance.put(`${BASE_URL}/api/core/academic/library`, { data, revision }, {
-      params: { target_dataset_id: datasetId }, timeout: 30_000, ...{ silentError: true },
-    });
-    return decodePersistedLibrary(response.data);
-  } catch (error) { throw persistenceError(error); }
-}
-
-function legacyBrowserCopy(datasetId: string): { data: PaperLibraryDataV3; raw: string } | undefined {
-  let modern: string | null;
-  let legacy: string | null;
-  try {
-    modern = localStorage.getItem(dataKeyV3(datasetId));
-    legacy = localStorage.getItem(dataKey(datasetId));
-  } catch { return undefined; } // Storage may be disabled; the server still works.
-  if (!modern && !legacy) return undefined;
-  try {
-    const parsed = JSON.parse(modern || legacy!);
-    if (!modern && (!object(parsed) || !Array.isArray(parsed.papers) || !Array.isArray(parsed.folders))) throw new Error('Invalid legacy library');
-    const data = modern ? parsed : migratePaperLibrary(parsed);
-    validateLibrary(data);
-    return { data, raw: modern || legacy! };
-  } catch {
-    throw new Error('旧浏览器文献数据无法解析，原数据已保留，请先恢复数据后重试迁移');
-  }
-}
-
-const unionRecords = <T extends { id: string }>(server: T[], legacy: T[]): T[] => {
-  const existing = new Set(server.map((item) => item.id));
-  return [...server, ...legacy.filter((item) => !existing.has(item.id))];
-};
-
-function migrateBrowserCopy(server: PaperLibraryDataV3, legacy: PaperLibraryDataV3, id: string): PaperLibraryDataV3 {
-  const hidden = new Set(server.hiddenArxivWorkIds || []);
-  const visibleWorks = new Set(server.papers.map((paper) => paper.academicWorkId).filter(Boolean));
-  return {
-    ...server,
-    folders: unionRecords(server.folders, legacy.folders),
-    collections: unionRecords(server.collections, legacy.collections),
-    papers: unionRecords(server.papers, legacy.papers.filter((paper) => !paper.academicWorkId || !hidden.has(paper.academicWorkId))),
-    attachments: unionRecords(server.attachments, legacy.attachments),
-    notes: unionRecords(server.notes, legacy.notes),
-    annotations: unionRecords(server.annotations, legacy.annotations),
-    relations: unionRecords(server.relations, legacy.relations),
-    mergeSnapshots: unionRecords(server.mergeSnapshots, legacy.mergeSnapshots),
-    hiddenArxivWorkIds: [...new Set([...(server.hiddenArxivWorkIds || []), ...(legacy.hiddenArxivWorkIds || []).filter((workId) => !visibleWorks.has(workId))])],
-    hiddenArxivPapers: unionRecords(server.hiddenArxivPapers || [], legacy.hiddenArxivPapers || []),
-    migrationSnapshots: [...(server.migrationSnapshots || []), { id, createdAt: new Date().toISOString(), source: 'browser-local-v3', data: legacy }],
-  };
-}
-
-/** Always read the server first. Old browser records are migrated durably, never used as an offline source of truth. */
-export async function loadPersistedPaperLibrary(datasetId: string): Promise<PersistedPaperLibrary> {
-  let current = await fetchPersistedLibrary(datasetId);
-  const copy = legacyBrowserCopy(datasetId);
-  const legacy = copy?.data;
-  if (!legacy || !entityKeys.some((key) => legacy[key].length) && !legacy.hiddenArxivWorkIds?.length && !legacy.hiddenArxivPapers?.length) return current;
-  const migrationId = `browser-${computeTextSha256(copy!.raw)}`;
-  // A competing browser can update the library while its legacy copy is being merged.
-  // Re-read and merge missing records only; never retry an ordinary edit against a newer revision.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (current.data.migrationSnapshots?.some((snapshot) => snapshot.id === migrationId)) return current;
-    if (!current.canWrite) throw new Error('本浏览器有尚未迁移的文献数据，需要知识库编辑权限才能保存到服务器；原数据已保留');
+export async function loadPersistedPaperLibrary(dataset: string): Promise<PersistedPaperLibrary> {
+    const { data } = await axiosInstance.get(`${core}/library`, { params: { target_dataset_id: dataset }, timeout: 30000, silentError: true } as never);
+    const current = decodePersistedLibrary(data);
+    let raw: string | null = null;
+    let version = 3;
     try {
-      return await savePersistedPaperLibrary(datasetId, migrateBrowserCopy(current.data, legacy, migrationId), current.revision);
-    } catch (error) {
-      if (!object(error) || error.status !== 409 || attempt === 2) throw error;
-      current = await fetchPersistedLibrary(datasetId);
-    }
-  }
-  throw new Error('文献库正在被其他用户更新，请重试迁移');
+        raw = localStorage.getItem(`lazymind.paper-library.data.v3.${dataset}`);
+        if (!raw) { raw = localStorage.getItem(`lazymind.paper-library.data.v2.${dataset}`); version = 2; }
+    } catch { return current; }
+    if (!raw) return current;
+    const migrationId = `browser-${computeTextSha256(raw)}`;
+    if (current.data.migrationSnapshots?.some(snapshot => (snapshot as { id?: string })?.id === migrationId)) return current;
+    let legacy: PaperLibraryData;
+    try {
+        const parsed = JSON.parse(raw);
+        legacy = parseLibraryBackup(version === 3 ? raw : JSON.stringify({ ...parsed, schemaVersion: 3, attachments: [], notes: [] }));
+    } catch { throw new Error('旧浏览器文献数据无法解析，原数据已保留，请先恢复数据后重试迁移'); }
+    if (!legacy.papers.length && !legacy.folders.length && !legacy.attachments.length && !legacy.notes.length && !legacy.annotations?.length) return current;
+    if (!current.canWrite) throw new Error('本浏览器有尚未迁移的文献数据，需要知识库编辑权限才能保存到服务器；原数据已保留');
+    const migration = { ...legacy, migrationSnapshots: [...(current.data.migrationSnapshots || []), { id: migrationId, createdAt: new Date().toISOString(), source: 'browser-local-v3', data: JSON.parse(raw) }] };
+    const saved = await axiosInstance.post(`${core}/zotero/import`, { data: migration, source_id: 'browser-local-v3', idempotency_key: migrationId }, { params: { target_dataset_id: dataset }, timeout: 120000, silentError: true } as never);
+    return decodePersistedLibrary(saved.data);
+}
+async function mutation(dataset: string, method: 'post' | 'patch', path: string, body: unknown): Promise<LibraryChanges> {
+    const { data } = await axiosInstance.request({ method, url: `${core}/${path}`, data: body, params: { target_dataset_id: dataset }, timeout: 30000, silentError: true } as never);
+    checkData(data.data);
+    return data;
+}
+export function patchLibraryPaper(dataset: string, paper: PaperRecord, changes: {
+    metadata?: PaperMetadata;
+    status?: PaperRecord['status'];
+    tags?: string[];
+    primary_attachment_id?: string;
+}) { return mutation(dataset, 'patch', `library/papers/${encodeURIComponent(paper.id)}`, { revision: paper.revision, ...changes }); }
+const targets = (papers: PaperRecord[]) => papers.map(p => ({ id: p.id, revision: p.revision }));
+export function moveLibraryPapers(dataset: string, papers: PaperRecord[], folderId: string | null) { return mutation(dataset, 'post', 'library/papers:move', { items: targets(papers), folder_id: folderId || '' }); }
+export function removeLibraryPapers(dataset: string, papers: PaperRecord[]) { return mutation(dataset, 'post', 'library/papers:remove', { items: targets(papers) }); }
+export function detachLibraryAttachment(dataset: string, paper: PaperRecord, id: string) { return mutation(dataset, 'post', `library/papers/${encodeURIComponent(paper.id)}/attachments/${encodeURIComponent(id)}:detach`, { revision: paper.revision }); }
+export function addLibraryNote(dataset: string, paperId: string, id: string, content: string) { return mutation(dataset, 'post', `library/papers/${encodeURIComponent(paperId)}/notes`, { id, content }); }
+export function createLibraryFolder(dataset: string, id: string, name: string, parentId: string | null) { return mutation(dataset, 'post', 'library/folders', { id, name, parent_id: parentId || '' }); }
+export function renameLibraryFolder(dataset: string, folder: PaperFolder, name: string) { return mutation(dataset, 'patch', `library/folders/${encodeURIComponent(folder.id)}`, { revision: folder.revision, name }); }
+export function deleteLibraryFolder(dataset: string, folder: PaperFolder) { return mutation(dataset, 'post', `library/folders/${encodeURIComponent(folder.id)}:delete`, { revision: folder.revision }); }
+function importPaper(paper: PaperRecord) { const { id, metadata, folderId, source, sourceUrl, arxivVersion, tags } = paper; return { id, metadata, folderId, source, sourceUrl, arxivVersion, tags }; }
+export function importLibraryPapers(dataset: string, papers: PaperRecord[], folders: PaperFolder[], key: string, format: 'bib' | 'ris' | 'csv', fileName?: string) { return mutation(dataset, 'post', 'imports', { entry_type: 'bibliography', target_dataset_id: dataset, idempotency_key: key, format, file_name: fileName, folders: folders.map(f => ({ id: f.id, name: f.name, parentId: f.parentId || null, revision: f.revision || 0 })), items: papers.map(paper => ({ paper: importPaper(paper) })) }); }
+export function confirmLibraryPdf(dataset: string, paper: PaperRecord, documentId: string, key: string, version?: string) { return mutation(dataset, 'post', 'imports', { entry_type: 'pdf_upload', target_dataset_id: dataset, idempotency_key: key, items: [{ paper: importPaper(paper), document_id: documentId, revision: paper.revision, confirmed: true, candidate: { version } }] }); }
+export function mergeLibraryChanges(current: PaperLibraryData, change: LibraryChanges): PaperLibraryData {
+    const removed = new Set(change.removedPaperIds || []), changed = new Set(change.data.papers.map(p => p.id));
+    const merge = <T extends {
+        id: string;
+    }>(old: T[], fresh: T[]) => { const updates = new Map(fresh.map(item => [item.id, item])); const previous = new Set(old.map(item => item.id)); return [...old.map(item => updates.get(item.id) || item), ...fresh.filter(item => !previous.has(item.id))]; };
+    const data: PaperLibraryData = { ...current, ...change.data };
+    data.papers = merge(current.papers.filter(p => !removed.has(p.id)), change.data.papers);
+    data.folders = merge(current.folders.filter(f => !change.removedFolderIds?.includes(f.id)), change.data.folders);
+    data.attachments = [...current.attachments.filter(a => !removed.has(a.paperId) && !changed.has(a.paperId)), ...change.data.attachments];
+    data.notes = [...current.notes.filter(n => !removed.has(n.paperId) && !changed.has(n.paperId)), ...change.data.notes];
+    data.annotations = merge((current.annotations || []).filter(item => !removed.has(item.paperId)), change.data.annotations || []);
+    data.relations = merge((current.relations || []).filter(item => !removed.has(item.fromPaperId) && !removed.has(item.toPaperId)), change.data.relations || []);
+    data.collections = merge((current.collections || []).filter(item => !change.removedFolderIds?.includes(item.id)), change.data.collections || []);
+    return data;
+}
+export async function previewLibraryPapers(dataset: string, papers: PaperRecord[]): Promise<PaperRecord[]> {
+    const { data } = await axiosInstance.post(`${core}/imports:preview`, { target_dataset_id: dataset, papers: papers.map(importPaper), resolve_external: false }, { silentError: true } as never);
+    const ids = new Map<string, string>((data.items || []).map((item: {
+        library_paper_id: string;
+        work_id: string;
+    }) => [item.library_paper_id, item.work_id]));
+    return papers.map(p => ({ ...p, academicWorkId: ids.get(p.id) || p.academicWorkId }));
 }

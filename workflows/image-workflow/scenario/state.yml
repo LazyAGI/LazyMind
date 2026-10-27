@@ -328,8 +328,12 @@ steps:
         or remove query/signature parameters from any URL.
       - **Save only 1–3 validated images total.** Use `selected[*].url` from
         image_search_and_validate verbatim, including every query/signature parameter.
-      - Only when web collection is required: if web_search is unavailable, fall back to
-        wikipedia once; if both are unavailable, stop with a failure note.
+      - When real web images are required but web_search is unavailable, call
+        image_search_and_validate without candidate_urls to check configured image-search providers.
+        If it reports MEDIA_CAPABILITY_DEPENDENCY_MISSING, stop and show its search-engine
+        configuration link. Do not retry with different keywords, silently skip collection,
+        substitute AI-generated images, or treat Wikipedia text as collected real images.
+        After configuration, retry collect_materials and preserve existing analysis and materials.
       - For web-sourced items, image_search_and_validate is authoritative:
           1. Read its exact candidate_count, validated_count, valid_count, invalid_count,
              selected_count, selected, and candidates fields.

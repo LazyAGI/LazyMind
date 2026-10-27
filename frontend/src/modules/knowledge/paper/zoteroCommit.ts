@@ -1,5 +1,5 @@
 import { axiosInstance, BASE_URL } from '@/components/request';
-import type { PaperLibraryDataV3 } from './libraryModel';
+import type { PaperLibraryData } from './model';
 import { decodePersistedLibrary, type PersistedPaperLibrary } from './store';
 import {
   buildZoteroImport, downloadZoteroAttachment, matchLocalZoteroFile, zoteroImportError,
@@ -12,8 +12,8 @@ interface ConfirmedImport {
   preview: ZoteroPreview;
   config: ZoteroImportConfig;
   options: ZoteroImportOptions;
-  getLibrary: () => PaperLibraryDataV3;
-  saveLibrary: (library: PaperLibraryDataV3) => Promise<void>;
+  getLibrary: () => PaperLibraryData;
+  saveLibrary: (library: PaperLibraryData) => Promise<void>;
   storeAttachment: (file: File, candidate: ZoteroAttachmentCandidate) => Promise<void>;
 }
 
@@ -27,12 +27,13 @@ export async function executeZoteroImport(input: ConfirmedImport): Promise<Zoter
   if (options.includeAttachments) {
     for (const candidate of plan.attachments) {
       // The caller also checks that the same library is still mounted before each write.
-      getLibrary();
+      const authoritative = getLibrary().attachments.find(attachment => attachment.id === candidate.id);
+      const target = authoritative ? { ...candidate, paperId: authoritative.paperId } : candidate;
       try {
         const localFile = matchLocalZoteroFile(candidate, options.localFiles);
         if (!localFile && config.source === 'local') throw new Error('未找到对应的本地 PDF，请选择 Zotero storage 或导出文件所在目录后重试');
         const file = localFile || await downloadZoteroAttachment(datasetId, config, candidate);
-        await storeAttachment(file, candidate);
+        await storeAttachment(file, target);
         attachments++;
       } catch (error) {
         failures.push(`${candidate.name}：${zoteroImportError(error, config)}`);
@@ -62,4 +63,12 @@ export async function storeZoteroAttachment(datasetId: string, file: File, candi
     }
     throw Object.assign(new Error(zoteroImportError(error)), { library, cause: error });
   }
+}
+
+/** The server atomically merges stable Zotero identities into authoritative entities. */
+export async function importZoteroSnapshot(datasetId: string, data: PaperLibraryData, sourceId: string, idempotencyKey: string): Promise<PersistedPaperLibrary> {
+  const response = await axiosInstance.post(`${BASE_URL}/api/core/academic/zotero/import`, { data, source_id: sourceId, idempotency_key: idempotencyKey }, {
+    params: { target_dataset_id: datasetId }, timeout: 120_000, ...{ silentError: true },
+  });
+  return decodePersistedLibrary(response.data);
 }

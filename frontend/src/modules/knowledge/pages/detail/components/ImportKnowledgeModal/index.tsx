@@ -12,7 +12,7 @@ import {
 
 import { DataSourceType } from "@/modules/knowledge/constants/common";
 import DragUpload, { ALLOWED_FILE_TYPES } from "../DragUpload";
-import { DocumentServiceApi, TaskServiceApi } from "@/modules/knowledge/utils/request";
+import { DocumentServiceApi, TaskServiceApi, getKnowledgeOptions, type KnowledgeOptions } from "@/modules/knowledge/utils/request";
 import { buildUploadTaskItems } from "@/modules/knowledge/utils/uploadByHash";
 import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
 import TagSelect from "@/modules/knowledge/components/TagSelect";
@@ -69,6 +69,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
   const { availability } = useRAGComponent();
   const storageOnly = availability !== "ready" || props.storageOnly === true;
   const [data, setData] = useState<IData>(InitData);
+  const [uploadOptions, setUploadOptions] = useState<KnowledgeOptions["upload"]>();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [runtimeWaiting, setRuntimeWaiting] = useState(false);
@@ -109,7 +110,9 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
       });
   }
 
-  function handleOpen(currentData: IData) {
+  async function handleOpen(currentData: IData) {
+    const options = await getKnowledgeOptions();
+    setUploadOptions(options.upload);
     if (currentData.data_source_type) {
       form.setFieldsValue({ dataSourceType: currentData.data_source_type });
     }
@@ -276,6 +279,7 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
           message={props.storageOnly ? "文件将保留在知识库内，仅保存原文件，不解析、不建立索引。"
             : "无需安装 RAG 即可保存解析文本和基础切片。安装组件并配置 embedding 后自动建立索引；扫描件需要 OCR。"} />
       )}
+      {importError && <Alert type="error" showIcon message={importError} style={{ marginBottom: 16, whiteSpace: "pre-wrap" }} />}
       {loading && (
         <Alert
           message={
@@ -315,9 +319,10 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
                 <DragUpload
                   disabled={loading}
                   maxCount={300}
-                  maxSize={TOTAL_FILE_MAX_SIZE}
-                  maxFileSize={SINGLE_FILE_MAX_SIZE}
-                  accept={isZipMode ? ZIP_FILE_TYPES : ALLOWED_FILE_TYPES}
+                  maxSize={uploadOptions?.max_batch_bytes ?? TOTAL_FILE_MAX_SIZE}
+                  maxFileSize={uploadOptions?.max_file_bytes ?? SINGLE_FILE_MAX_SIZE}
+                  supportedFileTypes={uploadOptions?.file_types}
+                  accept={isZipMode ? ZIP_FILE_TYPES : uploadOptions?.file_types ?? ALLOWED_FILE_TYPES}
                   targetPath={data.targetPath}
                   maxLevel={2}
                   onZipStatusChange={setHasZipError}

@@ -93,20 +93,21 @@ func TestPaperLibraryAggregateAndDevPathsMatch(t *testing.T) {
 				}
 			}
 			for _, db := range []*sql.DB{aggregate, dev} {
-				assertPaperLibraryStorage(t, db)
+				assertPaperLibraryEntities(t, db)
+				assertScopedImportanceStorage(t, db)
 			}
 			fingerprint := func(db *sql.DB) string {
 				if driver == "postgres" {
 					var lines []string
 					for _, line := range postgresSchemaLines(t, db) {
-						if strings.Contains(line, "|paper_libraries|") {
+						if strings.Contains(line, "|paper_library_") || strings.Contains(line, "|academic_user_paper_states|") {
 							lines = append(lines, line)
 						}
 					}
 					return strings.Join(lines, "\n")
 				}
 				var ddl string
-				if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='paper_libraries'`).Scan(&ddl); err != nil {
+				if err := db.QueryRow(`SELECT GROUP_CONCAT(sql, ';') FROM (SELECT sql FROM sqlite_master WHERE type='table' AND (name LIKE 'paper_library_%' OR name='academic_user_paper_states') ORDER BY name)`).Scan(&ddl); err != nil {
 					t.Fatal(err)
 				}
 				return ddl
@@ -114,10 +115,49 @@ func TestPaperLibraryAggregateAndDevPathsMatch(t *testing.T) {
 			if fingerprint(aggregate) != fingerprint(dev) {
 				t.Fatal("paper library schema differs between aggregate and dev paths")
 			}
+			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261026123247_paper_library_entities.down.sql", driver)
+			if _, err := dev.Exec(`SELECT dataset_id FROM paper_library_entries`); err == nil {
+				t.Fatal("entity downgrade retained final schema")
+			}
+			var count int
+			if err := dev.QueryRow(`SELECT COUNT(*) FROM academic_works WHERE id='test-work'`).Scan(&count); err != nil || count != 1 {
+				t.Fatal("entity downgrade damaged scholarly data", err)
+			}
+			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261026123247_paper_library_entities.up.sql", driver)
+			if err := dev.QueryRow(`SELECT COUNT(*) FROM paper_library_entries`).Scan(&count); err != nil || count != 0 {
+				t.Fatal("entity upgrade did not create final empty storage", err)
+			}
 			execMigrationFileForDriver(t, aggregate, catalog.Modes[len(catalog.Modes)-1].Aggregate.DownPath, driver)
-			if _, err := aggregate.Exec(`SELECT dataset_id FROM paper_libraries`); err == nil {
-				t.Fatal("aggregate rollback did not remove paper_libraries")
+			if _, err := aggregate.Exec(`SELECT dataset_id FROM paper_library_entries`); err == nil {
+				t.Fatal("aggregate rollback did not remove paper_library_entries")
 			}
 		})
+	}
+}
+
+func assertPaperLibraryEntities(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(`INSERT INTO academic_works(id,doi_normalized,canonical_title,normalized_title,authors_json,first_author_normalized,publication_year,venue,abstract,external_ids_json,metadata_provenance_json,created_at,updated_at) VALUES ('test-work','10.1234/test','Title','title','[]','',2024,'','','{}','{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO paper_library_entries(dataset_id,id,academic_work_id,tags_json,metadata_json,created_at,updated_at) VALUES ('existing-library','entry','test-work','[]','{}',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+ INSERT INTO paper_library_notes(dataset_id,id,paper_id,title,content,created_at,updated_at) VALUES ('existing-library','note','entry','Note','Preserve notes',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);
+ INSERT INTO paper_library_attachments(dataset_id,id,paper_id,name,document_id,created_at,updated_at) VALUES ('existing-library','attachment','entry','Study.pdf','pdf',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);`); err != nil {
+		t.Fatal(err)
+	}
+	var content string
+	var revision int
+	if err := db.QueryRow(`SELECT content,revision FROM paper_library_notes n JOIN paper_library_entries e ON e.id=n.paper_id AND e.dataset_id=n.dataset_id WHERE n.id='note'`).Scan(&content, &revision); err != nil || content != "Preserve notes" || revision != 1 {
+		t.Fatal(content, revision, err)
+	}
+	if _, err := db.Exec(`INSERT INTO paper_library_attachments(dataset_id,id,paper_id,name,document_id,created_at,updated_at) VALUES ('existing-library','duplicate','entry','Same.pdf','pdf',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err == nil {
+		t.Fatal("active document duplicate accepted")
+	}
+	if _, err := db.Exec(`UPDATE paper_library_attachments SET detached_at=CURRENT_TIMESTAMP WHERE id='attachment';
+ INSERT INTO paper_library_attachments(dataset_id,id,paper_id,name,document_id,created_at,updated_at) VALUES ('existing-library','new','entry','Same.pdf','pdf',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE paper_library_entries SET revision=0 WHERE id='entry'`); err == nil {
+		t.Fatal("invalid revision accepted")
 	}
 }

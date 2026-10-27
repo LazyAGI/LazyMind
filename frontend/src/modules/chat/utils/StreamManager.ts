@@ -1,6 +1,6 @@
 import { SSE } from "./sse";
 import i18n from "@/i18n";
-import type { RunTerminal as CoreRunTerminal } from "@/api/generated/core-client";
+import type { ChatModelOutput, RunTerminal as CoreRunTerminal } from "@/api/generated/core-client";
 
 export interface StreamCallbacks {
   message?: (e: CustomEvent) => void;
@@ -21,6 +21,8 @@ export interface StreamState {
   messageId?: string;
   history_id?: string;
   messageList?: any[];
+  modelOutput?: ChatModelOutput;
+  modelOutputSnapshotPending?: boolean;
 }
 
 export interface StreamRegistrationOptions {
@@ -116,8 +118,15 @@ export class StreamManager {
       }
     }
 
+    const registeredState = this.streamStates.get(conversationId);
+    if (registeredState) {
+      registeredState.modelOutput = undefined;
+      registeredState.modelOutputSnapshotPending = true;
+    }
+
     const wrappedCallbacks: StreamCallbacks = {
       message: (e: CustomEvent) => {
+        if (this.callbacks.get(conversationId) !== wrappedCallbacks) return;
         try {
           const data = (e as any).data;
           if (typeof data === "string") {
@@ -145,6 +154,7 @@ export class StreamManager {
         }
       },
       error: (e: CustomEvent) => {
+        if (this.callbacks.get(conversationId) !== wrappedCallbacks) return;
         const state = this.streamStates.get(conversationId);
         if (state && !this.isStreamFinished(conversationId)) {
           state.connectionState = "disconnected";
@@ -155,6 +165,7 @@ export class StreamManager {
         this.cleanupStream(conversationId);
       },
       timeout: (e: CustomEvent) => {
+        if (this.callbacks.get(conversationId) !== wrappedCallbacks) return;
         const state = this.streamStates.get(conversationId);
         if (state && !this.isStreamFinished(conversationId)) {
           state.connectionState = "resuming";
@@ -214,20 +225,47 @@ export class StreamManager {
         const result = parsed?.result;
         if (result) {
           const runtimeEvent = result.runtime_event;
+          const modelOutput: ChatModelOutput | undefined = result.model_output;
+          if (state.modelOutput && runtimeEvent?.run_id && runtimeEvent.run_id !== state.modelOutput.run_id) {
+            return false;
+          }
           const hasBusinessPayload = Boolean(
             result.delta ||
               result.reasoning_content ||
               result.task_created ||
               result.artifact_created ||
+              (result as any).knowledge_operation_result ||
               result.ask_pending ||
               result.tool_limit_pending,
           );
           const wasFinished = this.isStreamFinished(conversationId);
-          if (wasFinished && hasBusinessPayload) {
-            console.error("Ignored payload emitted after run_finished");
+          if (wasFinished && (hasBusinessPayload || modelOutput)) {
+            if (hasBusinessPayload) console.error("Ignored payload emitted after run_finished");
             return false;
           }
-          if (result.sources && result.sources.length > 0) {
+          if (modelOutput) {
+            const previous = state.modelOutput;
+            const { call_index: index, phase, run_id: runId } = modelOutput;
+            if (!runId || !Number.isInteger(index) || index < 0 ||
+                (phase && !["begin", "commit", "rollback"].includes(phase)) ||
+                (index === 0 && phase !== "commit") ||
+                (previous && (previous.run_id !== runId || index < previous.call_index))) return false;
+            const snapshot = state.modelOutputSnapshotPending && result.delta_mode === "replace";
+            if (snapshot) {
+              state.modelOutput = modelOutput;
+            } else if (index === 0) {
+              if (previous) return false;
+              state.modelOutput = modelOutput;
+            } else if (phase === "begin") {
+              if (previous?.phase === "begin" || index !== (previous?.call_index ?? 0) + 1) return false;
+              state.modelOutput = modelOutput;
+            } else {
+              if (!previous || previous.phase !== "begin" || index !== previous.call_index) return false;
+              if (phase) state.modelOutput = modelOutput;
+            }
+            if (index > 0 || snapshot) state.modelOutputSnapshotPending = false;
+          }
+          if ((modelOutput && result.delta_mode === "replace") || result.sources?.length > 0) {
             state.sources = result.sources;
           }
           if (
@@ -474,6 +512,7 @@ export class StreamManager {
 
     const wrappedCallbacks: StreamCallbacks = {
       message: (e: CustomEvent) => {
+        if (this.callbacks.get(conversationId) !== wrappedCallbacks) return;
         try {
           const data = (e as any).data;
           if (typeof data === "string") {
@@ -501,6 +540,7 @@ export class StreamManager {
         }
       },
       error: (e: CustomEvent) => {
+        if (this.callbacks.get(conversationId) !== wrappedCallbacks) return;
         const state = this.streamStates.get(conversationId);
         if (state && !this.isStreamFinished(conversationId)) {
           state.connectionState = "disconnected";
@@ -511,6 +551,7 @@ export class StreamManager {
         this.cleanupStream(conversationId);
       },
       timeout: (e: CustomEvent) => {
+        if (this.callbacks.get(conversationId) !== wrappedCallbacks) return;
         const state = this.streamStates.get(conversationId);
         if (state && !this.isStreamFinished(conversationId)) {
           state.connectionState = "resuming";

@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
 import lazymind.chat.engine.subagent.tools as attachment_tools
-import lazymind.chat.engine.tools.file_resources.attachment_edit as attachment_edit
-import lazymind.chat.service.chat_service as chat_service
+from lazymind.chat.engine.tools.file_resources import attachment_edit
+from lazymind.chat.service import chat_service
 
 
 def _attachment(monkeypatch, tmp_path, filename, content):
@@ -35,7 +35,17 @@ def _attachment(monkeypatch, tmp_path, filename, content):
 def test_attachment_tools_register_string_replace_only_when_files_exist():
     assert chat_service._build_user_attachment_tools(False) == []
     names = {tool.__name__ for tool in chat_service._build_user_attachment_tools(True)}
-    assert names == {'find_user_attachment', 'read_user_attachment', 'string_replace'}
+    assert names == {
+        'find_user_attachment', 'read_user_attachment', 'string_replace', 'pptx_analyzer', 'edit_presentation',
+    }
+
+
+def test_attachment_registration_obeys_each_disabled_tool():
+    names = {'find_user_attachment', 'read_user_attachment', 'string_replace', 'pptx_analyzer', 'edit_presentation'}
+    for enabled in names:
+        tools = chat_service._build_user_attachment_tools(True, names - {enabled})
+        assert [tool.__name__ for tool in tools] == [enabled]
+    assert chat_service._build_user_attachment_tools(True, names) == []
 
 
 def test_string_replace_publishes_edited_copy_and_preserves_upload(monkeypatch, tmp_path):

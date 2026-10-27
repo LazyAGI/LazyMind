@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Input, Progress, Radio } from "antd";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { LeftOutlined, RightOutlined, UploadOutlined, CloseOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import type { RcFile } from "antd/es/upload";
+import ImageUpload, { type ImageUploadImperativeProps } from "../ImageUpload";
 import "./index.scss";
 
 export interface AskQuestion {
@@ -9,6 +11,13 @@ export interface AskQuestion {
   type: "boolean" | "single" | "multiple" | "text";
   choices?: string[];
   allow_other?: boolean;
+  attachment?: {
+    when_choice: string;
+    material_id: string;
+    accept: string[];
+    max_files?: number;
+    required?: boolean;
+  };
 }
 
 export interface AskPending {
@@ -21,6 +30,8 @@ export interface AskPending {
   /** Optional subtitle / description shown below the title */
   description?: string;
   user_env_delete?: { id: string; name: string; expected_updated_at: string };
+  knowledge_management?: { confirmation_id: string; arguments_digest: string; snapshot: string };
+  knowledge_management_preview?: Record<string, unknown>;
   env_input?: import("../EnvInputCard").EnvironmentInput;
   skill_ambiguity?: { requested_name: string; candidates: string[]; original_query: string };
   mail_draft?: import("@/modules/chat/components/MailDraftCard").MailDraftPreview;
@@ -46,6 +57,8 @@ export interface AskSubmitPayload {
   text: string;
   /** Full structured answers, forwarded to the backend as ask_answers_structured. */
   structured: AskAnswersStructured;
+  /** Uploaded through a conditional question and sent as normal chat attachments. */
+  files?: (RcFile & { uri: string })[];
 }
 
 interface AskCardProps {
@@ -53,6 +66,8 @@ interface AskCardProps {
   /** Called with a payload containing the formatted text and full structured answers. */
   onSubmit: (payload: AskSubmitPayload) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
+  /** Persisted completion, distinct from a temporarily disabled or superseded card. */
+  answered?: boolean;
   /** Cached answers to pre-populate (index → serialized answer) */
   savedAnswers?: Record<number, AnswerState>;
   /** Called whenever an answer changes, for external caching */
@@ -81,6 +96,24 @@ function initAnswer(q: AskQuestion): AnswerState {
   }
 }
 
+function restoreAnswer(q: AskQuestion, saved?: AnswerState): AnswerState {
+  if (!saved || saved.type !== q.type) return initAnswer(q);
+  const choices = q.choices?.length ? q.choices :
+    q.type === "boolean" ? ["__ask_user_yes__", "__ask_user_no__"] : [];
+  switch (saved.type) {
+    case "text":
+      return typeof saved.value === "string" ? saved : initAnswer(q);
+    case "boolean":
+      return saved.value === null || choices.includes(saved.value) ? saved : initAnswer(q);
+    case "single":
+      return saved.value === null || choices.includes(saved.value)
+        ? { ...saved, otherText: saved.otherText ?? "" } : initAnswer(q);
+    case "multiple":
+      return Array.isArray(saved.value) && saved.value.every(value => choices.includes(value))
+        ? { ...saved, otherText: saved.otherText ?? "" } : initAnswer(q);
+  }
+}
+
 function isAnswered(ans: AnswerState, otherOption: string): boolean {
   switch (ans.type) {
     case "boolean":
@@ -96,6 +129,35 @@ function isAnswered(ans: AnswerState, otherOption: string): boolean {
     case "text":
       return ans.value.trim().length > 0;
   }
+}
+
+type AskAttachmentFile = RcFile & { uri?: string };
+
+function attachmentIsActive(q: AskQuestion, ans: AnswerState): boolean {
+  return Boolean(
+    q.attachment && ans.type === "single" &&
+    ans.value === q.attachment.when_choice,
+  );
+}
+
+function questionIsComplete(
+  q: AskQuestion,
+  ans: AnswerState,
+  files: AskAttachmentFile[],
+  otherOption: string,
+): boolean {
+  if (!isAnswered(ans, otherOption)) return false;
+  if (!attachmentIsActive(q, ans) || !q.attachment?.required) return true;
+  return files.length > 0 && files.every((file) => Boolean(file.uri));
+}
+
+function attachmentRequirementSatisfied(
+  q: AskQuestion,
+  ans: AnswerState,
+  files: AskAttachmentFile[],
+): boolean {
+  if (!attachmentIsActive(q, ans) || !q.attachment?.required) return true;
+  return files.length > 0 && files.every((file) => Boolean(file.uri));
 }
 
 function formatAnswer(
@@ -136,6 +198,15 @@ function formatAnswer(
   }
 }
 
+function previewText(value: unknown): string {
+  if (value == null) return "";
+  if (Array.isArray(value)) return value.map(previewText).filter(Boolean).join("\n");
+  if (typeof value === "object") {
+    return Object.entries(value).map(([key, entry]) => `${key}: ${previewText(entry)}`).join("; ");
+  }
+  return String(value);
+}
+
 function ChoiceLabel({ value }: { value: string }) {
   return <span className="ask-wizard__choice-label">{value}</span>;
 }
@@ -158,6 +229,7 @@ export default function AskCard({
   askPending,
   onSubmit,
   disabled = false,
+  answered = false,
   savedAnswers,
   onAnswerChange,
 }: AskCardProps) {
@@ -177,18 +249,37 @@ export default function AskCard({
     description,
   } = askPending;
   const questions = normalizedAskQuestions(askPending, t);
-  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "");
+  const preview = askPending.knowledge_management_preview;
+  const displayTitle = title || (titleI18nKey ? t(titleI18nKey) : "") || previewText(preview?.title);
+  const displayDescription = description || previewText(preview?.description);
+  const irreversible = previewText(preview?.impact).includes("删除后不可恢复");
+  const previewEntries = Object.entries(preview ?? {}).flatMap(([key, value]) => {
+    if (key === "title" || key === "description") return [];
+    const text = previewText(value);
+    return !text || text === displayTitle || text === displayDescription ? [] : [[key, text]];
+  });
   const total = questions.length;
 
   const [answers, setAnswers] = useState<AnswerState[]>(() =>
-    questions.map((q, i) => savedAnswers?.[i] ?? initAnswer(q)),
+    questions.map((q, i) => restoreAnswer(q, savedAnswers?.[i])),
   );
   const [currentIndex, setCurrentIndex] = useState(0);
   const [submitted, setSubmitted] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [decisionFailed, setDecisionFailed] = useState(false);
+  const [attachmentFiles, setAttachmentFiles] = useState<Record<number, AskAttachmentFile[]>>({});
+  const attachmentRefs = useRef<Record<number, ImageUploadImperativeProps | null>>({});
   const submittingRef = useRef(false);
-  const isReadOnly = disabled || submitted || submitting;
-  const needsConfirmation = !!askPending.user_env_delete && !(
+  const processed = answered || submitted;
+  const isReadOnly = disabled || processed || submitting;
+  const isConfirmation = !!(askPending.knowledge_management || askPending.user_env_delete);
+  const decision = answers[0]?.type === "boolean" ? answers[0].value : null;
+  const statusLabel = t(isConfirmation && decision === "__ask_user_yes__"
+    ? "chat.askCardConfirmed"
+    : isConfirmation && decision === "__ask_user_no__"
+      ? "chat.askCardCancelled" : "chat.askCardAnswered");
+  const needsConfirmation = !!(askPending.user_env_delete || askPending.knowledge_management) && !(
     answers.length === 1 && answers[0]?.type === "boolean" &&
     ["__ask_user_yes__", "__ask_user_no__"].includes(answers[0].value ?? "")
   );
@@ -200,16 +291,23 @@ export default function AskCard({
 
   useEffect(() => {
     setAnswers((prev) =>
-      questions.map((q, i) => savedAnswers?.[i] ?? prev[i] ?? initAnswer(q)),
+      questions.map((q, i) => restoreAnswer(q, savedAnswers?.[i] ?? prev[i])),
     );
   }, [askPending.ask_id, savedAnswers]);
+
+  useEffect(() => {
+    setAttachmentFiles({});
+    attachmentRefs.current = {};
+  }, [askPending.ask_id]);
 
   const currentQ = questions[currentIndex]!;
   const currentAns = answers[currentIndex]!;
   const currentChoices = customChoices[currentIndex] ?? currentQ.choices ?? [];
 
   const progressPercent = Math.round(
-    (answers.filter((answer) => isAnswered(answer, otherOption)).length /
+    (answers.filter((answer, index) => questionIsComplete(
+      questions[index]!, answer, attachmentFiles[index] ?? [], otherOption,
+    )).length /
       total) *
       100,
   );
@@ -231,6 +329,9 @@ export default function AskCard({
 
   const handleSubmit = async () => {
     if (isReadOnly || submittingRef.current || needsConfirmation) return;
+    if (questions.some((question, index) => !attachmentRequirementSatisfied(
+      question, answers[index]!, attachmentFiles[index] ?? [],
+    ))) return;
     const lines = questions.map((q, i) =>
       formatAnswer(
         q,
@@ -254,11 +355,19 @@ export default function AskCard({
     };
     submittingRef.current = true;
     setSubmitting(true);
+    setDecisionFailed(false);
     try {
-      const accepted = await onSubmit({ text: lines.join("\n"), structured });
+      const files = questions.flatMap((question, index) => (
+        attachmentIsActive(question, answers[index]!)
+          ? (attachmentFiles[index] ?? []).filter((file): file is RcFile & { uri: string } => Boolean(file.uri))
+          : []
+      ));
+      const accepted = await onSubmit({ text: lines.join("\n"), structured, files });
       if (accepted !== false && !askPending.user_env_delete) setSubmitted(true);
+      if (accepted === false && askPending.knowledge_management) setDecisionFailed(true);
     } catch {
-      // The caller reports request errors; keep the selected answer available for retry.
+      if (askPending.knowledge_management) setDecisionFailed(true);
+      // Ordinary callers report their own request errors; keep the answer for retry.
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -277,6 +386,21 @@ export default function AskCard({
       className={`ask-wizard${isReadOnly ? " ask-wizard--disabled" : ""}`}
       aria-label={t("chat.askCardAria")}
     >
+      {processed && (
+        <button
+          type="button"
+          className="ask-wizard__summary"
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <span className="ask-wizard__summary-status">{statusLabel}</span>
+          <span className="ask-wizard__summary-title">{displayTitle}</span>
+          <span>{t(expanded ? "chat.askCardCollapse" : "chat.askCardExpand")}</span>
+          <RightOutlined rotate={expanded ? 90 : 0} />
+        </button>
+      )}
+      {(!processed || expanded) && <>
+      {decisionFailed && <p role="alert">{t("chat.knowledgeConfirmationFailed")}</p>}
       {/* Header */}
       <div className="ask-wizard__header">
         <div className="ask-wizard__header-top">
@@ -284,8 +408,17 @@ export default function AskCard({
             {displayTitle && (
               <h3 className="ask-wizard__title">{displayTitle}</h3>
             )}
-            {description && (
-              <p className="ask-wizard__description">{description}</p>
+            {displayDescription && (
+              <p className="ask-wizard__description">{displayDescription}</p>
+            )}
+            {irreversible && <p role="alert"><strong>删除后不可恢复</strong></p>}
+            {previewEntries.length > 0 && (
+              <dl className="ask-wizard__knowledge-preview">
+                {previewEntries.map(([key, text]) => <div key={key}>
+                  <dt>{t(`chat.knowledgePreviewLabels.${key}`, { defaultValue: key.replaceAll("_", " ") })}</dt>
+                  <dd>{text}</dd>
+                </div>)}
+              </dl>
             )}
           </div>
           <div className="ask-wizard__meta">
@@ -351,6 +484,11 @@ export default function AskCard({
                 value={currentAns.type === "single" ? currentAns.value : null}
                 onChange={(e) => {
                   const chosen = e.target.value as string;
+                  const activatesAttachment = currentQ.attachment?.when_choice === chosen;
+                  if (!activatesAttachment && attachmentFiles[currentIndex]?.length) {
+                    attachmentRefs.current[currentIndex]?.clear();
+                    setAttachmentFiles((previous) => ({ ...previous, [currentIndex]: [] }));
+                  }
                   updateAnswer(
                     currentIndex,
                     {
@@ -361,7 +499,7 @@ export default function AskCard({
                           ? currentAns.otherText
                           : "",
                     },
-                    chosen !== otherOption,
+                    chosen !== otherOption && !activatesAttachment,
                   );
                 }}
                 disabled={isReadOnly}
@@ -394,6 +532,46 @@ export default function AskCard({
                     className="ask-wizard__other-input"
                   />
                 )}
+              {attachmentIsActive(currentQ, currentAns) && currentQ.attachment && (
+                <div className="ask-wizard__attachment">
+                  <ImageUpload
+                    ref={(instance) => { attachmentRefs.current[currentIndex] = instance; }}
+                    max={currentQ.attachment.max_files === -1 ? Infinity : (currentQ.attachment.max_files ?? 1)}
+                    listNum={0}
+                    types={currentQ.attachment.accept}
+                    disabled={isReadOnly}
+                    updateFiles={(files) => setAttachmentFiles((previous) => ({
+                      ...previous,
+                      [currentIndex]: files as AskAttachmentFile[],
+                    }))}
+                    icon={(
+                      <Button icon={<UploadOutlined />} disabled={isReadOnly}>
+                        {t("chat.askCardUploadFile")}
+                      </Button>
+                    )}
+                  />
+                  {(attachmentFiles[currentIndex] ?? []).map((file) => (
+                    <div className="ask-wizard__attachment-file" key={file.uid}>
+                      <span>{file.name}</span>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CloseOutlined />}
+                        disabled={isReadOnly}
+                        aria-label={t("chat.askCardRemoveFile")}
+                        onClick={() => attachmentRefs.current[currentIndex]?.removeFile(file.uid)}
+                      />
+                    </div>
+                  ))}
+                  {currentQ.attachment.required && !questionIsComplete(
+                    currentQ, currentAns, attachmentFiles[currentIndex] ?? [], otherOption,
+                  ) && (
+                    <span className="ask-wizard__attachment-hint">
+                      {t("chat.askCardUploadRequired")}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -488,11 +666,13 @@ export default function AskCard({
               <RightOutlined />
             </Button>
           ) : (
-            !disabled && !submitted && (
+            !disabled && !processed && (
               <Button
                 type="primary"
                 onClick={handleSubmit}
-                disabled={needsConfirmation || submitting}
+                disabled={needsConfirmation || submitting || questions.some((question, index) => !attachmentRequirementSatisfied(
+                  question, answers[index]!, attachmentFiles[index] ?? [],
+                ))}
                 loading={submitting}
                 className="ask-wizard__submit-btn"
               >
@@ -508,7 +688,7 @@ export default function AskCard({
             <button
               key={idx}
               type="button"
-              className={`ask-wizard__jump-item${idx === currentIndex ? " is-current" : ""}${isAnswered(answers[idx]!, otherOption) ? " is-done" : ""}`}
+              className={`ask-wizard__jump-item${idx === currentIndex ? " is-current" : ""}${questionIsComplete(questions[idx]!, answers[idx]!, attachmentFiles[idx] ?? [], otherOption) ? " is-done" : ""}`}
               onClick={() => goTo(idx)}
               aria-label={`Go to question ${idx + 1}`}
             >
@@ -521,6 +701,7 @@ export default function AskCard({
       {!isReadOnly && (
         <p className="ask-wizard__hint">{t("chat.askCardAutoSaveHint")}</p>
       )}
+      </>}
     </div>
   );
 }

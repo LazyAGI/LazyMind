@@ -208,6 +208,7 @@ class ToolConfigurationRuntime:
                     self.pending[service] = (action, 'Connection is ready. Use only tools present in this request.')
 
     def _refresh(self, service, response, *, action=None):
+        from lazyllm.tools.mcp.tool_adaptor import MCPToolNameError
         info = self.services[service]
         definition = None
         runtime = response.get('mcp_config')
@@ -216,6 +217,11 @@ class ToolConfigurationRuntime:
                 self._invalidate(service)
             try:
                 tools = self.loader(runtime) if runtime else []
+            except MCPToolNameError as exc:
+                info['status'] = 'naming_error'
+                if action is None or response.get('pending_delivery'):
+                    self.pending[service] = (action, f'MCP tool naming error: {exc}')
+                return False
             except Exception:
                 tools = []
             if not tools:

@@ -42,6 +42,9 @@ class ChatRuntimeOptions(BaseModel):
     priority: Optional[int] = None
     environment_context: Optional[Dict[str, Any]] = None
     llm_config: Optional[Dict[str, Any]] = None
+    model_fallback_current_id: str = ''
+    model_fallback_candidates: List[Dict[str, Any]] = Field(default_factory=list, repr=False)
+    model_fallback_initial_switch: Optional[Dict[str, Any]] = Field(default=None, repr=False)
     ocr_config: Optional[Dict[str, Any]] = None
     tool_config: Optional[Dict[str, Union[str, List[str]]]] = None
     mcp_config: Optional[List[Dict[str, Any]]] = None
@@ -64,7 +67,7 @@ class ChatPersonalizationOptions(BaseModel):
 
 
 class ChatAgentOptions(BaseModel):
-    document_directories_enabled: bool = True
+    document_directories_enabled: bool = False
     document_directories_generation: int = 0
     enable_tool_retrieval: bool = False
     disabled_tools: Optional[List[str]] = None

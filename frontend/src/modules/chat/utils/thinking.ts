@@ -130,6 +130,14 @@ export function splitThinkingContent(
   };
 }
 
+export function splitModelOutputContent(rawText?: string, rawReasoningContent?: string): ThinkingSplitResult {
+  const split = splitThinkingContent(rawText);
+  return {
+    content: split.content,
+    reasoning_content: [rawReasoningContent?.trim(), split.reasoning_content.trim()].filter(Boolean).join("\n\n"),
+  };
+}
+
 /**
  * Normalize reasoning_content for display in MarkdownViewer.
  *

@@ -1,0 +1,18 @@
+package main
+import("os";"path/filepath";"testing";"time";"net/http/httptest")
+func TestReportHoistedMetadata(t *testing.T){
+ root:=t.TempDir(); nm:=filepath.Join(root,"node_modules"); os.MkdirAll(filepath.Join(nm,"vite","bin"),0755); os.MkdirAll(filepath.Join(nm,".bin"),0755)
+ os.WriteFile(filepath.Join(nm,"vite","bin","vite.js"),[]byte(""),0644);os.WriteFile(frontendToolPath(nm,"vite"),[]byte(""),0755)
+ os.WriteFile(filepath.Join(nm,".modules.yaml"),[]byte("nodeLinker: hoisted\n"),0644)
+ ready,reason,err:=frontendNodeModulesReady(RuntimePaths{FrontendNodeModules:nm},root)
+ if err!=nil||ready{t.Fatalf("expected metadata rejection, got %v %q %v",ready,reason,err)};t.Log(reason)
+}
+func TestReportSQLiteActiveAndIdleTTL(t *testing.T){
+ s,e:=newSQLiteHTTPServer(sqliteTestToken,map[string]string{"core":filepath.Join(t.TempDir(),"db")},500*time.Millisecond);if e!=nil{t.Fatal(e)};defer s.Close()
+ h:=httptest.NewServer(s.Handler());defer h.Close()
+ tx:=postSQLiteTestRequest(t,h.URL,"/v1/begin",sqliteRequest{DB:"core"})
+ ticker:=time.NewTicker(100*time.Millisecond);defer ticker.Stop()
+ for i:=0;i<8;i++{<-ticker.C;postSQLiteTestRequest(t,h.URL,"/v1/query",sqliteRequest{DB:"core",TxID:tx.TxID,SQL:"SELECT 1"})}
+ postSQLiteTestRequest(t,h.URL,"/v1/commit",sqliteRequest{DB:"core",TxID:tx.TxID})
+ t.Log("active transaction survived 800ms with 500ms idle TTL")
+}

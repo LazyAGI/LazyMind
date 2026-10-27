@@ -102,11 +102,19 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 115 {
-		t.Fatalf("v0_3 dev migration count=%d, want 115", len(v03.Dev))
+	if len(v03.Dev) != 125 {
+		t.Fatalf("v0_3 dev migration count=%d, want 125", len(v03.Dev))
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20261021105921) {
 		t.Fatal("v0_3 dev migrations are missing paper library persistence")
+	}
+	if !containsMigrationFileVersion(v03.Dev, 20261023020205) {
+		t.Fatal("v0_3 dev migrations are missing the document directories default")
+	}
+	for _, version := range []uint64{20261020034257, 20261020130000} {
+		if !containsMigrationFileVersion(v03.Dev, version) {
+			t.Fatalf("v0_3 dev migrations are missing knowledge resource migration %d", version)
+		}
 	}
 	if !containsMigrationFileVersion(v03.Dev, 20261016034717) {
 		t.Fatal("v0_3 dev migrations are missing task execution timing")

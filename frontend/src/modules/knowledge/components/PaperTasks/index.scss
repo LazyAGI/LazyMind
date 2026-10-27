@@ -1,0 +1,47 @@
+.paper-expansion-result-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+
+  .ant-typography { flex: 1; min-width: 0; margin: 0; }
+  .ant-tag { flex: none; margin: 0; padding: 3px 10px; font-size: 13px; font-weight: 600; }
+}
+
+.paper-expansion-result-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 0 12px;
+}
+
+.paper-expansion-result-selection {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+
+  > span + span { color: var(--color-text-tertiary); }
+}
+
+.paper-expansion-result-table {
+  .ant-checkbox-wrapper { opacity: 0; }
+  .ant-table-row:hover .ant-checkbox-wrapper,
+  .ant-table-row:focus-within .ant-checkbox-wrapper,
+  .ant-table-row-selected .ant-checkbox-wrapper,
+  .ant-table-thead:hover .ant-checkbox-wrapper,
+  .ant-table-thead:focus-within .ant-checkbox-wrapper,
+  &.has-selection .ant-table-thead .ant-checkbox-wrapper { opacity: 1; }
+}
+
+@media (hover: none) {
+  .paper-expansion-result-table .ant-checkbox-wrapper { opacity: 1; }
+}
+.paper-task-launch-selection {
+  margin-top: 12px;
+  .ant-typography { margin-bottom: 0; }
+  .ant-typography + .ant-typography { margin-top: 4px; font-size: 12px; }
+}

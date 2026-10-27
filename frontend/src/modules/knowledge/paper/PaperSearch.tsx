@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ChangeEvent } from "react";
+import { useEffect, useRef, type ChangeEvent, type KeyboardEvent } from "react";
 import { Button, Input, type InputRef } from "antd";
 import { CloseOutlined, SearchOutlined } from "@ant-design/icons";
 
@@ -33,7 +33,7 @@ export default function PaperSearch({ open, value, onOpenChange, onChange }: Pro
       onKeyDown={(event) => { if (event.key === "Escape" && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.stopPropagation(); close(); } }}>
       <Input ref={input} aria-label="搜索文献" value={value} allowClear prefix={<SearchOutlined />}
         placeholder="题名、作者、DOI 或 arXiv" onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
-        onPressEnter={(event) => { if (!event.nativeEvent.isComposing && event.keyCode !== 229) close(); }} />
+        onPressEnter={(event: KeyboardEvent<HTMLInputElement>) => { if (!event.nativeEvent.isComposing && event.keyCode !== 229) close(); }} />
       <Button type="text" aria-label="收起搜索" icon={<CloseOutlined />} onClick={close} />
     </div> : <Button ref={trigger} type="text" className={`paper-library-tool ${value ? "is-active" : ""}`}
       icon={<SearchOutlined />} aria-label="搜索" aria-expanded={false} onClick={() => onOpenChange(true)}>

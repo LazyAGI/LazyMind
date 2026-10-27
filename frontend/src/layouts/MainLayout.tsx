@@ -143,6 +143,10 @@ export default function MainLayout() {
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
   const notificationUserKey = JSON.stringify([userInfo?.userId || userInfo?.username || '', userInfo?.tenantId || userInfo?.tenant_id || userInfo?.tenantKey || userInfo?.tenant_key || '']);
+  const datasetUserKey = JSON.stringify([
+    userInfo?.userId || userInfo?.username || '',
+    userInfo?.tenantId || userInfo?.tenant_id || userInfo?.tenantKey || userInfo?.tenant_key || '',
+  ]);
   const [directoryPreference, setDirectoryPreference] = useState<{ user: string; enabled: boolean } | null>(null);
   const directoryUser = userInfo?.userId || userInfo?.username || "";
   const directoriesEnabled = isLoggedIn && directoryPreference?.user === directoryUser ? directoryPreference.enabled : null;
@@ -154,7 +158,7 @@ export default function MainLayout() {
       const request = ++sequence;
       try {
         const prefs = await fetchUserUiPreferences({ silentError: true } as never);
-        if (!disposed && request === sequence) setDirectoryPreference({ user: directoryUser, enabled: prefs.document_directories_enabled ?? true });
+        if (!disposed && request === sequence) setDirectoryPreference({ user: directoryUser, enabled: prefs.document_directories_enabled ?? false });
       } catch { /* Keep the feature unavailable until preferences can be read. */ }
     };
     const changed = (event: Event) => {
@@ -223,14 +227,15 @@ export default function MainLayout() {
     matchPath("/memory-management/workflows/published/:workflowRef", pathname) ||
     matchPath("/memory-management/workflows/cloud/:resourceId", pathname),
   );
-  const knowledgeDatasetId = matchPath("/lib/knowledge/detail/:id", pathname)?.params.id;
-  const currentKnowledgeDataset = useDatasetPermissionStore((state) => state.currentDataset);
-  const libraryKind = currentKnowledgeDataset?.dataset_id === knowledgeDatasetId
-    ? currentKnowledgeDataset?.library_kind : undefined;
-  const isPaperLibraryDetail = Boolean(
-    matchPath("/lib/knowledge/paper-preview", pathname) || isPaperLibrary(knowledgeDatasetId, libraryKind),
+  const knowledgeDatasetId = matchPath("/lib/knowledge/detail/:id", pathname)?.params.id
+    || matchPath("/lib/knowledge/knowledge/:knowledgeBaseId/:knowledgeId", pathname)?.params.knowledgeBaseId;
+  const { currentDataset: currentKnowledgeDataset, requestedDatasetId, datasetLoading, datasetError, loadDataset, clearDataset } = useDatasetPermissionStore();
+  const datasetOwner = useRef(datasetUserKey);
+  const knowledgeDatasetReady = datasetOwner.current === datasetUserKey && currentKnowledgeDataset?.dataset_id === knowledgeDatasetId;
+  const isPaperPage = Boolean(
+    knowledgeDatasetReady && isPaperLibrary(currentKnowledgeDataset?.scene),
   );
-  const startsWithCompactSidebar = isWorkflowDetail || isPaperLibraryDetail;
+  const startsWithCompactSidebar = isWorkflowDetail || isPaperPage;
   const defaultSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
   const [sidebarSize, setSidebarSize] = useState({
     pathname,
@@ -383,6 +388,19 @@ export default function MainLayout() {
     checkFailed: agreementCheckFailed,
     retryCheck: retryAgreementCheck,
   } = useUserAgreementConsentGate(isLoggedIn);
+
+  useEffect(() => {
+    if (datasetOwner.current !== datasetUserKey) {
+      datasetOwner.current = datasetUserKey;
+      clearDataset();
+    }
+    if (!isLoggedIn || !knowledgeDatasetId) {
+      clearDataset();
+      return;
+    }
+    if (localSessionGate.loading || localSessionGate.error || agreementLoading || agreementCheckFailed) return;
+    void loadDataset(knowledgeDatasetId).catch(() => {});
+  }, [knowledgeDatasetId, datasetUserKey, isLoggedIn, localSessionGate.loading, localSessionGate.error, agreementLoading, agreementCheckFailed, loadDataset, clearDataset]);
 
   useEffect(() => {
     if (!localSessionGate.enabled) {
@@ -944,13 +962,24 @@ export default function MainLayout() {
     );
   }
 
+  if (knowledgeDatasetId && !knowledgeDatasetReady) {
+    const error = requestedDatasetId === knowledgeDatasetId ? datasetError : '';
+    return <div className="local-session-gate" role="status">
+      <div className="local-session-panel">
+        {(datasetLoading || !error) && <Spin />}
+        <div className="local-session-message">{error ? t('layout.knowledgeLoadFailed') : t('layout.loadingKnowledge')}</div>
+        {error && <Button type="primary" onClick={() => void loadDataset(knowledgeDatasetId, true).catch(() => {})}>{t('common.retry')}</Button>}
+      </div>
+    </div>;
+  }
+
   return (
     <Layout hasSider className="main-layout">
       <Sider
         id="main-navigation"
         width={sidebarWidth}
         trigger={null}
-        className={`sider-bar-style${isMenuCollapsed ? " is-collapsed" : ""}`}
+        className={`sider-bar-style${isMenuCollapsed ? " is-collapsed" : ""}${!sidebarRouteChanged && sidebarSize.manuallyResized ? " is-manually-resized" : ""}`}
       >
         <div className="sider-inner">
           <div className="sider-brand-row">

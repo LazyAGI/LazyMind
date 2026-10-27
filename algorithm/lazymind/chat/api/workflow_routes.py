@@ -124,6 +124,7 @@ def editable_pptx_enabled() -> bool:
 class TaskCancelRequest(BaseModel):
     task_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    history_id: Optional[str] = None
 
 
 class TaskCancelResponse(BaseModel):
@@ -487,12 +488,13 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     - task_id: direct task/session ID (original SubAgent path)
     - conversation_id: looks up the active chat session from _active_sessions
     """
-    from lazymind.chat.service.chat_service import _active_sessions
+    from lazymind.chat.service.chat_service import _active_sessions, _active_turn_sessions
     from lazymind.chat.engine.agent_runtime.cancellation import request_cancel
     try:
         sid: Optional[str] = None
         if req.conversation_id:
-            sid = _active_sessions.get(req.conversation_id)
+            sid = (_active_turn_sessions.get((req.conversation_id, req.history_id))
+                   if req.history_id else _active_sessions.get(req.conversation_id))
         elif req.task_id:
             sid = req.task_id
 
@@ -541,8 +543,6 @@ async def export_ppt_from_html(req: PptExportRequest):
     pages = [page for page in (req.pages or []) if (page.html or '').strip()]
     if not pages:
         raise HTTPException(status_code=400, detail='pages with html are required')
-    if len(pages) > 30:
-        raise HTTPException(status_code=400, detail='too many pages (max 30)')
 
     def sanitize_html(raw: str) -> str:
         value = (raw or '').strip()

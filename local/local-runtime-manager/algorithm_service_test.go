@@ -2,12 +2,60 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
 )
+
+func TestAlgorithmPreparePythonKeepsExistingVenvAfterInstallFailure(t *testing.T) {
+	installFakeUVOnPath(t)
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{
+		"LAZYLLM_VERSION":            "1.4.0\n",
+		"algorithm/requirements.txt": "requests\n",
+	} {
+		path := filepath.Join(repo, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Algorithm.RAGDisabled = true
+	if err := paths.EnsureAllDirs(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(paths.AlgorithmPython), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.AlgorithmPython, []byte("existing python"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{t: t, handlers: []func(Command) (CommandResult, error){
+		func(Command) (CommandResult, error) { return CommandResult{}, errors.New("installer failed") },
+	}}
+	err = NewAlgorithmServiceManager(runner).preparePython(context.Background(), cfg, paths, false)
+	if err == nil {
+		t.Fatal("expected install failure")
+	}
+	runner.assertCommandCount(1)
+	data, err := os.ReadFile(paths.AlgorithmPython)
+	if err != nil || string(data) != "existing python" {
+		t.Fatalf("existing python changed: %q, %v", data, err)
+	}
+}
 
 func TestLazyLLMVersionUsesRepositoryPin(t *testing.T) {
 	t.Setenv("LAZYMIND_LAZYLLM_VERSION", "")
@@ -247,6 +295,7 @@ func TestAlgorithmServiceEnvDoesNotForceEditablePPT(t *testing.T) {
 }
 
 func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "false")
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfig("desktop", repo)
@@ -276,6 +325,7 @@ func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
 }
 
 func TestDesktopAlgorithmRegisterPolicyHonorsExplicitOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "false")
 	cfg := RuntimeConfig{Profile: "desktop"}
 	paths := RuntimePaths{StateDir: t.TempDir()}
 	t.Setenv(desktopAppVersionEnvVar, "1.2.3")
@@ -287,6 +337,7 @@ func TestDesktopAlgorithmRegisterPolicyHonorsExplicitOverride(t *testing.T) {
 }
 
 func TestDesktopAlgorithmRegisterPolicyWithoutVersionDefaultsToUpdate(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "false")
 	cfg := RuntimeConfig{Profile: "desktop"}
 	paths := RuntimePaths{StateDir: t.TempDir()}
 	t.Setenv(desktopAppVersionEnvVar, "")
@@ -298,12 +349,53 @@ func TestDesktopAlgorithmRegisterPolicyWithoutVersionDefaultsToUpdate(t *testing
 }
 
 func TestLocalAlgorithmRegisterPolicyDefaultsToUpdate(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "false")
 	cfg := RuntimeConfig{Profile: "local"}
 	paths := RuntimePaths{StateDir: t.TempDir()}
 	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "")
 
 	if got := algorithmRegisterPolicy(cfg, paths); got != "update" {
 		t.Fatalf("local registration policy = %q, want update", got)
+	}
+}
+
+func TestForceAlgorithmRegistrationReachesServiceEnvironment(t *testing.T) {
+	for _, profile := range []string{"desktop", "local"} {
+		t.Run(profile, func(t *testing.T) {
+			repo := t.TempDir()
+			writeComposeFixture(t, repo)
+			cfg, paths, err := NewRuntimeConfig(profile, repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "true")
+			t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "none")
+			for _, service := range []string{algoProcessName, processorServerProcessName, processorWorkerProcessName} {
+				assertEnvContains(t, algorithmServiceEnv(cfg, paths, service), "LAZYLLM_ALGO_REGISTER_POLICY=force")
+			}
+		})
+	}
+}
+
+func TestDesktopAlgorithmRegistrationDefaultsToForceDespiteOldOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "")
+	t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", "none")
+	if got := algorithmRegisterPolicy(RuntimeConfig{Profile: "desktop"}, RuntimePaths{}); got != "force" {
+		t.Fatalf("policy = %q, want force", got)
+	}
+}
+
+func TestLocalAlgorithmRegistrationDefaultsWithoutForceOverride(t *testing.T) {
+	t.Setenv("LAZYMIND_FORCE_ALGO_REGISTER", "")
+	for _, policy := range []string{"", "none", "update"} {
+		t.Setenv("LAZYLLM_ALGO_REGISTER_POLICY", policy)
+		want := policy
+		if want == "" {
+			want = "update"
+		}
+		if got := algorithmRegisterPolicy(RuntimeConfig{Profile: "local"}, RuntimePaths{}); got != want {
+			t.Fatalf("policy = %q, want %q", got, want)
+		}
 	}
 }
 

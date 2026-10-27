@@ -11,7 +11,8 @@ vi.mock("@/components/request", () => ({
   getLocalizedErrorMessage: (error: unknown) => error instanceof Error ? error.message : "request failed",
 }));
 const ensureDocumentParsed = vi.hoisted(() => vi.fn().mockResolvedValue({ status: "parsing" }));
-vi.mock("@/modules/knowledge/api/pdfArtifacts", () => ({ ensureDocumentParsed }));
+const retryDocumentParsed = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@/modules/knowledge/api/pdfArtifacts", () => ({ ensureDocumentParsed, retryDocumentParsed }));
 vi.mock("@/modules/chat/utils/request", () => ({
   CHAT_STREAM_URL: "/chat", CHAT_RESUME_STREAM_URL: "/resume", ChatServiceApi: vi.fn(),
 }));
@@ -47,6 +48,7 @@ beforeEach(() => {
   chatActions.sendMessage.mockClear();
   chatActions.prepareMessage.mockClear();
   ensureDocumentParsed.mockClear();
+  retryDocumentParsed.mockClear();
 });
 afterEach(() => {
   cleanup();
@@ -80,12 +82,29 @@ describe("document question context", () => {
     expect(screen.getByText("knowledge.pdfChatParsing")).toBeInTheDocument();
   });
 
-  it("shows a transient parsing failure with its reason outside chat history", async () => {
-    ensureDocumentParsed.mockRejectedValueOnce(new Error("Reader could not decode the PDF"));
+  it("shows a failed status with its reason without implicitly retrying", async () => {
+    ensureDocumentParsed.mockResolvedValueOnce({ status: "failed", error: { message: "Reader could not decode the PDF" } });
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="broken-pdf" fileName="broken.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText("knowledge.pdfChatParseFailed")).toBeInTheDocument();
     expect(screen.getByText("Reader could not decode the PDF")).toBeInTheDocument();
+    expect(ensureDocumentParsed).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "knowledge.pdfChatRetryParse" })).toBeInTheDocument();
+    expect(retryDocumentParsed).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "knowledge.pdfChatRetryParse" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(retryDocumentParsed).toHaveBeenCalledWith("dataset-a", "broken-pdf");
+    expect(screen.getByText("knowledge.pdfChatParsing")).toBeInTheDocument();
+    expect(screen.queryByText("Reader could not decode the PDF")).not.toBeInTheDocument();
+  });
+
+  it("does not turn a failed status lookup into parsing", async () => {
+    ensureDocumentParsed.mockRejectedValueOnce(new Error("unavailable"));
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="unknown-pdf" fileName="unknown.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("knowledge.pdfChatUnknown")).toBeInTheDocument();
+    expect(screen.queryByText("knowledge.pdfChatParsing")).not.toBeInTheDocument();
+    expect(retryDocumentParsed).not.toHaveBeenCalled();
   });
 
   it.each(["pdf", "txt", "md", "docx", "html", "xlsx", "pptx"])("submits %s questions scoped to the active document", (extension) => {

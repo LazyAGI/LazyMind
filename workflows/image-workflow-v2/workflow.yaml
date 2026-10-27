@@ -70,34 +70,34 @@ steps:
   - {id: review_pack, label: Review Final Pack}
 
 slots:
-  - {id: source_image, label: Uploaded Source Image, type: image, cardinality: single, external: true, required: false}
-  - {id: route_plan, label: Route Plan, type: json, cardinality: single}
-  - {id: material_images, label: Reference Materials, type: image, cardinality: list, ordered: true}
-  - {id: material_summary, label: Material Summary, type: text, cardinality: single}
-  - {id: ordinary_prompt, label: Ordinary Image Prompt, type: text, cardinality: single}
-  - {id: ordinary_output, label: Ordinary Image Output, type: image, cardinality: list, ordered: true}
-  - {id: authoritative_image, label: Authoritative Source Image, type: image, cardinality: single}
-  - {id: edit_contract, label: Local Edit Contract, type: json, cardinality: single}
-  - {id: edit_candidate, label: Local Edit Candidate, type: image, cardinality: single}
-  - {id: meme_brief_data, label: Meme Brief, type: json, cardinality: single}
-  - {id: preflight_report, label: Preflight Report, type: json, cardinality: single}
-  - {id: canonical_character_image, label: Canonical Character, type: image, cardinality: single}
-  - {id: character_identity_prompt, label: Character Identity Prompt, type: text, cardinality: single}
-  - {id: face_anchor_images, label: Eye and Mouth Anchor Images, type: image, cardinality: list, ordered: true}
-  - {id: face_anchor_grid, label: 2x2 Eye and Mouth Anchor Grid, type: image, cardinality: single}
-  - {id: state_specs, label: State Performance Propositions, type: json, cardinality: single}
-  - {id: best_performances, label: Best Performances, type: json, cardinality: single}
-  - {id: static_plan, label: Static Hero-Frame Plan, type: json, cardinality: single}
-  - {id: hero_no_text, label: Text-Free Hero Frames, type: image, cardinality: list, ordered: true}
-  - {id: static_final, label: Final Static Memes, type: image, cardinality: list, ordered: true}
-  - {id: dynamic_plan, label: Key-Image Dynamic Plan, type: json, cardinality: single}
-  - {id: master_keyframes, label: Key Images, type: image, cardinality: list, ordered: true}
-  - {id: canary_video, label: Video Canary, type: file, cardinality: single}
-  - {id: canary_state_id, label: Canary State, type: text, cardinality: single}
-  - {id: skip_remaining_dynamic, label: Skip Remaining Videos, type: json, cardinality: single}
-  - {id: remaining_videos, label: Remaining Videos, type: file, cardinality: list, ordered: true}
-  - {id: gif_output, label: Final Animated GIFs, type: image, cardinality: list, ordered: true}
-  - {id: pack_review, label: Final Pack Review, type: json, cardinality: single}
+  - {id: source_image, user_visible: false, label: Uploaded Source Image, type: image, cardinality: single, external: true, required: false}
+  - {id: route_plan, user_visible: false, label: Route Plan, type: json, cardinality: single}
+  - {id: material_images, user_visible: false, label: Reference Materials, type: image, cardinality: list, ordered: true}
+  - {id: material_summary, user_visible: false, label: Material Summary, type: text, cardinality: single}
+  - {id: ordinary_prompt, user_visible: false, label: Ordinary Image Prompt, type: text, cardinality: single}
+  - {id: ordinary_output, user_visible: true, label: Ordinary Image Output, type: image, cardinality: list, ordered: true}
+  - {id: authoritative_image, user_visible: false, label: Authoritative Source Image, type: image, cardinality: single}
+  - {id: edit_contract, user_visible: false, label: Local Edit Contract, type: json, cardinality: single}
+  - {id: edit_candidate, user_visible: true, label: Local Edit Candidate, type: image, cardinality: single}
+  - {id: meme_brief_data, user_visible: false, label: Meme Brief, type: json, cardinality: single}
+  - {id: preflight_report, user_visible: false, label: Preflight Report, type: json, cardinality: single}
+  - {id: canonical_character_image, user_visible: true, label: Canonical Character, type: image, cardinality: single}
+  - {id: character_identity_prompt, user_visible: false, label: Character Identity Prompt, type: text, cardinality: single}
+  - {id: face_anchor_images, user_visible: false, label: Eye and Mouth Anchor Images, type: image, cardinality: list, ordered: true}
+  - {id: face_anchor_grid, user_visible: false, label: 2x2 Eye and Mouth Anchor Grid, type: image, cardinality: single}
+  - {id: state_specs, user_visible: false, label: State Performance Propositions, type: json, cardinality: single}
+  - {id: best_performances, user_visible: false, label: Best Performances, type: json, cardinality: single}
+  - {id: static_plan, user_visible: false, label: Static Hero-Frame Plan, type: json, cardinality: single}
+  - {id: hero_no_text, user_visible: false, label: Text-Free Hero Frames, type: image, cardinality: list, ordered: true}
+  - {id: static_final, user_visible: true, label: Final Static Memes, type: image, cardinality: list, ordered: true}
+  - {id: dynamic_plan, user_visible: false, label: Key-Image Dynamic Plan, type: json, cardinality: single}
+  - {id: master_keyframes, user_visible: false, label: Key Images, type: image, cardinality: list, ordered: true}
+  - {id: canary_video, user_visible: false, label: Video Canary, type: file, cardinality: single}
+  - {id: canary_state_id, user_visible: false, label: Canary State, type: text, cardinality: single}
+  - {id: skip_remaining_dynamic, user_visible: false, label: Skip Remaining Videos, type: json, cardinality: single}
+  - {id: remaining_videos, user_visible: false, label: Remaining Videos, type: file, cardinality: list, ordered: true}
+  - {id: gif_output, user_visible: true, label: Final Animated GIFs, type: image, cardinality: list, ordered: true}
+  - {id: pack_review, user_visible: false, label: Final Pack Review, type: json, cardinality: single}
 
 ui:
   tabs:

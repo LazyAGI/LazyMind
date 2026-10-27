@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
+import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import { MailConfirmationReplayStore } from "./mailConfirmationReplay";
 import {
@@ -128,6 +129,25 @@ describe("mailDraftCardsReadOnly", () => {
 });
 
 describe("mergeAskPending", () => {
+  it("replaces question-specific metadata across ask IDs while retaining mail receipts", () => {
+    const previous = { ask_id: "old", title: "Delete", description: "Old target", title_i18n_key: "old.title",
+      knowledge_management: { confirmation_id: "old" }, knowledge_management_preview: { impact: "Delete" },
+      user_env_delete: { id: "env" }, env_input: { name: "SECRET" }, skill_ambiguity: { candidates: ["old"] },
+      questions: [{ text: "Old?", type: "boolean" }], mail_draft: { draft_id: "mail", status: "sent" } };
+    const incoming = { ask_id: "new", questions: [{ text: "Next?", type: "single", choices: ["Stop"] }] };
+    const merged = mergeAskPending(previous, incoming);
+    for (const key of ["title", "description", "title_i18n_key", "knowledge_management", "knowledge_management_preview", "user_env_delete", "env_input", "skill_ambiguity"]) {
+      expect(merged[key]).toBeUndefined();
+    }
+    expect(merged.questions).toEqual(incoming.questions);
+    expect(merged.mail_draft_only).toBe(false);
+    expect(merged.mail_drafts).toEqual([previous.mail_draft]);
+  });
+  it("keeps metadata for a partial update to the same question", () => {
+    const previous = { ask_id: "same", title: "Question", questions: [{ text: "When?", type: "text" }] };
+    expect(mergeAskPending(previous, { ask_id: "same", description: "Detail" })).toMatchObject(previous);
+  });
+
   it("keeps ordinary questions distinguishable when mail cards precede them", () => {
     const merged = mergeAskPending(
       { ask_id: "mail", mail_draft: { draft_id: "a", status: "sent" } },
@@ -435,6 +455,20 @@ describe("buildChatMessageListFromHistory", () => {
     expect(assistantMessage.ask_answered).toBe(true);
   });
 
+  it("restores public model switch records without changing the selected route", () => {
+    const records: ChatModelSwitchRecord[] = [{ event_id: "switch", switch_index: 1,
+      reason_code: "model_config_unavailable", context_compacted: false,
+      from_max_input_tokens: null, to_max_input_tokens: null,
+      from: { candidate_id: "own:a", source: "own", model_id: "a", provider_group_id: "" },
+      to: { candidate_id: "own:b", source: "own", model_id: "b", provider_group_id: "group" } }];
+    const route = { mode: "fixed", model_id: "b" };
+    const cursor = { run_id: "restored-run", call_index: 2, phase: "rollback" as const };
+    const list = buildChatMessageListFromHistory([{ id: "history", query: "task", result: "answer",
+      model_switches: records, model_route: route, model_output: cursor }] as any);
+    expect(list[1]).toMatchObject({ model_switches: records, model_route: route, model_output: cursor });
+    expect(buildChatMessageListFromHistory([{ id: "old", query: "old task", result: "answer" }])[1].model_switches).toBeUndefined();
+  });
+
   it("restores performance metrics onto the assistant message", () => {
     const metrics = {
       schema_version: 1,
@@ -464,6 +498,11 @@ describe("buildChatMessageListFromHistory", () => {
   });
 
   it("restores archived failure attempts before the latest answer", () => {
+    const switches: ChatModelSwitchRecord[] = [{ event_id: "failed-run-switch", switch_index: 1,
+      reason_code: "rate_limited", context_compacted: false,
+      from_max_input_tokens: null, to_max_input_tokens: null,
+      from: { candidate_id: "own:a", source: "own", model_id: "a", provider_group_id: "a" },
+      to: { candidate_id: "own:b", source: "own", model_id: "b", provider_group_id: "b" } }];
     const failedTerminal = {
       status: "failed",
       reason: "model_failure",
@@ -482,6 +521,7 @@ describe("buildChatMessageListFromHistory", () => {
             run_id: "run-failed-1",
             run_status: "failed",
             run_terminal: failedTerminal,
+            model_switches: switches,
             model_route: {
               mode: "auto",
               provider_name: "Fast",
@@ -501,6 +541,7 @@ describe("buildChatMessageListFromHistory", () => {
       original_history_id: "h1",
       delta: "partial answer",
       run_terminal: failedTerminal,
+      model_switches: switches,
       model_route: {
         mode: "auto",
         provider_name: "Fast",

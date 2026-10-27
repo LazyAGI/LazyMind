@@ -56,13 +56,13 @@ import {
 } from "@/modules/knowledge/utils/request";
 import { ALL_TAGS } from "@/modules/knowledge/constants/common";
 import {
-  Dataset,
+  Dataset as LegacyDataset,
 } from "@/api/generated/knowledge-client";
 import type { Dataset as CoreDataset } from "@/api/generated/core-client";
+type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment_count">;
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
-  effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
 import { isPaperLibrary } from "@/modules/knowledge/paper/store";
@@ -1316,7 +1316,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   if (data.dataset_id) openDetail(data.dataset_id);
                 }}
               >
-                <Tooltip title={name}><span>{name}{isPaperLibrary(data.dataset_id, data.library_kind) ? " · 论文集" : ""}</span></Tooltip>
+                <Tooltip title={name}><span>{name}{isPaperLibrary(data.scene) ? " · 论文集" : ""}</span></Tooltip>
               </Button>
               <Tooltip title={data.desc} placement="topLeft">
                 <span className="knowledge-list-description">{data.desc || "-"}</span>
@@ -1350,10 +1350,12 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       },
     },
     {
-      title: t("knowledge.documentCountLabel"),
+      title: t("knowledge.resourceCountLabel"),
       dataIndex: "document_count",
-      width: 88,
-      render: (count: number) => t("knowledge.documentCount", { count: count || 0 }),
+      width: 180,
+      render: (count: number, dataset: Dataset) => isPaperLibrary(dataset.scene)
+        ? t('knowledge.paperCollectionCount', { paperCount: dataset.paper_count ?? 0, pdfCount: dataset.pdf_attachment_count ?? 0 })
+        : t("knowledge.documentCount", { count: count || 0 }),
     },
     {
       title: t("knowledge.updateDate"),
@@ -1372,7 +1374,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           dataset={data}
           onEdit={() => createUpdateRef.current?.onOpen(data)}
           onAuthorize={runtimeFeatures.hideUserGroupSurfaces ? undefined : () => navigate(`/lib/knowledge/auth/${data.dataset_id}`)}
-          onExport={isPaperLibrary(data.dataset_id, data.library_kind) ? async (format) => {
+          onExport={isPaperLibrary(data.scene) ? async (format) => {
             try {
               const library = await loadPaperLibraryForExport(data.dataset_id || "");
               if (!library.papers.length) { message.info("这个论文库还没有可导出的文献"); return; }
@@ -1650,26 +1652,16 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     setLoading(true);
     try {
       if (data.dataset_id) {
-        const { processing_level: nextLevel, ...dataset } = data;
-        const current = dataSource.find(
-          (item) => item.dataset_id === data.dataset_id,
-        ) as (Dataset & { processing_level?: ProcessingLevel }) | undefined;
-        if (
-          nextLevel &&
-          nextLevel !== effectiveProcessingLevel(current?.processing_level)
-        ) {
-          await axiosInstance.patch(
-            `${BASE_URL}/api/core/datasets/${encodeURIComponent(data.dataset_id)}/processing-level`,
-            { processing_level: nextLevel },
-          );
-        }
+        const dataset = data;
         return KnowledgeBaseServiceApi()
           .datasetServiceUpdateDataset({
             dataset: data.dataset_id,
             dataset2: dataset,
           })
-          .then(() => {
-            message.success(t("knowledge.editSuccess"));
+          .then((response) => {
+            const errors = response.data.operation_result?.items?.flatMap(item => item.error ? [item.error.message] : []) || [];
+            if (errors.length) message.warning(`配置已保存，但后续同步失败：${errors.join("；")}`);
+            else message.success(t("knowledge.editSuccess"));
             void getLocalTags();
             getTableData();
           });

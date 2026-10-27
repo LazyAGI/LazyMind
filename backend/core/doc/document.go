@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -30,7 +31,6 @@ import (
 	"lazymind/core/staticstorage"
 	"lazymind/core/store"
 
-	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 )
 
@@ -43,9 +43,17 @@ var fuzzyPunctRe = regexp.MustCompile(`[._\-\s（）()]+`)
 // fuzzySearchMaxCandidates caps DB rows loaded for in-memory fuzzy scoring (avoids OOM).
 const fuzzySearchMaxCandidates = 5000
 
+// HasDatasetPermission applies the same dataset and cloud-source checks used by
+// document operations to features in other packages.
+func HasDatasetPermission(r *http.Request, datasetID, action string) bool {
+	_, _, ok := requireDatasetPermission(r, datasetID, action)
+	return ok
+}
+
 func requireDatasetPermission(r *http.Request, datasetID string, action string) (*orm.Dataset, string, bool) {
 	userID := strings.TrimSpace(store.UserID(r))
-	if userID == "" {
+	caller, err := resolveDatasetCatalogCallerFromRequest(r)
+	if userID == "" || err != nil {
 		return nil, userID, false
 	}
 	var ds orm.Dataset
@@ -54,10 +62,13 @@ func requireDatasetPermission(r *http.Request, datasetID string, action string) 
 		First(&ds).Error; err != nil {
 		return nil, userID, false
 	}
+	if resourceTenant(ds.TenantID) != resourceTenant(caller.TenantID) {
+		return &ds, userID, false
+	}
 	if !canAccessDataset(&ds, userID, action) {
 		return &ds, userID, false
 	}
-	if !datasetAllowedByScanSource(r, ds.ID, action) {
+	if !datasetAllowedByScanSourceForCaller(r.Context(), caller, ds.ID, action) {
 		return &ds, userID, false
 	}
 	return &ds, userID, true
@@ -761,6 +772,26 @@ func CreateDocument(w http.ResponseWriter, r *http.Request) {
 		display = docID
 	}
 	documentType := resolveDocumentType(body.Type, display)
+	if documentType == "FOLDER" {
+		service, op, err := resourcePageService(r)
+		if err != nil {
+			replyResourceError(w, err)
+			return
+		}
+		result, err := service.CreateFolders(r.Context(), op, CreateFoldersRequest{KnowledgeBaseID: datasetID, Folders: []string{display}, ParentID: strings.TrimSpace(body.PID), PreferredRootID: docID})
+		if err != nil {
+			replyResourceError(w, err)
+			return
+		}
+		row, err := loadResourcePageDocument(r, datasetID, result.Items[0].ResourceRef.ID())
+		if err != nil {
+			replyResourceError(w, err)
+			return
+		}
+		common.ReplyJSON(w, docFromRow(mergedDocRow{DocID: row.ID, DatasetID: row.DatasetID, DisplayName: row.DisplayName, Type: row.DocumentType, PID: row.PID, Tags: row.Tags, FileID: row.FileID, Creator: row.CreateUserName, BaseCreatedAt: row.CreatedAt, BaseUpdatedAt: row.UpdatedAt}))
+		return
+	}
+
 	pid := strings.TrimSpace(body.PID)
 	fileID := strings.TrimSpace(body.FileID)
 	tagsBytes, _ := json.Marshal(body.Tags)
@@ -828,155 +859,117 @@ func GetDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	doc := docFromRow(rr)
+	if !strings.EqualFold(doc.Type, "FOLDER") {
+		service, e := NewDocumentService(DocumentServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
+		if e != nil {
+			common.ReplyErr(w, "document status unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		caller, e := resolveDatasetCatalogCallerFromRequest(r)
+		if e != nil {
+			common.ReplyErr(w, "permission denied", http.StatusForbidden)
+			return
+		}
+		metadata, e := service.GetDocumentMetadata(r.Context(), DocumentGetRequest{UserID: caller.UserID, DatasetID: datasetID, DocumentID: docID, Caller: caller})
+		if e != nil {
+			common.ReplyErr(w, "document status unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		doc.ProcessingStatus = DocumentProcessingStatus(metadata.ProcessingLevel, metadata.ProcessingState)
+		doc.ProcessingError = metadata.ProcessingError
+	}
 	setDocumentURI(&doc)
 	common.ReplyJSON(w, doc)
 }
 func DeleteDocument(w http.ResponseWriter, r *http.Request) {
-	datasetID := datasetIDFromPath(r)
-	docID := documentIDFromPath(r)
-	userID := store.UserID(r)
-	if datasetID == "" || docID == "" {
-		common.ReplyErr(w, "missing dataset or document", http.StatusBadRequest)
-		return
-	}
-	if userID == "" {
-		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
-		return
-	}
-	ds, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetWrite)
-	if !ok {
-		replyDatasetForbidden(w)
-		return
-	}
-	var row orm.Document
-	if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", docID, datasetID).Take(&row).Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "document not found", err), http.StatusNotFound)
-		return
-	}
-	rowsToDelete, err := expandDocumentsForDelete(r.Context(), datasetID, []orm.Document{row})
+	datasetID, docID := datasetIDFromPath(r), documentIDFromPath(r)
+	service, op, err := resourcePageService(r)
 	if err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query documents failed", err), http.StatusInternalServerError)
+		replyResourceError(w, err)
 		return
 	}
-	if err := deleteExternalDocs(r, datasetID, rowsToDelete); err != nil {
-		common.ReplyErr(w, "external delete failed", http.StatusBadGateway)
+	row, err := loadResourcePageDocument(r, datasetID, docID)
+	if err != nil {
+		replyResourceError(w, err)
 		return
 	}
-	// Delete uploaded source files and clean up residual files in the shared folder.
-	if err := deleteUploadedFiles(r.Context(), ds.TenantID, datasetID, rowsToDelete); err != nil {
-		log.Logger.Error().Err(err).Str("handler", "DeleteDocument").Msg("failed to delete uploaded files")
-	}
-	now := time.Now().UTC()
-	docIDs := documentIDsFromRows(rowsToDelete)
-	if err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&orm.Document{}).
-			Where("id IN ? AND dataset_id = ? AND deleted_at IS NULL", docIDs, datasetID).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&orm.Task{}).
-			Where("doc_id IN ? AND dataset_id = ? AND deleted_at IS NULL", docIDs, datasetID).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		common.ReplyErr(w, "delete document failed", http.StatusInternalServerError)
+	if _, err = service.Delete(r.Context(), op, DeleteResourcesRequest{Targets: []ResourceRef{resourceRef(row)}}); err != nil {
+		replyResourceError(w, err)
 		return
 	}
-	recalcAffectedFolderStats(r.Context(), datasetID, row.PID)
 	w.WriteHeader(http.StatusOK)
 }
-func UpdateDocument(w http.ResponseWriter, r *http.Request) {
-	datasetID := datasetIDFromPath(r)
-	docID := documentIDFromPath(r)
-	userID := store.UserID(r)
-	userName := store.UserName(r)
-	if datasetID == "" || docID == "" {
-		common.ReplyErr(w, "missing dataset or document", http.StatusBadRequest)
-		return
+func loadResourcePageDocument(r *http.Request, datasetID, docID string) (orm.Document, error) {
+	var row orm.Document
+	err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", docID, datasetID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return row, resourceErr("NOT_FOUND", "document not found")
 	}
-	if userID == "" {
-		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
-		return
-	}
-	if _, _, ok := requireDatasetPermission(r, datasetID, acl.PermissionDatasetWrite); !ok {
-		replyDatasetForbidden(w)
-		return
-	}
-	var body Doc
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
-		return
-	}
-	updates := map[string]any{}
-	if s := strings.TrimSpace(body.DisplayName); s != "" {
-		updates["display_name"] = s
-	}
-	if s := strings.TrimSpace(body.PID); s != "" {
-		updates["p_id"] = s
-	}
-	if body.Tags != nil {
-		b, _ := json.Marshal(body.Tags)
-		updates["tags"] = b
-	}
-	if s := strings.TrimSpace(body.FileID); s != "" {
-		updates["file_id"] = s
-	}
-	if s := strings.TrimSpace(body.Type); s != "" {
-		updates["document_type"] = s
-	}
-	now := time.Now().UTC()
-	updates["updated_at"] = now
+	return row, err
+}
 
-	db := store.DB().WithContext(r.Context())
-	var cd orm.Document
-	err := db.Where("id = ? AND dataset_id = ?", docID, datasetID).Take(&cd).Error
+func UpdateDocument(w http.ResponseWriter, r *http.Request) {
+	datasetID, docID := datasetIDFromPath(r), documentIDFromPath(r)
+	service, op, err := resourcePageService(r)
 	if err != nil {
-		row := orm.Document{
-			ID:           docID,
-			LazyllmDocID: "",
-			DatasetID:    datasetID,
-			DisplayName:  strings.TrimSpace(body.DisplayName),
-			DocumentType: resolveDocumentType(body.Type, body.DisplayName),
-			PID:          strings.TrimSpace(body.PID),
-			FileID:       strings.TrimSpace(body.FileID),
-			Tags:         func() []byte { b, _ := json.Marshal(body.Tags); return b }(),
-			Ext:          json.RawMessage(`{}`),
-			BaseModel: orm.BaseModel{
-				CreateUserID:   userID,
-				CreateUserName: userName,
-				CreatedAt:      now,
-				UpdatedAt:      now,
-			},
-		}
-		if err := db.Create(&row).Error; err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "update document failed", err), http.StatusInternalServerError)
+		replyResourceError(w, err)
+		return
+	}
+	var body struct {
+		DisplayName *string   `json:"display_name"`
+		PID         *string   `json:"p_id"`
+		Tags        *[]string `json:"tags"`
+		Type        *string   `json:"type"`
+		FileID      *string   `json:"file_id"`
+	}
+	if err = json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	row, err := loadResourcePageDocument(r, datasetID, docID)
+	if err != nil {
+		replyResourceError(w, err)
+		return
+	}
+	ref := resourceRef(row)
+	if body.PID == nil && (body.DisplayName != nil || body.Tags != nil) {
+		if _, err = service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: []ResourceMetadataItem{{Target: ref, Changes: ResourceMetadataChanges{Name: body.DisplayName, Tags: body.Tags}}}}); err != nil {
+			replyResourceError(w, err)
 			return
 		}
-		common.ReplyJSON(w, docFromRow(mergedDocRow{
-			DocID:         docID,
-			DatasetID:     datasetID,
-			DisplayName:   row.DisplayName,
-			Type:          row.DocumentType,
-			PID:           row.PID,
-			Tags:          row.Tags,
-			FileID:        row.FileID,
-			Creator:       userName,
-			BaseCreatedAt: now,
-			BaseUpdatedAt: now,
-		}))
-		return
 	}
-	if err := db.Model(&orm.Document{}).Where("id = ? AND deleted_at IS NULL", cd.ID).Updates(updates).Error; err != nil {
-		common.ReplyErr(w, fmt.Sprintf("%s: %v", "update document failed", err), http.StatusInternalServerError)
-		return
+	if body.PID != nil {
+		destination := ResourceRef{Kind: "knowledge_base", KnowledgeBaseID: datasetID}
+		if *body.PID != "" {
+			destination.Kind = "folder"
+			destination.FolderID = *body.PID
+		}
+		if _, err = service.Move(r.Context(), op, MoveResourcesRequest{Sources: []ResourceRef{ref}, Destination: destination, PageMetadata: &ResourceMetadataChanges{Name: body.DisplayName, Tags: body.Tags}}); err != nil {
+			replyResourceError(w, err)
+			return
+		}
 	}
-	// return refreshed
-	r2 := r.Clone(r.Context())
-	mux.Vars(r2)["document"] = docID
-	GetDocument(w, r2)
+	// The legacy page contract allows internal type/file metadata, outside MCP's field allowlist.
+	if body.Type != nil || body.FileID != nil {
+		if _, err = ResolveResourceDataset(r.Context(), store.DB(), op.Caller, datasetID, acl.PermissionDatasetWrite); err != nil {
+			replyResourceError(w, err)
+			return
+		}
+		updates := map[string]any{"updated_at": time.Now().UTC(), "resource_version": gorm.Expr("resource_version + 1")}
+		if body.Type != nil {
+			updates["document_type"] = *body.Type
+		}
+		if body.FileID != nil {
+			updates["file_id"] = *body.FileID
+		}
+		if err = store.DB().WithContext(r.Context()).Model(&orm.Document{}).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", docID, datasetID).Updates(updates).Error; err != nil {
+			replyResourceError(w, err)
+			return
+		}
+	}
+	GetDocument(w, r)
 }
+
 func SearchDocuments(w http.ResponseWriter, r *http.Request) {
 	datasetID := datasetIDFromPath(r)
 	if datasetID == "" {
@@ -1206,86 +1199,44 @@ func BatchUpdateDocumentTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetIDs := map[string]struct{}{}
+	service, op, err := resourcePageService(r)
+	if err != nil {
+		replyResourceError(w, err)
+		return
+	}
+	tagMode := "append"
+	if mode == "OVERWRITE" {
+		tagMode = "replace"
+	}
+	items := []ResourceMetadataItem{}
 	for _, id := range req.DocumentIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			targetIDs[id] = struct{}{}
+		if strings.TrimSpace(id) != "" {
+			items = append(items, ResourceMetadataItem{Target: ResourceRef{Kind: "document", KnowledgeBaseID: datasetID, DocumentID: id}, Changes: ResourceMetadataChanges{Tags: &req.Tags, TagMode: tagMode}})
 		}
 	}
-	for _, folderID := range req.FolderIDs {
-		folderID = strings.TrimSpace(folderID)
-		if folderID == "" {
-			continue
-		}
-		subtree, err := loadDocumentSubtree(r.Context(), datasetID, folderID)
-		if err != nil {
-			common.ReplyErr(w, fmt.Sprintf("%s: %v", "folder not found", err), http.StatusBadRequest)
-			return
-		}
-		for _, row := range subtree {
-			if isFolderLikeDocument(row) {
-				continue
-			}
-			targetIDs[strings.TrimSpace(row.ID)] = struct{}{}
+	for _, id := range req.FolderIDs {
+		if strings.TrimSpace(id) != "" {
+			items = append(items, ResourceMetadataItem{Target: ResourceRef{Kind: "folder", KnowledgeBaseID: datasetID, FolderID: id}, Changes: ResourceMetadataChanges{Tags: &req.Tags, TagMode: tagMode, Recursive: true}})
 		}
 	}
-
-	if len(targetIDs) == 0 {
-		common.ReplyJSON(w, BatchUpdateDocumentTagsResponse{AffectedFiles: 0, TruncatedDocs: 0})
+	if len(items) == 0 {
+		common.ReplyJSON(w, BatchUpdateDocumentTagsResponse{})
 		return
 	}
-
-	ids := make([]string, 0, len(targetIDs))
-	for id := range targetIDs {
-		ids = append(ids, id)
-	}
-
-	var docs []orm.Document
-	if err := store.DB().WithContext(r.Context()).
-		Where("dataset_id = ? AND id IN ? AND deleted_at IS NULL", datasetID, ids).
-		Find(&docs).Error; err != nil {
-		common.ReplyErr(w, "query documents failed", http.StatusInternalServerError)
+	out, err := service.UpdateMetadata(r.Context(), op, UpdateMetadataRequest{Items: items})
+	if err != nil {
+		replyResourceError(w, err)
 		return
 	}
-
-	requestTags := normalizeBatchDocumentTags(req.Tags)
-	now := time.Now().UTC()
-	affected := int32(0)
+	seen := map[string]bool{}
+	for _, item := range out.Items {
+		seen[item.ResourceRef.DocumentID] = true
+	}
 	truncated := int32(0)
-
-	for _, docRow := range docs {
-		if isFolderLikeDocument(docRow) {
-			continue
-		}
-		affected++
-		finalTags := append([]string(nil), requestTags...)
-		if mode == "APPEND" || mode == "UPDATE_MODE_UNSPECIFIED" {
-			var existing []string
-			_ = json.Unmarshal(docRow.Tags, &existing)
-			finalTags = mergeAppendDocumentTags(existing, requestTags, 10)
-		} else if len(finalTags) > 10 {
-			finalTags = finalTags[:10]
-			truncated++
-		}
-		if len(finalTags) > 10 {
-			finalTags = finalTags[:10]
-			truncated++
-		}
-		tagsBytes, _ := json.Marshal(finalTags)
-		if err := store.DB().WithContext(r.Context()).
-			Model(&orm.Document{}).
-			Where("dataset_id = ? AND id = ? AND deleted_at IS NULL", datasetID, docRow.ID).
-			Updates(map[string]any{"tags": tagsBytes, "updated_at": now}).Error; err != nil {
-			common.ReplyErr(w, "update document tags failed", http.StatusInternalServerError)
-			return
-		}
+	if tagMode == "replace" && len(normalizeBatchDocumentTags(req.Tags)) > 10 {
+		truncated = int32(len(seen))
 	}
-
-	common.ReplyJSON(w, BatchUpdateDocumentTagsResponse{
-		AffectedFiles: affected,
-		TruncatedDocs: truncated,
-	})
+	common.ReplyJSON(w, BatchUpdateDocumentTagsResponse{AffectedFiles: int32(len(seen)), TruncatedDocs: truncated})
 }
 
 func normalizeBatchDocumentTags(tags []string) []string {
@@ -1596,6 +1547,8 @@ type DocumentTableColumn struct {
 }
 
 type Doc struct {
+	ProcessingStatus       string                `json:"processing_status,omitempty"`
+	ProcessingError        *ProcessingDiagnostic `json:"processing_error,omitempty"`
 	Name                   string                `json:"name"`
 	DocumentID             string                `json:"document_id"`
 	DisplayName            string                `json:"display_name"`
@@ -1678,6 +1631,9 @@ type externalDeleteDocsRequest struct {
 }
 
 func deleteExternalDocs(r *http.Request, datasetID string, rows []orm.Document) error {
+	return deleteExternalDocsWithContext(requestContext(r), datasetID, datasetKbIDByID(datasetID), rows)
+}
+func deleteExternalDocsWithContext(ctx context.Context, datasetID, kbID string, rows []orm.Document) error {
 	docIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
 		lazyDocID := strings.TrimSpace(row.LazyllmDocID)
@@ -1691,7 +1647,7 @@ func deleteExternalDocs(r *http.Request, datasetID string, rows []orm.Document) 
 	}
 	req := externalDeleteDocsRequest{
 		DocIDs:         docIDs,
-		KbID:           datasetKbIDByID(datasetID),
+		KbID:           kbID,
 		IdempotencyKey: newDocID(),
 	}
 	url := common.JoinURL(parsingServiceEndpoint(), "/v1/docs/delete")
@@ -1703,7 +1659,7 @@ func deleteExternalDocs(r *http.Request, datasetID string, rows []orm.Document) 
 		Any("request_body", req).
 		Msg("calling external delete-docs request")
 	var resp map[string]any
-	if err := common.ApiPost(requestContext(r), url, req, nil, &resp, 15*time.Second); err != nil {
+	if err := common.ApiPost(ctx, url, req, nil, &resp, 15*time.Second); err != nil {
 		log.Logger.Error().
 			Err(err).
 			Str("handler", "DeleteDocument").
@@ -1728,6 +1684,9 @@ func deleteExternalDocs(r *http.Request, datasetID string, rows []orm.Document) 
 // deleteUploadedFiles deletes uploaded files associated with documents and cleans up residual upload_xxx file directories in the shared folder.
 // Finds the corresponding upload_file_id via UploadedFile.document_id, then removes the file directory.
 func deleteUploadedFiles(ctx context.Context, tenantID, datasetID string, rows []orm.Document) error {
+	return deleteUploadedFilesWithDB(ctx, store.DB(), tenantID, datasetID, rows)
+}
+func deleteUploadedFilesWithDB(ctx context.Context, db *gorm.DB, tenantID, datasetID string, rows []orm.Document) error {
 	docIDs := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if strings.TrimSpace(row.ID) == "" {
@@ -1740,7 +1699,7 @@ func deleteUploadedFiles(ctx context.Context, tenantID, datasetID string, rows [
 	}
 	// Look up the corresponding upload_file_id from the UploadedFile table by document_id.
 	var uploadedFiles []orm.UploadedFile
-	if err := store.DB().WithContext(ctx).
+	if err := db.WithContext(ctx).
 		Where("document_id IN ? AND deleted_at IS NULL", docIDs).
 		Find(&uploadedFiles).Error; err != nil {
 		return fmt.Errorf("query uploaded files: %w", err)
@@ -1779,7 +1738,7 @@ func deleteUploadedFiles(ctx context.Context, tenantID, datasetID string, rows [
 	for _, uf := range uploadedFiles {
 		fileIDs = append(fileIDs, uf.UploadFileID)
 	}
-	if err := store.DB().WithContext(ctx).Model(&orm.UploadedFile{}).
+	if err := db.WithContext(ctx).Model(&orm.UploadedFile{}).
 		Where("upload_file_id IN ?", fileIDs).
 		Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
 		return fmt.Errorf("soft delete uploaded file records: %w", err)
@@ -2638,230 +2597,7 @@ func normalizeForFuzzy(s string) string {
 }
 
 func loadMergedDocumentsByDocIDs(ctx context.Context, docIDs []string, datasetID, keyword, pid string, applyPIDFilter bool, limit, offset int) ([]mergedDocRow, int64, error) {
-	if len(docIDs) == 0 {
-		return []mergedDocRow{}, 0, nil
-	}
-
-	var docs []orm.Document
-	docQuery := store.DB().WithContext(ctx).
-		Where("deleted_at IS NULL").
-		Where("(id IN ? OR lazyllm_doc_id IN ?)", docIDs, docIDs)
-	if datasetID != "" {
-		docQuery = docQuery.Where("dataset_id = ?", datasetID)
-	}
-	if applyPIDFilter {
-		docQuery = docQuery.Where("COALESCE(p_id, '') = ?", pid)
-	}
-	if err := docQuery.Order("updated_at DESC").Find(&docs).Error; err != nil {
-		return nil, 0, err
-	}
-	if len(docs) == 0 {
-		return []mergedDocRow{}, 0, nil
-	}
-
-	datasetIDs := make([]string, 0, len(docs))
-	datasetSeen := make(map[string]struct{}, len(docs))
-	externalIDs := make([]string, 0, len(docs))
-	for _, doc := range docs {
-		if doc.DatasetID != "" {
-			if _, ok := datasetSeen[doc.DatasetID]; !ok {
-				datasetSeen[doc.DatasetID] = struct{}{}
-				datasetIDs = append(datasetIDs, doc.DatasetID)
-			}
-		}
-		if extID := strings.TrimSpace(doc.LazyllmDocID); extID != "" {
-			externalIDs = append(externalIDs, extID)
-		}
-	}
-
-	datasetDisplayByID := make(map[string]string, len(datasetIDs))
-	if len(datasetIDs) > 0 {
-		var datasets []orm.Dataset
-		if err := store.DB().WithContext(ctx).
-			Where("id IN ? AND deleted_at IS NULL", datasetIDs).
-			Find(&datasets).Error; err != nil {
-			return nil, 0, err
-		}
-		for _, ds := range datasets {
-			datasetDisplayByID[ds.ID] = strings.TrimSpace(ds.DisplayName)
-		}
-	}
-
-	baseByExternalID := make(map[string]readonlyorm.LazyLLMDocRow, len(externalIDs))
-	if len(externalIDs) > 0 {
-		var baseRows []readonlyorm.LazyLLMDocRow
-		baseQuery := store.LazyLLMDB().WithContext(ctx).
-			Table((readonlyorm.LazyLLMDocRow{}).TableName()).
-			Where("doc_id IN ?", externalIDs)
-		if keyword != "" && strings.TrimSpace(datasetID) == "" {
-			like := "%" + strings.ToLower(strings.ReplaceAll(keyword, "%", "\\%")) + "%"
-			baseQuery = baseQuery.Where("LOWER(filename) LIKE ? OR LOWER(path) LIKE ?", like, like)
-		}
-		if err := baseQuery.Find(&baseRows).Error; err != nil {
-			return nil, 0, err
-		}
-		for _, row := range baseRows {
-			baseByExternalID[row.DocID] = row
-		}
-	}
-
-	latestTaskStatusByExternalID := make(map[string]string, len(externalIDs))
-	if len(externalIDs) > 0 {
-		var extTasks []readonlyorm.LazyLLMDocServiceTaskRow
-		if err := store.LazyLLMDB().WithContext(ctx).
-			Table((readonlyorm.LazyLLMDocServiceTaskRow{}).TableName()).
-			Where("doc_id IN ?", externalIDs).
-			Order("updated_at DESC").
-			Find(&extTasks).Error; err != nil {
-			return nil, 0, err
-		}
-		for _, task := range extTasks {
-			if _, ok := latestTaskStatusByExternalID[task.DocID]; !ok {
-				latestTaskStatusByExternalID[task.DocID] = strings.TrimSpace(task.Status)
-			}
-		}
-	}
-
-	coreIDs := make([]string, 0, len(docs))
-	docByID := make(map[string]orm.Document, len(docs))
-	for _, doc := range docs {
-		coreIDs = append(coreIDs, doc.ID)
-		docByID[doc.ID] = doc
-	}
-	latestTaskDataSourceByExternalID := make(map[string]string, len(externalIDs))
-	if len(coreIDs) > 0 {
-		var coreTasks []orm.Task
-		if err := store.DB().WithContext(ctx).
-			Where("doc_id IN ? AND deleted_at IS NULL", coreIDs).
-			Order("updated_at DESC").
-			Find(&coreTasks).Error; err != nil {
-			return nil, 0, err
-		}
-		for _, task := range coreTasks {
-			doc, ok := docByID[task.DocID]
-			if !ok {
-				continue
-			}
-			extID := strings.TrimSpace(doc.LazyllmDocID)
-			if extID == "" {
-				continue
-			}
-			if _, ok := latestTaskDataSourceByExternalID[extID]; ok {
-				continue
-			}
-			var ext taskExt
-			_ = json.Unmarshal(task.Ext, &ext)
-			if s := strings.TrimSpace(ext.DataSourceType); s != "" {
-				latestTaskDataSourceByExternalID[extID] = s
-			}
-		}
-	}
-
-	rows := make([]mergedDocRow, 0, len(docs))
-	likeKeyword := strings.ToLower(strings.TrimSpace(keyword))
-	for _, doc := range docs {
-		datasetDisplay := datasetDisplayByID[doc.DatasetID]
-		extID := strings.TrimSpace(doc.LazyllmDocID)
-		if extID == "" {
-			row := mergedDocRowFromCoreOnlyWithDatasetDisplay(doc, datasetDisplay)
-			if likeKeyword != "" && !mergedDocMatchesKeyword(row, likeKeyword) {
-				continue
-			}
-			rows = append(rows, row)
-			continue
-		}
-
-		base, ok := baseByExternalID[extID]
-		if !ok {
-			row := mergedDocRowFromCoreOnlyWithDatasetDisplay(doc, datasetDisplay)
-			if likeKeyword != "" && !mergedDocMatchesKeyword(row, likeKeyword) {
-				continue
-			}
-			rows = append(rows, row)
-			continue
-		}
-
-		displayName := strings.TrimSpace(base.Filename)
-		if strings.TrimSpace(doc.DisplayName) != "" {
-			displayName = strings.TrimSpace(doc.DisplayName)
-		}
-		documentSize := int64(0)
-		if base.SizeBytes != nil {
-			documentSize = int64(*base.SizeBytes)
-		}
-		relPath := relativePathFromFullPath(base.Path)
-		documentStage := strings.TrimSpace(base.UploadStatus)
-		if taskStatus, ok := latestTaskStatusByExternalID[extID]; ok && strings.TrimSpace(taskStatus) != "" {
-			documentStage = strings.TrimSpace(taskStatus)
-		}
-		dataSourceType := strings.TrimSpace(latestTaskDataSourceByExternalID[extID])
-		if dataSourceType == "" && strings.TrimSpace(base.SourceType) != "" {
-			dataSourceType = dataSourceTypeFromSourceType(base.SourceType)
-		}
-		if dataSourceType == "" {
-			dataSourceType = "LOCAL_FILE"
-		}
-		var dExt documentExt
-		_ = json.Unmarshal(doc.Ext, &dExt)
-		if dExt.FileSize > 0 {
-			documentSize = dExt.FileSize
-		}
-		if strings.TrimSpace(dExt.RelativePath) != "" {
-			relPath = strings.TrimSpace(dExt.RelativePath)
-		}
-		docType := resolveDocumentType(doc.DocumentType, firstNonEmpty(dExt.OriginalFilename, base.Filename))
-		if strings.TrimSpace(dExt.StoredPath) != "" {
-			base.Path = strings.TrimSpace(dExt.StoredPath)
-		}
-		row := mergedDocRow{
-			DocID:            doc.ID,
-			Filename:         base.Filename,
-			Path:             base.Path,
-			Ext:              doc.Ext,
-			DatasetID:        doc.DatasetID,
-			DatasetDisplay:   datasetDisplay,
-			BaseCreatedAt:    firstNonZeroTime(doc.CreatedAt, base.CreatedAt),
-			BaseUpdatedAt:    firstNonZeroTime(doc.UpdatedAt, base.UpdatedAt),
-			DisplayName:      displayName,
-			PID:              doc.PID,
-			Tags:             doc.Tags,
-			FileID:           doc.FileID,
-			Creator:          doc.CreateUserName,
-			DocumentSize:     documentSize,
-			DataSourceType:   dataSourceType,
-			Type:             docType,
-			RelPath:          relPath,
-			DocumentStage:    documentStage,
-			PDFConvertResult: strings.TrimSpace(doc.PDFConvertResult),
-		}
-		if row.BaseCreatedAt.IsZero() {
-			row.BaseCreatedAt = doc.CreatedAt
-		}
-		if row.BaseUpdatedAt.IsZero() {
-			row.BaseUpdatedAt = doc.UpdatedAt
-		}
-		if likeKeyword != "" && !mergedDocMatchesKeyword(row, likeKeyword) {
-			continue
-		}
-		rows = append(rows, row)
-	}
-
-	sort.Slice(rows, func(i, j int) bool { return rows[i].BaseUpdatedAt.After(rows[j].BaseUpdatedAt) })
-	total := int64(len(rows))
-	if offset < 0 {
-		offset = 0
-	}
-	if limit <= 0 {
-		limit = 20
-	}
-	if offset >= len(rows) {
-		return []mergedDocRow{}, total, nil
-	}
-	end := offset + limit
-	if end > len(rows) {
-		end = len(rows)
-	}
-	return rows[offset:end], total, nil
+	return loadMergedDocumentsWithDB(ctx, store.DB(), store.LazyLLMDB(), docIDs, datasetID, keyword, pid, applyPIDFilter, limit, offset)
 }
 
 func mergedDocMatchesKeyword(row mergedDocRow, keyword string) bool {

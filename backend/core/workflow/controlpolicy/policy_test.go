@@ -19,6 +19,11 @@ func TestAdmissionSeparatesReviewExecutionAndLifecycle(t *testing.T) {
 		{"unbound", Facts{Status: "active", BindingRequired: true}, "binding_required", false},
 		{"bound", Facts{Status: "active", BindingRequired: true, Bound: true}, "continue", true},
 		{"failed", Facts{Status: "failed"}, "failed", false},
+		{"failed retry available", Facts{Status: "failed", AutomaticRetryAvailable: true}, "continue", true},
+		{"failed retry draining", Facts{Status: "failed", AutomaticRetryAvailable: true, ActiveAttempts: 1}, "failed", false},
+		{"failed retry review", Facts{Status: "failed", AutomaticRetryAvailable: true, PendingReviews: 1}, "awaiting_user", false},
+		{"failed retry unbound", Facts{Status: "failed", AutomaticRetryAvailable: true, BindingRequired: true}, "binding_required", false},
+		{"stopped retry", Facts{Status: "stopped", AutomaticRetryAvailable: true}, "stopped", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			state, admission := Decide(tt.facts)

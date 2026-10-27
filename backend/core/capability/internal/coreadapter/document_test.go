@@ -121,3 +121,56 @@ func TestKnowledgeDocumentReaderUsesDatasetACLAndExcludesFolders(t *testing.T) {
 		t.Fatalf("document page = %#v", result)
 	}
 }
+
+type observedDocumentService struct{ fakeCoreDocumentService }
+
+func (*observedDocumentService) GetDocumentMetadata(_ context.Context, req doc.DocumentGetRequest) (doc.DocumentMetadata, error) {
+	return doc.DocumentMetadata{ID: req.DocumentID, DatasetID: req.DatasetID, ParseStatus: "SUCCESS", ProcessingLevel: "indexed", ProcessingState: orm.DocumentProcessingState{ParseStatus: "succeeded", ChunkStatus: "succeeded", IndexStatus: "succeeded"}}, nil
+}
+func (s *observedDocumentService) GetDocument(ctx context.Context, req doc.DocumentReadRequest) (doc.DocumentReadResult, error) {
+	metadata, err := s.GetDocumentMetadata(ctx, doc.DocumentGetRequest{DocumentID: req.DocumentID, DatasetID: req.DatasetID})
+	return doc.DocumentReadResult{Metadata: metadata}, err
+}
+
+func TestDocumentListUsesObservedStagesInsteadOfPersistedPending(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.Document{}, &orm.DocumentProcessingState{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range []any{&orm.Document{ID: "indexed", DatasetID: "ds", DisplayName: "new indexed original"}, &orm.DocumentProcessingState{DatasetID: "ds", DocumentID: "indexed", ParseStatus: "pending", ChunkStatus: "pending", IndexStatus: "pending"}} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := &observedDocumentService{}
+	reader, err := NewKnowledgeDocumentReader(db, &fakeDocumentDatasetService{}, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateReads := 0
+	const callback = "test:adapter-processing-state-read"
+	db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "document_processing_states" {
+			stateReads++
+		}
+	})
+	defer db.Callback().Query().Remove(callback)
+	page, err := reader.ListKnowledgeDocuments(context.Background(), capability.InvocationContext{Principal: capability.Principal{UserID: "user"}}, capability.KnowledgeDocumentListQuery{KnowledgeID: "ds", Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].ParseStatus != "SUCCESS" || page.Items[0].ProcessingStatus != "ready" {
+		t.Fatalf("observed indexed success lost: %+v %v", page, err)
+	}
+	detail, err := reader.GetKnowledgeDocument(context.Background(), capability.InvocationContext{Principal: capability.Principal{UserID: "user"}}, capability.GetKnowledgeDocumentInput{KnowledgeID: "ds", DocumentID: "indexed"})
+	if err != nil || detail.Document.ProcessingStatus != "ready" {
+		t.Fatalf("get loses observed indexed stages: %+v %v", detail, err)
+	}
+	if stateReads != 0 {
+		t.Fatalf("adapter re-read persisted stage state %d times", stateReads)
+	}
+	metadata, _ := service.GetDocumentMetadata(context.Background(), doc.DocumentGetRequest{DatasetID: "ds", DocumentID: "indexed"})
+	if got := mapDocumentSummary(metadata).ProcessingStatus; got != "ready" {
+		t.Fatalf("get mapper loses observed state: %s", got)
+	}
+}

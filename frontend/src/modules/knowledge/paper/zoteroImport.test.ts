@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { emptyLibraryV3 } from './libraryModel';
+import { emptyLibrary } from './libraryModel';
 import { buildZoteroImport, parseZoteroJSON, matchLocalZoteroFile, previewZotero, type ZoteroPreview } from './zoteroImport';
 import { axiosInstance } from '@/components/request';
 
@@ -17,11 +17,11 @@ const sample = (): ZoteroPreview => ({
 
 describe('Zotero import graph', () => {
   it('preserves nested collections, authors, memberships, notes and PDF annotations without pretending files are stored', () => {
-    const plan = buildZoteroImport(sample(), emptyLibraryV3());
+    const plan = buildZoteroImport(sample(), emptyLibrary());
     expect(plan.library.folders).toHaveLength(2);
     expect(plan.library.folders[1].parentId).toBe(plan.library.folders[0].id);
     const paper = plan.library.papers[0];
-    expect(paper).toMatchObject({ title: 'A paper', authors: 'Ada Lovelace', year: 2024, doi: '10.1234/test' });
+    expect(paper).toMatchObject({ metadata: { title: 'A paper', authors: ['Ada Lovelace'], year: 2024, identifiers: { doi: '10.1234/test' } } });
     expect(paper.collectionIds).toHaveLength(2);
     expect(plan.library.notes[0].content).toBe('Useful note');
     expect(plan.library.annotations[0]).toMatchObject({ paperId: paper.id, quote: 'A result', comment: 'Interesting', page: 3 });
@@ -30,14 +30,14 @@ describe('Zotero import graph', () => {
   });
 
   it('is idempotent and preserves personal edits and uploaded attachment identities', () => {
-    const first = buildZoteroImport(sample(), emptyLibraryV3());
-    first.library.papers[0].title = 'My edited title';
+    const first = buildZoteroImport(sample(), emptyLibrary());
+    first.library.papers[0].metadata.title = 'My edited title';
     first.library.papers[0].status = 'read';
     first.library.papers[0].important = true;
     first.library.attachments[0].contentRef = 'stored-document';
     const next = buildZoteroImport(sample(), first.library);
     expect(next.library.papers).toHaveLength(1);
-    expect(next.library.papers[0]).toMatchObject({ title: 'My edited title', status: 'read', important: true });
+    expect(next.library.papers[0]).toMatchObject({ metadata: { title: 'My edited title' }, status: 'read', important: true });
     expect(next.library.notes).toHaveLength(1);
     expect(next.library.annotations).toHaveLength(1);
     expect(next.attachments).toEqual([]);
@@ -45,7 +45,7 @@ describe('Zotero import graph', () => {
   });
 
   it('matches an existing DOI and augments relationships without overwriting existing organization', () => {
-    const first = buildZoteroImport(sample(), emptyLibraryV3());
+    const first = buildZoteroImport(sample(), emptyLibrary());
     first.library.papers[0].id = 'my-existing-paper';
     first.library.papers[0].zoteroSources = [];
     first.library.papers[0].source = 'doi';
@@ -68,21 +68,21 @@ describe('Zotero import graph', () => {
   it('rejects cycles and missing collection parents before producing a partial graph', () => {
     const cycle = sample();
     (cycle.collections[0] as { data: { parentCollection: unknown } }).data.parentCollection = 'CHILD001';
-    expect(() => buildZoteroImport(cycle, emptyLibraryV3())).toThrow(/循环/);
+    expect(() => buildZoteroImport(cycle, emptyLibrary())).toThrow(/循环/);
     const missing = sample();
     (missing.collections[0] as { data: { parentCollection: unknown } }).data.parentCollection = 'MISSING1';
-    expect(() => buildZoteroImport(missing, emptyLibraryV3())).toThrow(/父/);
+    expect(() => buildZoteroImport(missing, emptyLibrary())).toThrow(/父/);
   });
 
   it('places imported root collections beneath an existing chosen folder', () => {
-    const library = emptyLibraryV3();
+    const library = emptyLibrary();
     library.folders.push({ id: 'destination', name: 'Imported' });
     const plan = buildZoteroImport(sample(), library, 'destination');
     expect(plan.library.folders.find(folder => folder.name === 'Research')?.parentId).toBe('destination');
   });
 
   it('keeps a matched existing folder identity after the user renames or moves it', () => {
-    const library = emptyLibraryV3();
+    const library = emptyLibrary();
     library.folders.push({ id: 'mine', name: 'Research' }, { id: 'parent', name: 'Personal' });
     const input = sample();
     input.items = input.items.slice(0, 2);
@@ -98,7 +98,7 @@ describe('Zotero import graph', () => {
   it('flattens exported nested items, notes and collections using stable external identities', () => {
     const input = JSON.stringify({ items: [{ key: 'PAPER001', itemType: 'book', title: 'Book', uri: 'http://zotero.org/users/42/items/PAPER001', attachments: [{ key: 'PDF00001', contentType: 'application/pdf', path: 'storage/PDF00001/paper.pdf' }], notes: [{ key: 'NOTE0001', note: '<p>Note</p>' }] }], collections: [{ key: 'ROOT0001', name: 'Root', items: ['PAPER001'], children: [{ key: 'CHILD001', name: 'Child', items: ['PAPER001'] }] }] });
     const parsed = parseZoteroJSON(input);
-    const graph = buildZoteroImport(parsed, emptyLibraryV3());
+    const graph = buildZoteroImport(parsed, emptyLibrary());
     expect(graph.library.notes).toHaveLength(1);
     expect(graph.library.attachments).toHaveLength(1);
     expect(graph.library.papers[0].collectionIds).toHaveLength(2);
@@ -115,7 +115,7 @@ describe('Zotero import graph', () => {
       items: [{ itemID: 123, itemType: 'journalArticle', title: 'Exported paper', uri: 'http://zotero.org/users/42/items/PAPER001', attachments: [{ uri: 'http://zotero.org/users/42/items/PDF00001', mimeType: 'application/pdf', path: 'files/456/paper.pdf' }] }],
       collections: { ROOT0001: { key: 'ROOT0001', name: 'Root', parent: '', items: [123] }, CHILD001: { key: 'CHILD001', name: 'Child', parent: 'ROOT0001', items: [123] } },
     }));
-    const plan = buildZoteroImport(parsed, emptyLibraryV3());
+    const plan = buildZoteroImport(parsed, emptyLibrary());
     expect(plan.library.folders).toHaveLength(2);
     expect(plan.library.folders[1].parentId).toBe(plan.library.folders[0].id);
     expect(plan.library.papers[0].collectionIds).toHaveLength(2);
@@ -146,7 +146,7 @@ describe('Zotero import graph', () => {
     const input = sample();
     input.items = input.items.slice(0, 2);
     input.items.push({ key: 'WEB00001', data: { itemType: 'attachment', parentItem: 'PAPER001', contentType: 'text/html', title: 'Snapshot' } });
-    const plan = buildZoteroImport(input, emptyLibraryV3());
+    const plan = buildZoteroImport(input, emptyLibrary());
     expect(plan.attachments).toHaveLength(1);
     expect(plan.library.attachments).toHaveLength(1);
   });

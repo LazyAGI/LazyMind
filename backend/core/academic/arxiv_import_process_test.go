@@ -3,7 +3,9 @@ package academic
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"io"
+	"lazymind/core/asyncjob"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -14,23 +16,27 @@ import (
 
 	"gorm.io/gorm"
 
-	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
 	"lazymind/core/store"
 )
 
 type arxivProcessSpec struct {
-	Driver, DSN, Directory, Worker, Mode string
+	Driver, DSN, Directory, Worker, Mode, ItemID string
 }
 
 func newArxivProcessFixture(t *testing.T) (*gorm.DB, arxivProcessSpec) {
 	t.Helper()
-	db := orm.MigrateTestDB(t, &orm.Dataset{}, &orm.Document{}, &orm.Task{}, &orm.DocumentProcessingState{}, &orm.AcademicWork{}, &orm.AcademicWorkDocument{}).DB
-	if err := db.Create(&orm.Dataset{ID: "dataset", ProcessingLevel: "stored"}).Error; err != nil {
-		t.Fatal(err)
+	db, batch, item, _ := importPipelineFixture(t)
+	otherBatch, otherItem := batch, item
+	otherBatch.ID, otherBatch.AsyncJobID = "other-batch", "other-job"
+	otherItem.ID, otherItem.BatchID = "other-item", otherBatch.ID
+	for _, row := range []any{&orm.AsyncJob{ID: otherBatch.AsyncJobID, Status: "running", AttemptCount: 1, PayloadJSON: marshal(map[string]string{})}, &otherBatch, &otherItem} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
 	}
-	spec := arxivProcessSpec{Driver: db.Dialector.Name(), Directory: t.TempDir()}
+	spec := arxivProcessSpec{Driver: db.Dialector.Name(), Directory: t.TempDir(), ItemID: item.ID}
 	if spec.Driver == "postgres" {
 		var schema string
 		if err := db.Raw("SELECT current_schema()").Scan(&schema).Error; err != nil {
@@ -83,6 +89,9 @@ func TestArxivImportAcrossProcesses(t *testing.T) {
 	var commands []*exec.Cmd
 	for _, worker := range []string{"first", "second"} {
 		spec.Worker = worker
+		if worker == "second" {
+			spec.ItemID = "other-item"
+		}
 		commands = append(commands, startArxivProcess(t, ctx, spec))
 	}
 	for _, worker := range []string{"first", "second"} {
@@ -111,14 +120,14 @@ func TestArxivImportAcrossProcesses(t *testing.T) {
 	if documents != 1 || links != 1 {
 		t.Fatalf("independent Core processes created documents=%d links=%d, want 1 each", documents, links)
 	}
-	var first, second ArxivImportResult
-	for worker, result := range map[string]*ArxivImportResult{"first": &first, "second": &second} {
+	var first, second orm.PaperImportItem
+	for worker, result := range map[string]*orm.PaperImportItem{"first": &first, "second": &second} {
 		encoded, err := os.ReadFile(filepath.Join(spec.Directory, worker+".result"))
 		if err != nil || json.Unmarshal(encoded, result) != nil {
 			t.Fatalf("read worker result: %v", err)
 		}
 	}
-	if first.DocumentID != second.DocumentID || first.WorkID != second.WorkID {
+	if first.DocumentID != second.DocumentID || first.AcademicWorkID != second.AcademicWorkID {
 		t.Fatalf("processes returned different attachments: %#v %#v", first, second)
 	}
 }
@@ -151,11 +160,15 @@ func TestArxivImportRecoversAfterImporterProcessExits(t *testing.T) {
 		t.Fatalf("retry downloaded another PDF after process exit: %v", downloads)
 	}
 	encoded, err := os.ReadFile(filepath.Join(spec.Directory, "second.result"))
-	var recovered ArxivImportResult
+	var recovered orm.PaperImportItem
 	if err != nil || json.Unmarshal(encoded, &recovered) != nil {
 		t.Fatalf("recovery result: %v", err)
 	}
-	if recovered.DocumentID != "doc-first" || recovered.Status != "already_present" || recovered.DocumentTaskID != "task-first" || len(recovered.ContentSHA256) != 64 {
+	var persisted orm.Document
+	if err := db.Take(&persisted).Error; err != nil {
+		t.Fatal(err)
+	}
+	if recovered.DocumentID != persisted.ID || recovered.Status != "succeeded" || recovered.DocumentTaskID == "" || len(recovered.ContentSHA256) != 64 {
 		t.Fatalf("process exit recovery lost persisted attachment: %#v", recovered)
 	}
 }
@@ -190,55 +203,62 @@ func TestArxivImportProcessWorker(t *testing.T) {
 	pool, _ := db.DB.DB()
 	defer pool.Close()
 	store.Init(db.DB, db.DB, nil)
-	svc := newArxivImportService(db.DB)
-	svc.lookup = func(ctx context.Context, _ string) (arxivsource.Metadata, error) {
-		if err := os.WriteFile(filepath.Join(spec.Directory, spec.Worker+".ready"), nil, 0600); err != nil {
-			return arxivsource.Metadata{}, err
-		}
-		waitForArxivProcessFile(t, ctx, filepath.Join(spec.Directory, "go"))
-		return arxivsource.Metadata{BaseID: "2404.06654", Version: "v2", Title: "Shared import", Authors: []string{"Author"}}, nil
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", filepath.Join(spec.Directory, "uploads"))
+	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
+	http.DefaultTransport = sourceTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"items":[{"dataset_id":"target","exists":false,"allowed":true}],"source_map":{}}`)), Request: r}, nil
+	})
+	if err := os.WriteFile(filepath.Join(spec.Directory, spec.Worker+".ready"), nil, 0600); err != nil {
+		t.Fatal(err)
 	}
-	svc.acquire = func(context.Context, FulltextCandidate) (string, int64, error) {
-		path := filepath.Join(spec.Directory, spec.Worker+".download")
-		if err := os.WriteFile(path, nil, 0600); err != nil {
+	waitForArxivProcessFile(t, t.Context(), filepath.Join(spec.Directory, "go"))
+	var item orm.PaperImportItem
+	if err := db.Where("id=?", spec.ItemID).Take(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	var batch orm.PaperImportBatch
+	if err := db.Where("id=?", item.BatchID).Take(&batch).Error; err != nil {
+		t.Fatal(err)
+	}
+	var selected savedImportCandidate
+	if err := json.Unmarshal(item.SelectedCandidateJSON, &selected); err != nil {
+		t.Fatal(err)
+	}
+	guard, err := lockArxivImport(t.Context(), db.DB, selected.VerifiedPaper.ArxivID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = acquireCachedPDFLocked(guard.ctx, batch.CreatedBy, *selected.VerifiedPaper, func(context.Context, FulltextCandidate) (string, int64, error) {
+		marker := filepath.Join(spec.Directory, spec.Worker+".download")
+		if err := os.WriteFile(marker, nil, 0600); err != nil {
 			return "", 0, err
 		}
-		// Keep both processes inside the download window without a shared lock.
 		time.Sleep(200 * time.Millisecond)
-		pdf := filepath.Join(spec.Directory, spec.Worker+".pdf")
-		return pdf, 12, os.WriteFile(pdf, []byte("%PDF-1.7\nPDF"), 0600)
+		path := filepath.Join(spec.Directory, spec.Worker+".pdf")
+		content := []byte("%PDF-1.7\nshared original PDF\n%%EOF")
+		return path, int64(len(content)), os.WriteFile(path, content, 0600)
+	})
+	guard.release()
+	if err != nil {
+		t.Fatal(err)
 	}
-	svc.importFile = func(ctx context.Context, input doc.LocalFileImportRequest) (doc.LocalFileImportResult, error) {
-		contents, err := os.ReadFile(input.SourcePath)
-		if err != nil {
-			return doc.LocalFileImportResult{}, err
-		}
-		stored := filepath.Join(spec.Directory, spec.Worker+"-stored.pdf")
-		if err = os.WriteFile(stored, contents, 0600); err != nil {
-			return doc.LocalFileImportResult{}, err
-		}
-		ext, _ := json.Marshal(map[string]any{"stored_path": stored})
-		tags, _ := json.Marshal(input.Tags)
-		document := orm.Document{ID: "doc-" + spec.Worker, DatasetID: input.DatasetID, DisplayName: input.DisplayName, Ext: ext, Tags: tags}
-		if err = db.WithContext(ctx).Create(&document).Error; err != nil {
-			return doc.LocalFileImportResult{}, err
-		}
-		task := orm.Task{ID: "task-" + spec.Worker, DocID: document.ID, DatasetID: input.DatasetID, Ext: json.RawMessage(`{"task_state":"SUCCEEDED","data_source_type":"ARXIV_IMPORT"}`)}
-		if err = db.WithContext(ctx).Create(&task).Error; err != nil {
-			return doc.LocalFileImportResult{}, err
-		}
+	service, err := doc.NewOriginalService(doc.OriginalServiceDeps{DB: db.DB, SubmitProcessing: func(ctx context.Context, caller doc.DatasetCatalogCaller, dataset, task string) (doc.StartTaskResult, error) {
 		if spec.Mode == "exit-after-save" {
-			// Simulate a crashed Core: skip all deferred lock and file cleanup.
 			os.Exit(0)
 		}
-		return doc.LocalFileImportResult{DocumentID: document.ID, TaskID: task.ID, ContentSHA256: strings.Repeat("a", 64)}, nil
-	}
-	result, err := svc.importPaper(t.Context(), "2404.06654v2", "dataset", "user", "User")
+		return doc.SubmitOriginalTask(ctx, caller, dataset, task)
+	}})
 	if err != nil {
-		t.Fatal(fmt.Errorf("import: %w", err))
+		t.Fatal(err)
 	}
-	encodedResult, _ := json.Marshal(result)
-	if err = os.WriteFile(filepath.Join(spec.Directory, spec.Worker+".result"), encodedResult, 0600); err != nil {
+	if err := processImportItem(t.Context(), asyncjob.Job{ID: batch.AsyncJobID, AttemptCount: 1}, batch, item, sourceImportCaller(batch), service); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("id=?", item.ID).Take(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	encodedResult, _ := json.Marshal(item)
+	if err := os.WriteFile(filepath.Join(spec.Directory, spec.Worker+".result"), encodedResult, 0600); err != nil {
 		t.Fatal(err)
 	}
 }

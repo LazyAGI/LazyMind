@@ -78,12 +78,14 @@ type CreateTaskItem struct {
 }
 
 type CreateTaskRequest struct {
-	Parent string           `json:"parent,omitempty"`
-	Items  []CreateTaskItem `json:"items"`
+	PaperImport *PaperUploadContext `json:"paper_import,omitempty"`
+	Parent      string              `json:"parent,omitempty"`
+	Items       []CreateTaskItem    `json:"items"`
 }
 
 type CreateTasksResponse struct {
-	Tasks []TaskResponse `json:"tasks"`
+	PaperImportBatchID string         `json:"paper_import_batch_id,omitempty"`
+	Tasks              []TaskResponse `json:"tasks"`
 }
 
 type StartTaskRequest struct {
@@ -278,6 +280,7 @@ type transferBinding struct {
 
 type taskExt struct {
 	ProcessingLevel      string            `json:"processing_level,omitempty"`
+	ProcessingRevision   int64             `json:"processing_revision,omitempty"`
 	MarketPreviousTaskID string            `json:"market_previous_task_id,omitempty"`
 	MarketSubmission     string            `json:"market_submission,omitempty"`
 	TaskType             string            `json:"task_type,omitempty"`

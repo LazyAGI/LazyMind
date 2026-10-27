@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { emptyLibraryV3 } from './libraryModel';
-import { executeZoteroImport, storeZoteroAttachment } from './zoteroCommit';
+import { emptyLibrary } from './libraryModel';
+import { executeZoteroImport, importZoteroSnapshot, storeZoteroAttachment } from './zoteroCommit';
 import { axiosInstance } from '@/components/request';
 import type { ZoteroPreview } from './zoteroImport';
 
@@ -16,14 +16,14 @@ const options = { includeAttachments: true, localFiles: [new File(['%PDF-1.7'], 
 describe('confirmed Zotero imports', () => {
   it('does not upload files when saving the confirmed metadata fails', async () => {
     const storeAttachment = vi.fn();
-    await expect(executeZoteroImport({ datasetId: 'ds', preview, config, options, getLibrary: emptyLibraryV3,
+    await expect(executeZoteroImport({ datasetId: 'ds', preview, config, options, getLibrary: emptyLibrary,
       saveLibrary: async () => { throw new Error('revision conflict'); }, storeAttachment,
     })).rejects.toThrow('revision conflict');
     expect(storeAttachment).not.toHaveBeenCalled();
   });
 
   it('keeps metadata and reports attachment errors so the same import can be retried', async () => {
-    let current = emptyLibraryV3();
+    let current = emptyLibrary();
     let reject = true;
     const storeAttachment = vi.fn(async (_file, candidate) => {
       if (reject) throw new Error('storage unavailable');
@@ -45,7 +45,7 @@ describe('confirmed Zotero imports', () => {
   });
 
   it('imports metadata only when attachment import is disabled', async () => {
-    let current = emptyLibraryV3();
+    let current = emptyLibrary();
     const storeAttachment = vi.fn();
     const result = await executeZoteroImport({ datasetId: 'ds', preview, config, options: { ...options, includeAttachments: false },
       getLibrary: () => current, saveLibrary: async data => { current = data; }, storeAttachment });
@@ -58,7 +58,7 @@ describe('confirmed Zotero imports', () => {
   it('reports missing local attachments without silently downloading another source', async () => {
     const upload = vi.fn();
     const response = await executeZoteroImport({ datasetId: 'ds', preview, config,
-      options: { includeAttachments: true, localFiles: [] }, getLibrary: emptyLibraryV3,
+      options: { includeAttachments: true, localFiles: [] }, getLibrary: emptyLibrary,
       saveLibrary: async () => {}, storeAttachment: upload });
     expect(response.failures?.[0]).toContain('未找到对应的本地 PDF');
     expect(upload).not.toHaveBeenCalled();
@@ -69,7 +69,7 @@ describe('confirmed Zotero imports', () => {
     let switched = false;
     const upload = vi.fn();
     await expect(executeZoteroImport({ datasetId: 'ds', preview, config, options,
-      getLibrary: () => { if (switched) throw new Error('library switched'); return emptyLibraryV3(); },
+      getLibrary: () => { if (switched) throw new Error('library switched'); return emptyLibrary(); },
       saveLibrary: async () => { switched = true; }, storeAttachment: upload,
     })).rejects.toThrow('library switched');
     expect(upload).not.toHaveBeenCalled();
@@ -83,10 +83,28 @@ describe('durable Zotero attachment responses', () => {
     await expect(storeZoteroAttachment('ds', options.localFiles[0], candidate)).rejects.toThrow('响应格式无效');
   });
   it('keeps the saved snapshot while surfacing a parsing failure', async () => {
-    const library = { data: emptyLibraryV3(), revision: 7, can_write: true };
+    const library = { data: emptyLibrary(), paper_count: 0, pdf_attachment_count: 0, active: false, can_write: true };
     vi.mocked(axiosInstance.post).mockRejectedValueOnce({ response: { data: { message: 'parser unavailable', library } } });
     await expect(storeZoteroAttachment('ds', options.localFiles[0], candidate)).rejects.toMatchObject({
-      message: 'parser unavailable', library: { data: library.data, revision: 7, canWrite: true },
+      message: 'parser unavailable', library: { data: library.data, paperCount: 0, pdfAttachmentCount: 0, active: false, canWrite: true },
     });
   });
+});
+
+it('submits normalized graph data atomically and decodes the authoritative snapshot', async () => {
+  const data = emptyLibrary();
+  const reply = { data, can_write: true, paper_count: 0, pdf_attachment_count: 0, active: false };
+  vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: reply });
+  expect(await importZoteroSnapshot('ds', data, 'users:42', 'stable-key')).toEqual({ data, canWrite: true, paperCount: 0, pdfAttachmentCount: 0, active: false });
+  expect(axiosInstance.post).toHaveBeenLastCalledWith('/api/core/academic/zotero/import', { data, source_id: 'users:42', idempotency_key: 'stable-key' }, expect.objectContaining({ params: { target_dataset_id: 'ds' } }));
+});
+
+it('uses the authoritative paper identity returned after a concurrent metadata merge', async () => {
+  let current = emptyLibrary();
+  const uploaded: string[] = [];
+  await executeZoteroImport({ datasetId: 'ds', preview, config, options, getLibrary: () => current,
+    saveLibrary: async data => { current = { ...data, papers: data.papers.map(paper => ({ ...paper, id: 'existing' })), attachments: data.attachments.map(attachment => ({ ...attachment, paperId: 'existing' })) }; },
+    storeAttachment: async (_file, candidate) => { uploaded.push(candidate.paperId); },
+  });
+  expect(uploaded).toEqual(['existing']);
 });

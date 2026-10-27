@@ -45,6 +45,7 @@ describe('NewWorkflowModal during translation refresh', () => {
         </ConfigProvider>
       </I18nextProvider>,
     );
+    await waitFor(() => expect(screen.getByRole('dialog', { name: '新工作流' })).toBeVisible());
     if (!preset) {
       fireEvent.click(screen.getByRole('button', { name: /从技能转化/ }));
       const picker = screen.getByRole('combobox', { name: '搜索并选择技能' });
@@ -65,7 +66,7 @@ describe('NewWorkflowModal during translation refresh', () => {
     await act(async () => { await i18n.changeLanguage(i18n.language); });
     expect(screen.getByRole('button', { name: /从技能转化/ })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: /查看详情/ }));
-    expect(screen.getByText('A referenced file is missing.')).toBeVisible();
+    await waitFor(() => expect(screen.getByText('A referenced file is missing.')).toBeVisible());
 
     await act(async () => { await i18n.changeLanguage(i18n.language); });
     expect(screen.getByRole('textbox', { name: /显示名称/ })).toHaveValue('自定义工作流');

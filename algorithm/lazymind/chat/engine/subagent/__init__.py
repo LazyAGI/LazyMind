@@ -10,6 +10,7 @@ SUBAGENT_CORE_TOOL_NAMES = (
     'read_user_attachment',
     'find_user_attachment',
     'string_replace',
+    'edit_presentation',
     'find_artifact',
     'patch_artifact',
     'discard_draft',

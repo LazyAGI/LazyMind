@@ -113,3 +113,39 @@ def workspace_runtime(monkeypatch, tmp_path):
         return middleware, core, config
 
     return create
+
+
+@pytest.fixture
+def fallback_provider(request):
+    from fallback_test_support import ScriptedProvider, EFFECT_RECEIPTS
+    from lazymind.config import config
+
+    old_agent = lazyllm.locals.get('_lazyllm_agent')
+    old_config = lazyllm.globals.get('agentic_config')
+    old_history = lazyllm.locals['chat_history'].copy()
+    old_usage = copy.deepcopy(lazyllm.globals['usage'])
+    settings = {key: config[key] for key in config.get_all_configs()}
+    lazyllm.locals['_lazyllm_agent'] = {}
+    lazyllm.globals['agentic_config'] = {}
+    EFFECT_RECEIPTS.clear()
+    server = ScriptedProvider()
+    if request.instance is not None:
+        request.instance.provider = server
+    try:
+        yield server
+    finally:
+        server.close()
+        EFFECT_RECEIPTS.clear()
+        lazyllm.locals['_lazyllm_agent'] = old_agent
+        lazyllm.globals['agentic_config'] = old_config
+        lazyllm.locals['chat_history'].clear()
+        lazyllm.locals['chat_history'].update(old_history)
+        lazyllm.globals['usage'].clear()
+        lazyllm.globals['usage'].update(old_usage)
+        for key, value in settings.items():
+            config[key] = value
+
+
+@pytest.fixture
+def provider(fallback_provider):
+    return fallback_provider

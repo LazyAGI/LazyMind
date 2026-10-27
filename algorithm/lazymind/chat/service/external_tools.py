@@ -1,6 +1,7 @@
 """Registry-driven external tools, isolated from interactive Chat execution state."""
 
 import inspect
+import logging
 from typing import Any
 
 import lazyllm
@@ -12,9 +13,13 @@ from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS, _instan
 from lazymind.model_config import inject_model_config
 
 
+LOG = logging.getLogger(__name__)
+
+
 # These groups require context/approval that a stateless external call does not own.
 # They remain visible, but cannot execute until that context has an explicit adapter.
 _CONTEXT_REQUIREMENTS = {
+    'github_prs': 'conversation-scoped PR source cache',
     'kb': 'knowledge base access context', 'temp_kb': 'conversation attachments',
     'data_sources': 'user data-source context', 'external_db': 'user database context',
     'writer_create': 'artifact workspace', 'writer_revision': 'artifact workspace',
@@ -67,7 +72,8 @@ def _resolve(config):
         if not methods:
             return None, [], 'No executable methods are available'
         return manager, methods, ''
-    except Exception:
+    except Exception as exc:
+        LOG.warning('External tool failed tool=%s stage=schema error_type=%s', config.name, type(exc).__name__)
         return None, [], 'Tool schema is not available for external execution'
 
 
@@ -94,30 +100,33 @@ def run_external_tools(payload: dict, *, execute: bool = False) -> dict:
     try:
         inject_model_config(payload.get('llm_config') or {})
         inject_tool_config(payload.get('tool_config') or {})
-        disabled = set(payload.get('disabled_tools') or [])
         if execute:
-            return _execute(payload, disabled)
+            return _execute(payload)
         items = []
         for config in DEFAULT_TOOLS:
             _, methods, reason = _resolve(config)
-            if config.name in disabled:
-                reason = 'Tool is disabled in LazyMind settings'
             items.append({
                 'name': config.name, 'description': config.description,
                 'input_schema': _schema(methods), 'available': not reason, 'reason': reason,
             })
         return {'items': items}
+    except Exception as exc:
+        name = next((item.name for item in DEFAULT_TOOLS if item.name == payload.get('tool_name')), 'unknown')
+        LOG.error('External tool request failed tool=%s execute=%s error_type=%s',
+                  name, execute, type(exc).__name__)
+        raise
     finally:
         lazyllm.globals.clear()
 
 
-def _execute(payload, disabled):
+def _execute(payload):
     name = str(payload.get('tool_name') or '')
     config = next((item for item in DEFAULT_TOOLS if item.name == name), None)
-    if config is None or name in disabled:
+    if config is None:
         raise ValueError('Tool is unavailable or disabled')
     manager, methods, reason = _resolve(config)
     if reason:
+        LOG.warning('External tool unavailable tool=%s stage=availability', config.name)
         raise ValueError(reason)
     arguments = payload.get('arguments', {})
     if not isinstance(arguments, dict):
@@ -136,10 +145,12 @@ def _execute(payload, disabled):
         allowed_tool_names={method},
     ).results[0]
     if isinstance(result, dict) and (result.get('ok') is False or result.get('isError') is True):
+        LOG.error('External tool failed tool=%s stage=execution', config.name)
         raise RuntimeError('Tool execution failed; check its connection and arguments')
     if isinstance(result, dict) and result.get('ok') is True and 'value' in result:
         result = result['value']
     if isinstance(result, dict) and (result.get('ok') is False or result.get('isError') is True):
+        LOG.error('External tool failed tool=%s stage=execution', config.name)
         raise RuntimeError('Tool execution failed; check its connection and arguments')
     return {'tool_name': name, 'result': _public_result(result)}
 

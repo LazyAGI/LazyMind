@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { emptyLibraryV3, migratePaperLibrary } from './libraryModel';
-import { assignFolders, normalizeLibrary, papersInView, sampleLibrary } from './model';
+import { emptyLibrary, withLibraryGraph } from './libraryModel';
+import { assignFolders, createPaperRecord, papersInView } from './model';
 import { deleteFolderSubtree, descendantFolderIds, flattenFolderTree, folderPath, movePaperRecords, syncFolderCollections, updateFolderTree, validateFolderChange } from './folderTree';
 
 const folders = [
@@ -11,7 +11,7 @@ const folders = [
 ];
 
 function library() {
-  const value = migratePaperLibrary({ folders, papers: sampleLibrary().papers.slice(0, 3).map((paper, i) => ({ ...paper, folderId: ['grandchild', 'other', null][i] })) });
+  const value = withLibraryGraph({ ...emptyLibrary(), folders, papers: [0, 1, 2].map(i => createPaperRecord({ title: `Paper ${i}` }, { id: `p${i + 1}`, folderId: ['grandchild', 'other', null][i] })) });
   value.collections = folders;
   value.papers[1].collectionIds = ['child', 'other'];
   return value;
@@ -19,7 +19,7 @@ function library() {
 
 describe('nested paper folders', () => {
   it('preserves parent links when reading legacy libraries', () => {
-    expect(normalizeLibrary({ folders, papers: [] }).folders).toEqual(folders);
+    expect(withLibraryGraph({ ...emptyLibrary(), folders }).folders).toEqual(folders);
   });
 
   it('places bibliography folders under the selected parent without matching another branch', () => {
@@ -73,7 +73,7 @@ describe('nested paper folders', () => {
     expect(next.attachments).toEqual(original.attachments);
     expect(next.notes).toEqual(original.notes);
     expect(original.folders).toHaveLength(4);
-    expect(deleteFolderSubtree(emptyLibraryV3(), 'missing')).toEqual(emptyLibraryV3());
+    expect(deleteFolderSubtree(withLibraryGraph(emptyLibrary()), 'missing')).toEqual(withLibraryGraph(emptyLibrary()));
   });
 
   it('moving papers clears prior collection memberships so they leave the old tree', () => {
@@ -104,7 +104,7 @@ describe('nested paper folders', () => {
     expect(collections.find((item) => item.id === 'extra')).toEqual(data.collections[0]);
     expect(collections.find((item) => item.id === 'child')).toEqual(folders[1]);
     const moved = movePaperRecords(data.papers, ['p1'], 'other');
-    expect(collections.some((item) => item.id === moved[0].collectionIds[0])).toBe(true);
+    expect(collections.some((item) => item.id === moved[0].collectionIds?.[0])).toBe(true);
     expect(data.collections).toHaveLength(1);
   });
 });

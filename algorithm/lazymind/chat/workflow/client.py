@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import logging
 from typing import Any, Dict
 
 import httpx
@@ -128,10 +129,11 @@ class RemoteExecutorClient:
         return str(value.get('path') or '')
 
     async def fail(self, client: httpx.AsyncClient, attempt: str, lease: str,
-                   message: str, *, post_step_checkpoint: Dict[str, Any] | None = None) -> httpx.Response:
+                   message: str, *, error_code: str = 'LAZYMIND_EXECUTION_FAILED',
+                   post_step_checkpoint: Dict[str, Any] | None = None) -> httpx.Response:
         payload = {
             'lease_token': lease,
-            'error_code': 'LAZYMIND_EXECUTION_FAILED',
+            'error_code': error_code,
             'result': {'error': message, **(
                 {'post_step_checkpoint': post_step_checkpoint} if post_step_checkpoint else {}
             )},
@@ -151,6 +153,26 @@ class RemoteExecutorClient:
                                      headers=self.headers(lease), json=payload)
         response.raise_for_status()
         return response
+
+    async def acknowledge_stop(self, client: httpx.AsyncClient, attempt: str, lease: str) -> None:
+        # This idempotent receipt is the only proof that the fenced executor has
+        # exited. Retain it until Core confirms delivery; never rerun the tools.
+        delay = 0.5
+        while True:
+            try:
+                response = await client.post(
+                    f'{self.base_url}/internal/workflow-attempts/{attempt}:stop-ack',
+                    headers=self.headers(lease), json={'lease_token': lease})
+                response.raise_for_status()
+                return
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in (408, 429) and exc.response.status_code < 500:
+                    raise
+                logging.getLogger(__name__).warning('stop receipt %s awaiting delivery: %s', attempt, exc)
+            except httpx.TransportError as exc:
+                logging.getLogger(__name__).warning('stop receipt %s awaiting delivery: %s', attempt, exc)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30.0)
 
     async def complete(self, client: httpx.AsyncClient, attempt: str, lease: str,
                        result: Dict[str, Any]) -> httpx.Response:

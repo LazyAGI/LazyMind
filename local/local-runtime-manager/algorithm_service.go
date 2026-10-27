@@ -272,12 +272,17 @@ func (m *AlgorithmServiceManager) preparePython(ctx context.Context, cfg Runtime
 			return nil
 		}
 	}
-	if _, err := os.Stat(paths.AlgorithmPython); os.IsNotExist(err) {
+	_, pythonErr := os.Stat(paths.AlgorithmPython)
+	newVenv := os.IsNotExist(pythonErr)
+	if newVenv {
 		if err := m.createVenv(ctx, paths, false); err != nil {
 			return err
 		}
 	}
 	if err := m.installAlgorithmPythonDeps(ctx, paths, includeEvo, includeRAG); err != nil {
+		if !newVenv {
+			return fmt.Errorf("prepare algorithm python failed; preserving existing venv: %w", err)
+		}
 		if rebuildErr := m.createVenv(ctx, paths, true); rebuildErr != nil {
 			return fmt.Errorf("prepare algorithm python failed and venv rebuild failed: %w (original install error: %v)", rebuildErr, err)
 		}
@@ -820,6 +825,11 @@ func joinPathList(parts ...string) string {
 }
 
 func algorithmRegisterPolicy(cfg RuntimeConfig, paths RuntimePaths) string {
+	// Desktop packages may reuse a version while changing registration fingerprints.
+	// This opt-out override only replaces definitions; it never resets knowledge data.
+	if envBool("LAZYMIND_FORCE_ALGO_REGISTER", cfg.Profile == "desktop") {
+		return "force"
+	}
 	if policy := strings.TrimSpace(os.Getenv("LAZYLLM_ALGO_REGISTER_POLICY")); policy != "" {
 		return policy
 	}

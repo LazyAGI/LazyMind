@@ -11,6 +11,7 @@ from lazymind.chat.api import (
     base_ingestion_routes,
     chat_routes,
     document_routes,
+    academic_routes,
     health_routes,
     knowledge_search_routes,
     llm_task_routes,
@@ -51,6 +52,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     app.include_router(agent_control_routes.router)
     app.include_router(mail_read_routes.router)
     app.include_router(directory_file_routes.router)
+    app.include_router(academic_routes.router)
     # Workflow actions, Writer sync, and LazyMind task cancellation callbacks.
     app.include_router(workflow_routes.router)
 

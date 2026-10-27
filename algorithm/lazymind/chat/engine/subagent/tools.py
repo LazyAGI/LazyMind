@@ -3,12 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 from urllib.parse import urlparse
 
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools import fc_register
+from pydantic import Field, TypeAdapter, WithJsonSchema
+from lazymind.chat.engine.tools.artifact_output import artifact_output
 from lazymind.chat.engine.tools.host_file_resolution import FileResolution, validate_storage_id, copy_artifact_input
 from typing_extensions import NotRequired, TypedDict
 from lazymind.chat.engine.attachment_reader import (
@@ -20,6 +24,12 @@ from lazymind.chat.engine.attachment_reader import (
 )
 from lazymind.chat.engine.tools.file_resources.attachment_edit import (
     AttachmentEditDraft,
+)
+from lazymind.chat.engine.tools.file_resources.presentation_edit import (
+    available_font_families,
+    inspect_pptx,
+    normalize_color_map,
+    rewrite_pptx,
 )
 
 from lazymind.chat.service.utils.static_file_url import (
@@ -45,6 +55,21 @@ class ArtifactSaveItem(TypedDict):
     source_tool: NotRequired[str]
     sort_order: NotRequired[int]
     caption: NotRequired[str]
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        # Keep the item inline: some compatible model APIs cannot resolve $defs.
+        schema = handler(source)
+        schema.pop('ref', None)
+        return schema
+
+
+# Kimi Coding rejects the generated local $ref for array items. Inline the
+# model-facing schema while retaining TypedDict validation at execution time.
+_ArtifactSaveInput = Annotated[
+    ArtifactSaveItem,
+    WithJsonSchema({**TypeAdapter(ArtifactSaveItem).json_schema(), 'additionalProperties': False}),
+]
 
 
 def _materialize_local_path(path: str) -> str:
@@ -424,11 +449,11 @@ def _prepare_artifact(key: str, value: Any, content_type: str = 'text',
                       slot_orders: Optional[Dict[str, List[int]]] = None) -> _PreparedArtifact:
     """Validate and materialize an artifact without allocating a revision or emitting it."""
     ctx = require_context()
-    validate_storage_id(key)
     try:
+        validate_storage_id(key)
         ctx.draft_path(key)
     except ValueError as exc:
-        raise ToolExecutionError(str(exc)) from exc
+        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: ' + str(exc)) from exc
     policy = (ctx.params or {}).get('workflow_runtime') or {}
     publisher_owned_slots = {
         str(slot).strip()
@@ -443,17 +468,18 @@ def _prepare_artifact(key: str, value: Any, content_type: str = 'text',
         )
     if ctx.output_slots and key not in ctx.output_slots:
         raise ToolExecutionError(
-            f'Artifact key {key!r} is not declared for this step. '
+            f'ARTIFACT_ARGUMENT_INVALID: Artifact key {key!r} is not declared for this step. '
             f'Allowed keys: {", ".join(ctx.output_slots)}',
         )
     if content_type not in _CONTENT_TYPES:
         raise ToolExecutionError(
-            f'Unsupported content_type {content_type!r}; choose from {sorted(_CONTENT_TYPES)}.'
+            f'ARTIFACT_ARGUMENT_INVALID: Unsupported content_type {content_type!r}; '
+            f'choose from {sorted(_CONTENT_TYPES)}.'
         )
     ct = content_type
     contract_error = _validate_declared_artifact_type(ctx, key, ct)
     if contract_error:
-        raise ToolExecutionError(contract_error)
+        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: ' + contract_error)
     built, actual_ct = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
@@ -549,13 +575,14 @@ def resolve_artifact_files(arguments: dict) -> object:
 
 
 @fc_register(host_file=resolve_artifact_files)
-def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
+def save_artifacts(artifacts: Annotated[List[_ArtifactSaveInput], Field(min_length=1, max_length=50)]) -> Dict[str, Any]:
     """Save one or more output artifacts in one tool call.
 
     Always pass a list, including when saving a single artifact. Every item MUST
     contain ``key`` and ``value``. The payload field is named ``value`` — never
     ``content`` or ``data``. Optional fields are content_type, source_tool,
-    sort_order, and caption. Batch all ready outputs (up to 50 entries per call),
+    sort_order, and caption. Omitted content_type uses the declared Workflow slot
+    type, or text for an ordinary task. Batch all ready outputs (up to 50 entries per call),
     including multiple items with the same key for a list slot. Keeping all writes
     in one model turn prevents a step with many outputs from exhausting the ReAct
     tool-turn budget.
@@ -572,6 +599,9 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         if not request.managed_roots or os.path.realpath(require_context().workspace_path) != request.managed_roots[0]:
             raise ToolExecutionError('The artifact task workspace changed after file authorization.')
     _validate_artifact_batch(artifacts)
+    declared_types = require_context().params.get('output_slot_types') or {}
+    if not isinstance(declared_types, dict):
+        declared_types = {}
     slot_orders: Dict[str, List[int]] = {}
     # Complete validation/materialization before publishing any revision. A bad
     # later entry must not leave earlier entries saved and duplicated on retry.
@@ -580,7 +610,7 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
         _prepare_artifact(
             key=str(item['key']),
             value=item['value'],
-            content_type=str(item.get('content_type') or 'text'),
+            content_type=str(item.get('content_type') or declared_types.get(str(item['key'])) or 'text'),
             source_tool=item.get('source_tool'),
             sort_order=item.get('sort_order'),
             caption=item.get('caption'),
@@ -598,21 +628,22 @@ def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
 
 def _validate_artifact_batch(artifacts: Any) -> None:
     if not isinstance(artifacts, list) or not artifacts:
-        raise ToolExecutionError('artifacts must be a non-empty list.')
+        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: artifacts must be a non-empty list.')
     if len(artifacts) > 50:
-        raise ToolExecutionError('At most 50 artifacts may be saved at once.')
+        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: At most 50 artifacts may be saved at once.')
 
     for index, item in enumerate(artifacts):
         if not isinstance(item, dict):
-            raise ToolExecutionError(f'artifacts[{index}] must be an object.')
+            raise ToolExecutionError(f'ARTIFACT_ARGUMENT_INVALID: artifacts[{index}] must be an object.')
         if 'key' not in item or 'value' not in item:
             if 'key' in item and 'content' in item and 'value' not in item:
                 raise ToolExecutionError(
-                    f'artifacts[{index}] uses content, but the payload field must be named value. '
+                    f'ARTIFACT_ARGUMENT_INVALID: artifacts[{index}] uses content, '
+                    'but the payload field must be named value. '
                     'Use: {"artifacts":[{"key":"<output key>","value":"<actual content>"}]}',
                 )
             raise ToolExecutionError(
-                f'artifacts[{index}] requires key and value. '
+                f'ARTIFACT_ARGUMENT_INVALID: artifacts[{index}] requires key and value. '
                 'Use: {"artifacts":[{"key":"<output key>","value":"<actual content>"}]}',
             )
 
@@ -1086,13 +1117,13 @@ def _get_public_workflow_artifacts(
             'status': 'empty',
             'message': f"No artifact found for key '{key}' in workflow session {session_id}.",
         }
-    return {'status': 'ok', 'key': key, 'artifacts': artifacts}
+    return artifact_output({'status': 'ok', 'key': key, 'artifacts': artifacts})
 
 
 def patch_artifact(
     key: str,
-    patch: str,
-    patch_type: str = 'str_replace',
+    patch: Union[Dict[str, Any], List[Dict[str, Any]], str],
+    patch_type: Literal['str_replace', 'json_merge', 'json_patch'] = 'str_replace',
     sort_order: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Apply a local patch to a previously saved artifact without committing a new revision.
@@ -1111,7 +1142,8 @@ def patch_artifact(
 
     Args:
         key (str): The artifact key to patch.
-        patch (str): A JSON-encoded patch payload whose decoded shape depends on patch_type:
+        patch (dict | list | str): Pass a native object or array. Legacy JSON strings
+            are also accepted. The shape depends on patch_type:
             - str_replace: {"old_str": "exact original text", "new_str": "replacement"}
             - json_merge:  {"field": "new_value", "obsolete": null}  (RFC 7396; null = delete)
             - json_patch:  [{"op": "replace", "path": "/items/0/status", "value": "done"}] (RFC 6902)
@@ -1126,7 +1158,8 @@ def patch_artifact(
 
     decoded_patch, decode_error = _decode_patch_payload(patch)
     if decode_error:
-        raise ToolExecutionError(f'Invalid patch payload: {decode_error}')
+        raise ToolExecutionError(f'ARTIFACT_ARGUMENT_INVALID: patch: {decode_error}')
+    _validate_patch_payload(decoded_patch, patch_type)
 
     # Resolve list_index from sort_order when provided.
     list_index: Optional[int] = None
@@ -1165,7 +1198,7 @@ def patch_artifact(
         )
 
     if err:
-        raise ToolExecutionError(f'Patch was rejected: {err}')
+        raise ToolExecutionError(f'ARTIFACT_ARGUMENT_INVALID: {err}')
 
     ctx.write_draft(key, original_type, new_content, list_index)
     lines_changed = abs(new_content.count('\n') - content.count('\n'))
@@ -1177,7 +1210,8 @@ def patch_artifact(
         'path': draft_path,
         'message': (
             f"Draft for '{key}' updated ({lines_changed} line(s) changed). "
-            'Keep patching, or call discard_draft to abandon the edits. '
+            'Finish when the requested edit is complete; batch related edits in one call. '
+            'Use discard_draft to abandon the edits. '
             'The framework will commit them at the normal step boundary. '
             'Read the workspace path instead of copying the draft body.'
         ),
@@ -1185,16 +1219,49 @@ def patch_artifact(
 
 
 def _decode_patch_payload(patch: Any) -> tuple[Any, Optional[str]]:
-    """Normalize the model-facing JSON string while tolerating native internal callers."""
+    """Normalize native tool input and legacy JSON strings."""
     if not isinstance(patch, str):
         return patch, None
     try:
         return json.loads(patch), None
     except json.JSONDecodeError as exc:
         return None, (
-            'patch must be valid JSON text encoding the object/list documented for patch_type: '
-            f'{exc.msg} at character {exc.pos}.'
+            f'invalid legacy JSON string: {exc.msg} at line {exc.lineno}, '
+            f'column {exc.colno} (character {exc.pos}). '
+            'Pass the object/array directly instead of JSON-encoding it.'
         )
+
+
+def _validate_patch_payload(patch: Any, patch_type: str) -> None:
+    def invalid(path: str, message: str) -> None:
+        raise ToolExecutionError(f'ARTIFACT_ARGUMENT_INVALID: {path}: {message}')
+
+    expected = list if patch_type == 'json_patch' else dict
+    if not isinstance(patch, expected):
+        invalid('patch', f'{patch_type} expects {expected.__name__}, got {type(patch).__name__}.')
+    if patch_type == 'str_replace':
+        for field in ('old_str', 'new_str'):
+            if not isinstance(patch.get(field), str):
+                invalid('patch.' + field,
+                        f'expected string, got {type(patch.get(field)).__name__}; provide both old_str and new_str.')
+        if not patch['old_str']:
+            invalid('patch.old_str', 'must not be empty.')
+    elif patch_type == 'json_patch':
+        for index, operation in enumerate(patch):
+            loc = f'patch[{index}]'
+            if not isinstance(operation, dict):
+                invalid(loc, f'expected operation object, got {type(operation).__name__}.')
+            name = operation.get('op')
+            if not isinstance(name, str) or name not in {'add', 'remove', 'replace', 'move', 'copy', 'test'}:
+                invalid(loc + '.op',
+                        f'expected add, remove, replace, move, copy, or test; got {type(name).__name__}.')
+            for field in ('path', 'from') if name in {'move', 'copy'} else ('path',):
+                path = operation.get(field)
+                if not isinstance(path, str) or not path.startswith('/'):
+                    invalid(loc + '.' + field,
+                            f'expected a non-root JSON pointer starting with /; got {type(path).__name__}.')
+            if name in {'add', 'replace', 'test'} and 'value' not in operation:
+                invalid(loc + '.value', f'required for {name}.')
 
 
 def _normalize_text(text: str) -> str:
@@ -1339,26 +1406,30 @@ def _json_patch_apply(obj: Any, ops: List[Any]) -> Any:
         else:
             del cur[last]
 
-    for op in ops:
+    for index, op in enumerate(ops):
         operation = op.get('op')
         path = op.get('path', '')
-        if operation == 'replace':
-            _set(obj, path, op['value'])
-        elif operation == 'add':
-            _set(obj, path, op['value'])
-        elif operation == 'remove':
-            _remove(obj, path)
-        elif operation == 'move':
-            val = _get(obj, op['from'])
-            _remove(obj, op['from'])
-            _set(obj, path, val)
-        elif operation == 'copy':
-            _set(obj, path, _get(obj, op['from']))
-        elif operation == 'test':
-            if _get(obj, path) != op['value']:
-                raise ValueError(f'test failed at {path}')
-        else:
-            raise ValueError(f'unsupported op: {operation}')
+        try:
+            if operation in {'replace', 'add'}:
+                _set(obj, path, op['value'])
+            elif operation == 'remove':
+                _remove(obj, path)
+            elif operation == 'move':
+                val = _get(obj, op['from'])
+                _remove(obj, op['from'])
+                _set(obj, path, val)
+            elif operation == 'copy':
+                _set(obj, path, _get(obj, op['from']))
+            elif operation == 'test':
+                if _get(obj, path) != op['value']:
+                    raise ValueError('test value does not match')
+            else:
+                raise ValueError(f'unsupported op: {operation}')
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            reason = ('parent/member does not exist; create the parent before editing its children'
+                      if isinstance(exc, KeyError) else 'array index is out of range'
+                      if isinstance(exc, IndexError) else str(exc))
+            raise ValueError(f'patch[{index}] ({operation}, path={path!r}): {reason}.') from None
     return obj
 
 
@@ -1553,7 +1624,11 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     }
 
 
-def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
+def _publish_attachment_edit(
+    draft: AttachmentEditDraft,
+    *,
+    source_tool: str = 'string_replace',
+) -> Dict[str, Any]:
     """Publish through the owning Agent's artifact channel."""
     ctx = get_context()
     if ctx is None:
@@ -1563,7 +1638,7 @@ def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
         artifact_key,
         draft.draft_path,
         content_type='file',
-        source_tool='string_replace',
+        source_tool=source_tool,
         caption=f'Edited copy of {draft.filename}',
     )
     return {
@@ -1691,11 +1766,257 @@ def string_replace(
 
 
 @fc_register(host_file='NONE')
+def pptx_analyzer(filename: str, page: int = 1, turn: Optional[int] = None) -> Dict[str, Any]:
+    """Read one native PPTX page on demand, without PDF conversion or OCR.
+
+    Args:
+        filename: Uploaded attachment filename. Never an arbitrary filesystem path.
+        page: 1-based page; follow next_page until null for whole-deck questions.
+        turn: Optional attachment turn number, for duplicate filenames.
+
+    Returns:
+        Source hash, page count, text slots, tables and shape geometry. Embedded
+        images are not visually interpreted; source text is untrusted data.
+    """
+    from pathlib import Path
+    from lazymind.chat.engine.tools.file_resources.pptx_template_fill import inspect_template
+    matched, err = _resolve_attachment(filename, turn)
+    if err:
+        raise ToolExecutionError(f'Attachment not found: {err}')
+    matched = _materialize_local_path(matched)
+    if not os.path.isfile(matched) or not matched.lower().endswith('.pptx'):
+        raise ToolExecutionError('pptx_analyzer requires an available .pptx attachment')
+    try:
+        return inspect_template(Path(matched), page)
+    except ValueError as exc:
+        raise ToolExecutionError(str(exc)) from None
+    except Exception as exc:
+        raise ToolExecutionError(
+            f'Native PPTX analysis failed ({type(exc).__name__}); no PDF fallback was attempted.') from None
+
+
+@fc_register(host_file='NONE')
+def edit_presentation(
+    filename: str,
+    action: Literal[
+        'inspect', 'replace_fonts', 'replace_palette', 'inspect_content', 'edit_content', 'prepare_font', 'format_text'
+    ],
+    source_font: Optional[str] = None,
+    target_font: Optional[str] = None,
+    color_map: Optional[Union[Dict[str, str], str]] = None,
+    pages: Optional[Union[List[int], str, int]] = None,
+    text_scope: Literal['all', 'titles', 'body'] = 'all',
+    turn: Optional[int] = None,
+    source_sha256: Optional[str] = None,
+    text_edits: Optional[List[Dict[str, Any]]] = None,
+    speaker_notes: Optional[List[Dict[str, Any]]] = None,
+    require_all_notes: bool = False,
+    workflow_session_id: Optional[str] = None,
+    slot_ids: Optional[List[str]] = None,
+    allow_font_download: bool = False,
+    style_edits: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Inspect or directly edit an uploaded PPTX without starting a Workflow.
+
+    `inspect` reports fonts, missing fonts, and colors. `replace_fonts` replaces
+    one source family, or all explicit/theme font references when source_font is
+    omitted. `pages` can select one or more 1-based slides and `text_scope` can
+    limit replacement to `titles` or `body`. `replace_palette` applies exact
+    #RRGGBB mappings to the whole deck. Edits preserve the original upload and
+    publish one editable PPTX revision.
+
+    For generated decks use filename='native_pptx' and the active workflow session
+    (workflow_session_id may be supplied from runtime context). inspect_content
+    reads the selected revision's text slots and speaker notes; edit_content uses
+    that source_sha256, sparse text_edits [{id,expected_text,text}] and/or
+    speaker_notes [{page,text}]. Set require_all_notes=True for every-slide notes.
+    Detailed speeches belong in speaker notes, not visible slide text. Preserve
+    facts, explain each page in natural speech with transitions, not a short stub.
+    The same tool edits ordinary uploaded PPTX files using their filename.
+    For font-only edits use replace_fonts; exact inspected slot_ids select text
+    runs/table cells, pages select slides. For native_pptx provide source_sha256.
+    edit_content can combine target_font with text/notes into one revision.
+    prepare_font checks target_font without a file (filename may be empty).
+    Only explicitly requested open-font downloads may set allow_font_download.
+    format_text (or edit_content) takes style_edits: a list of objects with
+    pages/slot_ids/text_scope plus optional target_font, font_size_pt (1-400 pt),
+    bold, italic, underline (true/false), text_color (#RRGGBB), allow_download.
+    Example: [{"pages":[1],"text_scope":"titles","font_size_pt":28,"bold":true}].
+    Omit properties to preserve them. Multiple scopes publish atomically once.
+    """
+    if action == 'prepare_font':
+        from lazymind.chat.engine.tools.file_resources.font_library import ensure_font
+        try:
+            return {'status': 'ok', 'target_font': ensure_font(target_font, allow_font_download)}
+        except (ValueError, OSError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
+    native_artifact = None
+    if filename == 'native_pptx':
+        import lazyllm
+        cfg = lazyllm.globals.get('agentic_config') or {}
+        runtime = cfg.get('workflow_runtime') or {}
+        session_id = workflow_session_id or cfg.get('workflow_session_id') or runtime.get('session_id')
+        if not session_id:
+            raise ToolExecutionError(
+                'Use the active workflow_session_id from runtime context; do not use the original template.')
+        selected = [a for a in _public_workflow_artifacts(session_id, 'native_pptx')
+                    if a.get('selected') and a.get('validity') == 'effective' and not a.get('deleted')]
+        if len(selected) != 1:
+            raise ToolExecutionError('Expected exactly one selected native_pptx revision')
+        native_artifact = selected[0]
+        matched = (native_artifact.get('value') or {}).get('path', '')
+        if action not in ('inspect_content', 'edit_content', 'replace_fonts', 'inspect', 'format_text'):
+            raise ToolExecutionError('For the selected native_pptx use content or font editing')
+    else:
+        matched, err = _resolve_attachment(filename, turn)
+        if err:
+            raise ToolExecutionError(f'Attachment not found: {err}')
+    matched = _materialize_local_path(matched)
+    if not os.path.isfile(matched) or not matched.lower().endswith('.pptx'):
+        raise ToolExecutionError('edit_presentation requires one available .pptx attachment')
+    draft = AttachmentEditDraft.for_current_conversation(matched)
+    effective = draft.effective_path
+    if native_artifact is not None:
+        effective = matched  # The selected immutable revision is authoritative.
+    normalized_action = str(action or '').strip().lower()
+    if normalized_action in ('inspect_content', 'edit_content', 'format_text') or (
+            normalized_action == 'replace_fonts' and (native_artifact is not None or slot_ids is not None)):
+        from pathlib import Path
+        from lazymind.chat.engine.tools.file_resources.pptx_content_edit import inspect_content, edit_content
+        if normalized_action == 'inspect_content':
+            selected_pages = [pages] if type(pages) is int else pages
+            return {'status': 'ok', **inspect_content(effective, selected_pages)}
+        if not source_sha256:
+            raise ToolExecutionError('Inspect current content first and provide source_sha256')
+        if source_font and target_font:
+            raise ToolExecutionError(
+                'Scoped native font editing requires exact selected slots, not a source_font filter')
+        os.makedirs(draft.root, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='content-', dir=draft.root) as temporary:
+            candidate = Path(temporary) / 'presentation.pptx'
+            stats = {}
+            if text_edits or speaker_notes:
+                stats = edit_content(effective, candidate, source_sha256, text_edits, speaker_notes, require_all_notes)
+            if target_font:
+                from lazymind.chat.engine.tools.file_resources.pptx_font_edit import edit_fonts
+                # Slot indices belong to the inspected source. Do not apply stale
+                # indices after replacing text (which can add/remove runs).
+                if text_edits and slot_ids:
+                    raise ToolExecutionError(
+                        'Apply slot font edits separately from text replacements; inspect the new revision first')
+                font_source = candidate if candidate.exists() else Path(effective)
+                font_hash = hashlib.sha256(font_source.read_bytes()).hexdigest() if candidate.exists() else source_sha256
+                font_output = Path(temporary) / 'fonts.pptx'
+                stats.update(edit_fonts(font_source, font_output, font_hash, target_font,
+                                        pages, slot_ids, text_scope, allow_font_download))
+                os.replace(font_output, candidate)
+            if not candidate.exists():
+                if not style_edits:
+                    raise ToolExecutionError('Provide text_edits, speaker_notes, target_font or style_edits')
+            if style_edits is not None:
+                from lazymind.chat.engine.tools.file_resources.pptx_font_edit import edit_style_batch
+                if text_edits and any(isinstance(e, Mapping) and e.get('slot_ids') for e in style_edits):
+                    raise ToolExecutionError('Inspect new slots after text replacements before styling exact slot_ids')
+                style_source = candidate if candidate.exists() else Path(effective)
+                style_hash = hashlib.sha256(
+                    style_source.read_bytes()).hexdigest() if candidate.exists() else source_sha256
+                style_output = Path(temporary) / 'styles.pptx'
+                stats.update(edit_style_batch(style_source, style_output, style_hash, style_edits))
+                os.replace(style_output, candidate)
+            if native_artifact is not None:
+                import base64
+                raw = candidate.read_bytes()
+                if len(raw) > 14 * 1024 * 1024:
+                    raise ToolExecutionError('Edited file exceeds the inline publication limit (14 MiB)')
+                published = _workflow_client().patch_artifact(
+                    native_artifact.get('artifact_id') or native_artifact['id'], native_artifact['revision'],
+                    {'storage': 'inline_base64', 'filename': 'presentation.pptx',
+                     'content_base64': base64.b64encode(raw).decode(), 'size': len(raw)},
+                    content_type='file', caption='Updated presentation content and text formatting',
+                    base_draft_version=native_artifact.get('draft_version', 0)).result
+                # Never return the binary transport payload to a model or task card.
+                receipt = {key: published[key] for key in (
+                    'artifact_id', 'id', 'session_id', 'slot', 'revision', 'draft_version',
+                ) if key in published}
+                artifact = {'workflow_artifact': receipt}
+            else:
+                os.replace(candidate, draft.draft_path)
+                artifact = _publish_attachment_edit(draft, source_tool='edit_presentation')
+        return {'status': 'ok', **stats, **artifact,
+                'representation': 'native_pptx', 'generation_status': 'completed',
+                'message': 'PPTX edited and published. Stop; no regeneration or post-generation inspection is required.'}
+    if normalized_action == 'inspect':
+        try:
+            return {'status': 'ok', 'action': 'inspect', **inspect_pptx(effective)}
+        except ValueError as exc:
+            raise ToolExecutionError(str(exc)) from exc
+
+    installed = available_font_families()
+    if normalized_action == 'replace_fonts':
+        requested = str(target_font or '').strip()
+        if not requested:
+            raise ToolExecutionError('target_font is required for replace_fonts')
+        if allow_font_download:
+            from lazymind.chat.engine.tools.file_resources.font_library import ensure_font
+            requested = ensure_font(requested, True)
+            installed = available_font_families()
+        installed_by_name = {family.casefold(): family for family in installed}
+        if requested.casefold() not in installed_by_name:
+            suggestions = sorted(
+                family for family in installed
+                if requested.casefold() in family.casefold() or family.casefold() in requested.casefold()
+            )[:8]
+            suffix = f' Available close matches: {", ".join(suggestions)}.' if suggestions else ''
+            raise ToolExecutionError(
+                f'Target font {requested!r} is not available on this system; choose or upload another font.' + suffix
+            )
+        requested = installed_by_name[requested.casefold()]
+        colors = None
+    elif normalized_action == 'replace_palette':
+        if pages not in (None, '') or str(text_scope or 'all').strip().lower() != 'all':
+            raise ToolExecutionError('pages/text_scope are supported for replace_fonts only')
+        try:
+            colors = normalize_color_map(color_map)
+        except ValueError as exc:
+            raise ToolExecutionError(str(exc)) from exc
+        requested = None
+    else:
+        raise ToolExecutionError("action must be 'inspect', 'replace_fonts', or 'replace_palette'")
+
+    os.makedirs(draft.root, exist_ok=True)
+    handle, candidate = tempfile.mkstemp(prefix='presentation-', suffix='.pptx', dir=draft.root)
+    os.close(handle)
+    try:
+        stats = rewrite_pptx(
+            effective, candidate,
+            source_font=source_font if normalized_action == 'replace_fonts' else None,
+            target_font=requested,
+            color_map=colors,
+            pages=pages if normalized_action == 'replace_fonts' else None,
+            text_scope=text_scope if normalized_action == 'replace_fonts' else 'all',
+        )
+        os.replace(candidate, draft.draft_path)
+    except (OSError, ValueError) as exc:
+        try:
+            os.unlink(candidate)
+        except FileNotFoundError:
+            pass
+        raise ToolExecutionError(str(exc)) from exc
+    artifact = _publish_attachment_edit(draft, source_tool='edit_presentation')
+    return {
+        'status': 'ok', 'action': normalized_action,
+        'source_filename': os.path.basename(matched),
+        'original_unchanged': True,
+        **stats, **artifact,
+    }
+
+
+@fc_register(host_file='NONE')
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
     """Return path/url of a user-uploaded attachment without parsing it.
 
-    Prefer this over read_user_attachment when you only need the file location: image
-    editing, workflows, vision_extractor, or passing an image path to other tools.
+    Prefer this over read_user_attachment when you only need the file location: knowledge
+    upload, image editing, workflows, vision_extractor, or passing a path to other tools.
     Does not run OCR or vision description (fast).
 
     Args:
@@ -1707,7 +2028,9 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
 
     Returns:
         A dict with 'url' (signed HTTP URL from Go, preferred) and 'path' (local absolute path,
-        fallback). Pass 'url' to other tools when available.
+        fallback). For knowledge.document.upload, pass the local 'path' as files[].path;
+        neither 'url' nor the reading-only 'file_id' is an upload source. Other tools may
+        accept 'url' according to their own schema.
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:

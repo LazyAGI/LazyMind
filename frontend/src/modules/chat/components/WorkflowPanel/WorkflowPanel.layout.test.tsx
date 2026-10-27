@@ -13,7 +13,7 @@ const fixture = vi.hoisted(() => ({
   ui: {} as WorkflowUI,
   flush: vi.fn(async () => true),
   refresh: vi.fn(),
-  setApprovalPreference: vi.fn(async () => {}),
+  pause: vi.fn(),
   setFocusedTab: vi.fn(),
   focusedTab: undefined as string | undefined,
   documentAction: vi.fn(),
@@ -27,13 +27,14 @@ vi.mock('@/modules/chat/store/workflowPanel', async (original) => {
   const state = {
     get sessionByConversation() { return { 'layout-test': fixture.session }; },
     bumpDismissedRefresh: vi.fn(), autoRunningByConversation: {}, setAutoRunning: vi.fn(),
+    loadActiveSession: vi.fn(async () => {}),
     fetchWorkflowUI: () => Promise.resolve(fixture.ui), setFocusedTab: fixture.setFocusedTab,
     setFocusedSortOrder: vi.fn(),
     get focusedTabByConversation() { return { 'layout-test': fixture.focusedTab }; }, workflowUIByWorkflow: {},
   };
   return { ...actual, useWorkflowStore: Object.assign((selector?: (value: typeof state) => unknown) => selector ? selector(state) : state, { getState: () => state }) };
 });
-vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => ({ setApprovalPreference: fixture.setApprovalPreference }) }));
+vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => ({ pauseSession: fixture.pause }) }));
 vi.mock('@/components/StateGraphModal', () => ({ default: () => null }));
 vi.mock('./actions/WorkflowTabActions', () => ({ WorkflowTabActions: () => null }));
 vi.mock('./ppt/SlideThumb', () => ({ SlideThumb: () => null }));
@@ -73,6 +74,7 @@ beforeEach(async () => {
   await i18n.changeLanguage('zh-CN');
   vi.clearAllMocks();
   fixture.flush.mockResolvedValue(true);
+  fixture.pause.mockResolvedValue(undefined);
   fixture.focusedTab = undefined;
   fixture.setFocusedTab.mockImplementation((_id: string, tab: string) => { fixture.focusedTab = tab; });
   localStorage.clear();
@@ -84,8 +86,9 @@ beforeEach(async () => {
   ] };
   fixture.session = {
     session_id: 'layout-test', conversation_id: 'layout-test', workflow_id: 'fixture', workflow_mode: 'auto',
+    controller_host: 'lazymind',
     status: 'completed', current_step_id: 'write_document', created_at: '', updated_at: '',
-    projection: { past: ['prepare', 'write_document'] },
+    projection: { display: { status: 'completed', reason: 'completed', approval_step_id: '' }, past: ['prepare', 'write_document'] },
     steps: ['prepare', 'write_document', 'stale_step'].map(step_id => ({
       id: step_id, session_id: 'layout-test', step_id, attempt: 1, task_id: '', status: 'succeeded',
       validity: step_id === 'stale_step' ? 'stale' : 'effective', created_at: '2026-09-16T00:00:00Z', updated_at: '',
@@ -96,6 +99,34 @@ beforeEach(async () => {
 afterEach(cleanup);
 
 describe('shared workflow compact layout', () => {
+  it('keeps automatic grids from reintroducing hidden output when every tab is hidden', async () => {
+    fixture.ui.slotDefinitions = [{ id: 'document', label: '内部数据', type: 'text', user_visible: false }];
+    fixture.ui.tabs = [{ id: 'internal', label: '内部数据', slots: fixture.ui.slotDefinitions }];
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await waitFor(() => expect(screen.getByText('示例工作流')).toBeInTheDocument());
+    expect(screen.queryByText('正文 document')).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: '内部数据' })).not.toBeInTheDocument();
+    act(() => setDeveloperModeActive(true));
+    expect(await screen.findByText('正文 document')).toBeInTheDocument();
+  });
+
+  it('switches declared output visibility with developer mode without changing the workflow session', async () => {
+    fixture.ui.tabs![0].slots = [{ id: 'internal_prompt', label: '生成提示词', type: 'text', user_visible: false }];
+    fixture.session.slots!.push({ ...fixture.session.slots![0], slot_id: 'internal_prompt', slot: 'internal_prompt', step_id: 'prepare' });
+    const { setDeveloperModeActive } = await import('@/utils/developerMode');
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(screen.queryByRole('tab', { name: '写作准备' })).not.toBeInTheDocument();
+    expect(screen.queryByText('正文 internal_prompt')).not.toBeInTheDocument();
+    act(() => setDeveloperModeActive(true));
+    fireEvent.click(await screen.findByRole('tab', { name: '写作准备' }));
+    expect(screen.getByText('正文 internal_prompt')).toBeInTheDocument();
+    act(() => setDeveloperModeActive(false));
+    expect(screen.queryByRole('tab', { name: '写作准备' })).not.toBeInTheDocument();
+    expect(fixture.session.slots!.some(slot => slot.slot_id === 'internal_prompt')).toBe(true);
+  });
+
   it('keeps a replacement document action when the previous registration cleans up', async () => {
     render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('tab', { name: '成稿', selected: true });
@@ -236,27 +267,35 @@ describe('shared workflow compact layout', () => {
   });
 
   it.each(['active', 'waiting', 'failed', 'completed'] as const)(
-    'shows the full trust notice for %s sessions and after remount', async (status) => {
+    'keeps the full trust notice hidden for %s sessions and after remount', async (status) => {
       fixture.session.status = status;
       fixture.session.steps = [];
       const notice = '此工作流以完全信任模式运行，可在服务进程的系统权限范围内读取、修改文件和执行代码，不受 Workspace 权限限制，无需逐次审批。';
       const view = render(<WorkflowPanel conversationId='layout-test' />);
-      expect(await screen.findByText(notice)).toBeVisible();
+      await screen.findByRole('tab', { name: '成稿' });
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
       view.unmount();
       render(<WorkflowPanel conversationId='layout-test' />);
-      expect(await screen.findByText(notice)).toBeVisible();
+      await screen.findByRole('tab', { name: '成稿' });
+      expect(screen.queryByText(notice)).not.toBeInTheDocument();
     },
   );
 
-  it('keeps rerun shortcuts visible in the footer and still saves before rerunning', async () => {
+  it.each(['completed', 'failed'] as const)('binds the %s rerun to Chat and still saves before rerunning', async (status) => {
+    fixture.session.status = status;
+    fixture.session.projection!.display!.status = status;
     const send = vi.fn();
-    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    // Let the asynchronous UI load and editor-action registration settle before
+    // asserting the save-before-rerun contract.
+    await act(async () => { render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />); });
     await screen.findByRole('button', { name: '发布' });
     const shortcuts = screen.getByRole('group', { name: '回退到步骤：' });
     expect(shortcuts).toBeVisible();
     expect(within(shortcuts).getByRole('button', { name: '写作准备' })).toBeVisible();
     fireEvent.click(within(shortcuts).getByRole('button', { name: '成稿' }));
-    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 write_document'));
+    await waitFor(() => expect(send).toHaveBeenCalledWith('请重新执行步骤 write_document', {
+      session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
+    }));
     expect(fixture.flush).toHaveBeenCalledOnce();
     expect(within(shortcuts).queryByRole('button', { name: 'stale_step' })).not.toBeInTheDocument();
   });
@@ -264,7 +303,7 @@ describe('shared workflow compact layout', () => {
   it('does not rerun when saving the current edits fails', async () => {
     fixture.flush.mockResolvedValue(false);
     const send = vi.fn();
-    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await act(async () => { render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />); });
     await screen.findByRole('button', { name: '发布' });
     fireEvent.click(within(screen.getByRole('group', { name: '回退到步骤：' })).getByRole('button', { name: '成稿' }));
     await waitFor(() => expect(fixture.flush).toHaveBeenCalledOnce());
@@ -342,17 +381,240 @@ describe('shared workflow compact layout', () => {
   });
 
   it('retains only the relevant running and failed workflow controls', async () => {
-    const stop = vi.fn();
     fixture.session.status = 'active';
-    const view = render(<WorkflowPanel conversationId='layout-test' onStop={stop} />);
+    fixture.session.projection!.display = { status: 'running', reason: 'executing', approval_step_id: '' };
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
     await screen.findByRole('tab', { name: /成稿/ });
     expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '继续' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '停止' }));
-    expect(stop).toHaveBeenCalledOnce();
+    await waitFor(() => expect(fixture.pause).toHaveBeenCalledWith('layout-test'));
+    expect(fixture.pause).toHaveBeenCalledOnce();
+    expect(fixture.refresh).toHaveBeenCalledOnce();
+    expect(fixture.flush).not.toHaveBeenCalled();
+    fixture.session = { ...fixture.session, status: 'pausing' };
+    fixture.session.projection!.display = { status: 'running', reason: 'pausing', approval_step_id: '' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByRole('button', { name: '停止中…' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '停止中…' }));
+    expect(fixture.pause).toHaveBeenCalledOnce();
     fixture.session = { ...fixture.session, status: 'failed' };
-    view.rerender(<WorkflowPanel conversationId='layout-test' onStop={stop} />);
+    fixture.session.projection!.display = { status: 'failed', reason: 'execution_failed', approval_step_id: '' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
     expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
+  });
+
+  it.each([false, true])('pauses only the workflow while Chat busy=%s', async chatBusy => {
+    fixture.session.status = 'active';
+    fixture.session.projection!.display = {
+      status: 'running', reason: 'executing', approval_step_id: '',
+    };
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' chatBusy={chatBusy} onSendMessage={send} />);
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: '停止' })));
+    expect(fixture.pause).toHaveBeenCalledWith('layout-test');
+    expect(fixture.pause).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '停止' })).toHaveAttribute('title', i18n.t('chat.workflowPauseScopeHint'));
+  });
+
+  it.each(['zh-CN', 'en-US'])('keeps stop labels distinct from confirmed pause through the lifecycle (%s)', async language => {
+    await i18n.changeLanguage(language);
+    const labels = language === 'zh-CN'
+      ? { stop: '停止', stopping: '停止中…', running: '执行中', paused: '已暂停', resume: '继续' }
+      : { stop: 'Stop', stopping: 'Stopping…', running: 'Running', paused: 'Paused', resume: 'Continue' };
+    fixture.session.status = 'active';
+    fixture.session.projection!.display = { status: 'running', reason: 'executing', approval_step_id: '' };
+    let finishStop!: () => void;
+    fixture.pause.mockImplementationOnce(() => new Promise<void>(resolve => { finishStop = resolve; }));
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    fireEvent.click(await screen.findByRole('button', { name: labels.stop }));
+    const stopping = screen.getByRole('button', { name: labels.stopping });
+    expect(stopping).toBeDisabled();
+    fireEvent.click(stopping);
+    expect(fixture.pause).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: String(i18n.t('chat.workflowStatusAria', { status: labels.running })) })).toBeVisible();
+    expect(screen.getByText(new RegExp(String(i18n.t('chat.workflowStoppingHint'))))).toBeVisible();
+    expect(screen.queryByRole('button', { name: labels.resume })).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, status: 'pausing', projection: {
+      ...fixture.session.projection, display: { status: 'running', reason: 'pausing', approval_step_id: '' },
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await act(async () => finishStop());
+    expect(screen.getByRole('button', { name: labels.stopping })).toBeDisabled();
+    // The confirmed state, not the HTTP response alone, enables Continue.
+    fixture.session = { ...fixture.session, status: 'waiting', projection: {
+      ...fixture.session.projection, current: [], ready: ['write_document'],
+      display: { status: 'paused', reason: 'user_stopped', approval_step_id: '' },
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByRole('button', { name: labels.resume })).toBeEnabled();
+    expect(screen.getByRole('button', { name: String(i18n.t('chat.workflowStatusAria', { status: labels.paused })) })).toBeVisible();
+    expect(screen.queryByRole('button', { name: labels.stopping })).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, status: 'active', projection: {
+      ...fixture.session.projection, display: { status: 'running', reason: 'executing', approval_step_id: '' },
+    } };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.getByRole('button', { name: labels.stop })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: labels.resume })).not.toBeInTheDocument();
+  });
+
+  it('releases a failed pause request for retry without inventing paused state', async () => {
+    fixture.session.status = 'active';
+    fixture.session.projection!.display = { status: 'running', reason: 'executing', approval_step_id: '' };
+    fixture.pause.mockRejectedValueOnce(new Error('cancel notification failed'));
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: '停止' })));
+    expect(screen.getByRole('button', { name: '停止' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '继续' })).not.toBeInTheDocument();
+    expect(fixture.refresh).not.toHaveBeenCalled();
+  });
+
+  it.each(['paused-before-dispatch', 'failed-with-ready-step', 'completed'] as const)(
+    'offers Continue only for confirmed paused ready steps: %s', async (scenario) => {
+      const status = scenario === 'paused-before-dispatch' ? 'paused' : scenario === 'completed' ? 'completed' : 'failed';
+      fixture.session.status = status === 'paused' ? 'waiting' : status;
+      fixture.session.projection!.display = { status, reason: '', approval_step_id: '' };
+      fixture.session.projection!.ready = ['write_document'];
+      fixture.session.projection!.current = [];
+      const send = vi.fn();
+      render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+      await screen.findByRole('tab', { name: '成稿' });
+      if (status === 'paused') {
+        await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续' })));
+        expect(send).toHaveBeenCalledWith('继续', { session_id: 'layout-test', kind: 'resume', expected_state_version: 0 });
+        expect(send).toHaveBeenCalledOnce();
+      } else {
+        expect(screen.queryByRole('button', { name: '继续' })).not.toBeInTheDocument();
+        expect(send).not.toHaveBeenCalled();
+      }
+      if (status === 'failed') expect(screen.getByRole('button', { name: '重试' })).toBeEnabled();
+    },
+  );
+
+  it('preserves the workflow-declared completed Continue action without treating it as resume', async () => {
+    fixture.ui.tabs![1].completed_continue_step = 'write_document';
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('tab', { name: '成稿' });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续' })));
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}write_document`, {
+      session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
+    });
+  });
+
+  it('does not change completed state when Chat refuses the continuation', async () => {
+    fixture.ui.tabs![1].completed_continue_step = 'write_document';
+    const send = vi.fn(async () => false);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('tab', { name: '成稿' });
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByRole('button', { name: '继续' })).toBeEnabled());
+    expect(fixture.session.projection!.display!.status).toBe('completed');
+    expect(fixture.pause).not.toHaveBeenCalled();
+  });
+
+  it('keeps interrupted-step resume protected across Chat acceptance and panel remount', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'paused', reason: 'user_stopped', approval_step_id: '' };
+    fixture.session.projection!.current = ['write_document'];
+    fixture.session.projection!.nodes = { write_document: {
+      execution: 'interrupted', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '',
+    } };
+    let accept!: (accepted: boolean) => void;
+    const send = vi.fn(() => new Promise<boolean>(resolve => { accept = resolve; }));
+    const view = render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('tab', { name: '成稿' });
+    const resume = screen.getByRole('button', { name: '继续' });
+    fireEvent.click(resume);
+    expect(resume).toBeDisabled();
+    fireEvent.click(resume);
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
+    expect(send).toHaveBeenCalledWith('继续', { session_id: 'layout-test', kind: 'resume', expected_state_version: 0 });
+    // Sending inserts a new assistant message: its panel has no local actionPending.
+    view.rerender(<WorkflowPanel key='new-turn' conversationId='layout-test' onSendMessage={send} chatBusy />);
+    await act(async () => accept(true));
+    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    expect(screen.getByRole('button', { name: '继续' })).toBeDisabled();
+    expect(send).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+
+    fixture.session = { ...fixture.session, status: 'active' };
+    fixture.session.projection!.display = { status: 'running', reason: 'executing', approval_step_id: '' };
+    view.rerender(<WorkflowPanel key='new-turn' conversationId='layout-test' onSendMessage={send} chatBusy />);
+    expect(screen.queryByRole('button', { name: '继续' })).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '停止' })));
+    expect(fixture.pause).toHaveBeenCalledWith('layout-test');
+    expect(send).toHaveBeenCalledOnce();
+    fixture.session = { ...fixture.session, status: 'waiting' };
+    fixture.session.projection!.display = { status: 'paused', reason: 'user_stopped', approval_step_id: '' };
+    view.rerender(<WorkflowPanel key='new-turn' conversationId='layout-test' onSendMessage={send} />);
+    expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+  });
+
+  it('releases resume when Chat rejects the request', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'paused', reason: 'user_stopped', approval_step_id: '' };
+    fixture.session.projection!.current = ['write_document'];
+    fixture.session.projection!.nodes = { write_document: {
+      execution: 'interrupted', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '',
+    } };
+    const send = vi.fn(async () => false);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByRole('tab', { name: '成稿' });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续' })));
+    expect(send).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+  });
+
+  it('blocks approval while an ordinary Chat turn is active without treating it as approval', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' };
+    const send = vi.fn();
+    const view = render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} chatBusy />);
+    const approve = await screen.findByRole('button', { name: '继续执行' });
+    expect(approve).toBeDisabled();
+    fireEvent.click(approve);
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+    view.rerender(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    expect(screen.getByRole('button', { name: '继续执行' })).toBeEnabled();
+  });
+
+  it('binds a failed workflow retry to the admitted Chat turn', async () => {
+    fixture.session.status = 'failed';
+    fixture.session.state_version = 7;
+    fixture.session.projection!.display = { status: 'failed', reason: 'execution_failed', approval_step_id: '' };
+    const send = vi.fn(async () => false);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    const retry = await screen.findByRole('button', { name: '重试' });
+    await act(async () => fireEvent.click(retry));
+    expect(send).toHaveBeenCalledWith('重试', { session_id: 'layout-test', kind: 'retry', expected_state_version: 7 });
+    // A refused Chat request must not optimistically start the workflow.
+    expect(retry).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+  });
+
+  it('offers retry after pausing a parallel run with an already failed branch', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'paused', reason: 'user_stopped', approval_step_id: '' };
+    fixture.session.projection!.nodes = {
+      failed: { execution: 'failed', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '' },
+      interrupted: { execution: 'interrupted', requires_approval: false, validity: 'effective', reachability: '', readiness: '', branch: '' },
+    };
+    fixture.session.projection!.current = ['failed', 'interrupted'];
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    expect(await screen.findByRole('button', { name: '重试' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '继续' })).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '重试' })));
+    expect(send).toHaveBeenCalledWith('重试', { session_id: 'layout-test', kind: 'resume', expected_state_version: 0 });
   });
 
   it.each([
@@ -361,6 +623,7 @@ describe('shared workflow compact layout', () => {
     ['chat.workflowSkipFollowingApprovals', 'following'],
   ] as const)('keeps shared approval choice %s on the native path', async (label, scope) => {
     fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' };
     // The approval resolver uses the latest effective attempt, not array order.
     fixture.session.steps!.find(step => step.step_id === 'write_document')!.created_at = '2026-09-16T00:01:00Z';
     fixture.session.projection!.nodes = { write_document: {
@@ -373,12 +636,40 @@ describe('shared workflow compact layout', () => {
     expect(within(approval).getByRole('button', { name: '继续执行' })).toBeEnabled();
     const scopeButton = within(approval).getByRole('button', { name: String(i18n.t(label)) });
     await act(async () => fireEvent.click(scopeButton));
-    if (scope) {
-      expect(fixture.setApprovalPreference).toHaveBeenCalledWith('layout-test', { step_id: 'write_document', scope, approval_required: false });
-    } else {
-      expect(fixture.setApprovalPreference).not.toHaveBeenCalled();
-    }
-    expect(send).toHaveBeenCalledWith(i18n.t('chat.workflowContinue'));
+    expect(send).toHaveBeenCalledWith(i18n.t('chat.workflowContinue'), {
+      session_id: 'layout-test', kind: 'approve',
+      step_id: 'write_document', expected_state_version: 0, ...(scope ? { preference_scope: scope } : {}),
+    });
+  });
+
+  it('saves edits and approves the same checkpoint at the new version', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.state_version = 4;
+    fixture.session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' };
+    fixture.flush.mockImplementationOnce(async () => {
+      fixture.session = { ...fixture.session, state_version: 5 };
+      return true;
+    });
+    const send = vi.fn();
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    fireEvent.click(await screen.findByRole('tab', { name: '成稿' }));
+    await screen.findByRole('button', { name: '发布' });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续执行' })));
+    expect(fixture.flush).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith(i18n.t('chat.workflowContinue'), { session_id: 'layout-test', kind: 'approve', step_id: 'write_document', expected_state_version: 5 });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('keeps approval available when Chat refuses the control turn', async () => {
+    fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' };
+    const send = vi.fn(async () => false);
+    render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
+    await screen.findByText('正文 document');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续执行' })));
+    expect(send).toHaveBeenCalledOnce();
+    expect(fixture.session.projection!.display.status).toBe('waiting');
+    expect(screen.getByRole('button', { name: '继续执行' })).toBeEnabled();
   });
 });
 
@@ -390,6 +681,7 @@ describe('external workflow surface boundary', () => {
       const interrupted = scenario === 'interrupted';
       fixture.session.status = completed ? 'completed' : 'waiting';
       fixture.session.projection = {
+        display: { status: completed ? 'completed' : interrupted ? 'paused' : 'running', reason: '', approval_step_id: '' },
         past: ['prepare'], current: interrupted ? ['write_document'] : [], completed,
         nodes: { write_document: {
           execution: interrupted ? 'interrupted' : 'succeeded', requires_approval: false,
@@ -413,19 +705,22 @@ describe('external workflow surface boundary', () => {
       await screen.findByRole('button', { name: '发布' });
       const footerButtons = () => within(screen.getByRole('group', { name: '工作流会话操作' }))
         .getAllByRole('button').map(button => ({ label: button.textContent, disabled: (button as HTMLButtonElement).disabled }));
-      const native = footerButtons();
+      // Background-native pause is not an external capability. Other footer
+      // actions remain shared; external stop is tested with its explicit grant.
+      const native = footerButtons().filter(button => button.label !== '停止');
       view.rerender(<WorkflowPanel conversationId='layout-test' embedded
         externalPresentation={{ activities: {}, compactEmptyStates: false }}
         controlAdapter={{ control, execute: vi.fn(async () => {}) }} />);
       expect(footerButtons()).toEqual(native);
       expect(screen.queryByRole('group', { name: '工作流审批操作' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: '保存并继续' })).not.toBeInTheDocument();
-      if (interrupted || completed) expect(screen.getByRole('button', { name: '继续', exact: true })).toBeEnabled();
+      if (interrupted || completed) expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
     },
   );
 
   it('uses the native running footer and routes stop without saving editors', async () => {
     fixture.session.status = 'active';
+    fixture.session.projection!.display = { status: 'running', reason: 'executing', approval_step_id: '' };
     fixture.session.steps![1].status = 'running';
     fixture.session.projection!.current = ['write_document'];
     const control = {
@@ -444,6 +739,7 @@ describe('external workflow surface boundary', () => {
 
   it('renders the same approval bar as native and does not expose rollback while awaiting review', async () => {
     fixture.session.status = 'waiting';
+    fixture.session.projection!.display = { status: 'waiting', reason: 'approval_required', approval_step_id: 'write_document' };
     fixture.session.current_step_id = 'write_document';
     fixture.session.steps!.find(step => step.step_id === 'write_document')!.created_at = '2026-09-16T00:01:00Z';
     fixture.session.projection!.nodes = { write_document: {
@@ -631,6 +927,7 @@ it('keeps saved output visible after execution fails and retries through externa
   };
   const getControl = vi.fn(async () => ({ data: { data: {
     session: structuredClone(stored), control: structuredClone(control),
+    display: { status: control.continuation === 'failed' ? 'failed' as const : 'running' as const, reason: '', approval_step_id: '' },
     projection: { current: control.active_executions ? ['write_document'] : [] },
   } } }));
   const getSession = vi.fn(async () => { throw new Error('unexpected native fallback'); });
