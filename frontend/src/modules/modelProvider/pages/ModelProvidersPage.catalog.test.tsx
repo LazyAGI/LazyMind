@@ -153,13 +153,14 @@ describe("model catalog integration", () => {
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:qwen-plus" }));
     await waitFor(() => expect(mocks.add).toHaveBeenCalledTimes(1));
     expect(mocks.add).toHaveBeenCalledWith({ modelProviderId: "supplier", groupId: "store", addModelProviderGroupModelOpenAPIRequest: { name: "qwen-plus", model_type: "llm", vision: false } });
-    expect(screen.getByTestId("configured-model-keys")).toHaveTextContent("fixture-key");
+    const keysBeforeDelete = screen.getByTestId("configured-model-keys").textContent;
+    expect(keysBeforeDelete).toBe(JSON.stringify([{ id: "fixture-key", masked: "********fixture", enabled: true }]));
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:qwen-plus" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
       { modelProviderId: "supplier", groupId: "store", modelId: "saved-model-id" },
       undefined,
     ));
-    expect(screen.getByTestId("configured-model-keys")).toHaveTextContent("fixture-key");
+    expect(screen.getByTestId("configured-model-keys").textContent).toBe(keysBeforeDelete);
   });
 
   it("confirms knowledge-base downgrade before deleting an embedding model", async () => {
@@ -173,18 +174,22 @@ describe("model catalog integration", () => {
     await waitFor(() => expect(sync).toBeEnabled());
     fireEvent.click(sync);
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" }));
+    const keysBeforeDelete = screen.getByTestId("configured-model-keys").textContent;
+    expect(keysBeforeDelete).toBe(JSON.stringify([{ id: "fixture-key", masked: "********fixture", enabled: true }]));
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:BAAI/bge-large" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
       { modelProviderId: "supplier", groupId: "store", modelId: "saved-vector-id" },
       undefined,
     ));
-    expect(screen.getByTestId("configured-model-keys")).toHaveTextContent("fixture-key");
+    expect(screen.getByTestId("configured-model-keys").textContent).toBe(keysBeforeDelete);
     expect(await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc")).toBeInTheDocument();
+    const keysBeforeConfirmedDelete = screen.getByTestId("configured-model-keys").textContent;
+    expect(keysBeforeConfirmedDelete).toBe(keysBeforeDelete);
     fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
       { modelProviderId: "supplier", groupId: "store", modelId: "saved-vector-id" },
       { params: { confirm_indexed_downgrade: true } },
     ));
-    expect(screen.getByTestId("configured-model-keys")).toHaveTextContent("fixture-key");
+    expect(screen.getByTestId("configured-model-keys").textContent).toBe(keysBeforeConfirmedDelete);
   });
 });
