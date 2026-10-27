@@ -427,6 +427,35 @@ func TestDocumentImageExportSingleMustBelongToSnapshot(t *testing.T) {
 	}
 }
 
+func TestDocumentImageExportSingleMatchesEncodedURL(t *testing.T) {
+	for _, tc := range []struct{ name, markdownURL, reference string }{
+		{"unicode", "https://example.org/中文.png", "https://example.org/%E4%B8%AD%E6%96%87.png"},
+		{"space", "<https://example.org/hello world.png>", "https://example.org/hello%20world.png"},
+		{"already encoded", "https://example.org/%E4%B8%AD%E6%96%87.png", "https://example.org/%E4%B8%AD%E6%96%87.png"},
+		{"signed query", "https://example.org/中文.png?token=a%2Fb+c&expires=123", "https://example.org/%E4%B8%AD%E6%96%87.png?token=a%2Fb+c&expires=123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, input := publicationFixture(t, false)
+			mustPublicationErrorNil(t, f.db.AutoMigrate(&orm.AsyncJob{}))
+			corestore.Init(f.db.DB, nil, nil)
+			t.Cleanup(func() { corestore.Init(nil, nil, nil) })
+			content, _ := json.Marshal("![Photo](" + tc.markdownURL + ")")
+			body := DocumentImageExportRequest{BaseRevision: &input.BaseRevision, BaseDraftVersion: input.BaseDraftVersion, Document: content, ImageReference: tc.reference}
+			state := imageExportReply(t, imageExportHTTP(t, CreateDocumentImageExportHTTP, "owner", f.currentRevisionID, "", "", body))
+			if !state.Single || state.Total != 1 {
+				t.Fatalf("unexpected single export %#v", state)
+			}
+			body.ImageReference += "&other=1"
+			if response := imageExportHTTP(t, CreateDocumentImageExportHTTP, "owner", f.currentRevisionID, "", "", body); response.Code != 422 {
+				t.Fatalf("different resource accepted: %d", response.Code)
+			}
+		})
+	}
+	if imageReferenceKey("https://example.org/a%2Fb.png") == imageReferenceKey("https://example.org/a/b.png") {
+		t.Fatal("encoded path separator must not match another resource")
+	}
+}
+
 func TestDocumentImageExportConcurrentAdmissionAndExpiry(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.AsyncJob{})
 	payload := imageExportPayload{CacheKey: strings.Repeat("a", 32), ExpiresAt: time.Now().Add(time.Hour), Images: []imageExportSource{{ID: "image-001"}}}

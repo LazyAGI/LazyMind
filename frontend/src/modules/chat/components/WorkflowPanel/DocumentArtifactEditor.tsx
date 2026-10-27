@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from 'antd';
-import { ExclamationCircleOutlined, ExportOutlined, LockOutlined, ReloadOutlined } from '@ant-design/icons';
+import { ExclamationCircleOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { DocumentProvider, DocumentNumberingResult, DocumentConvertResult } from '@/api/generated/core-client';
 import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 import { WorkflowSessionApi, type RewriteSelectionPreview, type WriterNumberingState, type WriterNumberingUpdate } from '@/modules/chat/utils/request';
@@ -136,7 +136,6 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
     setPublicationStatus({ signature: slotSignature, text: provider === 'wechat' && !url
       ? String(i18n.t('chat.writerIR.wechatDraftLinkUnavailable')) : String(i18n.t('chat.writerIR.writeBackSuccess')) });
   }, [slotSignature, slot.write_back_state]);
-  const [authorizationNeeded, setAuthorizationNeeded] = useState('');
   const [providerRefresh, setProviderRefresh] = useState(0);
   const availability = useWriterProviderAvailability(providers.map(provider => provider.id));
   const previewSource = useRef<Baseline>();
@@ -374,15 +373,10 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const chooseProvider = (provider?: string) => {
     if (publicationBlocked || !loaded || !writable) return;
     if (provider && !publicationChoices[provider]?.selectable) return;
-    setAuthorizationNeeded(''); setError(''); setErrorAction(null);
+    setError(''); setErrorAction(null);
     setPublishDialog({ provider });
   };
   const chooseRef = useRef(chooseProvider); chooseRef.current = chooseProvider;
-  useEffect(() => {
-    if (authorizationNeeded && availability.states[authorizationNeeded] === 'ready') {
-      setAuthorizationNeeded(''); setError(''); setErrorAction(null);
-    }
-  }, [authorizationNeeded, availability.states]);
   useEffect(() => {
     if (!active || !writable || !descriptor.capabilities.includes('publish_document')) return;
     const authorizationStatus = (provider: string) => publicationChoices[provider]?.reason ?? String(i18n.t('chat.writerLocal.checking'));
@@ -428,10 +422,10 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
           onClick: () => chooseRef.current(provider.id),
         };
       }) : undefined,
-      statusText: error && authorizationNeeded ? undefined : error || successStatus, statusTone: error ? 'error' : 'success',
+      statusText: error || successStatus, statusTone: error ? 'error' : 'success',
       statusLink: publicationUrl ? { href: publicationUrl, label: String(i18n.t('chat.writerIR.openCloudDocument')) } : undefined,
     });
-  }, [active, writable, descriptor.capabilities, registerFooterAction, editingKey, loaded, providers, publicationBlocked, publicationChoices, error, authorizationNeeded, publicationStatus, publicationUrl, slot.provider, slot.write_back_ready, slot.write_back_state, availability.states, currentSignature, slotSignature, hasLocalChanges]);
+  }, [active, writable, descriptor.capabilities, registerFooterAction, editingKey, loaded, providers, publicationBlocked, publicationChoices, error, publicationStatus, publicationUrl, slot.provider, slot.write_back_ready, slot.write_back_state, availability.states, currentSignature, slotSignature, hasLocalChanges]);
 
   if (!loaded) return <div role='status'>{error || '…'}</div>;
   const versionHistory = VersionHistory && sessionId ? <VersionHistory sessionId={sessionId} slotId={slot.slot_id}
@@ -463,20 +457,17 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
         }} /> : <div role='alert'>{String(i18n.t('chat.writerIR.saveFailed'))}</div>}
     </div>
     {imageDownloads.dialog}
-    {error && <div className={`workflow-document-notice${authorizationNeeded ? ' workflow-document-notice--authorization' : ''}`} role='alert'>
-      <span className='workflow-document-notice__icon' aria-hidden='true'>{authorizationNeeded ? <LockOutlined /> : <ExclamationCircleOutlined />}</span>
+    {error && <div className='workflow-document-notice' role='alert'>
+      <span className='workflow-document-notice__icon' aria-hidden='true'><ExclamationCircleOutlined /></span>
       <span className='workflow-document-notice__message'>{error}</span>
-      {(authorizationNeeded || errorAction) && <div className='workflow-document-notice__actions'>
-        {authorizationNeeded && <a className='workflow-document-notice__action workflow-document-notice__action--settings' href={getCloudDocumentsUrl(authorizationNeeded === 'feishu' ? 'feishu' : undefined)} target='_blank' rel='noreferrer'>
-          {String(i18n.t(authorizationNeeded === 'feishu' ? 'chat.writerLocal.feishuSettings' : 'chat.writerLocal.settings'))}<ExportOutlined aria-hidden='true' />
-        </a>}
-        {errorAction && <button className='workflow-document-notice__action' type='button' onClick={() => { if (errorAction === 'download') retryDownload.current?.(); else if (errorAction === 'history') retryHistory.current?.(); else { setError(''); setProviderRefresh(value => value + 1); void availability.refresh(); } }}>
+      {errorAction && <div className='workflow-document-notice__actions'>
+        <button className='workflow-document-notice__action' type='button' onClick={() => { if (errorAction === 'download') retryDownload.current?.(); else if (errorAction === 'history') retryHistory.current?.(); else { setError(''); setProviderRefresh(value => value + 1); void availability.refresh(); } }}>
           <ReloadOutlined aria-hidden='true' />{String(i18n.t('common.retry'))}
-        </button>}
+        </button>
       </div>}
     </div>}
     {descriptor.capabilities.includes('publish_document') && <DocumentPublicationDialog key={`${sessionId}:${slot.slot_id}:${slot.list_index ?? -1}`}
-      artifactId={latest.current.id} providers={providers} open={!!publishDialog} initialProvider={publishDialog?.provider} dirty={hasLocalChanges} readOnly={!writable}
+      artifactId={latest.current.id} sourceSignature={currentSignature} providers={providers} availability={availability} open={!!publishDialog} initialProvider={publishDialog?.provider} dirty={hasLocalChanges} readOnly={!writable}
       onProviderChoicesChange={setPublicationChoices}
       onClose={() => setPublishDialog(undefined)} beforePublish={async selectedProviders => {
         if (flushEditor.current && !await flushEditor.current()) throw new Error(String(i18n.t('chat.writerIR.saveFailed')));

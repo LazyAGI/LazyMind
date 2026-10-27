@@ -4,12 +4,12 @@ import { ConfigProvider } from 'antd';
 import i18n from '@/i18n';
 import type { DocumentPublicationGroupState } from '@/api/generated/core-client';
 import { DocumentPublicationDialog } from './DocumentPublicationDialog';
+import type { useWriterProviderAvailability } from './useWriterProviderAvailability';
 
 const availability = vi.hoisted(() => ({ states: { github: 'ready', notion: 'ready' } as Record<string,string>, accounts: {
   github: [{ connection_id: 'github-account', display_name: 'GitHub fixture' }],
   notion: [{ connection_id: 'notion-account', display_name: 'Notion fixture' }],
 }, refresh: vi.fn() }));
-vi.mock('./useWriterProviderAvailability', () => ({ useWriterProviderAvailability: () => availability }));
 const api = vi.hoisted(() => ({ getPublicationTargets: vi.fn(), createPublicationGroup: vi.fn(), recoverPublication: vi.fn(), retryPublicationLocal: vi.fn(), cancelPublication: vi.fn() }));
 vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => api }));
 const providers = [{ id: 'github', capabilities: ['create','replace'] }, { id: 'notion', capabilities: ['create','replace'] }];
@@ -33,7 +33,7 @@ beforeEach(async () => {
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); });
 function view(extra = {}) {
-  return <ConfigProvider theme={{ token: { motion: false } }}><DocumentPublicationDialog artifactId='draft' providers={providers} open dirty={false} onClose={close} beforePublish={beforePublish} {...extra} /></ConfigProvider>;
+  return <ConfigProvider theme={{ token: { motion: false } }}><DocumentPublicationDialog artifactId='draft' sourceSignature='draft:4:1' providers={providers} availability={availability as ReturnType<typeof useWriterProviderAvailability>} open dirty={false} onClose={close} beforePublish={beforePublish} {...extra} /></ConfigProvider>;
 }
 async function pickBoth() {
   fireEvent.click(await screen.findByRole('checkbox', { name: 'GitHub' }));
@@ -138,6 +138,21 @@ it('renders partial results and new edits without an all-success message or unsa
   expect(screen.getByText('New edits not synced')).toBeInTheDocument();
   expect(screen.getAllByRole('link')).toHaveLength(1);
   expect(screen.getByRole('link')).toHaveAttribute('href','https://github.com/fixture/repo/pull/7');
+});
+it('refreshes the saved content hash when the same artifact advances its draft version', async () => {
+  failedNotion();
+  const { rerender } = render(view({ open: false, sourceSignature: 'draft:4:1' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Sync results' }));
+  await screen.findByText('Pull request created; check merge status');
+  expect(screen.queryByText('New edits not synced')).not.toBeInTheDocument();
+  rerender(view({ open: false, dirty: true, sourceSignature: 'draft:4:1' }));
+  expect(screen.getByText('New edits not synced')).toBeInTheDocument();
+  state.current_hash = 'saved-new-content';
+  rerender(view({ open: false, dirty: false, sourceSignature: 'draft:4:2' }));
+  await waitFor(() => expect(api.getPublicationTargets).toHaveBeenCalledTimes(2));
+  expect(screen.getByText('New edits not synced')).toBeInTheDocument();
+  expect(beforePublish).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
 });
 it('keeps results collapsed until hover and closes when the pointer leaves the popover', async () => {
   render(view({ open: false }));

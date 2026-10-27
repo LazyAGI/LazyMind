@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import type { DocumentProvider, DocumentPublicationGroupRequest, DocumentPublicationGroupState, DocumentPublicationTargetState } from '@/api/generated/core-client';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
 import { CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH, getCloudDocumentsUrl } from '@/modules/modelProvider/utils/cloudDocumentUrls';
-import { useWriterProviderAvailability } from './useWriterProviderAvailability';
+import type { useWriterProviderAvailability } from './useWriterProviderAvailability';
 import { documentPublicationTargetUrl } from './documentPublicationUrl';
 import { documentPublicationErrorMessage } from './documentPublicationError';
 import { WriterProviderIcon } from './DocumentProviderChoice';
@@ -18,7 +18,9 @@ type Baseline = { id: string; revision: number; draft?: number };
 export type PublicationProviderChoices = Record<string, { selectable: boolean; reason: string }>;
 type Props = {
   artifactId: string;
+  sourceSignature: string;
   providers: DocumentProvider[];
+  availability: ReturnType<typeof useWriterProviderAvailability>;
   open: boolean;
   initialProvider?: string;
   dirty: boolean;
@@ -28,10 +30,9 @@ type Props = {
   onProviderChoicesChange?: (choices: PublicationProviderChoices) => void;
 };
 
-export function DocumentPublicationDialog({ artifactId, providers, open, initialProvider, dirty, readOnly, onClose, beforePublish, onProviderChoicesChange }: Props) {
+export function DocumentPublicationDialog({ artifactId, sourceSignature, providers, availability, open, initialProvider, dirty, readOnly, onClose, beforePublish, onProviderChoicesChange }: Props) {
   const { t } = useTranslation();
   const label = (provider: string) => t(`chat.writerIR.providers.${provider}`, { defaultValue: provider });
-  const availability = useWriterProviderAvailability(providers.map(item => item.id));
   const [state, setState] = useState<DocumentPublicationGroupState>();
   const [selected, setSelected] = useState<string[]>([]);
   const [connectionChoices, setConnectionChoices] = useState<Record<string, string>>({});
@@ -98,7 +99,7 @@ export function DocumentPublicationDialog({ artifactId, providers, open, initial
     };
     void refresh();
     return () => { canceled = true; generation.current++; clearTimeout(timer); };
-  }, [load, open, submitting, t]);
+  }, [load, sourceSignature, open, submitting, t]);
 
   useEffect(() => {
     if (!open) { initialized.current = false; return; }

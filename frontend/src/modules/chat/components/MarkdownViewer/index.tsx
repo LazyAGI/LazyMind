@@ -262,7 +262,14 @@ const ImageComponent = (props: any) => {
   const { t } = useTranslation();
   const { resolveImageUrl, previewArtifacts, conversationId } = useContext(MarkdownRenderContext);
   const sharedPreview = useArtifactPreview();
-  const useShared = previewArtifacts && sharedPreview;
+  const [resolvedSrc, setResolvedSrc] = useState(() =>
+    resolveCoreAssetUrl(props.src || ""),
+  );
+  // Cross-origin images can render without CORS, but the shared file preview
+  // fetches their bytes. Keep the direct image preview for those URLs.
+  let sameOrigin = false;
+  try { sameOrigin = new URL(resolvedSrc, window.location.origin).origin === window.location.origin; } catch { /* Invalid image URL. */ }
+  const useShared = previewArtifacts && sharedPreview && sameOrigin;
   const openImage = () => {
     if (!useShared) { setPreviewVisible(true); return; }
     const name = basenameFromPath(props.src || '') || 'image.png';
@@ -270,9 +277,6 @@ const ImageComponent = (props: any) => {
   };
   const [imageLoadError, setImageLoadError] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
-  const [resolvedSrc, setResolvedSrc] = useState(() =>
-    resolveCoreAssetUrl(props.src || ""),
-  );
 
   useEffect(() => {
     let cancelled = false;

@@ -78,7 +78,7 @@ export function PreviewContent({ target, close, onVersions }: { target: Artifact
   else if (kind === 'json' || kind === 'text') {
     let text = new TextDecoder().decode(data);
     if (kind === 'json') { try { text = JSON.stringify(JSON.parse(text), null, 2); } catch { /* Keep malformed JSON readable. */ } }
-    content = <pre className="artifact-preview__text">{text}</pre>;
+    content = kind === 'text' && renderMarkdown ? renderMarkdown(text) : <pre className="artifact-preview__text">{text}</pre>;
   } else content = <FileViewer data={data} fileName={previewFilename(target)} renderMarkdown={renderMarkdown} onPreviewError={() => setError('failed')} />;
   if (sourceContext) content = <SourceImportProvider context={sourceContext.context} sources={sourceContext.sources}>
     {content}

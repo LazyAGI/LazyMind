@@ -188,7 +188,9 @@ func CreateDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, art
 func ReadDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, artifactID string) (*DocumentPublicationGroupState, error) {
 	result := &DocumentPublicationGroupState{PreferredProviders: []string{}, Targets: []DocumentPublicationTargetState{}}
 	var wechatOperation *DocumentPublicationOperation
+	var wechatLastSuccess *DocumentPublicationOperation
 	err := common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
+		wechatOperation, wechatLastSuccess = nil, nil
 		var revision orm.WorkflowSlotRevision
 		if err := tx.First(&revision, "id = ?", artifactID).Error; err != nil {
 			return publicationError("PUBLICATION_NOT_FOUND")
@@ -274,6 +276,16 @@ func ReadDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, artif
 			}
 		}
 		result.PublicationID = documentLatest.PublicationID
+		if binding := byProvider["wechat"]; binding.LastOperationID != "" && (wechatOperation == nil || binding.LastOperationID != wechatOperation.ID) {
+			var success DocumentPublicationOperation
+			err := tx.Where("id = ? AND owner_user_id = ? AND session_id = ? AND slot_id = ? AND item_index = ? AND provider = ? AND status = ?",
+				binding.LastOperationID, owner, selected.SessionID, selected.SlotID, publicationIndex(selected.ListIndex), "wechat", "succeeded").First(&success).Error
+			if err == nil {
+				wechatLastSuccess = &success
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		}
 		for _, provider := range []string{"github", "feishu", "notion", "googledrive", "wechat", "obsidian"} {
 			binding := byProvider[provider]
 			state := DocumentPublicationTargetState{Provider: provider, ConnectionID: binding.ConnectionID, Bound: len(binding.TargetDocument) > 0, TargetURL: documentPublicationTargetURL(provider, binding.TargetDocument), LastSuccessHash: binding.LastSuccessHash, LastSuccessAt: binding.LastSuccessAt}
@@ -291,12 +303,22 @@ func ReadDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, artif
 		}
 		return nil
 	})
-	if err == nil && wechatOperation != nil {
-		status := publicationStatusForRead(ctx, wechatOperation)
+	if err == nil && (wechatOperation != nil || wechatLastSuccess != nil) {
+		var status *DocumentPublicationStatus
+		targetURL := ""
+		if wechatOperation != nil {
+			latest := publicationStatusForRead(ctx, wechatOperation)
+			status, targetURL = &latest, latest.TargetURL
+		}
+		// The latest attempt owns the displayed status; the last successful
+		// binding still owns an article when that attempt has no write receipt.
+		if targetURL == "" && wechatLastSuccess != nil {
+			targetURL = publicationStatusForRead(ctx, wechatLastSuccess).TargetURL
+		}
 		for i := range result.Targets {
 			if result.Targets[i].Provider == "wechat" {
-				result.Targets[i].Operation = &status
-				result.Targets[i].TargetURL = status.TargetURL
+				result.Targets[i].Operation = status
+				result.Targets[i].TargetURL = targetURL
 			}
 		}
 	}

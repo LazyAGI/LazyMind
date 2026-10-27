@@ -4035,12 +4035,6 @@
   font-size: 12px;
   line-height: 1.6;
 
-  &--authorization {
-    border-color: #e0e7f1;
-    background: #f8faff;
-    color: #475569;
-  }
-
   &__icon {
     display: inline-flex;
     flex: 0 0 16px;
@@ -4087,18 +4081,6 @@
     &:focus-visible {
       outline: 2px solid #2563eb;
       outline-offset: 2px;
-    }
-
-    &--settings {
-      border-color: #dbe5f5;
-      background: #fff;
-      color: #2563eb;
-
-      &:hover {
-        border-color: #b8cef5;
-        background: #eff6ff;
-        color: #1d4ed8;
-      }
     }
   }
 }

@@ -51,3 +51,14 @@ it('keeps embedded Workflow images on their original preview behavior by default
   await act(async () => fireEvent.keyDown(screen.getByRole('button', { name: 'workflow image' }), { key: 'Enter' }));
   expect(preview.open).not.toHaveBeenCalled();
 });
+
+it.each(['click', 'keyboard'])('previews third-party images directly without requiring CORS (%s)', async action => {
+  render(<ArtifactPreviewContext.Provider value={preview}>
+    <MarkdownViewer previewArtifacts>{'![external image](https://images.example.org/photo.png)'}</MarkdownViewer>
+  </ArtifactPreviewContext.Provider>);
+  const thumbnail = screen.getByRole('button', { name: 'external image' });
+  if (action === 'click') fireEvent.click(thumbnail);
+  else fireEvent.keyDown(thumbnail, { key: 'Enter' });
+  await waitFor(() => expect(document.querySelector('.ant-image-preview-img')).toHaveAttribute('src', 'https://images.example.org/photo.png'));
+  expect(preview.open).not.toHaveBeenCalled();
+});

@@ -54,6 +54,27 @@ it('offers a read-only retry after fetch failure', async () => {
   expect(mocks.download).not.toHaveBeenCalled();
 });
 
+it('preserves citation interactions for inline text without a filename extension', async () => {
+  mocks.read.mockResolvedValue(bytes('ReAct [1](#source-1.1)'));
+  const { container } = render(<ArtifactPreview target={{ key: 'report', filename: '报告', content: 'ReAct [1](#source-1.1)',
+    sourceContext: { context: { conversation_id: 'conv', history_id: 'turn' }, sources: [
+      { source_type: 'external', index: '1.1', title: 'ReAct paper', url: 'https://example.org/react' },
+    ] },
+  }} onClose={vi.fn()} />);
+  await waitFor(() => expect(container.querySelector('a.md-source-chip')).toBeInTheDocument());
+  expect(container.querySelector('pre')).not.toBeInTheDocument();
+  fireEvent.mouseEnter(container.querySelector('a.md-source-chip')!);
+  expect(await screen.findByRole('link', { name: /ReAct paper/ })).toHaveAttribute('href', 'https://example.org/react');
+});
+
+it('keeps ordinary inline text without sources as plain text', async () => {
+  mocks.read.mockResolvedValue(bytes('literal <tag> [1](#source-1.1)'));
+  const { container } = render(<ArtifactPreview target={{ key: 'plain', filename: '报告', content: 'literal' }} onClose={vi.fn()} />);
+  await screen.findByText('literal <tag> [1](#source-1.1)');
+  expect(container.querySelector('pre')).toBeInTheDocument();
+  expect(container.querySelector('a.md-source-chip')).not.toBeInTheDocument();
+});
+
 it('offers retry after a renderer failure without showing parser details', async () => {
   mocks.read.mockResolvedValue(bytes('corrupt'));
   render(<ArtifactPreview target={a} onClose={vi.fn()} />);

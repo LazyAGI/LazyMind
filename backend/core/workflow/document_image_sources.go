@@ -44,6 +44,11 @@ func imageReferenceKey(source string) string {
 		if u.Scheme == "" && u.Host == "" && u.Path != "" {
 			return path.Clean(u.Path)
 		}
+		if u.Scheme == "http" || u.Scheme == "https" {
+			// Match browser-encoded paths without decoding reserved separators or
+			// rewriting signed query parameters on external URLs.
+			return u.String()
+		}
 	}
 	return source
 }
