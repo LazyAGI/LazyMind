@@ -137,6 +137,7 @@ sensitive_filter = SensitiveFilter(
 # Maps conversation_id → session_id for active chat sessions.
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
 _active_sessions: dict[str, str] = {}
+_active_turn_sessions: dict[tuple[str, str], str] = {}
 _conversation_env_vars: dict[str, dict[str, str]] = {}
 _conversation_env_store = ConversationEnvStore(_conversation_env_vars)
 _observation_writer: Optional[LocalObservationWriter] = None
@@ -167,6 +168,9 @@ def _unregister_active_session(conversation_id: str, session_id: str) -> None:
     """Remove only the request that registered this exact ChatAgent session."""
     if _active_sessions.get(conversation_id) == session_id:
         _active_sessions.pop(conversation_id, None)
+    for key, value in list(_active_turn_sessions.items()):
+        if key[0] == conversation_id and value == session_id:
+            _active_turn_sessions.pop(key, None)
 
 
 def clear_conversation_env(conversation_id: str) -> bool:
@@ -1294,6 +1298,7 @@ async def _handle_chat_impl(
     is_context_inspection = runtime.context_usage_preview or runtime.context_prompt_export
     if _conv_id_key and not is_context_inspection:
         _active_sessions[_conv_id_key] = conversation.session_id
+        _active_turn_sessions[(_conv_id_key, conversation.history_id)] = conversation.session_id
     lazyllm_session_id = conversation.session_id
     if is_context_inspection:
         lazyllm_session_id = (

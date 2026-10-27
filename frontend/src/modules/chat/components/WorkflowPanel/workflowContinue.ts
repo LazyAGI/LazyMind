@@ -31,6 +31,11 @@ export function resolveWorkflowContinueAction(
   const interruptedStep = (session.projection?.current ?? []).find((id) =>
     nodes[id]?.validity !== 'stale' && ['interrupted', 'cancelled', 'canceled'].includes(nodes[id]?.execution),
   );
+  if (displayStatus === 'stopped') {
+    // A confirmed pause can occur before dispatch or between successful steps.
+    const stepId = interruptedStep ?? session.projection?.ready?.[0];
+    if (stepId) return { kind: 'resume', stepId };
+  }
   return interruptedStep ? { kind: 'resume', stepId: interruptedStep } : undefined;
 }
 
