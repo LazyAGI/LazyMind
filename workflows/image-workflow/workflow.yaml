@@ -89,62 +89,73 @@ steps:
 
 slots:
   - id: subject_analysis
+    user_visible: false
     label: Subject Analysis
     type: text
     cardinality: single
     summary_max_chars: 300
 
   - id: workflow_routing
+    user_visible: false
     label: Workflow Routing
     type: text
     cardinality: single
     summary_max_chars: 200
 
   - id: edit_route
+    user_visible: false
     label: Edit Route Token
     type: text
     cardinality: single
 
   - id: material_images
+    user_visible: false
     label: Reference Materials
     type: image
     cardinality: list
     ordered: true
 
   - id: material_summary
+    user_visible: false
     label: Material Summary
     type: text
     cardinality: single
     summary_max_chars: 400
 
   - id: prompt_used
+    user_visible: false
     label: Optimized Prompt
     type: text
     cardinality: single
 
   - id: meme_generation_plan
+    user_visible: false
     label: Meme Generation Plan
     type: json
     cardinality: single
 
   - id: enhanced_image_output
+    user_visible: true
     label: Enhanced Images
     type: image
     cardinality: list
     ordered: true
 
   - id: raw_source_image
+    user_visible: false
     label: Raw Source Image
     type: image
     cardinality: single
 
   - id: generated_image_output
+    user_visible: true
     label: Generated Image
     type: image
     cardinality: list
     ordered: true
 
   - id: generated_base_image
+    user_visible: false
     label: Generated Base Image
     type: image
     cardinality: list
@@ -152,48 +163,56 @@ slots:
     exposed: false
 
   - id: generated_first_frame
+    user_visible: false
     label: Generated First Frame
     type: image
     cardinality: list
     ordered: true
 
   - id: generated_last_frame
+    user_visible: false
     label: Generated Last Frame
     type: image
     cardinality: list
     ordered: true
 
   - id: generation_reference_images
+    user_visible: false
     label: Generation References
     type: image
     cardinality: list
     ordered: true
 
   - id: enhancement_status
+    user_visible: false
     label: Enhancement Status
     type: json
     cardinality: single
     exposed: false
 
   - id: meme_static_output
+    user_visible: true
     label: Static Meme
     type: image
     cardinality: list
     ordered: true
 
   - id: image_output
+    user_visible: true
     label: Origin Image
     type: image
     cardinality: list
     ordered: true
 
   - id: gif_output
+    user_visible: true
     label: Animated GIF
     type: image
     cardinality: list
     ordered: true
 
   - id: video_output
+    user_visible: true
     label: Generated Video
     type: file
     cardinality: list

@@ -5147,6 +5147,7 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
         </div>
         <div className='workflow-slot__file-card-actions'>
           <ArtifactSourceButton value={raw} sourceUrl={textSource ? url : undefined} fileRecord={!textSource} />
+          {/\.pptx$/i.test(name) ? <span role='note'>网页暂不支持打开 PPTX，请下载后使用 PowerPoint 或 WPS 查看。</span> :
           <button
             className='workflow-slot__file-action-btn'
             onClick={handlePreview}
@@ -5155,7 +5156,7 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
             type='button'
           >
             {tr('chat.slots.preview')}
-          </button>
+          </button>}
           {allowDownload && (
             <a
               href={url}

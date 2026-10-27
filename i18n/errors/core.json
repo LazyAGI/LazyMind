@@ -1914,6 +1914,7 @@
   "2003170": {"en-US": "Skill is outside the organize scope", "zh-CN": "技能不在本次整理范围内"},
   "2003171": {"en-US": "Skill organize target was not found", "zh-CN": "找不到整理目标技能"},
   "2003172": {"en-US": "Skill to remove was not found", "zh-CN": "找不到要移除的技能"},
+  "2003173": {"en-US": "Order must be a complete permutation", "zh-CN": "排序必须包含全部项目，且不能重复"},
   "2003201": {"zh-CN": "目录正在整理或版本已更新，请稍后刷新重试", "en-US": "The directory is organizing or has changed. Refresh and retry."},
   "2003202": {"zh-CN": "目录已满，临时目录正在使用或整理，请稍后重试", "en-US": "All temporary directories are in use. Retry when capacity is available."},
   "2003203": {"zh-CN": "最多长期保留 10 个目录，请先取消其他目录的 Pin", "en-US": "Up to 10 directories can be pinned. Unpin another directory first."},

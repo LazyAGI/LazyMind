@@ -1,0 +1,7 @@
+{
+  "concurrent_calls": 100,
+  "worker_threads": 8,
+  "same_connection_client_ports": 1,
+  "disconnect_request_count_no_auto_retry": 1,
+  "next_explicit_call_reconnects": true
+}

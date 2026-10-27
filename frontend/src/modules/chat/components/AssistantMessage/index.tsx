@@ -1413,6 +1413,7 @@ const AssistantMessage = (props: any) => {
             }
             const started = await props.sendMessage?.(payload.text, undefined, {
               ask_answers_structured: payload.structured,
+              ...(payload.files?.length ? { files: payload.files } : {}),
             });
             if (!started) return false;
             // Deletion confirmations are consumed by Core; history remains authoritative.

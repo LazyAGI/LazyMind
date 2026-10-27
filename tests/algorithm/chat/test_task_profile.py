@@ -493,6 +493,16 @@ def test_invalid_classifier_response_falls_back_without_raising() -> None:
     assert profile.router_error
 
 
+def test_classifier_uses_first_json_object_when_response_contains_another() -> None:
+    profile = resolve_task_profile(
+        '我现在想搞点AI视频相关的东西',
+        classifier=lambda _: '{"primary_outcome":"decide","complexity":"open_ended","freshness":"stable"}'
+        ' explanatory text {"example":true}',
+    )
+    assert profile.source != 'fallback'
+    assert profile.primary_outcome == 'decide'
+
+
 def test_valid_classifier_preserves_explicit_current_signal() -> None:
     result = {
         'primary_outcome': 'decide',

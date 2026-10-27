@@ -785,10 +785,10 @@ export function WorkflowSessionApi() {
         options,
       );
     },
-    reorderSlotItems(sessionId: string, slotId: string, order: number[], version: number, options?: RawAxiosRequestConfig) {
+    reorderSlotItems(sessionId: string, slotId: string, order: number[], version: number, options?: RawAxiosRequestConfig, linkedOrders?: { slot_id: string; order: number[]; version: number }[]) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
-        { order, version },
+        { order, version, linked_orders: linkedOrders },
         options,
       );
     },

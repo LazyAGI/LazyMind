@@ -92,24 +92,28 @@ steps:
 
 slots:
   - id: bid_doc
+    user_visible: false
     label: 招标文件
     type: file
     cardinality: single
     external: true
     exposed: false
   - id: word_target
+    user_visible: false
     label: 目标总字数
     type: text
     cardinality: single
     external: true
     exposed: false
   - id: output_format
+    user_visible: false
     label: 导出格式（md/docx）
     type: text
     cardinality: single
     external: true
     exposed: false
   - id: use_default_docx_template
+    user_visible: false
     label: 使用默认 DOCX 样式
     type: text
     cardinality: single
@@ -117,112 +121,134 @@ slots:
     exposed: false
 
   - id: generation_parameters
+    user_visible: false
     label: 已确认生成参数
     type: json
     cardinality: single
     exposed: false
 
   - id: raw_bid_text
+    user_visible: false
     label: 招标文件全文
     type: text
     cardinality: single
     exposed: true
   - id: raw_bid_meta
+    user_visible: false
     label: 解析元数据
     type: json
     cardinality: single
     exposed: true
   - id: technical_requirements
+    user_visible: true
     label: 技术要求清单
     type: text
     cardinality: single
     exposed: true
   - id: disqualification_items
+    user_visible: true
     label: 废标项清单
     type: text
     cardinality: single
     exposed: true
   - id: knowledge_evidence
+    user_visible: true
     label: 知识库检索资料
     type: text
     cardinality: single
     exposed: true
   - id: writing_task
+    user_visible: false
     label: Writer 写作任务
     type: file
     cardinality: single
     exposed: false
   - id: resource_profiles
+    user_visible: false
     label: Writer 资料画像
     type: file
     cardinality: single
     exposed: false
   - id: writing_context
+    user_visible: false
     label: Writer 写作上下文
     type: file
     cardinality: single
     exposed: false
   - id: outline_document
+    user_visible: true
     label: 章节大纲
     type: file
     cardinality: single
     exposed: true
   - id: outline
+    user_visible: false
     label: 结构化章节大纲
     type: json
     cardinality: single
     exposed: false
   - id: outline_check_report
+    user_visible: false
     label: 大纲检查报告
     type: text
     cardinality: single
     exposed: true
   - id: writing_context_after_outline
+    user_visible: false
     label: 大纲后写作上下文
     type: file
     cardinality: single
     exposed: false
   - id: outline_revision_task
+    user_visible: false
     label: 大纲修改任务
     type: file
     cardinality: single
     exposed: false
   - id: outline_locate_result
+    user_visible: false
     label: 大纲修改定位
     type: file
     cardinality: single
     exposed: false
   - id: outline_modify_plan
+    user_visible: false
     label: 大纲修改计划
     type: file
     cardinality: single
     exposed: false
   - id: outline_revision_set
+    user_visible: false
     label: 大纲修改集
     type: file
     cardinality: single
     exposed: false
   - id: outline_revision_result
+    user_visible: false
     label: 大纲修改结果
     type: file
     cardinality: single
     exposed: false
   - id: effective_outline
+    user_visible: false
     label: 正文生效大纲
     type: file
     cardinality: single
     exposed: false
   - id: effective_outline_check_report
+    user_visible: false
     label: 生效大纲检查
     type: text
     cardinality: single
     exposed: true
   - id: section_instructions
+    user_visible: false
     label: Writer 章节规划
     type: file
     cardinality: single
     exposed: false
   - id: chapter_contents
+    user_visible: false
     label: 分章生成稿（只读）
     type: file
     cardinality: list
@@ -230,46 +256,55 @@ slots:
     allow_manual_add: false
     exposed: true
   - id: draft_document
+    user_visible: true
     label: 完整正文
     type: file
     cardinality: single
     exposed: true
   - id: writing_context_after_draft
+    user_visible: false
     label: 正文后写作上下文
     type: file
     cardinality: single
     exposed: false
   - id: document_revision_task
+    user_visible: false
     label: 正文修改任务
     type: file
     cardinality: single
     exposed: false
   - id: document_locate_result
+    user_visible: false
     label: 正文修改定位
     type: file
     cardinality: single
     exposed: false
   - id: document_modify_plan
+    user_visible: false
     label: 正文修改计划
     type: file
     cardinality: single
     exposed: false
   - id: document_revision_set
+    user_visible: false
     label: 正文修改集
     type: file
     cardinality: single
     exposed: false
   - id: document_revision_result
+    user_visible: false
     label: 正文修改结果
     type: file
     cardinality: single
     exposed: false
   - id: architecture_image
+    user_visible: true
     label: 系统架构图
     type: image
     cardinality: single
     exposed: true
   - id: effect_images
+    user_visible: true
     label: 功能效果图
     type: image
     cardinality: list
@@ -277,26 +312,31 @@ slots:
     allow_manual_add: false
     exposed: true
   - id: image_manifest
+    user_visible: false
     label: 图像清单
     type: json
     cardinality: single
     exposed: true
   - id: final_proposal_markdown
+    user_visible: true
     label: 技术方案 Markdown（交付快照）
     type: file
     cardinality: single
     exposed: true
   - id: final_proposal
+    user_visible: true
     label: 最终交付文件（Markdown/Word）
     type: file
     cardinality: single
     exposed: true
   - id: validation_report
+    user_visible: true
     label: 最终校验报告
     type: text
     cardinality: single
     exposed: true
   - id: validation_summary
+    user_visible: false
     label: 校验摘要
     type: json
     cardinality: single

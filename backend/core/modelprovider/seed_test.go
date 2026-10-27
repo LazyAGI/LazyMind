@@ -631,3 +631,51 @@ func TestCatalogSeedPreservesDeletedModelTombstone(t *testing.T) {
 		t.Fatal("catalog seed cleared user tombstone")
 	}
 }
+
+func TestGLMCatalogUsesSupportedAPIModels(t *testing.T) {
+	data, err := os.ReadFile("../config/model_catalog.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := loadModelCatalog(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	for _, supplier := range catalog["model_providers"].Suppliers {
+		if supplier.Name != "GLM" {
+			continue
+		}
+		models := map[string]catalogModel{}
+		for _, model := range supplier.Models {
+			models[model.Name] = model
+		}
+		for _, name := range []string{"glm-5.3-flash", "glm-5.3-flashx", "glm-5.3-flashx-legal"} {
+			if model := models[name]; model.Type != "llm" || !model.Vision {
+				t.Fatalf("%s must preserve chat and vision capabilities: %+v", name, model)
+			}
+			if got, ok := lookupMaxInputTokens(name, "llm"); !ok || got != "1M" {
+				t.Fatalf("%s context = %s, found=%v", name, got, ok)
+			}
+		}
+		for name, kind := range map[string]string{
+			"cogview-4-250304": "text2image", "GLM-Image": "text2image", "GLM-TTS": "tts",
+			"GLM-ASR-2512": "stt", "cogvideox-3": "text2video", "cogvideox-flash": "text2video",
+			"viduq1-text": "text2video", "viduq1-image": "text2video", "viduq1-start-end": "text2video",
+			"vidu2-image": "text2video", "vidu2-start-end": "text2video", "vidu2-reference": "text2video",
+		} {
+			if models[name].Type != kind {
+				t.Fatalf("%s must be %s", name, kind)
+			}
+		}
+		for _, name := range []string{"GLM-4-Voice", "GLM-TTS-Clone", "GLM-Realtime", "GLM-OCR"} {
+			if _, ok := models[name]; ok {
+				t.Fatalf("%s requires a separate protocol, not a standard model role", name)
+			}
+		}
+		return
+	}
+	t.Fatal("GLM supplier missing")
+}

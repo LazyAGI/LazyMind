@@ -97,6 +97,11 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, materialDiag("E_MATERIAL_DUPLICATE", "error", fmt.Sprintf("workflow.yaml.slots[%d].id", i), id, "material id is duplicated: "+id))
 		}
 		knownMaterials[id] = true
+		if value, present := slot["user_visible"]; present {
+			if _, ok := value.(bool); !ok {
+				result.Diagnostics = append(result.Diagnostics, materialDiag("E_USER_VISIBLE_INVALID", "error", fmt.Sprintf("workflow.yaml.slots[%d].user_visible", i), id, "user_visible must be a boolean"))
+			}
+		}
 		if materialType := strings.ToLower(scalar(slot["type"])); materialType != "" {
 			graph.MaterialTypes[id] = materialType
 		}
@@ -349,6 +354,57 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 				"E_RUNTIME_CLARIFICATION_CHOICE_POLICY_INVALID", "error", path+".choice_policy",
 				"runtime clarification field choice_policy must be seed, subset, or fixed",
 			))
+		}
+		if field.Attachment != nil {
+			attachment := field.Attachment
+			attachment.WhenChoice = strings.TrimSpace(attachment.WhenChoice)
+			attachment.MaterialID = strings.TrimSpace(attachment.MaterialID)
+			if field.Type != "single" {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_CLARIFICATION_ATTACHMENT_TYPE_INVALID", "error", path+".attachment",
+					"conditional attachments require a single-choice clarification field",
+				))
+			}
+			if attachment.WhenChoice == "" || !seenChoices[attachment.WhenChoice] {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_CLARIFICATION_ATTACHMENT_CHOICE_INVALID", "error", path+".attachment.when_choice",
+					"attachment.when_choice must exactly match one declared choice",
+				))
+			}
+			if attachment.MaterialID == "" || !knownMaterials[attachment.MaterialID] || !external[attachment.MaterialID] || graph.MaterialTypes[attachment.MaterialID] != "file" {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_CLARIFICATION_ATTACHMENT_MATERIAL_INVALID", "error", path+".attachment.material_id",
+					"attachment.material_id must reference an external file material",
+				))
+			}
+			accept := make([]string, 0, len(attachment.Accept))
+			seenAccept := map[string]bool{}
+			for _, rawAccept := range attachment.Accept {
+				value := strings.ToLower(strings.TrimSpace(rawAccept))
+				if value != "" && !strings.HasPrefix(value, ".") {
+					value = "." + value
+				}
+				if value != "" && !seenAccept[value] {
+					seenAccept[value] = true
+					accept = append(accept, value)
+				}
+			}
+			attachment.Accept = accept
+			if len(attachment.Accept) == 0 {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_CLARIFICATION_ATTACHMENT_ACCEPT_REQUIRED", "error", path+".attachment.accept",
+					"conditional attachments require at least one accepted file extension",
+				))
+			}
+			if attachment.MaxFiles == 0 {
+				attachment.MaxFiles = 1
+			}
+			if attachment.MaxFiles < -1 {
+				result.Diagnostics = append(result.Diagnostics, diag(
+					"E_RUNTIME_CLARIFICATION_ATTACHMENT_MAX_FILES_INVALID", "error", path+".attachment.max_files",
+					"attachment.max_files must be positive, or -1 for unlimited",
+				))
+			}
 		}
 	}
 

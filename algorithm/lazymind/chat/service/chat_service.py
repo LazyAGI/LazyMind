@@ -1073,7 +1073,7 @@ async def _handle_chat_impl(
     from lazymind.chat.workflow.workflow_manager import (
         _build_chat_agent_task_context,
         guard_workflow_agent_stream,
-        resolve_workflow_injection,
+        resolve_workflow_injection_async,
         update_intentwriter,
         workflow_startup_clarification_already_asked,
     )
@@ -1414,7 +1414,7 @@ async def _handle_chat_impl(
         if ref.startswith('builtin:')
     )
 
-    workflow_contribution = resolve_workflow_injection(
+    workflow_contribution = await resolve_workflow_injection_async(
         effective_workflow_context,
         conversation_id=conversation_id,
         # The raw query may contain the internal <mentioned_resources> envelope.

@@ -1,3 +1,5 @@
+import { DEVELOPER_ACTIVE_EVENT, isDeveloperModeActive } from '@/utils/developerMode';
+import { hiddenUserSlots, workflowUIForAudience } from './workflowAudience';
 import { WorkflowExtensions } from '../../extensions/WorkflowExtensions';
 import { groupDownloadActions } from './groupDownloadActions';
 import { WorkflowApprovalActions } from './WorkflowApprovalActions';
@@ -68,7 +70,10 @@ import {
   filterPresentCompositeItems,
   findAlignedCompositeRevision,
 } from './compositeArtifactLayout';
+import { linkedPageTabs, buildPageOrderChange } from './workflowPageGroup';
 import './WorkflowPanel.scss';
+
+const PageGroupContext = React.createContext<{ tabs: TabDef[]; pages: Record<string, number>; select: (group: string, page: number) => void }>({ tabs: [], pages: {}, select: () => {} });
 
 const EMPTY_TASK_CENTER_TASKS: SubAgentTask[] = [];
 
@@ -824,6 +829,8 @@ function CompositeSlotGrid({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
+  const pageGroups = React.useContext(PageGroupContext);
+  const tabActive = React.useContext(WorkflowPanelTabActiveContext);
   const compactEmptyStates = React.useContext(CompactWorkflowEmptyStatesContext);
   const reorderSlotItems = useWorkflowStore((state) => state.reorderSlotItems);
   const rows = getCompositeRows(tab, session);
@@ -844,22 +851,27 @@ function CompositeSlotGrid({
       && tab.composite_layout.direction === 'column',
   );
   const [slideExpanded, setSlideExpanded] = useState(false);
-  const [currentPage, setCurrentPage] = useState<number | null>(null);
+  const [localPage, setLocalPage] = useState<number | null>(null);
+  const currentPage = tab.page_group ? (pageGroups.pages[tab.page_group] ?? null) : localPage;
+  const setCurrentPage = (page: number | null) => {
+    if (tab.page_group && page !== null) pageGroups.select(tab.page_group, page);
+    else setLocalPage(page);
+  };
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [reordering, setReordering] = useState(false);
 
   useEffect(() => {
-    if (!paged) return;
+    if (!paged || !tabActive) return;
     if (!rows.length) {
       setCurrentPage(null);
       return;
     }
-    setCurrentPage((page) => page != null && rows.includes(page) ? page : rows[0]);
-  }, [paged, rows.join(',')]);
+    if (currentPage == null || !rows.includes(currentPage)) setCurrentPage(rows[0]);
+  }, [paged, tabActive, currentPage, rows.join(',')]);
 
   useEffect(() => {
-    if (paged) onFocusSortOrder?.(currentPage ?? undefined);
-  }, [paged, currentPage, onFocusSortOrder]);
+    if (paged && tabActive) onFocusSortOrder?.(currentPage ?? undefined);
+  }, [paged, tabActive, currentPage, onFocusSortOrder]);
 
   const activePage = currentPage ?? rows[0];
   const reorderableCompositeSlotIds = tab.slots
@@ -884,27 +896,17 @@ function CompositeSlotGrid({
     setReordering(true);
     setReorderError(null);
     try {
-      for (const slotId of reorderableCompositeSlotIds) {
-        const revisions = getTabSlotRevisions(session, tab, slotId)
-          .filter((revision) => revision.selected
-            && revision.sort_order !== undefined
-            && revision.list_index !== undefined)
-          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-        if (revisions.length < 2) continue;
-        const bySortOrder = new Map(revisions.map((revision) => [revision.sort_order as number, revision]));
-        const nextListOrder = nextPages
-          .map((sortOrder) => bySortOrder.get(sortOrder)?.list_index)
-          .filter((listIndex): listIndex is number => listIndex !== undefined);
-        if (nextListOrder.length !== revisions.length) {
-          throw new Error(t('chat.workflowPageReorderFailed'));
+      const changes = new Map<string, ReturnType<typeof buildPageOrderChange>>();
+      for (const linkedTab of linkedPageTabs(tab, pageGroups.tabs)) {
+        for (const slot of linkedTab.slots) {
+          if (slot.cardinality !== 'list' || !slot.ordered || changes.has(slot.id)) continue;
+          const change = buildPageOrderChange(slot.id, getTabSlotRevisions(session, linkedTab, slot.id), nextPages);
+          if (change) changes.set(slot.id, change);
         }
-        await reorderSlotItems(
-          session.session_id,
-          slotId,
-          nextListOrder,
-          revisions[0]?.order_version ?? 0,
-        );
       }
+      const [first, ...rest] = [...changes.values()].filter((change): change is NonNullable<typeof change> => change !== null);
+      if (!first) return;
+      await reorderSlotItems(session.session_id, first.slot_id, first.order, first.version, rest);
       await onRefresh?.();
       const nextFocusedPage = focusedVisualIdx + 1;
       setCurrentPage(nextFocusedPage);
@@ -914,7 +916,7 @@ function CompositeSlotGrid({
     } finally {
       setReordering(false);
     }
-  }, [activePage, canReorderPages, onFocusSortOrder, onRefresh, reorderSlotItems, reordering, reorderableCompositeSlotIds, rows, session, tab, t]);
+  }, [activePage, canReorderPages, onFocusSortOrder, onRefresh, reorderSlotItems, reordering, reorderableCompositeSlotIds, rows, session, tab, t, pageGroups]);
 
   if (rows.length === 0) {
     return (
@@ -1409,7 +1411,8 @@ function NamedTabSlot({
     revisions.length > 0 || Boolean(artifactStream), collapseWhenEmpty, slotDef.widget?.collapsed === true,
   );
   const contentCollapsed = compactEmptyStates ? externalCollapsed : nativeCollapsed;
-  const prefersFullGridRow = slotDef.widget?.itemLayout === 'grid'
+  const prefersFullGridRow = slotDef.type === 'text' || slotDef.type === 'json'
+    || slotDef.widget?.itemLayout === 'grid'
     || (slotDef.widget?.itemWidth ?? 0) >= 600
     || slotDef.widget?.collapsed === true;
   const isWriterDocument = slotDef.widget?.widgetType === 'writer-document';
@@ -1693,7 +1696,15 @@ export function WorkflowPanel({
   // reset the user's current tab.
   const focusedTabByConversation = useWorkflowStore((s) => s.focusedTabByConversation);
   const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
-  const [ui, setUI] = useState<WorkflowUI>({});
+  const [rawUI, setUI] = useState<WorkflowUI>();
+  const [developerMode, setDeveloperMode] = useState(isDeveloperModeActive);
+  useEffect(() => {
+    const update = () => setDeveloperMode(isDeveloperModeActive());
+    window.addEventListener(DEVELOPER_ACTIVE_EVENT, update);
+    return () => window.removeEventListener(DEVELOPER_ACTIVE_EVENT, update);
+  }, []);
+  const ui = useMemo(() => workflowUIForAudience(rawUI ?? {}, developerMode), [rawUI, developerMode]);
+  const hiddenSlots = useMemo(() => developerMode ? new Set<string>() : hiddenUserSlots(rawUI ?? {}), [rawUI, developerMode]);
   const [dismissing, setDismissing] = useState(false);
   const [stateGraphOpen, setStateGraphOpen] = useState(false);
   const [expanded, setExpanded] = useState(() => readPersistedExpanded(conversationId));
@@ -1876,12 +1887,21 @@ export function WorkflowPanel({
     session?.status,
   ]);
 
+  const [groupFocus, setGroupFocus] = useState<{ sessionId?: string; pages: Record<string, number> }>({ pages: {} });
+  const groupPages = groupFocus.sessionId === session?.session_id ? groupFocus.pages : {};
+  const selectGroupPage = useCallback((group: string, page: number) => {
+    setGroupFocus(previous => ({ sessionId: session?.session_id, pages: {
+      ...(previous.sessionId === session?.session_id ? previous.pages : {}), [group]: page,
+    } }));
+  }, [session?.session_id]);
+
   // Track focused tab changes.
   const handleTabChange = useCallback((idx: number, tabId: string) => {
     setActiveTabIdx(idx);
     setFocusedTab(conversationId, tabId);
-    setFocusedSortOrder(conversationId, undefined);
-  }, [conversationId, setFocusedTab, setFocusedSortOrder]);
+    const group = ui.tabs?.find(tab => tab.id === tabId)?.page_group;
+    setFocusedSortOrder(conversationId, group ? groupPages[group] : undefined);
+  }, [conversationId, setFocusedTab, setFocusedSortOrder, ui.tabs, groupPages]);
 
   const handleFocusSortOrder = useCallback((sortOrder: number | undefined) => {
     setFocusedSortOrder(conversationId, sortOrder);
@@ -2351,6 +2371,7 @@ export function WorkflowPanel({
       {/* Body */}
       {!collapsed && (
         <div className='workflow-panel__body' key={session.session_id}>
+          <PageGroupContext.Provider value={{ tabs: ui.tabs ?? [], pages: groupPages, select: selectGroupPage }}>
           <WorkflowExtensions names={ui?.extensions} session={session} disabled={actionPending}
             beforeAction={flushPendingEdits} onRefresh={refresh} onSendMessage={onSendMessage} />
           {hasTabs ? (
@@ -2382,11 +2403,12 @@ export function WorkflowPanel({
             })
           ) : (
             <AutoSlotGrid
-              session={session}
+              session={{ ...session, slots: rawUI || developerMode ? session.slots?.filter(slot => !hiddenSlots.has(slot.slot_id || slot.slot)) : [] }}
               onRefresh={refresh}
               onReference={onReference}
             />
           )}
+          </PageGroupContext.Provider>
         </div>
       )}
 

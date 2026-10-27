@@ -1,0 +1,4 @@
+ok  	github.com/mesotron7x/LazyMind/local/local-runtime-manager	65.723s
+ok  	github.com/mesotron7x/LazyMind/local/local-runtime-manager/cmd/desktop-launcher	0.924s
+?   	github.com/mesotron7x/LazyMind/local/local-runtime-manager/cmd/installer-maintenance	[no test files]
+ok  	github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winfile	1.336s

@@ -1613,6 +1613,10 @@ export interface ConversationArchiveResponse {
     'archived_at': string;
     'conversation_id': string;
     'newly_archived': boolean;
+    /**
+     * All affected conversation IDs, including dependent side chats.
+     */
+    'archived_ids': Array<string>;
 }
 export interface ConversationBatchDeleteRequest {
     'conversation_ids': Array<string>;
@@ -1987,6 +1991,10 @@ export const ConversationItemThinkingDepthEnum = {
 export type ConversationItemThinkingDepthEnum = typeof ConversationItemThinkingDepthEnum[keyof typeof ConversationItemThinkingDepthEnum];
 
 export interface ConversationListResponse {
+    /**
+     * True only for the complete lightweight selection snapshot. Such a response has no next page.
+     */
+    'selection_complete'?: boolean;
     'conversations'?: Array<ConversationItem>;
     'next_page_token'?: string;
     'total_size'?: number;
@@ -17470,10 +17478,12 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {boolean} [selectionSnapshot] Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
+         * @param {string} [selectionGroupId] Restrict a selection snapshot to this owned group.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, selectionSnapshot?: boolean, selectionGroupId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/conversations`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -17500,6 +17510,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (pageToken !== undefined) {
                 localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            if (selectionSnapshot !== undefined) {
+                localVarQueryParameter['selection_snapshot'] = selectionSnapshot;
+            }
+
+            if (selectionGroupId !== undefined) {
+                localVarQueryParameter['selection_group_id'] = selectionGroupId;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -28474,11 +28492,13 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {boolean} [selectionSnapshot] Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
+         * @param {string} [selectionGroupId] Restrict a selection snapshot to this owned group.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, options);
+        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, selectionSnapshot?: boolean, selectionGroupId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, selectionSnapshot, selectionGroupId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -33082,7 +33102,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationListResponse> {
-            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, requestParameters.selectionSnapshot, requestParameters.selectionGroupId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -36299,6 +36319,16 @@ export interface DefaultApiApiCoreConversationsGetRequest {
     readonly pageSize?: number
 
     readonly pageToken?: string
+
+    /**
+     * Return all matching selectable roots and their placement/lock metadata in one database snapshot; ignores history pagination.
+     */
+    readonly selectionSnapshot?: boolean
+
+    /**
+     * Restrict a selection snapshot to this owned group.
+     */
+    readonly selectionGroupId?: string
 }
 
 /**
@@ -38898,7 +38928,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, requestParameters.selectionSnapshot, requestParameters.selectionGroupId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
