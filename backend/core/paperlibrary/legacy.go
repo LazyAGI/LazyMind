@@ -208,7 +208,7 @@ func decodeSnapshotPaper(item map[string]json.RawMessage) (Paper, error) {
 	}
 	p.FolderID = Pointer(textField(item, "folderId"))
 	p.Important = boolField(item, "important")
-	if len(p.Metadata.Title) > 4096 || len(p.Metadata.Authors) > 200 || len(p.Metadata.Abstract) > 2<<20 {
+	if len(p.Metadata.Title) > 4096 || len(p.Metadata.Authors) > MaxMetadataAuthors || len(p.Metadata.Abstract) > 2<<20 {
 		return p, errors.New("paper metadata too large")
 	}
 	if p.Status != "unread" && p.Status != "reading" && p.Status != "read" {

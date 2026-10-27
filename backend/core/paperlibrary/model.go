@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// MaxMetadataAuthors allows large scientific collaborations while bounding
+// author lists consistently across snapshot imports and metadata edits.
+const MaxMetadataAuthors = 10000
+
 type Identifiers struct {
 	DOI   string `json:"doi,omitempty"`
 	Arxiv string `json:"arxiv,omitempty"`

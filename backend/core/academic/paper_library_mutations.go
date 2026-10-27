@@ -27,7 +27,7 @@ func validateLibraryMetadata(m *paperlibrary.Metadata) error {
 	if (m.Identifiers.DOI != "" && doiPattern.FindString(m.Identifiers.DOI) != m.Identifiers.DOI) || (rawArxiv != "" && m.Identifiers.Arxiv == "") {
 		return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "DOI 或 arXiv 标识符无效")
 	}
-	if m.Title == "" || len(m.Title) > 4096 || len(m.Abstract) > 2<<20 || len(m.Authors) > 500 || len(m.Venue) > 4096 || m.Year < 0 || m.Year > 10000 || len(m.Identifiers.DOI) > 512 || len(m.Identifiers.Arxiv) > 64 || m.CitationCount != nil && *m.CitationCount < 0 {
+	if m.Title == "" || len(m.Title) > 4096 || len(m.Abstract) > 2<<20 || len(m.Authors) > paperlibrary.MaxMetadataAuthors || len(m.Venue) > 4096 || m.Year < 0 || m.Year > 10000 || len(m.Identifiers.DOI) > 512 || len(m.Identifiers.Arxiv) > 64 || m.CitationCount != nil && *m.CitationCount < 0 {
 		return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "论文题录字段无效或过长")
 	}
 	for _, a := range m.Authors {
