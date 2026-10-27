@@ -39,6 +39,7 @@ export function patchLibraryPaper(dataset: string, paper: PaperRecord, changes: 
     metadata?: PaperMetadata;
     status?: PaperRecord['status'];
     tags?: string[];
+    primary_attachment_id?: string;
 }) { return mutation(dataset, 'patch', `library/papers/${encodeURIComponent(paper.id)}`, { revision: paper.revision, ...changes }); }
 const targets = (papers: PaperRecord[]) => papers.map(p => ({ id: p.id, revision: p.revision }));
 export function moveLibraryPapers(dataset: string, papers: PaperRecord[], folderId: string | null) { return mutation(dataset, 'post', 'library/papers:move', { items: targets(papers), folder_id: folderId || '' }); }

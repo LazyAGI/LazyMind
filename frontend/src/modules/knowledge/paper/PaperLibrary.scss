@@ -288,6 +288,23 @@
 .paper-library-drag-preview > span:last-child { min-width: 0; }
 .paper-library-drag-preview strong { display: block; font-size: 13px; font-weight: 600; }
 .paper-library-drag-preview small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 4px; color: #627084; font-size: 12px; }
+
+.paper-directory-folder-title { position: relative; min-height: 28px; }
+.paper-directory-actions { position: absolute; top: 0; right: 0; display: flex; align-items: center; opacity: 0; pointer-events: none; background: #fff; border-radius: 4px; }
+.paper-directory-actions .ant-btn { width: 25px; min-width: 25px; height: 26px; padding: 0; color: var(--muted); }
+.paper-directory-folder-title:hover .paper-directory-actions,
+.paper-directory-folder-title:focus-within .paper-directory-actions { opacity: 1; pointer-events: auto; }
+.paper-directory-folder-title:hover .paper-directory-count,
+.paper-directory-folder-title:focus-within .paper-directory-count { visibility: hidden; }
+.paper-directory-folder-title:hover .paper-directory-node-name,
+.paper-directory-folder-title:focus-within .paper-directory-node-name { padding-right: 46px; }
+.paper-directory-paper-title { cursor: grab; touch-action: none; }
+.paper-directory-paper-title.is-dragging { opacity: .45; }
+@media (hover: none) {
+  .paper-directory-actions { position: static; opacity: 1; pointer-events: auto; }
+  .paper-directory-folder-title .paper-directory-count { display: none; }
+  .paper-directory-actions .ant-btn { min-height: 40px; width: 36px; }
+}
 .paper-library-sort { width: 108px; }
 .paper-library-empty { padding: 64px 24px; color: var(--muted); font-size: 13px; text-align: center; line-height: 1.8; }
 

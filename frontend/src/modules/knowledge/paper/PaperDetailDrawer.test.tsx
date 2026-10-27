@@ -3,9 +3,34 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { ConfigProvider } from 'antd';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PaperDetailDrawer from './PaperDetailDrawer';
+vi.mock('./PaperAttachmentPreview', () => ({ default: ({ attachment }: { attachment: { name: string } }) => <div aria-label="附件预览">{attachment.name}</div> }));
 const fixture=()=>libraryFixture({papers:[paperFixture({metadata:{year:2026}})]});
 afterEach(cleanup);
 describe('durable paper notes', () => {
+    it('previews versions independently and changes the main reading target only after a primary update', async () => {
+        const data = fixture();
+        data.attachments[0].contentRef = 'main-document';
+        data.attachments.push({ ...data.attachments[0], id: 'older-pdf', contentRef: 'older-document', name: 'Older version.pdf', sourceVersion: 'v1', isPrimary: false });
+        data.papers[0].attachmentIds.push('older-pdf');
+        const open = vi.fn(), setPrimary = vi.fn().mockResolvedValue(undefined);
+        const props = { datasetId: 'library', paper: data.papers[0], data, initialTab: 'attachments' as const, onClose: vi.fn(), onAddNote: vi.fn(), onOpenAttachment: open, onSetPrimaryAttachment: setPrimary };
+        const view = render(<PaperDetailDrawer {...props} />);
+        fireEvent.change(screen.getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'older-pdf' } });
+        expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
+        fireEvent.click(screen.getByRole('button', { name: '阅读 ↗' }));
+        expect(open).toHaveBeenLastCalledWith('older-document');
+        fireEvent.click(screen.getByRole('button', { name: '阅读 PDF' }));
+        expect(open).toHaveBeenLastCalledWith('main-document');
+        fireEvent.click(screen.getByRole('button', { name: '设为主附件' }));
+        await waitFor(() => expect(setPrimary).toHaveBeenCalledWith(data.attachments[1]));
+        const updated = { ...data, attachments: [{ ...data.attachments[0], isPrimary: false }, { ...data.attachments[1], isPrimary: true }] };
+        view.rerender(<PaperDetailDrawer {...props} data={updated} />);
+        fireEvent.click(screen.getByRole('button', { name: '阅读 PDF' }));
+        expect(open).toHaveBeenLastCalledWith('older-document');
+        expect(screen.queryByRole('button', { name: '设为主附件' })).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('tab', { name: '笔记 0' }));
+        expect(screen.getByText('这篇论文的所有 PDF 附件共用笔记。')).toBeInTheDocument();
+    });
     it('retains note text through a delayed failure and clears it only after a successful retry', async () => {
         const data = fixture();
         let reject!: (error: Error) => void;
@@ -41,7 +66,7 @@ describe('durable paper notes', () => {
         render(<ConfigProvider theme={{ token: { motion: false } }}><PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} academic={{ state: { document_id: 'pdf', kind: 'unknown', status: 'failed', paper_id: '', manual: false, error: 'Model unavailable' }, is_important: false }} onClose={() => { }} onAddNote={vi.fn()} onRetryIdentification={retry} onSave={vi.fn().mockResolvedValue(true)}/></ConfigProvider>);
         expect(screen.getByRole('status', { name: '论文信息自动识别' })).toHaveTextContent('识别失败');
         expect(screen.getByRole('status', { name: '正文解析状态' })).toHaveTextContent('正文解析失败');
-        expect(screen.getByRole('button', { name: '编 辑' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: '编辑题录' })).toBeEnabled();
         expect(screen.queryByText('Model unavailable')).not.toBeInTheDocument();
         expect(screen.queryByText('invalid literal for int()')).not.toBeInTheDocument();
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();

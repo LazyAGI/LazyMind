@@ -5,6 +5,7 @@ import { extractAcademicReferences, listAcademicReferences, type AcademicReferen
 import { listExpansions, type Expansion } from '../api/paperWorkflows';
 import { libraryFixture, paperFixture } from './__tests__/fixtures';
 import PaperDetailDrawer from './PaperDetailDrawer';
+vi.mock('./PaperAttachmentPreview', () => ({ default: () => <div>附件预览</div> }));
 vi.mock('../api/academicReferences', () => ({ listAcademicReferences: vi.fn(), extractAcademicReferences: vi.fn() }));
 vi.mock('../api/paperWorkflows', () => ({ listExpansions: vi.fn() }));
 function fixture() {
@@ -65,7 +66,8 @@ describe('paper relations in the detail drawer', () => {
         expect(screen.queryByText('全文版本')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('tab', { name: '附件 2' }));
         const attachments = screen.getByRole('tabpanel', { name: '附件 2' });
-        fireEvent.click(within(attachments).getAllByRole('button', { name: '打开 PDF' })[1]);
+        fireEvent.change(within(attachments).getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'second-version' } });
+        fireEvent.click(within(attachments).getByRole('button', { name: '阅读 ↗' }));
         expect(onOpenAttachment).toHaveBeenCalledWith('pdf-v1');
         expect(extractAcademicReferences).not.toHaveBeenCalled();
     });

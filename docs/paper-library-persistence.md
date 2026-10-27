@@ -22,6 +22,8 @@ All endpoints below use the existing `target_dataset_id` query parameter and dat
 
 The dataset catalog also supplies `paper_count` and `pdf_attachment_count` for paper collections. `document_count` retains its existing meaning. PDF counts deduplicate active, stored document IDs; supplemental materials, external links, detached/deleted originals and unconfirmed uploads are excluded. Versions share a paper identity by arXiv base ID. Individual attachments keep their actual source version/hash; unknown versions stay unknown, and adding an old version preserves the primary attachment and saved bibliography.
 
+`PATCH /academic/library/papers/{id}` accepts `primary_attachment_id` with the current entry revision. The selected attachment must be an active stored PDF of that entry and dataset, backed by an existing document. Primary selection updates all active attachment flags atomically without changing bibliography or paper notes. Previewing another attachment is local UI state and does not change the primary attachment. Directory paper entries open a full detail page; result-list entries retain the detail drawer. Both share the same attachment preview and existing document reading route.
+
 Implementation and verification:
 
 1. Store the complete version 3 document graph per dataset in the core database, with dataset permissions, bounded validation, and optimistic revision checks. Preserve papers, folders, collections, tags, attachment references, notes, annotations, relations, merge snapshots, and removal markers together.

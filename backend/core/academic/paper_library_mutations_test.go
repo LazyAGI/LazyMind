@@ -139,6 +139,78 @@ func TestLibrarySameHashAndVersionsPreservePrimaryAndMetadata(t *testing.T) {
 		t.Fatal("old version replaced primary")
 	}
 }
+
+func TestLibraryPrimaryAttachmentSelectionPersistsAndChecksMembership(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	paper := importDraft(t, "papers", "metadata", libraryDraft("paper", "Confirmed title", "10.1234/primary")).Data.Papers[0]
+	for _, id := range []string{"first-pdf", "second-pdf"} {
+		uploadReceipt(t, db, "papers", id, "upload-"+id, paper.ID, id)
+		paper = confirmUpload(t, paper, id, "upload-"+id, true).Data.Papers[0]
+	}
+	view := readLibrary(t, "papers")
+	var selected, old string
+	for _, attachment := range view.Data.Attachments {
+		if attachment.ContentRef == "second-pdf" {
+			selected = attachment.ID
+		} else {
+			old = attachment.ID
+		}
+	}
+	w := libraryRequest(t, "POST", "/library/papers/paper/notes", "papers", "owner", map[string]any{"id": "note", "content": "Keep the paper note"})
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	request := func(revision int64, attachment string) int {
+		t.Helper()
+		return libraryRequest(t, "PATCH", "/library/papers/paper", "papers", "owner", map[string]any{"revision": revision, "primary_attachment_id": attachment}).Code
+	}
+	if status := request(paper.Revision, selected); status != 200 {
+		t.Fatal(status)
+	}
+	view = readLibrary(t, "papers")
+	if view.Data.Papers[0].Revision != paper.Revision+1 || len(view.Data.Notes) != 1 || view.Data.Notes[0].Content != "Keep the paper note" {
+		t.Fatal("primary update lost revision or paper note")
+	}
+	for _, attachment := range view.Data.Attachments {
+		if attachment.IsPrimary != (attachment.ID == selected) {
+			t.Fatal("primary selection was not persisted uniquely")
+		}
+	}
+	if status := request(paper.Revision, old); status != 409 {
+		t.Fatal("stale selection accepted", status)
+	}
+	paper = view.Data.Papers[0]
+	w = libraryRequest(t, "POST", "/library/papers/paper/attachments/"+old+":detach", "papers", "owner", map[string]any{"revision": paper.Revision})
+	if w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	paper = readLibrary(t, "papers").Data.Papers[0]
+	for _, attachment := range []orm.PaperLibraryAttachment{
+		{DatasetID: "another-library", ID: "foreign-library", PaperID: paper.ID, Kind: "pdf", DocumentID: "second-pdf"},
+		{DatasetID: "papers", ID: "foreign-paper", PaperID: "another-paper", Kind: "pdf", DocumentID: "second-pdf"},
+		{DatasetID: "papers", ID: "supplement", PaperID: paper.ID, Kind: "other", DocumentID: "second-pdf"},
+	} {
+		if err := db.Create(&attachment).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{old, "foreign-library", "foreign-paper", "supplement"} {
+		if status := request(paper.Revision, id); status != 404 {
+			t.Fatal("invalid attachment accepted", id, status)
+		}
+	}
+	var document orm.Document
+	db.Where("id=?", "second-pdf").Take(&document)
+	if err := db.Delete(&document).Error; err != nil {
+		t.Fatal(err)
+	}
+	if status := request(paper.Revision, selected); status != 404 {
+		t.Fatal("deleted document accepted", status)
+	}
+	if latest := readLibrary(t, "papers").Data.Papers[0]; latest.Revision != paper.Revision {
+		t.Fatal("rejected selection changed paper")
+	}
+}
 func TestLibraryImportanceIsScopedToUserAndDataset(t *testing.T) {
 	db := paperLibraryTestDB(t)
 	a := importDraft(t, "papers", "a", libraryDraft("a", "A", "10.1234/a")).Data.Papers[0]

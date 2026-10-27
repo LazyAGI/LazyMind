@@ -83,8 +83,12 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const [detailPaperId, setDetailPaperId] = useState<string | null>(null);
     const [detailTab, setDetailTab] = useState<PaperDetailTab>("overview");
     const [detailEditing, setDetailEditing] = useState(false);
+    const [detailPresentation, setDetailPresentation] = useState<'drawer' | 'page'>('drawer');
     const restartRef = useRef<IRestartKnowledgeProps>(null);
-    const openDetail = (id: string, tab: PaperDetailTab = "overview") => { setDetailEditing(false); setDetailTab(tab); setDetailPaperId(id); };
+    const openDetail = (id: string, tab: PaperDetailTab = "overview", presentation: 'drawer' | 'page' = 'drawer') => {
+        setActiveTool(null); setDetailEditing(false); setDetailTab(tab); setDetailPaperId(id); setDetailPresentation(presentation);
+        if (presentation === 'page') { setFolderId(dataRef.current.papers.find(paper => paper.id === id)?.folderId || null); setLibraryView('directory'); }
+    };
     const [folderId, setFolderId] = useState<string | null>(null);
     const [libraryView, setLibraryView] = useState<LibraryView>("all");
     const [filters, setFilters] = useState<PaperFilters>(DEFAULT_PAPER_FILTERS);
@@ -95,6 +99,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const [activeTool, setActiveTool] = useState<"search" | "filter" | "imports" | null>(null);
     const setSearchOpen = useCallback((open: boolean) => setActiveTool((current) => open ? "search" : current === "search" ? null : current), []);
     const [folderDialogOpen, setFolderDialogOpen] = useState(false);
+    const [newFolderParent, setNewFolderParent] = useState<string | null>(null);
     const [editing, setEditing] = useState<PaperRecord | null>(null);
     const editingRevisionRef = useRef<number | null>(null);
     const [editError, setEditError] = useState<string | null>(null);
@@ -278,13 +283,14 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         const name = folderName.trim();
         if (disabled || busyRef.current || !name)
             return;
-        const parent = libraryView === 'directory' ? folderId : null, id = uuidv4();
+        const parent = newFolderParent, id = uuidv4();
         try {
             await mutate(() => createLibraryFolder(datasetId, id, name, parent));
             setFolderName('');
             setFolderDialogOpen(false);
             setLibraryView('directory');
             setFolderId(id);
+            setDetailPaperId(null);
             message.success('目录已创建');
         }
         catch (error) {
@@ -294,13 +300,14 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const currentFolder = data.folders.find(folder => folder.id === folderId);
     const childFolders = data.folders.filter(folder => (folder.parentId || null) === folderId);
     const directoryPaperCount = folderId ? data.papers.filter(paper => paper.folderId && descendantFolderIds(data.folders, folderId).has(paper.folderId)).length : data.papers.length;
-    const selectView = (id: string | null, view: LibraryView) => { setFolderId(view === 'directory' ? id : null); setLibraryView(view); setSelected([]); };
-    const deleteFolder = () => {
-        const folder = data.folders.find(f => f.id === folderId);
+    const selectView = (id: string | null, view: LibraryView) => { setFolderId(view === 'directory' ? id : null); setLibraryView(view); setSelected([]); setDetailPaperId(null); };
+    const openFolderDialog = (parentId: string | null) => { setNewFolderParent(parentId); setFolderName(''); setFolderDialogOpen(true); };
+    const deleteFolder = (id: string) => {
+        const folder = data.folders.find(f => f.id === id);
         if (!folder || disabled)
             return;
         const descendants = descendantFolderIds(data.folders, folder.id), count = data.papers.filter(p => p.folderId && descendants.has(p.folderId)).length;
-        Modal.confirm({ title: `删除「${folder.name}」及其子目录？`, content: `将移除 ${descendants.size} 个目录，把 ${count} 篇论文放回上一级；原文件、附件、笔记和星标保留。`, okText: '删除目录', okButtonProps: { danger: true }, onOk: async () => { await mutate(() => deleteLibraryFolder(datasetId, folder)); setFolderId(folder.parentId || null); } });
+        Modal.confirm({ title: `删除「${folder.name}」及其子目录？`, content: `将移除 ${descendants.size} 个目录，把 ${count} 篇论文放回上一级；原文件、附件、笔记和星标保留。`, okText: '删除目录', okButtonProps: { danger: true }, onOk: async () => { await mutate(() => deleteLibraryFolder(datasetId, folder)); if (folderId && descendants.has(folderId)) setFolderId(folder.parentId || null); } });
     };
     const dropPapers = async (ids: string[]) => {
         if (disabled || busyRef.current)
@@ -380,7 +387,24 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
             return;
         restartRef.current?.onOpen({ dataset: datasetId, ids: [document], names: [item.metadata.title], title: '重新解析', processingLevel });
     };
+    const renderImportance = (item: PaperRecord) => (<PaperImportanceButton important={item.important} onToggle={async (important) => {
+                if (!item.academicWorkId)
+                    throw new Error('论文身份尚未保存');
+                await setPaperImportance(datasetId, item.academicWorkId, important);
+                if (isCurrentScope())
+                    applySnapshot({ ...dataRef.current, papers: dataRef.current.papers.map(p => p.id === item.id ? { ...p, important } : p) });
+            }}/>);
     const detailPaper = dataState.papers.find(item => item.id === detailPaperId);
+    const detailContent = detailPaper && (<PaperDetailDrawer datasetId={datasetId} mode={detailPresentation} importanceControl={renderImportance(detailPaper)} key={`${detailPaperId}:${detailTab}:${detailEditing}`} initialTab={detailTab} initialEditing={detailEditing} academic={paperDocument(dataState, detailPaper.id)} editError={editError} onEdit={() => { editingRevisionRef.current = detailPaper.revision; setEditing(data.papers.find(item => item.id === detailPaperId)!); setEditError(null); }} onSave={saveEdits} onRetryIdentification={async () => {
+                const document = paperDocument(dataRef.current, detailPaper.id)?.state.document_id;
+                if (!document)
+                    throw new Error("请先关联 PDF 附件");
+                await updatePaperIdentity(document, { reidentify: true });
+                if (isCurrentScope()) {
+                    syncGeneration.current += 1;
+                    setSyncRevision(value => value + 1);
+                }
+            }} paper={detailPaper} onReparse={() => openReparse(detailPaper)} reparseDisabledReason={reparseDisabledReason(detailPaper)} data={dataState} onClose={() => setDetailPaperId(null)} onAddNote={async (id, content) => { await mutate(() => addLibraryNote(datasetId, detailPaper.id, id, content)); }} disabled={disabled} onStatusChange={status => updatePaper(detailPaper.id, { status })} onSetPrimaryAttachment={async attachment => { await mutate(() => patchLibraryPaper(datasetId, detailPaper, { primary_attachment_id: attachment.id })); }} onOpenAttachment={openDocument} onOpenPaper={id => openDetail(id, 'relations', detailPresentation)} onAddPdf={() => openImport('upload', detailPaper.id)} onDetachAttachment={async (attachment) => { await mutate(() => detachLibraryAttachment(datasetId, detailPaper, attachment.id)); }}/>);
     return (<DndContext sensors={dragSensors} collisionDetection={pointerWithin} accessibility={{
             screenReaderInstructions: { draggable: "拖到左侧文件夹以移动文献，也可按回车选择目标文件夹。" },
             announcements: {
@@ -392,7 +416,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         }} onDragStart={({ active }: DragStartEvent) => {
             if (disabled || busyRef.current)
                 return;
-            const item = data.papers.find((paper) => paper.id === active.id);
+            const item = data.papers.find((paper) => paper.id === (active.data.current?.paperId || active.id));
             if (!item)
                 return;
             const ids = selected.includes(item.id) ? selectedPapers.map((paper) => paper.id) : [item.id];
@@ -451,17 +475,15 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
           <FolderButton icon={<StarOutlined />} name="重点论文" count={stats.important} current={libraryView === "important"} onClick={() => selectView(null, "important")}/>
           <div className="paper-library-directory-head paper-library-browse-head">
             <span className="paper-library-rail-label">目录</span>
-            <div className="paper-library-folder-tools">
-              <Tooltip title="新建文件夹"><Button type="text" size="small" icon={<PlusOutlined />} aria-label="新建文件夹" disabled={disabled} onClick={() => { setFolderName(""); setFolderDialogOpen(true); }}/></Tooltip>
-              <Tooltip title={currentFolder ? "删除当前文件夹" : "选择文件夹后删除"}><span><Button type="text" size="small" icon={<DeleteOutlined />} aria-label="删除文件夹" disabled={disabled || !currentFolder} onClick={deleteFolder}/></span></Tooltip>
-            </div>
           </div>
-          <PaperDirectoryTree key={datasetId} data={data} title={title} active={libraryView === 'directory'} folderId={folderId} detailPaperId={detailPaperId} disabled={disabled} draggedIds={draggedIds} dropFolderId={dropFolderId} onSelectFolder={id => selectView(id, 'directory')} onOpenPaper={id => openDetail(id)}/>
+          <PaperDirectoryTree key={datasetId} data={data} title={title} active={libraryView === 'directory'} folderId={folderId} detailPaperId={detailPresentation === 'page' ? detailPaperId : null} disabled={disabled} draggedIds={draggedIds} dropFolderId={dropFolderId} onSelectFolder={id => selectView(id, 'directory')} onOpenPaper={id => openDetail(id, 'overview', 'page')} onCreateFolder={openFolderDialog} onDeleteFolder={deleteFolder}/>
           {!!draggedIds.length && <p className="paper-library-drag-hint" role="status">移动 {draggedIds.length} 篇文献<br />拖到目标文件夹</p>}
           </div>
           <div ref={setTaskActionsContainer} className="paper-library-task-actions-slot"/>
         </nav>
         <div className="paper-library-board">
+          {detailPresentation === 'page' && detailContent}
+          <div hidden={detailPresentation === 'page' && !!detailPaper}>
           <div className="paper-library-view-heading">
             <div><span className="paper-library-view-path">{libraryView === 'directory' ? [title, paperFolderPath(data.folders, folderId)].filter(Boolean).join(' / ') : '浏览视图'}</span><h2>{libraryView === 'all' ? '全部论文' : libraryView === 'important' ? '重点论文' : currentFolder?.name || title}</h2></div>
             <span>{libraryView === 'directory' ? `本层 ${scoped.length} 篇 · 含子目录 ${directoryPaperCount} 篇` : `${viewed.length} 篇论文`}</span>
@@ -501,13 +523,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
               </div></td>
               <td className="paper-library-main">
                   <div className="paper-library-title-line"><h2 className="paper-library-title"><button type="button" className="paper-library-title-button" onClick={() => openDetail(item.id)}>{item.metadata.title}</button></h2>
-                    <PaperImportanceButton important={item.important} onToggle={async (important) => {
-                if (!item.academicWorkId)
-                    throw new Error('论文身份尚未保存');
-                await setPaperImportance(datasetId, item.academicWorkId, important);
-                if (isCurrentScope())
-                    applySnapshot({ ...dataRef.current, papers: dataRef.current.papers.map(p => p.id === item.id ? { ...p, important } : p) });
-            }}/>
+                    {renderImportance(item)}
 
                   </div>
                 <p className="paper-library-cite">{item.metadata.authors.length ? item.metadata.authors.join("、") : "作者待补全"}</p>
@@ -560,6 +576,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
             </tbody>
           </table>
           </div>
+          </div>
         </div>
       </div>
       <Modal title="新建文件夹" open={folderDialogOpen} onCancel={() => {
@@ -571,16 +588,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         </label>
       </Modal>
       <PaperImportDialog imports={imports} data={data} disabled={disabled} loading={loading} saving={saving} confirmingImport={confirmingImport} fileImportDisabled={fileImportDisabled}/>
-      {detailPaper && (<PaperDetailDrawer datasetId={datasetId} key={`${detailPaperId}:${detailTab}:${detailEditing}`} initialTab={detailTab} initialEditing={detailEditing} academic={paperDocument(dataState, detailPaper.id)} editError={editError} onEdit={() => { editingRevisionRef.current = detailPaper.revision; setEditing(data.papers.find(item => item.id === detailPaperId)!); setEditError(null); }} onSave={saveEdits} onRetryIdentification={async () => {
-                const document = paperDocument(dataRef.current, detailPaper.id)?.state.document_id;
-                if (!document)
-                    throw new Error("请先关联 PDF 附件");
-                await updatePaperIdentity(document, { reidentify: true });
-                if (isCurrentScope()) {
-                    syncGeneration.current += 1;
-                    setSyncRevision(value => value + 1);
-                }
-            }} paper={detailPaper} onReparse={() => openReparse(detailPaper)} reparseDisabledReason={reparseDisabledReason(detailPaper)} data={dataState} onClose={() => setDetailPaperId(null)} onAddNote={async (id, content) => { await mutate(() => addLibraryNote(datasetId, detailPaper.id, id, content)); }} disabled={disabled} onOpenAttachment={openDocument} onOpenPaper={id => openDetail(id, 'relations')} onAddPdf={() => openImport('upload', detailPaper.id)} onDetachAttachment={async (attachment) => { await mutate(() => detachLibraryAttachment(datasetId, detailPaper, attachment.id)); }}/>)}
+      {detailPresentation === 'drawer' && detailContent}
       <RestartKnowledgeModal ref={restartRef} parsers={parsers} onFinish={() => setSyncRevision(value => value + 1)}/>
     </section>
     <DragOverlay dropAnimation={null}>{draggedIds.length > 0 && <div className="paper-library-drag-preview"><HolderOutlined /><span><strong>移动 {draggedIds.length} 篇文献</strong><small>{data.papers.find(p => p.id === draggedIds[0])?.metadata.title}</small></span></div>}</DragOverlay>

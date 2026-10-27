@@ -175,13 +175,18 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input struct {
-		Revision int64                  `json:"revision"`
-		Metadata *paperlibrary.Metadata `json:"metadata,omitempty"`
-		Status   *string                `json:"status,omitempty"`
-		Tags     *[]string              `json:"tags,omitempty"`
+		Revision            int64                  `json:"revision"`
+		Metadata            *paperlibrary.Metadata `json:"metadata,omitempty"`
+		Status              *string                `json:"status,omitempty"`
+		Tags                *[]string              `json:"tags,omitempty"`
+		PrimaryAttachmentID *string                `json:"primary_attachment_id,omitempty"`
 	}
-	if !parseJSON(r, &input) || input.Revision < 1 || input.Metadata == nil && input.Status == nil && input.Tags == nil {
+	if !parseJSON(r, &input) || input.Revision < 1 || input.Metadata == nil && input.Status == nil && input.Tags == nil && input.PrimaryAttachmentID == nil {
 		replyError(w, 400, "INVALID_REQUEST", "revision 和修改字段不能为空")
+		return
+	}
+	if input.PrimaryAttachmentID != nil && !paperlibrary.ValidID(*input.PrimaryAttachmentID) {
+		replyError(w, 400, "INVALID_REQUEST", "主附件 ID 无效")
 		return
 	}
 	if input.Metadata != nil {
@@ -222,6 +227,19 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 		}
 		if input.Tags != nil {
 			row.TagsJSON = marshal(*input.Tags)
+		}
+		if input.PrimaryAttachmentID != nil {
+			var attachment orm.PaperLibraryAttachment
+			if err := tx.Where("dataset_id=? AND paper_id=? AND id=? AND detached_at IS NULL AND kind='pdf' AND document_id<>''", dataset, id, *input.PrimaryAttachmentID).Take(&attachment).Error; err != nil {
+				return err
+			}
+			var document orm.Document
+			if err := tx.Where("dataset_id=? AND id=?", dataset, attachment.DocumentID).Take(&document).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&orm.PaperLibraryAttachment{}).Where("dataset_id=? AND paper_id=? AND detached_at IS NULL", dataset, id).Updates(map[string]any{"is_primary": gorm.Expr("id = ?", attachment.ID), "updated_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
 		}
 		return paperlibrary.SaveEntry(tx, &row)
 	})
@@ -312,7 +330,7 @@ func DetachLibraryAttachment(w http.ResponseWriter, r *http.Request) {
 	id, attachmentID := mux.Vars(r)["library_paper_id"], mux.Vars(r)["attachment_id"]
 	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		var member orm.PaperLibraryAttachment
-		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND paper_id=? AND id=?", dataset, id, attachmentID).Take(&member).Error; e != nil {
+		if e := tx.Where("dataset_id=? AND paper_id=? AND id=?", dataset, id, attachmentID).Take(&member).Error; e != nil {
 			return e
 		}
 		if member.DetachedAt != nil {
