@@ -10497,7 +10497,6 @@ const enUS = {
     "undetermined": "Not yet determined",
     "paperCount": "{{count}} papers",
     "progress": "Progress",
-    "stage": { "expansion_plan": "Reference papers and search plan", "candidate_set": "Expansion and screening", "relation_analysis": "Paper relationships", "expansion_result": "Paper collection" },
     "rounds": "Expansion history",
     "round": "Result {{count}}",
     "generated": "Generated content",
@@ -10574,6 +10573,9 @@ const enUS = {
       "not_imported": "Not added"
     },
     "stage": {
+      "expansion_plan": "Reference papers and search plan",
+      "candidate_set": "Expansion and screening",
+      "relation_analysis": "Paper relationships",
       "direction_research": "Research directions",
       "seed_set": "Seed papers",
       "expanded_papers": "Expansion and screening",

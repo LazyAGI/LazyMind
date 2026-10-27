@@ -10241,7 +10241,6 @@ const zhCN = {
     "undetermined": "尚未确定",
     "paperCount": "{{count}} 篇论文",
     "progress": "阶段成果",
-    "stage": { "expansion_plan": "准备参考论文与检索计划", "candidate_set": "拓展与筛选", "relation_analysis": "分析论文关系", "expansion_result": "论文清单" },
     "rounds": "扩展历史",
     "round": "第 {{count}} 次结果",
     "generated": "已生成内容",
@@ -10318,6 +10317,9 @@ const zhCN = {
       "not_imported": "未入库"
     },
     "stage": {
+      "expansion_plan": "准备参考论文与检索计划",
+      "candidate_set": "拓展与筛选",
+      "relation_analysis": "分析论文关系",
       "direction_research": "调研与方向",
       "seed_set": "种子论文",
       "expanded_papers": "扩展与筛选",
