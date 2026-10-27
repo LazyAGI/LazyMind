@@ -1,6 +1,6 @@
 # 论文 Workflow 对接
 
-面向接入综述、阅读心得和科研 PPT 的同事。对应 [PR #863](https://github.com/LazyAGI/LazyMind/pull/863)。
+面向接入综述、阅读心得和科研 PPT 的同事。基于 [PR #863](https://github.com/LazyAGI/LazyMind/pull/863) 的论文能力，增加准备确认、四步拓展与独立报告。
 
 论文流程提供主题/种子初步调研、明确确认方向后的四步多来源拓展、分层阅读与质量检查、版本化材料交接和全文读取。**综述、心得、PPT 目前接 Mock，只返回材料接收结果，正式生成能力由下游 Workflow 接入。**
 

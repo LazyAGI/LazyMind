@@ -191,6 +191,12 @@ print(json.dumps(asyncio.run(parse_pdf(PDFRequest(**json.loads(sys.argv[1])),"re
 					continue
 				}
 				row["parsed"] = true
+				if output := os.Getenv("LAZYMIND_PAPER_ACQUISITION_REPORT"); output != "" {
+					folder := filepath.Join(filepath.Dir(output), "original-parsed")
+					if e := os.MkdirAll(folder, 0700); e == nil {
+						_ = os.WriteFile(filepath.Join(folder, paper.ID+".json"), marshal(map[string]any{"pages": pages, "pdf_hash": hash}), 0600)
+					}
+				}
 				q := checkPaperQuality(PaperRef{Title: paper.Title, DOI: paper.DOI, ArxivID: paper.ArxivID}, pages, "external", hash)
 				row["quality"] = q
 				row["eligible"] = q.Eligible

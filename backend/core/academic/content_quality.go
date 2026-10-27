@@ -81,12 +81,15 @@ func checkPaperQuality(paper PaperRef, pages []ContentPage, kind, hash string) c
 	}
 	// Match the document opening, not identifiers found in its bibliography.
 	title := NormalizeTitle(paper.Title)
-	normalized := NormalizeTitle(opening)
-	matched := len([]rune(title)) >= 8 && (strings.Contains(normalized, title) || tokenCoverage(title, normalized) >= 0.85)
-	if paper.DOI != "" && strings.Contains(strings.ReplaceAll(opening, " ", ""), strings.ToLower(paper.DOI)) {
+	normalized := NormalizeTitle(string(front))
+	// Keep title order: a bag of common topic words in an unrelated abstract
+	// cannot verify paper identity. Joining whitespace tolerates PDF line wraps.
+	matched := len([]rune(title)) >= 8 && strings.Contains(strings.ReplaceAll(normalized, " ", ""), strings.ReplaceAll(title, " ", ""))
+	identifierOpening := strings.ReplaceAll(string(front), " ", "")
+	if expectedDOI != "" && strings.Contains(identifierOpening, expectedDOI) {
 		matched = true
 	}
-	if paper.ArxivID != "" && strings.Contains(strings.ReplaceAll(opening, " ", ""), strings.ToLower(paper.ArxivID)) {
+	if expectedArxiv != "" && strings.Contains(identifierOpening, expectedArxiv) {
 		matched = true
 	}
 	if !matched {

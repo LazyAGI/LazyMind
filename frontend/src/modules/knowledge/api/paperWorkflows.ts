@@ -60,7 +60,7 @@ export interface Expansion {
   reading?: ExpansionReport['reading'];
   report?: ExpansionReport;
   discovery_mode?: string;
-  progress?: Record<string, Partial<ReviewWorkflowInput>>;
+  progress?: Record<string, Partial<ReviewWorkflowInput> & { input?: Partial<ReviewWorkflowInput>; plan?: string[]; gaps?: string[] }>;
   id: string;
   dataset_id: string;
   conversation_id: string;

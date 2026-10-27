@@ -136,3 +136,20 @@ def test_repeated_critical_submission_does_not_repeat_verification(publisher, mo
     module.academic_submit_relations(analyses, claims)
     assert module.academic_submit_relations(analyses, claims)['already_published']
     assert len(calls) == 1
+
+
+def test_verification_checks_the_published_analysis_not_an_easier_claim(publisher, monkeypatch):
+    module, _, events, _ = publisher
+    checked = []
+
+    def verify(claims, allowed):
+        checked.extend(claims)
+        return [dict(claims[0], status='unsupported')]
+
+    monkeypatch.setattr(module, '_verify_claims', verify)
+    module.academic_submit_relations(
+        [{'paper_id': 'a', 'key_contribution': 'Improves accuracy by 25%.'}],
+        [{'paper_id': 'a', 'field': 'key_contribution', 'statement': 'This paper studies retrieval.', 'positions': [2]}],
+    )
+    assert checked[0]['statement'] == 'Improves accuracy by 25%.'
+    assert '25%' not in events[0]['value']['data']['input']['papers'][0]['key_contribution']

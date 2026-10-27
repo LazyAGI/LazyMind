@@ -31,6 +31,7 @@ function fixture() {
 function expansion(): Expansion {
     return {
         id: 'expansion', dataset_id: 'library', conversation_id: 'chat', title: 'Efficient adaptation', goal: 'review', status: 'completed', version: 2,
+        preparation_revision: 1, budget_mode: 'balanced',
         created_at: '2026-10-26T00:00:00Z', updated_at: '2026-10-26T00:00:00Z',
         result: { user_instruction: '', candidate_directions: [], selected_directions: ['Adaptation'], papers: [
                 { paper: { paper_id: 'work-current', title: 'Current paper', abstract: null }, is_seed: false, is_important: false, seed_relation: 'Builds on the seed method', direction_relation: 'Reduces adaptation cost', key_contribution: 'A compact adaptation method' },

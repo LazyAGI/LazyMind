@@ -82,12 +82,15 @@ def academic_expansion_context(expansion_id: str):
     return _call('GET', '/expansions/' + quote(expansion_id, safe=''))
 
 
-def academic_search_papers(expansion_id: str, query: str, max_results: int = 10,
-                           sources: list[str] | None = None, mode: str = 'keyword', paper_id: str = ''):
+def academic_search_papers(expansion_id: str, query: str = '', max_results: int = 10,
+                           sources: list[str] | None = None, mode: str = 'keyword', paper_id: str = '',
+                           cursor: str = ''):
     """Search openalex/arxiv/sciverse/web, or references/citations of a registered paper."""
     _check_expansion(expansion_id)
     payload = {'expansion_id': expansion_id, 'query': query, 'max_results': max_results,
                'sources': sources or [], 'mode': mode, 'paper_id': paper_id}
+    if cursor:
+        payload['cursor'] = cursor
     return _call('POST', '/papers:search', payload)
 
 
@@ -241,7 +244,7 @@ def academic_submit_relations(analyses: list[PaperAnalysis], claims: list[dict] 
     """Submit the complete selected-paper analysis once. Do not copy paper metadata.
 
     Args:
-        analyses: One entry for every paper in bound expanded_papers. Each entry has
+        analyses: One entry for every paper in bound candidate_set. Each entry has
             paper_id and optional plain strings seed_relation, direction_relation,
             key_contribution. Keep failed full-text papers; omit unsupported analysis.
     """
@@ -266,7 +269,7 @@ def academic_submit_relations(analyses: list[PaperAnalysis], claims: list[dict] 
         supplied[identity] = analysis
     expected = {p['paper']['paper_id'] for p in result['papers']}
     if set(supplied) != expected:
-        _invalid('analyses.paper_id: must cover exactly the bound expanded_papers; missing or additional identities')
+        _invalid('analyses.paper_id: must cover exactly the bound candidate_set; missing or additional identities')
     statuses = {state['paper_id']: state['status'] for state in contents}
     for entry in result['papers']:
         identity = entry['paper']['paper_id']
@@ -286,8 +289,19 @@ def academic_submit_relations(analyses: list[PaperAnalysis], claims: list[dict] 
         if value.get('submission_hash') != submission:
             _invalid('relation_analysis: this attempt already published a different result; retry the step to revise it')
         return {'status': 'ok', 'already_published': True, 'paper_count': len(result['papers'])}
-    verified = _verify_claims(claims or [], expected)
-    critical = re.compile(r'继承|优于|提升|加速|%|\d+\.\d+|outperform|improv|inherit', re.I)
+    grounded_claims = copy.deepcopy(claims or [])
+    if isinstance(grounded_claims, list):
+        for claim in grounded_claims:
+            if (isinstance(claim, dict) and claim.get('paper_id') in supplied
+                    and claim.get('field') in _ANALYSIS_FIELDS and isinstance(claim.get('statement'), str)):
+                # Check the text that will actually be published. A different,
+                # easier statement cannot validate an unsupported analysis field.
+                claim['statement'] = supplied[claim['paper_id']].get(claim['field'], '')
+    verified = _verify_claims(grounded_claims, expected)
+    critical = re.compile(
+        r'继承|源于|优于|提升|加速|耗时|适用条件|%|\d+\.\d+|outperform|improv|inherit|derived from|built on'
+        r'|\d+\s*(?:ms|sec|min|hour|秒|分钟|小时|倍|residues|tokens)', re.I)
+
     for entry in result['papers']:
         for field in _ANALYSIS_FIELDS:
             relevant = [claim for claim in verified

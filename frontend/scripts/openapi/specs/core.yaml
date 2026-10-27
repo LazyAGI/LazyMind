@@ -487,6 +487,11 @@ components:
                     items:
                         type: string
                     type: array
+                reused_source_queries:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
                 source_queries:
                     items:
                         properties: {}
@@ -18759,7 +18764,6 @@ paths:
                                     type: array
                             required:
                                 - expansion_id
-                                - query
                             type: object
                 required: true
             responses:

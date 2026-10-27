@@ -266,6 +266,7 @@ export interface AcademicExpansionReport {
     'preparation_attempts'?: Array<object>;
     'reading'?: { [key: string]: AcademicExpansionReadingValue; };
     'reading_order'?: Array<string>;
+    'reused_source_queries'?: Array<object>;
     'source_queries'?: Array<object>;
     'stage_metrics'?: { [key: string]: AcademicExpansionReportComposeMetrics; };
     'stage_timing'?: Array<AcademicExpansionReportStageTimingInner>;
@@ -1170,7 +1171,7 @@ export interface ApiCoreAcademicPapersSearchPostRequest {
     'mode'?: ApiCoreAcademicPapersSearchPostRequestModeEnum;
     'paper_id'?: string;
     'preparation_revision'?: number;
-    'query': string;
+    'query'?: string;
     'sources'?: Array<ApiCoreAcademicPapersSearchPostRequestSourcesEnum>;
 }
 
