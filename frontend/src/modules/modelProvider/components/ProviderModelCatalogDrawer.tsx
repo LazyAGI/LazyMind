@@ -222,6 +222,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     props.models,
     props.protocolName,
     props.providerName,
+    props.runtimeIdentity,
     loaded,
   ]);
 
