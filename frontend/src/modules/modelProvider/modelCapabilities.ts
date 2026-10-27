@@ -31,7 +31,9 @@ const runtimeModelTypesBySource: Record<string, readonly string[]> = {
   glm: ["llm", "vlm", "embed", "rerank", "text2image", "stt"],
   kimi: ["llm", "vlm"],
   minimax: ["llm", "vlm", "text2image", "tts"],
-  openai: ["llm", "vlm", "embed", "multimodal_embedding", "rerank"],
+  openai: ["llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "text2video"],
+  vllm: ["llm", "vlm", "embed", "multimodal_embedding", "rerank"],
+  lmdeploy: ["llm", "vlm", "embed", "multimodal_embedding", "rerank"],
   openrouter: ["llm", "vlm", "embed", "text2image", "text2video", "tts", "stt"],
   ppio: ["llm", "vlm"],
   qwen: ["llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "image_editing", "text2video", "tts", "stt"],
@@ -44,7 +46,7 @@ function runtimeSource(protocol?: string) {
   const aliases: Record<string, string> = {
     anthropic: "claude", bigmodel: "glm", moonshot: "kimi", tongyiqianwen: "qwen",
     volcanoark: "doubao", volcengine: "doubao", zhipu: "glm", zhipuai: "glm",
-    vllm: "openai", lmdeploy: "openai",
+    vllm: "vllm", lmdeploy: "lmdeploy",
   };
   return Object.prototype.hasOwnProperty.call(aliases, source) ? aliases[source] : source;
 }

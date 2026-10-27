@@ -98,7 +98,9 @@ var runtimeModelTypesBySource = map[string][]string{
 	"glm":         {"llm", "vlm", "embed", "rerank", "text2image", "stt"},
 	"kimi":        {"llm", "vlm"},
 	"minimax":     {"llm", "vlm", "text2image", "tts"},
-	"openai":      {"llm", "vlm", "embed", "multimodal_embedding", "rerank"},
+	"openai":      {"llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "text2video"},
+	"vllm":        {"llm", "vlm", "embed", "multimodal_embedding", "rerank"},
+	"lmdeploy":    {"llm", "vlm", "embed", "multimodal_embedding", "rerank"},
 	"openrouter":  {"llm", "vlm", "embed", "text2image", "text2video", "tts", "stt"},
 	"ppio":        {"llm", "vlm"},
 	"qwen":        {"llm", "vlm", "embed", "multimodal_embedding", "rerank", "text2image", "image_editing", "text2video", "tts", "stt"},
@@ -110,7 +112,16 @@ var runtimeModelTypesBySource = map[string][]string{
 // A working compatible endpoint or public catalog entry cannot add an adapter.
 func RuntimeSupportsModelType(providerName, modelType string) bool {
 	modelType = normalizedDeclaredModelType(modelType)
-	for _, supported := range runtimeModelTypesBySource[LazyLLMSource(providerName)] {
+	source := LazyLLMSource(providerName)
+	// vLLM and LMDeploy use OpenAI's wire protocol, but their local runtime
+	// adapters do not expose OpenAI's image/video generation tasks.
+	switch normalizeProviderName(providerName) {
+	case "vllm":
+		source = "vllm"
+	case "lmdeploy":
+		source = "lmdeploy"
+	}
+	for _, supported := range runtimeModelTypesBySource[source] {
 		if modelType == supported {
 			return true
 		}

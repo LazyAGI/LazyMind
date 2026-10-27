@@ -34,7 +34,7 @@ func TestVerifiedKeylessCustomSupplierEmitsOnlySupportedRuntimeRoles(t *testing.
 			t.Fatal(err)
 		}
 		for role := range roles {
-			if role == "stt" || role == "tts" || role == "text2image" || role == "image_editing" || role == "text2video" {
+			if role == "stt" || role == "tts" || role == "image_editing" {
 				if config[role] != nil {
 					t.Errorf("%s unsupported OpenAI runtime role %s was emitted: %#v", user, role, config[role])
 				}

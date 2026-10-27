@@ -11,7 +11,11 @@ describe("supplier model capabilities", () => {
     expect(getSelectableCapabilities(["LLM_CHAT", "VLM", "EMBEDDING", "RERANK", "TTS", "TEXT_TO_IMAGE"], protocol))
       .toEqual(["LLM_CHAT", "VLM"]);
   });
-  it.each(["OpenAI", "vLLM", "LMDeploy"])("keeps compatible embedding/reranking but excludes missing media adapters for %s", (protocol) => {
+  it("exposes image and video generation adapters for OpenAI", () => {
+    expect(getSelectableCapabilities(["EMBEDDING", "RERANK", "MULTIMODAL_EMBEDDING", "TEXT_TO_IMAGE", "TEXT_TO_VIDEO", "TTS", "ASR"], "OpenAI"))
+      .toEqual(["EMBEDDING", "RERANK", "MULTIMODAL_EMBEDDING", "TEXT_TO_IMAGE", "TEXT_TO_VIDEO"]);
+  });
+  it.each(["vLLM", "LMDeploy"])("keeps compatible embedding/reranking but excludes media adapters for %s", (protocol) => {
     expect(getSelectableCapabilities(["EMBEDDING", "RERANK", "MULTIMODAL_EMBEDDING", "TEXT_TO_IMAGE", "TEXT_TO_VIDEO", "TTS", "ASR"], protocol))
       .toEqual(["EMBEDDING", "RERANK", "MULTIMODAL_EMBEDDING"]);
   });

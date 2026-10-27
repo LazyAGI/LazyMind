@@ -46,8 +46,8 @@ const LAZYMIND_CLOUD_PROVIDER_KEY = "lazymind_cloud";
 
 const defaultCapabilityGroups = [
   { key: "visual", icon: PictureOutlined, capabilities: ["vlm", "image_generator", "video_generator"] },
-  { key: "voice", icon: AudioOutlined, capabilities: ["speech_to_text", "tts"] },
   { key: "retrieval", icon: SearchOutlined, capabilities: ["embed_image", "reranker", "cloudParsing", "searchEngine"] },
+  { key: "voice", icon: AudioOutlined, capabilities: ["speech_to_text", "tts"] },
   { key: "evolution", icon: RocketOutlined, capabilities: ["evo_llm"] },
 ] as const;
 
@@ -258,7 +258,7 @@ export default function DefaultModelConfigPanel({
   const groupId = useId();
   const highlightedGroup = getDefaultCapabilityGroup(highlightTarget);
   const [expandedGroups, setExpandedGroups] = useState<string[]>(() =>
-    highlightedGroup ? [highlightedGroup] : [],
+    defaultCapabilityGroups.map(({ key }) => key),
   );
 
   useEffect(() => {

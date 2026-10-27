@@ -86,7 +86,7 @@ function renderPanel(
 }
 
 const basic = () => screen.getByRole("region", { name: "modelProvider.defaults.basicTitle" });
-const categoryNames = ["visual", "voice", "retrieval", "evolution"] as const;
+const categoryNames = ["visual", "retrieval", "voice", "evolution"] as const;
 type CategoryName = typeof categoryNames[number];
 const categoryButton = (category: CategoryName) => screen.getByRole("button", {
   name: new RegExp(`modelProvider.defaults.${category}Title`),
@@ -200,19 +200,26 @@ describe("default capability configuration groups", () => {
     expect(screen.getByRole("button", { name: /^Demo\s*1$/ })).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("shows two basic selectors on entry and keeps optional categories collapsed", async () => {
+  it("shows two basic selectors and expands every available category on entry", async () => {
     renderPanel();
     await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
-    await waitFor(() => expect(screen.getAllByRole("combobox")).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole("combobox")).toHaveLength(11));
     const basic = screen.getByRole("region", { name: "modelProvider.defaults.basicTitle" });
     expect(within(basic).getAllByRole("group")).toHaveLength(2);
     expect(within(basic).getByRole("group", { name: "modelProvider.module.llmChatTitle" })).toBeInTheDocument();
     expect(within(basic).getByRole("group", { name: "modelProvider.module.embeddingTitle" })).toBeInTheDocument();
-    for (const category of ["visual", "voice", "retrieval", "evolution"]) {
-      expect(screen.getByRole("button", { name: new RegExp(`modelProvider.defaults.${category}Title`) })).toHaveAttribute("aria-expanded", "false");
-      expect(screen.queryByRole("region", { name: `modelProvider.defaults.${category}Title` })).not.toBeInTheDocument();
+    const headings = [...document.querySelectorAll(".model-defaults-group-heading")].map((heading) => heading.textContent);
+    expect(headings).toEqual([
+      expect.stringContaining("modelProvider.defaults.visualTitle"),
+      expect.stringContaining("modelProvider.defaults.retrievalTitle"),
+      expect.stringContaining("modelProvider.defaults.voiceTitle"),
+      expect.stringContaining("modelProvider.defaults.evolutionTitle"),
+    ]);
+    for (const category of ["visual", "retrieval", "voice", "evolution"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`modelProvider.defaults.${category}Title`) })).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("region", { name: `modelProvider.defaults.${category}Title` })).toBeInTheDocument();
     }
-    expect(screen.queryByRole("group", { name: "modelProvider.module.ttsTitle" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
   });
 
   it("shows custom supplier identity without its private storage group", async () => {
@@ -255,18 +262,18 @@ describe("default capability configuration groups", () => {
     expect(screen.queryByText("Demo model · OpenAI")).not.toBeInTheDocument();
   });
 
-  it("reveals optional models only for the selected category and supports collapsing it", async () => {
+  it("keeps every category visible by default and supports collapsing one category", async () => {
     renderPanel();
     await screen.findByRole("region", { name: "modelProvider.defaults.basicTitle" });
     const voice = expandCategory("voice");
     expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "true");
     expect(within(voice).getAllByRole("group")).toHaveLength(2);
     expect(within(voice).getByRole("group", { name: "modelProvider.module.ttsTitle" })).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "modelProvider.module.textToImageTitle" })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "modelProvider.module.textToImageTitle" })).toBeInTheDocument();
     fireEvent.click(categoryButton("voice"));
     expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("region", { name: "modelProvider.defaults.voiceTitle" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("group")).toHaveLength(2);
+    expect(screen.getByRole("group", { name: "modelProvider.module.textToImageTitle" })).toBeInTheDocument();
   });
 
   it("automatically reveals and focuses a deep-linked capability in a collapsed category", async () => {
@@ -275,7 +282,7 @@ describe("default capability configuration groups", () => {
     const visual = await screen.findByRole("region", { name: "modelProvider.defaults.visualTitle" });
     const target = within(visual).getByRole("group", { name: "modelProvider.module.textToImageTitle" });
     expect(categoryButton("visual")).toHaveAttribute("aria-expanded", "true");
-    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "false");
+    expect(categoryButton("voice")).toHaveAttribute("aria-expanded", "true");
     expect(target).toHaveClass("is-config-highlighted");
     await waitFor(() => expect(target).toHaveFocus());
     expect(target.scrollIntoView).toHaveBeenCalled();

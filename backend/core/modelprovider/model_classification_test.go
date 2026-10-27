@@ -69,7 +69,7 @@ func TestRuntimeSupportRejectsUnregisteredSupplierAdapters(t *testing.T) {
 			t.Errorf("unknown provider accepted for %s", typ)
 		}
 	}
-	for _, provider := range []string{"OpenAI", "vLLM", "LMDeploy"} {
+	for _, provider := range []string{"vLLM", "LMDeploy"} {
 		for _, typ := range []string{"text2image", "text2video", "tts", "stt", "image_editing"} {
 			if RuntimeSupportsModelType(provider, typ) {
 				t.Errorf("unregistered OpenAI-compatible %s adapter accepted for %s", typ, provider)
@@ -79,6 +79,19 @@ func TestRuntimeSupportRejectsUnregisteredSupplierAdapters(t *testing.T) {
 			if !RuntimeSupportsModelType(provider, typ) {
 				t.Errorf("existing compatible %s adapter rejected for %s", typ, provider)
 			}
+		}
+	}
+}
+
+func TestOpenAIRuntimeSupportsMediaGenerationAdapters(t *testing.T) {
+	for _, typ := range []string{"text2image", "text2video"} {
+		if !RuntimeSupportsModelType("OpenAI", typ) {
+			t.Errorf("OpenAI media adapter %s rejected", typ)
+		}
+	}
+	for _, typ := range []string{"image_editing", "tts", "stt"} {
+		if RuntimeSupportsModelType("OpenAI", typ) {
+			t.Errorf("OpenAI unsupported adapter %s accepted", typ)
 		}
 	}
 }
