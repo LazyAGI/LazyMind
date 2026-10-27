@@ -608,7 +608,6 @@ ui:
       layout: list
       slots:
         - id: material_summary
-        - id: academic_brief
 
     - id: style
       step_id: choose_style
