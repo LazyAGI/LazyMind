@@ -74,7 +74,7 @@ describe("model catalog integration", () => {
     expect(mocks.addBatch.mock.calls.every(([provider, group]) => provider === "supplier" && group === "store")).toBe(true);
     expect(mocks.addBatch.mock.calls[1][2]).toContainEqual({ name: "model-204", model_type: "", vision: false, max_input_tokens: "262144" });
     expect(mocks.add).not.toHaveBeenCalled();
-    expect(await screen.findByRole("button", { name: "modelProvider.catalog.disableModel:model-204" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:model-204" })).toBeInTheDocument();
     await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
   }, 20000);
 
@@ -101,7 +101,7 @@ describe("model catalog integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.addAll" }));
     expect(await screen.findByText("modelProvider.catalog.partialFailure")).toBeInTheDocument();
     expect(screen.getByLabelText("Configured model count")).toHaveTextContent("1001");
-    const manual = screen.getByRole("button", { name: "modelProvider.catalog.disableModel:manual" }).closest(".provider-model-catalog-row");
+    const manual = screen.getByRole("button", { name: "modelProvider.catalog.removeModel:manual" }).closest(".provider-model-catalog-row");
     expect(manual?.querySelector('[data-model-type="unknown"]')).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "modelProvider.catalog.addModel:broken" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
@@ -155,10 +155,12 @@ describe("model catalog integration", () => {
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:qwen-plus" }));
     await waitFor(() => expect(mocks.add).toHaveBeenCalledTimes(1));
     expect(mocks.add).toHaveBeenCalledWith({ modelProviderId: "supplier", groupId: "store", addModelProviderGroupModelOpenAPIRequest: { name: "qwen-plus", model_type: "llm", vision: false } });
-    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.disableModel:qwen-plus" }));
-    await waitFor(() => expect(mocks.setEnabled).toHaveBeenCalledWith("supplier", "store", "saved-model-id", false));
-    expect(mocks.remove).not.toHaveBeenCalled();
-    expect(await screen.findByRole("button", { name: "modelProvider.catalog.enableModel:qwen-plus" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:qwen-plus" }));
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
+      { modelProviderId: "supplier", groupId: "store", modelId: "saved-model-id" },
+      undefined,
+    ));
+    expect(mocks.setEnabled).not.toHaveBeenCalled();
   });
 
   it("confirms knowledge-base downgrade before deleting an embedding model", async () => {
@@ -172,14 +174,12 @@ describe("model catalog integration", () => {
     await waitFor(() => expect(sync).toBeEnabled());
     fireEvent.click(sync);
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.addModel:BAAI/bge-large" }));
-    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.disableModel:BAAI/bge-large" }));
-    await waitFor(() => expect(mocks.setEnabled).toHaveBeenCalledWith("supplier", "store", "saved-vector-id", false));
-    expect(mocks.remove).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.deleteModel:BAAI/bge-large" }));
+    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:BAAI/bge-large" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
       { modelProviderId: "supplier", groupId: "store", modelId: "saved-vector-id" },
       undefined,
     ));
+    expect(mocks.setEnabled).not.toHaveBeenCalled();
     expect(await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(

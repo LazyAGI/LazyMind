@@ -133,6 +133,19 @@ describe("saved supplier models", () => {
     fireEvent.mouseEnter(screen.getByRole("button", { name: "modelProvider.deleteModelAria:gpt-4o" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("modelProvider.removeModelHint");
   });
+  it("removes a historically disabled model with the minus action", async () => {
+    const disabled: ProviderModel = { ...models[1], enabled: false };
+    const { props } = setup({ models: [disabled] });
+    const row = screen.getByRole("listitem", { name: disabled.name });
+    const remove = within(row).getByRole("button", {
+      name: `modelProvider.deleteModelAria:${disabled.name}`,
+    });
+    expect(remove).toBeEnabled();
+    expect(within(row).queryByRole("button", { name: `modelProvider.enableModelAria:${disabled.name}` })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: `modelProvider.disableModelAria:${disabled.name}` })).not.toBeInTheDocument();
+    fireEvent.click(remove);
+    await waitFor(() => expect(props.onRemove).toHaveBeenCalledWith(disabled));
+  });
   it("honors disabled visual input instead of reviving the catalog default", async () => {
     upstream.lookup.mockReturnValue({ input: ["text", "image"], output: ["text"] });
     setup({ providerName: "OpenAI", models: [{ ...models[1], vision: false }] });

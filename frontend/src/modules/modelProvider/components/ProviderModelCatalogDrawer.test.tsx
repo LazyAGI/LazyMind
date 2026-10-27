@@ -385,6 +385,18 @@ describe("provider model catalog drawer", () => {
     expect(screen.queryByText("modelProvider.catalog.removeDescription")).not.toBeInTheDocument();
   });
 
+  it("removes a saved model even when its historical enabled flag is false", async () => {
+    const disabled: ProviderModel = { ...selected[0], enabled: false };
+    const props = fixture([disabled]);
+    draw(props);
+    const remove = await screen.findByRole("button", {
+      name: "modelProvider.catalog.removeModel:qwen-private",
+    });
+    expect(remove).toBeEnabled();
+    fireEvent.click(remove);
+    await waitFor(() => expect(props.onRemove).toHaveBeenCalledWith(disabled));
+  });
+
   it("removes an embedding directly and retains it after a failed request", async () => {
     const embedding: ProviderModel = {
       id: "embedding",

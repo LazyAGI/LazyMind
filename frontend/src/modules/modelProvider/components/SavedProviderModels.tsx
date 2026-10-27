@@ -1,10 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import {
-  DeleteOutlined,
-  MinusOutlined,
-  PlusOutlined,
-  SettingOutlined,
-} from "@ant-design/icons";
+import { MinusOutlined, SettingOutlined } from "@ant-design/icons";
 import { Button, Spin, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
@@ -39,7 +34,6 @@ export interface SavedProviderModelsProps {
   capabilityLabel: (capability: ModelCapability) => string;
   probe?: ModelProbeContext;
   onEdit: (model: ProviderModel) => void;
-  onSetEnabled?: (model: ProviderModel, enabled: boolean) => void | boolean | Promise<void | boolean>;
   onRemove: (model: ProviderModel) => void | boolean | Promise<void | boolean>;
 }
 
@@ -166,17 +160,6 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                   onClick={() => props.onEdit(model)}
                 />
               </Tooltip>
-              {props.onSetEnabled ? (
-                <Tooltip title={t(model.enabled === false ? "modelProvider.enableModelHint" : "modelProvider.disableModelHint")}>
-                  <Button
-                    type="text"
-                    aria-label={t(model.enabled === false ? "modelProvider.enableModelAria" : "modelProvider.disableModelAria", { name: model.name })}
-                    icon={model.enabled === false ? <PlusOutlined aria-hidden="true" /> : <MinusOutlined aria-hidden="true" />}
-                    disabled={removing.has(model.id) || probing.has(model.id)}
-                    onClick={() => void props.onSetEnabled?.(model, model.enabled === false)}
-                  />
-                </Tooltip>
-              ) : null}
               <Tooltip
                 title={t("modelProvider.removeModelHint")}
               >
@@ -185,7 +168,7 @@ export function SavedProviderModels(props: SavedProviderModelsProps) {
                   aria-label={t("modelProvider.deleteModelAria", {
                     name: model.name,
                   })}
-                  icon={<DeleteOutlined aria-hidden="true" />}
+                  icon={<MinusOutlined aria-hidden="true" />}
                   loading={removing.has(model.id)}
                   disabled={removing.has(model.id) || probing.has(model.id)}
                   onClick={() => void remove(model)}

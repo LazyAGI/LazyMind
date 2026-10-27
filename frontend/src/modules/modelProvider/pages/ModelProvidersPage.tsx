@@ -41,7 +41,6 @@ import {
   setCredentialBackupEnabled,
   startCredentialRestore,
   listRemoteGroupModels,
-  setGroupModelEnabled,
   unwrapModelProviderData,
   updateGroupModel,
   withModelProviderJsonOptions,
@@ -1541,50 +1540,6 @@ export default function ModelProviderPage({
     }
   };
 
-  const setSavedModelEnabled = (
-    providerId: string,
-    groupId: string,
-    model: ProviderModel,
-    enabled: boolean,
-  ) => {
-    const operationKey = `enabled:${providerId}:${groupId}:${model.id}`;
-    const existing = modelDeleteRequests.current.get(operationKey);
-    if (existing) return existing;
-    const operation = Promise.resolve().then(async () => {
-      try {
-        await setGroupModelEnabled(providerId, groupId, model.id, enabled);
-        setAddedProviderList((current) =>
-          current.map((provider) =>
-            provider.id === providerId
-              ? {
-                  ...provider,
-                  groups: provider.groups.map((group) =>
-                    group.id === groupId
-                      ? {
-                          ...group,
-                          models: group.models.map((item) =>
-                            item.id === model.id ? { ...item, enabled } : item,
-                          ),
-                        }
-                      : group,
-                  ),
-                }
-              : provider,
-          ),
-        );
-        void onConfigurationChanged?.();
-        return true;
-      } catch (error) {
-        message.error(getLocalizedErrorMessage(error));
-        return false;
-      } finally {
-        modelDeleteRequests.current.delete(operationKey);
-      }
-    });
-    modelDeleteRequests.current.set(operationKey, operation);
-    return operation;
-  };
-
   const deleteCustomModel = (
     providerId: string,
     groupId: string,
@@ -1692,9 +1647,6 @@ export default function ModelProviderPage({
         onDeleteModel={(provider, group, model) =>
           deleteCustomModel(provider.id, group.id, model)
         }
-        onSetEnabled={(provider, group, model, enabled) =>
-          setSavedModelEnabled(provider.id, group.id, model, enabled)
-        }
         onCheck={(provider, group) =>
           void verifyProviderGroup(provider, group, "")
         }
@@ -1754,7 +1706,6 @@ export default function ModelProviderPage({
         onRefreshModels={() => void loadGroupModels(catalogProvider.id, catalogGroup.id)}
         onAdd={(model) => addCatalogModel(catalogProvider.id, catalogGroup.id, model)}
         onAddMany={(models) => addCatalogModels(catalogProvider.id, catalogGroup.id, models)}
-        onSetEnabled={(model, enabled) => setSavedModelEnabled(catalogProvider.id, catalogGroup.id, model, enabled)}
         onRemove={(model) => deleteCustomModel(catalogProvider.id, catalogGroup.id, model, false)}
         onChanged={() => void onConfigurationChanged?.()}
       /> : null}

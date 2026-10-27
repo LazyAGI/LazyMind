@@ -11,7 +11,6 @@ import {
 } from "antd";
 import {
   DownOutlined,
-  DeleteOutlined,
   MinusOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -62,7 +61,6 @@ interface Props {
   onAdd: (model: CatalogModelChoice) => Promise<void>;
   onAddMany?: (models: CatalogModelChoice[]) => Promise<{ succeeded: number; failed: number }>;
   onRemove: (model: ProviderModel) => Promise<boolean>;
-  onSetEnabled?: (model: ProviderModel, enabled: boolean) => Promise<boolean>;
   onChanged?: () => void;
 }
 
@@ -279,8 +277,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
   );
 
   const runChanges = async (requested: Candidate[], remove: boolean) => {
-    const enabling = !remove && Boolean(props.onSetEnabled) && requested.some((model) => model.existing?.enabled === false);
-    const items = remove || enabling ? requested : requested.filter((model) => !model.unsupportedType);
+    const items = remove ? requested : requested.filter((model) => !model.unsupportedType);
     if (busyRequest.current || props.modelsLoading || !items.length) return;
     busyRequest.current = true;
     setBusy(true);
@@ -294,13 +291,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
         setPending((current) => new Set(current).add(key));
         try {
           if (remove && model.existing) {
-            const disabled = props.onSetEnabled
-              ? await props.onSetEnabled(model.existing, false)
-              : await props.onRemove(model.existing);
-            if (!disabled)
-              throw new Error(copy("removeFailed"));
-          } else if (model.existing?.enabled === false && props.onSetEnabled) {
-            if (!(await props.onSetEnabled(model.existing, true)))
+            if (!(await props.onRemove(model.existing)))
               throw new Error(copy("removeFailed"));
           } else {
             await props.onAdd({
@@ -609,38 +600,25 @@ export function ProviderModelCatalogDrawer(props: Props) {
                           <Button
                             type="text"
                             aria-label={copy(
-                              model.existing?.enabled === false && props.onSetEnabled
-                                ? "enableModel"
-                                : model.existing
-                                  ? (props.onSetEnabled ? "disableModel" : "removeModel")
-                                  : "addModel",
+                              model.existing ? "removeModel" : "addModel",
                               { name: model.name },
                             )}
                             loading={pending.has(key)}
                             disabled={working || (!model.existing && model.unsupportedType)}
                             title={!model.existing && model.unsupportedType ? copy(getModelTaskType(model.model_type) === "unknown" ? "unclassifiedType" : "unsupportedType") : undefined}
                             icon={
-                              model.existing && !(model.existing.enabled === false && props.onSetEnabled) ? (
+                              model.existing ? (
                                 <MinusOutlined aria-hidden="true" />
                               ) : (
                                 <PlusOutlined aria-hidden="true" />
                               )
                             }
                             onClick={() =>
-                              model.existing && !(model.existing.enabled === false && props.onSetEnabled)
+                              model.existing
                                 ? void runChanges([model], true)
                                 : void runChanges([model], false)
                             }
                           />
-                          {model.existing && props.onSetEnabled ? (
-                            <Button
-                              type="text"
-                              aria-label={copy("deleteModel", { name: model.name })}
-                              disabled={working}
-                              icon={<DeleteOutlined aria-hidden="true" />}
-                              onClick={() => void props.onRemove(model.existing as ProviderModel)}
-                            />
-                          ) : null}
                         </div>
                       );
                     })
