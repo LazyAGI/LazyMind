@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Switch } from "antd";
+import { useTranslation } from "react-i18next";
 import { modelProvidersApi, unwrapModelProviderData } from "../api";
 import DefaultModelConfigPanel, {
   type CloudServiceSlotKey,
   type ModelCapability,
   type SetupAvailabilityState,
 } from "../components/DefaultModelConfigPanel";
+import ExternalServicesPage from "./ExternalServicesPage";
+import "./DefaultServicesPage.scss";
+
+type ServiceCategory = "parsing" | "search" | "academic" | "translation";
 
 interface DefaultServicesPageProps {
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
@@ -12,6 +18,11 @@ interface DefaultServicesPageProps {
   onModelSelectionChanged: () => void | Promise<void>;
   highlightTarget?: ModelCapability;
   onHighlightResolved?: () => void;
+  focusServiceCategory?: ServiceCategory;
+  documentParsingEnabled: boolean;
+  documentParsingSaving: boolean;
+  controlsDisabled: boolean;
+  onDocumentParsingChange: (enabled: boolean) => void;
 }
 
 interface SetupAvailability {
@@ -74,9 +85,20 @@ export default function DefaultServicesPage({
   onModelSelectionChanged,
   highlightTarget,
   onHighlightResolved,
+  focusServiceCategory,
+  documentParsingEnabled,
+  documentParsingSaving,
+  controlsDisabled,
+  onDocumentParsingChange,
 }: DefaultServicesPageProps) {
+  const { t } = useTranslation();
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
+  const [selectionVersion, setSelectionVersion] = useState(0);
+  const [activeFocusCategory, setActiveFocusCategory] = useState(focusServiceCategory);
   const latestRequest = useRef(0);
+  const serviceArea = useRef<HTMLElement>(null);
+  const focusObserver = useRef<MutationObserver | null>(null);
+  const focusTimer = useRef<number | null>(null);
 
   const checkSetupAvailability = useCallback(async () => {
     const requestId = ++latestRequest.current;
@@ -114,21 +136,105 @@ export default function DefaultServicesPage({
     };
   }, [checkSetupAvailability]);
 
+  const scrollToServiceCategory = useCallback((category: ServiceCategory) => {
+    focusObserver.current?.disconnect();
+    const container = serviceArea.current;
+    if (!container) return;
+    const scrollIfPresent = () => {
+      const section = container.querySelector<HTMLElement>(`[data-service-category="${category}"]`);
+      if (!section) return false;
+      const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      section.scrollIntoView?.({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+      return true;
+    };
+    if (scrollIfPresent() || typeof MutationObserver === "undefined") return;
+    const observer = new MutationObserver(() => {
+      if (scrollIfPresent()) observer.disconnect();
+    });
+    observer.observe(container, { childList: true, subtree: true });
+    focusObserver.current = observer;
+  }, []);
+
+  useEffect(() => {
+    setActiveFocusCategory(focusServiceCategory);
+    if (focusServiceCategory) scrollToServiceCategory(focusServiceCategory);
+  }, [focusServiceCategory, scrollToServiceCategory]);
+
+  useEffect(() => () => {
+    focusObserver.current?.disconnect();
+    if (focusTimer.current !== null) window.clearTimeout(focusTimer.current);
+  }, []);
+
+  const handleConfigureCloudService = (service: CloudServiceSlotKey) => {
+    const category = service === "cloudParsing" ? "parsing" : "search";
+    onConfigureCloudService(service);
+    if (focusTimer.current !== null) {
+      window.clearTimeout(focusTimer.current);
+      focusTimer.current = null;
+    }
+    if (activeFocusCategory === category) {
+      // A second click on the same link should expand and focus the group again.
+      setActiveFocusCategory(undefined);
+      focusTimer.current = window.setTimeout(() => {
+        setActiveFocusCategory(category);
+        focusTimer.current = null;
+      }, 0);
+    } else {
+      setActiveFocusCategory(category);
+    }
+    scrollToServiceCategory(category);
+  };
+
+  const handleServiceConfigurationChanged = () => {
+    setSelectionVersion((current) => current + 1);
+    void checkSetupAvailability();
+    void onModelSelectionChanged();
+  };
+
+  const parsingControl = (
+    <div className="default-services-parsing-control">
+      <div className="default-services-parsing-copy">
+        <strong>{t("settingsPage.knowledge.documentParsing")}</strong>
+        <p>{t("settingsPage.knowledge.documentParsingGroupDesc")}</p>
+      </div>
+      <div className="default-services-parsing-action">
+        <span>{t(documentParsingEnabled ? "settingsPage.enabled" : "settingsPage.disabled")}</span>
+        <Switch
+          aria-label={t("settingsPage.knowledge.documentParsingAria")}
+          checked={documentParsingEnabled}
+          disabled={controlsDisabled}
+          loading={documentParsingSaving}
+          onChange={onDocumentParsingChange}
+        />
+      </div>
+    </div>
+  );
+
   return (
-    <div className="model-provider-service-page">
+    <div className="model-provider-service-page default-services-page">
       <DefaultModelConfigPanel
+        key={selectionVersion}
         cloudServiceSetupStates={{
           cloudParsing: setupAvailability.cloudParsing,
           searchEngine: setupAvailability.searchEngine,
         }}
         modelProviderSetupState={setupAvailability.modelProvider}
-        onConfigureCloudService={onConfigureCloudService}
+        onConfigureCloudService={handleConfigureCloudService}
         onConfigureProviders={onConfigureProviders}
         onModelSelectionChanged={onModelSelectionChanged}
         onRetrySetup={() => void checkSetupAvailability()}
         highlightTarget={highlightTarget}
         onHighlightResolved={onHighlightResolved}
       />
+      <section className="default-services-configuration" ref={serviceArea}>
+        <ExternalServicesPage
+          variant="default-models"
+          visibleCategories={["parsing", "search", "academic", "translation"]}
+          focusCategory={activeFocusCategory}
+          parsingControl={parsingControl}
+          onConfigurationChanged={handleServiceConfigurationChanged}
+        />
+      </section>
     </div>
   );
 }

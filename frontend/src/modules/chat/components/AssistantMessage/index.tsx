@@ -374,7 +374,7 @@ const AssistantMessage = (props: any) => {
   const [translationSource, setTranslationSource] = useState("");
   const onTranslationError = useCallback((error: unknown) => {
     if (error instanceof TranslationUnavailableError && error.reason === "service_not_configured") {
-      window.location.href = "/settings?section=knowledge&tool=translation";
+      window.location.href = "/settings?section=model_defaults&service=translation";
     } else {
       message.error(error instanceof TranslationUnavailableError ? t("knowledge.dictionaryNotFound") : t("knowledge.translationFailed"));
     }

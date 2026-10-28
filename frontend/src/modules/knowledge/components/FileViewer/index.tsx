@@ -402,7 +402,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             translateSelectionDisabled={!props.translationConfigured}
             translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
             translateSelectionConfigureLabel={t("knowledge.translationConfigureAction")}
-            translateSelectionConfigureUrl="/settings?section=knowledge&tool=translation"
+            translateSelectionConfigureUrl="/settings?section=model_defaults&service=translation"
             learningSelectionActions={props.learningSelectionActions}
             onLearningSelection={props.onLearningSelection}
             onPdfKindDetected={props.onPdfKindDetected}

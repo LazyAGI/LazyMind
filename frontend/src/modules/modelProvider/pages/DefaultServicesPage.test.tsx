@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useEffect, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import DefaultServicesPage from "./DefaultServicesPage";
@@ -6,6 +7,11 @@ import DefaultServicesPage from "./DefaultServicesPage";
 const mocks = vi.hoisted(() => ({
   listModels: vi.fn(),
   listProviderGroups: vi.fn(),
+  panelMounts: vi.fn(),
+}));
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string) => key }),
 }));
 
 vi.mock("../api", () => ({
@@ -17,16 +23,54 @@ vi.mock("../api", () => ({
 }));
 
 vi.mock("../components/DefaultModelConfigPanel", () => ({
-  default: ({ modelProviderSetupState }: { modelProviderSetupState: string }) => (
-    <div data-testid="model-provider-setup-state">{modelProviderSetupState}</div>
+  default: function MockDefaultModelConfigPanel({ modelProviderSetupState, onConfigureCloudService }: {
+    modelProviderSetupState: string;
+    onConfigureCloudService: (service: "cloudParsing" | "searchEngine") => void;
+  }) {
+    useEffect(() => { mocks.panelMounts(); }, []);
+    return (
+      <div>
+        <div data-testid="model-provider-setup-state">{modelProviderSetupState}</div>
+        <button onClick={() => onConfigureCloudService("cloudParsing")}>configure parsing</button>
+        <button onClick={() => onConfigureCloudService("searchEngine")}>configure search</button>
+      </div>
+    );
+  },
+}));
+
+vi.mock("./ExternalServicesPage", () => ({
+  default: ({ variant, visibleCategories, focusCategory, parsingControl, onConfigurationChanged }: {
+    variant: string;
+    visibleCategories: string[];
+    focusCategory?: string;
+    parsingControl?: ReactNode;
+    onConfigurationChanged?: () => void;
+  }) => (
+    <div data-testid="external-services" data-variant={variant} data-focus={focusCategory}
+      data-categories={visibleCategories.join(",")}>
+      <section data-service-category="parsing">{parsingControl}</section>
+      <section data-service-category="search" />
+      <section data-service-category="academic" />
+      <section data-service-category="translation" />
+      <button onClick={onConfigurationChanged}>save service</button>
+    </div>
   ),
 }));
 
 describe("DefaultServicesPage", () => {
+  const defaultOcrProps = {
+    documentParsingEnabled: false,
+    documentParsingSaving: false,
+    controlsDisabled: false,
+    onDocumentParsingChange: vi.fn(),
+  };
+
   beforeEach(() => {
     mocks.listModels.mockReset();
     mocks.listProviderGroups.mockReset();
+    mocks.panelMounts.mockReset();
     mocks.listProviderGroups.mockResolvedValue({ data: { groups: [] } });
+    Element.prototype.scrollIntoView = vi.fn();
   });
 
   it("allows configuration when any verified provider model exists without an LLM", async () => {
@@ -38,6 +82,7 @@ describe("DefaultServicesPage", () => {
 
     render(
       <DefaultServicesPage
+        {...defaultOcrProps}
         onConfigureCloudService={vi.fn()}
         onConfigureProviders={vi.fn()}
         onModelSelectionChanged={vi.fn()}
@@ -67,6 +112,7 @@ describe("DefaultServicesPage", () => {
 
     render(
       <DefaultServicesPage
+        {...defaultOcrProps}
         onConfigureCloudService={vi.fn()}
         onConfigureProviders={vi.fn()}
         onModelSelectionChanged={vi.fn()}
@@ -104,6 +150,7 @@ describe("DefaultServicesPage", () => {
 
     render(
       <DefaultServicesPage
+        {...defaultOcrProps}
         onConfigureCloudService={vi.fn()}
         onConfigureProviders={vi.fn()}
         onModelSelectionChanged={vi.fn()}
@@ -113,5 +160,72 @@ describe("DefaultServicesPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("model-provider-setup-state")).toHaveTextContent("ready");
     });
+  });
+
+  it("places OCR, search, academic, and translation settings below defaults, with the OCR master switch", async () => {
+    mocks.listModels.mockResolvedValue({ data: { models: [] } });
+    const onDocumentParsingChange = vi.fn();
+    render(<DefaultServicesPage
+      onConfigureCloudService={vi.fn()}
+      onConfigureProviders={vi.fn()}
+      onModelSelectionChanged={vi.fn()}
+      documentParsingEnabled
+      documentParsingSaving={false}
+      controlsDisabled={false}
+      onDocumentParsingChange={onDocumentParsingChange}
+    />);
+
+    const services = screen.getByTestId("external-services");
+    expect(services).toHaveAttribute("data-variant", "default-models");
+    expect(services).toHaveAttribute("data-categories", "parsing,search,academic,translation");
+    const switchControl = screen.getByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
+    expect(switchControl).toBeChecked();
+    fireEvent.click(switchControl);
+    expect(onDocumentParsingChange).toHaveBeenCalledWith(false, expect.anything());
+    await waitFor(() => expect(screen.getByTestId("model-provider-setup-state")).toHaveTextContent("empty"));
+  });
+
+  it("refreshes setup availability after a service is saved", async () => {
+    mocks.listModels.mockResolvedValue({ data: { models: [] } });
+    const onModelSelectionChanged = vi.fn();
+    render(<DefaultServicesPage
+      onConfigureCloudService={vi.fn()}
+      onConfigureProviders={vi.fn()}
+      onModelSelectionChanged={onModelSelectionChanged}
+      documentParsingEnabled={false}
+      documentParsingSaving={false}
+      controlsDisabled={false}
+      onDocumentParsingChange={vi.fn()}
+    />);
+    await waitFor(() => expect(mocks.listProviderGroups).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "save service" }));
+    await waitFor(() => expect(mocks.listProviderGroups).toHaveBeenCalledTimes(4));
+    expect(mocks.listModels).toHaveBeenCalledTimes(2);
+    expect(onModelSelectionChanged).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.panelMounts).toHaveBeenCalledTimes(2));
+  });
+
+  it("focuses a deep-linked category and scrolls again on repeated configure clicks", async () => {
+    mocks.listModels.mockResolvedValue({ data: { models: [] } });
+    const onConfigureCloudService = vi.fn();
+    render(<DefaultServicesPage
+      onConfigureCloudService={onConfigureCloudService}
+      onConfigureProviders={vi.fn()}
+      onModelSelectionChanged={vi.fn()}
+      focusServiceCategory="parsing"
+      documentParsingEnabled={false}
+      documentParsingSaving={false}
+      controlsDisabled={false}
+      onDocumentParsingChange={vi.fn()}
+    />);
+    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
+    const countBefore = vi.mocked(Element.prototype.scrollIntoView).mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "configure parsing" }));
+    expect(onConfigureCloudService).toHaveBeenCalledWith("cloudParsing");
+    expect(screen.getByTestId("external-services")).not.toHaveAttribute("data-focus");
+    await waitFor(() => expect(screen.getByTestId("external-services")).toHaveAttribute("data-focus", "parsing"));
+    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(countBefore + 1));
   });
 });

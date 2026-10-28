@@ -1,10 +1,12 @@
 import { useSettingsDraft, useSettingsEditor } from "@/modules/settings/SettingsNavigationGuard";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Alert, AutoComplete, Button, Empty, Form, Input, Modal, Space, Spin, Tag, Tooltip, message } from "antd";
 import {
   CloudServerOutlined,
   CompassOutlined,
   DeleteOutlined,
+  DownOutlined,
   FilePdfOutlined,
   GoogleOutlined,
   InfoCircleFilled,
@@ -294,6 +296,27 @@ const translationCredentialPairs: Record<string, { first: string; second: string
   youdaotranslation: { first: "youdaoAppKeyPlaceholder", second: "youdaoAppSecretPlaceholder" },
   microsofttranslator: { first: "microsoftKeyPlaceholder", second: "microsoftRegionPlaceholder", secondRequired: false },
 };
+
+// These links mirror the provider catalog's official setup and API references.
+const translationSetupUrls: Record<string, string> = {
+  baidutranslation: "https://fanyi-api.baidu.com/",
+  aliyuntranslation: "https://help.aliyun.com/zh/machine-translation/developer-reference/api-reference-machine-translation-universal-version-call-guide",
+  volcenginetranslation: "https://www.volcengine.com/docs/4640/65067",
+  microsofttranslator: "https://learn.microsoft.com/azure/ai-services/translator/text-translation/quickstart/rest-api",
+  googlecloudtranslation: "https://docs.cloud.google.com/translate/docs/basic/translating-text",
+  niutrans: "https://niutrans.com/doc-api",
+  youdaotranslation: "https://ai.youdao.com/DOCSIRMA/html/trans/api/wbfy/index.html",
+  deepl: "https://developers.deepl.com/docs/getting-started/auth",
+  caiyuntranslation: "https://platform.caiyunapp.com/",
+  tencenttokenhubtranslation: "https://cloud.tencent.com/document/product/1823/130079",
+  tencenttranslation: "https://console.cloud.tencent.com/cam/capi",
+};
+
+function getTranslationSetupUrl(service: ExternalServiceConfig) {
+  const knownUrl = translationSetupUrls[normalizeProviderName(service.name)];
+  if (knownUrl) return knownUrl;
+  return service.description.match(/https:\/\/[^\s，。；、）)]+/)?.[0];
+}
 
 function isKeylessTranslation(service?: ExternalServiceConfig | null) {
   return service?.category === "translation" && service.capabilities?.includes("keyless_translation") === true;
@@ -740,6 +763,10 @@ interface ExternalServicesPageProps {
   includeBuiltinTools?: boolean;
   includeDependencies?: boolean;
   visibleCategories?: ServiceCategoryKey[];
+  variant?: "default-models";
+  focusCategory?: "parsing" | "search" | "academic" | "translation";
+  parsingControl?: ReactNode;
+  onConfigurationChanged?: () => void;
 }
 
 export default function ExternalServicesPage({
@@ -747,6 +774,10 @@ export default function ExternalServicesPage({
   includeBuiltinTools = true,
   includeDependencies = true,
   visibleCategories,
+  variant,
+  focusCategory,
+  parsingControl,
+  onConfigurationChanged,
 }: ExternalServicesPageProps = {}) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
@@ -763,6 +794,12 @@ export default function ExternalServicesPage({
     parsing: "",
     search: "",
   });
+  const [expandedCategories, setExpandedCategories] = useState<ServiceCategoryKey[]>([]);
+
+  useEffect(() => {
+    if (variant !== "default-models" || !focusCategory) return;
+    setExpandedCategories((current) => current.includes(focusCategory) ? current : [...current, focusCategory]);
+  }, [focusCategory, variant]);
 
   // Multi-key state
   const [keyList, setKeyList] = useState<StoredProviderKey[]>([]);
@@ -955,6 +992,7 @@ export default function ExternalServicesPage({
       setNewKeyValue("");
       setNewKeyEngineId("");
       void loadExternalServices(normalizedSearchValue);
+      onConfigurationChanged?.();
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
@@ -974,7 +1012,11 @@ export default function ExternalServicesPage({
       });
       await selectTranslationService(activeService, group.id);
       setGroupForActiveService(group);
+      setActiveService((current) => current?.key === activeService.key
+        ? { ...current, status: "configured" }
+        : current);
       void loadExternalServices(normalizedSearchValue);
+      onConfigurationChanged?.();
       message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
@@ -990,6 +1032,7 @@ export default function ExternalServicesPage({
     setAddingKey(true);
     try {
       await selectTranslationService(activeService, groupForActiveService.id);
+      onConfigurationChanged?.();
       message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
@@ -1039,6 +1082,7 @@ export default function ExternalServicesPage({
 
       message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
       void loadExternalServices(normalizedSearchValue);
+      onConfigurationChanged?.();
       confirmConfigClose.acceptSaved();
       closeConfigModal();
     } catch (error) {
@@ -1065,6 +1109,7 @@ export default function ExternalServicesPage({
       );
       await loadGroupKeys(activeService.key);
       void loadExternalServices(normalizedSearchValue);
+      onConfigurationChanged?.();
     } catch (error) {
     }
   }
@@ -1180,6 +1225,31 @@ export default function ExternalServicesPage({
     );
   };
 
+  const renderServiceCards = (items: ExternalServiceConfig[]) => items.length ? (
+    <div className="model-provider-service-grid">
+      {items.map((service) => (
+        <ExternalServiceCard
+          ariaLabel={t("modelProvider.external.configModalTitle", { name: service.name })}
+          key={service.key}
+          onOpen={openConfigModal}
+          service={service}
+          selected={service.category === "translation" && selectedTranslationProviderId === service.key}
+          selectedLabel={t("modelProvider.external.translationSelected")}
+          statusLabel={variant === "default-models" && isKeylessTranslation(service) && service.status !== "configured"
+            ? t("modelProvider.external.keylessTranslationStatus")
+            : t(`modelProvider.external.status.${service.status}`)}
+        />
+      ))}
+    </div>
+  ) : (
+    <div className="model-provider-category-empty">
+      <Empty
+        description={t("modelProvider.external.noMatchedServices")}
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      />
+    </div>
+  );
+
   const renderServiceCategory = (categoryKey: ServiceCategoryKey) => {
     if (visibleCategories && !visibleCategories.includes(categoryKey)) {
       return null;
@@ -1191,8 +1261,83 @@ export default function ExternalServicesPage({
 
     const categoryServices = categorizedServices[categoryKey];
     const visibleServices = filteredCategorizedServices[categoryKey];
-    if (!categoryServices.length) {
+    if (!categoryServices.length && !(variant === "default-models" && category.key === "parsing" && parsingControl)) {
       return null;
+    }
+
+    if (variant === "default-models") {
+      const expanded = expandedCategories.includes(category.key);
+      const contentId = `default-service-${category.key}-content`;
+      const titleId = `default-service-${category.key}-title`;
+      const configured = categoryServices.filter((service) => service.status === "configured").length;
+      const keylessTranslation = visibleServices.filter(isKeylessTranslation);
+      const keyedTranslation = visibleServices.filter((service) => !isKeylessTranslation(service));
+
+      return (
+        <section
+          aria-labelledby={titleId}
+          className={`model-provider-default-service-group${expanded ? " is-expanded" : ""}`}
+          data-service-category={category.key}
+          id={`default-service-${category.key}`}
+          key={category.key}
+        >
+          <h3 className="model-provider-default-service-heading">
+            <button
+              aria-controls={contentId}
+              aria-expanded={expanded}
+              className="model-provider-default-service-toggle"
+              onClick={() => setExpandedCategories((current) => expanded
+                ? current.filter((key) => key !== category.key)
+                : [...current, category.key])}
+              type="button"
+            >
+              <span className="model-provider-default-service-icon" aria-hidden="true">{category.icon}</span>
+              <span className="model-provider-default-service-copy">
+                <strong id={titleId}>{t(category.titleKey)}</strong>
+                <small>{t(category.descKey)}</small>
+              </span>
+              <span className="model-provider-default-service-count">
+                {t("modelProvider.defaults.configuredCount", { configured, total: categoryServices.length })}
+              </span>
+              <DownOutlined className="model-provider-default-service-caret" aria-hidden="true" />
+            </button>
+          </h3>
+          <div className="model-provider-default-service-content" hidden={!expanded} id={contentId}>
+            {category.key === "parsing" && parsingControl ? (
+              <div className="model-provider-default-parsing-control">{parsingControl}</div>
+            ) : null}
+            {renderCategorySearch(category.key)}
+            {category.key === "translation" ? (
+              <div className="model-provider-translation-tiers">
+                {[
+                  {
+                    key: "keyless",
+                    title: t("modelProvider.external.keylessTranslationTitle"),
+                    description: t("modelProvider.external.keylessTranslationDesc"),
+                    services: keylessTranslation,
+                  },
+                  {
+                    key: "keyed",
+                    title: t("modelProvider.external.keyedTranslationTitle"),
+                    description: t("modelProvider.external.keyedTranslationDesc"),
+                    services: keyedTranslation,
+                  },
+                ].filter((tier) => tier.services.length > 0).map((tier) => (
+                  <section className="model-provider-translation-tier" key={tier.key}>
+                    <div className="model-provider-translation-tier-heading">
+                      <h4>{tier.title}</h4>
+                      <p>{tier.description}</p>
+                    </div>
+                    {renderServiceCards(tier.services)}
+                  </section>
+                ))}
+              </div>
+            ) : category.key === "parsing" && categoryServices.length === 0 ? (
+              <Empty description={t("common.noData")} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : renderServiceCards(visibleServices)}
+          </div>
+        </section>
+      );
     }
 
     return (
@@ -1208,34 +1353,13 @@ export default function ExternalServicesPage({
           {renderCategorySearch(category.key)}
         </div>
 
-        {visibleServices.length ? (
-          <div className="model-provider-service-grid">
-            {visibleServices.map((service) => (
-              <ExternalServiceCard
-                ariaLabel={t("modelProvider.external.configModalTitle", { name: service.name })}
-                key={service.key}
-                onOpen={openConfigModal}
-                service={service}
-                selected={service.category === "translation" && selectedTranslationProviderId === service.key}
-                selectedLabel={t("modelProvider.external.translationSelected")}
-                statusLabel={t(`modelProvider.external.status.${service.status}`)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="model-provider-category-empty">
-            <Empty
-              description={t("modelProvider.external.noMatchedServices")}
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-            />
-          </div>
-        )}
+        {renderServiceCards(visibleServices)}
       </section>
     );
   };
 
   return (
-    <div className="model-provider-service-page">
+    <div className={`model-provider-service-page${variant === "default-models" ? " is-default-models" : ""}`}>
       <Spin spinning={loading}>
         <div className="model-provider-service-stack">
           {loadError ? (
@@ -1262,12 +1386,12 @@ export default function ExternalServicesPage({
 
           <div className="model-provider-tools-substack">
             {renderServiceCategory("parsing")}
-            {includeDependencies ? <DependencyInstallSection /> : null}
+            {variant !== "default-models" && includeDependencies ? <DependencyInstallSection /> : null}
             {renderServiceCategory("search")}
             {renderServiceCategory("academic")}
             {renderServiceCategory("translation")}
-            {developerActive && includeBuiltinTools ? <ToolManagementSection view="builtin" /> : null}
-            {includeMcp ? <ToolManagementSection view="mcp" /> : null}
+            {variant !== "default-models" && developerActive && includeBuiltinTools ? <ToolManagementSection view="builtin" /> : null}
+            {variant !== "default-models" && includeMcp ? <ToolManagementSection view="mcp" /> : null}
           </div>
         </div>
       </Spin>
@@ -1331,24 +1455,32 @@ export default function ExternalServicesPage({
                 <p>{renderExternalServiceDescription(activeService.description)}</p>
               </div>
             </div>
-            {isTencentTranslation(activeService) ? (
-              <Alert
-                showIcon
-                type="info"
-                message={t("modelProvider.external.tencentSetupTitle")}
-                description={(
-                  <ol className="model-provider-tencent-setup-steps">
-                    <li>{t("modelProvider.external.tencentSetupStepEnable")}</li>
-                    <li>{t("modelProvider.external.tencentSetupStepCredential")}</li>
-                    <li>{t("modelProvider.external.tencentSetupStepPaste")}</li>
-                  </ol>
-                )}
-                action={(
-                  <Button href="https://console.cloud.tencent.com/tmt" target="_blank" rel="noreferrer" size="small">
-                    {t("modelProvider.external.tencentOpenConsole")}
-                  </Button>
-                )}
-              />
+            {activeService.category === "translation" && !isKeylessTranslation(activeService) ? (
+              <section
+                aria-label={t("modelProvider.external.translationGuideTitle", { name: activeService.name })}
+                className="model-provider-translation-setup-guide"
+              >
+                <div className="model-provider-translation-setup-head">
+                  <strong>{t("modelProvider.external.translationGuideTitle", { name: activeService.name })}</strong>
+                  {getTranslationSetupUrl(activeService) ? (
+                    <a href={getTranslationSetupUrl(activeService)} rel="noreferrer" target="_blank">
+                      {t("modelProvider.external.translationGuideOpenOfficial")}
+                      <RightOutlined aria-hidden="true" />
+                    </a>
+                  ) : null}
+                </div>
+                <ol>
+                  <li>{t(isTencentTranslation(activeService)
+                    ? "modelProvider.external.tencentSetupStepEnable"
+                    : "modelProvider.external.translationGuideStepOpen")}</li>
+                  <li>{t(isTencentTranslation(activeService)
+                    ? "modelProvider.external.tencentSetupStepCredential"
+                    : "modelProvider.external.translationGuideStepCreate")}</li>
+                  <li>{t(isTencentTranslation(activeService)
+                    ? "modelProvider.external.tencentSetupStepPaste"
+                    : "modelProvider.external.translationGuideStepSave")}</li>
+                </ol>
+              </section>
             ) : null}
             <Form form={form} layout="vertical">
               {activeService.fields.includes("baseUrl") ? (
@@ -1500,7 +1632,7 @@ export default function ExternalServicesPage({
         )}
       </Modal>
 
-      <section className="model-provider-service-alert" aria-label={t("modelProvider.external.apiContractTitle")}>
+      {variant !== "default-models" ? <section className="model-provider-service-alert" aria-label={t("modelProvider.external.apiContractTitle")}>
         <div className="model-provider-service-alert-icon" aria-hidden="true">
           <InfoCircleFilled />
         </div>
@@ -1508,7 +1640,7 @@ export default function ExternalServicesPage({
           <h3>{t("modelProvider.external.apiContractTitle")}</h3>
           <p>{t("modelProvider.external.apiContractDesc")}</p>
         </div>
-      </section>
+      </section> : null}
     </div>
   );
 }
