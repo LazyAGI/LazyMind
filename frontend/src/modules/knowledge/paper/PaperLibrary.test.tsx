@@ -657,6 +657,7 @@ describe('paper library behavior', () => {
         fireEvent.click(await screen.findByRole("menuitem", { name: "查看详情" }));
         const dialog = await screen.findByRole("dialog", { name: "文献详情" });
         const details = within(dialog);
+        fireEvent.click(details.getByRole("tab", { name: /^笔记/ }));
         fireEvent.click(details.getByRole("button", { name: "编辑题录" }));
         const titleInput = details.getByLabelText("题名");
         const saveButton = details.getByRole("button", { name: "保存题录" });
@@ -674,6 +675,10 @@ describe('paper library behavior', () => {
         expect(titleInput).toBeEnabled();
         expect(closeButton).toBeEnabled();
         expect(details.getByText(/修改尚未保存/)).toBeInTheDocument();
+        fireEvent.click(details.getByRole("tab", { name: /^附件/ }));
+        expect(await screen.findByText("请先保存题录或取消编辑，再切换标签页。")).toBeVisible();
+        expect(details.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
+        expect(titleInput).toHaveValue("Keep this draft");
         await act(async () => fireEvent.focus(window));
         expect(notificationButton).toBeInTheDocument();
         expect(notificationButton).toHaveAccessibleName(/通知：.*1 条待处理/);
@@ -683,6 +688,8 @@ describe('paper library behavior', () => {
             expect(notificationButton).toHaveAccessibleName(/通知：.*0 条待处理/);
         });
         expect(readLibrary(datasetId).papers[0].metadata.title).toBe("Keep this draft");
+        fireEvent.click(details.getByRole("tab", { name: /^附件/ }));
+        expect(details.getByRole("tab", { name: /^附件/ })).toHaveAttribute("aria-selected", "true");
     });
     it("honors reader access and never writes an arXiv synchronization snapshot", async () => {
         mockReload({ data: readLibrary(datasetId), canWrite: false });

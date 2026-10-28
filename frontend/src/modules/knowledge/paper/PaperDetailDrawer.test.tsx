@@ -1,5 +1,5 @@
 import { libraryFixture, paperFixture } from "./__tests__/fixtures";
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PaperDetailDrawer from './PaperDetailDrawer';
@@ -7,6 +7,50 @@ vi.mock('./PaperAttachmentPreview', () => ({ default: ({ attachment }: { attachm
 const fixture=()=>libraryFixture({papers:[paperFixture({metadata:{year:2026}})]});
 afterEach(cleanup);
 describe('durable paper notes', () => {
+    it.each(['notes', 'attachments'] as const)('opens metadata from %s and requires saving or cancelling before switching tabs', async initialTab => {
+        const data = fixture();
+        data.attachments[0].contentRef = 'main-document';
+        const onSave = vi.fn();
+        render(<ConfigProvider theme={{ token: { motion: false } }}><PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} initialTab={initialTab} onClose={vi.fn()} onAddNote={vi.fn()} onSave={onSave} /></ConfigProvider>);
+        fireEvent.click(screen.getByRole('button', { name: '编辑题录' }));
+        const title = screen.getByRole('textbox', { name: '题名' });
+        expect(title).toBeVisible();
+        expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
+        fireEvent.change(title, { target: { value: 'Keep this metadata draft' } });
+        for (const name of ['附件 1', '笔记 0', '批注', '关系']) {
+            fireEvent.click(screen.getByRole('tab', { name }));
+            expect(await screen.findByText('请先保存题录或取消编辑，再切换标签页。')).toBeVisible();
+            expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
+            expect(title).toHaveValue('Keep this metadata draft');
+        }
+        fireEvent.click(screen.getByRole('button', { name: 'PDF · 1 份，查看附件与版本' }));
+        expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
+        expect(onSave).not.toHaveBeenCalled();
+        fireEvent.click(within(screen.getByRole('dialog').querySelector('header')!).getByRole('button', { name: '取消编辑' }));
+        fireEvent.click(screen.getByRole('tab', { name: '笔记 0' }));
+        expect(screen.getByRole('tab', { name: '笔记 0' })).toHaveAttribute('aria-selected', 'true');
+        fireEvent.click(screen.getByRole('button', { name: '编辑题录' }));
+        expect(screen.getByRole('textbox', { name: '题名' })).toHaveValue(data.papers[0].metadata.title);
+    });
+    it('saves a selected reading status and prevents changes while saving', async () => {
+        const data = fixture();
+        let finish!: () => void;
+        const onStatusChange = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+        const props = { datasetId: 'library', paper: data.papers[0], data, onClose: vi.fn(), onAddNote: vi.fn(), onStatusChange };
+        const view = render(<ConfigProvider theme={{ token: { motion: false } }}><PaperDetailDrawer {...props} /></ConfigProvider>);
+        const status = screen.getByRole('combobox', { name: '论文阅读状态' });
+        fireEvent.mouseDown(status);
+        fireEvent.click(screen.getByText('阅读中'));
+        expect(onStatusChange).toHaveBeenCalledOnce();
+        expect(onStatusChange).toHaveBeenCalledWith('reading');
+        expect(status).toBeDisabled();
+        await act(async () => finish());
+        const updated = { ...data, papers: [{ ...data.papers[0], status: 'reading' as const }] };
+        view.rerender(<ConfigProvider theme={{ token: { motion: false } }}><PaperDetailDrawer {...props} data={updated} /></ConfigProvider>);
+        expect(status).toBeEnabled();
+        expect(within(screen.getByRole('dialog', { name: '文献详情' })).getByText('阅读中')).toBeVisible();
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
     it('previews versions independently and changes the main reading target only after a primary update', async () => {
         const data = fixture();
         data.attachments[0].contentRef = 'main-document';
