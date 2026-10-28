@@ -7,7 +7,7 @@ afterEach(cleanup);
 describe("paper translation panel", () => {
   it("submits typed text and clears the composer while showing one source and result", () => {
     const onTranslate = vi.fn();
-    const props = { source: "old source", result: "old result", loading: false, providers: [], providerSaving: false, providersLoading: false, onProviderChange: vi.fn(), onTranslate };
+    const props = { source: "old source", result: "old result", loading: false, providers: [], providerSaving: false, providersLoading: false, onProviderChange: vi.fn(), onTranslate, onRetranslateWithLLM: vi.fn() };
     const { rerender } = render(<PaperTranslationPanel {...props} />);
     const composer = screen.getByRole("textbox", { name: "输入要翻译的文字" });
     fireEvent.change(composer, { target: { value: "new source" } });
@@ -29,8 +29,23 @@ describe("paper translation panel", () => {
     render(<PaperTranslationPanel source="" result="" loading={false}
       providers={[{ group_id: "google", provider_name: "Google Translate Web", group_name: "Google Translate Web" }]}
       providerGroupId="google" providerSaving={false} providersLoading={false}
-      onProviderChange={vi.fn()} onTranslate={vi.fn()} />);
+      onProviderChange={vi.fn()} onTranslate={vi.fn()} onRetranslateWithLLM={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "设置翻译引擎" }));
     expect(screen.getByText("谷歌翻译（网页）")).toBeInTheDocument();
+  });
+
+  it("retranslates the current source with an LLM from beside engine settings", () => {
+    const onRetranslateWithLLM = vi.fn();
+    const { rerender } = render(<PaperTranslationPanel source="paper sentence" result="旧译文" loading={false}
+      providers={[]} providerSaving={false} providersLoading={false}
+      onProviderChange={vi.fn()} onTranslate={vi.fn()} onRetranslateWithLLM={onRetranslateWithLLM} />);
+    const heading = screen.getByRole("heading", { name: "译文" }).parentElement;
+    expect(heading).toContainElement(screen.getByRole("button", { name: "用大模型重新翻译" }));
+    fireEvent.click(screen.getByRole("button", { name: "用大模型重新翻译" }));
+    expect(onRetranslateWithLLM).toHaveBeenCalledTimes(1);
+    rerender(<PaperTranslationPanel source="" result="" loading={false}
+      providers={[]} providerSaving={false} providersLoading={false}
+      onProviderChange={vi.fn()} onTranslate={vi.fn()} onRetranslateWithLLM={onRetranslateWithLLM} />);
+    expect(screen.getByRole("button", { name: "用大模型重新翻译" })).toBeDisabled();
   });
 });

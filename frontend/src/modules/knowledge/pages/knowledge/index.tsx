@@ -203,6 +203,7 @@ const KnowledgeDocumentContent = () => {
     loading: translationLoading,
     result: translationResult,
     translate: translateSelectedText,
+    translateWithLLM: retranslateSelectedTextWithLLM,
     clear: clearSelectedTranslation,
   } = usePdfSelectionTranslation(refreshTranslationStatus, onTranslationError);
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
@@ -1158,7 +1159,7 @@ const KnowledgeDocumentContent = () => {
                       </div>
                     )}
                     items={[
-                      { key: "translation", label: "翻译", children: <PaperTranslationPanel source={translationSource} result={translationResult} loading={translationLoading} providers={translationDocumentProviders} providerGroupId={translationProviderGroupId} providerSaving={translationProviderSaving} providersLoading={translationStatusRefreshing} onProviderChange={(groupId) => void selectDefaultTranslationProvider(groupId)} onTranslate={translateTypedText} /> },
+                      { key: "translation", label: "翻译", children: <PaperTranslationPanel source={translationSource} result={translationResult} loading={translationLoading} providers={translationDocumentProviders} providerGroupId={translationProviderGroupId} providerSaving={translationProviderSaving} providersLoading={translationStatusRefreshing} onProviderChange={(groupId) => void selectDefaultTranslationProvider(groupId)} onTranslate={translateTypedText} onRetranslateWithLLM={() => void retranslateSelectedTextWithLLM(translationSource)} /> },
                       {
                         key: "chat",
                         label: t("knowledge.pdfChatTab"),

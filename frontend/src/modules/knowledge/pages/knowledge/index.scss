@@ -371,7 +371,8 @@
 .knowledge-reader-translation-heading {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   margin-bottom: 12px;
   h3 { margin: 0; }
 }

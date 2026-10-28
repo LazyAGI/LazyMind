@@ -15,6 +15,7 @@ interface Props {
   providersLoading: boolean;
   onProviderChange: (id: string) => void;
   onTranslate: (text: string) => void;
+  onRetranslateWithLLM: () => void;
 }
 
 export default function PaperTranslationPanel(props: Props) {
@@ -33,6 +34,8 @@ export default function PaperTranslationPanel(props: Props) {
       <div className="knowledge-reader-translation-heading">
         <h3>译文</h3>
         <Button aria-label="设置翻译引擎" icon={<SettingOutlined />} size="small" onClick={() => setSettingsOpen(true)}>设置翻译引擎</Button>
+        <Button aria-label="用大模型重新翻译" size="small" disabled={!props.source.trim() || props.loading}
+          onClick={props.onRetranslateWithLLM}>用大模型重新翻译</Button>
       </div>
       {props.loading ? <Spin tip="正在翻译…"><div className="knowledge-reader-translation-loading" /></Spin>
         : <div className="knowledge-translation-text">{props.result}</div>}

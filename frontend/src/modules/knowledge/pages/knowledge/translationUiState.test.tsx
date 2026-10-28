@@ -1,11 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ status: vi.fn(), translate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ status: vi.fn(), translate: vi.fn(), translateWithLLM: vi.fn() }));
 vi.mock("@/modules/knowledge/api/translation", () => ({
   getTranslationServiceStatus: mocks.status,
   translateSelectionText: mocks.translate,
 }));
+vi.mock("@/modules/knowledge/api/pdfArtifacts", () => ({ translateTextWithLLM: mocks.translateWithLLM }));
 
 import { getTranslationProgressLabel, resolveDocumentTranslationProvider, useDocumentTranslationService, usePdfSelectionTranslation } from "./translationUiState";
 
@@ -118,5 +119,17 @@ describe("PDF selection translation", () => {
     await act(async () => { await result.current.translate("hello"); });
 
     expect(mocks.translate).toHaveBeenCalledWith("hello", undefined);
+  });
+
+  it("replaces the API result with an LLM translation of the current source", async () => {
+    const refreshStatus = vi.fn();
+    mocks.translateWithLLM.mockResolvedValue("新的译文");
+    const { result } = renderHook(() => usePdfSelectionTranslation(refreshStatus, vi.fn()));
+
+    await act(async () => { await result.current.translateWithLLM("paper sentence"); });
+
+    expect(mocks.translateWithLLM).toHaveBeenCalledWith("paper sentence", "zh");
+    expect(result.current.result).toBe("新的译文");
+    expect(refreshStatus).not.toHaveBeenCalled();
   });
 });

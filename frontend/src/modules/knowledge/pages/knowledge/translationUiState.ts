@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getTranslationServiceStatus, translateSelectionText, type DocumentTranslationProvider, type TranslationServiceStatus } from "@/modules/knowledge/api/translation";
+import { translateTextWithLLM } from "@/modules/knowledge/api/pdfArtifacts";
 
 const unavailableStatus: TranslationServiceStatus = {
   configured: false,
@@ -119,6 +120,23 @@ export function usePdfSelectionTranslation(
     }
   }, [onError, performTranslation, refreshStatus]);
 
+  const translateWithLLM = useCallback(async (text: string) => {
+    const source = text.trim();
+    if (!source) return;
+    const generation = ++requestGeneration.current;
+    setResult("");
+    setLoading(true);
+    try {
+      const targetLanguage = /[\u3400-\u9fff]/u.test(source) ? "en" : "zh";
+      const translated = await translateTextWithLLM(source, targetLanguage);
+      if (requestGeneration.current === generation) setResult(translated);
+    } catch (error) {
+      if (requestGeneration.current === generation) onError(error);
+    } finally {
+      if (requestGeneration.current === generation) setLoading(false);
+    }
+  }, [onError]);
+
   const clear = useCallback(() => {
     requestGeneration.current += 1;
     setResult("");
@@ -129,6 +147,7 @@ export function usePdfSelectionTranslation(
     result,
     loading,
     translate,
+    translateWithLLM,
     clear,
   };
 }
