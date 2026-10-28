@@ -37,8 +37,7 @@ CREATE INDEX idx_library_attachment_paper ON paper_library_attachments(dataset_i
 CREATE INDEX idx_library_attachment_document ON paper_library_attachments(dataset_id,document_id);
 CREATE UNIQUE INDEX uk_library_active_document ON paper_library_attachments(dataset_id,document_id) WHERE document_id<>'' AND detached_at IS NULL;
 
--- Retain the original graph as an immutable archive. Core converts it
--- transactionally on first access and commits a conversion marker with its rows.
+DROP TABLE paper_libraries;
 
 -- +migrate Dialect postgres
 ALTER TABLE academic_expansions ALTER COLUMN discovery_mode SET DEFAULT 'external';

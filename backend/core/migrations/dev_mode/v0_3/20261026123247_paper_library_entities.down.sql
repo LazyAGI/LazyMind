@@ -3,7 +3,7 @@ DROP TABLE paper_library_attachments;
 DROP TABLE paper_library_notes;
 DROP TABLE paper_library_entries;
 DROP TABLE paper_library_folders;
-CREATE TABLE IF NOT EXISTS paper_libraries (
+CREATE TABLE paper_libraries (
     dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
     data_json JSON NOT NULL,
     revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),

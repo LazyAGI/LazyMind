@@ -115,6 +115,8 @@ func TestPaperLibraryAggregateAndDevPathsMatch(t *testing.T) {
 			if fingerprint(aggregate) != fingerprint(dev) {
 				t.Fatal("paper library schema differs between aggregate and dev paths")
 			}
+			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261028022508_finalize_paper_library_archive.down.sql", driver)
+			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261027092144_preserve_legacy_paper_libraries.down.sql", driver)
 			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261026123247_paper_library_entities.down.sql", driver)
 			if _, err := dev.Exec(`SELECT dataset_id FROM paper_library_entries`); err == nil {
 				t.Fatal("entity downgrade retained final schema")
@@ -124,6 +126,8 @@ func TestPaperLibraryAggregateAndDevPathsMatch(t *testing.T) {
 				t.Fatal("entity downgrade damaged scholarly data", err)
 			}
 			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261026123247_paper_library_entities.up.sql", driver)
+			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261027092144_preserve_legacy_paper_libraries.up.sql", driver)
+			execMigrationFileForDriver(t, dev, "../migrations/dev_mode/v0_3/20261028022508_finalize_paper_library_archive.up.sql", driver)
 			if err := dev.QueryRow(`SELECT COUNT(*) FROM paper_library_entries`).Scan(&count); err != nil || count != 0 {
 				t.Fatal("entity upgrade did not create final empty storage", err)
 			}
