@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Alert, Button, Checkbox, Modal, Popover, Select, Spin, Tag } from 'antd';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { Alert, Button, Checkbox, Input, Modal, Popover, Select, Spin, Tag } from 'antd';
 import { CheckCircleOutlined, CloudOutlined, CloudUploadOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { CheckboxChangeEvent } from 'antd/es/checkbox';
 import { useTranslation } from 'react-i18next';
@@ -50,7 +50,13 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
   const generation = useRef(0);
   const pending = useRef<{ id: string; body: DocumentPublicationGroupRequest }>();
   const [uncertain, setUncertain] = useState(false);
+  const [destinations, setDestinations] = useState<Record<string, string>>({});
+  const [obsidianVault, setObsidianVault] = useState<string>();
+  const [targetProblems, setTargetProblems] = useState<Record<string, string>>({});
+  const vaults = availability.obsidian?.vaults ?? [];
+  const chosenVault = vaults.find(item => item.id === obsidianVault) ?? (vaults.length === 1 ? vaults[0] : undefined);
   const initialized = useRef(false);
+  useEffect(() => { setDestinations({}); setObsidianVault(undefined); setTargetProblems({}); }, [artifactId]);
   const load = useCallback(async () => {
     const request = ++generation.current;
     const response = await WorkflowSessionApi().getPublicationTargets(artifactId, { silentError: true });
@@ -75,15 +81,14 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
 
   const providerChoices = useMemo<PublicationProviderChoices>(() => Object.fromEntries(providers.map(provider => {
     const target = state?.targets.find(item => item.provider === provider.id);
-    const unsupported = provider.id === 'obsidian' && !target?.bound;
     const busy = !!target?.operation && blocked.has(target.operation.status);
     const ready = isAuthorized(provider.id);
-    const reason = !state ? t('chat.writerLocal.checking') : unsupported ? t('chat.publication.boundOnly')
+    const reason = !state ? t('chat.writerLocal.checking')
       : busy ? t(`chat.publication.status.${target!.operation!.status}`, { defaultValue: t('chat.publication.status.outcome_unknown') })
-        : ready ? '' : t(availability.states[provider.id] === 'chat-disabled' ? 'chat.writerLocal.feishuChatDisabledShort'
+        : ready ? '' : provider.id === 'obsidian' && availability.states[provider.id] === 'configure' ? t('chat.publication.configureVault') : t(availability.states[provider.id] === 'chat-disabled' ? 'chat.writerLocal.feishuChatDisabledShort'
           : availability.states[provider.id] === 'failed' ? 'chat.writerLocal.platformFailed'
             : ['authorize', 'ready'].includes(availability.states[provider.id]) ? 'chat.writerLocal.authorizeShort' : 'chat.writerLocal.checking');
-    return [provider.id, { selectable: !!state && !unsupported && !busy && ready, reason }];
+    return [provider.id, { selectable: !!state && !busy && ready, reason }];
   })), [providers, state, isAuthorized, availability.states, t]);
   const canSelect = useCallback((provider: string) => providerChoices[provider]?.selectable === true, [providerChoices]);
   useEffect(() => { onProviderChoicesChange?.(providerChoices); }, [providerChoices, onProviderChoicesChange]);
@@ -156,16 +161,27 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
             setAuthorizationProvider(provider);
             throw new Error(`${label(provider)}: ${t('chat.publication.accountRequired')}`);
           }
-          if (!existing?.bound && provider === 'obsidian') throw new Error(t('chat.publication.obsidianUnsupported'));
-          if (!existing?.bound && provider === 'github' && !existing?.parent_uri) throw new Error(t('chat.publication.githubTargetRequired'));
-          return { provider, connection_id: account?.connection_id, parent_uri: existing?.bound ? undefined : existing?.parent_uri, retry_operation_id: retryOperations[provider] };
+          let parent = destinations[provider]?.trim() || existing?.parent_uri;
+          if (!existing?.bound && provider === 'obsidian') {
+            if (!chosenVault?.writable) throw new Error(t('chat.publication.chooseVault'));
+            const path = destinations.obsidian?.trim() || '';
+            if (path && (path.startsWith('/') || path.split('/').some(part => ['..', '.', '.obsidian'].includes(part)) || /[\\\x00-\x1f]/.test(path))) throw new Error(t('chat.publication.targetErrors.OBSIDIAN_PATH_INVALID'));
+            parent = `obsidian://${chosenVault.id}/${path.split('/').map(encodeURIComponent).join('/')}`;
+          }
+          if (!existing?.bound && provider === 'github' && !parent) throw new Error(t('chat.publication.githubTargetRequired'));
+          return { provider, connection_id: account?.connection_id, parent_uri: existing?.bound ? undefined : parent, retry_operation_id: retryOperations[provider] };
         });
         if (targets.some(input => input.retry_operation_id && current.targets.find(item => item.provider === input.provider)?.operation_hash !== current.current_hash)) {
           setRetryOperations({});
           setSelected(current.preferred_providers.filter(canSelect));
           throw new Error(t('chat.publication.changedRetry'));
         }
-        pending.current = { id: baseline.id, body: { base_revision: baseline.revision, base_draft_version: baseline.draft, idempotency_key: crypto.randomUUID(), targets } };
+        const body = { base_revision: baseline.revision, base_draft_version: baseline.draft, idempotency_key: crypto.randomUUID(), targets };
+        const checked = (await WorkflowSessionApi().preflightPublication(baseline.id, body, { silentError: true })).data.data;
+        const problems = checked.targets.filter(item => item.state !== 'ready');
+        setTargetProblems(Object.fromEntries(problems.map(item => [item.provider, item.code || 'PUBLICATION_TARGET_UNAVAILABLE'])));
+        if (problems.length) throw new Error(documentPublicationErrorMessage(problems[0].code || 'PUBLICATION_TARGET_UNAVAILABLE', problems[0].provider));
+        pending.current = { id: baseline.id, body };
       }
       const attempt = pending.current;
       const response = await WorkflowSessionApi().createPublicationGroup(attempt.id, attempt.body, { silentError: true });
@@ -189,7 +205,8 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
   };
   const results = state?.targets.filter(item => item.operation || item.bound) ?? [];
   const selectionReady = selected.every(provider => canSelect(provider)
-    && (provider === 'obsidian' || !!accountFor(provider, state?.targets.find(item => item.provider === provider))));
+    && (provider === 'obsidian' ? state?.targets.some(item => item.provider === provider && item.bound) || !!chosenVault?.writable
+      : !!accountFor(provider, state?.targets.find(item => item.provider === provider))));
   const accountSelectors = selected.filter(provider => {
     if (provider === 'obsidian') return false;
     const target = state?.targets.find(item => item.provider === provider);
@@ -225,6 +242,7 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
           <span className='document-publication-result-icon' aria-hidden='true'><WriterProviderIcon provider={item.provider} /></span>
           <div className='document-publication-result-summary'>
             <strong>{label(item.provider)}</strong>
+            {item.title && <span className='document-publication-result-target' title={item.title}>{item.title}</span>}
             <Tag className='document-publication-result-status' bordered={false} color={statusColor} icon={status === 'succeeded' ? <CheckCircleOutlined aria-hidden='true' /> : undefined}>
               {status === 'succeeded' && item.provider === 'github' && (item.operation?.target_url || item.target_url)?.includes('/pull/') ? t('chat.publication.pullRequestCreated') : status ? statusLabel(status) : t('chat.publication.bound')}
             </Tag>
@@ -291,13 +309,12 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
             {providers.map(provider => {
               const target = state.targets.find(item => item.provider === provider.id);
               const isObsidian = provider.id === 'obsidian';
-              const unsupported = isObsidian && !target?.bound;
               const busy = !!target?.operation && blocked.has(target.operation.status);
               const ready = isAuthorized(provider.id);
               const authorizationNeeded = provider.id !== 'obsidian' && !ready && ['authorize', 'chat-disabled', 'ready'].includes(availability.states[provider.id]);
-              const status = providerChoices[provider.id]?.reason || t(isObsidian ? 'modelProvider.cloudDocuments.obsidianBoundStatus' : 'chat.publication.authorized');
+              const status = providerChoices[provider.id]?.reason || t(isObsidian ? 'modelProvider.cloudDocuments.obsidianConnectedStatus' : 'chat.publication.authorized');
               return <div className={`document-publication-platform-card${authorizationNeeded ? ' has-authorization' : isObsidian ? ' has-guide' : ''}`} key={provider.id}>
-              <Checkbox className='document-publication-platform' aria-label={label(provider.id)} title={unsupported ? t('chat.publication.obsidianUnsupported') : undefined}
+              <Checkbox className='document-publication-platform' aria-label={label(provider.id)}
                 checked={selected.includes(provider.id)} disabled={submitting || uncertain || !canSelect(provider.id)}
                 onChange={(event: CheckboxChangeEvent) => {
                   if (!canSelect(provider.id)) return;
@@ -308,7 +325,7 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
                   <span className='document-publication-icon' aria-hidden='true'><WriterProviderIcon provider={provider.id} /></span>
                   <span className='document-publication-platform-copy'>
                     <strong>{label(provider.id)}</strong>
-                    <small className={ready && !unsupported && !busy ? 'is-ready' : ''}>{status}</small>
+                    <small className={ready && !busy ? 'is-ready' : ''}>{status}</small>
                     {isObsidian && <small title={t('modelProvider.cloudDocuments.obsidianEnvironmentHint')}>{t('modelProvider.cloudDocuments.obsidianEnvironmentSummary')}</small>}
                   </span>
                 </span>
@@ -320,6 +337,21 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
               </div>;
             })}
           </div>
+          {selected.includes('obsidian') && !state.targets.find(item => item.provider === 'obsidian')?.bound && (vaults.length > 1 || targetProblems.obsidian) && <div className='document-publication-accounts'>
+            <label htmlFor={`${resultsId}-vault`}>{t('chat.publication.chooseVault')}</label>
+            <Select id={`${resultsId}-vault`} value={chosenVault?.id} placeholder={t('chat.publication.chooseVault')} disabled={submitting || uncertain}
+              options={vaults.map(item => ({ value: item.id, label: `${item.name} · ${item.id.slice(-6)}`, disabled: !item.writable }))}
+              onChange={setObsidianVault} />
+            {targetProblems.obsidian && <><label htmlFor={`${resultsId}-note`}>{t('chat.publication.notePath')}</label>
+              <Input id={`${resultsId}-note`} value={destinations.obsidian || ''} maxLength={1024} disabled={submitting || uncertain}
+                placeholder={t('chat.publication.notePathPlaceholder')} onChange={(event: ChangeEvent<HTMLInputElement>) => setDestinations(current => ({ ...current, obsidian: event.target.value }))} /></>}
+          </div>}
+          {selected.includes('github') && !state.targets.find(item => item.provider === 'github')?.bound && <div className='document-publication-accounts'>
+            <label htmlFor={`${resultsId}-repository`}>{t('chat.publication.githubDestination')}</label>
+            <Input id={`${resultsId}-repository`} value={destinations.github ?? state.targets.find(item => item.provider === 'github')?.parent_uri ?? ''}
+              maxLength={2048} disabled={submitting || uncertain} placeholder='https://github.com/owner/repository/tree/branch/folder'
+              onChange={(event: ChangeEvent<HTMLInputElement>) => setDestinations(current => ({ ...current, github: event.target.value }))} />
+          </div>}
           {accountSelectors.length > 0 && <div className='document-publication-accounts'>
             {accountSelectors.map(provider => {
               const target = state.targets.find(item => item.provider === provider);

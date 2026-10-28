@@ -235,11 +235,9 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
         </div>
         <Tag
           className="model-provider-cloud-doc-resource-status"
-          color={isDesktopRuntime && obsidianConfig?.available ? "success" : "default"}
+          color={obsidianConfig?.available ? "success" : "default"}
         >
-          {!isDesktopRuntime
-            ? t("modelProvider.cloudDocuments.obsidianDeploymentStatus")
-            : obsidianConfig?.available
+          {obsidianConfig?.available
               ? t("modelProvider.cloudDocuments.obsidianConnectedStatus")
               : t("modelProvider.cloudDocuments.obsidianUnavailableStatus")}
         </Tag>
