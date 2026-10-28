@@ -1342,6 +1342,8 @@
 
 @media (max-width: 1100px) {
   .settings-dashboard-grid { grid-template-columns: 1fr; }
+  .settings-skill-resources-head { grid-template-columns: 48px minmax(0, 1fr); }
+  .settings-skill-group-controls { grid-column: 1 / -1; width: 100%; flex-wrap: wrap; justify-content: space-between; gap: 10px 18px; padding-top: 4px; }
 }
 
 @media (max-width: 1200px) {
@@ -1499,7 +1501,6 @@
   .settings-memory-capability-row > .ant-switch { grid-column: 3; grid-row: 1 / span 2; }
   .settings-skill-resources-head { grid-template-columns: 42px minmax(0, 1fr); padding: 16px 14px; }
   .settings-skill-resources-title-icon { width: 42px; height: 42px; }
-  .settings-skill-group-controls { grid-column: 1 / -1; width: 100%; flex-wrap: wrap; justify-content: space-between; gap: 10px 18px; padding-top: 4px; }
   .settings-skill-master { justify-content: space-between; }
   .settings-skill-master > div { text-align: left; }
   .settings-skill-master-notice { margin: 0 14px 14px; }
