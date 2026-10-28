@@ -1,0 +1,39 @@
+id: paper_workflow_mock
+name: 论文任务交接
+description: 综述、独立阅读心得、科研 PPT 的接口联调，不生成正式成果。
+when_to_use: 从论文业务发起综述、阅读心得或汇报 PPT 的材料交接。
+steps:
+- id: acknowledge
+  label: 核对交接并反馈
+slots:
+- id: task_context
+  label: 任务上下文
+  type: text
+  cardinality: single
+  external: true
+  exposed: false
+- id: handoff_receipt
+  label: 交接结果
+  type: text
+  cardinality: single
+runtime:
+  publisher_owned_slots: [handoff_receipt]
+  trigger_inputs:
+  - task_context
+
+tool_scripts:
+- path: scripts/tools.py
+  functions:
+  - academic_handoff_submit
+  - academic_handoff_context
+  - academic_read_paper
+
+ui:
+  tabs:
+  - id: acknowledge
+    step_id: acknowledge
+    label: 任务交接
+    layout: list
+    slots:
+    - id: handoff_receipt
+      label: 交接结果

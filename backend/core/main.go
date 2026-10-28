@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"lazymind/core/academic"
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
 	"lazymind/core/browser"
@@ -917,7 +918,7 @@ func run(ctx context.Context) error {
 		// History samples have already been downloaded and imported above.
 		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, chat.ConversationTitleJobTypes...)
+		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType}, chat.ConversationTitleJobTypes...)
 		if !systemdeps.PythonComponentActive("rag") {
 			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
 				doc.MarketUpdateAllJobType, "document_pdf_translation")
@@ -928,7 +929,10 @@ func run(ctx context.Context) error {
 			PollInterval:    asyncConfig.PollInterval,
 			LockTTL:         asyncConfig.LockTTL,
 		})
-		backgroundDone = append(backgroundDone, runner.Done())
+		backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
+		paperChatRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+		backgroundDone = append(backgroundDone, paperChatRunner.Done())
+		academic.RecoverPaperExpansions(runtimeCtx, store.DB())
 		backgroundDone = append(backgroundDone, workflow.StartDocumentImageExportCleanup(runtimeCtx))
 		directoryRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
 		backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))

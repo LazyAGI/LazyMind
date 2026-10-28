@@ -247,10 +247,12 @@ func sourceItemView(ctx context.Context, b orm.PaperImportBatch, item orm.PaperI
 	}
 	v.TargetName = ds.DisplayName
 	var work orm.AcademicWork
-	if e := store.DB().Where("id = ?", item.AcademicWorkID).Take(&work).Error; e != nil {
-		return v, e
+	if item.AcademicWorkID != "" {
+		if e := store.DB().Where("id = ?", item.AcademicWorkID).Take(&work).Error; e != nil {
+			return v, e
+		}
 	}
-	v.Title = work.CanonicalTitle
+	v.Title = firstNonEmpty(item.TitleSnapshot, work.CanonicalTitle, "未命名文献")
 	var presence map[string]string
 	_ = json.Unmarshal(item.PresenceSnapshotJSON, &presence)
 	v.PaperKey = presence["paper_key"]
@@ -476,9 +478,12 @@ func retrySourceImport(w http.ResponseWriter, r *http.Request, b orm.PaperImport
 		ItemIDs        []string `json:"item_ids"`
 		IdempotencyKey string   `json:"idempotency_key"`
 	}
-	if !parseJSON(r, &req) || req.IdempotencyKey == "" || len(req.IdempotencyKey) > 128 || len(req.ItemIDs) > 500 {
+	if !parseJSON(r, &req) || (req.IdempotencyKey == "" && b.EntryType == "conversation_sources") || len(req.IdempotencyKey) > 128 || len(req.ItemIDs) > 500 {
 		replyError(w, 400, "INVALID_REQUEST", "idempotency_key and optional item_ids required")
 		return
+	}
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = uuid.NewString()
 	}
 	c := sourceCaller(r)
 	ctx, e := prepareSourceTarget(r.Context(), c, b.TargetDatasetID)

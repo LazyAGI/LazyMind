@@ -119,6 +119,14 @@ ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE 
     next_attempt_at = CURRENT_TIMESTAMP, last_error_code = 0, updated_at = CURRENT_TIMESTAMP;
 DROP TABLE model_provider_endpoint_backups;
 
+-- +migrate Dialect *
+DROP TABLE IF EXISTS academic_paper_contents;
+DROP TABLE IF EXISTS academic_handoffs;
+DROP TABLE IF EXISTS academic_expansion_rounds;
+DROP TABLE IF EXISTS academic_expansions;
+DROP TABLE IF EXISTS academic_user_paper_states;
+DROP TABLE IF EXISTS academic_document_states;
+
 DROP TABLE IF EXISTS document_folder_nodes;
 DROP TABLE IF EXISTS document_folder_inventories;
 
@@ -127,6 +135,10 @@ DROP TABLE IF EXISTS task_attempt_timings;
 DROP TABLE IF EXISTS task_execution_timings;
 
 -- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS paper_library_attachments;
+DROP TABLE IF EXISTS paper_library_notes;
+DROP TABLE IF EXISTS paper_library_entries;
+DROP TABLE IF EXISTS paper_library_folders;
 DROP TABLE rejected_document_publications;
 DROP TABLE document_ownership_backfills;
 

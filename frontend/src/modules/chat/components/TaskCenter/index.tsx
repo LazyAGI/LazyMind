@@ -9,7 +9,7 @@ import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { reconcileWorkflowTasks } from "@/modules/chat/utils/workflowTaskStatus";
 import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
-import { useMemo, useState, useRef, useCallback, useEffect, useId } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Image, Progress, Tooltip } from "antd";

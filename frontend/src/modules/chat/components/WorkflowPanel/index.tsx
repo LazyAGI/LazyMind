@@ -70,7 +70,6 @@ import {
   findAlignedCompositeRevision,
 } from './compositeArtifactLayout';
 import { linkedPageTabs, buildPageOrderChange } from './workflowPageGroup';
-import { WorkflowTrustNotice } from './WorkflowTrustNotice';
 import { PreviewContent } from '../ArtifactPreview';
 import { useArtifactPreview } from '../ArtifactPreview/context';
 import { useWorkflowViewState } from './useWorkflowViewState';
@@ -2401,8 +2400,6 @@ export function WorkflowPanel({
       )}
 
       </div>
-
-      <WorkflowTrustNotice />
 
       {!collapsed && externalPresentation && runningTasks.length > 0 && <div className='workflow-external-activity'>
         <div className='workflow-external-activity__text' role='status'>

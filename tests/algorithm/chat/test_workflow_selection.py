@@ -129,8 +129,13 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
         'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
     ), patch('lazymind.chat.workflow.workflow_manager._resolve_workflow_attachment', return_value=(
         '/safe/report.pdf', None,
-    )), patch('lazymind.chat.workflow.file_adapter.LazyMindHostFileAdapter.import_attachment',
-              return_value=InputResource('resource-1', 'report.pdf', 'application/pdf', 42, 'sha256:test', 1)):
+    )), patch(
+        'lazymind.chat.workflow.file_adapter.LazyMindHostFileAdapter.import_attachment',
+        return_value=InputResource(
+            resource_id='resource-1', revision=1, content_hash='sha256:test',
+            name='report.pdf', mime_type='application/pdf', size=100,
+        ),
+    ):
         client_factory.return_value.get_workflow.return_value.result = {
             'workflow_id': 'image-workflow', 'revision_id': 'revision-1',
         }
@@ -191,10 +196,10 @@ def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments
     }
     with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
         'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
-    ), patch(
-        'lazymind.chat.workflow.file_adapter.LazyMindHostFileAdapter.import_text',
-        return_value=InputResource('text-resource', 'target_length.txt', 'text/plain', 4, 'sha256:text', 1),
-    ) as import_text:
+    ), patch('lazymind.chat.workflow.file_adapter.LazyMindHostFileAdapter.import_text', return_value=InputResource(
+        resource_id='text-resource', revision=1, content_hash='sha256:text',
+        name='target_length.txt', mime_type='text/plain; charset=utf-8', size=4,
+    )) as import_text:
         client_factory.return_value.get_workflow.return_value.result = {
             'workflow_id': 'report', 'revision_id': 'revision-1',
             'compiled_graph': {

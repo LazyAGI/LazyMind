@@ -51,8 +51,11 @@ func TestModelSettingsMigrationRoundTripAndAggregate(t *testing.T) {
 				}
 			}
 			base := filepath.Join("..", "migrations", "dev_mode", "v0_3", modelSettingsMigration)
-			execMigrationFileForDriver(t, dev, base+".up.sql", driver)
-			execMigrationFileForDriver(t, dev, filepath.Join("..", "migrations", "dev_mode", "v0_3", "20261026093200_add_model_enabled.up.sql"), driver)
+			for _, migration := range catalog.Modes[len(catalog.Modes)-1].Dev {
+				if migration.FileVersion >= 20261023163745 {
+					execMigrationFileForDriver(t, dev, migration.UpPath, driver)
+				}
+			}
 			for _, table := range []string{"default_models", "user_model_provider_group_models"} {
 				var settings, context string
 				var vision bool

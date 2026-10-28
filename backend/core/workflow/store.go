@@ -340,7 +340,7 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 // failIdleSession fences late driver callbacks against user pause, completion,
 // and a newer dispatch. A failed controller must never manufacture an approval.
 func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		busy := tx.Model(&orm.WorkflowSessionStep{}).Select("1").Where("session_id = ? AND validity <> ? AND status IN ?", sessionID, "stale", []string{"pending", "queued", "claimed", "running"})
 		result := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status = ?", sessionID, SessionStatusActive).
 			Where("NOT EXISTS (?)", busy).Updates(map[string]any{"status": SessionStatusFailed, "updated_at": time.Now().UTC(), "state_version": gorm.Expr("state_version + 1")})
@@ -356,11 +356,15 @@ func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 		}
 		return appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"failed"}`))
 	})
+	if err == nil && OnAcademicRuntimeChanged != nil {
+		OnAcademicRuntimeChanged(ctx, db, sessionID)
+	}
+	return err
 }
 
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status <> ? AND status <> ?", sessionID, status, "pausing")
 		if status == SessionStatusWaiting {
 			// Delayed pause callbacks cannot overwrite a terminal session or a
@@ -389,6 +393,10 @@ func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status str
 		payload, _ := json.Marshal(map[string]any{"status": status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
 	})
+	if err == nil && OnAcademicRuntimeChanged != nil {
+		OnAcademicRuntimeChanged(ctx, db, sessionID)
+	}
+	return err
 }
 
 // UpdateSessionCurrentStep updates current_step_id for a session.

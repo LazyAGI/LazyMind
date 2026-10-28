@@ -74,6 +74,7 @@ func (AcademicReference) TableName() string { return "academic_references" }
 
 type PaperImportBatch struct {
 	ID                    string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	SourceContextJSON     json.RawMessage `gorm:"column:source_context_json;type:json;serializer:json;not null;default:'{}'"`
 	EntryType             string          `gorm:"column:entry_type;type:varchar(32);not null"`
 	TargetDatasetID       string          `gorm:"column:target_dataset_id;type:varchar(255);not null;index"`
 	TargetPID             string          `gorm:"column:target_pid;type:varchar(255);not null;default:''"`
@@ -96,6 +97,9 @@ func (PaperImportBatch) TableName() string { return "paper_import_batches" }
 
 type PaperImportItem struct {
 	ID                    string          `gorm:"column:id;type:varchar(36);primaryKey"`
+	TitleSnapshot         string          `gorm:"column:title_snapshot;type:text;not null;default:''"`
+	LibraryPaperID        string          `gorm:"column:library_paper_id;type:varchar(255);not null;default:''"`
+	ResultKind            string          `gorm:"column:result_kind;type:varchar(32);not null;default:''"`
 	BatchID               string          `gorm:"column:batch_id;type:varchar(36);not null;index"`
 	AcademicWorkID        string          `gorm:"column:academic_work_id;type:varchar(36);not null;index"`
 	ReferenceIDsJSON      json.RawMessage `gorm:"column:reference_ids_json;type:json;not null"`

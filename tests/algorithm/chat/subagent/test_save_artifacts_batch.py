@@ -20,8 +20,9 @@ def batch_context(tmp_path, monkeypatch):
         emit=events.append,
     )
     monkeypatch.setattr(tools, 'require_context', lambda: ctx)
-    monkeypatch.setitem(lazyllm.globals, 'agentic_config', {'workflow_session_id': 'session'})
-    return ctx, events
+    with lazyllm.locals._scope():
+        lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session'}
+        yield ctx, events
 
 
 def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context):

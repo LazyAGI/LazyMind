@@ -20,6 +20,7 @@ from lazymind.review.preference_organizer.schemas import (
     PreferenceOrganizerPassResult,
     PreferenceOrganizerResult,
     PreferenceOrganizerResultData,
+    PreferenceStateData,
 )
 from lazymind.review.preference_organizer.state import (
     load_preference_state,
@@ -41,6 +42,7 @@ def organize_preferences(
     user_id: str,
     llm_config: Optional[dict[str, Any]] = None,
     force_analysis: bool = False,
+    expected_max_chars: Optional[int] = None,
 ) -> PreferenceOrganizerResult:
     initialize_context(task_id, run_id, user_id)
     lazyllm.set_trace_context(
@@ -68,6 +70,14 @@ def organize_preferences(
     except Exception as exc:
         return _failure_result(task_id, 'storage_read_failed', str(exc), retryable=True)
 
+    if expected_max_chars is not None and initial.data.max_chars != expected_max_chars:
+        return _failure_result(
+            task_id,
+            'preference_budget_mismatch',
+            f'Core preference budget is {expected_max_chars}, Algorithm budget is {initial.data.max_chars}.',
+            retryable=False,
+        )
+
     if initial.data.stored_items == 0 or (not force_analysis and target_reached(initial.data)):
         return _result(
             task_id,
@@ -77,6 +87,8 @@ def organize_preferences(
             target_reached_value=target_reached(initial.data),
             stop_reason='empty_index' if initial.data.stored_items == 0 else 'target_reached',
             reason='No adjustment needed.',
+            initial_state=initial.data,
+            final_state=initial.data,
         )
 
     terminal_outcome = ''
@@ -188,6 +200,7 @@ def organize_preferences(
         stop_reason=stop_reason,
         reason=terminal_error,
         retryable=_retryable(terminal_error) and terminal_outcome not in {'stale_state', 'partial'},
+        initial_state=initial.data,
     )
 
 
@@ -281,8 +294,13 @@ def _result(
     reason: str,
     target_reached_value: bool = False,
     retryable: bool = False,
+    initial_state: Optional[PreferenceStateData] = None,
+    final_state: Optional[PreferenceStateData] = None,
 ) -> PreferenceOrganizerResult:
     success = outcome in {'organized', 'organized_with_remaining', 'no_safe_changes'}
+    if pass_results:
+        initial_state = initial_state or pass_results[0].before
+        final_state = pass_results[-1].after
     return PreferenceOrganizerResult(
         status='success' if success else 'failed',
         task_id=task_id,
@@ -299,5 +317,7 @@ def _result(
             reason=reason,
             target_reached=target_reached_value if success else False,
             stop_reason=stop_reason,
+            initial_state=initial_state,
+            final_state=final_state,
         ),
     )

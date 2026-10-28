@@ -1,4 +1,4 @@
-import { Button, message, Modal, Radio, Table, Tooltip } from "antd";
+import { Alert, Button, message, Modal, Radio, Table, Tooltip } from "antd";
 import { CloseOutlined } from "@ant-design/icons";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -14,11 +14,15 @@ import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import { localizeErrorCode } from "@/components/request";
 import { IMPORT_TASK_POLL_INTERVAL } from "@/modules/knowledge/constants/common";
 import { isFFmpegDependencyError } from "@/modules/knowledge/utils/taskError";
+import { getImportErrorMessage } from "@/modules/knowledge/utils/importError";
+import type { ImportTaskState } from "../../importTaskFailures";
 
 interface IProps {
   datasetId: string;
+  initialTab?: TaskTab;
   onClose: () => void;
   onSuspendSuccess?: () => void;
+  onRetrySuccess?: (task: ImportTaskState) => void;
 }
 
 export enum TaskTab {
@@ -47,7 +51,8 @@ const ImportTaskList = (props: IProps) => {
   const [pageSize, setPageSize] = useState(10);
   const [total, setTotal] = useState(0);
   const [dataSource, setDataSource] = useState([]);
-  const [tab, setTab] = useState(TaskTab.Running);
+  const [requestError, setRequestError] = useState("");
+  const [tab, setTab] = useState(props.initialTab ?? TaskTab.Running);
   // pageTokens[i] is the token to fetch page i+1 (index 0 = first page, no token needed).
   const [pageTokens, setPageTokens] = useState<(string | undefined)[]>([undefined]);
   const pollingRef = useRef(new Polling());
@@ -83,6 +88,7 @@ const ImportTaskList = (props: IProps) => {
     const pageToken = getTaskPageToken(page, size, tokens);
 
     const updateTableData = ({ data = {} }: { data?: { tasks?: any[]; total_size?: number; next_page_token?: string } }) => {
+      setRequestError("");
       const tasks: any[] = data.tasks || [];
       setTotal(data.total_size ?? 0);
       setDataSource(
@@ -93,7 +99,7 @@ const ImportTaskList = (props: IProps) => {
             ? t("knowledge.ffmpegRequiredDesc")
             : localizeErrorCode(
                 task.err_msg,
-                localizeErrorCode("2000509"),
+                task.err_msg || localizeErrorCode("2000509"),
               ),
         })) as any,
       );
@@ -126,8 +132,7 @@ const ImportTaskList = (props: IProps) => {
         .then(updateTableData)
         .catch((err) => {
           console.error(err);
-          setTotal(0);
-          setDataSource([]);
+          setRequestError(getImportErrorMessage(err));
         });
       return;
     }
@@ -138,8 +143,7 @@ const ImportTaskList = (props: IProps) => {
       onSuccess: updateTableData,
       onError: (err) => {
         console.error(err);
-        setTotal(0);
-        setDataSource([]);
+        setRequestError(getImportErrorMessage(err));
       },
     });
   };
@@ -184,7 +188,11 @@ const ImportTaskList = (props: IProps) => {
       .resumeTask(datasetId, cvm?.task_id)
       .then(() => {
         message.success(t("knowledge.taskRetrySuccess"));
+        props.onRetrySuccess?.(cvm);
         getTableData({ currentTab: tab });
+      })
+      .catch((err) => {
+        setRequestError(getImportErrorMessage(err));
       });
   }
 
@@ -357,6 +365,7 @@ const ImportTaskList = (props: IProps) => {
           );
         })}
       </Radio.Group>
+      {requestError && <Alert type="error" showIcon message={requestError} style={{ margin: "12px 0", whiteSpace: "pre-wrap" }} />}
       <Table
         columns={columns}
         dataSource={dataSource}

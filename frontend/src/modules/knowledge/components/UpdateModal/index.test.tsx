@@ -7,7 +7,7 @@ import { getKnowledgeBaseCapabilities, getLearningCatalog, saveKnowledgeBaseCapa
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("@/modules/knowledge/utils/request", () => ({
-  KnowledgeBaseServiceApi: () => ({
+  getKnowledgeOptions: vi.fn().mockResolvedValue({capabilities: [], algorithms: [{algo_id:"general_algo"}]}), KnowledgeBaseServiceApi: () => ({
     datasetServiceAllDatasetTags: vi.fn().mockResolvedValue({ data: { tags: ["test"] } }),
     datasetServiceListAlgos: vi.fn().mockResolvedValue({ data: { algos: [{ algo_id: "general_algo" }] } }),
   }),

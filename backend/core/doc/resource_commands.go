@@ -30,6 +30,9 @@ func (s *ResourceService) prepareKnowledgeCreate(ctx context.Context, op Resourc
 	if err != nil {
 		return orm.Dataset{}, nil, err
 	}
+	if err := validateAcademicScenario(ctx, s.db, op.Caller.UserID, scene, level); err != nil {
+		return orm.Dataset{}, nil, resourceErr("INVALID_ARGUMENT", err.Error())
+	}
 	now := time.Now().UTC()
 	id := newDatasetID()
 	if req.PreferredID != "" {
