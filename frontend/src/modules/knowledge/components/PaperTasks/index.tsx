@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type Key } from 'react';
 import { createPortal } from 'react-dom';
-import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Drawer, Dropdown, Input, List, Modal, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { CheckboxChangeEvent } from 'antd/es/checkbox';
 import { BranchesOutlined, DownOutlined, EditOutlined, FundProjectionScreenOutlined, HistoryOutlined, LoadingOutlined, ReadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -10,7 +10,8 @@ import { deleteExpansion, getExpansion, launchPaperTask, listExpansions, resolve
 import { previewPaperImport, startReferenceImport, getPaperImportStatus, type ImportPreviewItem, isImportPreviewExpired } from '../../api/academicReferences';
 import './index.scss';
 import MarkdownViewer from '../MarkdownViewer';
-import PreparationPanel, { budgetOptions } from './PreparationPanel';
+import PreparationPanel from './PreparationPanel';
+import ResearchDepth from './ResearchDepth';
 import { getExpansionCapabilities, type BudgetMode } from '../../api/paperWorkflows';
 import type { PaperNotification } from '../../paper/usePaperNotifications';
 
@@ -100,6 +101,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         setActionError('');
         setInstruction('');
         setReflectionFirst(false);
+        setBudgetMode('balanced');
         setLaunch({ kind, direction });
         requestKey.current = crypto.randomUUID();
         requestInput.current = '';
@@ -438,10 +440,20 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             <Tooltip title={selectedPaperTaskError || undefined} placement="right"><span><Button type="text" className={`paper-library-task-action ${activeTask === 'ppt' ? 'is-active' : ''}`} icon={<FundProjectionScreenOutlined aria-hidden />} aria-pressed={activeTask === 'ppt'} disabled={!!selectedPaperTaskError} onClick={() => openLaunch('ppt', false)}>{taskLabel('ppt')}</Button></span></Tooltip>
             <Button type="text" className="paper-library-task-action" icon={<HistoryOutlined aria-hidden />} onClick={openHistory}>{t('paperTasks.records')}</Button>
         </div>;
+    const confirmDeleteExpansion = () => {
+        if (!detail) return;
+        Modal.confirm({
+            title: t('paperTasks.deleteTitle'), content: t('paperTasks.deleteHint'), okText: t('paperTasks.confirmDelete'), cancelText: t('paperTasks.cancel'), okButtonProps: { danger: true },
+            onOk: async () => {
+                try { await deleteExpansion(detail.record.id, !!onNotification); onNotificationResolved?.(`expansion-delete:${detail.record.id}`); closeDetail(); await refreshHistory(); }
+                catch (error) { onNotification?.({ id: `expansion-delete:${detail.record.id}`, title: '论文扩展记录删除失败', message: error instanceof Error ? error.message : '删除失败，请重试' }); throw error; }
+            },
+        });
+    };
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
         <Modal okText={launch && ['expansion', 'review'].includes(launch.kind) ? '开始初步调研' : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
-            title={launch ? taskLabel(launch.kind) : ''}
+            title={launch ? taskLabel(launch.kind) : ''} className={launch && ['expansion', 'review'].includes(launch.kind) ? 'paper-task-launch-modal' : undefined} width={launch && ['expansion', 'review'].includes(launch.kind) ? 660 : 520}
             onCancel={() => !busy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {actionError && onNotification && <p role="status">{actionError}</p>}
             {launch?.kind === 'review' && <Alert type="info" showIcon message={t('paperTasks.reviewStartHint')} />}
@@ -454,7 +466,8 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 placeholder={t(launch?.direction ? 'paperTasks.topicPlaceholder' : `paperTasks.placeholder.${launch?.kind || 'expansion'}`)}
                 value={instruction} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setInstruction(event.target.value)} />
             {launch && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
-                <Select aria-label="执行预算" value={budgetMode} options={budgetOptions} onChange={setBudgetMode} style={{ width: '100%' }} />
+                <ResearchDepth value={budgetMode} onChange={setBudgetMode} />
+                <p className="paper-task-launch-flow-hint"><BranchesOutlined />有多个方向时请你选择；只有一个方向时自动继续拓展。</p>
                 {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message="可使用当前配置开始调研" description={<>
                   {!capabilities.openalex_key && <div>OpenAlex 使用基础访问，部分检索深度与托管全文受限。<Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">配置 OpenAlex</Link></div>}
                   {!capabilities.sciverse && <div>Sciverse 检索未启用。<Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=sciverse">配置 Sciverse</Link></div>}
@@ -468,16 +481,18 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 <Button key="view" onClick={() => void openDetail(record.id).catch(() => {})}>{t('paperTasks.viewResult')}</Button>,
             ]}><List.Item.Meta title={record.title} description={`${statusLabel(record.status)} · ${t('paperTasks.paperCount', { count: distinctPapers(record.result?.papers || []).length })}`} /></List.Item>} />
         </Drawer>
-        <Drawer open={!!detail} title={t('paperTasks.resultTitle')} width={1000} onClose={closeDetail} closable={!busy}>
+        <Drawer className="paper-expansion-detail-drawer" open={!!detail} title={detail?.record.preparation ? '论文拓展' : t('paperTasks.resultTitle')} width={1000} onClose={closeDetail} closable={!busy}
+            extra={detail?.record.preparation && detail.record.version === 0 ? <Button type="text" danger onClick={confirmDeleteExpansion}>{t('paperTasks.deleteResult')}</Button> : undefined}>
             {detail && <>
                 <div className="paper-expansion-result-heading">
                     <Typography.Title level={4} ellipsis={{ rows: 2 }}>{detail.record.title}</Typography.Title>
-                    <Tag role="status" color={expanding ? 'processing' : detail.record.status === 'failed' ? 'error' : detail.record.status === 'completed' ? 'success' : undefined} icon={expanding ? <LoadingOutlined /> : undefined}>
+                    <Tag role="status" color={expanding || detail.record.status === 'preparing' ? 'processing' : ['failed', 'preparation_failed'].includes(detail.record.status) ? 'error' : detail.record.status === 'completed' ? 'success' : ['awaiting_info', 'awaiting_confirmation', 'pending'].includes(detail.record.status) ? 'blue' : undefined} icon={expanding ? <LoadingOutlined /> : undefined}>
                         {expanding ? t('paperTasks.expanding') : statusLabel(detail.record.status)}
                     </Tag>
                 </div>
                 {detail.chat_status !== 'available' && detail.chat_status !== 'uncreated' && <Alert type="warning" message={t(detail.chat_status === 'trashed' ? 'paperTasks.expansionTrashed' : 'paperTasks.expansionDeleted')} />}
                 <PreparationPanel detail={detail} onRefresh={() => openDetail(detail.record.id)} onStart={id => goChat(id, detail.record.goal === 'review')} />
+                {(!detail.record.preparation || detail.record.version > 0) && <>
                 {detail.record.report?.narrative && <section aria-label="研究脉络与阅读建议">
                   <Typography.Title level={5}>研究脉络与阅读建议</Typography.Title>
                   <MarkdownViewer>{detail.record.report.narrative}</MarkdownViewer>
@@ -490,13 +505,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 </section>}
                 <Space wrap style={{ margin: '12px 0' }}>
                     <Button disabled={detail.chat_status !== 'available'} onClick={() => goChat(detail.record.conversation_id)}>{t('paperTasks.returnExpansion')}</Button>
-                    <Button danger onClick={() => Modal.confirm({
-                        title: t('paperTasks.deleteTitle'), content: t('paperTasks.deleteHint'), okText: t('paperTasks.confirmDelete'), cancelText: t('paperTasks.cancel'), okButtonProps: { danger: true },
-                        onOk: async () => {
-                            try { await deleteExpansion(detail.record.id, !!onNotification); onNotificationResolved?.(`expansion-delete:${detail.record.id}`); closeDetail(); await refreshHistory(); }
-                            catch (error) { onNotification?.({ id: `expansion-delete:${detail.record.id}`, title: '论文扩展记录删除失败', message: error instanceof Error ? error.message : '删除失败，请重试' }); throw error; }
-                        },
-                    })}>{t('paperTasks.deleteResult')}</Button>
+                    <Button danger onClick={confirmDeleteExpansion}>{t('paperTasks.deleteResult')}</Button>
                 </Space>
                 <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }} style={{ whiteSpace: 'pre-wrap', marginTop: 12 }}>{detail.record.result.user_instruction}</Typography.Paragraph>
                 <Typography.Paragraph>{t('paperTasks.directions', { value: detail.record.result.selected_directions?.join('；') || t('paperTasks.undetermined') })}</Typography.Paragraph>
@@ -585,6 +594,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 </details></List.Item>} />
                 <Typography.Title level={5}>{t('paperTasks.generated')}</Typography.Title>
                 <List dataSource={detail.handoffs} renderItem={item => <List.Item><Button onClick={() => goChat(item.conversation_id)}>{t('paperTasks.viewTask', { task: taskLabel(item.kind) })}</Button></List.Item>} />
+                </>}
             </>}
         </Drawer>
         <Modal open={!!confirmation} width={720} title={t('paperTasks.bulkImportTitle')}

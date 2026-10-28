@@ -17,11 +17,11 @@ def policy_for(params: dict[str, Any]) -> ExecutionPolicy | None:
     value = limits.get(params.get('step_id'))
     if value is None:
         return None
-    rounds, timeout = int(value['rounds']), int(value['timeout'])
+    rounds, timeout = int(value['rounds']), int(value.get('timeout', 0))
     calls = dict(value.get('tool_calls') or {})
     if (
         not 1 <= rounds <= 64
-        or not 1 <= timeout <= 3600
+        or not 0 <= timeout <= 3600
         or any(not isinstance(v, int) or not 1 <= v <= 100 for v in calls.values())
     ):
         raise ValueError('Invalid package execution limits')
@@ -31,7 +31,7 @@ def policy_for(params: dict[str, Any]) -> ExecutionPolicy | None:
 async def bounded_frames(frames: AsyncIterator[str], params: dict[str, Any], stop) -> AsyncIterator[str]:
     policy = policy_for(params)
     try:
-        if policy is None:
+        if policy is None or policy.timeout == 0:
             async for frame in frames:
                 yield frame
         else:

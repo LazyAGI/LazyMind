@@ -233,8 +233,8 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 				recordID = existing.ID
 				return nil
 			}
-			if _, valid := budgetFor(req.BudgetMode); !valid {
-				return errors.New("invalid budget mode")
+			if _, valid := depthFor(req.BudgetMode); !valid {
+				return errors.New("invalid research depth")
 			}
 			seeds, e := seedSources(tx, req.DatasetID, papers)
 			if e != nil {
@@ -242,7 +242,7 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 			}
 			mode := firstNonEmpty(req.BudgetMode, "balanced")
 			preparation := expansionPreparation{OriginalInstruction: instruction, UserInstruction: instruction, Answers: map[string]string{}, Questions: []preparationQuestion{}, Directions: []preparationDirection{}}
-			record := orm.AcademicExpansion{DiscoveryMode: "external", SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: json.RawMessage(`[]`), ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, Title: instruction, Goal: req.Kind, Status: "preparing", ResultJSON: marshal(input), PreparationRevision: 1, PreparationJSON: marshal(preparation), BudgetMode: mode, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			record := orm.AcademicExpansion{DiscoveryMode: "external", SeedSnapshotJSON: marshal(seeds), DiscoveryJSON: json.RawMessage(`[]`), ID: uuid.NewString(), UserID: user, RequestOwner: user, RequestKey: req.RequestKey, DatasetID: req.DatasetID, Title: truncateTitle(instruction), Goal: req.Kind, Status: "preparing", ResultJSON: marshal(input), PreparationRevision: 1, PreparationJSON: marshal(preparation), BudgetMode: mode, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if e = tx.Create(&record).Error; e != nil {
 				return e
 			}
@@ -911,7 +911,6 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 		if e != nil {
 			continue
 		} // Legacy histories remain visible; a continued round must discover candidates again.
-		source.Deadline = expansionContentDeadline(latest)
 		content, e := ensurePaperContent(ctx, db, record.UserID, paper.Paper.PaperID, source)
 		if e != nil {
 			return asyncjob.Result{}, e
@@ -1063,7 +1062,8 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 			importance[mark.PaperID] = mark.IsImportant
 		}
 	}
-	common.ReplyJSON(w, map[string]any{"record": record, "rounds": rounds, "chat_status": chatStatus, "contents": contents, "handoffs": handoffs, "presence": presence, "paper_importance": importance, "user_updates": updates, "interactions": interactions})
+	depth, _ := depthFor(record.BudgetMode)
+	common.ReplyJSON(w, map[string]any{"record": record, "research_guidance": depth.Guidance, "rounds": rounds, "chat_status": chatStatus, "contents": contents, "handoffs": handoffs, "presence": presence, "paper_importance": importance, "user_updates": updates, "interactions": interactions})
 }
 func DeleteExpansion(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireUser(w, r)

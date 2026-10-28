@@ -259,6 +259,7 @@ components:
         AcademicExpansion:
             properties:
                 budget_mode:
+                    description: Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget.
                     enum:
                         - fast
                         - balanced
@@ -285,6 +286,8 @@ components:
                             additionalProperties:
                                 type: string
                             type: object
+                        auto_confirmed:
+                            type: boolean
                         directions:
                             items:
                                 properties:
@@ -311,6 +314,7 @@ components:
                                     - difference
                                     - paper_ids
                                 type: object
+                            maxItems: 5
                             type: array
                         error:
                             type: string
@@ -1015,6 +1019,7 @@ components:
         AcademicTaskLaunch:
             properties:
                 budget_mode:
+                    description: Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget.
                     enum:
                         - fast
                         - balanced
@@ -17073,6 +17078,8 @@ paths:
                                         type: array
                                     record:
                                         $ref: '#/components/schemas/AcademicExpansion'
+                                    research_guidance:
+                                        type: string
                                     rounds:
                                         items:
                                             properties: {}
@@ -17138,12 +17145,6 @@ paths:
                                     additionalProperties:
                                         type: string
                                     type: object
-                                budget_mode:
-                                    enum:
-                                        - fast
-                                        - balanced
-                                        - deep
-                                    type: string
                                 request_key:
                                     type: string
                                 revision:
@@ -17188,12 +17189,6 @@ paths:
                     application/json:
                         schema:
                             properties:
-                                budget_mode:
-                                    enum:
-                                        - fast
-                                        - balanced
-                                        - deep
-                                    type: string
                                 request_key:
                                     type: string
                                 revision:

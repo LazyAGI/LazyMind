@@ -184,6 +184,9 @@ export const AcademicDocumentStateKindEnum = {
 export type AcademicDocumentStateKindEnum = typeof AcademicDocumentStateKindEnum[keyof typeof AcademicDocumentStateKindEnum];
 
 export interface AcademicExpansion {
+    /**
+     * Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget.
+     */
     'budget_mode': AcademicExpansionBudgetModeEnum;
     'conversation_id'?: string;
     'created_at'?: string;
@@ -218,6 +221,7 @@ export type AcademicExpansionDiscoveryModeEnum = typeof AcademicExpansionDiscove
 
 export interface AcademicExpansionPreparation {
     'answers'?: { [key: string]: string; };
+    'auto_confirmed'?: boolean;
     'directions'?: Array<AcademicExpansionPreparationDirectionsInner>;
     'error'?: string;
     'metrics'?: object;
@@ -530,6 +534,9 @@ export interface AcademicSourceImportItem {
     'title': string;
 }
 export interface AcademicTaskLaunch {
+    /**
+     * Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget.
+     */
     'budget_mode'?: AcademicTaskLaunchBudgetModeEnum;
     'dataset_id'?: string;
     'direction'?: string;
@@ -914,20 +921,10 @@ export interface ApiCoreAcademicExpansionsExpansionIdConfirmPost200Response {
     'status'?: string;
 }
 export interface ApiCoreAcademicExpansionsExpansionIdConfirmPostRequest {
-    'budget_mode'?: ApiCoreAcademicExpansionsExpansionIdConfirmPostRequestBudgetModeEnum;
     'request_key': string;
     'revision': number;
     'selected_directions': Array<string>;
 }
-
-export const ApiCoreAcademicExpansionsExpansionIdConfirmPostRequestBudgetModeEnum = {
-    Fast: 'fast',
-    Balanced: 'balanced',
-    Deep: 'deep'
-} as const;
-
-export type ApiCoreAcademicExpansionsExpansionIdConfirmPostRequestBudgetModeEnum = typeof ApiCoreAcademicExpansionsExpansionIdConfirmPostRequestBudgetModeEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdConfirmPostRequestBudgetModeEnum];
-
 export interface ApiCoreAcademicExpansionsExpansionIdDelete200Response {
     'deleted'?: boolean;
 }
@@ -941,6 +938,7 @@ export interface ApiCoreAcademicExpansionsExpansionIdGet200Response {
     'paper_importance'?: { [key: string]: boolean; };
     'presence'?: Array<AcademicPresence>;
     'record'?: AcademicExpansion;
+    'research_guidance'?: string;
     'rounds'?: Array<object>;
 }
 
@@ -964,7 +962,6 @@ export interface ApiCoreAcademicExpansionsExpansionIdPreparationPost200Response 
 export interface ApiCoreAcademicExpansionsExpansionIdPreparationPostRequest {
     'action': ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum;
     'answers'?: { [key: string]: string; };
-    'budget_mode'?: ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestBudgetModeEnum;
     'request_key': string;
     'revision': number;
     'user_instruction'?: string;
@@ -977,13 +974,6 @@ export const ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnu
 } as const;
 
 export type ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum = typeof ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum];
-export const ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestBudgetModeEnum = {
-    Fast: 'fast',
-    Balanced: 'balanced',
-    Deep: 'deep'
-} as const;
-
-export type ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestBudgetModeEnum = typeof ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestBudgetModeEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestBudgetModeEnum];
 
 export interface ApiCoreAcademicExpansionsGet200Response {
     'items'?: Array<AcademicExpansion>;

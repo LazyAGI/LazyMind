@@ -27,7 +27,6 @@ var errUnregisteredExpansionPaper = errors.New("expansion paper is not a saved s
 // A source is frozen by the server, never supplied by the model. DatasetID is
 // the expansion's boundary even when the actual bytes come from the Internet.
 type paperSource struct {
-	Deadline   *time.Time          `json:"deadline,omitempty"`
 	Paper      PaperRef            `json:"paper"`
 	DatasetID  string              `json:"dataset_id"`
 	DocumentID string              `json:"document_id,omitempty"`

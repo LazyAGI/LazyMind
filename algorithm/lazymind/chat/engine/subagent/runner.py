@@ -963,7 +963,8 @@ def _build_subagent_plan(
     # A declared execution budget overrides defaults; None preserves the
     # upstream round, retry, tool-discovery and tool-limit path exactly.
     execution_policy = policy_for(ctx.params)
-    execution_deadline = time.monotonic() + execution_policy.timeout if execution_policy else None
+    execution_deadline = (time.monotonic() + execution_policy.timeout
+                          if execution_policy and execution_policy.timeout else None)
     ctx.execution_deadline = execution_deadline
 
     def check_execution_budget():
@@ -1014,7 +1015,7 @@ def _build_subagent_plan(
             expanded_round_limit=execution_policy.rounds if execution_policy else None,
             llm_config=llm_config or {},
             before_model_request=check_execution_budget if execution_policy else None,
-            model_context_provider=execution_budget_notice if execution_policy else None,
+            model_context_provider=execution_budget_notice if execution_deadline is not None else None,
             tool_failure_limits=WORKFLOW_TOOL_FAILURE_LIMITS,
             tool_call_limits={**WORKFLOW_TOOL_CALL_LIMITS, **(execution_policy.calls if execution_policy else {})},
         ),

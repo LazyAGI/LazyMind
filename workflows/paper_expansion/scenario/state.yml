@@ -16,10 +16,10 @@ steps:
     label: 准备参考论文与检索计划
     prompt: '{{runtime_instruction}}
 
-      先用 academic_expansion_context 读取绑定任务；使用服务端确认的方向、用户要求、种子和已有调研。不得改变主要方向或 ask_user。模型只提交论文
-      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。接近预算时停止补查，保存有效成果和缺口。
+      先用 academic_expansion_context 读取绑定任务；使用服务端确定的方向、用户要求、种子和已有调研，按 record.budget_mode 与 research_guidance 执行本任务固定调研深度。不得改变主要方向或 ask_user。模型只提交论文
+      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。按研究目标和证据充分程度收尾；达到轮次或工具调用上限时，保存有效成果和缺口，不按耗时承诺完成。
 
-      复用 preparation 的调研、摘要、代表论文及先前成果，不机械重查。多方向分别安排主题、前后向引用与方法检索，写明预算与停止条件。调用 academic_publish_stage(paper_ids,plan,decisions,gaps)
+      复用 preparation 的调研、摘要、代表论文及先前成果，不机械重查。多方向分别安排主题、前后向引用与方法检索，写明检索和阅读范围及停止条件。调用 academic_publish_stage(paper_ids,plan,decisions,gaps)
       保存 expansion_plan，保留全部用户种子。'
     tools:
     - academic_expansion_context
@@ -39,8 +39,8 @@ steps:
     label: 拓展与筛选
     prompt: '{{runtime_instruction}}
 
-      先用 academic_expansion_context 读取绑定任务；使用服务端确认的方向、用户要求、种子和已有调研。不得改变主要方向或 ask_user。模型只提交论文
-      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。接近预算时停止补查，保存有效成果和缺口。
+      先用 academic_expansion_context 读取绑定任务；使用服务端确定的方向、用户要求、种子和已有调研，按 record.budget_mode 与 research_guidance 执行本任务固定调研深度。不得改变主要方向或 ask_user。模型只提交论文
+      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。按研究目标和证据充分程度收尾；达到轮次或工具调用上限时，保存有效成果和缺口，不按耗时承诺完成。
 
       按各已选方向分别检索，再跨方向去重。academic_search_papers 的 sources 可选 openalex/arxiv/sciverse/web，mode
       可选 keyword/references/citations（引用查询用 openalex 和 paper_id）。Sciverse 有配置时正常参与适合的查询；通用搜索补查遗漏和公开副本，网页线索不能冒充论文。正常零结果、缺
@@ -66,8 +66,8 @@ steps:
     label: 分析论文关系
     prompt: '{{runtime_instruction}}
 
-      先用 academic_expansion_context 读取绑定任务；使用服务端确认的方向、用户要求、种子和已有调研。不得改变主要方向或 ask_user。模型只提交论文
-      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。接近预算时停止补查，保存有效成果和缺口。
+      先用 academic_expansion_context 读取绑定任务；使用服务端确定的方向、用户要求、种子和已有调研，按 record.budget_mode 与 research_guidance 执行本任务固定调研深度。不得改变主要方向或 ask_user。模型只提交论文
+      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。按研究目标和证据充分程度收尾；达到轮次或工具调用上限时，保存有效成果和缺口，不按耗时承诺完成。
 
       先按原始摘要初筛，对关键论文按问题调用 academic_read_paper(keywords=[...]) 或指定 page_start/page_end。检查完整命中页、相邻页、表格标题、实验条件及运行前提；必要时扩大或完整阅读，不要求所有论文把
       cursor 读到底。内容 processing/failed/needs_review 时保留论文并限制分析。调用 academic_submit_relations(analyses,claims)：analyses
@@ -92,8 +92,8 @@ steps:
     label: 研究脉络与阅读建议
     prompt: '{{runtime_instruction}}
 
-      先用 academic_expansion_context 读取绑定任务；使用服务端确认的方向、用户要求、种子和已有调研。不得改变主要方向或 ask_user。模型只提交论文
-      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。接近预算时停止补查，保存有效成果和缺口。
+      先用 academic_expansion_context 读取绑定任务；使用服务端确定的方向、用户要求、种子和已有调研，按 record.budget_mode 与 research_guidance 执行本任务固定调研深度。不得改变主要方向或 ask_user。模型只提交论文
+      ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。按研究目标和证据充分程度收尾；达到轮次或工具调用上限时，保存有效成果和缺口，不按耗时承诺完成。
 
       读取 relation_analysis 的 input、claims、reading，按方向整理研究问题、前序基础、相关路线、后续变化及阅读建议。具体主张必须遵循复核结论；不把引用当继承，不把方法改变当效果改善。调用
       academic_publish_expansion_result(narrative,reading_order,limitations)，narrative

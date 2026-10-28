@@ -257,6 +257,8 @@ def test_preparation_tools_execute_with_normal_workspace_authorization(monkeypat
             return {}
 
     def execute(self, llm, plan):
+        assert plan.execution_options.expanded_round_limit == 20
+        assert plan.execution_options.tool_call_limits == {'search_papers': 12, 'read_paper': 20}
         manager = ToolManager(plan.tools)
         policy = WorkspaceAuthorizationPolicy(WorkspaceContext(), set(), lambda _: False)
         batch = manager.prepare_tool_calls([
@@ -273,7 +275,8 @@ def test_preparation_tools_execute_with_normal_workspace_authorization(monkeypat
     monkeypatch.setattr(preparation, 'AutoModel', lambda **_: object())
     monkeypatch.setattr(preparation.AgentExecutor, 'run', execute)
     result = preparation.run_preparation({
-        'llm_config': {}, 'timeout_seconds': 10, 'user_id': 'u',
+        'llm_config': {}, 'depth': {'guidance': 'Standard research', 'preparation': {
+            'rounds': 20, 'tool_calls': {'search_papers': 12, 'read_paper': 20}}}, 'user_id': 'u',
         'expansion_id': 'exp', 'revision': 1, 'preparation': {'user_instruction': 'RAG'}, 'input': {},
     })
     assert result['directions'][0]['paper_ids'] == ['real-paper']

@@ -97,7 +97,7 @@ class PreparationRequest(BaseModel):
     input: dict
     preparation: dict
     llm_config: dict
-    timeout_seconds: int = Field(ge=1, le=300)
+    depth: dict
 
 
 @router.post('/internal/academic/preparation:run')

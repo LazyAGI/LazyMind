@@ -83,6 +83,17 @@ describe('paper task startup routes', () => {
         expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a'], false);
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: ['a'] }), false);
     });
+    it('chooses research depth at launch and resets it for a new task', async () => {
+        mount(['a']);
+        fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
+        fireEvent.click(await screen.findByText('基于选中论文扩展'));
+        fireEvent.click(screen.getByRole('radio', { name: /深入/ }));
+        await submit();
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'deep' }), false);
+        fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
+        fireEvent.click(await screen.findByText('基于选中论文扩展'));
+        expect(screen.getByRole('radio', { name: /标准/ })).toBeChecked();
+    });
     it('starts direction expansion with one topic input and no papers', async () => {
         mount([]);
         fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));

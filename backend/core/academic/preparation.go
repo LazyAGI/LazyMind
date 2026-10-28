@@ -26,21 +26,41 @@ import (
 
 const preparationJobType = "academic.prepare"
 
-type expansionBudget struct {
-	Preparation int `json:"preparation_seconds"`
-	Formal      int `json:"formal_seconds"`
+const maxPreparationDirections = 5
+
+type expansionDepth struct {
+	Guidance    string                                `json:"guidance"`
+	Preparation graphengine.ExecutionLimit            `json:"preparation"`
+	Steps       map[string]graphengine.ExecutionLimit `json:"-"`
 }
 
-func budgetFor(mode string) (expansionBudget, bool) {
+// Depth bounds investigation by work, rather than by elapsed wall time.
+func depthFor(mode string) (expansionDepth, bool) {
+	var guidance string
+	var preparation, plan, research, compose, searches, reads int
 	switch mode {
 	case "fast":
-		return expansionBudget{120, 600}, true
+		guidance = "快速调研：聚焦核心问题与代表论文，阅读支撑关键结论的段落，核验主要依据并明确材料边界。"
+		preparation, plan, research, compose, searches, reads = 12, 8, 24, 8, 12, 24
 	case "", "balanced":
-		return expansionBudget{180, 1200}, true
+		guidance = "标准调研：覆盖主要研究路线，比较代表方法与关键证据，阅读相关正文并核验重要结论及适用条件。"
+		preparation, plan, research, compose, searches, reads = 20, 12, 32, 8, 24, 48
 	case "deep":
-		return expansionBudget{300, 1800}, true
+		guidance = "深入调研：在主要路线之外追踪相关工作、前后向引用及不同证据，扩大关键正文阅读，核验分歧、反例和适用边界。"
+		preparation, plan, research, compose, searches, reads = 28, 16, 48, 12, 36, 72
+	default:
+		return expansionDepth{}, false
 	}
-	return expansionBudget{}, false
+	return expansionDepth{
+		Guidance:    guidance,
+		Preparation: graphengine.ExecutionLimit{Rounds: preparation, ToolCalls: map[string]int{"search_papers": preparation * 2 / 3, "read_paper": preparation}},
+		Steps: map[string]graphengine.ExecutionLimit{
+			"prepare_plan":      {Rounds: plan, ToolCalls: map[string]int{"academic_search_papers": searches / 4}},
+			"expand_and_screen": {Rounds: research, ToolCalls: map[string]int{"academic_search_papers": searches}},
+			"analyze_relations": {Rounds: research, ToolCalls: map[string]int{"academic_read_paper": reads, "academic_submit_relations": 2}},
+			"compose_result":    {Rounds: compose},
+		},
+	}, true
 }
 
 type preparationDirection struct {
@@ -74,9 +94,9 @@ type expansionPreparation struct {
 	AnsweredQuestions   []preparationAnswer  `json:"answered_questions,omitempty"`
 	Attempts            []preparationAttempt `json:"attempts,omitempty"`
 
-	ExecutionStartedAt *time.Time           `json:"execution_started_at,omitempty"`
-	ConfirmedAt        *time.Time           `json:"confirmed_at,omitempty"`
-	StepStartedAt      map[string]time.Time `json:"step_started_at,omitempty"`
+	ExecutionStartedAt *time.Time `json:"execution_started_at,omitempty"`
+	ConfirmedAt        *time.Time `json:"confirmed_at,omitempty"`
+	AutoConfirmed      bool       `json:"auto_confirmed,omitempty"`
 
 	UserInstruction string                 `json:"user_instruction"`
 	Summary         string                 `json:"summary"`
@@ -121,20 +141,19 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 	if preparation.StartedAt == nil {
 		preparation.StartedAt = &now
 	}
-	budget, _ := budgetFor(record.BudgetMode)
-	deadline := preparation.StartedAt.Add(time.Duration(budget.Preparation) * time.Second)
+	depth, _ := depthFor(record.BudgetMode)
 	if err := db.Model(&record).Where("preparation_revision=? AND status='preparing'", payload.Revision).Update("preparation_json", marshal(preparation)).Error; err != nil {
 		return asyncjob.Result{}, err
 	}
-	result := preparation
+	output := struct {
+		expansionPreparation
+		Title string `json:"title"`
+	}{expansionPreparation: preparation}
 	role, err := chat.LoadDefaultChatLLMConfig(ctx, db, record.UserID)
-	if err == nil && time.Now().Before(deadline) {
-		runCtx, cancel := context.WithDeadline(ctx, deadline)
-		defer cancel()
-		err = internalAcademic(runCtx, "preparation:run", map[string]any{"expansion_id": record.ID, "user_id": record.UserID, "revision": payload.Revision, "input": json.RawMessage(record.ResultJSON), "preparation": preparation, "llm_config": map[string]any{"llm": role}, "timeout_seconds": int(time.Until(deadline).Seconds())}, &result)
-	} else if err == nil {
-		err = errors.New("初步调研预算已用尽，可保留已有材料后重试")
+	if err == nil {
+		err = internalAcademic(ctx, "preparation:run", map[string]any{"expansion_id": record.ID, "user_id": record.UserID, "revision": payload.Revision, "input": json.RawMessage(record.ResultJSON), "preparation": preparation, "llm_config": map[string]any{"llm": role}, "depth": depth}, &output)
 	}
+	result := output.expansionPreparation
 	// Search tools register candidates while the Agent runs. Validate against
 	// that committed discovery state, fenced to this preparation revision.
 	var latest orm.AcademicExpansion
@@ -181,12 +200,22 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 	}
 	result.Attempts = append(preparation.Attempts, preparationAttempt{Revision: payload.Revision, StartedAt: preparation.StartedAt, FinishedAt: finished, Model: result.Model, Metrics: result.Metrics, Error: result.Error})
 	saveErr := conversationgroup.UserTransaction(ctx, db, record.UserID, func(tx *gorm.DB) error {
-		update := tx.Model(&orm.AcademicExpansion{}).Where("id=? AND preparation_revision=? AND status='preparing' AND deleted_at IS NULL", record.ID, payload.Revision).Updates(map[string]any{"preparation_json": marshal(result), "status": status, "updated_at": finished})
-		if update.Error != nil {
-			return update.Error
+		if e := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND preparation_revision=? AND status='preparing' AND deleted_at IS NULL", record.ID, payload.Revision).Take(&record).Error; e != nil {
+			if errors.Is(e, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			return e
 		}
-		if update.RowsAffected == 0 {
-			return nil
+		record.Status = status
+		record.PreparationJSON = marshal(result)
+		if err == nil {
+			record.Title = truncateTitle(firstNonEmpty(strings.TrimSpace(output.Title), record.Title))
+		}
+		if e := tx.Model(&record).Updates(map[string]any{"preparation_json": record.PreparationJSON, "status": status, "title": record.Title, "updated_at": finished}).Error; e != nil {
+			return e
+		}
+		if status == "awaiting_confirmation" && len(result.Directions) == 1 {
+			return confirmPreparedExpansion(ctx, tx, &record, []string{result.Directions[0].Name}, fmt.Sprintf("auto:%d", payload.Revision), true)
 		}
 		return taskcenter.NotifyAcademicExpansion(ctx, tx, record.UserID, record.DatasetID, record.ID, payload.Revision, status)
 	})
@@ -203,6 +232,9 @@ func validatePreparation(db *gorm.DB, record orm.AcademicExpansion, p expansionP
 		}
 		seen[q.ID] = true
 	}
+	if len(p.Directions) > maxPreparationDirections {
+		return fmt.Errorf("研究方向最多 %d 个，请合并重复方向后重试", maxPreparationDirections)
+	}
 	if len(p.Questions) > 0 {
 		return nil
 	}
@@ -211,7 +243,7 @@ func validatePreparation(db *gorm.DB, record orm.AcademicExpansion, p expansionP
 	}
 	seen = map[string]bool{}
 	for _, d := range p.Directions {
-		if strings.TrimSpace(d.Name) == "" || seen[d.Name] || d.Reason == "" || len(d.PaperIDs) == 0 {
+		if strings.TrimSpace(d.Name) == "" || seen[d.Name] || strings.TrimSpace(d.Question) == "" || strings.TrimSpace(d.Reason) == "" || len(d.PaperIDs) == 0 {
 			return errors.New("研究方向缺少名称、依据或代表论文")
 		}
 		seen[d.Name] = true
@@ -244,14 +276,14 @@ func SubmitPreparation(w http.ResponseWriter, r *http.Request) {
 		RequestKey  string            `json:"request_key"`
 		Answers     map[string]string `json:"answers"`
 		Instruction string            `json:"user_instruction"`
-		BudgetMode  string            `json:"budget_mode"`
+		BudgetMode  json.RawMessage   `json:"budget_mode"`
 	}
 	if !parseJSON(r, &req) || req.RequestKey == "" || len(req.RequestKey) > 128 || (req.Action != "answer" && req.Action != "revise" && req.Action != "retry") {
 		replyError(w, 400, "INVALID_REQUEST", "action, revision and request_key are required")
 		return
 	}
-	if _, ok := budgetFor(req.BudgetMode); !ok {
-		replyError(w, 400, "INVALID_REQUEST", "invalid budget mode")
+	if len(req.BudgetMode) > 0 {
+		replyError(w, 400, "INVALID_REQUEST", "调研深度在任务启动时固定，后续不能修改")
 		return
 	}
 	err := conversationgroup.UserTransaction(r.Context(), store.DB(), user, func(tx *gorm.DB) error {
@@ -298,6 +330,7 @@ func SubmitPreparation(w http.ResponseWriter, r *http.Request) {
 		p.RequestKey = req.RequestKey
 		p.Questions = nil
 		p.Selected = nil
+		p.AutoConfirmed = false
 		if e := taskcenter.ResolveAcademicExpansionNotifications(r.Context(), tx, record.ID, record.PreparationRevision); e != nil {
 			return e
 		}
@@ -309,10 +342,7 @@ func SubmitPreparation(w http.ResponseWriter, r *http.Request) {
 		record.PreparationRevision++
 		record.PreparationJSON = marshal(p)
 		record.Status = "preparing"
-		if req.BudgetMode != "" {
-			record.BudgetMode = req.BudgetMode
-		}
-		if e := tx.Model(&record).Updates(map[string]any{"preparation_revision": record.PreparationRevision, "preparation_json": record.PreparationJSON, "status": record.Status, "budget_mode": record.BudgetMode, "updated_at": time.Now().UTC()}).Error; e != nil {
+		if e := tx.Model(&record).Updates(map[string]any{"preparation_revision": record.PreparationRevision, "preparation_json": record.PreparationJSON, "status": record.Status, "updated_at": time.Now().UTC()}).Error; e != nil {
 			return e
 		}
 		return enqueuePreparation(r.Context(), tx, record)
@@ -333,17 +363,17 @@ func ConfirmExpansion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Revision   int64    `json:"revision"`
-		RequestKey string   `json:"request_key"`
-		Selected   []string `json:"selected_directions"`
-		BudgetMode string   `json:"budget_mode"`
+		Revision   int64           `json:"revision"`
+		RequestKey string          `json:"request_key"`
+		Selected   []string        `json:"selected_directions"`
+		BudgetMode json.RawMessage `json:"budget_mode"`
 	}
 	if !parseJSON(r, &req) || req.RequestKey == "" || len(req.RequestKey) > 128 || len(req.Selected) == 0 {
 		replyError(w, 400, "INVALID_REQUEST", "revision, request_key and selected_directions required")
 		return
 	}
-	if _, ok := budgetFor(req.BudgetMode); !ok {
-		replyError(w, 400, "INVALID_REQUEST", "invalid budget mode")
+	if len(req.BudgetMode) > 0 {
+		replyError(w, 400, "INVALID_REQUEST", "调研深度在任务启动时固定，后续不能修改")
 		return
 	}
 	err := conversationgroup.UserTransaction(r.Context(), store.DB(), user, func(tx *gorm.DB) error {
@@ -358,60 +388,7 @@ func ConfirmExpansion(w http.ResponseWriter, r *http.Request) {
 		if p.RequestKey == "confirm:"+req.RequestKey && record.ConversationID != "" {
 			return nil
 		}
-		if record.Status != "awaiting_confirmation" {
-			return errors.New("请先完成初步调研和待补充问题")
-		}
-		if e := validatePreparation(tx, record, p); e != nil {
-			return e
-		}
-		choices := map[string]bool{}
-		for _, d := range p.Directions {
-			choices[d.Name] = true
-		}
-		seen := map[string]bool{}
-		for _, d := range req.Selected {
-			if !choices[d] || seen[d] {
-				return errors.New("请选择已调研的方向；新方向需先补充调研")
-			}
-			seen[d] = true
-		}
-		var input ReviewWorkflowInput
-		if e := json.Unmarshal(record.ResultJSON, &input); e != nil {
-			return e
-		}
-		input.UserInstruction = p.UserInstruction
-		for _, answer := range p.AnsweredQuestions {
-			input.UserInstruction += "\n补充：" + answer.Question + "：" + answer.Answer
-		}
-		input.CandidateDirections = []string{}
-		for _, d := range p.Directions {
-			input.CandidateDirections = append(input.CandidateDirections, d.Name)
-		}
-		input.SelectedDirections = req.Selected
-		p.Selected = req.Selected
-		p.ExecutionStartedAt = nil
-		p.StepStartedAt = nil
-		confirmed := time.Now().UTC()
-		p.ConfirmedAt = &confirmed
-		if e := taskcenter.ResolveAcademicExpansionNotifications(r.Context(), tx, record.ID, record.PreparationRevision); e != nil {
-			return e
-		}
-		p.RequestKey = "confirm:" + req.RequestKey
-		if record.ConversationID == "" {
-			id, e := newAcademicConversation(tx, user, record.DatasetID, "论文扩展："+truncateTitle(record.Title), "expansion")
-			if e != nil {
-				return e
-			}
-			record.ConversationID = id
-		}
-		if req.BudgetMode != "" {
-			record.BudgetMode = req.BudgetMode
-		}
-		record.Status = "pending"
-		if e := tx.Model(&record).Updates(map[string]any{"conversation_id": record.ConversationID, "status": record.Status, "result_json": marshal(input), "preparation_json": marshal(p), "budget_mode": record.BudgetMode, "updated_at": time.Now().UTC()}).Error; e != nil {
-			return e
-		}
-		return enqueueAcademicChat(r.Context(), tx, user, record.ConversationID, "paper_expansion", "请按照已确认范围执行四步论文拓展。准备成果已保存，请先读取任务上下文。", fmt.Sprintf("confirm:%d:%s", req.Revision, req.RequestKey))
+		return confirmPreparedExpansion(r.Context(), tx, &record, req.Selected, req.RequestKey, false)
 	})
 	if err != nil {
 		replyError(w, 409, "CONFIRM_FAILED", err.Error())
@@ -419,6 +396,69 @@ func ConfirmExpansion(w http.ResponseWriter, r *http.Request) {
 	}
 	common.ReplyJSON(w, map[string]any{"expansion_id": record.ID, "conversation_id": record.ConversationID, "status": record.Status})
 }
+func confirmPreparedExpansion(ctx context.Context, tx *gorm.DB, record *orm.AcademicExpansion, selected []string, requestKey string, automatic bool) error {
+	var p expansionPreparation
+	if err := json.Unmarshal(record.PreparationJSON, &p); err != nil {
+		return err
+	}
+	if record.Status != "awaiting_confirmation" {
+		return errors.New("请先完成初步调研和待补充问题")
+	}
+	if len(p.Questions) > 0 {
+		return errors.New("请先回答待补充问题")
+	}
+	if e := validatePreparation(tx, *record, p); e != nil {
+		return e
+	}
+	choices := map[string]bool{}
+	for _, d := range p.Directions {
+		choices[d.Name] = true
+	}
+	seen := map[string]bool{}
+	for _, d := range selected {
+		if !choices[d] || seen[d] {
+			return errors.New("请选择已调研的方向；新方向需先补充调研")
+		}
+		seen[d] = true
+	}
+	var input ReviewWorkflowInput
+	if e := json.Unmarshal(record.ResultJSON, &input); e != nil {
+		return e
+	}
+	input.UserInstruction = p.UserInstruction
+	for _, answer := range p.AnsweredQuestions {
+		input.UserInstruction += "\n补充：" + answer.Question + "：" + answer.Answer
+	}
+	input.CandidateDirections = []string{}
+	for _, d := range p.Directions {
+		input.CandidateDirections = append(input.CandidateDirections, d.Name)
+	}
+	input.SelectedDirections = selected
+	p.Selected = selected
+	p.ExecutionStartedAt = nil
+	p.AutoConfirmed = automatic
+	confirmed := time.Now().UTC()
+	p.ConfirmedAt = &confirmed
+	if e := taskcenter.ResolveAcademicExpansionNotifications(ctx, tx, record.ID, record.PreparationRevision); e != nil {
+		return e
+	}
+	p.RequestKey = "confirm:" + requestKey
+	if record.ConversationID == "" {
+		id, e := newAcademicConversation(tx, record.UserID, record.DatasetID, "论文扩展："+truncateTitle(record.Title), "expansion")
+		if e != nil {
+			return e
+		}
+		record.ConversationID = id
+	}
+	record.Status = "pending"
+	record.ResultJSON = marshal(input)
+	record.PreparationJSON = marshal(p)
+	if e := tx.Model(record).Updates(map[string]any{"conversation_id": record.ConversationID, "status": record.Status, "result_json": record.ResultJSON, "preparation_json": record.PreparationJSON, "updated_at": time.Now().UTC()}).Error; e != nil {
+		return e
+	}
+	return enqueueAcademicChat(ctx, tx, record.UserID, record.ConversationID, "paper_expansion", "请按照已确认范围执行四步论文拓展。准备成果已保存，请先读取任务上下文。", fmt.Sprintf("confirm:%d:%s", record.PreparationRevision, requestKey))
+}
+
 func ExpansionCapabilities(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireUser(w, r)
 	if !ok {
@@ -440,7 +480,7 @@ func ExpansionCapabilities(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "CONFIG_UNAVAILABLE", "无法读取 OpenAlex 配置")
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"openalex_key": key != "", "sciverse": academic["sciverse"] != nil, "web_search": len(web) > 0, "budgets": map[string]expansionBudget{"fast": {120, 600}, "balanced": {180, 1200}, "deep": {300, 1800}}})
+	common.ReplyJSON(w, map[string]any{"openalex_key": key != "", "sciverse": academic["sciverse"] != nil, "web_search": len(web) > 0})
 }
 
 func configureAcademicStep(ctx context.Context, db *gorm.DB, user, conversation string, params *workflow.WorkflowStepParams) error {
@@ -470,51 +510,20 @@ func configureAcademicStep(ctx context.Context, db *gorm.DB, user, conversation 
 	now := time.Now().UTC()
 	if preparation.ExecutionStartedAt == nil || record.Status == "completed" {
 		preparation.ExecutionStartedAt = &now
-		preparation.StepStartedAt = map[string]time.Time{}
 	}
-	if preparation.StepStartedAt == nil {
-		preparation.StepStartedAt = map[string]time.Time{}
-	}
-	start, ok := preparation.StepStartedAt[params.StepID]
+	depth, ok := depthFor(record.BudgetMode)
 	if !ok {
-		start = now
-		preparation.StepStartedAt[params.StepID] = start
+		return errors.New("invalid research depth")
 	}
-	budget, _ := budgetFor(record.BudgetMode)
-	fraction := map[string]int{"prepare_plan": 10, "expand_and_screen": 40, "analyze_relations": 40, "compose_result": 10}[params.StepID]
-	if fraction == 0 {
+	limit, ok := depth.Steps[params.StepID]
+	if !ok {
 		return errors.New("unknown paper research step")
-	}
-	seconds := int(time.Until(start.Add(time.Duration(budget.Formal*fraction/100) * time.Second)).Seconds())
-	total := int(time.Until(preparation.ExecutionStartedAt.Add(time.Duration(budget.Formal) * time.Second)).Seconds())
-	if seconds > total {
-		seconds = total
-	}
-	if seconds < 1 {
-		return errors.New("本轮执行预算已用尽，请在拓展记录中重试并确认预算")
 	}
 	limits := map[string]graphengine.ExecutionLimit{}
 	for key, value := range params.Runtime.ExecutionLimits {
 		limits[key] = value
 	}
-	limit := limits[params.StepID]
-	limit.Timeout = seconds
 	limits[params.StepID] = limit
 	params.Runtime.ExecutionLimits = limits
 	return db.Model(&record).Updates(map[string]any{"preparation_json": marshal(preparation), "status": "running"}).Error
-}
-
-func expansionContentDeadline(record orm.AcademicExpansion) *time.Time {
-	var p expansionPreparation
-	_ = json.Unmarshal(record.PreparationJSON, &p)
-	budget, _ := budgetFor(record.BudgetMode)
-	if record.Status == "preparing" && p.StartedAt != nil {
-		deadline := p.StartedAt.Add(time.Duration(budget.Preparation) * time.Second)
-		return &deadline
-	}
-	if p.ExecutionStartedAt != nil {
-		deadline := p.ExecutionStartedAt.Add(time.Duration(budget.Formal) * time.Second)
-		return &deadline
-	}
-	return nil
 }

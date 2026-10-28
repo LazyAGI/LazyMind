@@ -60,16 +60,9 @@ def _resolve(paper_ids):
 
 
 def _call(method, path, payload=None):
-    import time
-    from lazymind.chat.engine.subagent.context import get_context
-    context = get_context()
-    deadline = getattr(context, 'execution_deadline', None)
-    remaining = deadline - time.monotonic() if deadline is not None else 90
-    if path in {'/papers:search', '/paper-contents:read'} and remaining < 30:
-        return {'status': 'budget_exhausted', 'message': '停止补查，保留有效部分成果并说明覆盖缺口。'}
     api = _client()
     response = api.transport.request(method, api.base_url + '/academic' + path,
-                                     headers=api._headers(), json=payload, timeout=max(1, min(90, remaining)))
+                                     headers=api._headers(), json=payload, timeout=90)
     response.raise_for_status()
     data = response.json()
     return data.get('data', data)

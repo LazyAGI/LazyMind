@@ -52,6 +52,7 @@ export interface ExpansionPreparation {
  questions: Array<{ id: string; question: string; options?: string[] }>;
  directions: Array<{ name: string; question: string; reason: string; difference: string; paper_ids: string[]; papers?: PaperRef[] }>;
  selected_directions: string[];
+ auto_confirmed?: boolean;
 }
 export interface Expansion {
   preparation?: ExpansionPreparation;
@@ -154,13 +155,13 @@ export async function retryPaperContent(id: string, expansionId: string, silentE
 
 export async function submitPreparation(id: string, input: {
  action: 'answer' | 'revise' | 'retry'; revision: number; request_key: string;
- answers?: Record<string, string>; user_instruction?: string; budget_mode?: BudgetMode;
+ answers?: Record<string, string>; user_instruction?: string;
 }) {
  const response = await axiosInstance.post(`${core}/expansions/${encodeURIComponent(id)}/preparation`, input);
  return unwrap<{ expansion_id: string; revision: number; status: string }>(response.data);
 }
 export async function confirmExpansion(id: string, input: {
- revision: number; request_key: string; selected_directions: string[]; budget_mode: BudgetMode;
+ revision: number; request_key: string; selected_directions: string[];
 }) {
  const response = await axiosInstance.post(`${core}/expansions/${encodeURIComponent(id)}:confirm`, input);
  return unwrap<{ conversation_id: string; expansion_id: string }>(response.data);

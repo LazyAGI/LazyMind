@@ -73,7 +73,11 @@ func internalAcademic(ctx context.Context, action string, input, output any) err
 	if endpoint == "" {
 		endpoint = "http://chat:8046"
 	}
-	return common.ApiPost(ctx, endpoint+"/internal/academic/"+action, input, map[string]string{"X-LazyMind-Internal-Token": token}, output, 10*time.Minute)
+	timeout := 10 * time.Minute
+	if action == "preparation:run" {
+		timeout = 0
+	}
+	return common.ApiPost(ctx, endpoint+"/internal/academic/"+action, input, map[string]string{"X-LazyMind-Internal-Token": token}, output, timeout)
 }
 func init() { asyncjob.Register("academic.paper_content", runPaperContent) }
 
@@ -82,32 +86,7 @@ func ensurePaperContent(ctx context.Context, db *gorm.DB, userID, paperID string
 		return orm.AcademicPaperContent{}, errors.New("paper source context required")
 	}
 	if row, err := findSourceContent(db.WithContext(ctx), userID, source); err == nil {
-		if row.Status == "unavailable" && row.Error == "任务取文执行预算已用尽" && source.Deadline != nil && source.Deadline.After(time.Now()) {
-			err = db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-				var previous orm.AsyncJob
-				if e := tx.Where("job_type=? AND idempotency_key=?", "academic.paper_content", row.ID).Take(&previous).Error; e != nil {
-					return e
-				}
-				if previous.Status != string(asyncjob.StatusFailed) && previous.Status != string(asyncjob.StatusSucceeded) && previous.Status != string(asyncjob.StatusCanceled) {
-					return nil
-				}
-				var payload struct {
-					Source paperSource `json:"source"`
-				}
-				if e := json.Unmarshal(previous.PayloadJSON, &payload); e != nil {
-					return e
-				}
-				if payload.Source.Deadline == nil || !source.Deadline.After(*payload.Source.Deadline) {
-					return nil
-				}
-				if e := tx.Model(&row).Where("status='unavailable'").Updates(map[string]any{"status": "processing", "error": "", "quality_json": marshal(contentQuality{})}).Error; e != nil {
-					return e
-				}
-				_, e := asyncjob.EnqueueInTransaction(ctx, tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: userID, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3, SkipSucceeded: true})
-				row.Status = "processing"
-				return e
-			})
-		}
+
 		return row, err
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return row, err
@@ -146,25 +125,15 @@ func runPaperContent(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil || payload.Source.DatasetID == "" {
 		return asyncjob.Result{Permanent: true}, errors.New("legacy fulltext job requires a new expansion-context read")
 	}
-	readCtx := ctx
-	cancel := func() {}
-	if payload.Source.Deadline != nil {
-		readCtx, cancel = context.WithDeadline(ctx, *payload.Source.Deadline)
-	}
-	defer cancel()
-	pages, kind, hash, version, err := readKnownPaper(readCtx, job.CreateUserID, payload.Source, row)
-	budgetExceeded := payload.Source.Deadline != nil && !time.Now().Before(*payload.Source.Deadline)
+	pages, kind, hash, version, err := readKnownPaper(ctx, job.CreateUserID, payload.Source, row)
 
 	if err != nil {
 		status := "processing"
 		if job.AttemptCount >= job.MaxAttempts {
 			status = "failed"
 		}
-		if errors.Is(err, errFulltextUnavailable) || budgetExceeded {
+		if errors.Is(err, errFulltextUnavailable) {
 			status = "unavailable"
-		}
-		if budgetExceeded {
-			err = errors.New("任务取文执行预算已用尽")
 		}
 		var latest orm.AcademicPaperContent
 		if e := db.Where("id=?", row.ID).Take(&latest).Error; e != nil {
@@ -178,7 +147,7 @@ func runPaperContent(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 		if updateErr := db.Model(&row).Updates(map[string]any{"status": status, "quality_json": marshal(quality), "source_hash": firstNonEmpty(hash, acquisition.PDFHash), "error": err.Error(), "updated_at": time.Now().UTC()}).Error; updateErr != nil {
 			return asyncjob.Result{}, updateErr
 		}
-		return asyncjob.Result{Permanent: errors.Is(err, errFulltextUnavailable) || budgetExceeded}, err
+		return asyncjob.Result{Permanent: errors.Is(err, errFulltextUnavailable)}, err
 	}
 	data, err := json.Marshal(pages)
 	if err != nil {
@@ -423,9 +392,6 @@ func ReadPaperContent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		source, err = expansionSource(store.DB(), record, req.PaperID)
-		if record.Status == "preparing" || record.Status == "running" || record.Status == "pending" {
-			source.Deadline = expansionContentDeadline(record)
-		}
 		if err != nil {
 			replyError(w, 422, "INVALID_SELECTION", err.Error())
 			return

@@ -1,7 +1,7 @@
 id: paper_expansion
 name: 论文自动拓展
 description: 承接记录中已确认的研究范围，四步自动检索、筛选、分层阅读和证据核验。临时阅读不自动入库。
-when_to_use: 仅在用户已经于拓展记录确认方向后执行；继续同一范围或调整结果表达沿用原记录。
+when_to_use: 仅在拓展记录已经确定方向后执行（单一方向自动确定，多方向由用户确认）；继续同一范围或调整结果表达沿用原记录。
 runtime:
   transactional_outputs: true
   publisher_owned_slots:
@@ -22,23 +22,19 @@ runtime:
   execution_limits:
     prepare_plan:
       rounds: 12
-      timeout: 120
       tool_calls:
         academic_search_papers: 6
     expand_and_screen:
       rounds: 32
-      timeout: 480
       tool_calls:
         academic_search_papers: 24
     analyze_relations:
       rounds: 32
-      timeout: 480
       tool_calls:
         academic_read_paper: 48
         academic_submit_relations: 2
     compose_result:
       rounds: 8
-      timeout: 120
   post_step_checks:
   - step_id: prepare_plan
     tool: academic_validate_stage
