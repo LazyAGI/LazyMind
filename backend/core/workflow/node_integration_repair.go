@@ -21,13 +21,18 @@ import (
 
 var errRepairStaleDraft = errors.New("repair stale draft")
 
-// Once conversion is complete, structural edits belong to the current workflow,
-// not to the original Skill. Apply the same contract after a page reload too.
-func effectiveWorkflowRepairTarget(draft orm.WorkflowDraft, target string) string {
-	if draft.SourceType == "skill" && draft.GenerateStatus == generateStatusDone && (target == "statemachine" || target == "full") {
-		return "node_integration"
+// Scope and preservation are independent: both flow and full repairs keep the
+// user's current graph after conversion, including after a page reload.
+func shouldPreserveCurrentWorkflow(draft orm.WorkflowDraft, target string, edit *algo.WorkflowEditContext) bool {
+	if target == "node_integration" { // Persisted jobs and older clients.
+		return true
 	}
-	return target
+	return (target == "statemachine" || target == "full") &&
+		((draft.SourceType == "skill" && draft.GenerateStatus == generateStatusDone) || (edit != nil && len(edit.NodeIDs) > 0))
+}
+
+func isCurrentWorkflowRepair(payload workflowDraftRepairPayload) bool {
+	return payload.PreserveCurrentWorkflow || payload.Target == "node_integration"
 }
 
 // Call inside a transaction. Admission holds the same draft lock and retires
@@ -216,7 +221,8 @@ func handleNodeIntegrationRepair(ctx context.Context, db *gorm.DB, draft orm.Wor
 	base := workflowRepairSnapshot{WorkflowYAML: draft.WorkflowYAMLContent, StateYAML: draft.StateYAMLContent, ScenarioMD: draft.ScenarioContent, Scripts: scriptsFromDraft(draft.ScriptsContent)}
 	resp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
 		WorkflowYAML: base.WorkflowYAML, StateYAML: base.StateYAML, ScenarioMD: base.ScenarioMD, Scripts: base.Scripts,
-		RepairHint: payload.RepairHint, Diagnostics: payload.Diagnostics, Target: "node_integration", EditContext: payload.EditContext, LLMConfig: llmConfig,
+		RepairHint: payload.RepairHint, Diagnostics: payload.Diagnostics, Target: payload.Target, EditContext: payload.EditContext, LLMConfig: llmConfig,
+		PreserveCurrentWorkflow: true,
 	})
 	var diagnostics []repairDiagnostic
 	candidate := base

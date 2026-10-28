@@ -376,16 +376,17 @@ type WorkflowEditContext struct {
 
 // RepairStateMachineRequest is the request body for the repair endpoint.
 type RepairStateMachineRequest struct {
-	WorkflowYAML string               `json:"workflow_yaml"`
-	StateYAML    string               `json:"state_yaml"`
-	RepairHint   string               `json:"repair_hint,omitempty"`
-	Warnings     []string             `json:"warnings,omitempty"`
-	Diagnostics  []map[string]any     `json:"diagnostics,omitempty"`
-	Target       string               `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
-	ScenarioMD   string               `json:"scenario_md,omitempty"`
-	Scripts      map[string]string    `json:"scripts,omitempty"`
-	LLMConfig    map[string]any       `json:"llm_config"`
-	EditContext  *WorkflowEditContext `json:"edit_context,omitempty"`
+	WorkflowYAML            string               `json:"workflow_yaml"`
+	StateYAML               string               `json:"state_yaml"`
+	RepairHint              string               `json:"repair_hint,omitempty"`
+	Warnings                []string             `json:"warnings,omitempty"`
+	Diagnostics             []map[string]any     `json:"diagnostics,omitempty"`
+	Target                  string               `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
+	ScenarioMD              string               `json:"scenario_md,omitempty"`
+	Scripts                 map[string]string    `json:"scripts,omitempty"`
+	LLMConfig               map[string]any       `json:"llm_config"`
+	EditContext             *WorkflowEditContext `json:"edit_context,omitempty"`
+	PreserveCurrentWorkflow bool                 `json:"preserve_current_workflow,omitempty"`
 }
 
 // RepairStateMachineResponse is the response body from the repair endpoint.
@@ -418,15 +419,16 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 		files = append(files, llmTaskFile{Path: path, Content: content, ContentType: "text/x-python"})
 	}
 	raw, err := callWorkflowLLMTask(ctx, "workflow.repair", "Repair only the requested Workflow target. For each changed file return either precise edits or final full content, not both.", map[string]any{
-		"workflow_yaml": req.WorkflowYAML,
-		"state_yaml":    req.StateYAML,
-		"repair_hint":   req.RepairHint,
-		"warnings":      req.Warnings,
-		"diagnostics":   req.Diagnostics,
-		"target":        req.Target,
-		"scenario_md":   req.ScenarioMD,
-		"scripts":       req.Scripts,
-		"edit_context":  req.EditContext,
+		"workflow_yaml":             req.WorkflowYAML,
+		"state_yaml":                req.StateYAML,
+		"repair_hint":               req.RepairHint,
+		"warnings":                  req.Warnings,
+		"diagnostics":               req.Diagnostics,
+		"target":                    req.Target,
+		"scenario_md":               req.ScenarioMD,
+		"scripts":                   req.Scripts,
+		"edit_context":              req.EditContext,
+		"preserve_current_workflow": req.PreserveCurrentWorkflow,
 	}, files, req.LLMConfig)
 	if err != nil {
 		return nil, err

@@ -100,18 +100,19 @@ type workflowDraftGeneratePayload struct {
 }
 
 type workflowDraftRepairPayload struct {
-	DraftID      string                    `json:"draft_id"`
-	UserID       string                    `json:"user_id"`
-	Target       string                    `json:"target"`      // 'statemachine' | 'ui' | 'scenario'
-	RepairHint   string                    `json:"repair_hint"` // optional
-	Warnings     []string                  `json:"warnings,omitempty"`
-	Diagnostics  []map[string]any          `json:"diagnostics,omitempty"`
-	PrevStatus   string                    `json:"prev_status"`
-	LLMConfig    map[string]any            `json:"llm_config,omitempty"`
-	DraftVersion int                       `json:"draft_version"`
-	Mode         string                    `json:"mode,omitempty"`
-	RepairRunID  string                    `json:"repair_run_id,omitempty"`
-	EditContext  *algo.WorkflowEditContext `json:"edit_context,omitempty"`
+	DraftID                 string                    `json:"draft_id"`
+	UserID                  string                    `json:"user_id"`
+	Target                  string                    `json:"target"`      // 'statemachine' | 'ui' | 'scenario'
+	RepairHint              string                    `json:"repair_hint"` // optional
+	Warnings                []string                  `json:"warnings,omitempty"`
+	Diagnostics             []map[string]any          `json:"diagnostics,omitempty"`
+	PrevStatus              string                    `json:"prev_status"`
+	LLMConfig               map[string]any            `json:"llm_config,omitempty"`
+	DraftVersion            int                       `json:"draft_version"`
+	Mode                    string                    `json:"mode,omitempty"`
+	RepairRunID             string                    `json:"repair_run_id,omitempty"`
+	EditContext             *algo.WorkflowEditContext `json:"edit_context,omitempty"`
+	PreserveCurrentWorkflow bool                      `json:"preserve_current_workflow,omitempty"`
 }
 
 type workflowRepairSnapshot struct {
@@ -1506,12 +1507,12 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	if db == nil {
 		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("db unavailable")
 	}
-	if payload.Target != "node_integration" && payload.RepairRunID != "" {
+	if !isCurrentWorkflowRepair(payload) && payload.RepairRunID != "" {
 		_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "repairing", "updated_at": time.Now().UTC()}).Error
 	}
 
 	var draft orm.WorkflowDraft
-	if payload.Target == "node_integration" {
+	if isCurrentWorkflowRepair(payload) {
 		err := db.Transaction(func(tx *gorm.DB) error {
 			current, owns, err := lockWorkflowRepairOwner(tx, payload)
 			if err != nil {
@@ -1571,7 +1572,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		}
 	}
 
-	if payload.Target == "node_integration" {
+	if isCurrentWorkflowRepair(payload) {
 		return handleNodeIntegrationRepair(ctx, db, draft, payload, llmConfig)
 	}
 	if payload.Target == "scripts" || payload.Target == "full" {

@@ -16,9 +16,14 @@ import './index.scss';
 
 const POLL_INTERVAL_MS = 3000;
 
-function effectiveRepairTarget(draft: WorkflowDraftRecord | null, target: RepairTarget): RepairTarget {
-  return draft?.source_type === 'skill' && draft.generate_status === 'done' && (target === 'statemachine' || target === 'full')
-    ? 'node_integration' : target;
+function displayedRepairTarget(target: RepairTarget): RepairTarget {
+  // Existing repair records can still refer to the former specialized target.
+  return target === 'node_integration' ? 'statemachine' : target;
+}
+
+function preservesCurrentWorkflow(draft: WorkflowDraftRecord | null, target: RepairTarget, context: RepairContext): boolean {
+  return (target === 'statemachine' || target === 'full') &&
+    ((draft?.source_type === 'skill' && draft.generate_status === 'done') || context.node_ids.length > 0);
 }
 
 function repairRunErrors(run: WorkflowRepairRun): ValidationError[] {
@@ -172,8 +177,8 @@ function repairScopeForTarget(target: RepairTarget, plannedFiles: string[]) {
       };
     case 'statemachine':
       return {
-        primary: planned.filter((item) => item !== '说明文档' && item !== '脚本与工具代码'),
-        linked: [] as string[],
+        primary: planned.filter((item) => !['说明文档', '脚本与工具代码', '界面展示配置'].includes(item)),
+        linked: planned.filter((item) => ['说明文档', '脚本与工具代码', '界面展示配置'].includes(item)),
       };
     case 'scenario':
       return {
@@ -185,8 +190,6 @@ function repairScopeForTarget(target: RepairTarget, plannedFiles: string[]) {
         primary: planned.filter((item) => item === '脚本与工具代码' || item === '工具声明'),
         linked: planned.filter((item) => item !== '脚本与工具代码' && item !== '工具声明'),
       };
-    case 'node_integration':
-      return { primary: ['执行流程与步骤配置', '基础结构与素材定义', '说明文档'], linked: ['界面展示配置', '脚本与工具代码'] };
     case 'full':
       return {
         primary: planned,
@@ -685,11 +688,12 @@ export default function WorkflowDetailPage() {
     if (!workflowId) return;
     const hintSnapshot = repairHint.trim();
     const errorsSnapshot = repairValidationErrors;
-    const targetSnapshot = effectiveRepairTarget(draftRef.current, repairTarget);
+    const targetSnapshot = displayedRepairTarget(repairTarget);
+    const currentWorkflow = preservesCurrentWorkflow(draftRef.current, targetSnapshot, repairContext);
     setRepairRequestError('');
     try {
       let fullHint = hintSnapshot;
-      if (errorsSnapshot.length > 0 && targetSnapshot !== 'node_integration') {
+      if (errorsSnapshot.length > 0 && !currentWorkflow) {
         const errText = JSON.stringify(errorsSnapshot.map((e) => ({
           code: e.code,
           path: e.path,
@@ -712,10 +716,10 @@ export default function WorkflowDetailPage() {
       const updated = await repairWorkflowDraft(workflowId, {
         repair_hint: fullHint,
         target: targetSnapshot,
-        mode: targetSnapshot === 'node_integration' ? 'workflow_local' : draftRef.current?.source_analysis_id ? 'source_aware' : 'workflow_local',
+        mode: currentWorkflow ? 'workflow_local' : draftRef.current?.source_analysis_id ? 'source_aware' : 'workflow_local',
         draft_version: draftRef.current?.version || 0,
         source_analysis_id: draftRef.current?.source_analysis_id || undefined,
-        edit_context: targetSnapshot === 'node_integration' ? repairContext : undefined,
+        edit_context: targetSnapshot === 'statemachine' || targetSnapshot === 'full' ? repairContext : undefined,
       });
       setDraft(updated);
       startPolling();
@@ -770,8 +774,9 @@ export default function WorkflowDetailPage() {
     setRepairPreviewError('');
     previewWorkflowRepair(workflowId, {
       target: repairTarget,
-      mode: repairTarget === 'node_integration' ? 'workflow_local' : draft?.source_analysis_id ? 'source_aware' : 'workflow_local',
+      mode: preservesCurrentWorkflow(draftRef.current, repairTarget, repairContext) ? 'workflow_local' : draft?.source_analysis_id ? 'source_aware' : 'workflow_local',
       draft_version: draftRef.current?.version,
+      edit_context: repairTarget === 'statemachine' || repairTarget === 'full' ? repairContext : undefined,
     }).then((preview) => {
       if (repairPreviewRequestRef.current === requestId) setRepairPreview(preview);
     }).catch((error: unknown) => {
@@ -786,14 +791,14 @@ export default function WorkflowDetailPage() {
     return () => {
       if (repairPreviewRequestRef.current === requestId) repairPreviewRequestRef.current += 1;
     };
-  }, [workflowId, repairModalOpen, repairSubmitting, repairPreviewAttempt, repairTarget, draft?.source_analysis_id, draft?.generate_status, t]);
+  }, [workflowId, repairModalOpen, repairSubmitting, repairPreviewAttempt, repairTarget, repairContext, draft?.source_analysis_id, draft?.generate_status, t]);
 
   const handleOpenRepair = useCallback((target: RepairTarget, validationErrors?: ValidationError[], context?: RepairContext) => {
     setRepairPreview(null);
     setRepairPreviewError('');
     setRepairRequestError('');
     setRepairContext(context ?? { node_ids: [] });
-    setRepairTarget(effectiveRepairTarget(draftRef.current, target));
+    setRepairTarget(displayedRepairTarget(target));
     setRepairValidationErrors(validationErrors ?? []);
     setRepairModalOpen(true);
   }, []);
@@ -1033,12 +1038,11 @@ export default function WorkflowDetailPage() {
     setRegenerateModalOpen(true);
   };
   const repairTargetOptions: Array<{ value: RepairTarget; label: string; description: string }> = [
-    { value: 'node_integration', label: t('selfEvolutionRun.workflowNodeIntegration'), description: t('selfEvolutionRun.workflowNodeIntegrationDescription') },
-    { value: 'statemachine', label: '执行流程', description: '修复步骤顺序、连线、输入输出依赖，以及这些内容需要的素材定义。' },
+    { value: 'statemachine', label: '执行流程', description: t('selfEvolutionRun.workflowDetailRepairFlowDescription') },
     { value: 'ui', label: '界面展示', description: '修复素材在界面里的展示方式；只在引用不一致时同步相关素材。' },
     { value: 'scenario', label: '说明文档', description: '补全或修正每个步骤的说明，不主动改执行流程。' },
     { value: 'scripts', label: '脚本与工具', description: '修复工具脚本及工具声明；只在调用关系不一致时同步相关步骤配置。' },
-    { value: 'full', label: '完整修复', description: '整体修复结构、执行流程、说明文档、脚本与界面展示。' },
+    { value: 'full', label: '完整修复', description: t('selfEvolutionRun.workflowDetailRepairFullDescription') },
   ];
   const repairTargetMeta = repairTargetOptions.find((option) => option.value === repairTarget) ?? repairTargetOptions[0];
   const repairScope = repairScopeForTarget(repairTarget, repairPreview?.planned_files ?? []);
@@ -1489,15 +1493,15 @@ export default function WorkflowDetailPage() {
             {repairPreviewError && <Alert type="error" showIcon message={repairPreviewError} />}
             <Select
               value={repairTarget}
-              onChange={(value) => setRepairTarget(effectiveRepairTarget(draftRef.current, value))}
+              onChange={(value) => setRepairTarget(value)}
               style={{ width: '100%', marginBottom: 12 }}
-              options={repairTargetOptions.filter((option) => effectiveRepairTarget(draft, option.value) === option.value).map((option) => ({ value: option.value, label: option.label }))}
+              options={repairTargetOptions.map((option) => ({ value: option.value, label: option.label }))}
             />
             <div className="workflow-repair-target-summary">
               <div className="workflow-repair-target-title">{repairTargetMeta.label}</div>
               <div className="workflow-repair-target-description">{repairTargetMeta.description}</div>
             </div>
-            {(repairTarget === 'statemachine' || repairTarget === 'node_integration' || repairTarget === 'full') && repairValidationErrors.length > 0 && (
+            {(repairTarget === 'statemachine' || repairTarget === 'full') && repairValidationErrors.length > 0 && (
               <>
                 <p style={{ marginBottom: 6 }}>{t('selfEvolutionRun.workflowDetailRepairValidationBasis')}</p>
                 <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, fontSize: 13, color: 'var(--color-text-secondary, #888)' }}>
@@ -1545,7 +1549,7 @@ export default function WorkflowDetailPage() {
             )}
             <p style={{ marginBottom: 8 }}>{t('selfEvolutionRun.workflowDetailRepairHintLabel')}</p>
             <Input.TextArea
-              placeholder={repairTarget === 'node_integration' ? t('selfEvolutionRun.workflowNodeIntegrationPlaceholder') : repairTarget === 'scenario' ? t('selfEvolutionRun.workflowDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.workflowDetailRepairStatePlaceholder')}
+              placeholder={repairTarget === 'statemachine' ? t('selfEvolutionRun.workflowNodeIntegrationPlaceholder') : repairTarget === 'scenario' ? t('selfEvolutionRun.workflowDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.workflowDetailRepairStatePlaceholder')}
               value={repairHint}
               onChange={(e) => setRepairHint(e.target.value)}
               rows={3}

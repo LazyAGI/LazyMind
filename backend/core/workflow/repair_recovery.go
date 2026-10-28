@@ -39,7 +39,7 @@ func StartWorkflowRepairRecovery(ctx context.Context, db *gorm.DB) <-chan struct
 func recoverWorkflowRepairs(ctx context.Context, db *gorm.DB) error {
 	db = db.WithContext(ctx)
 	var runs []orm.WorkflowRepairRun
-	if err := db.Where("target = ? AND status IN ? AND draft_id IN (?)", "node_integration", []string{"queued", "repairing"},
+	if err := db.Where("target IN ? AND status IN ? AND draft_id IN (?)", []string{"node_integration", "statemachine", "full"}, []string{"queued", "repairing"},
 		db.Model(&orm.WorkflowDraft{}).Select("id").Where("generate_status = ? AND deleted_at IS NULL", generateStatusRepairing)).Find(&runs).Error; err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func recoverWorkflowRepairs(ctx context.Context, db *gorm.DB) error {
 		if err := json.Unmarshal(jobs[0].PayloadJSON, &payload); err != nil {
 			return fmt.Errorf("decode interrupted workflow repair %s: %w", jobs[0].ID, err)
 		}
-		if payload.RepairRunID != run.ID || payload.DraftID != run.DraftID {
+		if !isCurrentWorkflowRepair(payload) || payload.RepairRunID != run.ID || payload.DraftID != run.DraftID {
 			continue
 		}
 		if err := finishNodeIntegrationFailure(db, payload, "failed", "E_REPAIR_INTERRUPTED", "后台修复任务已中断，本次没有应用修改。草稿已恢复编辑，请重新修复。"); err != nil {

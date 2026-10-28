@@ -91,14 +91,15 @@ def test_workflow_task_loads_builtin_skill_and_returns_json(monkeypatch):
     assert 'Return schema: {"design_brief":"markdown"}' in model.prompts[0]
 
 
-def test_node_integration_repair_preserves_intent_and_reports_missing_information(monkeypatch):
+@pytest.mark.parametrize('target,preserve', [('node_integration', False), ('statemachine', True), ('full', True)])
+def test_node_integration_repair_preserves_intent_and_reports_missing_information(monkeypatch, target, preserve):
     model = _JSONModel({'needs_input': 'Where should rejected reviews go?', 'edits': []})
     monkeypatch.setattr(llm_task, 'inject_model_config', lambda _config: None)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **_kwargs: model)
     result = run_llm_task(LLMTaskRequest(
         task_type='workflow.repair',
         input=LLMTaskInput(data={
-            'target': 'node_integration', 'edit_context': {'node_ids': ['review']},
+            'target': target, 'preserve_current_workflow': preserve, 'edit_context': {'node_ids': ['review']},
             'repair_hint': 'Review before export',
         }),
     ))
@@ -107,25 +108,48 @@ def test_node_integration_repair_preserves_intent_and_reports_missing_informatio
     assert 'current saved files and user edit intent take precedence' in model.prompts[0]
     assert 'Never delete or skip a node' in model.prompts[0]
     assert 'Review before export' in model.prompts[0]
+    if target == 'full':
+        assert 'Scope: full repair. Inspect ALL current workflow files' in model.prompts[0]
+        assert 'not only problems involving newly added nodes' in model.prompts[0]
+        assert 'Scope: execution flow repair' not in model.prompts[0]
+    else:
+        assert 'Scope: execution flow repair' in model.prompts[0]
+        assert 'scripts ONLY where needed by these flow changes' in model.prompts[0]
+        assert 'Scope: full repair' not in model.prompts[0]
 
 
+@pytest.mark.parametrize('target,preserve', [('node_integration', False), ('statemachine', True), ('full', True)])
 @pytest.mark.parametrize('path,content,invalid', [
     ('scripts/review.py', 'def run():\n    return True\n', False),
     ('scripts/review.py', 'raise AssertionError("must not execute")', False),
     ('scripts/review.py', 'def run(:\n', True),
     ('scripts/../review.py', 'print(1)', True),
 ])
-def test_node_integration_checks_scripts_without_running_them(monkeypatch, path, content, invalid):
+def test_node_integration_checks_scripts_without_running_them(monkeypatch, path, content, invalid, target, preserve):
     model = _JSONModel({'scripts': {path: content}})
     monkeypatch.setattr(llm_task, 'inject_model_config', lambda _config: None)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **_kwargs: model)
     result = run_llm_task(LLMTaskRequest(
-        task_type='workflow.repair', input=LLMTaskInput(data={'target': 'node_integration'}),
+        task_type='workflow.repair', input=LLMTaskInput(data={'target': target, 'preserve_current_workflow': preserve}),
     ))
     assert result.status == 'succeeded'
     assert bool(result.output['script_errors']) is invalid
     if invalid:
         assert result.output['script_errors'][0]['path'] == path
+
+
+@pytest.mark.parametrize('target', ['ui', 'scenario', 'scripts', 'statemachine', 'full'])
+def test_other_repair_scopes_do_not_implicitly_enable_current_graph_policy(monkeypatch, target):
+    model = _JSONModel({})
+    monkeypatch.setattr(llm_task, 'inject_model_config', lambda _config: None)
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_kwargs: model)
+    result = run_llm_task(LLMTaskRequest(
+        task_type='workflow.repair', input=LLMTaskInput(data={'target': target}),
+    ))
+    assert result.status == 'succeeded'
+    assert 'Scope: full repair' not in model.prompts[0]
+    assert 'Scope: execution flow repair' not in model.prompts[0]
+    assert 'script_errors' not in result.output
 
 
 def test_workflow_repair_applies_unique_str_replace_edit(monkeypatch):

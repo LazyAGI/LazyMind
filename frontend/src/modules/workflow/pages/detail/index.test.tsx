@@ -47,6 +47,28 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('workflow draft lifecycle', () => {
+  it('shows the five repair scopes after Skill conversion and submits full scope without remapping', async () => {
+    show({ source_type: 'skill', source_analysis_id: 'original-analysis' });
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('statemachine', [], { node_ids: ['review'] }); });
+    const dialog = screen.getByRole('dialog', { name: 'selfEvolutionRun.workflowDetailRepairModalTitle' });
+    fireEvent.mouseDown(within(dialog).getByRole('combobox'));
+    for (const label of ['执行流程', '界面展示', '说明文档', '脚本与工具', '完整修复']) {
+      await waitFor(() => expect(screen.getByText(label, { selector: '.ant-select-item-option-content' })).toBeVisible());
+    }
+    expect(screen.queryByText('selfEvolutionRun.workflowNodeIntegration', { selector: '.ant-select-item-option-content' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('完整修复', { selector: '.ant-select-item-option-content' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith(draft.id, {
+      target: 'full', mode: 'workflow_local', draft_version: 3, edit_context: { node_ids: ['review'] },
+    }));
+    mocks.repair.mockResolvedValue({ ...draft, source_type: 'skill', generate_status: 'repairing' });
+    fireEvent.change(screen.getByPlaceholderText('selfEvolutionRun.workflowDetailRepairStatePlaceholder'), { target: { value: 'Fix all current files without deleting review' } });
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
+    await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({
+      target: 'full', mode: 'workflow_local', edit_context: { node_ids: ['review'] }, repair_hint: 'Fix all current files without deleting review',
+    })));
+  });
+
   it('flushes editor changes and waits for the shared save queue before publishing once', async () => {
     show();
     const publish = await screen.findByRole('button', { name: '发布插件' });
@@ -320,12 +342,12 @@ describe('workflow draft lifecycle', () => {
     const payload = { stateYaml: 'steps: [{id: review}]', workflowYaml: 'id: research-v2', scenarioContent: 'Review before export', scriptsContent: '{}', stateLayoutContent: '{}' };
     await act(async () => { await mocks.props.onSave?.(payload); });
     await act(async () => { mocks.props.onRepair?.('node_integration', [], { node_ids: ['review'] }); });
-    expect(mocks.preview).toHaveBeenCalledWith(draft.id, { target: 'node_integration', mode: 'workflow_local', draft_version: 4 });
+    expect(mocks.preview).toHaveBeenCalledWith(draft.id, { target: 'statemachine', mode: 'workflow_local', draft_version: 4, edit_context: { node_ids: ['review'] } });
     fireEvent.change(screen.getByPlaceholderText('selfEvolutionRun.workflowNodeIntegrationPlaceholder'), { target: { value: 'Review before export' } });
     mocks.repair.mockResolvedValue({ ...draft, version: 4, generate_status: 'repairing' });
     fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
     await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({
-      target: 'node_integration', mode: 'workflow_local', draft_version: 4,
+      target: 'statemachine', mode: 'workflow_local', draft_version: 4,
       repair_hint: 'Review before export', edit_context: { node_ids: ['review'] },
     })));
   });
@@ -348,10 +370,10 @@ describe('workflow draft lifecycle', () => {
     await screen.findByRole('region', { name: 'Editor' });
     // A freshly mounted editor has no in-session added nodes or placeholders.
     await act(async () => { mocks.props.onRepair?.(target, [{ code: 'E_MATERIAL_UNKNOWN', nodeId: 'research', message: 'Fix input' }], { node_ids: [] }); });
-    expect(mocks.preview).toHaveBeenCalledWith(draft.id, { target: 'node_integration', mode: 'workflow_local', draft_version: 3 });
+    expect(mocks.preview).toHaveBeenCalledWith(draft.id, { target, mode: 'workflow_local', draft_version: 3, edit_context: { node_ids: [] } });
     mocks.repair.mockResolvedValue({ ...draft, source_type: 'skill', version: 3, generate_status: 'repairing' });
     fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
-    await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({ target: 'node_integration', mode: 'workflow_local', edit_context: { node_ids: [] } })));
+    await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({ target, mode: 'workflow_local', edit_context: { node_ids: [] } })));
   });
 
   it('restores actionable repair diagnostics after reopening a failed draft', async () => {

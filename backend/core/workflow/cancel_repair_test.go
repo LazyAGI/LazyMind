@@ -101,14 +101,39 @@ func TestCancelWorkflowDraftRepairFencesQueuedAndRunningJobs(t *testing.T) {
 }
 
 func TestCancelWorkflowDraftRepairRejectsLateModelResults(t *testing.T) {
-	for _, target := range []string{"node_integration", "ui", "scenario", "scripts", "full"} {
+	for _, scope := range []struct {
+		target   string
+		preserve bool
+	}{
+		{"node_integration", false}, {"ui", false}, {"scenario", false}, {"scripts", false}, {"full", false},
+		{"statemachine", true}, {"full", true},
+	} {
+		target := scope.target
 		for _, modelFails := range []bool{false, true} {
 			name := target + "/success"
 			if modelFails {
 				name = target + "/error"
 			}
+			if scope.preserve {
+				name += "/current_workflow"
+			}
 			t.Run(name, func(t *testing.T) {
 				db, draft, run, job := seedCancelableRepair(t, target, generateStatusDone, string(asyncjob.StatusRunning))
+				if scope.preserve {
+					var payload workflowDraftRepairPayload
+					if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
+						t.Fatal(err)
+					}
+					payload.PreserveCurrentWorkflow = true
+					var err error
+					job.PayloadJSON, err = json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := db.Model(&orm.AsyncJob{}).Where("id=?", job.ID).Update("payload_json", job.PayloadJSON).Error; err != nil {
+						t.Fatal(err)
+					}
+				}
 				_, candidate := nodeIntegrationFixture()
 				canceled := false
 				transport := http.DefaultTransport

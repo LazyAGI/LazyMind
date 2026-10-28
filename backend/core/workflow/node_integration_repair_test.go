@@ -21,6 +21,31 @@ import (
 	"lazymind/core/workflow/graphengine"
 )
 
+func TestCurrentWorkflowRepairPolicyKeepsScopeSeparate(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, status, target string
+		edit                         *algo.WorkflowEditContext
+		preserve                     bool
+	}{
+		{"converted flow", "skill", "done", "statemachine", nil, true},
+		{"converted full", "skill", "done", "full", nil, true},
+		{"added node in AI flow", "ai", "done", "statemachine", &algo.WorkflowEditContext{NodeIDs: []string{"review"}}, true},
+		{"added node in AI full", "ai", "done", "full", &algo.WorkflowEditContext{NodeIDs: []string{"review"}}, true},
+		{"ordinary flow", "ai", "done", "statemachine", nil, false},
+		{"ordinary full", "ai", "done", "full", nil, false},
+		{"conversion recovery", "skill", "failed", "full", nil, false},
+		{"UI scope", "skill", "done", "ui", &algo.WorkflowEditContext{NodeIDs: []string{"review"}}, false},
+		{"legacy integration", "ai", "done", "node_integration", nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			draft := orm.WorkflowDraft{SourceType: tc.source, GenerateStatus: tc.status}
+			if got := shouldPreserveCurrentWorkflow(draft, tc.target, tc.edit); got != tc.preserve {
+				t.Fatalf("preserve=%v, want %v", got, tc.preserve)
+			}
+		})
+	}
+}
+
 func nodeIntegrationFixture() (workflowRepairSnapshot, workflowRepairSnapshot) {
 	base := workflowRepairSnapshot{
 		WorkflowYAML: `id: review_flow
@@ -228,132 +253,152 @@ func TestNodeIntegrationMayAddInputsWithoutWeakeningExistingOnes(t *testing.T) {
 }
 
 func TestNodeIntegrationJobAppliesOnlyValidCurrentCandidates(t *testing.T) {
-	for _, previousStatus := range []string{"done", "failed"} {
-		t.Run(previousStatus, func(t *testing.T) {
-			for _, outcome := range []string{"success", "unchanged", "invalid", "invalid_ui", "needs_input", "invalid_script", "model_failure", "stale", "stale_before_start", "commit_failure"} {
-				t.Run(outcome, func(t *testing.T) {
-					db := newHandlerTestDB(t)
-					base, candidate := nodeIntegrationFixture()
-					// Exposed outputs must remain single-placement after the repair is
-					// finalized for validation and publish, including no-output review steps.
-					base.WorkflowYAML = strings.Replace(base.WorkflowYAML, "id: final, type: text", "id: final, type: text, exposed: true", 1)
-					candidate.WorkflowYAML = base.WorkflowYAML
-					if outcome == "unchanged" {
-						base = candidate
-					}
-					draft := orm.WorkflowDraft{ID: uuid.NewString(), CreatedBy: "owner", SourceType: "skill", Version: 4, GenerateStatus: generateStatusRepairing, WorkflowYAMLContent: base.WorkflowYAML, StateYAMLContent: base.StateYAML, ScenarioContent: base.ScenarioMD, ScriptsContent: "{}"}
-					seedSkillForWorkflowConversion(t, db, "owner", "review-skill", "# Review\nGenerate a report, review it, and export the approved report.")
-					draft.SourceSkillID, draft.SourceSkillRevisionID, draft.SourceSkillTreeHash = "review-skill", "review-skill-rev", "tree-review-skill"
-					if previousStatus == "failed" {
-						draft.GenerateError = `{"phase":"validation","message":"generation validation failed"}`
-					}
-					if err := db.Create(&draft).Error; err != nil {
-						t.Fatal(err)
-					}
-					run := orm.WorkflowRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: "owner", Status: "queued", Target: "node_integration", CreatedAt: time.Now().UTC()}
-					if err := db.Create(&run).Error; err != nil {
-						t.Fatal(err)
-					}
-					if outcome == "commit_failure" {
-						if err := db.Callback().Update().Before("gorm:update").Register("fail_node_repair_commit", func(tx *gorm.DB) {
-							updates, ok := tx.Statement.Dest.(map[string]any)
-							if ok && tx.Statement.Table == (orm.WorkflowRepairRun{}).TableName() && updates["status"] == "succeeded" {
-								tx.AddError(errors.New("injected commit failure"))
+	for _, target := range []string{"node_integration", "statemachine", "full"} {
+		t.Run(target, func(t *testing.T) {
+			for _, previousStatus := range []string{"done", "failed"} {
+				t.Run(previousStatus, func(t *testing.T) {
+					for _, outcome := range []string{"success", "unchanged", "invalid", "invalid_ui", "needs_input", "invalid_script", "model_failure", "stale", "stale_before_start", "commit_failure"} {
+						t.Run(outcome, func(t *testing.T) {
+							db := newHandlerTestDB(t)
+							base, candidate := nodeIntegrationFixture()
+							// Exposed outputs must remain single-placement after the repair is
+							// finalized for validation and publish, including no-output review steps.
+							base.WorkflowYAML = strings.Replace(base.WorkflowYAML, "id: final, type: text", "id: final, type: text, exposed: true", 1)
+							candidate.WorkflowYAML = base.WorkflowYAML
+							if target == "full" && outcome == "success" {
+								// Full scope also applies UI and script repairs, not just edges.
+								candidate.WorkflowYAML = strings.Replace(candidate.WorkflowYAML, "label: Result", "label: Reviewed report", 1)
+								candidate.Scripts = map[string]string{"scripts/check.py": "def run():\n    return True\n"}
 							}
-						}); err != nil {
-							t.Fatal(err)
-						}
-						t.Cleanup(func() { db.Callback().Update().Remove("fail_node_repair_commit") })
-					}
-					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-						var request struct {
-							Input struct {
-								Data map[string]json.RawMessage `json:"data"`
-							} `json:"input"`
-						}
-						if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-							t.Error(err)
-						}
-						if string(request.Input.Data["target"]) != `"node_integration"` || !strings.Contains(string(request.Input.Data["edit_context"]), "review") {
-							t.Errorf("lost integration context: %+v", request)
-						}
-						if outcome == "model_failure" {
-							http.Error(w, "provider unavailable", http.StatusBadRequest)
-							return
-						}
-						if outcome == "invalid" {
-							candidate.StateYAML = strings.ReplaceAll(candidate.StateYAML, "mode: human", "mode: auto")
-						}
-						if outcome == "invalid_ui" {
-							candidate.WorkflowYAML = strings.Replace(candidate.WorkflowYAML, "slots: [{id: final}]", "slots: []", 1)
-						}
-						if outcome == "stale" {
-							if err := db.Model(&orm.WorkflowDraft{}).Where("id=?", draft.ID).Updates(map[string]any{"version": 5, "scenario_content": "Newer user edit"}).Error; err != nil {
-								t.Error(err)
+							if outcome == "unchanged" {
+								base = candidate
 							}
-						}
-						output := map[string]any{"workflow_yaml": candidate.WorkflowYAML, "state_yaml": candidate.StateYAML, "scenario_md": candidate.ScenarioMD}
-						if outcome == "invalid_script" {
-							output["script_errors"] = []map[string]string{{"path": "scripts/review.py", "message": "invalid syntax at line 1"}}
-						}
-						if outcome == "needs_input" {
-							output["needs_input"] = "请说明审核失败时应该进入哪个步骤"
-						}
-						_ = json.NewEncoder(w).Encode(map[string]any{"status": "succeeded", "output": output})
-					}))
-					defer server.Close()
-					t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
-					payload := workflowDraftRepairPayload{DraftID: draft.ID, UserID: "owner", DraftVersion: 4, PrevStatus: previousStatus, Target: "node_integration", RepairRunID: run.ID, LLMConfig: map[string]any{"llm": map[string]any{"model": "test"}}, EditContext: &algo.WorkflowEditContext{NodeIDs: []string{"review"}}}
-					body, _ := json.Marshal(payload)
-					if outcome == "stale_before_start" {
-						if err := db.Model(&orm.WorkflowDraft{}).Where("id=?", draft.ID).Updates(map[string]any{"version": 5, "scenario_content": "Newer user edit"}).Error; err != nil {
-							t.Fatal(err)
-						}
-					}
-					_, err := handleWorkflowDraftRepairJob(t.Context(), asyncjob.Job{PayloadJSON: body}, nil)
-					var saved orm.WorkflowDraft
-					if db.First(&saved, "id=?", draft.ID).Error != nil {
-						t.Fatal("draft missing")
-					}
-					if db.First(&run, "id=?", run.ID).Error != nil {
-						t.Fatal("run missing")
-					}
-					if outcome == "success" || outcome == "unchanged" {
-						if saved.GenerateStatus != "done" || saved.GenerateError != "" {
-							t.Fatalf("validated repair did not clear generation failure: status=%s error=%s", saved.GenerateStatus, saved.GenerateError)
-						}
-						if err != nil || run.Status != "succeeded" || saved.Version != 5 || saved.StateYAMLContent != candidate.StateYAML || saved.ScenarioContent != candidate.ScenarioMD {
-							t.Fatalf("valid candidate not committed: %v, %+v", err, saved)
-						}
-						req := httptest.NewRequest(http.MethodPost, "/", nil)
-						req.Header.Set("X-User-Id", "owner")
-						req = mux.SetURLVars(req, map[string]string{"draft_id": draft.ID})
-						rec := httptest.NewRecorder()
-						ValidateWorkflowDraft(rec, req)
-						if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "E_UI_MATERIAL_DUPLICATE") {
-							t.Fatalf("repaired draft fails validation: %d %s", rec.Code, rec.Body.String())
-						}
-						rec = httptest.NewRecorder()
-						PublishWorkflowDraft(rec, req)
-						if rec.Code != http.StatusOK {
-							t.Fatalf("repaired draft cannot publish: %d %s", rec.Code, rec.Body.String())
-						}
-					} else {
-						if saved.GenerateStatus != previousStatus || saved.GenerateError != draft.GenerateError {
-							t.Fatalf("failed repair changed generation state: status=%s error=%s", saved.GenerateStatus, saved.GenerateError)
-						}
-						if err == nil || saved.StateYAMLContent != base.StateYAML || run.Status == "succeeded" || !strings.Contains(saved.GenerateWarning, "[修复失败]") {
-							t.Fatalf("failed candidate applied: %v, %+v", err, saved)
-						}
-						if strings.HasPrefix(outcome, "stale") && (saved.ScenarioContent != "Newer user edit" || run.Status != "stale") {
-							t.Fatalf("overwrote newer draft: %+v", saved)
-						}
-						if !strings.HasPrefix(outcome, "stale") && saved.Version != 4 {
-							t.Fatalf("failed repair changed version: %d", saved.Version)
-						}
-						if run.DiagnosticsAfterJSON == "[]" || run.DiagnosticsAfterJSON == "" {
-							t.Fatal("failure has no diagnostics")
-						}
+							draft := orm.WorkflowDraft{ID: uuid.NewString(), CreatedBy: "owner", SourceType: "skill", Version: 4, GenerateStatus: generateStatusRepairing, WorkflowYAMLContent: base.WorkflowYAML, StateYAMLContent: base.StateYAML, ScenarioContent: base.ScenarioMD, ScriptsContent: "{}"}
+							seedSkillForWorkflowConversion(t, db, "owner", "review-skill", "# Review\nGenerate a report, review it, and export the approved report.")
+							draft.SourceSkillID, draft.SourceSkillRevisionID, draft.SourceSkillTreeHash = "review-skill", "review-skill-rev", "tree-review-skill"
+							if previousStatus == "failed" {
+								draft.GenerateError = `{"phase":"validation","message":"generation validation failed"}`
+							}
+							if target == "full" && outcome == "success" {
+								draft.SourceAnalysisID = uuid.NewString()
+							}
+							if err := db.Create(&draft).Error; err != nil {
+								t.Fatal(err)
+							}
+							if draft.SourceAnalysisID != "" {
+								if err := db.Create(&orm.WorkflowGenerationAnalysis{ID: draft.SourceAnalysisID, DraftID: draft.ID, UserID: "owner", ScriptReportJSON: "{}"}).Error; err != nil {
+									t.Fatal(err)
+								}
+							}
+							run := orm.WorkflowRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: "owner", Status: "queued", Target: target, CreatedAt: time.Now().UTC()}
+							if err := db.Create(&run).Error; err != nil {
+								t.Fatal(err)
+							}
+							if outcome == "commit_failure" {
+								if err := db.Callback().Update().Before("gorm:update").Register("fail_node_repair_commit", func(tx *gorm.DB) {
+									updates, ok := tx.Statement.Dest.(map[string]any)
+									if ok && tx.Statement.Table == (orm.WorkflowRepairRun{}).TableName() && updates["status"] == "succeeded" {
+										tx.AddError(errors.New("injected commit failure"))
+									}
+								}); err != nil {
+									t.Fatal(err)
+								}
+								t.Cleanup(func() { db.Callback().Update().Remove("fail_node_repair_commit") })
+							}
+							server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+								var request struct {
+									Input struct {
+										Data map[string]json.RawMessage `json:"data"`
+									} `json:"input"`
+								}
+								if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+									t.Error(err)
+								}
+								if string(request.Input.Data["target"]) != fmt.Sprintf("%q", target) || string(request.Input.Data["preserve_current_workflow"]) != "true" || !strings.Contains(string(request.Input.Data["edit_context"]), "review") {
+									t.Errorf("lost integration context: %+v", request)
+								}
+								if outcome == "model_failure" {
+									http.Error(w, "provider unavailable", http.StatusBadRequest)
+									return
+								}
+								if outcome == "invalid" {
+									candidate.StateYAML = strings.ReplaceAll(candidate.StateYAML, "mode: human", "mode: auto")
+								}
+								if outcome == "invalid_ui" {
+									candidate.WorkflowYAML = strings.Replace(candidate.WorkflowYAML, "slots: [{id: final}]", "slots: []", 1)
+								}
+								if outcome == "stale" {
+									if err := db.Model(&orm.WorkflowDraft{}).Where("id=?", draft.ID).Updates(map[string]any{"version": 5, "scenario_content": "Newer user edit"}).Error; err != nil {
+										t.Error(err)
+									}
+								}
+								output := map[string]any{"workflow_yaml": candidate.WorkflowYAML, "state_yaml": candidate.StateYAML, "scenario_md": candidate.ScenarioMD, "scripts": candidate.Scripts}
+								if outcome == "invalid_script" {
+									output["script_errors"] = []map[string]string{{"path": "scripts/review.py", "message": "invalid syntax at line 1"}}
+								}
+								if outcome == "needs_input" {
+									output["needs_input"] = "请说明审核失败时应该进入哪个步骤"
+								}
+								_ = json.NewEncoder(w).Encode(map[string]any{"status": "succeeded", "output": output})
+							}))
+							defer server.Close()
+							t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+							payload := workflowDraftRepairPayload{DraftID: draft.ID, UserID: "owner", DraftVersion: 4, PrevStatus: previousStatus, Target: target, PreserveCurrentWorkflow: target != "node_integration", RepairRunID: run.ID, LLMConfig: map[string]any{"llm": map[string]any{"model": "test"}}, EditContext: &algo.WorkflowEditContext{NodeIDs: []string{"review"}}}
+							body, _ := json.Marshal(payload)
+							if outcome == "stale_before_start" {
+								if err := db.Model(&orm.WorkflowDraft{}).Where("id=?", draft.ID).Updates(map[string]any{"version": 5, "scenario_content": "Newer user edit"}).Error; err != nil {
+									t.Fatal(err)
+								}
+							}
+							_, err := handleWorkflowDraftRepairJob(t.Context(), asyncjob.Job{PayloadJSON: body}, nil)
+							var saved orm.WorkflowDraft
+							if db.First(&saved, "id=?", draft.ID).Error != nil {
+								t.Fatal("draft missing")
+							}
+							if db.First(&run, "id=?", run.ID).Error != nil {
+								t.Fatal("run missing")
+							}
+							if outcome == "success" || outcome == "unchanged" {
+								if saved.GenerateStatus != "done" || saved.GenerateError != "" {
+									t.Fatalf("validated repair did not clear generation failure: status=%s error=%s", saved.GenerateStatus, saved.GenerateError)
+								}
+								if err != nil || run.Status != "succeeded" || saved.Version != 5 || saved.StateYAMLContent != candidate.StateYAML || saved.ScenarioContent != candidate.ScenarioMD {
+									t.Fatalf("valid candidate not committed: %v, %+v", err, saved)
+								}
+								if target == "full" && outcome == "success" && (saved.WorkflowYAMLContent != candidate.WorkflowYAML || !strings.Contains(saved.ScriptsContent, "scripts/check.py") || !strings.Contains(run.ChangesJSON, "scripts/check.py")) {
+									t.Fatalf("full repair lost UI/script changes: draft=%+v run=%+v", saved, run)
+								}
+								req := httptest.NewRequest(http.MethodPost, "/", nil)
+								req.Header.Set("X-User-Id", "owner")
+								req = mux.SetURLVars(req, map[string]string{"draft_id": draft.ID})
+								rec := httptest.NewRecorder()
+								ValidateWorkflowDraft(rec, req)
+								if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "E_UI_MATERIAL_DUPLICATE") {
+									t.Fatalf("repaired draft fails validation: %d %s", rec.Code, rec.Body.String())
+								}
+								rec = httptest.NewRecorder()
+								PublishWorkflowDraft(rec, req)
+								if rec.Code != http.StatusOK {
+									t.Fatalf("repaired draft cannot publish: %d %s", rec.Code, rec.Body.String())
+								}
+							} else {
+								if saved.GenerateStatus != previousStatus || saved.GenerateError != draft.GenerateError {
+									t.Fatalf("failed repair changed generation state: status=%s error=%s", saved.GenerateStatus, saved.GenerateError)
+								}
+								if err == nil || saved.StateYAMLContent != base.StateYAML || run.Status == "succeeded" || !strings.Contains(saved.GenerateWarning, "[修复失败]") {
+									t.Fatalf("failed candidate applied: %v, %+v", err, saved)
+								}
+								if strings.HasPrefix(outcome, "stale") && (saved.ScenarioContent != "Newer user edit" || run.Status != "stale") {
+									t.Fatalf("overwrote newer draft: %+v", saved)
+								}
+								if !strings.HasPrefix(outcome, "stale") && saved.Version != 4 {
+									t.Fatalf("failed repair changed version: %d", saved.Version)
+								}
+								if run.DiagnosticsAfterJSON == "[]" || run.DiagnosticsAfterJSON == "" {
+									t.Fatal("failure has no diagnostics")
+								}
+							}
+						})
 					}
 				})
 			}
@@ -498,6 +543,26 @@ func TestNodeIntegrationCompletedSkillRepairScopeSurvivesReload(t *testing.T) {
 				if rec.Code != http.StatusOK {
 					t.Fatalf("repair scope request failed: %s", rec.Body)
 				}
+				if strings.Contains(rec.Body.String(), `"planned_files"`) {
+					var preview struct {
+						Data struct {
+							Target, Mode string
+							PlannedFiles []string `json:"planned_files"`
+						}
+					}
+					if err := json.Unmarshal(rec.Body.Bytes(), &preview); err != nil {
+						t.Fatal(err)
+					}
+					if preview.Data.Target != target || preview.Data.Mode != "workflow_local" {
+						t.Fatalf("preview merged repair scopes: %s", rec.Body)
+					}
+					if target == "full" && !slices.Contains(preview.Data.PlannedFiles, "workflow.yaml") {
+						t.Fatal("full preview did not include the complete manifest")
+					}
+					if target == "statemachine" && (!slices.Contains(preview.Data.PlannedFiles, "workflow.yaml.steps") || slices.Contains(preview.Data.PlannedFiles, "workflow.yaml")) {
+						t.Fatal("flow preview does not distinguish primary and linked changes")
+					}
+				}
 			}
 			var job orm.AsyncJob
 			if err := db.First(&job, "resource_id=?", draft.ID).Error; err != nil {
@@ -507,7 +572,7 @@ func TestNodeIntegrationCompletedSkillRepairScopeSurvivesReload(t *testing.T) {
 			if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
 				t.Fatal(err)
 			}
-			if payload.Target != "node_integration" || payload.Mode != "workflow_local" || strings.Contains(payload.RepairHint, "Respect source analysis") {
+			if payload.Target != target || !payload.PreserveCurrentWorkflow || payload.Mode != "workflow_local" || strings.Contains(payload.RepairHint, "Respect source analysis") {
 				t.Fatalf("lost current-workflow contract: %+v", payload)
 			}
 		})

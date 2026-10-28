@@ -233,7 +233,7 @@ describe('StateGraphEditor workspace navigation', () => {
     expect(onRepair).not.toHaveBeenCalled();
     expect(screen.getByRole('region', { name: 'Graph canvas' })).toHaveAttribute('data-readonly', 'true');
     await act(async () => finish());
-    expect(onRepair).toHaveBeenCalledWith('node_integration', expect.any(Array), { node_ids: ['review_2'] });
+    expect(onRepair).toHaveBeenCalledWith('statemachine', expect.any(Array), { node_ids: ['review_2'] });
     await flushEditorWork();
     expect(onSave).toHaveBeenCalledTimes(1);
   });
@@ -349,7 +349,7 @@ describe('StateGraphEditor workspace navigation', () => {
     expect(screen.getByRole('button', { name: '3 · Review report' })).toBeVisible();
     onSave.mockResolvedValue(undefined);
     await act(async () => fireEvent.click(button('sgeAiRepairBtn')));
-    expect(onRepair).toHaveBeenCalledWith('node_integration', expect.any(Array), { node_ids: ['review_2'] });
+    expect(onRepair).toHaveBeenCalledWith('statemachine', expect.any(Array), { node_ids: ['review_2'] });
   });
 
   it('flushes pending YAML parsing before repair and leaves no delayed save behind', async () => {
@@ -363,7 +363,7 @@ describe('StateGraphEditor workspace navigation', () => {
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onSave.mock.calls[0][0].stateYaml).toContain('id: review');
     expect(onSave.mock.calls[0][0].workflowYaml).toContain('id: review');
-    expect(onRepair).toHaveBeenCalledWith('node_integration', expect.any(Array), { node_ids: ['review'] });
+    expect(onRepair).toHaveBeenCalledWith('statemachine', expect.any(Array), { node_ids: ['review'] });
     await flushEditorWork();
     expect(onSave).toHaveBeenCalledTimes(1);
   });
@@ -401,7 +401,7 @@ describe('StateGraphEditor workspace navigation', () => {
     expect(onRepair).not.toHaveBeenCalled();
     expect(onSave).toHaveBeenCalledTimes(1);
     await act(async () => finish());
-    expect(onRepair).toHaveBeenCalledWith('node_integration', expect.any(Array), { node_ids: ['review_2'] });
+    expect(onRepair).toHaveBeenCalledWith('statemachine', expect.any(Array), { node_ids: ['review_2'] });
   });
 
   it('does not rewrite a clean draft just to open repair', async () => {

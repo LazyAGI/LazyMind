@@ -417,7 +417,7 @@ export async function repairWorkflowDraft(
 export interface RepairPreview { target:string;mode:string;draft_version:number;diagnostics:Array<{code:string;path:string;message:string;severity:string}>;planned_files:string[] }
 export interface WorkflowRepairRun { repair_id:string;status:'queued'|'repairing'|'succeeded'|'failed'|'stale'|string;target:string;diagnostics_after:Array<{code:string;path:string;message:string;severity:string;node_id?:string;edge_id?:string;material_id?:string;details?:Record<string,unknown>}>;changes?:{files?:string[]} }
 export async function getWorkflowRepairRun(draftId:string,repairId:string):Promise<WorkflowRepairRun>{const r=await axiosInstance.get<CoreResponse<WorkflowRepairRun>>(`${coreBasePath}/workflow-drafts/${draftId}/repair-runs/${repairId}`);return r.data.data}
-export async function previewWorkflowRepair(id:string,payload:{target:string;mode:string;draft_version?:number}):Promise<RepairPreview>{
+export async function previewWorkflowRepair(id:string,payload:{target:string;mode:string;draft_version?:number;edit_context?:{node_ids:string[]}}):Promise<RepairPreview>{
   const r=await axiosInstance.post<CoreResponse<RepairPreview>>(`${coreBasePath}/workflow-drafts/${id}:repair-preview`,payload);
   const data = r.data.data;
   const normalized = Array.isArray(data.diagnostics) ? data.diagnostics.map((raw) => {

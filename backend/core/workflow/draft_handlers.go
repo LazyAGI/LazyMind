@@ -805,9 +805,9 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "draft has no generated content to repair", http.StatusBadRequest)
 		return
 	}
-	body.Target = effectiveWorkflowRepairTarget(draft, body.Target)
+	preserveCurrent := shouldPreserveCurrentWorkflow(draft, body.Target, body.EditContext)
 	if body.DraftVersion == 0 {
-		if body.Target == "node_integration" {
+		if preserveCurrent {
 			common.ReplyErr(w, "draft_version required", http.StatusBadRequest)
 			return
 		}
@@ -824,7 +824,7 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "workflow is not editable", http.StatusConflict)
 		return
 	}
-	if body.Target == "node_integration" {
+	if preserveCurrent {
 		body.Mode = "workflow_local"
 		if err := validateNodeIntegrationContext(draft, body.EditContext, body.RepairHint); err != nil {
 			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
@@ -869,17 +869,18 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	prevStatus := draft.GenerateStatus
 	beforeDiagnostics := diagnoseWorkflowWithProfile(draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent, graphengine.ProfilePublish)
 	payload := workflowDraftRepairPayload{
-		DraftID:      draftID,
-		UserID:       userID,
-		Target:       strings.TrimSpace(body.Target),
-		RepairHint:   strings.TrimSpace(body.RepairHint),
-		Warnings:     warnings,
-		Diagnostics:  repairDiagnosticsPayload(beforeDiagnostics),
-		PrevStatus:   prevStatus,
-		LLMConfig:    llmConfig,
-		DraftVersion: draft.Version,
-		Mode:         body.Mode,
-		EditContext:  body.EditContext,
+		DraftID:                 draftID,
+		UserID:                  userID,
+		Target:                  strings.TrimSpace(body.Target),
+		RepairHint:              strings.TrimSpace(body.RepairHint),
+		Warnings:                warnings,
+		Diagnostics:             repairDiagnosticsPayload(beforeDiagnostics),
+		PrevStatus:              prevStatus,
+		LLMConfig:               llmConfig,
+		DraftVersion:            draft.Version,
+		Mode:                    body.Mode,
+		EditContext:             body.EditContext,
+		PreserveCurrentWorkflow: preserveCurrent,
 	}
 	repairRun := orm.WorkflowRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: userID, BaseWorkflowRevisionID: draft.BaseRevisionID, DraftVersionBefore: draft.Version, Target: body.Target, Mode: body.Mode, SourceAnalysisID: body.SourceAnalysisID, SourceSkillRevisionID: draft.SourceSkillRevisionID, RepairHint: body.RepairHint, DiagnosticsBeforeJSON: diagnosticsJSON(beforeDiagnostics), ChangesJSON: "{}", DiagnosticsAfterJSON: "{}", Status: "queued", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	payload.RepairRunID = repairRun.ID

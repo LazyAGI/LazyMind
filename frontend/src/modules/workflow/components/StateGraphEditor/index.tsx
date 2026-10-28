@@ -542,7 +542,7 @@ export default function StateGraphEditor({
         !initialNodeIds.current.has(node.id) || (initialScenarioContent?.includes('（暂无描述）') && !scenarioDataRef.current.stepDescriptions[node.id]?.trim()) || currentErrors.some((error) =>
           error.nodeId === node.id && error.code.includes('UNREACHABLE')),
       ).map((node) => node.id);
-      onRepair(target === 'statemachine' && nodeIds.length ? 'node_integration' : target, currentErrors, { node_ids: nodeIds });
+      onRepair(target, currentErrors, { node_ids: nodeIds });
     } finally {
       preparingRepairRef.current = false;
       setPreparingRepair(false);

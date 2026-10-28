@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/algo"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -48,9 +49,10 @@ func PreviewWorkflowRepair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Target       string `json:"target"`
-		Mode         string `json:"mode"`
-		DraftVersion int    `json:"draft_version"`
+		Target       string                    `json:"target"`
+		Mode         string                    `json:"mode"`
+		DraftVersion int                       `json:"draft_version"`
+		EditContext  *algo.WorkflowEditContext `json:"edit_context,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
@@ -63,12 +65,12 @@ func PreviewWorkflowRepair(w http.ResponseWriter, r *http.Request) {
 	if body.Target == "" {
 		body.Target = "statemachine"
 	}
-	body.Target = effectiveWorkflowRepairTarget(draft, body.Target)
 	if body.Mode == "" {
 		body.Mode = "workflow_local"
 	}
 	profile := graphengine.ProfileEditor
-	if body.Target == "node_integration" {
+	preserveCurrent := shouldPreserveCurrentWorkflow(draft, body.Target, body.EditContext)
+	if preserveCurrent {
 		body.Mode = "workflow_local"
 		profile = graphengine.ProfilePublish
 	}
@@ -86,6 +88,9 @@ func PreviewWorkflowRepair(w http.ResponseWriter, r *http.Request) {
 		"scenario":         {"scenario/scenario.md"},
 		"scripts":          {"scripts/*", "workflow.yaml.tools", "scenario/state.yml.steps"},
 		"full":             {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"},
+	}
+	if body.Target == "statemachine" && preserveCurrent {
+		files["statemachine"] = []string{"scenario/state.yml", "workflow.yaml.steps", "workflow.yaml.slots", "scenario/scenario.md", "workflow.yaml.ui", "scripts/*"}
 	}
 	common.ReplyOK(w, map[string]any{"target": body.Target, "mode": body.Mode, "draft_version": draft.Version, "diagnostics": diagnostics, "planned_files": files[body.Target]})
 }

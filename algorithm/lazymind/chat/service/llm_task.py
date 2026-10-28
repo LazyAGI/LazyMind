@@ -174,7 +174,7 @@ def _run_workflow_task(request: LLMTaskRequest) -> tuple[dict[str, Any], str, li
         validate_repair if request.task_type == 'workflow.repair' else None
     ))
     if request.task_type == 'workflow.repair':
-        if request.input.data.get('target') == 'node_integration':
+        if _preserves_current_workflow(request):
             output['script_errors'] = _validate_integration_scripts(request, output)
     text = json.dumps(output, ensure_ascii=False)
     files = _output_files(output)
@@ -260,6 +260,11 @@ def _generic_prompt(request: LLMTaskRequest) -> str:
     ]).strip()
 
 
+def _preserves_current_workflow(request: LLMTaskRequest) -> bool:
+    return (request.input.data.get('preserve_current_workflow') is True
+            or request.input.data.get('target') == 'node_integration')
+
+
 def _workflow_prompt(request: LLMTaskRequest) -> str:
     task = request.task_type
     base = [
@@ -317,21 +322,35 @@ def _workflow_prompt(request: LLMTaskRequest) -> str:
         ),
     }
     base.append(schemas.get(task, 'Return a JSON object.'))
-    if task == 'workflow.repair' and request.input.data.get('target') == 'node_integration':
+    if task == 'workflow.repair' and _preserves_current_workflow(request):
         base.append(
-            'Integrate the user-added nodes identified in edit_context.node_ids into the CURRENT workflow. '
+            'Repair the CURRENT workflow, integrating user-added nodes '
+            'identified in edit_context.node_ids when present. '
             'The current saved files and user edit intent take precedence over the original Skill design. '
             'Preserve every existing node id, execution mode, required input expression and declared output. '
             'Never delete or skip a node, make a required input optional, or mark internal materials external '
             'just to pass validation. Repair predecessor/successor edges and material producers/consumers; '
-            'preserve existing branch conditions and only change edges required for the insertion. '
+            'preserve existing branch conditions and destinations, allowing inserted steps on their paths. '
             'Synchronize workflow steps, slots, affected UI references and complete scenario documentation '
             '(purpose, inputs, outputs and executable instructions for each step). '
-            'Only edit or add scripts if the new node actually needs them; preserve unrelated files. '
             'If purpose, insertion point or input source is ambiguous, return needs_input describing exactly '
             'what the user must specify, rather than guessing. Otherwise needs_input must be empty. '
             'Return final full content for changed files only, with no placeholders.'
         )
+        if request.input.data.get('target') == 'full':
+            base.append(
+                'Scope: full repair. Inspect ALL current workflow files: execution flow, material contracts, '
+                'UI references/layout, documentation and scripts/tools. Fix existing problems across these '
+                'areas, not only problems involving newly added nodes. Keep the current graph contracts '
+                'and user settings; full repair is not regeneration from the original Skill.'
+            )
+        else:
+            base.append(
+                'Scope: execution flow repair. Focus on step order, transitions and input/output dependencies, '
+                'including node integration. Synchronize workflow definitions, documentation, UI references '
+                'and scripts ONLY where needed by these flow changes. Do not independently redesign the '
+                'UI or rewrite unrelated documentation or scripts.'
+            )
     if request.instruction:
         base.append(f'Caller instruction:\n{request.instruction}')
     return '\n\n'.join(part for part in base if part).strip()
