@@ -52,7 +52,7 @@ describe('router contract', () => {
   it('keeps legacy model provider URLs as Settings redirects only', () => {
     expect(routerSource).not.toContain('ModelProviderPage');
     expect(routerSource).toContain(
-      '<Route path="model-providers/default-services" element={<Navigate to="/settings?section=models" replace />} />',
+      '<Route path="model-providers/default-services" element={<Navigate to="/settings?section=model_defaults" replace />} />',
     );
     expect(routerSource).toContain(
       '<Route path="model-providers/models" element={<Navigate to="/settings?section=models&view=providers" replace />} />',
