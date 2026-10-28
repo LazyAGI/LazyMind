@@ -1,8 +1,8 @@
 import { createRef, type ReactElement } from "react";
-import { fireEvent, render as renderComponent, screen } from "@testing-library/react";
+import { act, fireEvent, render as renderComponent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { MemoryRouter } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, RouterProvider } from "react-router-dom";
 
 import UserSkillWorkflowSettings from "./UserSkillWorkflowSettings";
 
@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   listSkillAssetsPage: vi.fn(),
   listUserWorkflowSettings: vi.fn(),
   onGroupChange: vi.fn(),
+  onChanged: vi.fn(),
+  patchSkillAsset: vi.fn(),
+  setUserWorkflowEnabled: vi.fn(),
 }));
 
 vi.mock("antd", async () => {
@@ -39,12 +42,12 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/modules/memory/skillApi", () => ({
   listSkillAssetsPage: mocks.listSkillAssetsPage,
-  patchSkillAsset: vi.fn(),
+  patchSkillAsset: mocks.patchSkillAsset,
 }));
 
 vi.mock("@/modules/workflow/workflowDraftApi", () => ({
   listUserWorkflowSettings: mocks.listUserWorkflowSettings,
-  setUserWorkflowEnabled: vi.fn(),
+  setUserWorkflowEnabled: mocks.setUserWorkflowEnabled,
 }));
 
 describe("UserSkillWorkflowSettings workflow controls", () => {
@@ -63,6 +66,9 @@ describe("UserSkillWorkflowSettings workflow controls", () => {
       })),
     });
     mocks.onGroupChange.mockReset();
+    mocks.onChanged.mockReset();
+    mocks.patchSkillAsset.mockReset();
+    mocks.setUserWorkflowEnabled.mockReset();
     mocks.listSkillAssetsPage.mockReset();
     mocks.listSkillAssetsPage.mockResolvedValue({ records: [] });
     mocks.listUserWorkflowSettings.mockReset();
@@ -80,6 +86,40 @@ describe("UserSkillWorkflowSettings workflow controls", () => {
       call_mode: "auto",
       status: "active",
     }]);
+  });
+
+  it.each([
+    ["skills", "", "/memory-management/skills"],
+    ["workflows", "", "/memory-management/skills?skillView=workflows"],
+    ["skills", "/lazymind", "/lazymind/memory-management/skills"],
+    ["workflows", "/lazymind", "/lazymind/memory-management/skills?skillView=workflows"],
+  ] as const)("opens %s management with PUSH navigation under basename '%s'", async (activeView, basename, destination) => {
+    const initialUrl = `${basename}/settings?section=skills&skillView=${activeView}`;
+    const router = createMemoryRouter([
+      { path: "/settings", element: <UserSkillWorkflowSettings activeView={activeView}
+        skillsEnabled workflowsEnabled groupSaving={null} controlsDisabled={false}
+        onGroupChange={mocks.onGroupChange} onChanged={mocks.onChanged}
+        headingRef={createRef<HTMLHeadingElement>()} /> },
+      { path: "/memory-management/skills", element: <h1>Capability Management</h1> },
+    ], { basename, initialEntries: [initialUrl] });
+    renderComponent(<RouterProvider router={router} />);
+    await screen.findByText(activeView === "skills" ? "settingsPage.skills.emptySkills" : "AI 图片生成");
+    const link = screen.getByRole("link", { name: "settingsPage.skills.openCapabilityManagement" });
+    expect(link).toHaveAttribute("href", destination);
+    fireEvent.click(link);
+    await screen.findByRole("heading", { name: "Capability Management" });
+    expect(router.state.location.pathname + router.state.location.search).toBe(destination);
+    expect(router.state.historyAction).toBe("PUSH");
+
+    await act(async () => { await router.navigate(-1); });
+    expect(router.state.location.pathname + router.state.location.search).toBe(initialUrl);
+    expect(router.state.historyAction).toBe("POP");
+    expect(screen.getByRole("link", { name: "settingsPage.skills.openCapabilityManagement" })).toHaveAttribute("href", destination);
+    expect(mocks.onGroupChange).not.toHaveBeenCalled();
+    expect(mocks.onChanged).not.toHaveBeenCalled();
+    expect(mocks.patchSkillAsset).not.toHaveBeenCalled();
+    expect(mocks.setUserWorkflowEnabled).not.toHaveBeenCalled();
+    router.dispose();
   });
 
   it("links the header to the active resource view without nested interactive controls", async () => {
