@@ -325,6 +325,7 @@ export interface AcademicHandoffResult {
 }
 export interface AcademicImportCandidate {
     'expected_mime'?: string;
+    'license'?: string;
     'source_provider'?: string;
     'source_type'?: string;
     'url'?: string;
@@ -388,11 +389,18 @@ export interface AcademicImportOperationItem {
     'current_state'?: string;
     'document_deleted'?: boolean;
     'document_id'?: string;
+    'error_code'?: string;
+    'error_detail'?: string;
+    'error_message'?: string;
+    'error_recovery'?: string;
     'item_id'?: string;
     'library_paper_id'?: string;
     'pending_paper'?: object;
     'resolved_later'?: boolean;
     'result_kind'?: string;
+    'source_provider'?: string;
+    'source_version'?: string;
+    'stage'?: string;
     'status'?: string;
     'title'?: string;
     'upload_request_key'?: string;
@@ -420,6 +428,7 @@ export interface AcademicImportPreview {
 export interface AcademicImportPreviewItemsInner {
     'disposition'?: string;
     'fulltext_candidates'?: Array<AcademicImportCandidate>;
+    'fulltext_error'?: ProcessingDiagnostic;
     'paper'?: AcademicPaperRef;
     'presence'?: AcademicPresence;
     'reference_ids'?: Array<string>;
@@ -434,7 +443,9 @@ export interface AcademicImportQueueItem {
     'current_document'?: AcademicImportQueueItemCurrentDocument;
     'document_id'?: string;
     'error_code'?: string;
+    'error_detail'?: string;
     'error_message'?: string;
+    'error_recovery'?: string;
     'item_id'?: string;
     'source_provider'?: string;
     'source_version'?: string;
@@ -521,7 +532,10 @@ export interface AcademicSourceImportItem {
     'batch_id': string;
     'created_library': boolean;
     'document_id'?: string;
+    'error_code'?: string;
+    'error_detail'?: string;
     'error_message'?: string;
+    'error_recovery'?: string;
     'item_id': string;
     'paper_key': string;
     'processing_status'?: string;
@@ -1036,6 +1050,16 @@ export interface ApiCoreAcademicImportsBatchIdGet200ResponseOneOf1 {
     'items'?: Array<AcademicImportOperationItem>;
     'next_cursor'?: string;
     'operation'?: AcademicImportOperation;
+}
+export interface ApiCoreAcademicImportsBatchIdRetryPost200Response {
+    'batch_id'?: string;
+    'job_id'?: string;
+    'retry_items'?: number;
+    'status'?: string;
+}
+export interface ApiCoreAcademicImportsBatchIdRetryPostRequest {
+    'idempotency_key'?: string;
+    'item_ids'?: Array<string>;
 }
 /**
  * @type ApiCoreAcademicImportsGet200Response
@@ -9564,7 +9588,45 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
+         * @summary Retry failed imports or processing without duplicating saved originals
+         * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdRetryPostRequest} [apiCoreAcademicImportsBatchIdRetryPostRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsBatchIdRetryPost: async (batchId: string, apiCoreAcademicImportsBatchIdRetryPostRequest?: ApiCoreAcademicImportsBatchIdRetryPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'batchId' is not null or undefined
+            assertParamExists('apiCoreAcademicImportsBatchIdRetryPost', 'batchId', batchId)
+            const localVarPath = `/api/core/academic/imports/{batch_id}:retry`
+                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicImportsBatchIdRetryPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetFilterEnum} [filter]
          * @param {ApiCoreAcademicImportsGetViewEnum} [view]
          * @param {string} [cursor]
          * @param {number} [limit]
@@ -9578,7 +9640,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicImportsGet: async (view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicImportsGet: async (filter?: ApiCoreAcademicImportsGetFilterEnum, view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/academic/imports`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -9590,6 +9652,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
+
+            if (filter !== undefined) {
+                localVarQueryParameter['filter'] = filter;
+            }
 
             if (view !== undefined) {
                 localVarQueryParameter['view'] = view;
@@ -10575,7 +10641,22 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Retry failed imports or processing without duplicating saved originals
+         * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdRetryPostRequest} [apiCoreAcademicImportsBatchIdRetryPostRequest]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsBatchIdRetryPost(batchId: string, apiCoreAcademicImportsBatchIdRetryPostRequest?: ApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsBatchIdRetryPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdRetryPost(batchId, apiCoreAcademicImportsBatchIdRetryPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsBatchIdRetryPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetFilterEnum} [filter]
          * @param {ApiCoreAcademicImportsGetViewEnum} [view]
          * @param {string} [cursor]
          * @param {number} [limit]
@@ -10589,8 +10670,8 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicImportsGet(view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(view, cursor, limit, targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
+        async apiCoreAcademicImportsGet(filter?: ApiCoreAcademicImportsGetFilterEnum, view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(filter, view, cursor, limit, targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -10980,13 +11061,23 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Retry failed imports or processing without duplicating saved originals
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsBatchIdRetryPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsBatchIdRetryPost200Response> {
+            return localVarFp.apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, requestParameters.apiCoreAcademicImportsBatchIdRetryPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Read source-scoped imports or a page of import operations
          * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsGet200Response> {
-            return localVarFp.apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicImportsGet(requestParameters.filter, requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -11272,9 +11363,20 @@ export interface AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreAcademicImportsBatchIdRetryPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest {
+    readonly batchId: string
+
+    readonly apiCoreAcademicImportsBatchIdRetryPostRequest?: ApiCoreAcademicImportsBatchIdRetryPostRequest
+}
+
+/**
  * Request parameters for apiCoreAcademicImportsGet operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicImportsGetRequest {
+    readonly filter?: ApiCoreAcademicImportsGetFilterEnum
+
     readonly view?: ApiCoreAcademicImportsGetViewEnum
 
     readonly cursor?: string
@@ -11576,13 +11678,24 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
+     * @summary Retry failed imports or processing without duplicating saved originals
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsBatchIdRetryPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, requestParameters.apiCoreAcademicImportsBatchIdRetryPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Read source-scoped imports or a page of import operations
      * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.filter, requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11813,6 +11926,11 @@ export const ApiCoreAcademicImportsBatchIdGetViewEnum = {
     Operations: 'operations'
 } as const;
 export type ApiCoreAcademicImportsBatchIdGetViewEnum = typeof ApiCoreAcademicImportsBatchIdGetViewEnum[keyof typeof ApiCoreAcademicImportsBatchIdGetViewEnum];
+export const ApiCoreAcademicImportsGetFilterEnum = {
+    All: 'all',
+    Current: 'current'
+} as const;
+export type ApiCoreAcademicImportsGetFilterEnum = typeof ApiCoreAcademicImportsGetFilterEnum[keyof typeof ApiCoreAcademicImportsGetFilterEnum];
 export const ApiCoreAcademicImportsGetViewEnum = {
     Operations: 'operations'
 } as const;
@@ -18373,39 +18491,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'batchId' is not null or undefined
             assertParamExists('apiCoreAcademicImportsBatchIdCancelPost', 'batchId', batchId)
             const localVarPath = `/api/core/academic/imports/{batch_id}:cancel`
-                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /academic/imports/{batch_id}:retry
-         * @param {string} batchId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsBatchIdRetryPost: async (batchId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'batchId' is not null or undefined
-            assertParamExists('apiCoreAcademicImportsBatchIdRetryPost', 'batchId', batchId)
-            const localVarPath = `/api/core/academic/imports/{batch_id}:retry`
                 .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -31022,19 +31107,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /academic/imports/{batch_id}:retry
-         * @param {string} batchId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsBatchIdRetryPost(batchId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdRetryPost(batchId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsBatchIdRetryPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /academic/references:resolve
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -35872,16 +35944,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /academic/imports/{batch_id}:retry
-         * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary POST /academic/references:resolve
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -39455,13 +39517,6 @@ export interface DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest {
 }
 
 /**
- * Request parameters for apiCoreAcademicImportsBatchIdRetryPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest {
-    readonly batchId: string
-}
-
-/**
  * Request parameters for apiCoreAgentInvocationsInvocationIdFinishPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreAgentInvocationsInvocationIdFinishPostRequest {
@@ -41588,17 +41643,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicImportsBatchIdCancelPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdCancelPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /academic/imports/{batch_id}:retry
-     * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

@@ -75,8 +75,11 @@ func lookupPaperLink(ctx context.Context, input string) (WorkInput, error) {
 	if len(m.Issued.DateParts) > 0 && len(m.Issued.DateParts[0]) > 0 {
 		work.Year = m.Issued.DateParts[0][0]
 	}
-	if pdf, license, version, e := resolveDOIOpenAccess(ctx, doi); e == nil && pdf != "" {
+	if pdf, license, version, e := resolveDOIOpenAccess(ctx, doi); e != nil {
+		work.FulltextError = fulltextLookupDiagnostic(e)
+	} else if pdf != "" {
 		work.Provenance["pdf_url"], work.Provenance["pdf_license"], work.Provenance["pdf_version"] = pdf, license, version
+		work.Provenance["pdf_provider"] = "unpaywall"
 	}
 	return work, nil
 }

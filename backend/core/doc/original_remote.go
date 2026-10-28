@@ -90,6 +90,9 @@ func (s *OriginalService) AcquireRemoteOriginal(ctx context.Context, caller Data
 	}
 	client := newOriginalHTTPClient()
 	defer client.CloseIdleConnections()
+	if s.httpTransport != nil {
+		client.Transport = s.httpTransport
+	}
 	downloadURL := *u
 	params := downloadURL.Query()
 	for key, value := range req.PrivateQuery {

@@ -201,8 +201,9 @@ func operationStates(db *gorm.DB, user, dataset string, batchIDs, itemIDs []stri
 	joined = joined.Select("x.*,CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END AS document_available," + state + " AS processing_state")
 	return db.Table("(?) state", joined).Select(`state.id,state.batch_id,
  CASE WHEN state.status='failed' AND state.library_removed_at IS NULL AND state.document_available=1 AND state.processing_state='ready' THEN 1 ELSE 0 END AS resolved_later,
- CASE WHEN state.stage='awaiting_association' THEN 'awaiting_association'
- WHEN state.library_removed_at IS NOT NULL THEN 'removed'
+ CASE WHEN state.library_removed_at IS NOT NULL THEN 'removed'
+ WHEN COALESCE(state.effective_document_id,'')<>'' AND state.document_available=0 THEN 'deleted'
+ WHEN state.stage='awaiting_association' THEN 'awaiting_association'
  WHEN state.result_kind='metadata_only' THEN 'metadata_only'
  WHEN state.status='failed' AND state.batch_status IN ('pending','running') THEN 'importing'
  WHEN state.status='failed' AND state.document_available=1 AND state.processing_state='processing' THEN 'processing'
@@ -297,7 +298,21 @@ func ListImportOperations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	db := store.DB().WithContext(r.Context())
+	filter := r.URL.Query().Get("filter")
+	if filter != "" && filter != "all" && filter != "current" {
+		replyError(w, 400, "INVALID_REQUEST", "invalid import filter")
+		return
+	}
+	observed, err := observeOperationProcessing(r, db, dataset, nil, nil)
+	if err != nil {
+		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
+		return
+	}
 	query := db.Where("target_dataset_id=? AND created_by=?", dataset, store.UserID(r))
+	if filter == "current" {
+		current := db.Table("(?) current_imports", operationSummaryQuery(db, store.UserID(r), dataset, nil, canWrite, observed.States)).Select("batch_id").Where("active>0 OR needs_action>0")
+		query = query.Where("id IN (?)", current)
+	}
 	if cursor != nil {
 		query = query.Where("created_at < ? OR (created_at=? AND id<?)", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
 	}
@@ -311,11 +326,6 @@ func ListImportOperations(w http.ResponseWriter, r *http.Request) {
 		batches = batches[:limit]
 		last := batches[len(batches)-1]
 		next = nextImportCursor(last.CreatedAt, last.ID)
-	}
-	observed, err := observeOperationProcessing(r, db, dataset, nil, nil)
-	if err != nil {
-		replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
-		return
 	}
 	operations, err := loadOperationSummaries(r.Context(), db, store.UserID(r), dataset, batches, canWrite, observed.States)
 	if err != nil {
@@ -429,9 +439,7 @@ func loadOperationPage(r *http.Request, db *gorm.DB, batch orm.PaperImportBatch,
 	}
 	for _, item := range raw {
 		var candidate FulltextCandidate
-		var details struct {
-			Message string `json:"message"`
-		}
+		var details importFailureDetails
 		if len(item.SelectedCandidateJSON) > 0 {
 			if err := json.Unmarshal(item.SelectedCandidateJSON, &candidate); err != nil {
 				return nil, err
@@ -443,6 +451,7 @@ func loadOperationPage(r *http.Request, db *gorm.DB, batch orm.PaperImportBatch,
 			}
 		}
 		row := ImportOperationItem{ImportQueueItem: ImportQueueItem{ItemID: item.ID, BatchID: batch.ID, WorkID: item.AcademicWorkID, Title: firstNonEmpty(item.TitleSnapshot, titles[item.AcademicWorkID], "未命名文献"), Status: item.Status, Stage: item.Stage, DocumentID: item.DocumentID, TargetDatasetID: batch.TargetDatasetID, SourceProvider: candidate.SourceProvider, SourceVersion: candidate.Version, ErrorCode: item.ErrorCode, ErrorMessage: details.Message, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, BatchStatus: batch.Status}, LibraryPaperID: item.LibraryPaperID, ResultKind: item.ResultKind, taskID: item.DocumentTaskID}
+		row.ErrorDetail, row.ErrorRecovery = details.Detail, details.Recovery
 		if !present[row.LibraryPaperID] {
 			row.LibraryPaperID = ""
 		}
@@ -489,6 +498,12 @@ func loadOperationPage(r *http.Request, db *gorm.DB, batch orm.PaperImportBatch,
 		row := &result[byID[s.ID]]
 		row.CurrentState = s.CurrentState
 		row.ResolvedLater = s.ResolvedLater > 0
+		if row.CurrentState == "processing_failed" {
+			row.ErrorMessage = "PDF 已保存，正文处理失败"
+			if diagnostic := observed.Metadata[row.DocumentID].ProcessingError; diagnostic != nil {
+				row.ErrorCode, row.ErrorDetail, row.ErrorRecovery = diagnostic.Code, diagnostic.Message, diagnostic.Recovery
+			}
+		}
 		if row.DocumentID != "" && row.CurrentDocument == nil && row.CurrentState != "importing" && row.CurrentState != "awaiting_association" && row.CurrentState != "metadata_only" && row.CurrentState != "removed" && row.Status != "failed" && row.Status != "canceled" {
 			row.CurrentState = "deleted"
 		}

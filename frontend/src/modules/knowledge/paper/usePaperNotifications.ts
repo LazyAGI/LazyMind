@@ -7,6 +7,7 @@ export interface PaperNotification {
   id: string;
   title: string;
   message: string;
+  level?: 'info' | 'success' | 'warning' | 'error';
   importBatchId?: string;
   action?: { label: string; onClick: () => void | Promise<void>; disabled?: boolean; closeOnClick?: boolean };
 }
@@ -30,8 +31,9 @@ export function usePaperNotifications(datasetId: string) {
         const data = response.data?.data || response.data;
         if (stopped || revision !== generation || scope.current !== datasetId || AgentAppsAuth.getUserInfo()?.userId !== user) return;
         const notices = (data.items || []).filter((item: { navigation?: { dataset_id?: string } }) => item.navigation?.dataset_id === datasetId);
-        const items: PaperNotification[] = notices.map((item: { notification_id: string; title: string; body: string; navigation: { expansion_id: string } }) => ({
+        const items: PaperNotification[] = notices.map((item: { notification_id: string; event: string; title: string; body: string; navigation: { expansion_id: string } }) => ({
           id: `persistent:${item.notification_id}`, title: item.title, message: item.body,
+          level: item.event === 'paper_ready' ? 'success' : 'info',
           action: { label: '打开拓展记录', closeOnClick: true, onClick: () => { window.dispatchEvent(new CustomEvent('paper-expansion-open', { detail: { id: item.navigation.expansion_id } })); } },
         }));
         setState(current => ({ datasetId, items: [...(current.datasetId === datasetId ? current.items.filter(item => !item.id.startsWith('persistent:')) : []), ...items] }));

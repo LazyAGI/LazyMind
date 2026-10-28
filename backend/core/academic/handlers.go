@@ -902,7 +902,8 @@ func candidatesForWork(work orm.AcademicWork) []FulltextCandidate {
 	}
 	license, _ := provenance["pdf_license"].(string)
 	version, _ := provenance["pdf_version"].(string)
-	return []FulltextCandidate{{URL: pdfURL, SourceType: "open_access_pdf", SourceProvider: "openalex", License: license, Version: version, ExpectedMIME: "application/pdf"}}
+	provider, _ := provenance["pdf_provider"].(string)
+	return []FulltextCandidate{{URL: pdfURL, SourceType: "open_access_pdf", SourceProvider: firstNonEmpty(provider, "openalex"), License: license, Version: version, ExpectedMIME: "application/pdf"}}
 }
 
 type previewRequest struct {
@@ -1086,6 +1087,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]PreviewItem, 0, len(works))
 	verified := map[string]PaperRef{}
+	hashes := map[string]string{}
 	for _, work := range works {
 		p := presenceByID[work.ID]
 		ref := paperRef(work)
@@ -1133,11 +1135,33 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 				replyError(w, 422, "INVALID_SELECTION", e.Error())
 				return
 			}
-			if source.Paper.PDFURL != "" {
-				ref = source.Paper
-				verified[work.ID] = ref
-				candidates = []FulltextCandidate{{URL: source.Paper.PDFURL, SourceProvider: source.Paper.SourceProvider, Version: source.Paper.SourceVersion, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}}
+			ref = source.Paper
+			var hash string
+			candidates, hash, e = expansionImportCandidates(r.Context(), userID, source)
+			if e != nil {
+				replyError(w, 500, "IMPORT_PREVIEW_FAILED", e.Error())
+				return
 			}
+			if len(candidates) > 0 && hash != "" {
+				hashes[work.ID+"|"+candidates[0].URL] = hash
+			}
+		}
+		if len(candidates) > 0 {
+			primary := candidates[0]
+			if primary.SourceProvider == "arxiv" && primary.Version == "" {
+				metadata, e := arxivsource.NewClient().Lookup(r.Context(), primary.URL)
+				if e != nil {
+					replyArxivImportError(w, e)
+					return
+				}
+				ref = documentPaperRef(ref, marshal(arxivWorkInput(metadata)))
+				ref.ArxivID = metadata.BaseID
+				primary.URL, primary.Version = metadata.PDFURL, metadata.Version
+				candidates[0] = primary
+			}
+			ref.SourceProvider, ref.SourceVersion, ref.PDFURL = primary.SourceProvider, primary.Version, primary.URL
+			pinPaperURLs(&ref)
+			verified[work.ID] = ref
 		}
 		if len(candidates) > 0 && candidates[0].Version != "" {
 			matching := []PresenceDocument{}
@@ -1150,7 +1174,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(candidates) > 0 {
-			p.Importing, err = activePaperImport(r.Context(), userID, req.TargetDatasetID, work.ID, candidates[0].Version)
+			p.Importing, err = activePaperImport(r.Context(), userID, req.TargetDatasetID, work.ID, candidates[0].Version, candidates[0].SourceProvider)
 			if err != nil {
 				replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 				return
@@ -1164,10 +1188,14 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		} else if len(candidates) == 0 {
 			disposition = "metadata_only"
 		}
-		items = append(items, PreviewItem{LibraryPaperID: draftIDs[work.ID], Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
+		var fulltextError *doc.ProcessingDiagnostic
+		if work.ID == linkedWorkID {
+			fulltextError = linkInput.FulltextError
+		}
+		items = append(items, PreviewItem{FulltextError: fulltextError, LibraryPaperID: draftIDs[work.ID], Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Title < items[j].Title })
-	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified, expansion)
+	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified, expansion, hashes)
 	if err != nil {
 		replyError(w, 500, "IMPORT_PREVIEW_FAILED", err.Error())
 		return

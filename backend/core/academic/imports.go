@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
@@ -53,10 +52,11 @@ type createImportRequest struct {
 }
 
 type paperImportPayload struct {
-	ItemIDs  []string `json:"item_ids,omitempty"`
-	BatchID  string   `json:"batch_id"`
-	UserID   string   `json:"user_id"`
-	UserName string   `json:"user_name"`
+	RequestHash string   `json:"request_hash,omitempty"`
+	ItemIDs     []string `json:"item_ids,omitempty"`
+	BatchID     string   `json:"batch_id"`
+	UserID      string   `json:"user_id"`
+	UserName    string   `json:"user_name"`
 }
 
 func init() { asyncjob.Register(paperImportJobType, handlePaperImportJob) }
@@ -178,7 +178,7 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		key := input.WorkID + "/" + input.Candidate.Version
+		key := input.WorkID + "/" + input.Candidate.SourceProvider + "/" + input.Candidate.Version
 		if seen[key] {
 			continue
 		}
@@ -188,7 +188,7 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 422, "WORK_NOT_FOUND", "one or more works are unresolved")
 			return
 		}
-		active, err := activePaperImport(r.Context(), userID, req.TargetDatasetID, input.WorkID, input.Candidate.Version)
+		active, err := activePaperImport(r.Context(), userID, req.TargetDatasetID, input.WorkID, input.Candidate.Version, input.Candidate.SourceProvider)
 		if err != nil {
 			replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 			return
@@ -199,7 +199,11 @@ func CreateImport(w http.ResponseWriter, r *http.Request) {
 		}
 
 		refs, _ := json.Marshal(input.ReferenceIDs)
-		candidate, _ := json.Marshal(savedImportCandidate{FulltextCandidate: input.Candidate, VerifiedPaper: verified})
+		selected := savedImportCandidate{FulltextCandidate: input.Candidate, VerifiedPaper: verified}
+		if preview != nil {
+			selected.ExpectedHash = preview.Hashes[input.WorkID+"|"+input.Candidate.URL]
+		}
+		candidate, _ := json.Marshal(selected)
 		stage := "acquire"
 		if input.Candidate.URL == "" {
 			stage = "resolve"
@@ -293,9 +297,7 @@ func ListImports(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := make([]ImportQueueItem, 0, len(records))
 	for _, record := range records {
-		var details struct {
-			Message string `json:"message"`
-		}
+		var details importFailureDetails
 		if len(record.ErrorDetailsJSON) > 0 {
 			if err := json.Unmarshal(record.ErrorDetailsJSON, &details); err != nil {
 				replyError(w, http.StatusInternalServerError, "IMPORT_QUERY_FAILED", "invalid import error details")
@@ -303,6 +305,7 @@ func ListImports(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		record.ErrorMessage = details.Message
+		record.ErrorDetail, record.ErrorRecovery = details.Detail, details.Recovery
 		var candidate FulltextCandidate
 		if err := json.Unmarshal(record.SelectedCandidateJSON, &candidate); err != nil {
 			replyError(w, 500, "IMPORT_QUERY_FAILED", "invalid import source")
@@ -379,56 +382,7 @@ func RetryImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if batch.EntryType == "conversation_sources" || batch.EntryType == "paper_link" || batch.EntryType == "paper_expansion" || batch.EntryType == "pdf_upload" {
-		retrySourceImport(w, r, batch)
-		return
-	}
-	var failed int64
-	var jobID string
-	noFailed := errors.New("there are no failed items to retry")
-	activeBatch := errors.New("batch is already processing")
-	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND created_by = ?", batch.ID, userID).Take(&batch).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batch.ID).Count(&failed).Error; err != nil {
-			return err
-		}
-		if failed == 0 {
-			return noFailed
-		}
-		var active int64
-		if err := tx.Model(&orm.AsyncJob{}).Where("id = ? AND status IN ?", batch.AsyncJobID, []string{"pending", "running"}).Count(&active).Error; err != nil {
-			return err
-		}
-		if active > 0 {
-			return activeBatch
-		}
-		queued, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID,
-			IdempotencyKey: "paper-import-retry:" + batch.ID + ":" + uuid.NewString(), Payload: paperImportPayload{BatchID: batch.ID, UserID: userID, UserName: store.UserName(r)},
-			CreateUserID: userID, CreateUserName: store.UserName(r)})
-		if err != nil {
-			return err
-		}
-		if err := tx.Model(&orm.PaperImportItem{}).Where("batch_id = ? AND status = 'failed'", batch.ID).Updates(map[string]any{"status": "pending", "error_details_json": json.RawMessage("{}"), "updated_at": time.Now().UTC()}).Error; err != nil {
-			return err
-		}
-		jobID = queued.ID
-		return tx.Model(&batch).Updates(map[string]any{"status": "pending", "async_job_id": jobID, "updated_at": time.Now().UTC()}).Error
-	})
-	if errors.Is(err, noFailed) || errors.Is(err, activeBatch) {
-		code := "NO_FAILED_ITEMS"
-		if errors.Is(err, activeBatch) {
-			code = "IMPORT_ALREADY_PROCESSING"
-		}
-		replyError(w, http.StatusConflict, code, err.Error())
-		return
-	}
-	if err != nil {
-		replyError(w, 500, "IMPORT_RETRY_FAILED", err.Error())
-		return
-	}
-	common.ReplyJSON(w, map[string]any{"batch_id": batch.ID, "job_id": jobID, "status": "pending", "retry_items": failed})
+	retrySourceImport(w, r, batch)
 }
 
 func handlePaperImportJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
@@ -476,6 +430,9 @@ func findEquivalentPresentWork(ctx context.Context, workID, datasetID string, ve
 		Limit(1)
 	if len(version) > 0 && version[0] != "" {
 		query = query.Where("awd.source_version = ?", version[0])
+		if len(version) > 1 && version[1] != "" {
+			query = query.Where("awd.source_provider=?", version[1])
+		}
 		if source.ArxivIDBase != "" {
 			query = query.Where("aw.arxiv_id_base=?", source.ArxivIDBase)
 		}
@@ -529,7 +486,7 @@ func safePaperFilename(value string) string {
 	return out
 }
 
-func activePaperImport(ctx context.Context, user, dataset, work, version string) (bool, error) {
+func activePaperImport(ctx context.Context, user, dataset, work, version string, provider ...string) (bool, error) {
 	var items []orm.PaperImportItem
 	err := store.DB().WithContext(ctx).Table("paper_import_items pi").Select("pi.*").Joins("JOIN paper_import_batches pb ON pb.id=pi.batch_id").Where("pi.academic_work_id=? AND pb.target_dataset_id=? AND pb.created_by=? AND pi.status IN ?", work, dataset, user, []string{"pending", "running"}).Find(&items).Error
 	if err != nil {
@@ -540,7 +497,7 @@ func activePaperImport(ctx context.Context, user, dataset, work, version string)
 		if err = json.Unmarshal(item.SelectedCandidateJSON, &candidate); err != nil {
 			return false, err
 		}
-		if version == candidate.Version {
+		if version == candidate.Version && (len(provider) == 0 || provider[0] == candidate.SourceProvider) {
 			return true, nil
 		}
 	}

@@ -172,7 +172,7 @@ func runPaperContent(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 		updates["error"] = quality.Reason
 	}
 	if kind == "external" {
-		if payload.Source.Paper.ArxivID != "" {
+		if payload.Source.Paper.SourceProvider == "arxiv" {
 			updates["source_provider"] = "arxiv"
 		}
 		updates["source_dataset_id"], updates["source_document_id"] = "", ""
@@ -229,7 +229,7 @@ func readKnownPaper(ctx context.Context, userID string, source paperSource, cont
 		return nil, "", "", "", err
 	}
 	paper := source.Paper
-	if paper.ArxivID != "" && paper.SourceVersion == "" {
+	if paper.ArxivID != "" && paper.SourceProvider == "arxiv" && paper.SourceVersion == "" {
 		// An unversioned local seed stays unversioned when reading its PDF.
 		// If external fallback is necessary, pin that revision before download
 		// so a failed download or interrupted job cannot advance on retry.

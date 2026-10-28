@@ -82,6 +82,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const [syncError, setSyncError] = useState<string | null>(null);
     const initialLoading = !snapshotReady && loading && !persistenceError;
     const [importPage, setImportPage] = useState<ImportBatchPage>(emptyImportBatchPage);
+    const [currentImportPage, setCurrentImportPage] = useState<ImportBatchPage>(emptyImportBatchPage);
     const [detailPaperId, setDetailPaperId] = useState<string | null>(null);
     const [detailTab, setDetailTab] = useState<PaperDetailTab>("overview");
     const [detailEditing, setDetailEditing] = useState(false);
@@ -146,9 +147,10 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                     setPersistenceError(error instanceof Error ? error.message : "无法加载已保存的文献，请重试");
                 }
             }),
-            listAcademicImportBatches(datasetId).then(queue => {
+            Promise.all([listAcademicImportBatches(datasetId), listAcademicImportBatches(datasetId, undefined, 'current')]).then(([queue, currentQueue]) => {
                 if (current()) {
                     setImportPage(queue);
+                    setCurrentImportPage(currentQueue);
                     setSyncError(null);
                 }
             }).catch(error => {
@@ -182,6 +184,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         setSnapshotReady(false);
         setLibraryActive(false);
         setImportPage(emptyImportBatchPage());
+        setCurrentImportPage(emptyImportBatchPage());
         refreshPendingRef.current = false;
         setDetailPaperId(null);
         setFolderId(null);
@@ -485,7 +488,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                 }] }}>
             <Button type="text" className="paper-library-tool" icon={<ExportOutlined />} aria-label="导出题录" title="仅导出论文题录，不包含 PDF、附件、笔记和批注" disabled={!exportPapers.length}>导出题录</Button>
           </Dropdown>
-          <PaperImportStatus key={datasetId} datasetId={datasetId} page={importPage} notifications={libraryNotices} syncError={syncError} refreshing={loading} onRefresh={() => { void reload(); }} canWrite={canWrite} onOpenPaper={id => openDetail(id)} onResumeAssociation={resumeAssociation} open={activeTool === "imports"} onOpenChange={open => setActiveTool(current => open ? "imports" : current === "imports" ? null : current)} onRetry={async (batch) => { await retryAcademicImport(batch, true); setSyncRevision(value => value + 1); }}/>
+          <PaperImportStatus key={datasetId} datasetId={datasetId} page={importPage} currentPage={currentImportPage} notifications={libraryNotices} syncError={syncError} refreshing={loading} onRefresh={() => { void reload(); }} canWrite={canWrite} onOpenPaper={id => openDetail(id)} onResumeAssociation={resumeAssociation} open={activeTool === "imports"} onOpenChange={open => setActiveTool(current => open ? "imports" : current === "imports" ? null : current)} onRetry={async (batch, key) => { await retryAcademicImport(batch, true, key); setSyncRevision(value => value + 1); }}/>
         </div>
       </header>
       {!loading && !canWrite && !persistenceError && <Alert type="info" showIcon message="当前文献库为只读，无法编辑"/>}

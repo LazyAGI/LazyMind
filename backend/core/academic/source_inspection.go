@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -176,6 +177,9 @@ func inspectRecord(ctx context.Context, db *gorm.DB, s sourceRecord) (SourceInsp
 		out.Work = WorkInput{ArxivID: id, Title: s.Title, Provider: "arxiv", ProviderWorkID: id}
 		out.PaperKey = "arxiv:" + id
 		out.Candidate = FulltextCandidate{URL: "https://arxiv.org/pdf/" + id, SourceType: "official_pdf", SourceProvider: "arxiv", ExpectedMIME: "application/pdf"}
+		if selected, err := arxivsource.Parse(s.URL); err == nil {
+			out.Candidate.URL, out.Candidate.Version = selected.PDFURL(), selected.Version
+		}
 		// Prefer an already established cross-provider identity.
 		var known orm.AcademicWork
 		if e := db.WithContext(ctx).Where("arxiv_id_base = ?", id).Take(&known).Error; e == nil {

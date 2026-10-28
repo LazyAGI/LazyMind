@@ -55,13 +55,16 @@ type AcquireRemoteOriginalRequest struct {
 	MaxBytes int64
 }
 type OriginalServiceDeps struct {
-	DB               *gorm.DB
+	DB *gorm.DB
+	// Trusted transport injection; production defaults to the guarded public-network transport.
+	HTTPTransport    http.RoundTripper
 	SubmitProcessing func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
 }
 type OriginalService struct {
-	db     *gorm.DB
-	submit func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
-	now    func() time.Time
+	db            *gorm.DB
+	httpTransport http.RoundTripper
+	submit        func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
+	now           func() time.Time
 }
 type originalMetadata struct {
 	uploadedFileExt
@@ -111,7 +114,7 @@ func NewOriginalService(deps OriginalServiceDeps) (*OriginalService, error) {
 	if deps.DB == nil {
 		return nil, errors.New("original service requires database")
 	}
-	return &OriginalService{db: deps.DB, submit: deps.SubmitProcessing, now: func() time.Time { return time.Now().UTC() }}, nil
+	return &OriginalService{db: deps.DB, httpTransport: deps.HTTPTransport, submit: deps.SubmitProcessing, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 func originalError(code DatasetServiceErrorCode, message string) error {
 	return &DatasetServiceError{Code: code, Message: message}

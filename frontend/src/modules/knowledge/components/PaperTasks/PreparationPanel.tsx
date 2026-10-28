@@ -61,9 +61,10 @@ export default function PreparationPanel({ detail, onRefresh, onStart }: {
   const confirmed = preparation.selected_directions || [];
   const summaryPreview = preparation.summary?.split('\n').find(line => line.trim() && !/^#{1,6}\s/.test(line)) || preparation.summary;
   const currentStage = stages.findIndex(stage => !record.progress?.[stage.slot]);
+  const preparationPhase = record.status === 'completed' ? 3 : record.status === 'awaiting_confirmation' ? 1 : pending ? 0 : 2;
   const content = <section className="paper-preparation" aria-label="初步调研与方向确认">
     <div className="paper-preparation-meta"><LockOutlined />{researchDepthLabels[record.budget_mode || 'balanced']}调研</div>
-    <Steps className="paper-preparation-steps" size="small" current={pending ? record.status === 'awaiting_confirmation' ? 1 : 0 : 2}
+    <Steps className="paper-preparation-steps" size="small" current={preparationPhase}
       items={[{ title: '初步调研' }, { title: preparation.auto_confirmed ? '方向已确定' : '确认方向' }, { title: '正式拓展' }]} />
     {record.status === 'preparing' && <div className="paper-preparation-working" role="status"><Spin size="small" /><div><strong>正在调研研究问题</strong><p>你可以离开此页面，需要补充信息或选择方向时会通知你。只有一个方向时将自动继续拓展。</p></div></div>}
     {preparation.summary && <section className="paper-preparation-findings">

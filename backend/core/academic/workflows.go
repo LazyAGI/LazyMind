@@ -1025,7 +1025,7 @@ func GetExpansion(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			continue
 		}
-		presence[i].Importing, err = activePaperImport(r.Context(), user, record.DatasetID, presence[i].WorkID, source.Paper.SourceVersion)
+		presence[i].Importing, err = activePaperImport(r.Context(), user, record.DatasetID, presence[i].WorkID, source.Paper.SourceVersion, source.Paper.SourceProvider)
 		if err != nil {
 			replyError(w, 500, "IMPORT_QUERY_FAILED", err.Error())
 			return

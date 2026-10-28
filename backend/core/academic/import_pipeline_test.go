@@ -94,6 +94,7 @@ func TestUnifiedPaperImportReusesCacheAndKeepsDifferentVersions(t *testing.T) {
 			item.DocumentID = ""
 			item.DocumentTaskID = ""
 			ref := testVerifiedPaper()
+			ref.PaperID = "work"
 			ref.SourceVersion = version
 			ref.PDFURL = "https://arxiv.org/pdf/" + ref.ArxivID + version
 			c := testPDFCandidate()

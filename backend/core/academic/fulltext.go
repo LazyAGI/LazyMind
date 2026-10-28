@@ -21,12 +21,13 @@ type contentAttempt struct {
 	ElapsedMS int64  `json:"elapsed_ms"`
 }
 type contentAcquisition struct {
-	StartedAt      time.Time        `json:"started_at"`
-	SourceURL      string           `json:"source_url,omitempty"`
-	SourceProvider string           `json:"source_provider,omitempty"`
-	Downloaded     bool             `json:"downloaded"`
-	PDFHash        string           `json:"pdf_hash,omitempty"`
-	Attempts       []contentAttempt `json:"attempts"`
+	Candidate      *FulltextCandidate `json:"candidate,omitempty"`
+	StartedAt      time.Time          `json:"started_at"`
+	SourceURL      string             `json:"source_url,omitempty"`
+	SourceProvider string             `json:"source_provider,omitempty"`
+	Downloaded     bool               `json:"downloaded"`
+	PDFHash        string             `json:"pdf_hash,omitempty"`
+	Attempts       []contentAttempt   `json:"attempts"`
 }
 
 // Page acquisition uses OriginalService's DNS, IP, redirect and byte validation.
@@ -201,6 +202,7 @@ func readExternalCopies(ctx context.Context, user string, source paperSource, co
 				q := checkPaperQuality(source.Paper, pages, "external", hash)
 				status = "needs_review"
 				if q.Eligible {
+					acquisition.Candidate = &candidate
 					acquisition.SourceURL = candidate.URL
 					acquisition.Attempts = append(acquisition.Attempts, contentAttempt{candidate.URL, "ready", time.Since(started).Milliseconds()})
 					if e = save(); e != nil {

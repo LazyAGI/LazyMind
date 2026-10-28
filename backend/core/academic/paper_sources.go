@@ -15,6 +15,7 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
@@ -98,9 +99,10 @@ func seedSources(db *gorm.DB, dataset string, papers []WorkflowPaper) ([]paperSo
 }
 
 func pinPaperURLs(p *PaperRef) {
-	if p.ArxivID != "" && p.SourceVersion != "" {
-		p.SourceProvider = "arxiv"
-		p.PaperURL, p.PDFURL = "https://arxiv.org/abs/"+p.ArxivID+p.SourceVersion, "https://arxiv.org/pdf/"+p.ArxivID+p.SourceVersion
+	if p.SourceProvider == "arxiv" && p.ArxivID != "" && p.SourceVersion != "" {
+		if id, err := arxivsource.Parse(p.ArxivID + p.SourceVersion); err == nil && id.Version == p.SourceVersion {
+			p.PaperURL, p.PDFURL = id.AbsURL(), id.PDFURL()
+		}
 	}
 }
 

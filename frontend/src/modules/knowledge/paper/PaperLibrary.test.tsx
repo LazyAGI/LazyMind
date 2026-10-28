@@ -179,10 +179,11 @@ describe('paper library behavior', () => {
             vi.mocked(loadPersistedPaperLibrary).mockImplementation(async id => ({ ...snapshot(readLibrary(id)), active: true }));
             await renderLibrary();
             expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
-            expect(listAcademicImportBatches).toHaveBeenCalledOnce();
+            expect(listAcademicImportBatches).toHaveBeenCalledTimes(2);
+            expect(listAcademicImportBatches).toHaveBeenCalledWith(datasetId, undefined, 'current');
             await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
             expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(2);
-            expect(listAcademicImportBatches).toHaveBeenCalledTimes(2);
+            expect(listAcademicImportBatches).toHaveBeenCalledTimes(4);
             await act(async () => { fireEvent.focus(window); });
             expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(3);
         } finally {
@@ -195,7 +196,7 @@ describe('paper library behavior', () => {
         expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
-        expect(await screen.findByText('通知暂时不可用', { selector: 'summary' })).toBeInTheDocument();
+        expect(await screen.findByText('通知暂时不可用')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('tab', { name: '导入记录' }));
         expect(screen.queryByText('暂无论文导入记录')).not.toBeInTheDocument();
         expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
@@ -731,7 +732,7 @@ describe('paper library behavior', () => {
         await waitFor(() => expect(screen.getByRole('button', { name: /通知：.*1 条待处理/ })).toBeInTheDocument());
         expect(error).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
-        expect(await screen.findByText('temporarily unavailable', { selector: 'summary' })).toBeInTheDocument();
+        expect(await screen.findByText('temporarily unavailable')).toBeInTheDocument();
         expect(readLibrary(datasetId).papers[0].important).toBe(true);
         expect(star).toHaveAttribute('aria-pressed', 'true');
         expect(readLibrary(datasetId)).toEqual(before);

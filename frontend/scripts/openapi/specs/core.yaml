@@ -574,6 +574,8 @@ components:
             properties:
                 expected_mime:
                     type: string
+                license:
+                    type: string
                 source_provider:
                     type: string
                 source_type:
@@ -709,6 +711,14 @@ components:
                     type: boolean
                 document_id:
                     type: string
+                error_code:
+                    type: string
+                error_detail:
+                    type: string
+                error_message:
+                    type: string
+                error_recovery:
+                    type: string
                 item_id:
                     type: string
                 library_paper_id:
@@ -719,6 +729,12 @@ components:
                 resolved_later:
                     type: boolean
                 result_kind:
+                    type: string
+                source_provider:
+                    type: string
+                source_version:
+                    type: string
+                stage:
                     type: string
                 status:
                     type: string
@@ -738,6 +754,8 @@ components:
                                 items:
                                     $ref: '#/components/schemas/AcademicImportCandidate'
                                 type: array
+                            fulltext_error:
+                                $ref: '#/components/schemas/ProcessingDiagnostic'
                             paper:
                                 $ref: '#/components/schemas/AcademicPaperRef'
                             presence:
@@ -783,7 +801,11 @@ components:
                     type: string
                 error_code:
                     type: string
+                error_detail:
+                    type: string
                 error_message:
+                    type: string
+                error_recovery:
                     type: string
                 item_id:
                     type: string
@@ -985,7 +1007,13 @@ components:
                     type: boolean
                 document_id:
                     type: string
+                error_code:
+                    type: string
+                error_detail:
+                    type: string
                 error_message:
+                    type: string
+                error_recovery:
                     type: string
                 item_id:
                     type: string
@@ -18184,6 +18212,14 @@ paths:
         get:
             parameters:
                 - in: query
+                  name: filter
+                  required: false
+                  schema:
+                    enum:
+                        - all
+                        - current
+                    type: string
+                - in: query
                   name: view
                   required: false
                   schema:
@@ -18378,10 +18414,38 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                idempotency_key:
+                                    type: string
+                                item_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                            type: object
+                required: false
             responses:
                 "200":
-                    description: OK
-            summary: POST /academic/imports/{batch_id}:retry
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    batch_id:
+                                        type: string
+                                    job_id:
+                                        type: string
+                                    retry_items:
+                                        type: integer
+                                    status:
+                                        type: string
+                                type: object
+                    description: Retry failed imports or processing without duplicating saved originals
+            summary: Retry failed imports or processing without duplicating saved originals
+            tags:
+                - AcademicWorkflows
     /api/core/academic/imports:preview:
         post:
             requestBody:

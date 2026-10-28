@@ -5,6 +5,7 @@ export type ImportSource = "local" | "zotero" | "google_scholar" | "semantic_sch
 export type PaperImportMethod = "upload" | "link" | "bibliography" | "expansion" | "references";
 export type ParseState = "ready" | "parsing" | "failed";
 export type CitationStyle = "gbt" | "apa" | "mla";
+export const paperSourceVersionLabels: Record<string, string> = { submittedVersion: '投稿稿', acceptedVersion: '录用稿', publishedVersion: '出版稿' };
 export interface PaperFolder {
     revision?: number;
     id: string;

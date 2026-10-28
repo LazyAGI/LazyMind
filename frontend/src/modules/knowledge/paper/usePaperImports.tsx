@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject, type Dispatch, type
 import { Alert, Button, Input, Modal, Radio, Tooltip, Upload, message, type RadioChangeEvent } from 'antd';
 import { InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
-import { assignFolders, classifyIdentifier, parseBibTeX, parseCSV, parseRIS, planImport, type LibraryView, type PaperLibraryData, type PaperRecord } from './model';
+import { assignFolders, classifyIdentifier, parseBibTeX, parseCSV, parseRIS, planImport, paperSourceVersionLabels, type LibraryView, type PaperLibraryData, type PaperRecord } from './model';
 import { mergeLibraryChanges, previewLibraryPapers, confirmLibraryPdf, importLibraryPapers, type LibraryChanges } from './store';
 import { previewPaperLink, importPaperLink, isImportPreviewExpired, type PaperUploadContext, type ImportPreviewItem, type ImportOperationItem } from '../api/academicReferences';
 import { paperFromPdf } from './pdfMeta';
@@ -451,12 +451,13 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
             <div className="paper-library-modal-actions"><Button type="primary" disabled={disabled || searching || !bibliography.trim()} onClick={importBibliography}>识别题录</Button></div>
           </>}
           {pendingArxiv && <section className="paper-library-import-confirm" aria-label="链接导入确认">
-            <div className="paper-library-arxiv-source"><span>{pendingArxiv.metadata.identifiers.arxiv ? "ARXIV" : "DOI"}</span><code>{pendingArxiv.metadata.identifiers.arxiv || pendingArxiv.metadata.identifiers.doi}{pendingArxiv.arxivVersion}</code></div>
+            <div className="paper-library-arxiv-source"><span>{pendingArxiv.metadata.identifiers.arxiv ? "ARXIV" : "DOI"}</span><code>{pendingArxiv.metadata.identifiers.arxiv || pendingArxiv.metadata.identifiers.doi}{pendingArxiv.metadata.identifiers.arxiv && /^v[1-9][0-9]*$/.test(pendingArxiv.arxivVersion || '') ? pendingArxiv.arxivVersion : ''}</code>{pendingArxiv.arxivVersion && !pendingArxiv.metadata.identifiers.arxiv && <span>{paperSourceVersionLabels[pendingArxiv.arxivVersion] || pendingArxiv.arxivVersion}</span>}</div>
             <h3>{pendingArxiv.metadata.title}</h3>
             <p className="paper-library-arxiv-authors">{pendingArxiv.metadata.authors.join("、")} · {pendingArxiv.metadata.year}</p>
             {pendingArxiv.metadata.abstract && <p className="paper-library-arxiv-abstract">{pendingArxiv.metadata.abstract}</p>}
-            <p className="paper-library-arxiv-hint">{linkPreview?.fulltext_candidates.length ? "确认后提交下载入库任务，同一论文的不同版本保留为独立附件。" : "仅找到文献信息，可先保存题录，后续补充 PDF。"}</p>
-            <div className="paper-library-modal-actions"><Button type="primary" loading={searching || saving} disabled={disabled} onClick={commitArxiv}>{searching ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : "保存题录"}</Button></div>
+            {linkPreview?.fulltext_error && <div role="alert"><p>{linkPreview.fulltext_error.message}。{linkPreview.fulltext_error.recovery}</p><Button disabled={disabled || searching} onClick={importIdentifier}>重新查询全文</Button></div>}
+            <p className="paper-library-arxiv-hint">{linkPreview?.fulltext_candidates.length ? "确认后提交下载入库任务，同一论文的不同版本保留为独立附件。" : linkPreview?.fulltext_error ? "本次仅保存题录，不会提交 PDF 下载任务。" : "仅找到文献信息，可先保存题录，后续补充 PDF。"}</p>
+            <div className="paper-library-modal-actions"><Button type="primary" loading={searching || saving} disabled={disabled} onClick={commitArxiv}>{searching ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : linkPreview?.fulltext_error ? "仅保存题录" : "保存题录"}</Button></div>
           </section>}
           {pending && <section className="paper-library-import-confirm" aria-label="导入确认">
             <h3>{pending.attachTo ? "为已有文献添加 PDF" : pending.fresh.length ? `可导入 ${pending.fresh.length} 篇文献` : "文献已在库中"}</h3>
