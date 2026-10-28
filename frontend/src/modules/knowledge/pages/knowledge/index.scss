@@ -76,6 +76,24 @@
   overflow: hidden;
 }
 
+.knowledge-preview-panel-column {
+  container: paper-reader / inline-size;
+}
+
+@container paper-reader (max-width: 300px) {
+  .knowledge-preview-mode-tabs > .ant-tabs-nav {
+    flex-wrap: wrap;
+  }
+
+  .knowledge-preview-mode-tabs > .ant-tabs-nav > .ant-tabs-nav-wrap {
+    flex: 1 1 100%;
+  }
+
+  .knowledge-preview-mode-tabs > .ant-tabs-nav > .ant-tabs-extra-content {
+    margin-left: auto;
+  }
+}
+
 .knowledge-preview-file-column {
   display: flex;
   flex-direction: column;

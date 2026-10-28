@@ -1111,6 +1111,7 @@ const KnowledgeDocumentContent = () => {
                 <div className={`knowledge-preview-side${previewSideCollapsed ? " is-collapsed" : ""}`}>
                   <Tabs
                     className="knowledge-preview-mode-tabs"
+                    tabBarGutter={8}
                     activeKey={previewSideTab}
                     onChange={setPreviewSideTab}
                     tabBarExtraContent={(
