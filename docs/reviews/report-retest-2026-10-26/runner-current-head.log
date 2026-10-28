@@ -1,9 +1,0 @@
-........................................................................ [ 50%]
-.......................................................................  [100%]
-=============================== warnings summary ===============================
-local/build/deps/python/algorithm/lib/python3.11/site-packages/jieba/_compat.py:18
-  /Users/cuishaoting/Documents/LazyMind/local/build/deps/python/algorithm/lib/python3.11/site-packages/jieba/_compat.py:18: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
-    import pkg_resources
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-143 passed, 1 warning in 2.63s
