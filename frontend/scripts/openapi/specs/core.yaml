@@ -9245,6 +9245,12 @@ components:
             type: object
         PreferenceOrganizerResult:
             properties:
+                final_state:
+                    $ref: '#/components/schemas/PreferenceOrganizerState'
+                initial_state:
+                    $ref: '#/components/schemas/PreferenceOrganizerState'
+                observed_state:
+                    $ref: '#/components/schemas/PreferenceOrganizerState'
                 outcome:
                     enum:
                         - organized
@@ -9276,6 +9282,8 @@ components:
                     type: string
                 full_projection_chars:
                     type: integer
+                max_chars:
+                    type: integer
                 projected_chars:
                     type: integer
                 projected_items:
@@ -9284,6 +9292,9 @@ components:
                     type: boolean
                 stored_items:
                     type: integer
+                updated_at:
+                    format: date-time
+                    type: string
             required:
                 - stored_items
                 - full_projection_chars
@@ -9297,6 +9308,8 @@ components:
                 created_at:
                     format: date-time
                     type: string
+                current_state:
+                    $ref: '#/components/schemas/PreferenceOrganizerState'
                 error_code:
                     type: string
                 error_message:
@@ -9304,8 +9317,21 @@ components:
                 finished_at:
                     format: date-time
                     type: string
+                invalidation_reason:
+                    enum:
+                        - state_unavailable
+                        - missing_snapshot
+                        - preference_changed
+                        - budget_changed
+                    type: string
                 result:
                     $ref: '#/components/schemas/PreferenceOrganizerResult'
+                result_validity:
+                    enum:
+                        - current
+                        - stale
+                        - unknown
+                    type: string
                 started_at:
                     format: date-time
                     type: string

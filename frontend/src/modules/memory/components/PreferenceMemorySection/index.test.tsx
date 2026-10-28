@@ -11,6 +11,8 @@ vi.mock("../../currentMemoryApi", () => ({ listPreferenceMemories: vi.fn(), getP
 vi.mock("@dnd-kit/core", () => ({ DndContext: ({ children, onDragEnd }: { children: ReactNode; onDragEnd: typeof state.drag }) => { state.drag = onDragEnd; return children; }, KeyboardSensor: class {}, PointerSensor: class {}, closestCenter: vi.fn(), useSensor: vi.fn(), useSensors: vi.fn() }));
 vi.mock("@dnd-kit/sortable", () => ({ SortableContext: ({ children }: { children: ReactNode }) => children, sortableKeyboardCoordinates: vi.fn(), verticalListSortingStrategy: vi.fn(), useSortable: () => ({ attributes: {}, listeners: {}, setNodeRef: vi.fn() }) }));
 const items = ["pref.a", "pref.b"].map((name) => ({ name, summary: `${name} summary`, createdAt: "2026-09-01T00:00:00Z", updatedAt: "2026-09-01T00:00:00Z" }));
+const snapshot = { etag: "etag-1", max_chars: 5000, stored_items: 2, full_projection_chars: 120,
+ projected_items: 2, projected_chars: 120, projection_truncated: false, updated_at: "1970-01-01T00:00:00.001Z" };
 const task = (status: api.PreferenceOrganizerTask["status"]): api.PreferenceOrganizerTask => ({ task_id: "task-1", status, waiting_reason: "memory_review", created_at: "2026-09-03T00:00:00Z" });
 beforeEach(() => {
  vi.resetAllMocks();
@@ -46,7 +48,8 @@ describe("Preference Organizer entry", () => {
   view.unmount();
  });
  it("restores the latest no-change result after returning to the page", async () => {
-  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result: { outcome: "no_safe_changes" } });
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result_validity: "current", current_state: snapshot,
+   result: { outcome: "no_safe_changes", target_reached: true, observed_state: snapshot, final_state: snapshot } });
   const view = render(<PreferenceMemorySection />);
   expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeNoChanges");
   expect(screen.getByRole("button", { name: /memoryPreferenceOrganize$/ })).toBeEnabled();
@@ -63,8 +66,81 @@ describe("Preference Organizer entry", () => {
  it("restores historical change-budget results without disabling organization", async () => {
   vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result: { outcome: "budget_exhausted", total_changes: 50, target_reached: false } });
   const view = render(<PreferenceMemorySection />);
-  expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeDone");
+  expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeUnverified");
   expect(screen.getByRole("button", { name: /memoryPreferenceOrganize$/ })).toBeEnabled();
+  view.unmount();
+ });
+
+ it("keeps the overflow warning when no safe changes were found", async () => {
+  const overflow = { ...snapshot, max_chars: 1000, full_projection_chars: 1258 };
+  vi.mocked(api.listPreferenceMemories).mockResolvedValue({ items, etag: "etag-1", totalSize: 2, updatedAt: 1, budget: { usedChars: 1258, maxChars: 1000 } });
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result_validity: "current", current_state: overflow,
+   result: { outcome: "no_safe_changes", target_reached: false, observed_state: overflow, final_state: overflow } });
+  const view = render(<PreferenceMemorySection />);
+  expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeNoSafeChanges");
+  expect(screen.getByText("1258 / 1000")).toBeInTheDocument();
+  expect(screen.getByText("admin.memoryPreferenceOverLimitTitle")).toBeInTheDocument();
+  expect(screen.queryByText("admin.memoryPreferenceOrganizeNoChanges")).not.toBeInTheDocument();
+  view.unmount();
+ });
+
+ it.each(["content", "budget"])("rejects a completion that does not match the loaded %s", async (change) => {
+  const old = { ...snapshot, ...(change === "content" ? { etag: "older" } : { max_chars: 1000 }) };
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result_validity: "current",
+   result: { outcome: "no_safe_changes", target_reached: true, observed_state: old, final_state: old } });
+  const view = render(<PreferenceMemorySection />);
+  expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeStale");
+  view.unmount();
+ });
+
+ it("refreshes usage when polling the same task detects external changes", async () => {
+  const completed: api.PreferenceOrganizerTask = { ...task("done"), result_validity: "current", current_state: snapshot,
+   result: { outcome: "no_safe_changes", target_reached: true, observed_state: snapshot, final_state: snapshot } };
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue(completed);
+  const view = render(<PreferenceMemorySection />);
+  expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeNoChanges");
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...completed, result_validity: "stale",
+   current_state: { ...snapshot, etag: "etag-2", max_chars: 1000, full_projection_chars: 1258 } });
+  vi.mocked(api.listPreferenceMemories).mockResolvedValue({ items, etag: "etag-2", totalSize: 2, updatedAt: 1,
+   budget: { usedChars: 1258, maxChars: 1000 } });
+  act(() => document.dispatchEvent(new Event("visibilitychange")));
+  await screen.findByText("1258 / 1000");
+  expect(screen.getByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeStale");
+  view.unmount();
+ });
+
+ it("reconciles a newer task snapshot that arrives during initial list loading", async () => {
+  const current = { ...snapshot, etag: "etag-2", max_chars: 1000, full_projection_chars: 1258 };
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result_validity: "stale", current_state: current,
+   result: { outcome: "no_safe_changes", target_reached: true, observed_state: snapshot, final_state: snapshot } });
+  vi.mocked(api.listPreferenceMemories)
+   .mockResolvedValueOnce({ items, etag: "etag-1", totalSize: 2, updatedAt: 1, budget: { usedChars: 120, maxChars: 5000 } })
+   .mockResolvedValue({ items, etag: "etag-2", totalSize: 2, updatedAt: 1, budget: { usedChars: 1258, maxChars: 1000 } });
+  const view = render(<PreferenceMemorySection />);
+  await screen.findByText("1258 / 1000");
+  expect(api.listPreferenceMemories).toHaveBeenCalledTimes(2);
+  expect(screen.getByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeStale");
+  view.unmount();
+ });
+
+ it("matches server millisecond timestamps with fractional ISO snapshots", async () => {
+  const current = { ...snapshot, updated_at: "2026-10-27T09:10:52.316722Z" };
+  vi.mocked(api.listPreferenceMemories).mockResolvedValue({ items, etag: "etag-1", totalSize: 2,
+   updatedAt: 1793092252316, budget: { usedChars: 120, maxChars: 5000 } });
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result_validity: "current", current_state: current,
+   result: { outcome: "organized", target_reached: true, observed_state: current, final_state: current } });
+  const view = render(<PreferenceMemorySection />);
+  expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeDone");
+  expect(api.listPreferenceMemories).toHaveBeenCalledTimes(1);
+  view.unmount();
+ });
+
+ it("describes retained preferences when organization stops above its target", async () => {
+  vi.mocked(api.getLatestPreferenceOrganizer).mockResolvedValue({ ...task("done"), result_validity: "current",
+   result: { outcome: "organized_with_remaining", target_reached: false, observed_state: snapshot, final_state: snapshot } });
+  const view = render(<PreferenceMemorySection />);
+  expect(await screen.findByRole("status")).toHaveTextContent("admin.memoryPreferenceOrganizeRemaining");
+  expect(screen.queryByText("admin.memoryPreferenceOrganizeDone")).not.toBeInTheDocument();
   view.unmount();
  });
 

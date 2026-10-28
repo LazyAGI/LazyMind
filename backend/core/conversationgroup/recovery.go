@@ -23,6 +23,7 @@ const (
 )
 
 var errScopeAuditUnresolved = errors.New("scope audit rejected after repairs")
+var errSummaryPreparationFailed = errors.New("summary preparation failed with no usable conversations")
 
 func organizerEffectiveErrorCode(run orm.ConversationOrganizerRun) string {
 	if run.ErrorCode == "incremental_step_failed" && run.ErrorMessage == legacyScopeAuditRejectedMessage {
@@ -34,7 +35,7 @@ func organizerEffectiveErrorCode(run orm.ConversationOrganizerRun) string {
 // Only explicitly understood failures may resume a frozen checkpoint.
 func recoveryForCode(code string) string {
 	switch code {
-	case "model_config_changed", "invalid_snapshot":
+	case "model_config_changed", "invalid_snapshot", "summary_preparation_failed":
 		return recoveryRestart
 	case "lease_lost", "lock_expired", "database_unavailable", "model_config",
 		"cancellation_unconfirmed", "connection_timeout", "response_timeout",
@@ -164,6 +165,9 @@ func organizerFailure(code string, err error) (string, bool) {
 	}
 	if errors.Is(err, errScopeAuditUnresolved) {
 		return "scope_audit_unresolved", false
+	}
+	if errors.Is(err, errSummaryPreparationFailed) {
+		return "summary_preparation_failed", false
 	}
 	var status *algo.ConversationGroupingHTTPError
 	if errors.As(err, &status) {
