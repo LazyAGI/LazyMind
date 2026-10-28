@@ -3058,10 +3058,18 @@ type translationOpenAPIResponse struct {
 	Target         string `json:"target"`
 }
 
+type translationDocumentProviderOpenAPIItem struct {
+	GroupID      string `json:"group_id"`
+	ProviderName string `json:"provider_name"`
+	GroupName    string `json:"group_name"`
+}
+
 type translationStatusOpenAPIResponse struct {
-	Configured        bool   `json:"configured"`
-	Provider          string `json:"provider,omitempty"`
-	DocumentSupported bool   `json:"document_supported"`
+	Configured        bool                                     `json:"configured"`
+	Provider          string                                   `json:"provider,omitempty"`
+	SelectedGroupID   string                                   `json:"selected_group_id,omitempty"`
+	DocumentSupported bool                                     `json:"document_supported"`
+	DocumentProviders []translationDocumentProviderOpenAPIItem `json:"document_providers"`
 }
 
 func registeredCoreOperations() []openAPIOperation {
@@ -4777,7 +4785,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/translation/status",
 			Summary:     "Get translation configuration status",
-			Description: "Reports the current user's selected translation provider, whether it is configured, and whether it supports document translation. Keyless providers require no credentials. Secrets are never returned.",
+			Description: "Reports the current user's selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.",
 			Tags:        []string{"translation"},
 			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
 		},

@@ -16,6 +16,8 @@ import (
 	"time"
 	"unicode"
 
+	"gorm.io/gorm"
+
 	"lazymind/core/common"
 	"lazymind/core/modelconfig"
 	"lazymind/core/store"
@@ -41,9 +43,52 @@ type Response struct {
 }
 
 type statusResponse struct {
-	Configured        bool   `json:"configured"`
-	Provider          string `json:"provider,omitempty"`
-	DocumentSupported bool   `json:"document_supported"`
+	Configured        bool                     `json:"configured"`
+	Provider          string                   `json:"provider,omitempty"`
+	SelectedGroupID   string                   `json:"selected_group_id,omitempty"`
+	DocumentSupported bool                     `json:"document_supported"`
+	DocumentProviders []documentProviderOption `json:"document_providers"`
+}
+
+type documentProviderOption struct {
+	GroupID      string `json:"group_id"`
+	ProviderName string `json:"provider_name"`
+	GroupName    string `json:"group_name"`
+}
+
+func documentProviderOptions(groups []modelconfig.TranslationProviderGroup) []documentProviderOption {
+	options := make([]documentProviderOption, 0, len(groups))
+	for _, group := range groups {
+		spec, ok := lookupProvider(group.ProviderName)
+		if !ok || !spec.SupportsDocuments {
+			continue
+		}
+		options = append(options, documentProviderOption{
+			GroupID: group.GroupID, ProviderName: spec.Name, GroupName: group.GroupName,
+		})
+	}
+	return options
+}
+
+// DocumentProviderSnapshot resolves one user's verified connection for a
+// document job without changing their default translation source.
+func DocumentProviderSnapshot(ctx context.Context, db *gorm.DB, userID, groupID string) (*modelconfig.TranslationConfigSnapshot, bool, error) {
+	groups, err := modelconfig.ListTranslationProviderGroups(ctx, db, userID)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, group := range groups {
+		if group.GroupID != strings.TrimSpace(groupID) {
+			continue
+		}
+		spec, ok := lookupProvider(group.ProviderName)
+		if !ok || !spec.SupportsDocuments {
+			return nil, false, nil
+		}
+		snapshot := group.Snapshot
+		return &snapshot, true, nil
+	}
+	return nil, false, nil
 }
 
 type tencentCredentials struct {
@@ -64,17 +109,32 @@ type tencentResponse struct {
 }
 
 func Status(w http.ResponseWriter, r *http.Request) {
+	groups, err := modelconfig.ListTranslationProviderGroups(r.Context(), store.DB(), store.UserID(r))
+	if err != nil {
+		common.ReplyErr(w, "load translation providers failed", http.StatusInternalServerError)
+		return
+	}
+	response := statusResponse{DocumentProviders: documentProviderOptions(groups)}
 	config, err := modelconfig.LoadTranslationConfig(r.Context(), store.DB(), store.UserID(r))
 	if err != nil {
 		common.ReplyErr(w, "load translation config failed", http.StatusInternalServerError)
 		return
 	}
 	if config == nil {
-		common.ReplyOK(w, statusResponse{})
+		common.ReplyOK(w, response)
 		return
 	}
 	spec, ok := lookupProvider(config.ProviderName)
-	common.ReplyOK(w, statusResponse{Configured: ok, Provider: spec.Name, DocumentSupported: ok && spec.SupportsDocuments})
+	response.Configured, response.Provider, response.DocumentSupported = ok, spec.Name, ok && spec.SupportsDocuments
+	selected, err := modelconfig.LoadTranslationConfigSnapshot(r.Context(), store.DB(), store.UserID(r))
+	if err != nil {
+		common.ReplyErr(w, "load translation selection failed", http.StatusInternalServerError)
+		return
+	}
+	if selected != nil {
+		response.SelectedGroupID = selected.GroupID
+	}
+	common.ReplyOK(w, response)
 }
 
 func Translate(w http.ResponseWriter, r *http.Request) {

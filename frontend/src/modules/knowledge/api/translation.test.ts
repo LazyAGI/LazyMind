@@ -38,6 +38,12 @@ describe("translateSelectionText",()=>{
 });
 
 it("reads the selected provider and document capability without exposing credentials",async()=>{
-  mocks.get.mockResolvedValueOnce({data:{data:{configured:true,provider:"Google Translate Web",document_supported:true}}});
-  await expect(getTranslationServiceStatus()).resolves.toEqual({configured:true,provider:"Google Translate Web",document_supported:true});
+  mocks.get.mockResolvedValueOnce({data:{data:{configured:true,provider:"Google Translate Web",selected_group_id:"google-group",document_supported:true,document_providers:[
+    {group_id:"google-group",provider_name:"Google Translate Web",group_name:"Free web"},
+    {group_id:"baidu-group",provider_name:"Baidu Translation",group_name:"Baidu account"},
+  ]}}});
+  await expect(getTranslationServiceStatus()).resolves.toEqual({configured:true,provider:"Google Translate Web",selected_group_id:"google-group",document_supported:true,document_providers:[
+    {group_id:"google-group",provider_name:"Google Translate Web",group_name:"Free web"},
+    {group_id:"baidu-group",provider_name:"Baidu Translation",group_name:"Baidu account"},
+  ]});
 });

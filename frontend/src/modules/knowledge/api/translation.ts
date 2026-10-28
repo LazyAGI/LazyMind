@@ -12,6 +12,14 @@ export interface TranslationServiceStatus {
   configured: boolean;
   provider: string;
   document_supported: boolean;
+  selected_group_id?: string;
+  document_providers?: DocumentTranslationProvider[];
+}
+
+export interface DocumentTranslationProvider {
+  group_id: string;
+  provider_name: string;
+  group_name: string;
 }
 
 export class TranslationUnavailableError extends Error {
@@ -35,6 +43,8 @@ export async function getTranslationServiceStatus(): Promise<TranslationServiceS
 		configured: Boolean(response.data.data?.configured),
 		provider: response.data.data?.provider || "",
 		document_supported: Boolean(response.data.data?.document_supported),
+		selected_group_id: response.data.data?.selected_group_id || undefined,
+		document_providers: response.data.data?.document_providers || [],
 	};
 }
 

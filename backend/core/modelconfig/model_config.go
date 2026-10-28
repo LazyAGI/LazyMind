@@ -773,7 +773,60 @@ type TranslationConfigSnapshot struct {
 	BaseURLHash        string `json:"base_url_sha256"`
 }
 
+// TranslationProviderGroup exposes the name of a usable connection and a
+// revocable reference for document jobs. Credential material never leaves Core.
+type TranslationProviderGroup struct {
+	GroupID      string
+	GroupName    string
+	ProviderName string
+	Snapshot     TranslationConfigSnapshot
+}
+
 var ErrTranslationProviderReferenceChanged = errors.New("translation provider group was removed or changed; create a new translation job")
+
+// ListTranslationProviderGroups returns only verified translation connections
+// owned by the user with either a stored secret or a known keyless provider.
+func ListTranslationProviderGroups(ctx context.Context, db *gorm.DB, userID string) ([]TranslationProviderGroup, error) {
+	if strings.TrimSpace(userID) == "" {
+		return []TranslationProviderGroup{}, nil
+	}
+	type row struct {
+		GroupID            string
+		GroupName          string
+		ProviderName       string
+		BaseURL            string
+		CredentialRevision int64
+		APIKey             string
+		APIKeyCiphertext   string
+	}
+	var rows []row
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+		Select("g.id AS group_id, g.name AS group_name, p.name AS provider_name, g.base_url, "+
+			"g.credential_revision, g.api_key, g.api_key_ciphertext").
+		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
+		Where("g.create_user_id = ? AND g.deleted_at IS NULL AND g.is_verified = ? AND p.category = ?", userID, true, "translation").
+		Order("p.name ASC, g.name ASC, g.id ASC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]TranslationProviderGroup, 0, len(rows))
+	for _, item := range rows {
+		apiKey, resolveErr := modelprovider.ResolveAPIKey(item.APIKey, item.APIKeyCiphertext)
+		if resolveErr != nil {
+			// A damaged credential makes only this connection unavailable.
+			continue
+		}
+		if strings.TrimSpace(apiKey) == "" && !isKeylessTranslationProvider(item.ProviderName) {
+			continue
+		}
+		groups = append(groups, TranslationProviderGroup{
+			GroupID: item.GroupID, GroupName: item.GroupName, ProviderName: item.ProviderName,
+			Snapshot: TranslationConfigSnapshot{GroupID: item.GroupID, CredentialRevision: item.CredentialRevision,
+				ProviderName: item.ProviderName, BaseURLHash: translationEndpointHash(item.BaseURL)},
+		})
+	}
+	return groups, nil
+}
 
 func LoadTranslationConfigSnapshot(ctx context.Context, db *gorm.DB, userID string) (*TranslationConfigSnapshot, error) {
 	row, err := loadSelectedProviderConfig(ctx, db, strings.TrimSpace(userID), "translation", false)

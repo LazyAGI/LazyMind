@@ -118,6 +118,7 @@ export async function createTranslationPdfJob(datasetId: string, documentId: str
   target_language: string;
   provider_type: "api" | "llm";
   provider: string;
+  provider_group_id?: string;
   model?: string;
   options_hash?: string;
   force?: boolean;
@@ -133,6 +134,7 @@ export async function createTranslationPdfJob(datasetId: string, documentId: str
   body.append("target_language", input.target_language);
   body.append("provider_type", input.provider_type);
   body.append("provider", input.provider);
+  if (input.provider_group_id) body.append("provider_group_id", input.provider_group_id);
   if (input.model) body.append("model", input.model);
   if (input.options_hash) body.append("options_hash", input.options_hash);
   body.append("force", String(Boolean(input.force)));

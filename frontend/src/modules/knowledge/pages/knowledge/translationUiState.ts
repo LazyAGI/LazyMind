@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getTranslationServiceStatus, translateSelectionText, type TranslationServiceStatus } from "@/modules/knowledge/api/translation";
+import { getTranslationServiceStatus, translateSelectionText, type DocumentTranslationProvider, type TranslationServiceStatus } from "@/modules/knowledge/api/translation";
 
 const unavailableStatus: TranslationServiceStatus = {
   configured: false,
@@ -7,8 +7,17 @@ const unavailableStatus: TranslationServiceStatus = {
   document_supported: false,
 };
 
+export function resolveDocumentTranslationProvider(
+  providers: DocumentTranslationProvider[],
+  selectedGroupId?: string,
+): DocumentTranslationProvider | undefined {
+  return providers.find((item) => item.group_id === selectedGroupId);
+}
+
 export function useDocumentTranslationService() {
   const [status, setStatus] = useState<TranslationServiceStatus>(unavailableStatus);
+  const [documentProviders, setDocumentProviders] = useState<DocumentTranslationProvider[]>([]);
+  const [providerGroupId, setProviderGroupId] = useState<string>();
   const [mode, setMode] = useState<"api" | "llm">("api");
   const [modalOpen, setModalOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -25,7 +34,12 @@ export function useDocumentTranslationService() {
     }
     if (requestGeneration.current === generation) {
       setStatus(nextStatus);
-      if (!nextStatus.document_supported) setMode("llm");
+      const nextProviders = nextStatus.document_providers || [];
+      setDocumentProviders(nextProviders);
+      setProviderGroupId((current) => nextProviders.find((item) => item.group_id === current)?.group_id
+        || nextProviders.find((item) => item.group_id === nextStatus.selected_group_id)?.group_id
+        || nextProviders[0]?.group_id);
+      if (!nextProviders.length) setMode("llm");
       setRefreshing(false);
     }
     return nextStatus;
@@ -42,8 +56,11 @@ export function useDocumentTranslationService() {
   }, [refreshStatus]);
 
   return {
-    provider: status.provider,
-    documentSupported: status.document_supported,
+    provider: documentProviders.find((item) => item.group_id === providerGroupId)?.provider_name || status.provider,
+    providerGroupId,
+    setProviderGroupId,
+    documentProviders,
+    documentSupported: documentProviders.length > 0,
     configured: status.configured,
     mode,
     setMode,

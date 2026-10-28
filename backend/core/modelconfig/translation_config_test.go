@@ -139,3 +139,60 @@ func TestTranslationConfigSnapshotUsesRevocableGroupReference(t *testing.T) {
 		t.Fatal("deleted group resolved from stale reference")
 	}
 }
+
+func TestListTranslationProviderGroupsOnlyReturnsOwnedVerifiedConfiguredSources(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:translation_available_groups?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	for _, item := range []struct {
+		id, name, category, owner, apiKey string
+		verified                          bool
+	}{
+		{"google", "Google Translate Web", "translation", "user", "", true},
+		{"baidu", "Baidu Translation", "translation", "user", "private-test-key", true},
+		{"no-key", "DeepL", "translation", "user", "", true},
+		{"broken-key", "Caiyun Translation", "translation", "user", "", true},
+		{"unverified", "Bing Translate Web", "translation", "user", "", false},
+		{"other-user", "Sogou Translate Web", "translation", "other", "", true},
+		{"wrong-category", "Google Translate Web", "search", "user", "", true},
+	} {
+		provider := orm.UserModelProvider{ID: item.id, Name: item.name, Category: item.category,
+			BaseModel: orm.BaseModel{CreateUserID: item.owner, CreatedAt: now, UpdatedAt: now}}
+		group := orm.UserModelProviderGroup{ID: item.id, UserModelProviderID: item.id, Name: item.name + " connection", BaseURL: "https://example.invalid/",
+			APIKey: item.apiKey, IsVerified: item.verified,
+			BaseModel: orm.BaseModel{CreateUserID: item.owner, CreatedAt: now, UpdatedAt: now}}
+		if err := db.Create(&provider).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&group).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "broken-key").
+		Update("api_key_ciphertext", "invalid-test-ciphertext").Error; err != nil {
+		t.Fatal(err)
+	}
+	groups, err := ListTranslationProviderGroups(t.Context(), db, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 2 || groups[0].GroupID != "baidu" || groups[1].GroupID != "google" {
+		t.Fatalf("available groups = %+v", groups)
+	}
+	if groups[0].ProviderName != "Baidu Translation" || groups[0].GroupName != "Baidu Translation connection" ||
+		groups[0].Snapshot.GroupID != "baidu" {
+		t.Fatalf("available group metadata = %+v", groups[0])
+	}
+	raw, err := json.Marshal(groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private-test-key") || strings.Contains(string(raw), "api_key") {
+		t.Fatalf("group listing exposed credentials: %s", raw)
+	}
+}

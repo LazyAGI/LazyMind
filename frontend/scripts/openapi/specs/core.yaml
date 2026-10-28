@@ -16733,6 +16733,19 @@ components:
                 - disabled
                 - name
             type: object
+        translationDocumentProviderOpenAPIItem:
+            properties:
+                group_id:
+                    type: string
+                group_name:
+                    type: string
+                provider_name:
+                    type: string
+            required:
+                - group_id
+                - group_name
+                - provider_name
+            type: object
         translationOpenAPIRequest:
             properties:
                 source:
@@ -16761,9 +16774,15 @@ components:
             properties:
                 configured:
                     type: boolean
+                document_providers:
+                    items:
+                        $ref: '#/components/schemas/translationDocumentProviderOpenAPIItem'
+                    type: array
                 document_supported:
                     type: boolean
                 provider:
+                    type: string
+                selected_group_id:
                     type: string
             required:
                 - configured
@@ -33231,7 +33250,7 @@ paths:
                 - tools
     /api/core/translation/status:
         get:
-            description: Reports the current user's selected translation provider, whether it is configured, and whether it supports document translation. Keyless providers require no credentials. Secrets are never returned.
+            description: Reports the current user's selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
             responses:
                 "200":
                     content:

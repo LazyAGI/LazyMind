@@ -42,7 +42,7 @@ import { readCachedPdfChat, touchCachedPdfChat } from "@/modules/knowledge/compo
 import { localizeErrorCode } from "@/components/request";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { TranslationUnavailableError } from "@/modules/knowledge/api/translation";
-import { getTranslationProgressLabel, useDocumentTranslationService, usePdfSelectionTranslation } from "./translationUiState";
+import { getTranslationProgressLabel, resolveDocumentTranslationProvider, useDocumentTranslationService, usePdfSelectionTranslation } from "./translationUiState";
 import {
   completePdfRenderJob,
   createSearchablePdfJob,
@@ -162,6 +162,9 @@ const KnowledgeDocumentContent = () => {
   const {
     configured: translationConfigured,
     provider: translationProvider,
+    providerGroupId: translationProviderGroupId,
+    setProviderGroupId: setTranslationProviderGroupId,
+    documentProviders: translationDocumentProviders,
     documentSupported: translationDocumentSupported,
     mode: translationMode,
     setMode: setTranslationMode,
@@ -172,6 +175,11 @@ const KnowledgeDocumentContent = () => {
     refreshStatus: refreshTranslationStatus,
   } = useDocumentTranslationService();
   const [translationSource, setTranslationSource] = useState("");
+  const [regenerationArtifact, setRegenerationArtifact] = useState<PdfArtifact>();
+  const [regenerationProviderGroupId, setRegenerationProviderGroupId] = useState<string>();
+  const translationDialogMode = regenerationArtifact
+    ? regenerationArtifact.provider_type === "llm" ? "llm" : "api"
+    : translationMode;
   const onTranslationError = useCallback((error: unknown) => {
     message.error(error instanceof TranslationUnavailableError && error.reason === "dictionary_not_found"
       ? t("knowledge.dictionaryNotFound")
@@ -611,9 +619,20 @@ const KnowledgeDocumentContent = () => {
     }
   }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, refreshPdfCapabilities]);
 
-  const runTranslationPdf = useCallback(async (force = false, basis?: PdfArtifact) => {
+  const runTranslationPdf = useCallback(async (force = false, basis?: PdfArtifact, requestedGroupId?: string) => {
     if (translationPreparing) return;
+    const providerType = basis ? basis.provider_type === "llm" ? "llm" : "api" : translationMode;
+    const selectedAPI = providerType === "api"
+      ? resolveDocumentTranslationProvider(translationDocumentProviders, basis ? requestedGroupId : translationProviderGroupId)
+      : undefined;
+    if (providerType === "api" && !selectedAPI) {
+      message.error(basis
+        ? "请先选择可用的翻译 API 来源，再重新生成译本"
+        : "所选翻译 API 已不可用，请在默认模型中重新配置");
+      return;
+    }
     setTranslationModalOpen(false);
+    setRegenerationArtifact(undefined);
     setTranslationPreparing(true);
     setPdfTaskDetail("正在准备翻译任务");
     const filename = knowledgeDetail?.display_name || "document.pdf";
@@ -644,13 +663,15 @@ const KnowledgeDocumentContent = () => {
       return;
     }
     const targetLanguage = basis?.target_language || translationTarget;
-    const providerType = basis?.provider_type === "llm" ? "llm" : basis?.provider_type === "api" ? "api" : translationMode;
-    const provider = basis?.provider || (providerType === "api" ? translationProvider || "Translation API" : "LazyMind LLM");
+    const provider = providerType === "api"
+      ? selectedAPI!.provider_name
+      : basis?.provider || "LazyMind LLM";
     try {
       const created = await createTranslationPdfJob(knowledgeBaseId, knowledgeId, {
         target_language: targetLanguage,
         provider_type: providerType,
         provider,
+        provider_group_id: selectedAPI?.group_id,
         model: basis?.model || (providerType === "llm" ? "document-context" : undefined),
         options_hash: layoutSource,
         force,
@@ -677,7 +698,21 @@ const KnowledgeDocumentContent = () => {
     } finally {
       setTranslationPreparing(false);
     }
-  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, refreshPdfCapabilities, translationMode, translationPreparing, translationProvider, translationTarget]);
+  }, [knowledgeBaseId, knowledgeDetail?.display_name, knowledgeId, originalPreviewFile, refreshPdfCapabilities, translationDocumentProviders, translationMode, translationPreparing, translationProvider, translationProviderGroupId, translationTarget]);
+
+  const openTranslationRegeneration = useCallback((artifact: PdfArtifact) => {
+    setRegenerationArtifact(artifact);
+    setRegenerationProviderGroupId(undefined);
+    setTranslationTarget(artifact.target_language || "zh");
+    setTranslationMode(artifact.provider_type === "llm" ? "llm" : "api");
+    openTranslationModal();
+  }, [openTranslationModal, setTranslationMode]);
+
+  const openNewTranslation = useCallback(() => {
+    setRegenerationArtifact(undefined);
+    setRegenerationProviderGroupId(undefined);
+    openTranslationModal();
+  }, [openTranslationModal]);
 
   const cancelTranslationJob = useCallback(async () => {
     const job = pdfTask?.kind === "TRANSLATION_PDF" && isActivePdfJob(pdfTask)
@@ -896,7 +931,7 @@ const KnowledgeDocumentContent = () => {
             trigger="click"
             content={<div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               {(pdfSourceView === "translation" || pdfSourceView === "comparison") && selectedPdfArtifact ? <>
-                <Button type="text" size="small" onClick={() => void runTranslationPdf(true, selectedPdfArtifact)}>重新生成当前译本</Button>
+                <Button type="text" size="small" onClick={() => openTranslationRegeneration(selectedPdfArtifact)}>重新生成当前译本</Button>
                 <Button type="text" danger size="small" onClick={() => removePdfArtifact(selectedPdfArtifact)}>删除当前译本</Button>
               </> : pdfCapabilities?.searchable_artifact ? <>
                 <Button type="text" size="small" onClick={() => void runSearchablePdf(true)}>重新生成普通版</Button>
@@ -915,7 +950,7 @@ const KnowledgeDocumentContent = () => {
           </Button>
         ) : null}
         {!pdfCapabilities?.translations.length ? (
-          <Button size="small" type="primary" loading={translationInProgress} disabled={translationInProgress} onClick={openTranslationModal}>
+          <Button size="small" type="primary" loading={translationInProgress} disabled={translationInProgress} onClick={openNewTranslation}>
             {translationInProgress ? "翻译进行中" : "翻译文档"}
           </Button>
         ) : null}
@@ -1285,17 +1320,36 @@ const KnowledgeDocumentContent = () => {
       </Row>
       <Modal
         open={translationModalOpen}
-        title="翻译文档"
-        okText="开始翻译"
+        title={regenerationArtifact ? "重新生成当前译本" : "翻译文档"}
+        okText={regenerationArtifact ? "重新生成" : "开始翻译"}
         cancelText="取消"
         confirmLoading={translationPreparing || translationStatusRefreshing}
-        okButtonProps={{ disabled: translationStatusRefreshing }}
-        onCancel={() => setTranslationModalOpen(false)}
-        onOk={() => void runTranslationPdf()}
+        okButtonProps={{ disabled: translationStatusRefreshing || (translationDialogMode === "api" && !(regenerationArtifact ? regenerationProviderGroupId : translationProviderGroupId)) }}
+        onCancel={() => { setTranslationModalOpen(false); setRegenerationArtifact(undefined); }}
+        onOk={() => void runTranslationPdf(Boolean(regenerationArtifact), regenerationArtifact, regenerationProviderGroupId)}
       >
         <div className="pdf-translation-config">
-          <div><label>翻译方式</label><Segmented block value={translationMode} onChange={(value) => setTranslationMode(value as "api" | "llm")} options={[{ label: "翻译 API", value: "api", disabled: translationStatusRefreshing || !translationDocumentSupported }, { label: "LazyMind 大模型", value: "llm" }]} /></div>
-          <div><label>目标语言</label><Select value={translationTarget} onChange={setTranslationTarget} options={[{ label: "简体中文", value: "zh" }, { label: "英文", value: "en" }]} /></div>
+          <div><label>翻译方式</label><Segmented block disabled={Boolean(regenerationArtifact)} value={translationDialogMode} onChange={(value) => setTranslationMode(value as "api" | "llm")} options={[{ label: "翻译 API", value: "api", disabled: translationStatusRefreshing || !translationDocumentSupported }, { label: "LazyMind 大模型", value: "llm" }]} /></div>
+          {translationDialogMode === "api" ? <div>
+            <label htmlFor="pdf-translation-provider">翻译 API 来源</label>
+            <Select
+              id="pdf-translation-provider"
+              aria-label="翻译 API 来源"
+              value={regenerationArtifact ? regenerationProviderGroupId : translationProviderGroupId}
+              onChange={regenerationArtifact ? setRegenerationProviderGroupId : setTranslationProviderGroupId}
+              placeholder={regenerationArtifact ? "请选择用于重新生成的翻译 API" : "请选择翻译 API"}
+              options={translationDocumentProviders.map((item) => ({
+                value: item.group_id,
+                label: item.group_name && item.group_name !== item.provider_name
+                  ? `${item.provider_name} · ${item.group_name}`
+                  : item.provider_name,
+              }))}
+            />
+          </div> : null}
+          {!translationDocumentSupported && !translationStatusRefreshing ? <p>
+            暂无可用于文档翻译的 API，可在 <a href="/settings?section=model_defaults&service=translation">默认模型</a> 中启用。
+          </p> : null}
+          <div><label>目标语言</label><Select disabled={Boolean(regenerationArtifact)} value={translationTarget} onChange={setTranslationTarget} options={[{ label: "简体中文", value: "zh" }, { label: "英文", value: "en" }]} /></div>
           <p>翻译会保留支持格式的文档结构、表格和图片，仅替换可翻译文字。若原件是图片 PDF，会先生成并缓存文本 PDF。</p>
         </div>
       </Modal>
@@ -1325,7 +1379,7 @@ const KnowledgeDocumentContent = () => {
                   loading={revisionTranslatingWith === "api"}
                   disabled={revisionLoading && revisionTranslatingWith !== "api"}
                   onClick={() => void retranslateRevisionBlock("api")}
-                >翻译 API</Button>
+                >默认翻译 API</Button>
                 <Button
                   size="small"
                   loading={revisionTranslatingWith === "llm"}

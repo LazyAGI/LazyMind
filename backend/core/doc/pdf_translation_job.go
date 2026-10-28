@@ -151,13 +151,21 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 	}
 	var apiSnapshot *modelconfig.TranslationConfigSnapshot
 	if req.ProviderType == "api" {
-		providerSnapshot, documentSupported, err := translation.SelectedProviderSnapshot(r.Context(), store.UserID(r))
+		requestedProviderGroupID := strings.TrimSpace(r.FormValue("provider_group_id"))
+		var providerSnapshot *modelconfig.TranslationConfigSnapshot
+		var documentSupported bool
+		var err error
+		if requestedProviderGroupID != "" {
+			providerSnapshot, documentSupported, err = translation.DocumentProviderSnapshot(r.Context(), store.DB(), store.UserID(r), requestedProviderGroupID)
+		} else {
+			providerSnapshot, documentSupported, err = translation.SelectedProviderSnapshot(r.Context(), store.UserID(r))
+		}
 		if err != nil {
 			common.ReplyErr(w, "load translation provider failed", http.StatusInternalServerError)
 			return
 		}
 		if providerSnapshot == nil {
-			common.ReplyErr(w, "translation service is not configured", http.StatusPreconditionFailed)
+			common.ReplyErr(w, "selected translation source is unavailable; configure it in Default Models", http.StatusPreconditionFailed)
 			return
 		}
 		if !documentSupported {

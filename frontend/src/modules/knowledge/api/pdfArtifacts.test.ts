@@ -119,11 +119,13 @@ describe("PDF artifacts API", () => {
     mocks.post.mockResolvedValueOnce({ data: { data: { cache_status: "miss", job: { id: "j1" } } } });
     await createTranslationPdfJob("d", "doc", {
       target_language: "zh", provider_type: "api", provider: "Tencent",
+      provider_group_id: "configured-connection",
       source: new Blob(["paragraph"]), source_filename: "notes.md",
     });
     const body = mocks.post.mock.calls[0][1] as FormData;
     expect(body.get("source")).toBeInstanceOf(Blob);
     expect(body.get("target_language")).toBe("zh");
+    expect(body.get("provider_group_id")).toBe("configured-connection");
     expect(body.get("layout_manifest")).toBeNull();
   });
 
