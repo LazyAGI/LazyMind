@@ -1219,8 +1219,8 @@ const KnowledgeDocumentContent = () => {
         onOk={() => void runTranslationPdf(Boolean(regenerationArtifact), regenerationArtifact, regenerationProviderGroupId)}
       >
         <div className="pdf-translation-config">
-          <div><label>翻译方式</label><Segmented block disabled={Boolean(regenerationArtifact)} value={translationDialogMode} onChange={(value) => setTranslationMode(value as "api" | "llm")} options={[{ label: "翻译 API", value: "api", disabled: translationStatusRefreshing || !translationDocumentSupported }, { label: "LazyMind 大模型", value: "llm" }]} /></div>
-          {translationDialogMode === "api" ? <div>
+          <div className="pdf-translation-config-row"><label>翻译方式</label><Segmented block disabled={Boolean(regenerationArtifact)} value={translationDialogMode} onChange={(value) => setTranslationMode(value as "api" | "llm")} options={[{ label: "翻译 API", value: "api", disabled: translationStatusRefreshing || !translationDocumentSupported }, { label: "LazyMind 大模型", value: "llm" }]} /></div>
+          {translationDialogMode === "api" ? <div className="pdf-translation-config-row">
             <label htmlFor="pdf-translation-provider">翻译 API 来源</label>
             <Select
               id="pdf-translation-provider"
@@ -1242,7 +1242,7 @@ const KnowledgeDocumentContent = () => {
           {!translationDocumentSupported && !translationStatusRefreshing ? <p>
             暂无可用于文档翻译的 API，可在 <a href="/settings?section=model_defaults&service=translation">默认模型</a> 中启用。
           </p> : null}
-          <div><label>目标语言</label><Select disabled={Boolean(regenerationArtifact)} value={translationTarget} onChange={setTranslationTarget} options={[{ label: "简体中文", value: "zh" }, { label: "英文", value: "en" }]} /></div>
+          <div className="pdf-translation-config-row"><label>目标语言</label><Select disabled={Boolean(regenerationArtifact)} value={translationTarget} onChange={setTranslationTarget} options={[{ label: "简体中文", value: "zh" }, { label: "英文", value: "en" }]} /></div>
           <p>翻译会保留支持格式的文档结构、表格和图片，仅替换可翻译文字。若原件是图片 PDF，会先生成并缓存文本 PDF。</p>
         </div>
       </Modal>

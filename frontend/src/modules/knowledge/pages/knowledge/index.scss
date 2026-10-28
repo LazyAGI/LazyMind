@@ -163,7 +163,8 @@
   flex-direction: column;
   gap: 18px;
 
-  > div { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: 12px; }
+  > .pdf-translation-config-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 12px; }
+  > .ant-select { width: 100%; min-width: 0; }
   p { margin: 0; color: var(--color-text-description); line-height: 1.6; }
 }
 
