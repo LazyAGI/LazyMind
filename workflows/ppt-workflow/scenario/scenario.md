@@ -16,6 +16,13 @@ This workflow helps users create a multi-slide presentation using the
 
 Workflow:
 
+Uploaded PPTX templates are read inside `analyze_requirements`, before material
+collection. This step reads every original page and additionally saves
+`template_content_brief` (sections, slots, evidence requirements and gaps).
+Collection and outline planning follow those sections. Template sample text is
+not user evidence. Template paths skip `choose_style` and both background stages;
+final generation revalidates and fills the original PPTX, not HTML.
+
 1. `analyze_requirements` — goal, audience, length, visual style, constraints,
    and the user's explicit AI-background choice. A deterministic post-step gate
    checks the configured `image_generator` only when that choice is enabled.
@@ -39,8 +46,12 @@ Workflow:
 
 Steps 3 and 4 are skipped together when AI backgrounds are disabled.
 
-After `analyze_requirements` succeeds, always advance to `collect_materials`.
-This removes the ambiguous two-ready-step choice. The collection step must use
+Academic scenarios always collect materials, then run the automatic
+`analyze_academic_sources` branch before rejoining style/background/outline
+planning. Its `academic_brief` preserves per-paper attribution, formulas,
+figures, findings and limitations. General self-contained quick decks may
+skip material collection according to the declared state transitions.
+The collection step must use
 a supplied/selected KB before any web tool and must skip web retrieval when the
 request, uploads, and KB already provide enough material.
 

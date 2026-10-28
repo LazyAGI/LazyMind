@@ -20,13 +20,9 @@ def batch_context(tmp_path, monkeypatch):
         emit=events.append,
     )
     monkeypatch.setattr(tools, 'require_context', lambda: ctx)
-    previous = lazyllm.globals.get('agentic_config')
-    lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session'}
-    yield ctx, events
-    if previous is None:
-        lazyllm.globals.pop('agentic_config', None)
-    else:
-        lazyllm.globals['agentic_config'] = previous
+    with lazyllm.locals._scope():
+        lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session'}
+        yield ctx, events
 
 
 def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context):

@@ -235,6 +235,7 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 	env := append([]string{}, localRuntimeEnv(cfg)...)
 	env = append(env, serviceRuntimeEnv(paths)...)
 	env = append(env,
+		"LAZYLLM_ALGO_REGISTER_POLICY="+algorithmRegisterPolicy(cfg, paths),
 		runtimeProfileEnvVar+"="+cfg.Profile,
 		runtimeRootEnvVar+"="+cfg.RuntimeRoot,
 		localBuildRootEnvVar+"="+cfg.BuildRoot,

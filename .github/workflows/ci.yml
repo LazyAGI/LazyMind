@@ -139,6 +139,9 @@ jobs:
         working-directory: frontend
         run: node scripts/openapi/check-stale.mjs
 
+      - name: Test upstream model catalog generation
+        run: python3 -m unittest discover -s scripts/tests -p test_upstream_model_catalog.py
+
       - name: Install and test with coverage
         run: |
           cd tests/frontend
@@ -157,11 +160,16 @@ jobs:
           cd tests/frontend
           npx c8 check-coverage --lines 10 --functions 10 --branches 10
 
-  test-workflow-panel:
+  test-frontend-shards:
     needs: [lint, doc_check]
-    name: Test Workflow Panel boundaries
+    name: Test frontend application (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [1, 2, 3, 4]
     permissions:
       contents: read
     steps:
@@ -178,11 +186,30 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
       - name: Type-check workflow panel integration
+        if: matrix.shard == 1
         working-directory: frontend
         run: pnpm typecheck
-      - name: Test frontend application including workflow panel boundaries
+      - name: Test frontend including model settings and workflow boundaries
         working-directory: frontend
-        run: pnpm test --maxWorkers=2 --minWorkers=1
+        run: pnpm test --shard=${{ matrix.shard }}/4 --maxWorkers=2 --minWorkers=1
+
+  test-workflow-panel:
+    needs: [test-frontend-shards]
+    if: ${{ always() }}
+    name: Test Workflow Panel boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Require every frontend shard to pass
+        env:
+          SHARDS_RESULT: ${{ needs.test-frontend-shards.result }}
+        run: |
+          if [ "$SHARDS_RESULT" != "success" ]; then
+            echo "Frontend test shards did not all pass ($SHARDS_RESULT)."
+            exit 1
+          fi
 
   test-local-runtime:
     needs: [lint, doc_check]

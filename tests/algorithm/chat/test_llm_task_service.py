@@ -140,7 +140,7 @@ def test_node_integration_checks_scripts_without_running_them(monkeypatch, path,
 
 @pytest.mark.parametrize('target', ['ui', 'scenario', 'scripts', 'statemachine', 'full'])
 def test_other_repair_scopes_do_not_implicitly_enable_current_graph_policy(monkeypatch, target):
-    model = _JSONModel({})
+    model = _JSONModel({'remaining_warnings': []})
     monkeypatch.setattr(llm_task, 'inject_model_config', lambda _config: None)
     monkeypatch.setattr(llm_task, 'AutoModel', lambda **_kwargs: model)
     result = run_llm_task(LLMTaskRequest(

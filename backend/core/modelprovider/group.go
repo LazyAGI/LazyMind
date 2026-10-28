@@ -53,13 +53,15 @@ type groupListItem struct {
 	Name                string         `json:"name"`
 	BaseURL             string         `json:"base_url"`
 	HasAPIKey           bool           `json:"has_api_key"`
+	ModelCount          int            `json:"model_count"`
 	Keys                []groupKeyItem `json:"keys"`
 	IsVerified          bool           `json:"is_verified"`
 }
 
 type groupKeyItem struct {
-	ID     string `json:"id"`
-	Masked string `json:"masked"`
+	ID      string `json:"id"`
+	Masked  string `json:"masked"`
+	Enabled bool   `json:"enabled"`
 }
 
 func groupKeyID(groupID, key string) string {
@@ -68,12 +70,18 @@ func groupKeyID(groupID, key string) string {
 
 func groupKeyItems(groupID, value string) []groupKeyItem {
 	items := make([]groupKeyItem, 0)
+	seen := make(map[string]bool)
 	for _, key := range splitAPIKeys(value) {
+		id := groupKeyID(groupID, key)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		masked := "********"
 		if len(key) > 8 {
 			masked += "..." + key[len(key)-4:]
 		}
-		items = append(items, groupKeyItem{ID: groupKeyID(groupID, key), Masked: masked})
+		items = append(items, groupKeyItem{ID: id, Masked: masked})
 	}
 	return items
 }
@@ -114,15 +122,42 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := prepareProviderKeySelection(r.Context(), db, &parent); err != nil {
+		common.ReplyErr(w, "initialize enabled api key failed", http.StatusInternalServerError)
+		return
+	}
 	var rows []orm.UserModelProviderGroup
 	if err := db.WithContext(r.Context()).
 		Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, userID).
-		Order("name ASC").
+		Order("created_at ASC, id ASC").
 		Find(&rows).Error; err != nil {
 		common.ReplyErr(w, "list groups failed", http.StatusInternalServerError)
 		return
 	}
 
+	modelCounts := make(map[string]int, len(rows))
+	// Some isolated credential tests intentionally omit the model table.
+	// Production lists count metadata in one aggregate, without loading models.
+	if len(rows) > 0 && db.Migrator().HasTable(&orm.UserModelProviderGroupModel{}) {
+		groupIDs := make([]string, 0, len(rows))
+		for _, group := range rows {
+			groupIDs = append(groupIDs, group.ID)
+		}
+		var counts []struct {
+			UserModelProviderGroupID string
+			ModelCount               int
+		}
+		if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroupModel{}).
+			Select("user_model_provider_group_id, COUNT(*) AS model_count").
+			Where("user_model_provider_id = ? AND create_user_id = ? AND user_model_provider_group_id IN ? AND deleted_at IS NULL", parent.ID, userID, groupIDs).
+			Group("user_model_provider_group_id").Scan(&counts).Error; err != nil {
+			common.ReplyErr(w, "list groups failed", http.StatusInternalServerError)
+			return
+		}
+		for _, count := range counts {
+			modelCounts[count.UserModelProviderGroupID] = count.ModelCount
+		}
+	}
 	out := make([]groupListItem, 0, len(rows))
 	for i := range rows {
 		g := rows[i]
@@ -131,13 +166,18 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "decrypt api key failed", http.StatusInternalServerError)
 			return
 		}
+		keys := groupKeyItems(g.ID, apiKey)
+		for k := range keys {
+			keys[k].Enabled = parent.ActiveKeyGroupID == g.ID && parent.ActiveKeyID == keys[k].ID
+		}
 		out = append(out, groupListItem{
 			ID:                  g.ID,
 			UserModelProviderID: g.UserModelProviderID,
 			Name:                g.Name,
-			BaseURL:             g.BaseURL,
+			BaseURL:             connectionBaseURL(parent, g.BaseURL),
 			HasAPIKey:           strings.TrimSpace(g.APIKey) != "" || strings.TrimSpace(g.APIKeyCiphertext) != "",
-			Keys:                groupKeyItems(g.ID, apiKey),
+			ModelCount:          modelCounts[g.ID],
+			Keys:                keys,
 			IsVerified:          g.IsVerified,
 		})
 	}
@@ -179,8 +219,8 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	baseURL := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
-	if name == "" || baseURL == "" {
-		common.ReplyErr(w, "name and base_url are required", http.StatusBadRequest)
+	if name == "" {
+		common.ReplyErr(w, "name is required", http.StatusBadRequest)
 		return
 	}
 
@@ -196,14 +236,30 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
 		return
 	}
-	if hasOpenAIRequestPath(parent.Name, baseURL) {
+	if err := prepareProviderKeySelection(r.Context(), db, &parent); err != nil {
+		common.ReplyErr(w, "initialize enabled api key failed", http.StatusInternalServerError)
+		return
+	}
+	if hasSharedProviderEndpoint(parent) {
+		name = parent.Name
+	}
+	if hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
 		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
 		return
 	}
-	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
+	baseURL = connectionBaseURL(parent, baseURL)
+	if baseURL == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
+		return
+	}
+	if hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
+		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
+		return
+	}
+	baseURL = LazyLLMBaseURL(RuntimeProviderName(parent), baseURL)
 
 	// Capability: single-group providers only allow one group per user.
-	if !parent.HasCapability("multi_group") {
+	if hasSharedProviderEndpoint(parent) || !parent.HasCapability("multi_group") {
 		var count int64
 		if err := db.WithContext(r.Context()).Model(&orm.UserModelProviderGroup{}).
 			Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, userID).
@@ -217,6 +273,10 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := validateSavedKeyPool(parent, name, baseURL, apiKey); err != nil {
+		common.ReplyErr(w, "api_key pool exceeds credential limits", http.StatusBadRequest)
+		return
+	}
 	groupID := common.GenerateID()
 	credentialRevision := int64(1)
 	apiKeyCiphertext, err := encodeLegacyModelProviderCiphertext(apiKey)
@@ -226,8 +286,8 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var checkData *CheckModelProviderData
-	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey, "")
+	if apiKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, RuntimeProviderName(parent)) {
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -245,8 +305,8 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 	}
-	if req.Verify && checkData == nil && apiKey != "" {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey, "")
+	if req.Verify && !hasSharedProviderEndpoint(parent) && checkData == nil && apiKey != "" {
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, apiKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -286,6 +346,30 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 	var autoSelection *autoModelSelection
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if hasSharedProviderEndpoint(parent) {
+			if err := lockProvider(tx, &parent); err != nil {
+				return err
+			}
+			var existing int64
+			if err := tx.Model(&orm.UserModelProviderGroup{}).Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", parent.ID, userID).Count(&existing).Error; err != nil {
+				return err
+			}
+			if existing > 0 {
+				return errCanonicalGroupExists
+			}
+			if strings.TrimSpace(parent.BaseURL) == "" {
+				if err := tx.Model(&parent).Update("base_url", baseURL).Error; err != nil {
+					return err
+				}
+				parent.BaseURL = baseURL
+			}
+			latestURL := connectionBaseURL(parent, baseURL)
+			if normalizeBaseURLForCompare(latestURL) != normalizeBaseURLForCompare(baseURL) {
+				checkData = nil
+				row.IsVerified = false
+			}
+			row.BaseURL, baseURL = latestURL, latestURL
+		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
@@ -295,17 +379,30 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.EqualFold(strings.TrimSpace(parent.Category), defaultProviderCategory) {
 			autoSelection, err = autoSelectUnconfiguredProviderModels(
-				tx, userID, userName, parent.Name, baseURL, seededModels, now,
+				tx, userID, userName, RuntimeProviderName(parent), baseURL, seededModels, now,
 			)
 			if err != nil {
 				return err
 			}
 		}
+		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
+			return err
+		}
 		return enqueueCredentialBackup(tx, row.ID, row.CredentialRevision, credentialvault.BackupUpsert, now)
 	})
 	if err != nil {
+		if errors.Is(err, errCanonicalGroupExists) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "create group failed", http.StatusInternalServerError)
 		return
+	}
+	if hasSharedProviderEndpoint(parent) {
+		if err := db.WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", row.ID).Take(&row).Error; err != nil {
+			common.ReplyErr(w, "reload group failed", http.StatusInternalServerError)
+			return
+		}
 	}
 	common.ReplyOK(w, createGroupResponse{
 		ID:                  row.ID,
@@ -402,11 +499,6 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(req.Name)
 	baseURL := strings.TrimSpace(req.BaseURL)
 	apiKey := strings.TrimSpace(req.APIKey)
-	if baseURL == "" {
-		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
-		return
-	}
-
 	var parent orm.UserModelProvider
 	err := db.WithContext(r.Context()).
 		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", parentID, userID).
@@ -419,12 +511,28 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
 		return
 	}
-	if hasOpenAIRequestPath(parent.Name, baseURL) {
+	if hasSharedProviderEndpoint(parent) {
+		name = parent.Name
+	}
+	if hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
 		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
 		return
 	}
-	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
+	baseURL = connectionBaseURL(parent, baseURL)
+	if baseURL == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
+		return
+	}
+	if hasOpenAIRequestPath(RuntimeProviderName(parent), baseURL) {
+		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
+		return
+	}
+	baseURL = LazyLLMBaseURL(RuntimeProviderName(parent), baseURL)
 
+	if err := prepareProviderKeySelection(r.Context(), db, &parent); err != nil {
+		common.ReplyErr(w, "initialize enabled api key failed", http.StatusInternalServerError)
+		return
+	}
 	var row orm.UserModelProviderGroup
 	err = db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
@@ -447,6 +555,14 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		name = row.Name
 	}
 
+	savedPool := apiKey
+	if savedPool == "" {
+		savedPool = storedAPIKey
+	}
+	if err := validateSavedKeyPool(parent, name, baseURL, savedPool); err != nil {
+		common.ReplyErr(w, "api_key pool exceeds credential limits", http.StatusBadRequest)
+		return
+	}
 	now := time.Now()
 	updates := map[string]interface{}{
 		"name":       name,
@@ -455,7 +571,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Capability: providers without custom_base_url must keep the original base_url.
-	if !parent.HasCapability("custom_base_url") {
+	if !hasSharedProviderEndpoint(parent) && !parent.HasCapability("custom_base_url") {
 		baseURL = row.BaseURL
 		updates["base_url"] = row.BaseURL
 	}
@@ -474,9 +590,16 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 	skipVerify := false
 	if baseURLChanged {
 		updates["is_verified"] = false
-		updates["api_key"] = ""
-		updates["api_key_ciphertext"] = ""
-		updates["credential_version"] = max(row.CredentialVersion, legacyModelProviderCredentialVersion)
+		// Address edits invalidate verification, never the saved key pool.
+		// Re-encrypt for the new revision so V2 AAD stays bound to this row.
+		preserved, err := encryptedAPIKeyUpdates(userID, row.ID, nextCredentialRevision, storedAPIKey, row.CredentialVersion)
+		if err != nil {
+			common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
+			return
+		}
+		for key, value := range preserved {
+			updates[key] = value
+		}
 		skipVerify = true
 	}
 	if apiKey != "" {
@@ -488,18 +611,18 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		for key, value := range encryptedUpdates {
 			updates[key] = value
 		}
-		if apiKey != storedAPIKey {
+		if apiKey != storedAPIKey && !hasSharedProviderEndpoint(parent) {
 			updates["is_verified"] = false
 		}
 	}
 
 	var checkData *CheckModelProviderData
 	effectiveAPIKey := apiKey
-	if effectiveAPIKey == "" && !baseURLChanged {
+	if effectiveAPIKey == "" {
 		effectiveAPIKey = storedAPIKey
 	}
-	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, parent.Name) {
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
+	if !skipVerify && effectiveAPIKey != "" && shouldVerifyCloudServiceOnSave(parent.Category, RuntimeProviderName(parent)) {
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -519,13 +642,14 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["is_verified"] = true
 	}
 
-	// verify=true: run connectivity check before persisting; on success mark is_verified=true atomically.
-	if req.Verify && checkData == nil {
-		if effectiveAPIKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, baseURL) {
+	// Shared model suppliers save independently of connection checks. The
+	// legacy verify flag remains meaningful only for auxiliary services.
+	if req.Verify && !hasSharedProviderEndpoint(parent) && checkData == nil {
+		if effectiveAPIKey == "" && providerAPIKeyRequiredForBaseURL(r.Context(), db, parent, baseURL) {
 			common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 			return
 		}
-		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), baseURL, effectiveAPIKey, "", parent)
 		if checkErr != nil || checkResult == nil || !checkResult.Success {
 			msg := "verification failed"
 			checkMsg := msg
@@ -547,7 +671,10 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		updates["is_verified"] = true
 	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&row).Updates(updates).Error; err != nil {
+		if err := updateConnectionSafely(tx, &parent, &row, baseURL, updates); err != nil {
+			return err
+		}
+		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
 			return err
 		}
 		if credentialChanged {
@@ -555,10 +682,19 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
+		if errors.Is(err, errConnectionChanged) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "update group failed", http.StatusInternalServerError)
 		return
 	}
-	if isVerified, ok := updates["is_verified"].(bool); ok {
+	if hasSharedProviderEndpoint(parent) {
+		if err := db.WithContext(r.Context()).Where("id = ? AND deleted_at IS NULL", row.ID).Take(&row).Error; err != nil {
+			common.ReplyErr(w, "reload group failed", http.StatusInternalServerError)
+			return
+		}
+	} else if isVerified, ok := updates["is_verified"].(bool); ok {
 		row.IsVerified = isVerified
 	}
 	row.Name = name
@@ -615,6 +751,10 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := prepareProviderKeySelection(r.Context(), db, &parent); err != nil {
+		common.ReplyErr(w, "initialize enabled api key failed", http.StatusInternalServerError)
+		return
+	}
 	var row orm.UserModelProviderGroup
 	err = db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
@@ -658,6 +798,11 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if hasSharedProviderEndpoint(parent) {
+			if err := lockProvider(tx, &parent); err != nil {
+				return err
+			}
+		}
 		if hasTextEmbedding {
 			count, err := downgradeIndexedDatasets(tx, userID, now)
 			if err != nil {
@@ -682,12 +827,15 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 			}).Error; err != nil {
 			return err
 		}
-		return tx.Model(&orm.UserModelProviderGroup{}).
+		if err := tx.Model(&orm.UserModelProviderGroup{}).
 			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
 			Updates(map[string]interface{}{
 				"deleted_at": now,
 				"updated_at": now,
-			}).Error
+			}).Error; err != nil {
+			return err
+		}
+		return reconcileProviderActiveKey(tx, &parent)
 	})
 	if err != nil {
 		common.ReplyErr(w, "delete group failed", http.StatusInternalServerError)
@@ -727,8 +875,37 @@ func isCustomBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseUR
 	return ok && normalizeBaseURLForCompare(baseURL) != normalizeBaseURLForCompare(defaultURL)
 }
 
-func isAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL string) bool {
-	return !isCustomBaseURL(ctx, db, defaultProviderID, baseURL)
+// Custom suppliers can point to unauthenticated self-hosted services even when
+// their original catalog entry no longer exists. Official catalog endpoints
+// still require credentials, and an empty/invalid URL is never keyless.
+func providerAPIKeyRequiredForBaseURL(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider, baseURL string) bool {
+	if strings.TrimSpace(baseURL) == "" {
+		return true
+	}
+	if isLocalOpenAISupplier(ctx, db, parent) && hasSharedProviderEndpoint(parent) {
+		return !validCustomProviderURL(RuntimeProviderName(parent), baseURL)
+	}
+	defaultURL, known := defaultBaseURL(ctx, db, parent.DefaultModelProviderID)
+	if !known {
+		return !parent.IsCustom || !hasSharedProviderEndpoint(parent) || !validCustomProviderURL(RuntimeProviderName(parent), baseURL)
+	}
+	return normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(LazyLLMBaseURL(RuntimeProviderName(parent), defaultURL))
+}
+
+// isVLLMSupplier retains the supplier identity after its active request protocol
+// has been saved as OpenAI. Custom suppliers inherit identity from their template.
+func isVLLMSupplier(ctx context.Context, db *gorm.DB, parent orm.UserModelProvider) bool {
+	if normalizeProviderName(RuntimeProviderName(parent)) == "vllm" || (!parent.IsCustom && normalizeProviderName(parent.Name) == "vllm") {
+		return true
+	}
+	if db == nil || parent.DefaultModelProviderID == "" || !db.Migrator().HasTable(&orm.DefaultModelProvider{}) {
+		return false
+	}
+	var template orm.DefaultModelProvider
+	if db.WithContext(ctx).Select("name").Where("id = ? AND deleted_at IS NULL", parent.DefaultModelProviderID).Take(&template).Error != nil {
+		return false
+	}
+	return normalizeProviderName(template.Name) == "vllm"
 }
 
 // sensenovaNewPlatformBaseURL is the alternative SenseNova base URL.
@@ -750,9 +927,9 @@ func shouldSeedSenseNovaModel(modelName string, useNewPlatform bool) bool {
 	return sensenovaNewPlatformModelNames[modelName] == useNewPlatform
 }
 
-// seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's
-// base_url matches the catalog DefaultModelProvider.base_url for parent.DefaultModelProviderID.
-// Also handles the special case of SenseNova's new platform URL.
+// seedGroupModelsFromDefaults preserves catalog seeding for auxiliary services.
+// Model suppliers discover their available models only after key verification;
+// copying catalog rows here would bypass the user's choice for larger lists.
 func seedGroupModelsFromDefaults(
 	tx *gorm.DB,
 	ctx context.Context,
@@ -761,13 +938,16 @@ func seedGroupModelsFromDefaults(
 	requestBaseURL, userID, userName string,
 	now time.Time,
 ) ([]orm.UserModelProviderGroupModel, error) {
+	if hasSharedProviderEndpoint(*parent) {
+		return nil, nil
+	}
 	// Providers without has_models capability (e.g. OCR, search) have no model list.
 	if !parent.HasCapability("has_models") {
 		return nil, nil
 	}
 
 	// Determine whether we use the new-platform subset or the full catalog.
-	useNewPlatform := strings.EqualFold(parent.Name, "SenseNova") &&
+	useNewPlatform := strings.EqualFold(RuntimeProviderName(*parent), "SenseNova") &&
 		normalizeBaseURLForCompare(requestBaseURL) == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL)
 
 	var catalog orm.DefaultModelProvider
@@ -801,7 +981,7 @@ func seedGroupModelsFromDefaults(
 
 	batch := make([]orm.UserModelProviderGroupModel, 0, len(defs))
 	for _, d := range defs {
-		if strings.EqualFold(parent.Name, "SenseNova") &&
+		if strings.EqualFold(RuntimeProviderName(*parent), "SenseNova") &&
 			!shouldSeedSenseNovaModel(d.Name, useNewPlatform) {
 			continue
 		}
@@ -859,7 +1039,7 @@ type removeKeyRequest struct {
 	KeyID  string `json:"key_id,omitempty"`
 }
 
-// AddKey validates and appends a single API key to the group.
+// AddKey saves one key. Shared suppliers validate connectivity separately.
 // POST /model_providers/{model_provider_id}/groups/{group_id}/keys
 func AddKey(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
@@ -886,7 +1066,7 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	newKey := strings.TrimSpace(req.APIKey)
-	if newKey == "" {
+	if newKey == "" || len(splitAPIKeys(newKey)) != 1 || len(newKey) > credentialvault.MaximumAPIKeyLength {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
@@ -904,6 +1084,10 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := prepareProviderKeySelection(r.Context(), db, &parent); err != nil {
+		common.ReplyErr(w, "initialize enabled api key failed", http.StatusInternalServerError)
+		return
+	}
 	var row orm.UserModelProviderGroup
 	err = db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
@@ -932,8 +1116,16 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Verify the key before storing.
-	checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, row.BaseURL, newKey, "")
+	prospectiveKeys := append(append([]string(nil), existing...), newKey)
+	if err := validateSavedKeyPool(parent, row.Name, connectionBaseURL(parent, row.BaseURL), strings.Join(prospectiveKeys, "\n")); err != nil {
+		common.ReplyErr(w, "api_key pool exceeds credential limits", http.StatusBadRequest)
+		return
+	}
+	checkResult := &modelCheckResponse{Success: true, Message: "saved"}
+	var checkErr error
+	if !hasSharedProviderEndpoint(parent) {
+		checkResult, checkErr = doProviderGroupCheck(r.Context(), parent.Category, RuntimeProviderName(parent), connectionBaseURL(parent, row.BaseURL), newKey, "", parent)
+	}
 	if checkErr != nil || checkResult == nil || !checkResult.Success {
 		msg := "verification failed"
 		if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {
@@ -953,14 +1145,21 @@ func AddKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now()
-	encryptedUpdates["is_verified"] = true
+	encryptedUpdates["is_verified"] = row.IsVerified || !hasSharedProviderEndpoint(parent)
 	encryptedUpdates["updated_at"] = now
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&row).Updates(encryptedUpdates).Error; err != nil {
+		if err := updateConnectionSafely(tx, &parent, &row, connectionBaseURL(parent, row.BaseURL), encryptedUpdates); err != nil {
+			return err
+		}
+		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
 			return err
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {
+		if errors.Is(err, errConnectionChanged) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
 		return
 	}
@@ -1018,6 +1217,10 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := prepareProviderKeySelection(r.Context(), db, &parent); err != nil {
+		common.ReplyErr(w, "initialize enabled api key failed", http.StatusInternalServerError)
+		return
+	}
 	var row orm.UserModelProviderGroup
 	err = db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parent.ID, userID).
@@ -1059,14 +1262,21 @@ func RemoveKey(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "encrypt api key failed", http.StatusInternalServerError)
 		return
 	}
-	encryptedUpdates["is_verified"] = len(filtered) > 0
+	encryptedUpdates["is_verified"] = row.IsVerified && len(filtered) > 0
 	encryptedUpdates["updated_at"] = now
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&row).Updates(encryptedUpdates).Error; err != nil {
+		if err := updateConnectionSafely(tx, &parent, &row, connectionBaseURL(parent, row.BaseURL), encryptedUpdates); err != nil {
+			return err
+		}
+		if err := reconcileProviderActiveKey(tx, &parent); err != nil {
 			return err
 		}
 		return enqueueCredentialBackup(tx, row.ID, nextCredentialRevision, credentialvault.BackupUpsert, now)
 	}); err != nil {
+		if errors.Is(err, errConnectionChanged) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "update api_key failed", http.StatusInternalServerError)
 		return
 	}

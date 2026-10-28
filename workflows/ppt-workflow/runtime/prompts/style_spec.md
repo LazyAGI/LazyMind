@@ -21,9 +21,28 @@ You design a PPT-wide style spec as strict JSON.
   "color_tone":   {"id": 1, "name_zh": "深色/暗色系", "name_en": "Dark"},
   "primary_color":{"id": 3, "name_zh": "宝石蓝", "name_en": "Royal Blue", "hex": "#1976D2"},
   "palette": {"primary": "#1976D2", "accent": "#RRGGBB", "neutral": "#RRGGBB"},
-  "typography": {"heading_font": "<CSS font-family>", "body_font": "<CSS font-family>", "base_size_px": 16}
+  "typography": {"heading_font": "<CSS font-family>", "body_font": "<CSS font-family>", "base_size_px": 16},
+  "art_direction": {
+    "concept": "A concrete visual idea grounded in this topic and audience",
+    "composition": ["Cover composition", "Content composition", "Data composition"],
+    "background": "Base surface and a specific editable structural motif",
+    "surfaces": "How content regions are grouped without repeating identical cards",
+    "decoration": "One restrained motif and where it belongs"
+  }
 }
 ```
+
+## Explicit visual constraints take precedence
+
+The user's complete qualified request and task_pack_params.explicit_visual_constraints
+are mandatory. Keep requested colors (including exact hex), backgrounds, typography,
+density, margins, composition, reference direction and prohibited motifs. Do not
+reduce "light ivory technology style, olive accents, no HUD/neon/blue" to a generic
+technology recipe. Catalog IDs are classification metadata, not permission to
+override these constraints. If explicit colors conflict with catalog compatibility,
+keep the user colors in palette and primary_color.hex. The catalog hex and
+compatibility rules below apply only to unspecified properties. Do not infer a
+dark/cyan scheme just because the topic is technical.
 
 ## Rules for the triple
 
@@ -37,13 +56,29 @@ You design a PPT-wide style spec as strict JSON.
 
 ## Rules for palette / typography
 
-- `palette.primary` MUST equal `primary_color.hex` literally.
+- `palette.primary` MUST equal `primary_color.hex` literally. When the user specifies a custom color, use that color in both fields instead of the catalog hex.
 - `palette.accent` and `palette.neutral` are your creative choice **but must harmonize** with the primary + tone. Use hex uppercase.
 - `typography` must match the design_style's personality (科技感 → Inter / Roboto Mono; 国潮 → serif like "Noto Serif SC"; 卡通可爱 → rounded like ZCOOL KuaiLe; etc.). Keep distinct heading and body stacks when the style calls for them; do not collapse every design to Arial/system-ui. Put the intended named face first and include a portable Office fallback later in each CSS stack (for Chinese, e.g. Microsoft YaHei/SimSun/KaiTi as appropriate; for Latin, e.g. Arial/Georgia/Courier New).
+
+## Concrete visual design
+
+Write a concise, topic-specific `art_direction` in the same response. Catalog IDs
+classify the style; they do not replace a design plan. Specify a focal element,
+spatial arrangement and repeatable visual motif. Vary cover, content and data
+compositions within one identity. Avoid describing every topic with only a
+generic gradient, sparse grid and equal rounded cards.
+
+`generate_background_images=false` means no AI-generated raster backdrop. It
+does not mean no background design: use editable shapes, explicit div layers,
+lines, inline SVG and typography. Respect requests for a plain background or
+minimal layout. If AI backgrounds are enabled, keep foreground composition
+readable and avoid redundant decorations over the generated image. Use only
+export-safe effects; do not request blur, masks, WebGL or fabricated images.
+Do not invent facts or decorative KPI values to implement the concept.
 
 ## What NOT to do
 
 - Do NOT invent a design_style / color_tone / primary_color outside the catalog.
-- Do NOT change the chosen primary_color.hex.
+- Do NOT change an explicit user color to the catalog's primary_color.hex.
 - Do NOT generate separate palettes for individual slides.
 - JSON must be valid.

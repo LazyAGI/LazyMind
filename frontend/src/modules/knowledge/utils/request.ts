@@ -1,3 +1,4 @@
+import type { PaperUploadContext } from "../api/academicReferences";
 import {
   Configuration,
   type DatasetServiceApiDatasetServiceCreateDatasetRequest,
@@ -35,6 +36,7 @@ import {
 } from "@/api/generated/core-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import type { RawAxiosRequestConfig } from "axios";
+import { assertImportTasksStarted } from "./importError";
 
 const baseUrl = `${BASE_URL}/api`;
 const coreApiBaseUrl = `${BASE_URL}/api/core`;
@@ -433,7 +435,7 @@ export interface CreateTaskItem {
   cross_dataset?: boolean;
 }
 
-export type CreateTaskRequest = CoreCreateTaskRequest;
+export type CreateTaskRequest = CoreCreateTaskRequest & { paper_import?: PaperUploadContext };
 
 export interface TaskDocumentInfo {
   display_name: string;
@@ -536,18 +538,20 @@ export function TaskServiceApi() {
     },
 
 
-    startTasks(
+    async startTasks(
       dataset: string,
       body: StartTaskRequest,
       options?: RawAxiosRequestConfig,
     ) {
-      return coreClient.apiCoreDatasetsDatasetTasksStartPost(
+      const response = await coreClient.apiCoreDatasetsDatasetTasksStartPost(
         {
           dataset,
           startTaskRequest: body,
         },
         options,
       );
+      assertImportTasksStarted(response.data, new Set(body.task_ids).size);
+      return response;
     },
 
 
@@ -599,18 +603,20 @@ export function TaskServiceApi() {
     },
 
 
-    resumeTask(
+    async resumeTask(
       dataset: string,
       task: string,
       options?: RawAxiosRequestConfig,
     ) {
-      return coreClient.apiCoreDatasetsDatasetTasksTaskResumePost(
+      const response = await coreClient.apiCoreDatasetsDatasetTasksTaskResumePost(
         {
           dataset,
           task,
         },
         options,
       );
+      assertImportTasksStarted(response.data, 1);
+      return response;
     },
 
 

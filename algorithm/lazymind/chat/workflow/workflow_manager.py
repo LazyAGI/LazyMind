@@ -6,6 +6,7 @@ public Workflow SDK into ChatAgent tools and applies LazyMind's handoff rule.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -17,14 +18,28 @@ import lazyllm
 from lazyllm.tools import fc_register
 from lazyllm.tools.agent.tool_runtime import HostFileAccess, _get_tool_runtime_metadata
 
+from lazymind.chat.workflow.completed_actions import load_completed_actions
 from lazymind.chat.engine.tools.intent_writer import enable_workflow_intent_scopes
+from lazymind.chat.engine.tools.artifact_output import artifact_output
 from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError
+from lazymind.workflow_sdk.input_bindings import normalize_input_reference
 from lazymind.workflow_toolkit import (
     AgentWorkflowToolProjection, HostWorkflowToolkit, StepCommandInput,
     workflow_package_input_types,
 )
 
 LOG = logging.getLogger(__name__)
+
+
+async def resolve_workflow_injection_async(*args, **kwargs):
+    """Keep synchronous SDK I/O off the Chat ASGI event loop.
+
+    Core artifact projections may call back into Chat document inspection.
+    Blocking this loop while waiting for Core deadlocks those callbacks.
+    to_thread copies ContextVars, including LazyLLM's user/session scope.
+    """
+    return await asyncio.to_thread(resolve_workflow_injection, *args, **kwargs)
+
 
 _SERIAL_WORKFLOW_EXECUTION_POLICY = (
     'Workflow SubAgent execution is strictly serial. Never issue more than one Workflow '
@@ -176,7 +191,7 @@ def _handoff_tool(
                 )
             try:
                 cfg = _agentic_config()
-                focus_hints = []
+                focus_hints = [_WORKFLOW_EDIT_SCOPE_POLICY]
                 focused_tab = str(cfg.get('focused_tab') or '').strip()
                 focused_sort_order = cfg.get('focused_sort_order')
                 if focused_tab:
@@ -225,6 +240,25 @@ def _handoff_tool(
         'Host acknowledges durable ownership of the post-execution approval checkpoint.'
     )
     return advance_step_and_hand_off
+
+
+_WORKFLOW_EDIT_SCOPE_POLICY = (
+    'Edit scope: the current user request overrides broad step defaults. '
+    'For a named section/paragraph/page, read the existing artifact first and change only '
+    'that target; preserve all other content, formatting, page count and order. '
+    'In main Chat, for a text/Markdown-only edit use patch_artifact_text with a unique exact excerpt, '
+    'without rewinding steps; do not replace or regenerate other sections. '
+    'For a composite resolve the target using current 1-based sort_order and selected '
+    'artifact identity; list_index is a stable ID, NOT page number minus one. '
+    'Explicit page/section numbers override UI focus; focus only resolves "this page". '
+    'For linked composites preserve alignment across outline, prompts, images, slides and notes. '
+    'In main Chat, for a pure page move/swap call reorder_artifact_pages directly with all linked lists; '
+    'do not rewind or regenerate any step. '
+    'Insert/delete/reorder whole pages together; do not confuse removing a bullet with deleting '
+    'a page. Regenerate only requested pages. Never recreate the entire deck for a local edit. '
+    'A request saying only edit the outline/section is a stop boundary: do not automatically '
+    'regenerate downstream outputs. Report which outputs changed and which need regeneration. '
+)
 
 
 def _artifact_by_handle(toolkit: HostWorkflowToolkit, session_id: str,
@@ -406,7 +440,7 @@ def _safe_session_tools(
                 )
             try:
                 cfg = _agentic_config()
-                focus_hints = []
+                focus_hints = [_WORKFLOW_EDIT_SCOPE_POLICY]
                 focused_tab = str(cfg.get('focused_tab') or '').strip()
                 focused_sort_order = cfg.get('focused_sort_order')
                 if focused_tab:
@@ -454,18 +488,60 @@ def _safe_session_tools(
     @_register_host_file(capability)
     def list_workflow_inputs() -> Dict[str, Any]:
         """List durable input bindings for this Session."""
-        return toolkit.list_workflow_inputs(session_id())
+        return artifact_output(toolkit.list_workflow_inputs(session_id()))
 
     @_register_host_file(capability)
     def list_artifacts() -> Dict[str, Any]:
         """List selected Artifacts for this Session."""
-        return toolkit.list_artifacts(session_id())
+        return artifact_output(toolkit.list_artifacts(session_id()))
+
+    @_register_host_file(capability)
+    def reorder_artifact_pages(slot_ids: List[str], order: List[int]) -> Dict[str, Any]:
+        """Move/swap pages without rerunning steps. Include ALL linked page-list slots.
+
+        order is the complete 1-based visual permutation (swap 1/3: [3,2,1]).
+        Read current artifacts first. Preserve unmentioned pages and single documents.
+        Host resolves stable IDs and versions; a conflict leaves every list unchanged.
+        """
+        return toolkit.reorder_artifact_pages(session_id(), slot_ids, order)
 
     @_register_host_file(capability)
     def read_artifact(artifact_ref: str) -> Dict[str, Any]:
         """Read a selected Artifact by exact slot handle such as report or images[0]."""
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
-        return toolkit.read_artifact(str(artifact.get('artifact_id') or artifact.get('id') or ''))
+        return artifact_output(toolkit.read_artifact(str(artifact.get('artifact_id') or artifact.get('id') or '')))
+
+    @_register_host_file(capability)
+    def patch_artifact_text(artifact_ref: str, old_text: str, new_text: str) -> Dict[str, Any]:
+        """Edit one unique excerpt of a selected text/Markdown artifact without rerunning steps.
+
+        Read the artifact first. Include a unique exact section/paragraph excerpt;
+        every character outside that excerpt is preserved. Does not regenerate
+        downstream pages. For a list use the exact handle returned by list_artifacts.
+        """
+        artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
+        artifact_id = str(artifact.get('artifact_id') or artifact.get('id') or '')
+        current = toolkit.read_artifact(artifact_id)
+        value = current.get('value')
+        field = next((key for key in ('text', 'data')
+                      if isinstance(value, dict) and isinstance(value.get(key), str)), None)
+        text = value.get(field) if field else value
+        content_type = str(current.get('content_type') or '').lower()
+        text_type = content_type in ('text', 'markdown', 'file', 'text/markdown', 'text/plain')
+        text_schema = isinstance(value, dict) and value.get('schema') in ('text/markdown', 'text/plain')
+        if not (text_type or text_schema) or not isinstance(text, str):
+            raise ValueError('Only a readable text/Markdown artifact supports excerpt editing')
+        if re.search(r'<(?:!doctype\s+html|html)(?:\s|>)', text, re.IGNORECASE):
+            raise ValueError('HTML slides require their scoped page-editing tool')
+        if not old_text or text.count(old_text) != 1:
+            raise ValueError('old_text must match exactly once; read the current artifact and retry')
+        revised = text.replace(old_text, new_text, 1)
+        revised_value = {**value, field: revised} if field else revised
+        return artifact_output(toolkit.patch_artifact(
+            artifact_id, int(current.get('revision') or artifact.get('revision') or 0),
+            revised_value, str(current.get('content_type') or 'text'), str(current.get('caption') or ''),
+            base_draft_version=int(current.get('draft_version') or 0),
+        ))
 
     @_register_host_file(capability)
     def patch_artifact(artifact_ref: str, value: Any, caption: str = '') -> Dict[str, Any]:
@@ -473,13 +549,13 @@ def _safe_session_tools(
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         artifact_id = str(artifact.get('artifact_id') or artifact.get('id') or '')
         content_type = str(artifact.get('content_type') or 'json')
-        return toolkit.patch_artifact(
+        return artifact_output(toolkit.patch_artifact(
             artifact_id, int(artifact.get('revision') or 0), value, content_type, caption,
-        )
+        ))
 
     return [
         get_workflow_state, get_ready_steps, advance_step, list_workflow_inputs,
-        list_artifacts, read_artifact, patch_artifact,
+        list_artifacts, read_artifact, patch_artifact, patch_artifact_text, reorder_artifact_pages,
     ]
 
 
@@ -600,7 +676,7 @@ def _import_attachment(path: str) -> Dict[str, Any]:
     value = LazyMindHostFileAdapter(
         str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''), transport=httpx,
     ).import_attachment(path)
-    return value.to_binding()
+    return normalize_input_reference(value)
 
 
 def _import_text_binding(material_id: str, value: str) -> Dict[str, Any]:
@@ -611,7 +687,7 @@ def _import_text_binding(material_id: str, value: str) -> Dict[str, Any]:
     resource = LazyMindHostFileAdapter(
         str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''), transport=httpx,
     ).import_text(f'{safe_name}.txt', str(value))
-    return resource.to_binding()
+    return normalize_input_reference(resource)
 
 
 def _conversation_has_attachments() -> bool:
@@ -708,7 +784,32 @@ def _runtime_clarification_fields(runtime_policy: Any) -> List[Dict[str, Any]]:
             'type': question_type,
             'choices': choices,
             'choice_policy': choice_policy,
+            'ask_when': _clean_workflow_text(raw.get('ask_when')),
         }
+        # A conditional attachment augments an existing choice question. It uses
+        # the normal conversation attachment transport instead of introducing a
+        # workflow-specific file question or upload API.
+        raw_attachment = raw.get('attachment')
+        if question_type == 'single' and isinstance(raw_attachment, dict):
+            when_choice = _clean_workflow_text(raw_attachment.get('when_choice'))
+            material_id = _clean_workflow_text(raw_attachment.get('material_id'))
+            accept = [
+                value if value.startswith('.') else f'.{value}'
+                for item in (raw_attachment.get('accept') or [])
+                if (value := _clean_workflow_text(item).lower())
+            ]
+            max_files = raw_attachment.get('max_files', 1)
+            if (
+                when_choice in choices and material_id and accept
+                and type(max_files) is int and (max_files == -1 or max_files >= 1)
+            ):
+                field['attachment'] = {
+                    'when_choice': when_choice,
+                    'material_id': material_id,
+                    'accept': list(dict.fromkeys(accept)),
+                    'max_files': max_files,
+                    'required': raw_attachment.get('required') is True,
+                }
         if question_type in {'single', 'multiple'}:
             # Fixed package choices are closed by definition. This default also
             # covers installed package revisions created before ``allow_other``
@@ -775,13 +876,15 @@ def enforce_startup_clarification_policy(
     """
     if not isinstance(questions, list):
         return questions
-    fixed_fields = [
+    governed_fields = [
         field for field in _runtime_clarification_fields(runtime_policy)
-        if field.get('choice_policy') == 'fixed'
-        and field.get('type') in {'single', 'multiple'}
-        and field.get('choices')
+        if (
+            field.get('choice_policy') == 'fixed'
+            and field.get('type') in {'single', 'multiple'}
+            and field.get('choices')
+        ) or field.get('attachment')
     ]
-    if not fixed_fields:
+    if not governed_fields:
         return questions
 
     governed: List[Any] = []
@@ -798,7 +901,7 @@ def enforce_startup_clarification_policy(
             if _clean_workflow_text(value) and _clean_workflow_text(value) != '其他'
         }
         matched = None
-        for field in fixed_fields:
+        for field in governed_fields:
             field_text = _question_fingerprint(field.get('question'))
             field_choices = set(field.get('choices') or [])
             if question_id and question_id == field.get('id'):
@@ -813,9 +916,12 @@ def enforce_startup_clarification_policy(
                 matched = field
                 break
         if matched is not None:
-            question['type'] = matched['type']
-            question['choices'] = list(matched['choices'])
-            question['allow_other'] = matched.get('allow_other', True)
+            if matched.get('choice_policy') == 'fixed':
+                question['type'] = matched['type']
+                question['choices'] = list(matched['choices'])
+                question['allow_other'] = matched.get('allow_other', True)
+            if matched.get('attachment'):
+                question['attachment'] = dict(matched['attachment'])
         governed.append(question)
     return governed
 
@@ -970,6 +1076,10 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'inspect the current request, relevant attachment names/content already available, '
         'and prior conversation turns. Treat a field as present only when it is explicit or '
         'unambiguously inferable. Do not ask for fields that are already present. If one or '
+        'more fields declare ask_when, evaluate that condition against the request, attachments '
+        'and conversation first. Exclude fields whose condition is false. Existing source '
+        'attachments or supplied substantive source text satisfy material questions; never '
+        'ask for those uploads again. A visual template alone is not source material. If one or '
         'more fields are missing, call ask_user exactly once TOTAL with only those missing fields, '
         'putting all of them in that single card, then stop without triggering the Workflow in '
         'that turn. Include each '
@@ -988,12 +1098,21 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'when responsible suggestions cannot be inferred. When a declared choice field has '
         'allow_other=false, pass allow_other=false in that ask_user question so the card does not '
         'append an Other option. Keep allow_other=true or omit it for other choice fields. '
+        'When a declared field includes attachment metadata, copy that metadata verbatim into '
+        'the matching ask_user question. The Chat card owns the upload button and sends the file '
+        'as a normal conversation attachment; never ask the user to paste a filesystem path. '
+        'On the answer turn, bind its declared attachment.material_id to the exact uploaded '
+        'filename in trigger input_bindings for a single file. For multiple files, preserve '
+        'EVERY exact attachment filename in request_context so the Workflow can resolve each '
+        'through the conversation attachment reader. Do not stringify a filename list into '
+        'a single file binding; omit that binding when multiple attachments are supplied. '
         'On the answer turn, NEVER call ask_user '
         'again or reassess fields as missing. Combine the original request, all already-known '
         'fields, and the new answers into one concise request_context and pass that value to '
         'the trigger; an answer-only current_query must never replace the original request. '
         'If no field is missing, trigger immediately. Never ask for an upload unless the '
-        'Workflow separately declares it as a required input. Declared fields: '
+        'Workflow declares it as a required input or as the selected conditional attachment '
+        'on a clarification field. Declared fields: '
         + json.dumps(fields, ensure_ascii=False, default=str)
     )
 
@@ -1172,7 +1291,7 @@ def _workflow_trigger_tools(
         def make_trigger(
             bound_id: str, bound_ref: str, bound_revision: str, bound_query: str,
             bound_clarification_answer: bool, bound_package: Optional[Dict[str, Any]],
-            supports_scalar_bindings: bool,
+            supports_scalar_bindings: bool, bound_runtime: Any,
         ) -> Any:
             def run_trigger(
                 input_bindings: Optional[Union[Dict[str, str], str]] = None,
@@ -1223,7 +1342,25 @@ def _workflow_trigger_tools(
                 client = _client()
                 package = bound_package or client.get_workflow(bound_id, bound_revision).result
                 input_types = _trigger_input_types(package)
-                if _trigger_input_contract(package) is not None and set(input_bindings or {}) - input_types.keys():
+                runtime = (package.get('runtime') or (package.get('compiled_graph') or {}).get('runtime')
+                           or bound_runtime)
+                clarification_ids = {str(field['id']) for field in _runtime_clarification_fields(runtime)}
+                clarification_answers = {
+                    key: value for key, value in input_bindings.items()
+                    if key not in input_types and key in clarification_ids and value.strip()
+                }
+                input_bindings = {key: value for key, value in input_bindings.items()
+                                  if key in input_types or key not in clarification_ids}
+                if clarification_answers:
+                    effective_context += '\n\nWorkflow clarification answers:\n' + json.dumps(
+                        clarification_answers, ensure_ascii=False,
+                    )
+                    if session_holder is not None:
+                        session_holder['request_context'] = effective_context
+                graph = package.get('compiled_graph') or {}
+                has_input_contract = (_trigger_input_contract(package) is not None
+                                      or isinstance(graph.get('material_producers'), dict))
+                if has_input_contract and set(input_bindings) - input_types.keys():
                     raise WorkflowClientError(
                         'WORKFLOW_INPUT_NOT_EXPOSED', 'Use only inputs advertised by this package.',
                     )
@@ -1380,12 +1517,14 @@ def _workflow_trigger_tools(
             trigger_query != str(current_query or '').strip(),
             package_hint,
             any(kind in {'text', 'json'} for kind in input_types_hint.values()),
+            item.get('runtime'),
         )
 
         trigger_workflow.__name__ = name
         description = str(item.get('tool_description') or '').strip()
         input_contract = (
-            ' Exact external material IDs and types: '
+            (' Exact external material IDs and types: ' if package_hint else
+             ' Startup fields (the package resolves material inputs versus clarification answers): ')
             + ', '.join(
                 f'{material_id} ({material_type})'
                 for material_id, material_type in sorted(input_types_hint.items())
@@ -1558,6 +1697,7 @@ def resolve_workflow_injection(
         'get_ready_steps', 'advance_step',
         'list_workflow_inputs', 'get_workflow_command',
         'list_artifacts', 'read_artifact', 'patch_artifact', 'delete_artifact',
+        'reorder_artifact_pages', 'patch_artifact_text',
     }
     if allowed_refs or session_id:
         tools = [
@@ -1642,10 +1782,18 @@ def resolve_workflow_injection(
             if isinstance(projection.get('projection'), dict) else {}
         )
         completed_followup = ''
+        completed_actions = []
         if session_projection.get('completed'):
+            completed_actions = load_completed_actions(
+                toolkit, session_id, runtime_policy,
+                register=_register_host_file('NONE' if _trusted_workflow_toolkit(toolkit) else 'UNDECLARED'),
+            )
+            tools.extend(action.tool for action in completed_actions)
             completed_followup = (
                 'A completed Session is not immutable. When the current user query asks to '
-                'revise, delete, fix, or regenerate an existing Workflow output, do not '
+                'revise, delete, fix, or regenerate an existing Workflow output, first use '
+                'patch_artifact_text for a text/Markdown-only edit or reorder_artifact_pages for '
+                'a pure permutation; neither operation rewinds steps. For other edits, do not '
                 'write replacement content in chat and do not use generic file/artifact '
                 'tools. Call get_ready_steps, select the matching exact rewindable_steps or continue_steps '
                 'target, and call advance_step so Runtime starts a new step attempt and '
@@ -1684,11 +1832,19 @@ def resolve_workflow_injection(
                         'owns the existing artifacts and publishes their new revisions; never '
                         'paste replacement content into chat as a substitute. '
                     )
+        if completed_actions:
+            completed_followup = (
+                'This Workflow declares scoped completed-output actions. Their declared '
+                'routing takes precedence over fallback step routing:\n'
+                + '\n'.join(action.routing for action in completed_actions)
+                + '\n' + completed_followup
+            )
         runtime_context = (
             '## Workflow Runtime [AUTHORITATIVE]\n'
             + 'The Host owns session/version concurrency fields. Never ask the user for '
             + 'state_version or expected_state_version. '
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
+            + _WORKFLOW_EDIT_SCOPE_POLICY
             + 'If a Workflow tool returns user_notice, explicitly relay that notice to the '
             + 'user. advance_step waits for '
             + 'terminal execution. A failed result never means success and never permits a '
@@ -1715,7 +1871,11 @@ def resolve_workflow_injection(
             + completed_followup
             + '\n'
             + 'Artifact-mutation guard: when the user asks to change an Artifact already '
-            + 'owned by this active Workflow, including inserting, replacing, moving, or '
+            + ('owned by this Workflow, the declared scoped completed-output actions '
+               'are an authorized exception to this guard within their declared routing. '
+               'For other changes to artifacts ' if completed_actions else '')
+            + 'owned by this active Workflow (except scoped text edits through patch_artifact_text '
+            + 'and pure page permutations through reorder_artifact_pages), including inserting, replacing, moving, or '
             + 'deleting an image in the current document, rerun the earliest owning Workflow '
             + 'step. Do not bypass the Workflow with generic file, image, artifact, or SubAgent '
             + 'tools; media acquisition belongs inside the owning step.\n'
@@ -1726,7 +1886,7 @@ def resolve_workflow_injection(
             # Ready frontier must be returned to the same ChatAgent turn so a
             # user-requested continuous run can keep advancing.  Only the
             # explicit hand-off variant transfers ownership and ends the turn.
-            tools, ['advance_step_and_hand_off'],
+            tools, ['advance_step_and_hand_off', *[action.tool.__name__ for action in completed_actions]],
             patch, runtime_context, runtime_policy, bind_successor,
         )
 
@@ -1751,6 +1911,7 @@ def resolve_workflow_injection(
             + 'summarize, or merely describe. The @workflow mention means the user explicitly '
             + 'selected and authorized this exact procedure. '
             + _SERIAL_WORKFLOW_EXECUTION_POLICY
+            + _WORKFLOW_EDIT_SCOPE_POLICY
             + entry_instruction
             + 'Conversation attachments are optional unless the selected Workflow Runtime '
             + 'explicitly returns a required-input result. Never infer that an upload is '

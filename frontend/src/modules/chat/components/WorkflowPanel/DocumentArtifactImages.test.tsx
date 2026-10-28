@@ -3,8 +3,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useWorkflowStore, type SlotRevision, type WorkflowSession } from '@/modules/chat/store/workflowPanel';
 import { DocumentArtifactEditor } from './DocumentArtifactEditor';
+import { SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 
-const api = vi.hoisted(() => ({ renderWriterDocument: vi.fn(), saveDocumentArtifact: vi.fn() }));
+const api = vi.hoisted(() => ({ renderWriterDocument: vi.fn(), saveDocumentArtifact: vi.fn(), createDocumentImageExport: vi.fn() }));
 vi.mock('@/modules/chat/utils/request', async (original) => ({
   ...await original<typeof import('@/modules/chat/utils/request')>(),
   WorkflowSessionApi: () => api,
@@ -15,11 +16,12 @@ vi.mock('./DocumentPublicationRecoveryPanel', () => ({ DocumentPublicationRecove
 vi.mock('./WriterIRControl', () => ({ WriterIRControl: () => <article>IR document</article> }));
 vi.mock('./ArtifactRewriteDialog', () => ({ ArtifactRewriteDialog: () => null }));
 vi.mock('./MarkdownArtifactEditor', () => ({
-  MarkdownArtifactEditor: ({ markdown, resolveImageUrl, onSave, sourceRevision }: {
+  MarkdownArtifactEditor: ({ markdown, resolveImageUrl, onSave, sourceRevision, onDownloadImage }: {
     markdown: string;
     resolveImageUrl: (source: string) => Promise<string>;
     onSave: (text: string, revision: number, mode: 'draft') => Promise<unknown>;
     sourceRevision: number;
+    onDownloadImage?: (source: string) => Promise<void>;
   }) => {
     const [src, setSrc] = useState('');
     const [text, setText] = useState(markdown);
@@ -32,6 +34,7 @@ vi.mock('./MarkdownArtifactEditor', () => ({
       <article>{markdown}</article><img alt='Document illustration' src={src || undefined} />
       <textarea aria-label='Document content' value={text} onChange={e => setText(e.target.value)} />
       <button onClick={() => void onSave(text, sourceRevision, 'draft')}>Save document</button>
+      <button onClick={() => void onDownloadImage?.('docs/assets/knowledge-library-en.jpg')}>Download inline image</button>
     </>;
   },
 }));
@@ -62,12 +65,44 @@ function pending<T>() {
 beforeEach(() => {
   api.renderWriterDocument.mockReset();
   api.saveDocumentArtifact.mockReset();
+  api.createDocumentImageExport.mockReset();
   useWorkflowStore.setState({ sessionByConversation: { conversation: session() } });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ urls: {} }) })));
 });
 afterEach(() => { cleanup(); useWorkflowStore.setState({ sessionByConversation: {} }); vi.unstubAllGlobals(); });
 
 describe('document artifact image previews', () => {
+  it('exports an inline Markdown image from the current snapshot through the owned API', async () => {
+    api.renderWriterDocument.mockResolvedValue(response('https://example.test/preview.jpg'));
+    api.createDocumentImageExport.mockResolvedValue({ data: { data: { id: 'export', status: 'failed', total: 1, ready: 0, items: [] } } });
+    const edited = `${markdown}\n\nUnsaved edits`;
+    const context = { getSnapshot: () => edited, setEditing: vi.fn(), registerFlush: () => () => {}, registerFooterAction: () => () => {} };
+    render(<SlotEditingContext.Provider value={context}><DocumentArtifactEditor slot={slot} sessionId='session' /></SlotEditingContext.Provider>);
+    fireEvent.click(await screen.findByText('Download inline image'));
+    await waitFor(() => expect(api.createDocumentImageExport).toHaveBeenCalledWith('source-artifact',
+      expect.objectContaining({ base_revision: 1, document: edited, image_reference: source }), expect.anything()));
+    expect(api.saveDocumentArtifact).not.toHaveBeenCalled();
+  });
+
+  it('offers image downloads without document conversion and sends the current editor snapshot', async () => {
+    api.renderWriterDocument.mockResolvedValue(response('https://example.test/preview.jpg'));
+    api.createDocumentImageExport.mockResolvedValue({ data: { data: { id: 'export', status: 'failed', total: 1, ready: 0, items: [] } } });
+    const edited = '# Changed article\n\n![New photo](https://example.test/new.jpg)';
+    let downloadAction: SlotFooterAction | undefined;
+    const context = { getSnapshot: () => edited, setEditing: vi.fn(), registerFlush: () => () => {},
+      registerFooterAction: (_key: string, action: SlotFooterAction | null) => {
+        if (action?.icon === 'download') downloadAction = action;
+        return () => {};
+      },
+    };
+    render(<SlotEditingContext.Provider value={context}><DocumentArtifactEditor slot={slot} sessionId='session' readOnly /></SlotEditingContext.Provider>);
+    await waitFor(() => expect(downloadAction?.menu?.map(item => item.key)).toEqual(['images']));
+    act(() => downloadAction!.menu!.find(item => item.key === 'images')!.onClick());
+    await waitFor(() => expect(api.createDocumentImageExport).toHaveBeenCalledWith('source-artifact',
+      expect.objectContaining({ base_revision: 1, document: edited }), expect.anything()));
+    expect(api.saveDocumentArtifact).not.toHaveBeenCalled();
+  });
+
   it('resolves downloaded media for a read-only source while retaining canonical Markdown', async () => {
     api.renderWriterDocument.mockResolvedValue(response('https://example.test/preview.jpg'));
     render(<DocumentArtifactEditor slot={slot} sessionId='session' readOnly />);

@@ -45,6 +45,362 @@ export interface AbortUploadResponse {
     'upload_id'?: string;
     'upload_state'?: string;
 }
+/**
+ * @type AcademicContentRead
+ */
+export type AcademicContentRead = AcademicContentReadOneOf | AcademicContentReadOneOf1 | ApiCoreAcademicPaperContentsRetryPostRequest;
+
+export interface AcademicContentReadOneOf {
+    'handoff_id': string;
+    'paper_id': string;
+}
+export interface AcademicContentReadOneOf1 {
+    'cursor': string;
+    'expansion_id'?: string;
+    'handoff_id'?: string;
+}
+export interface AcademicContentResponse {
+    'content_hash': string;
+    'content_level': AcademicContentResponseContentLevelEnum;
+    'next_cursor': string;
+    'pages': Array<AcademicContentResponsePagesInner>;
+    'paper': AcademicPaperRef;
+    'parser_version'?: string;
+    'source_kind'?: AcademicContentResponseSourceKindEnum;
+    'source_version'?: string;
+    'status': AcademicContentResponseStatusEnum;
+    'warnings': Array<string>;
+}
+
+export const AcademicContentResponseContentLevelEnum = {
+    None: 'none',
+    Fulltext: 'fulltext'
+} as const;
+
+export type AcademicContentResponseContentLevelEnum = typeof AcademicContentResponseContentLevelEnum[keyof typeof AcademicContentResponseContentLevelEnum];
+export const AcademicContentResponseSourceKindEnum = {
+    Kb: 'kb',
+    External: 'external',
+    Legacy: 'legacy'
+} as const;
+
+export type AcademicContentResponseSourceKindEnum = typeof AcademicContentResponseSourceKindEnum[keyof typeof AcademicContentResponseSourceKindEnum];
+export const AcademicContentResponseStatusEnum = {
+    Processing: 'processing',
+    Ready: 'ready',
+    Unavailable: 'unavailable',
+    Failed: 'failed'
+} as const;
+
+export type AcademicContentResponseStatusEnum = typeof AcademicContentResponseStatusEnum[keyof typeof AcademicContentResponseStatusEnum];
+
+export interface AcademicContentResponsePagesInner {
+    'page': number;
+    'text': string;
+}
+export interface AcademicDocumentIdentity {
+    'kind'?: AcademicDocumentIdentityKindEnum;
+    'paper'?: AcademicDocumentIdentityPaper;
+    'reidentify'?: boolean;
+}
+
+export const AcademicDocumentIdentityKindEnum = {
+    Paper: 'paper',
+    Other: 'other',
+    Unknown: 'unknown'
+} as const;
+
+export type AcademicDocumentIdentityKindEnum = typeof AcademicDocumentIdentityKindEnum[keyof typeof AcademicDocumentIdentityKindEnum];
+
+export interface AcademicDocumentIdentityPaper {
+    'abstract'?: string;
+    'arxiv_id'?: string;
+    'authors'?: Array<string>;
+    'doi'?: string;
+    'title'?: string;
+    'venue'?: string;
+    'year'?: number;
+}
+export interface AcademicDocumentState {
+    'document_id'?: string;
+    'error'?: string;
+    'kind'?: AcademicDocumentStateKindEnum;
+    'manual'?: boolean;
+    'paper_id'?: string;
+    'revision'?: number;
+    'status'?: string;
+}
+
+export const AcademicDocumentStateKindEnum = {
+    Paper: 'paper',
+    Other: 'other',
+    Unknown: 'unknown'
+} as const;
+
+export type AcademicDocumentStateKindEnum = typeof AcademicDocumentStateKindEnum[keyof typeof AcademicDocumentStateKindEnum];
+
+export interface AcademicExpansion {
+    'conversation_id': string;
+    'created_at'?: string;
+    'dataset_id': string;
+    'discovery_mode'?: AcademicExpansionDiscoveryModeEnum;
+    'goal'?: string;
+    'id': string;
+    'progress'?: object;
+    'result': AcademicReviewInput;
+    'status': string;
+    'title'?: string;
+    'updated_at'?: string;
+    'version': number;
+}
+
+export const AcademicExpansionDiscoveryModeEnum = {
+    External: 'external'
+} as const;
+
+export type AcademicExpansionDiscoveryModeEnum = typeof AcademicExpansionDiscoveryModeEnum[keyof typeof AcademicExpansionDiscoveryModeEnum];
+
+/**
+ * @type AcademicHandoffInput
+ */
+export type AcademicHandoffInput = AcademicPaperTaskInput | AcademicReviewInput;
+
+export interface AcademicImportCandidate {
+    'expected_mime'?: string;
+    'source_provider'?: string;
+    'source_type'?: string;
+    'url'?: string;
+    'version'?: string;
+}
+export interface AcademicImportCreate {
+    'entry_type'?: AcademicImportCreateEntryTypeEnum;
+    'file_name'?: string;
+    'folder_id'?: string;
+    'folders'?: Array<PaperLibraryFolder>;
+    'format'?: AcademicImportCreateFormatEnum;
+    'idempotency_key'?: string;
+    'items': Array<AcademicImportItem>;
+    'preview_token'?: string;
+    'source_document_ids'?: Array<string>;
+    'target_dataset_id': string;
+    'target_pid'?: string;
+}
+
+export const AcademicImportCreateEntryTypeEnum = {
+    SingleReference: 'single_reference',
+    PaperReferences: 'paper_references',
+    CollectionReferences: 'collection_references',
+    PaperLink: 'paper_link',
+    Bibliography: 'bibliography',
+    PdfUpload: 'pdf_upload'
+} as const;
+
+export type AcademicImportCreateEntryTypeEnum = typeof AcademicImportCreateEntryTypeEnum[keyof typeof AcademicImportCreateEntryTypeEnum];
+export const AcademicImportCreateFormatEnum = {
+    Bib: 'bib',
+    Ris: 'ris',
+    Csv: 'csv'
+} as const;
+
+export type AcademicImportCreateFormatEnum = typeof AcademicImportCreateFormatEnum[keyof typeof AcademicImportCreateFormatEnum];
+
+export interface AcademicImportItem {
+    'candidate'?: AcademicImportCandidate;
+    'confirmed'?: boolean;
+    'document_id'?: string;
+    'paper'?: PaperLibraryPaper;
+    'reference_ids'?: Array<string>;
+    'revision'?: number;
+    'work_id'?: string;
+}
+export interface AcademicImportOperation {
+    'created_at'?: string;
+    'entry_type'?: string;
+    'id'?: string;
+    'source'?: object;
+    'status'?: string;
+    'summary'?: AcademicImportOperationSummary;
+    'target_dataset_id'?: string;
+}
+export interface AcademicImportOperationItem {
+    'batch_id'?: string;
+    'can_retry'?: boolean;
+    'content_sha256'?: string;
+    'current_document'?: object;
+    'current_state'?: string;
+    'document_deleted'?: boolean;
+    'document_id'?: string;
+    'item_id'?: string;
+    'library_paper_id'?: string;
+    'pending_paper'?: object;
+    'resolved_later'?: boolean;
+    'result_kind'?: string;
+    'status'?: string;
+    'title'?: string;
+    'upload_request_key'?: string;
+}
+export interface AcademicImportOperationSummary {
+    'active'?: number;
+    'canceled'?: number;
+    'deleted'?: number;
+    'failed'?: number;
+    'metadata_only'?: number;
+    'needs_action'?: number;
+    'ready'?: number;
+    'removed'?: number;
+    'resolved_later'?: number;
+    'retryable'?: number;
+    'skipped'?: number;
+    'total'?: number;
+}
+export interface AcademicImportPreview {
+    'items'?: Array<AcademicImportPreviewItemsInner>;
+    'preview_token'?: string;
+    'target_dataset_id'?: string;
+    'total'?: number;
+}
+export interface AcademicImportPreviewItemsInner {
+    'disposition'?: string;
+    'fulltext_candidates'?: Array<AcademicImportCandidate>;
+    'paper'?: AcademicPaperRef;
+    'presence'?: AcademicPresence;
+    'reference_ids'?: Array<string>;
+    'title'?: string;
+    'work_id'?: string;
+}
+export interface AcademicImportQueueItem {
+    'batch_failed_items'?: number;
+    'batch_id'?: string;
+    'batch_status'?: string;
+    'created_at'?: string;
+    'current_document'?: AcademicImportQueueItemCurrentDocument;
+    'document_id'?: string;
+    'error_code'?: string;
+    'error_message'?: string;
+    'item_id'?: string;
+    'source_provider'?: string;
+    'source_version'?: string;
+    'stage'?: string;
+    'status'?: string;
+    'target_dataset_id'?: string;
+    'title'?: string;
+    'updated_at'?: string;
+    'work_id'?: string;
+}
+export interface AcademicImportQueueItemCurrentDocument {
+    'document_id'?: string;
+    'processing_error'?: string;
+    'processing_status'?: string;
+}
+export interface AcademicPaperRef {
+    'abstract': string | null;
+    'arxiv_id'?: string;
+    'authors'?: Array<string>;
+    'citation_count'?: number;
+    'document_id'?: string;
+    'doi'?: string;
+    'paper_id': string;
+    'paper_url'?: string;
+    'pdf_url'?: string;
+    'source_provider'?: string;
+    'source_version'?: string;
+    'title'?: string;
+    'venue'?: string;
+    'year'?: number;
+}
+export interface AcademicPaperTaskInput {
+    'notes'?: Array<AcademicPaperTaskNote>;
+    'papers': Array<AcademicPaperRef>;
+    'user_instruction': string;
+}
+export interface AcademicPaperTaskNote {
+    'content': string;
+    'id': string;
+    'paper_id': string;
+    'title': string;
+}
+export interface AcademicPresence {
+    'coverage_complete'?: boolean;
+    'current_dataset'?: Array<AcademicPresenceDocument>;
+    'importing'?: boolean;
+    'metadata_only'?: boolean;
+    'other_datasets'?: Array<AcademicPresenceDocument>;
+    'status'?: string;
+    'work_id'?: string;
+}
+export interface AcademicPresenceDocument {
+    'content_sha256'?: string;
+    'dataset_id'?: string;
+    'dataset_name'?: string;
+    'document_id'?: string;
+    'document_name'?: string;
+    'source_provider'?: string;
+    'source_version'?: string;
+}
+export interface AcademicResolvedPapers {
+    'contents': Array<AcademicResolvedPapersContentsInner>;
+    'papers': Array<AcademicWorkflowPaper>;
+}
+export interface AcademicResolvedPapersContentsInner {
+    'error'?: string;
+    'paper_id': string;
+    'source_kind'?: string;
+    'source_version': string;
+    'status': string;
+}
+export interface AcademicReviewInput {
+    'candidate_directions': Array<string>;
+    'papers': Array<AcademicWorkflowPaper>;
+    'selected_directions': Array<string>;
+    'user_instruction': string;
+}
+export interface AcademicSourceImportItem {
+    'batch_id': string;
+    'created_library': boolean;
+    'document_id'?: string;
+    'error_message'?: string;
+    'item_id': string;
+    'paper_key': string;
+    'processing_status'?: string;
+    'retry_batch_id'?: string;
+    'retry_item_id'?: string;
+    'retryable': boolean;
+    'stage': string;
+    'status': string;
+    'target_dataset_id': string;
+    'target_name': string;
+    'title': string;
+}
+export interface AcademicTaskLaunch {
+    'dataset_id'?: string;
+    'direction'?: string;
+    'document_ids'?: Array<string>;
+    'expansion_id'?: string;
+    'expansion_version'?: number;
+    'kind': AcademicTaskLaunchKindEnum;
+    'paper_ids'?: Array<string>;
+    'reflection_first'?: boolean;
+    'request_key': string;
+    'user_instruction'?: string;
+}
+
+export const AcademicTaskLaunchKindEnum = {
+    Expansion: 'expansion',
+    Review: 'review',
+    Reflection: 'reflection',
+    Ppt: 'ppt'
+} as const;
+
+export type AcademicTaskLaunchKindEnum = typeof AcademicTaskLaunchKindEnum[keyof typeof AcademicTaskLaunchKindEnum];
+
+export interface AcademicWorkflowPaper {
+    'direction_relation'?: string;
+    'is_important': boolean;
+    'is_seed': boolean;
+    'key_contribution'?: string;
+    'paper': AcademicPaperRef;
+    'seed_relation'?: string;
+}
 export interface AddACLData {
     'acl_id'?: number;
 }
@@ -56,9 +412,21 @@ export interface AddACLRequest {
 }
 export interface AddModelProviderGroupModelOpenAPIRequest {
     /**
-     * Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
+    /**
+     * Optional context window. Explicit discovered values are preserved for unclassified models. When omitted for LLM/VLM models, resolves from config/model_context_windows.yaml with a 128K fallback; unclassified models have no inferred default.
      */
     'max_input_tokens'?: string;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
+    /**
+     * Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use.
+     */
     'model_type': string;
     'name': string;
     /**
@@ -70,11 +438,20 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
     'base_url': string;
     'group_name': string;
     'id': string;
+    /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
     'is_default': boolean;
     /**
-     * Stored LLM input context window, for example 512, 128K, or 1M
+     * Stored context window, including an explicit discovered value on an unclassified model; for example 262144, 128K, or 1M
      */
     'max_input_tokens'?: string | null;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
     'provider_name': string;
@@ -84,6 +461,29 @@ export interface AddModelProviderGroupModelOpenAPIResponse {
      * Whether this LLM accepts image input
      */
     'vision': boolean;
+}
+export interface AddModelProviderGroupModelsOpenAPIFailure {
+    /**
+     * Safe per-model validation failure.
+     */
+    'message': string;
+    'name': string;
+}
+export interface AddModelProviderGroupModelsOpenAPIRequest {
+    /**
+     * One to 1000 models. Existing active names are returned without overwriting saved metadata; deleted models are restored with their original UUID.
+     */
+    'models'?: Array<AddModelProviderGroupModelOpenAPIRequest>;
+}
+export interface AddModelProviderGroupModelsOpenAPIResponse {
+    'added_count': number;
+    'existing_count': number;
+    'failures'?: Array<AddModelProviderGroupModelsOpenAPIFailure>;
+    'models'?: Array<AddModelProviderGroupModelOpenAPIResponse>;
+    /**
+     * Total active saved models in this group after the batch, including models outside the request.
+     */
+    'total_count': number;
 }
 export interface AddWordGroupConflictToGroupsRequest {
     'group_ids'?: Array<string>;
@@ -376,6 +776,201 @@ export interface Algo {
 }
 export interface AllDatasetTagsResponse {
     'tags'?: Array<string>;
+}
+export interface ApiCoreAcademicChatContextGet200Response {
+    'contents'?: ApiCoreAcademicChatContextGet200ResponseContents;
+    'dataset_id'?: string;
+    'expansion_id'?: string;
+    'handoff_id'?: string;
+    'input'?: AcademicHandoffInput;
+    'kind'?: string;
+    'next_conversation_id'?: string;
+    'paper_count'?: number;
+    'ready_count'?: number;
+    'source_available'?: boolean;
+    'source_conversation_id'?: string;
+    'status'?: string;
+    'version'?: number;
+}
+/**
+ * @type ApiCoreAcademicChatContextGet200ResponseContents
+ */
+export type ApiCoreAcademicChatContextGet200ResponseContents = Array<object> | object;
+
+export interface ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response {
+    'status'?: string;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdDelete200Response {
+    'deleted'?: boolean;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdDeleteRequest {
+    'confirm': boolean;
+}
+export interface ApiCoreAcademicExpansionsExpansionIdGet200Response {
+    'chat_status'?: ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum;
+    'contents'?: Array<object>;
+    'handoffs'?: Array<object>;
+    'paper_importance'?: { [key: string]: boolean; };
+    'presence'?: Array<AcademicPresence>;
+    'record'?: AcademicExpansion;
+    'rounds'?: Array<object>;
+}
+
+export const ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = {
+    Available: 'available',
+    Trashed: 'trashed',
+    Deleted: 'deleted'
+} as const;
+
+export type ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum = typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum[keyof typeof ApiCoreAcademicExpansionsExpansionIdGet200ResponseChatStatusEnum];
+
+export interface ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
+    'paper_ids': Array<string>;
+}
+export interface ApiCoreAcademicExpansionsGet200Response {
+    'items'?: Array<AcademicExpansion>;
+}
+/**
+ * @type ApiCoreAcademicImportsBatchIdGet200Response
+ */
+export type ApiCoreAcademicImportsBatchIdGet200Response = ApiCoreAcademicImportsBatchIdGet200ResponseOneOf | ApiCoreAcademicImportsBatchIdGet200ResponseOneOf1;
+
+export interface ApiCoreAcademicImportsBatchIdGet200ResponseOneOf {
+    'batch'?: object;
+    'items'?: Array<object>;
+}
+export interface ApiCoreAcademicImportsBatchIdGet200ResponseOneOf1 {
+    'items'?: Array<AcademicImportOperationItem>;
+    'next_cursor'?: string;
+    'operation'?: AcademicImportOperation;
+}
+/**
+ * @type ApiCoreAcademicImportsGet200Response
+ */
+export type ApiCoreAcademicImportsGet200Response = ApiCoreAcademicImportsGet200ResponseOneOf | ApiCoreAcademicImportsGet200ResponseOneOf1 | ApiCoreAcademicImportsGet200ResponseOneOf2;
+
+export interface ApiCoreAcademicImportsGet200ResponseOneOf {
+    'items': Array<AcademicImportQueueItem>;
+    'total': number;
+}
+export interface ApiCoreAcademicImportsGet200ResponseOneOf1 {
+    'items': Array<AcademicSourceImportItem>;
+}
+export interface ApiCoreAcademicImportsGet200ResponseOneOf2 {
+    'items'?: Array<AcademicImportOperation>;
+    'next_cursor'?: string;
+    'notification'?: ApiCoreAcademicImportsGet200ResponseOneOf2Notification;
+}
+export interface ApiCoreAcademicImportsGet200ResponseOneOf2Notification {
+    'active'?: number;
+    'needs_action'?: number;
+}
+/**
+ * @type ApiCoreAcademicImportsPost200Response
+ */
+export type ApiCoreAcademicImportsPost200Response = ApiCoreAcademicImportsPost200ResponseOneOf | PaperLibraryChanges;
+
+export interface ApiCoreAcademicImportsPost200ResponseOneOf {
+    'batch_id'?: string;
+    'status'?: string;
+}
+export interface ApiCoreAcademicImportsPreviewPostRequest {
+    'expansion_id'?: string;
+    'identifier'?: string;
+    'papers'?: Array<PaperLibraryPaper>;
+    'reference_ids'?: Array<string>;
+    'resolve_external'?: boolean;
+    'source_document_ids'?: Array<string>;
+    'target_dataset_id': string;
+    'work_ids'?: Array<string>;
+    'works'?: Array<object>;
+}
+export interface ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest {
+    'revision': number;
+}
+export interface ApiCoreAcademicLibraryFoldersFolderIdPatchRequest {
+    'name': string;
+    'revision': number;
+}
+export interface ApiCoreAcademicLibraryFoldersPostRequest {
+    'id': string;
+    'name': string;
+    'parent_id'?: string;
+}
+export interface ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
+    'content': string;
+    'id': string;
+}
+export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
+    'metadata'?: PaperLibraryMetadata;
+    'revision': number;
+    'status'?: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum;
+    'tags'?: Array<string>;
+}
+
+export const ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum = {
+    Unread: 'unread',
+    Reading: 'reading',
+    Read: 'read'
+} as const;
+
+export type ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum = typeof ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum[keyof typeof ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum];
+
+export interface ApiCoreAcademicLibraryPapersMovePostRequest {
+    'folder_id': string;
+    'items': Array<PaperLibraryTarget>;
+}
+export interface ApiCoreAcademicLibraryPapersRemovePostRequest {
+    'items': Array<PaperLibraryTarget>;
+}
+export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response {
+    'feedback'?: string;
+    'input'?: AcademicHandoffInput;
+    'kind'?: string;
+    'papers'?: Array<AcademicPaperRef>;
+    'reflection_markdown'?: string;
+    'status'?: string;
+}
+export interface ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest {
+    'reflection_markdown'?: string;
+}
+export interface ApiCoreAcademicPaperContentsRetryPostRequest {
+    'expansion_id': string;
+    'paper_id': string;
+}
+export interface ApiCoreAcademicPaperSelectionsResolvePost200Response {
+    'invalid'?: Array<ApiCoreAcademicPaperSelectionsResolvePost200ResponseInvalidInner>;
+    'papers'?: Array<AcademicWorkflowPaper>;
+}
+export interface ApiCoreAcademicPaperSelectionsResolvePost200ResponseInvalidInner {
+    'document_id'?: string;
+    'reason'?: string;
+}
+export interface ApiCoreAcademicPaperSelectionsResolvePostRequest {
+    'dataset_id': string;
+    'document_ids': Array<string>;
+}
+export interface ApiCoreAcademicPapersPaperIdImportancePut200Response {
+    'is_important'?: boolean;
+}
+export interface ApiCoreAcademicPapersPaperIdImportancePutRequest {
+    'dataset_id': string;
+    'is_important': boolean;
+}
+export interface ApiCoreAcademicPapersSearchPost200Response {
+    'mock'?: boolean;
+    'papers'?: Array<AcademicPaperRef>;
+    'source'?: string;
+}
+export interface ApiCoreAcademicPapersSearchPostRequest {
+    'expansion_id': string;
+    'max_results'?: number;
+    'query': string;
+}
+export interface ApiCoreAcademicWorkflowLaunchesPost200Response {
+    'conversation_id'?: string;
+    'expansion_id'?: string;
+    'handoff_id'?: string;
 }
 export interface ApiCoreConversationsConversationIdEventsGet200Response {
     'payload'?: object;
@@ -765,7 +1360,9 @@ export interface ChatChunkResponse {
     'exports'?: Array<ChatExport>;
     'history_id'?: string;
     'message'?: string;
+    'model_output'?: ChatModelOutput;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'performance_metrics'?: RunPerformanceMetrics;
     'prompt_questions'?: Array<string>;
     'reasoning_content'?: string;
@@ -912,6 +1509,10 @@ export interface ChatModelListOpenAPIItem {
     'group_name': string;
     'id': string;
     'lifecycle': ChatModelListOpenAPIItemLifecycleEnum;
+    /**
+     * Optional normalized PNG supplier logo data URL. Display metadata only.
+     */
+    'logo_data_url'?: string;
     'name': string;
     'shared': boolean;
     'source': ChatModelListOpenAPIItemSourceEnum;
@@ -939,8 +1540,30 @@ export const ChatModelListOpenAPIItemSourceEnum = {
 
 export type ChatModelListOpenAPIItemSourceEnum = typeof ChatModelListOpenAPIItemSourceEnum[keyof typeof ChatModelListOpenAPIItemSourceEnum];
 
+export interface ChatModelOutput {
+    /**
+     * Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run.
+     */
+    'call_index': number;
+    /**
+     * Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed.
+     */
+    'phase'?: ChatModelOutputPhaseEnum;
+    'run_id': string;
+}
+
+export const ChatModelOutputPhaseEnum = {
+    Begin: 'begin',
+    Commit: 'commit',
+    Rollback: 'rollback'
+} as const;
+
+export type ChatModelOutputPhaseEnum = typeof ChatModelOutputPhaseEnum[keyof typeof ChatModelOutputPhaseEnum];
+
 export interface ChatModelProviderOpenAPIItem {
     'id': string;
+    'is_custom': boolean;
+    'logo_data_url'?: string;
     'models'?: Array<ChatModelListOpenAPIItem>;
     'name': string;
     'source': ChatModelProviderOpenAPIItemSourceEnum;
@@ -982,7 +1605,8 @@ export const ChatModelRouteReasonEnum = {
     RetrySameModel: 'retry_same_model',
     Fixed: 'fixed',
     InitialSelection: 'initial_selection',
-    ModelUnavailable: 'model_unavailable'
+    ModelUnavailable: 'model_unavailable',
+    ModelFallback: 'model_fallback'
 } as const;
 
 export type ChatModelRouteReasonEnum = typeof ChatModelRouteReasonEnum[keyof typeof ChatModelRouteReasonEnum];
@@ -1008,6 +1632,10 @@ export interface ChatModelSelectionOpenAPI {
     'availability': ChatModelSelectionOpenAPIAvailabilityEnum;
     'group_id'?: string;
     'group_name'?: string;
+    /**
+     * Optional normalized PNG logo inherited from the selected supplier, including a shared model.
+     */
+    'logo_data_url'?: string;
     'mode': ChatModelSelectionOpenAPIModeEnum;
     'model_id'?: string;
     'model_name'?: string;
@@ -1037,6 +1665,42 @@ export const ChatModelSelectionOpenAPISourceEnum = {
 
 export type ChatModelSelectionOpenAPISourceEnum = typeof ChatModelSelectionOpenAPISourceEnum[keyof typeof ChatModelSelectionOpenAPISourceEnum];
 
+export interface ChatModelSwitchIdentity {
+    'candidate_id': string;
+    'model_id': string;
+    'model_name'?: string;
+    'provider_group_id': string;
+    'provider_name'?: string;
+    'source': ChatModelSwitchIdentitySourceEnum;
+}
+
+export const ChatModelSwitchIdentitySourceEnum = {
+    Own: 'own',
+    Shared: 'shared',
+    Cloud: 'cloud'
+} as const;
+
+export type ChatModelSwitchIdentitySourceEnum = typeof ChatModelSwitchIdentitySourceEnum[keyof typeof ChatModelSwitchIdentitySourceEnum];
+
+export interface ChatModelSwitchRecord {
+    'context_compacted': boolean;
+    'from': ChatModelSwitchIdentity;
+    'from_max_input_tokens': number | null;
+    'reason_code': string;
+    'switch_index': number;
+    'to': ChatModelSwitchIdentity;
+    'to_max_input_tokens': number | null;
+    'event_id': string;
+}
+export interface ChatModelSwitchedData {
+    'context_compacted': boolean;
+    'from': ChatModelSwitchIdentity;
+    'from_max_input_tokens': number | null;
+    'reason_code': string;
+    'switch_index': number;
+    'to': ChatModelSwitchIdentity;
+    'to_max_input_tokens': number | null;
+}
 export interface ChatModelsOpenAPIResponse {
     'auto_available': boolean;
     'default_selection': ChatModelSelectionOpenAPI;
@@ -1059,8 +1723,18 @@ export interface ChatRuntimeEvent {
     'event_id'?: string;
     'run_id'?: string;
     'schema_version'?: number;
-    'type'?: string;
+    'type'?: ChatRuntimeEventTypeEnum;
 }
+
+export const ChatRuntimeEventTypeEnum = {
+    ModelRetryScheduled: 'model_retry_scheduled',
+    ModelCallFinished: 'model_call_finished',
+    ModelSwitched: 'model_switched',
+    RunFinished: 'run_finished'
+} as const;
+
+export type ChatRuntimeEventTypeEnum = typeof ChatRuntimeEventTypeEnum[keyof typeof ChatRuntimeEventTypeEnum];
+
 export interface CheckDatabaseConnectionResponse {
     'message': string;
     'success': boolean;
@@ -1075,13 +1749,18 @@ export interface CheckFileHashesResponse {
 }
 export interface CheckModelProviderData {
     'message'?: string;
+    'reason'?: string;
     'success': boolean;
 }
 export interface CheckModelProviderOpenAPIRequest {
-    'api_key': string;
-    'base_url': string;
-    'dry_run': boolean;
-    'provider_name': string;
+    /**
+     * Omit to check the supplier\'s enabled key. An explicit empty string tests a keyless connection.
+     */
+    'api_key'?: string;
+    'base_url'?: string;
+    'dry_run'?: boolean;
+    'model'?: string;
+    'provider_name'?: string;
 }
 export interface CheckResponse {
     'message': string;
@@ -1483,6 +2162,7 @@ export interface ConversationArchiveRequest {
 }
 export interface ConversationArchiveResponse {
     'archived_at': string;
+    'archived_ids': Array<string>;
     'conversation_id': string;
     'newly_archived': boolean;
 }
@@ -1761,7 +2441,9 @@ export interface ConversationHistoryItem {
     'fork_read_only'?: boolean;
     'id'?: string;
     'input'?: Array<object>;
+    'model_output'?: ChatModelOutput;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'performance_metrics'?: RunPerformanceMetrics;
     'query'?: string;
     'reason'?: string;
@@ -1859,6 +2541,7 @@ export type ConversationItemThinkingDepthEnum = typeof ConversationItemThinkingD
 export interface ConversationListResponse {
     'conversations'?: Array<ConversationItem>;
     'next_page_token'?: string;
+    'selection_complete'?: boolean;
     'total_size'?: number;
 }
 export interface ConversationOpeningState {
@@ -2166,6 +2849,26 @@ export const CreateChatExportRequestContentTypeEnum = {
 
 export type CreateChatExportRequestContentTypeEnum = typeof CreateChatExportRequestContentTypeEnum[keyof typeof CreateChatExportRequestContentTypeEnum];
 
+export interface CreateCustomModelProviderOpenAPIRequest {
+    'base_url': string;
+    /**
+     * Optional PNG data URL, at most 128 by 128 pixels and 96 KiB decoded. Empty uses the default custom supplier icon.
+     */
+    'logo_data_url'?: string;
+    'name': string;
+    /**
+     * An owned model provider whose technical protocol is used for this custom supplier.
+     */
+    'source_provider_id': string;
+}
+export interface CreateCustomModelProviderOpenAPIResponse {
+    /**
+     * Private credential/model storage ID retained for API compatibility.
+     */
+    'group_id': string;
+    'id': string;
+    'logo_data_url'?: string;
+}
 export interface CreateEvalSetByImportRequest {
     'dataset_ids'?: Array<string>;
     'description': string;
@@ -2198,8 +2901,11 @@ export interface CreateEvalSetRequest {
 }
 export interface CreateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
-    'base_url': string;
+    'base_url'?: string;
     'name': string;
+    /**
+     * Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
+     */
     'verify': boolean;
 }
 export interface CreateModelProviderGroupOpenAPIResponse {
@@ -2245,9 +2951,11 @@ export interface CreateTaskItem {
 }
 export interface CreateTaskRequest {
     'items': Array<CreateTaskItem>;
+    'paper_import'?: PaperUploadContext;
     'parent'?: string;
 }
 export interface CreateTasksResponse {
+    'paper_import_batch_id'?: string;
     'tasks'?: Array<TaskResponse>;
 }
 export interface CreateWordGroupFromConflictRequest {
@@ -2552,6 +3260,10 @@ export interface CurrentMemorySoulResponse {
     'data': CurrentMemorySoulData;
     'message': string;
 }
+export interface CustomModelProviderMutationOpenAPIResponse {
+    'id': string;
+    'logo_data_url'?: string;
+}
 export interface DatabaseConnectionRequest {
     'database_name': string;
     'db_type': string;
@@ -2603,7 +3315,9 @@ export interface Dataset {
     'is_owner': boolean;
     'name': string;
     'operation_result'?: ResourceOperationResult;
+    'paper_count'?: number;
     'parsers'?: Array<ParserConfig>;
+    'pdf_attachment_count'?: number;
     'processing_level'?: string;
     'processing_revision'?: number;
     'profile_id'?: string;
@@ -2647,6 +3361,10 @@ export interface DatasetOptionsResponse {
 export interface DatasetRole {
     'display_name'?: string;
     'role'?: string;
+}
+export interface DeleteCustomModelProviderOpenAPIResponse {
+    'downgraded_knowledge_bases': number;
+    'id': string;
 }
 export interface DeleteDatabaseConnectionOpenAPIResponse {
     'deleted': boolean;
@@ -3278,6 +3996,56 @@ export interface DocumentImageDisplay {
     'start': number;
     'width': number;
 }
+export interface DocumentImageExportItem {
+    'error_code'?: string;
+    'filename': string;
+    'id': string;
+    'size'?: number;
+    'status': DocumentImageExportItemStatusEnum;
+}
+
+export const DocumentImageExportItemStatusEnum = {
+    Pending: 'pending',
+    Ready: 'ready',
+    Failed: 'failed'
+} as const;
+
+export type DocumentImageExportItemStatusEnum = typeof DocumentImageExportItemStatusEnum[keyof typeof DocumentImageExportItemStatusEnum];
+
+export interface DocumentImageExportRequest {
+    'base_draft_version'?: number;
+    'base_revision': number;
+    'document': DocumentConvertPreviewInputDocument;
+    'image_reference'?: string;
+}
+export interface DocumentImageExportResponse {
+    'code': number;
+    'data': DocumentImageExportState;
+    'message': string;
+}
+export interface DocumentImageExportState {
+    'completed': number;
+    'expires_at': string;
+    'filename': string;
+    'id': string;
+    'items'?: Array<DocumentImageExportItem>;
+    'ready': number;
+    'single': boolean;
+    'status': DocumentImageExportStateStatusEnum;
+    'total': number;
+}
+
+export const DocumentImageExportStateStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Ready: 'ready',
+    Partial: 'partial',
+    Failed: 'failed',
+    Expired: 'expired'
+} as const;
+
+export type DocumentImageExportStateStatusEnum = typeof DocumentImageExportStateStatusEnum[keyof typeof DocumentImageExportStateStatusEnum];
+
 export interface DocumentInvalidCrossReference {
     'target_id': string;
 }
@@ -3428,6 +4196,23 @@ export interface DocumentProvidersOpenAPIResponse {
     'data': DocumentProviderCatalog;
     'message': string;
 }
+export interface DocumentPublicationGroupRequest {
+    'base_draft_version'?: number;
+    'base_revision': number;
+    'idempotency_key': string;
+    'targets': Array<DocumentPublicationTargetInput>;
+}
+export interface DocumentPublicationGroupResponse {
+    'code': number;
+    'data': DocumentPublicationGroupState;
+    'message': string;
+}
+export interface DocumentPublicationGroupState {
+    'current_hash': string;
+    'preferred_providers': Array<string>;
+    'publication_id'?: string;
+    'targets': Array<DocumentPublicationTargetState>;
+}
 export interface DocumentPublicationLookup {
     'operation'?: DocumentPublicationStatus;
 }
@@ -3479,6 +4264,25 @@ export interface DocumentPublicationStatus {
     'status': string;
     'target_url'?: string;
     'updated_at': string;
+}
+export interface DocumentPublicationTargetInput {
+    'connection_id'?: string;
+    'parent_uri'?: string;
+    'provider': string;
+    'retry_operation_id'?: string;
+    'title'?: string;
+}
+export interface DocumentPublicationTargetState {
+    'bound': boolean;
+    'connection_id'?: string;
+    'last_success_at'?: string;
+    'last_success_hash'?: string;
+    'operation'?: DocumentPublicationStatus;
+    'operation_hash'?: string;
+    'parent_uri'?: string;
+    'provider': string;
+    'target_url'?: string;
+    'title'?: string;
 }
 export interface DocumentPublishInput {
     'idempotency_key': string;
@@ -3698,6 +4502,11 @@ export interface DocumentTableColumn {
 export interface DocumentTagsResponse {
     'tags'?: Array<string>;
 }
+export interface EmbeddingOptions {
+    'batch_size'?: number | null;
+    'passage_prefix'?: string;
+    'query_prefix'?: string;
+}
 export interface EpisodeMemory {
     'conversation_id': string;
     'episode_type': EpisodeMemoryEpisodeTypeEnum;
@@ -3894,6 +4703,7 @@ export interface ExternalExecutionWorkflow {
 export interface FailedRunAttempt {
     'create_time'?: string;
     'model_route'?: ChatModelRoute;
+    'model_switches'?: Array<ChatModelSwitchRecord>;
     'result'?: string;
     'run_id'?: string;
     'run_status'?: FailedRunAttemptRunStatusEnum;
@@ -3907,6 +4717,11 @@ export const FailedRunAttemptRunStatusEnum = {
 
 export type FailedRunAttemptRunStatusEnum = typeof FailedRunAttemptRunStatusEnum[keyof typeof FailedRunAttemptRunStatusEnum];
 
+export interface FeatureFlags {
+    'reasoning'?: boolean;
+    'tool_calling'?: boolean;
+    'vision'?: boolean;
+}
 export interface ForkAttachment {
     'name': string;
     'reason'?: string;
@@ -4483,25 +5298,42 @@ export interface ListGrantPrincipalsResponse {
 export interface ListModelProviderGroupModelsOpenAPIItem {
     'availability': ListModelProviderGroupModelsOpenAPIItemAvailabilityEnum;
     'base_url'?: string;
+    'brand_key'?: string;
     'capabilities'?: Array<string>;
+    /**
+     * False when the saved model is disabled. Disabled models keep their configuration.
+     */
+    'enabled': boolean;
     'group_name'?: string;
     'id': string;
+    /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
+    'is_custom': boolean;
     'is_default': boolean;
     /**
      * Whether this option supports image editing
      */
     'is_editable': boolean;
     'lifecycle': ListModelProviderGroupModelsOpenAPIItemLifecycleEnum;
+    'logo_data_url'?: string;
     /**
-     * Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
+     * Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported
      */
     'max_input_tokens'?: string | null;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
     'provider_group_id'?: string;
     'provider_id': string;
     'provider_name': string;
     'read_only': boolean;
+    'service_key'?: string;
     'source': ListModelProviderGroupModelsOpenAPIItemSourceEnum;
     'user_model_provider_group_id'?: string;
     'user_model_provider_id'?: string;
@@ -4536,10 +5368,12 @@ export interface ListModelProviderGroupModelsOpenAPIResponse {
     'models'?: Array<ListModelProviderGroupModelsOpenAPIItem>;
 }
 export interface ListModelProviderGroupsOpenAPIItem {
-    'api_key': string;
     'base_url': string;
+    'has_api_key': boolean;
     'id': string;
     'is_verified': boolean;
+    'keys'?: Array<ModelProviderGroupKeyOpenAPIItem>;
+    'model_count': number;
     'name': string;
     'user_model_provider_id': string;
 }
@@ -4548,10 +5382,18 @@ export interface ListModelProviderGroupsOpenAPIResponse {
 }
 export interface ListRemoteGroupModelsOpenAPIItem {
     'added': boolean;
+    'feature_support'?: FeatureFlags;
     'id': string;
+    'input'?: Array<string>;
     'max_input_tokens'?: string;
+    'model_settings'?: Settings;
     'model_type': string;
     'name': string;
+    'output'?: Array<string>;
+    /**
+     * Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog.
+     */
+    'sub_types'?: Array<string>;
 }
 export interface ListRemoteGroupModelsOpenAPIResponse {
     'models'?: Array<ListRemoteGroupModelsOpenAPIItem>;
@@ -4869,6 +5711,27 @@ export const MissingCapabilityIdEnum = {
 
 export type MissingCapabilityIdEnum = typeof MissingCapabilityIdEnum[keyof typeof MissingCapabilityIdEnum];
 
+export interface ModelCallFinishedData {
+    'attempt_count': number;
+    'failure'?: ModelCallFinishedDataFailure;
+    'finish'?: string;
+    'has_semantic_output': boolean;
+    'kind': ModelCallFinishedDataKindEnum;
+    'model_call_id': string;
+}
+
+export const ModelCallFinishedDataKindEnum = {
+    Finish: 'finish',
+    Failure: 'failure'
+} as const;
+
+export type ModelCallFinishedDataKindEnum = typeof ModelCallFinishedDataKindEnum[keyof typeof ModelCallFinishedDataKindEnum];
+
+export interface ModelCallFinishedDataFailure {
+    'code'?: string;
+    'diagnostic_id'?: string;
+    'origin'?: string;
+}
 
 export const ModelFailureCode = {
     AuthenticationFailed: 'authentication_failed',
@@ -4904,11 +5767,58 @@ export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
 }
+export interface ModelProbeResponse {
+    'code': ModelProbeResponseCodeEnum;
+    'elapsed_ms': number;
+    'embedding_dimensions'?: number;
+    'http_status'?: number;
+    'model_type': string;
+    'status': ModelProbeResponseStatusEnum;
+}
+
+export const ModelProbeResponseCodeEnum = {
+    Ok: 'ok',
+    Accepted: 'accepted',
+    UnsupportedType: 'unsupported_type',
+    UnsupportedProvider: 'unsupported_provider',
+    UnknownType: 'unknown_type',
+    AuthenticationFailed: 'authentication_failed',
+    PermissionDenied: 'permission_denied',
+    ModelNotFound: 'model_not_found',
+    RateLimited: 'rate_limited',
+    QuotaExceeded: 'quota_exceeded',
+    InvalidRequest: 'invalid_request',
+    Timeout: 'timeout',
+    ConnectionError: 'connection_error',
+    InvalidResponse: 'invalid_response',
+    EmptyResponse: 'empty_response',
+    UpstreamError: 'upstream_error',
+    ConfigurationChanged: 'configuration_changed',
+    KeyDisabled: 'key_disabled',
+    KeyRequired: 'key_required',
+    ProbeInProgress: 'probe_in_progress'
+} as const;
+
+export type ModelProbeResponseCodeEnum = typeof ModelProbeResponseCodeEnum[keyof typeof ModelProbeResponseCodeEnum];
+export const ModelProbeResponseStatusEnum = {
+    Passed: 'passed',
+    Failed: 'failed',
+    Unsupported: 'unsupported',
+    Accepted: 'accepted'
+} as const;
+
+export type ModelProbeResponseStatusEnum = typeof ModelProbeResponseStatusEnum[keyof typeof ModelProbeResponseStatusEnum];
+
 export interface ModelProviderBaseURLPresetItem {
     'api_key_required'?: boolean;
     'key': string;
     'label'?: string;
     'value': string;
+}
+export interface ModelProviderGroupKeyOpenAPIItem {
+    'enabled': boolean;
+    'id': string;
+    'masked': string;
 }
 export interface NotificationClaim {
     'outbox_id': string;
@@ -5056,7 +5966,9 @@ export interface OrdinaryTaskView {
     'conversation_id': string;
     'display_key': string;
     'execution_id': string;
+    'failure_code'?: OrdinaryTaskViewFailureCodeEnum;
     'knowledge_operations'?: Array<KnowledgeOperation>;
+    'model_switch'?: ChatModelSwitchRecord;
     'order': number;
     'pages': Pages;
     'parallel_group_id': string | null;
@@ -5084,6 +5996,12 @@ export interface OrdinaryTaskView {
     'workflow_step_id': string | null;
 }
 
+export const OrdinaryTaskViewFailureCodeEnum = {
+    ModelFallbackExhausted: 'model_fallback_exhausted',
+    ModelContextNotFit: 'model_context_not_fit'
+} as const;
+
+export type OrdinaryTaskViewFailureCodeEnum = typeof OrdinaryTaskViewFailureCodeEnum[keyof typeof OrdinaryTaskViewFailureCodeEnum];
 export const OrdinaryTaskViewSchemaVersionEnum = {
     NUMBER_1: 1
 } as const;
@@ -5109,6 +6027,120 @@ export interface Pages {
     'process_steps': CollectionPage;
     'sources': CollectionPage;
     'stage_artifacts': CollectionPage;
+}
+export interface PaperLibraryAttachment {
+    'academicState'?: AcademicDocumentState;
+    'addedAt': string;
+    'available': boolean;
+    'contentHash'?: string;
+    'contentRef'?: string;
+    'expansionId'?: string;
+    'expansionVersion'?: number;
+    'id': string;
+    'importMethod'?: string;
+    'isPrimary': boolean;
+    'kind': string;
+    'name': string;
+    'paperId': string;
+    'source'?: string;
+    'sourceProvider'?: string;
+    'sourceUrl'?: string;
+    'sourceVersion'?: string;
+}
+export interface PaperLibraryChanges {
+    'batch_id'?: string;
+    'data': PaperLibraryData;
+    'removedFolderIds'?: Array<string>;
+    'removedPaperIds'?: Array<string>;
+    'status'?: string;
+}
+export interface PaperLibraryData {
+    'attachments': Array<PaperLibraryAttachment>;
+    'folders': Array<PaperLibraryFolder>;
+    'notes': Array<PaperLibraryNote>;
+    'papers': Array<PaperLibraryPaper>;
+}
+export interface PaperLibraryFolder {
+    'id': string;
+    'name': string;
+    'parentId': string | null;
+    'revision': number;
+}
+export interface PaperLibraryMetadata {
+    'abstract'?: string;
+    'authors': Array<string>;
+    'citationCount'?: number;
+    'identifiers': PaperLibraryMetadataIdentifiers;
+    'title': string;
+    'venue': string;
+    'year': number;
+}
+export interface PaperLibraryMetadataIdentifiers {
+    'arxiv'?: string;
+    'doi'?: string;
+}
+export interface PaperLibraryNote {
+    'content': string;
+    'createdAt': string;
+    'id': string;
+    'kind': string;
+    'paperId': string;
+    'title': string;
+    'updatedAt': string;
+}
+export interface PaperLibraryPaper {
+    'academicWorkId'?: string;
+    'arxivVersion'?: string;
+    'associationConflict'?: string;
+    'attachmentIds': Array<string>;
+    'folderId': string | null;
+    'id': string;
+    'importMethod'?: string;
+    'important': boolean;
+    'incomplete'?: boolean;
+    'metadata': PaperLibraryMetadata;
+    'noteIds': Array<string>;
+    'parse': PaperLibraryPaperParseEnum;
+    'processingError'?: string;
+    'revision': number;
+    'source': string;
+    'sourceUrl'?: string;
+    'status': PaperLibraryPaperStatusEnum;
+    'tags': Array<string>;
+}
+
+export const PaperLibraryPaperParseEnum = {
+    Ready: 'ready',
+    Parsing: 'parsing',
+    Failed: 'failed'
+} as const;
+
+export type PaperLibraryPaperParseEnum = typeof PaperLibraryPaperParseEnum[keyof typeof PaperLibraryPaperParseEnum];
+export const PaperLibraryPaperStatusEnum = {
+    Unread: 'unread',
+    Reading: 'reading',
+    Read: 'read'
+} as const;
+
+export type PaperLibraryPaperStatusEnum = typeof PaperLibraryPaperStatusEnum[keyof typeof PaperLibraryPaperStatusEnum];
+
+export interface PaperLibraryResponse {
+    'active': boolean;
+    'can_write': boolean;
+    'data': PaperLibraryData;
+    'paper_count': number;
+    'pdf_attachment_count': number;
+}
+export interface PaperLibraryTarget {
+    'id': string;
+    'revision': number;
+}
+export interface PaperUploadContext {
+    'idempotency_key': string;
+    'library_paper_id': string;
+    'paper'?: any;
+    'source_version'?: string;
+    'title': string;
 }
 export interface ParserConfig {
     'name': string;
@@ -5219,6 +6251,9 @@ export const PreferenceOrganizerReceiptStatusEnum = {
 export type PreferenceOrganizerReceiptStatusEnum = typeof PreferenceOrganizerReceiptStatusEnum[keyof typeof PreferenceOrganizerReceiptStatusEnum];
 
 export interface PreferenceOrganizerResult {
+    'final_state'?: PreferenceOrganizerState;
+    'initial_state'?: PreferenceOrganizerState;
+    'observed_state'?: PreferenceOrganizerState;
     'outcome'?: PreferenceOrganizerResultOutcomeEnum;
     'passes'?: Array<PreferenceOrganizerPass>;
     'passes_attempted'?: number;
@@ -5243,23 +6278,43 @@ export type PreferenceOrganizerResultOutcomeEnum = typeof PreferenceOrganizerRes
 export interface PreferenceOrganizerState {
     'etag': string;
     'full_projection_chars': number;
+    'max_chars'?: number;
     'projected_chars': number;
     'projected_items': number;
     'projection_truncated': boolean;
     'stored_items': number;
+    'updated_at'?: string;
 }
 export interface PreferenceOrganizerTaskData {
     'created_at': string;
+    'current_state'?: PreferenceOrganizerState;
     'error_code'?: string;
     'error_message'?: string;
     'finished_at'?: string;
+    'invalidation_reason'?: PreferenceOrganizerTaskDataInvalidationReasonEnum;
     'result'?: PreferenceOrganizerResult;
+    'result_validity'?: PreferenceOrganizerTaskDataResultValidityEnum;
     'started_at'?: string;
     'status': PreferenceOrganizerTaskDataStatusEnum;
     'task_id': string;
     'waiting_reason'?: PreferenceOrganizerTaskDataWaitingReasonEnum;
 }
 
+export const PreferenceOrganizerTaskDataInvalidationReasonEnum = {
+    StateUnavailable: 'state_unavailable',
+    MissingSnapshot: 'missing_snapshot',
+    PreferenceChanged: 'preference_changed',
+    BudgetChanged: 'budget_changed'
+} as const;
+
+export type PreferenceOrganizerTaskDataInvalidationReasonEnum = typeof PreferenceOrganizerTaskDataInvalidationReasonEnum[keyof typeof PreferenceOrganizerTaskDataInvalidationReasonEnum];
+export const PreferenceOrganizerTaskDataResultValidityEnum = {
+    Current: 'current',
+    Stale: 'stale',
+    Unknown: 'unknown'
+} as const;
+
+export type PreferenceOrganizerTaskDataResultValidityEnum = typeof PreferenceOrganizerTaskDataResultValidityEnum[keyof typeof PreferenceOrganizerTaskDataResultValidityEnum];
 export const PreferenceOrganizerTaskDataStatusEnum = {
     Pending: 'pending',
     Running: 'running',
@@ -5450,6 +6505,52 @@ export interface ProviderConnectionSession {
     'session_id': string;
     'status': string;
 }
+export interface ProviderRequestAdvanced {
+    'extra_body'?: { [key: string]: any; };
+    'headers'?: { [key: string]: string; };
+    'query'?: { [key: string]: string; };
+}
+export interface ProviderRequestConfigOpenAPIResponse {
+    'advanced'?: ProviderRequestAdvanced;
+    'default_protocol': ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum;
+    'protocols'?: Array<ProviderRequestProtocolOpenAPIItem>;
+}
+
+export const ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum = {
+    Openai: 'openai',
+    Anthropic: 'anthropic'
+} as const;
+
+export type ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum = typeof ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum[keyof typeof ProviderRequestConfigOpenAPIResponseDefaultProtocolEnum];
+
+export interface ProviderRequestProtocolOpenAPIItem {
+    'base_url': string;
+    'default_base_url': string;
+    'name': string;
+    'protocol': ProviderRequestProtocolOpenAPIItemProtocolEnum;
+    /**
+     * Official protocol declaration for this built-in service. False means undeclared, not proven vendor rejection. Omitted for custom suppliers.
+     */
+    'provider_supported'?: boolean;
+    /**
+     * Whether the current runtime adapter implements this protocol for this service, independently of the official declaration.
+     */
+    'runtime_supported': boolean;
+    /**
+     * Whether this protocol can be configured: declared for the built-in service (or user-configurable custom service) and supported by the current runtime.
+     */
+    'supported': boolean;
+}
+
+export const ProviderRequestProtocolOpenAPIItemProtocolEnum = {
+    Openai: 'openai',
+    Anthropic: 'anthropic',
+    Gemini: 'gemini',
+    OpenaiResponses: 'openai-responses'
+} as const;
+
+export type ProviderRequestProtocolOpenAPIItemProtocolEnum = typeof ProviderRequestProtocolOpenAPIItemProtocolEnum[keyof typeof ProviderRequestProtocolOpenAPIItemProtocolEnum];
+
 export interface PublicArtifact {
     'artifact_id': string;
     'capabilities': Capabilities;
@@ -5482,6 +6583,7 @@ export type PublicDisplayProgressSchemaVersionEnum = typeof PublicDisplayProgres
 export interface PublicProcessStep {
     'elapsed_ms': number | null;
     'finished_at': string | null;
+    'model_switch'?: ChatModelSwitchRecord;
     'order': number;
     'revision': number;
     'started_at': string | null;
@@ -5526,6 +6628,13 @@ export interface QuestionTypeOptionsResponse {
 }
 export interface RecoveryDeleteCountResponse {
     'deleted_count'?: number;
+}
+export interface ReplaceModelProviderKeyOpenAPIRequest {
+    'api_key': string;
+}
+export interface ReplaceModelProviderKeyOpenAPIResponse {
+    'enabled': boolean;
+    'key_id': string;
 }
 export interface ResourceError {
     'code': string;
@@ -5601,6 +6710,12 @@ export interface Result {
 }
 export interface ResumeTaskRequest {
     'task_id'?: string;
+}
+export interface RevealModelProviderKeyOpenAPIResponse {
+    /**
+     * The selected saved secret, returned only by an explicit owner-authorized action with Cache-Control: no-store.
+     */
+    'api_key': string;
 }
 export interface RouterAlgorithmTraffic {
     'actual_ratio': number;
@@ -5771,7 +6886,9 @@ export interface SearchWordGroupsRequest {
 export interface SelectedModelOpenAPIItem {
     'availability': SelectedModelOpenAPIItemAvailabilityEnum;
     'base_url'?: string;
+    'brand_key'?: string;
     'group_name'?: string;
+    'is_custom': boolean;
     /**
      * True when the selection was copied from catalog YAML
      */
@@ -5780,21 +6897,32 @@ export interface SelectedModelOpenAPIItem {
      * Whether the selected model supports image editing
      */
     'is_editable': boolean;
+    'logo_data_url'?: string;
     /**
      * Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
      */
     'max_input_tokens'?: string | null;
     'model_id': string;
     'model_key': string;
+    'model_settings'?: Settings;
+    /**
+     * Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata
+     */
+    'model_type'?: string;
     'name': string;
     'provider_group_id'?: string;
     'provider_id': string;
     'provider_name': string;
     'read_only': boolean;
+    'service_key'?: string;
     'source': SelectedModelOpenAPIItemSourceEnum;
     'unavailable_reason'?: string;
     'user_model_provider_group_id'?: string;
     'user_model_provider_id'?: string;
+    /**
+     * Actual configured vision support, including explicit false; omitted when unknown for cloud models
+     */
+    'vision'?: boolean;
 }
 
 export const SelectedModelOpenAPIItemAvailabilityEnum = {
@@ -5843,6 +6971,7 @@ export interface ServerResponse {
     'url': string;
 }
 export interface SessionDTO {
+    'controller_host': string;
     'conversation_id': string;
     'created_at': string;
     'current_step_id': string;
@@ -5856,6 +6985,20 @@ export interface SessionDTO {
     'updated_at': string;
     'workflow_id': string;
     'workflow_mode': string;
+}
+export interface SetActiveModelProviderKeyOpenAPIRequest {
+    /**
+     * Connection containing the saved key; empty with key_id disables the supplier\'s active key.
+     */
+    'group_id': string;
+    /**
+     * Opaque saved key ID. At most one key can be enabled across all connections to a supplier.
+     */
+    'key_id': string;
+}
+export interface SetActiveModelProviderKeyOpenAPIResponse {
+    'group_id': string;
+    'key_id': string;
 }
 export interface SetChatHistoryResponse {
     'history_id'?: string;
@@ -5897,6 +7040,11 @@ export interface SetSelectedProviderOpenAPIRequest {
 export interface SetSharedProviderOpenAPIRequest {
     'group_id': string;
     'share': boolean;
+}
+export interface Settings {
+    'embedding'?: EmbeddingOptions;
+    'feature_enabled'?: FeatureFlags;
+    'feature_support'?: FeatureFlags;
 }
 export interface SettingsCheckResultOpenAPIResponse {
     'id': string;
@@ -6710,6 +7858,7 @@ export interface Snapshot {
     'active_execution_ids'?: Array<string>;
     'active_executions': number;
     'admission': Admission;
+    'automatic_retry_steps'?: Array<string>;
     'available_actions'?: Array<string>;
     'binding': BindingView;
     'continuation': string;
@@ -6838,6 +7987,43 @@ export interface TaskDocumentInfo {
     'document_size'?: number;
     'document_state'?: string;
 }
+/**
+ * Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect or execution changes begin with a Core-generated task_start with snapshot=true and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. Only this DB section initializes authoritative hydration; live task_start is idempotent for an established execution. On ordinary tool_calls/tool_results, seq is the zero-based durable step sequence used to merge snapshot and live delivery once. Terminal restores any open preview before done/error.
+ */
+export interface TaskEvent {
+    'chunk_index'?: number;
+    'content_type'?: string;
+    'current_phase'?: string;
+    'delta'?: string;
+    'durable_tool_results'?: Array<object>;
+    'estimated_sec'?: number;
+    'event_id'?: string;
+    'execution_id'?: string;
+    'message'?: string;
+    'model_output'?: ChatModelOutput;
+    'process_step'?: PublicProcessStep;
+    'progress'?: number;
+    'runtime_event'?: TaskModelRuntimeEvent;
+    'scope_version'?: number;
+    'seq'?: number;
+    'slot'?: string;
+    'snapshot'?: boolean;
+    'sources'?: Array<object>;
+    'status'?: string;
+    'steps'?: Array<string>;
+    'stream_id'?: string;
+    'summary'?: string;
+    'task_id'?: string;
+    'text'?: string;
+    'think'?: string;
+    'tool_calls'?: Array<object>;
+    'tool_results'?: Array<object>;
+    'type': string;
+    'v2_artifact_id'?: string;
+    'v2_revision_id'?: string;
+    'value'?: object;
+    'writing_subtasks'?: Array<object>;
+}
 export interface TaskFile {
     'content_type'?: string;
     'display_name'?: string;
@@ -6857,6 +8043,25 @@ export interface TaskInfo {
     'total_document_count'?: number;
     'total_document_size'?: number;
 }
+export interface TaskModelRuntimeEvent {
+    'data': ChatModelSwitchedData;
+    'event_id': string;
+    'run_id': string;
+    'schema_version': TaskModelRuntimeEventSchemaVersionEnum;
+    'type': TaskModelRuntimeEventTypeEnum;
+}
+
+export const TaskModelRuntimeEventSchemaVersionEnum = {
+    NUMBER_1: 1
+} as const;
+
+export type TaskModelRuntimeEventSchemaVersionEnum = typeof TaskModelRuntimeEventSchemaVersionEnum[keyof typeof TaskModelRuntimeEventSchemaVersionEnum];
+export const TaskModelRuntimeEventTypeEnum = {
+    ModelSwitched: 'model_switched'
+} as const;
+
+export type TaskModelRuntimeEventTypeEnum = typeof TaskModelRuntimeEventTypeEnum[keyof typeof TaskModelRuntimeEventTypeEnum];
+
 export interface TaskNotification {
     'account_id'?: string;
     'app_name'?: string;
@@ -7084,6 +8289,16 @@ export interface UpdateACLRequest {
     'expires_at'?: string;
     'permission': string;
 }
+export interface UpdateCustomModelProviderOpenAPIRequest {
+    /**
+     * Optional normalized PNG supplier logo. Omit to preserve; empty restores the default icon.
+     */
+    'logo_data_url'?: string;
+    /**
+     * Optional custom supplier display name. Omit for a logo-only edit.
+     */
+    'name'?: string;
+}
 export interface UpdateDatabaseConnectionRequest {
     'database_name'?: string;
     'db_type'?: string;
@@ -7121,18 +8336,73 @@ export interface UpdateEvalSetRequest {
     'group_id'?: string;
     'name'?: string;
 }
+export interface UpdateModelProviderEndpointOpenAPIRequest {
+    'base_url': string;
+}
+export interface UpdateModelProviderEndpointOpenAPIResponse {
+    'base_url': string;
+    'id': string;
+}
 export interface UpdateModelProviderGroupModelOpenAPIRequest {
     /**
-     * LLM input context window, for example 512, 128K, or 1M
+     * Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it.
      */
-    'max_input_tokens': string;
+    'customize'?: boolean;
+    /**
+     * Optional saved-model enablement. Disabled models keep their UUID and configuration and stay out of default selection.
+     */
+    'enabled'?: boolean;
+    /**
+     * Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'input_token_limit'?: string | null;
+    /**
+     * Optional stored context window for LLM/VLM or unclassified models, for example 262144, 128K, or 1M. Empty clears an unclassified model\'s value; omitted fields remain unchanged.
+     */
+    'max_input_tokens'?: string;
+    /**
+     * Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+     */
+    'max_output_tokens'?: string | null;
+    'model_settings'?: Settings;
+    /**
+     * Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references.
+     */
+    'model_type'?: string;
+    /**
+     * Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID.
+     */
+    'name'?: string;
+    /**
+     * Optional image-input support for chat models.
+     */
+    'vision'?: boolean;
 }
 export interface UpdateModelProviderGroupOpenAPIRequest {
     'api_key'?: string;
-    'base_url': string;
+    'base_url'?: string;
     'name': string;
+    /**
+     * Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
+     */
     'verify': boolean;
 }
+export interface UpdateProviderRequestConfigOpenAPIRequest {
+    'advanced'?: ProviderRequestAdvanced;
+    'default_protocol': UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum;
+    /**
+     * Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+     */
+    'endpoints'?: { [key: string]: string; };
+}
+
+export const UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum = {
+    Openai: 'openai',
+    Anthropic: 'anthropic'
+} as const;
+
+export type UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum = typeof UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum[keyof typeof UpdateProviderRequestConfigOpenAPIRequestDefaultProtocolEnum];
+
 export interface UpdateServerRequest {
     'allowed_tools'?: Array<string>;
     'api_key'?: string;
@@ -7232,14 +8502,25 @@ export interface UserInfo {
 export interface UserModelProviderOpenAPIItem {
     'base_url': string;
     'base_url_presets'?: Array<ModelProviderBaseURLPresetItem>;
+    /**
+     * Stable built-in navigation brand; absent for custom providers. Independent of the runtime protocol.
+     */
+    'brand_key'?: string;
     'capabilities'?: Array<string>;
     'category': string;
     'default_model_provider_id': string;
     'description': string;
     'id': string;
     'is_configured': boolean;
+    'is_custom': boolean;
+    'logo_data_url'?: string;
     'model_types'?: Array<string>;
     'name': string;
+    'protocol_name': string;
+    /**
+     * Stable configurable service within the brand. Each service owns independent credentials and models.
+     */
+    'service_key'?: string;
 }
 export interface UserUIPreferencesOpenAPIResponse {
     'accepted_user_agreement_version': string;
@@ -7255,6 +8536,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'task_center_enabled': boolean;
     'updated_at': string;
     'user_preference_configured': boolean;
+    'workflow_trust_notice_dismissed': boolean;
     'workflows_enabled': boolean;
 }
 export interface UserUIPreferencesPatchOpenAPIRequest {
@@ -7269,6 +8551,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'sensitive_word_filter_enabled'?: boolean;
     'skills_enabled'?: boolean;
     'task_center_enabled'?: boolean;
+    'workflow_trust_notice_dismissed'?: boolean;
     'workflows_enabled'?: boolean;
 }
 export interface VerifiedProviderGroupOpenAPIItem {
@@ -7671,6 +8954,2280 @@ export interface WriterDocumentWriteBackOpenAPIRequest {
     'source_document'?: any;
     'template'?: string;
 }
+
+/**
+ * AcademicWorkflowsApi - axios parameter creator
+ */
+export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicChatContextGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreAcademicChatContextGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/academic/chat-context`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (conversationId !== undefined) {
+                localVarQueryParameter['conversation_id'] = conversationId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Correct document identity or retry recognition
+         * @param {string} documentId
+         * @param {AcademicDocumentIdentity} academicDocumentIdentity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicDocumentsDocumentIdIdentityPatch: async (documentId: string, academicDocumentIdentity: AcademicDocumentIdentity, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'documentId' is not null or undefined
+            assertParamExists('apiCoreAcademicDocumentsDocumentIdIdentityPatch', 'documentId', documentId)
+            // verify required parameter 'academicDocumentIdentity' is not null or undefined
+            assertParamExists('apiCoreAcademicDocumentsDocumentIdIdentityPatch', 'academicDocumentIdentity', academicDocumentIdentity)
+            const localVarPath = `/api/core/academic/documents/{document_id}/identity`
+                .replace(`{${"document_id"}}`, encodeURIComponent(String(documentId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicDocumentIdentity, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Confirm deletion of results and trash/cancel the expansion Chat
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdDeleteRequest} apiCoreAcademicExpansionsExpansionIdDeleteRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdDelete: async (expansionId: string, apiCoreAcademicExpansionsExpansionIdDeleteRequest: ApiCoreAcademicExpansionsExpansionIdDeleteRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdDelete', 'expansionId', expansionId)
+            // verify required parameter 'apiCoreAcademicExpansionsExpansionIdDeleteRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdDelete', 'apiCoreAcademicExpansionsExpansionIdDeleteRequest', apiCoreAcademicExpansionsExpansionIdDeleteRequest)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicExpansionsExpansionIdDeleteRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read saved rounds, current papers, content states and Chat availability
+         * @param {string} expansionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdGet: async (expansionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdGet', 'expansionId', expansionId)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest} apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdPapersResolvePost: async (expansionId: string, apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest: ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'expansionId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdPapersResolvePost', 'expansionId', expansionId)
+            // verify required parameter 'apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsExpansionIdPapersResolvePost', 'apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest', apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest)
+            const localVarPath = `/api/core/academic/expansions/{expansion_id}/papers:resolve`
+                .replace(`{${"expansion_id"}}`, encodeURIComponent(String(expansionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List current user\'s expansion records
+         * @param {string} datasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsGet: async (datasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'datasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicExpansionsGet', 'datasetId', datasetId)
+            const localVarPath = `/api/core/academic/expansions`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (datasetId !== undefined) {
+                localVarQueryParameter['dataset_id'] = datasetId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read a batch or its complete operation summary and a page of items
+         * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdGetViewEnum} [view]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsBatchIdGet: async (batchId: string, view?: ApiCoreAcademicImportsBatchIdGetViewEnum, cursor?: string, limit?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'batchId' is not null or undefined
+            assertParamExists('apiCoreAcademicImportsBatchIdGet', 'batchId', batchId)
+            const localVarPath = `/api/core/academic/imports/{batch_id}`
+                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetViewEnum} [view]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {string} [targetDatasetId]
+         * @param {string} [sourceDocumentId]
+         * @param {string} [conversationId]
+         * @param {string} [historyId]
+         * @param {string} [taskId]
+         * @param {string} [workflowSessionId]
+         * @param {string} [workDisplayKey]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsGet: async (view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/academic/imports`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (view !== undefined) {
+                localVarQueryParameter['view'] = view;
+            }
+
+            if (cursor !== undefined) {
+                localVarQueryParameter['cursor'] = cursor;
+            }
+
+            if (limit !== undefined) {
+                localVarQueryParameter['limit'] = limit;
+            }
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            if (sourceDocumentId !== undefined) {
+                localVarQueryParameter['source_document_id'] = sourceDocumentId;
+            }
+
+            if (conversationId !== undefined) {
+                localVarQueryParameter['conversation_id'] = conversationId;
+            }
+
+            if (historyId !== undefined) {
+                localVarQueryParameter['history_id'] = historyId;
+            }
+
+            if (taskId !== undefined) {
+                localVarQueryParameter['task_id'] = taskId;
+            }
+
+            if (workflowSessionId !== undefined) {
+                localVarQueryParameter['workflow_session_id'] = workflowSessionId;
+            }
+
+            if (workDisplayKey !== undefined) {
+                localVarQueryParameter['work_display_key'] = workDisplayKey;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+         * @param {AcademicImportCreate} academicImportCreate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsPost: async (academicImportCreate: AcademicImportCreate, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'academicImportCreate' is not null or undefined
+            assertParamExists('apiCoreAcademicImportsPost', 'academicImportCreate', academicImportCreate)
+            const localVarPath = `/api/core/academic/imports`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicImportCreate, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Preview reference or identifier import into the current collection
+         * @param {ApiCoreAcademicImportsPreviewPostRequest} apiCoreAcademicImportsPreviewPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsPreviewPost: async (apiCoreAcademicImportsPreviewPostRequest: ApiCoreAcademicImportsPreviewPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicImportsPreviewPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicImportsPreviewPost', 'apiCoreAcademicImportsPreviewPostRequest', apiCoreAcademicImportsPreviewPostRequest)
+            const localVarPath = `/api/core/academic/imports:preview`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicImportsPreviewPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdDeletePost: async (targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'folderId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'folderId', folderId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdDeletePost', 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest', apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest)
+            const localVarPath = `/api/core/academic/library/folders/{folder_id}:delete`
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdPatchRequest} apiCoreAcademicLibraryFoldersFolderIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdPatch: async (targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'folderId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'folderId', folderId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdPatchRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersFolderIdPatch', 'apiCoreAcademicLibraryFoldersFolderIdPatchRequest', apiCoreAcademicLibraryFoldersFolderIdPatchRequest)
+            const localVarPath = `/api/core/academic/library/folders/{folder_id}`
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdPatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryFoldersPostRequest} apiCoreAcademicLibraryFoldersPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersPost: async (targetDatasetId: string, apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryFoldersPost', 'apiCoreAcademicLibraryFoldersPostRequest', apiCoreAcademicLibraryFoldersPostRequest)
+            const localVarPath = `/api/core/academic/library/folders`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
+         * @param {string} targetDatasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryGet: async (targetDatasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryGet', 'targetDatasetId', targetDatasetId)
+            const localVarPath = `/api/core/academic/library`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Detach a material without deleting its original or scholarly file facts
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {string} attachmentId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost: async (targetDatasetId: string, libraryPaperId: string, attachmentId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'attachmentId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'attachmentId', attachmentId)
+            // verify required parameter 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost', 'apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest', apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/attachments/{attachment_id}:detach`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)))
+                .replace(`{${"attachment_id"}}`, encodeURIComponent(String(attachmentId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Add a note idempotently by stable note ID
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost: async (targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost', 'apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest', apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}/notes`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdPatch: async (targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'libraryPaperId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'libraryPaperId', libraryPaperId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersLibraryPaperIdPatch', 'apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest', apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest)
+            const localVarPath = `/api/core/academic/library/papers/{library_paper_id}`
+                .replace(`{${"library_paper_id"}}`, encodeURIComponent(String(libraryPaperId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersMovePostRequest} apiCoreAcademicLibraryPapersMovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersMovePost: async (targetDatasetId: string, apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersMovePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersMovePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersMovePost', 'apiCoreAcademicLibraryPapersMovePostRequest', apiCoreAcademicLibraryPapersMovePostRequest)
+            const localVarPath = `/api/core/academic/library/papers:move`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersMovePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersRemovePostRequest} apiCoreAcademicLibraryPapersRemovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersRemovePost: async (targetDatasetId: string, apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersRemovePost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicLibraryPapersRemovePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicLibraryPapersRemovePost', 'apiCoreAcademicLibraryPapersRemovePostRequest', apiCoreAcademicLibraryPapersRemovePostRequest)
+            const localVarPath = `/api/core/academic/library/papers:remove`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicLibraryPapersRemovePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+         * @param {string} handoffId
+         * @param {ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicMockHandoffsHandoffIdSubmitPost: async (handoffId: string, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest: ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'handoffId' is not null or undefined
+            assertParamExists('apiCoreAcademicMockHandoffsHandoffIdSubmitPost', 'handoffId', handoffId)
+            // verify required parameter 'apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicMockHandoffsHandoffIdSubmitPost', 'apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest', apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest)
+            const localVarPath = `/api/core/academic/mock-handoffs/{handoff_id}:submit`
+                .replace(`{${"handoff_id"}}`, encodeURIComponent(String(handoffId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read real full text without importing; continue using cursor only
+         * @param {AcademicContentRead} academicContentRead
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperContentsReadPost: async (academicContentRead: AcademicContentRead, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'academicContentRead' is not null or undefined
+            assertParamExists('apiCoreAcademicPaperContentsReadPost', 'academicContentRead', academicContentRead)
+            const localVarPath = `/api/core/academic/paper-contents:read`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicContentRead, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Retry failed full text download and parsing
+         * @param {ApiCoreAcademicPaperContentsRetryPostRequest} apiCoreAcademicPaperContentsRetryPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperContentsRetryPost: async (apiCoreAcademicPaperContentsRetryPostRequest: ApiCoreAcademicPaperContentsRetryPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicPaperContentsRetryPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicPaperContentsRetryPost', 'apiCoreAcademicPaperContentsRetryPostRequest', apiCoreAcademicPaperContentsRetryPostRequest)
+            const localVarPath = `/api/core/academic/paper-contents:retry`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPaperContentsRetryPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Expand folders completely and resolve distinct confirmed papers
+         * @param {ApiCoreAcademicPaperSelectionsResolvePostRequest} apiCoreAcademicPaperSelectionsResolvePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperSelectionsResolvePost: async (apiCoreAcademicPaperSelectionsResolvePostRequest: ApiCoreAcademicPaperSelectionsResolvePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicPaperSelectionsResolvePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicPaperSelectionsResolvePost', 'apiCoreAcademicPaperSelectionsResolvePostRequest', apiCoreAcademicPaperSelectionsResolvePostRequest)
+            const localVarPath = `/api/core/academic/paper-selections:resolve`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPaperSelectionsResolvePostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Set current user\'s personal importance
+         * @param {string} paperId
+         * @param {ApiCoreAcademicPapersPaperIdImportancePutRequest} apiCoreAcademicPapersPaperIdImportancePutRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPapersPaperIdImportancePut: async (paperId: string, apiCoreAcademicPapersPaperIdImportancePutRequest: ApiCoreAcademicPapersPaperIdImportancePutRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'paperId' is not null or undefined
+            assertParamExists('apiCoreAcademicPapersPaperIdImportancePut', 'paperId', paperId)
+            // verify required parameter 'apiCoreAcademicPapersPaperIdImportancePutRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicPapersPaperIdImportancePut', 'apiCoreAcademicPapersPaperIdImportancePutRequest', apiCoreAcademicPapersPaperIdImportancePutRequest)
+            const localVarPath = `/api/core/academic/papers/{paper_id}/importance`
+                .replace(`{${"paper_id"}}`, encodeURIComponent(String(paperId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPapersPaperIdImportancePutRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @param {ApiCoreAcademicPapersSearchPostRequest} apiCoreAcademicPapersSearchPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPapersSearchPost: async (apiCoreAcademicPapersSearchPostRequest: ApiCoreAcademicPapersSearchPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicPapersSearchPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicPapersSearchPost', 'apiCoreAcademicPapersSearchPostRequest', apiCoreAcademicPapersSearchPostRequest)
+            const localVarPath = `/api/core/academic/papers:search`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPapersSearchPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Idempotently start expansion or a separate downstream Chat
+         * @param {AcademicTaskLaunch} academicTaskLaunch
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicWorkflowLaunchesPost: async (academicTaskLaunch: AcademicTaskLaunch, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'academicTaskLaunch' is not null or undefined
+            assertParamExists('apiCoreAcademicWorkflowLaunchesPost', 'academicTaskLaunch', academicTaskLaunch)
+            const localVarPath = `/api/core/academic/workflow-launches`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(academicTaskLaunch, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * AcademicWorkflowsApi - functional programming interface
+ */
+export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = AcademicWorkflowsApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicChatContextGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicChatContextGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicChatContextGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicChatContextGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Correct document identity or retry recognition
+         * @param {string} documentId
+         * @param {AcademicDocumentIdentity} academicDocumentIdentity
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicDocumentsDocumentIdIdentityPatch(documentId: string, academicDocumentIdentity: AcademicDocumentIdentity, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicDocumentsDocumentIdIdentityPatch(documentId, academicDocumentIdentity, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicDocumentsDocumentIdIdentityPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Confirm deletion of results and trash/cancel the expansion Chat
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdDeleteRequest} apiCoreAcademicExpansionsExpansionIdDeleteRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsExpansionIdDelete(expansionId: string, apiCoreAcademicExpansionsExpansionIdDeleteRequest: ApiCoreAcademicExpansionsExpansionIdDeleteRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsExpansionIdDelete200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsExpansionIdDelete(expansionId, apiCoreAcademicExpansionsExpansionIdDeleteRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsExpansionIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read saved rounds, current papers, content states and Chat availability
+         * @param {string} expansionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsExpansionIdGet(expansionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsExpansionIdGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsExpansionIdGet(expansionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsExpansionIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {string} expansionId
+         * @param {ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest} apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsExpansionIdPapersResolvePost(expansionId: string, apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest: ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicResolvedPapers>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsExpansionIdPapersResolvePost(expansionId, apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsExpansionIdPapersResolvePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List current user\'s expansion records
+         * @param {string} datasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicExpansionsGet(datasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsGet(datasetId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read a batch or its complete operation summary and a page of items
+         * @param {string} batchId
+         * @param {ApiCoreAcademicImportsBatchIdGetViewEnum} [view]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsBatchIdGet(batchId: string, view?: ApiCoreAcademicImportsBatchIdGetViewEnum, cursor?: string, limit?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsBatchIdGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdGet(batchId, view, cursor, limit, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsBatchIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read source-scoped imports or a page of import operations
+         * @param {ApiCoreAcademicImportsGetViewEnum} [view]
+         * @param {string} [cursor]
+         * @param {number} [limit]
+         * @param {string} [targetDatasetId]
+         * @param {string} [sourceDocumentId]
+         * @param {string} [conversationId]
+         * @param {string} [historyId]
+         * @param {string} [taskId]
+         * @param {string} [workflowSessionId]
+         * @param {string} [workDisplayKey]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsGet(view?: ApiCoreAcademicImportsGetViewEnum, cursor?: string, limit?: number, targetDatasetId?: string, sourceDocumentId?: string, conversationId?: string, historyId?: string, taskId?: string, workflowSessionId?: string, workDisplayKey?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(view, cursor, limit, targetDatasetId, sourceDocumentId, conversationId, historyId, taskId, workflowSessionId, workDisplayKey, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+         * @param {AcademicImportCreate} academicImportCreate
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsPost(academicImportCreate: AcademicImportCreate, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicImportsPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPost(academicImportCreate, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Preview reference or identifier import into the current collection
+         * @param {ApiCoreAcademicImportsPreviewPostRequest} apiCoreAcademicImportsPreviewPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicImportsPreviewPost(apiCoreAcademicImportsPreviewPostRequest: ApiCoreAcademicImportsPreviewPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicImportPreview>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPreviewPost(apiCoreAcademicImportsPreviewPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicImportsPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersFolderIdDeletePost(targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersFolderIdDeletePost(targetDatasetId, folderId, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersFolderIdDeletePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {string} targetDatasetId
+         * @param {string} folderId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdPatchRequest} apiCoreAcademicLibraryFoldersFolderIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersFolderIdPatch(targetDatasetId: string, folderId: string, apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersFolderIdPatch(targetDatasetId, folderId, apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersFolderIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryFoldersPostRequest} apiCoreAcademicLibraryFoldersPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryFoldersPost(targetDatasetId: string, apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryFoldersPost(targetDatasetId, apiCoreAcademicLibraryFoldersPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryFoldersPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
+         * @param {string} targetDatasetId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryGet(targetDatasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryGet(targetDatasetId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Detach a material without deleting its original or scholarly file facts
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {string} attachmentId
+         * @param {ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(targetDatasetId: string, libraryPaperId: string, attachmentId: string, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(targetDatasetId, libraryPaperId, attachmentId, apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Add a note idempotently by stable note ID
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(targetDatasetId, libraryPaperId, apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {string} targetDatasetId
+         * @param {string} libraryPaperId
+         * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersLibraryPaperIdPatch(targetDatasetId: string, libraryPaperId: string, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersLibraryPaperIdPatch(targetDatasetId, libraryPaperId, apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersLibraryPaperIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersMovePostRequest} apiCoreAcademicLibraryPapersMovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersMovePost(targetDatasetId: string, apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersMovePost(targetDatasetId, apiCoreAcademicLibraryPapersMovePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersMovePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicLibraryPapersRemovePostRequest} apiCoreAcademicLibraryPapersRemovePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicLibraryPapersRemovePost(targetDatasetId: string, apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PaperLibraryChanges>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicLibraryPapersRemovePost(targetDatasetId, apiCoreAcademicLibraryPapersRemovePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicLibraryPapersRemovePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+         * @param {string} handoffId
+         * @param {ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicMockHandoffsHandoffIdSubmitPost(handoffId: string, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest: ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicMockHandoffsHandoffIdSubmitPost(handoffId, apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicMockHandoffsHandoffIdSubmitPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read real full text without importing; continue using cursor only
+         * @param {AcademicContentRead} academicContentRead
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPaperContentsReadPost(academicContentRead: AcademicContentRead, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AcademicContentResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPaperContentsReadPost(academicContentRead, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPaperContentsReadPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Retry failed full text download and parsing
+         * @param {ApiCoreAcademicPaperContentsRetryPostRequest} apiCoreAcademicPaperContentsRetryPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPaperContentsRetryPost(apiCoreAcademicPaperContentsRetryPostRequest: ApiCoreAcademicPaperContentsRetryPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPaperContentsRetryPost(apiCoreAcademicPaperContentsRetryPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPaperContentsRetryPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Expand folders completely and resolve distinct confirmed papers
+         * @param {ApiCoreAcademicPaperSelectionsResolvePostRequest} apiCoreAcademicPaperSelectionsResolvePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPaperSelectionsResolvePost(apiCoreAcademicPaperSelectionsResolvePostRequest: ApiCoreAcademicPaperSelectionsResolvePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicPaperSelectionsResolvePost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPaperSelectionsResolvePost(apiCoreAcademicPaperSelectionsResolvePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPaperSelectionsResolvePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Set current user\'s personal importance
+         * @param {string} paperId
+         * @param {ApiCoreAcademicPapersPaperIdImportancePutRequest} apiCoreAcademicPapersPaperIdImportancePutRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPapersPaperIdImportancePut(paperId: string, apiCoreAcademicPapersPaperIdImportancePutRequest: ApiCoreAcademicPapersPaperIdImportancePutRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicPapersPaperIdImportancePut200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPapersPaperIdImportancePut(paperId, apiCoreAcademicPapersPaperIdImportancePutRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPapersPaperIdImportancePut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @param {ApiCoreAcademicPapersSearchPostRequest} apiCoreAcademicPapersSearchPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicPapersSearchPost(apiCoreAcademicPapersSearchPostRequest: ApiCoreAcademicPapersSearchPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicPapersSearchPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPapersSearchPost(apiCoreAcademicPapersSearchPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPapersSearchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Idempotently start expansion or a separate downstream Chat
+         * @param {AcademicTaskLaunch} academicTaskLaunch
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicWorkflowLaunchesPost(academicTaskLaunch: AcademicTaskLaunch, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicWorkflowLaunchesPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicWorkflowLaunchesPost(academicTaskLaunch, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicWorkflowLaunchesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * AcademicWorkflowsApi - factory interface
+ */
+export const AcademicWorkflowsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = AcademicWorkflowsApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary Read owned academic Chat progress and complete frozen handoff
+         * @param {AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicChatContextGet200Response> {
+            return localVarFp.apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Correct document identity or retry recognition
+         * @param {AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response> {
+            return localVarFp.apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters.documentId, requestParameters.academicDocumentIdentity, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Confirm deletion of results and trash/cancel the expansion Chat
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdDelete(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsExpansionIdDelete200Response> {
+            return localVarFp.apiCoreAcademicExpansionsExpansionIdDelete(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdDeleteRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read saved rounds, current papers, content states and Chat availability
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsExpansionIdGet200Response> {
+            return localVarFp.apiCoreAcademicExpansionsExpansionIdGet(requestParameters.expansionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsExpansionIdPapersResolvePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicResolvedPapers> {
+            return localVarFp.apiCoreAcademicExpansionsExpansionIdPapersResolvePost(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List current user\'s expansion records
+         * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicExpansionsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsGet200Response> {
+            return localVarFp.apiCoreAcademicExpansionsGet(requestParameters.datasetId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read a batch or its complete operation summary and a page of items
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsBatchIdGet200Response> {
+            return localVarFp.apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, requestParameters.view, requestParameters.cursor, requestParameters.limit, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read source-scoped imports or a page of import operations
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsGet200Response> {
+            return localVarFp.apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicImportsPost200Response> {
+            return localVarFp.apiCoreAcademicImportsPost(requestParameters.academicImportCreate, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Preview reference or identifier import into the current collection
+         * @param {AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicImportsPreviewPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicImportPreview> {
+            return localVarFp.apiCoreAcademicImportsPreviewPost(requestParameters.apiCoreAcademicImportsPreviewPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Delete a folder subtree and move its papers into the parent folder
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Rename a logical folder with revision validation
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a logical paper-library folder
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryFoldersPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryFoldersPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryFoldersPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read paper entries, logical folders and active materials
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryResponse> {
+            return localVarFp.apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Detach a material without deleting its original or scholarly file facts
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.attachmentId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Add a note idempotently by stable note ID
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Update one paper with its revision and validate every active attachment
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Atomically move selected paper entries without moving files
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersMovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersMovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersMovePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Atomically remove selected entries while retaining materials and history
+         * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicLibraryPapersRemovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PaperLibraryChanges> {
+            return localVarFp.apiCoreAcademicLibraryPapersRemovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersRemovePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+         * @param {AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicMockHandoffsHandoffIdSubmitPost200Response> {
+            return localVarFp.apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters.handoffId, requestParameters.apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read real full text without importing; continue using cursor only
+         * @param {AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperContentsReadPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AcademicContentResponse> {
+            return localVarFp.apiCoreAcademicPaperContentsReadPost(requestParameters.academicContentRead, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Retry failed full text download and parsing
+         * @param {AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperContentsRetryPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicDocumentsDocumentIdIdentityPatch200Response> {
+            return localVarFp.apiCoreAcademicPaperContentsRetryPost(requestParameters.apiCoreAcademicPaperContentsRetryPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Expand folders completely and resolve distinct confirmed papers
+         * @param {AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPaperSelectionsResolvePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicPaperSelectionsResolvePost200Response> {
+            return localVarFp.apiCoreAcademicPaperSelectionsResolvePost(requestParameters.apiCoreAcademicPaperSelectionsResolvePostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Set current user\'s personal importance
+         * @param {AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPapersPaperIdImportancePut(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicPapersPaperIdImportancePut200Response> {
+            return localVarFp.apiCoreAcademicPapersPaperIdImportancePut(requestParameters.paperId, requestParameters.apiCoreAcademicPapersPaperIdImportancePutRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Search external arXiv candidates and pin their versions to an owned expansion
+         * @param {AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicPapersSearchPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicPapersSearchPost200Response> {
+            return localVarFp.apiCoreAcademicPapersSearchPost(requestParameters.apiCoreAcademicPapersSearchPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Idempotently start expansion or a separate downstream Chat
+         * @param {AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicWorkflowLaunchesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicWorkflowLaunchesPost200Response> {
+            return localVarFp.apiCoreAcademicWorkflowLaunchesPost(requestParameters.academicTaskLaunch, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreAcademicChatContextGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicDocumentsDocumentIdIdentityPatch operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest {
+    readonly documentId: string
+
+    readonly academicDocumentIdentity: AcademicDocumentIdentity
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsExpansionIdDelete operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest {
+    readonly expansionId: string
+
+    readonly apiCoreAcademicExpansionsExpansionIdDeleteRequest: ApiCoreAcademicExpansionsExpansionIdDeleteRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsExpansionIdGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest {
+    readonly expansionId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsExpansionIdPapersResolvePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest {
+    readonly expansionId: string
+
+    readonly apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest: ApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicExpansionsGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest {
+    readonly datasetId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportsBatchIdGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest {
+    readonly batchId: string
+
+    readonly view?: ApiCoreAcademicImportsBatchIdGetViewEnum
+
+    readonly cursor?: string
+
+    readonly limit?: number
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportsGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsGetRequest {
+    readonly view?: ApiCoreAcademicImportsGetViewEnum
+
+    readonly cursor?: string
+
+    readonly limit?: number
+
+    readonly targetDatasetId?: string
+
+    readonly sourceDocumentId?: string
+
+    readonly conversationId?: string
+
+    readonly historyId?: string
+
+    readonly taskId?: string
+
+    readonly workflowSessionId?: string
+
+    readonly workDisplayKey?: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportsPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsPostRequest {
+    readonly academicImportCreate: AcademicImportCreate
+}
+
+/**
+ * Request parameters for apiCoreAcademicImportsPreviewPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest {
+    readonly apiCoreAcademicImportsPreviewPostRequest: ApiCoreAcademicImportsPreviewPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryFoldersFolderIdDeletePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest {
+    readonly targetDatasetId: string
+
+    readonly folderId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryFoldersFolderIdPatch operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest {
+    readonly targetDatasetId: string
+
+    readonly folderId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdPatchRequest: ApiCoreAcademicLibraryFoldersFolderIdPatchRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryFoldersPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryFoldersPostRequest: ApiCoreAcademicLibraryFoldersPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryGet operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest {
+    readonly targetDatasetId: string
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly attachmentId: string
+
+    readonly apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest: ApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersLibraryPaperIdPatch operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
+    readonly targetDatasetId: string
+
+    readonly libraryPaperId: string
+
+    readonly apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersMovePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryPapersMovePostRequest: ApiCoreAcademicLibraryPapersMovePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicLibraryPapersRemovePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicLibraryPapersRemovePostRequest: ApiCoreAcademicLibraryPapersRemovePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicMockHandoffsHandoffIdSubmitPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest {
+    readonly handoffId: string
+
+    readonly apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest: ApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicPaperContentsReadPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest {
+    readonly academicContentRead: AcademicContentRead
+}
+
+/**
+ * Request parameters for apiCoreAcademicPaperContentsRetryPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest {
+    readonly apiCoreAcademicPaperContentsRetryPostRequest: ApiCoreAcademicPaperContentsRetryPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicPaperSelectionsResolvePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest {
+    readonly apiCoreAcademicPaperSelectionsResolvePostRequest: ApiCoreAcademicPaperSelectionsResolvePostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicPapersPaperIdImportancePut operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest {
+    readonly paperId: string
+
+    readonly apiCoreAcademicPapersPaperIdImportancePutRequest: ApiCoreAcademicPapersPaperIdImportancePutRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicPapersSearchPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest {
+    readonly apiCoreAcademicPapersSearchPostRequest: ApiCoreAcademicPapersSearchPostRequest
+}
+
+/**
+ * Request parameters for apiCoreAcademicWorkflowLaunchesPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest {
+    readonly academicTaskLaunch: AcademicTaskLaunch
+}
+
+/**
+ * AcademicWorkflowsApi - object-oriented interface
+ */
+export class AcademicWorkflowsApi extends BaseAPI {
+    /**
+     *
+     * @summary Read owned academic Chat progress and complete frozen handoff
+     * @param {AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicChatContextGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicChatContextGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicChatContextGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Correct document identity or retry recognition
+     * @param {AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicDocumentsDocumentIdIdentityPatchRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicDocumentsDocumentIdIdentityPatch(requestParameters.documentId, requestParameters.academicDocumentIdentity, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Confirm deletion of results and trash/cancel the expansion Chat
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsExpansionIdDelete(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsExpansionIdDelete(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdDeleteRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read saved rounds, current papers, content states and Chat availability
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsExpansionIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsExpansionIdGet(requestParameters.expansionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Resolve registered expansion papers and version-scoped content metadata without full bodies
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsExpansionIdPapersResolvePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsExpansionIdPapersResolvePost(requestParameters.expansionId, requestParameters.apiCoreAcademicExpansionsExpansionIdPapersResolvePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List current user\'s expansion records
+     * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicExpansionsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsGet(requestParameters.datasetId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read a batch or its complete operation summary and a page of items
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsBatchIdGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, requestParameters.view, requestParameters.cursor, requestParameters.limit, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read source-scoped imports or a page of import operations
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsGet(requestParameters.view, requestParameters.cursor, requestParameters.limit, requestParameters.targetDatasetId, requestParameters.sourceDocumentId, requestParameters.conversationId, requestParameters.historyId, requestParameters.taskId, requestParameters.workflowSessionId, requestParameters.workDisplayKey, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Import bibliography or queued sources, or confirm an uploaded PDF in its existing operation
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsPost(requestParameters.academicImportCreate, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Preview reference or identifier import into the current collection
+     * @param {AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicImportsPreviewPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicImportsPreviewPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicImportsPreviewPost(requestParameters.apiCoreAcademicImportsPreviewPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete a folder subtree and move its papers into the parent folder
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersFolderIdDeletePost(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Rename a logical folder with revision validation
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersFolderIdPatch(requestParameters.targetDatasetId, requestParameters.folderId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdPatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a logical paper-library folder
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryFoldersPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryFoldersPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryFoldersPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryFoldersPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read paper entries, logical folders and active materials
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryGetRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryGet(requestParameters.targetDatasetId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Detach a material without deleting its original or scholarly file facts
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdAttachmentsAttachmentIdDetachPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.attachmentId, requestParameters.apiCoreAcademicLibraryFoldersFolderIdDeletePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Add a note idempotently by stable note ID
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdNotesPost(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Update one paper with its revision and validate every active attachment
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersLibraryPaperIdPatch(requestParameters.targetDatasetId, requestParameters.libraryPaperId, requestParameters.apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Atomically move selected paper entries without moving files
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersMovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersMovePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersMovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersMovePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Atomically remove selected entries while retaining materials and history
+     * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicLibraryPapersRemovePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicLibraryPapersRemovePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicLibraryPapersRemovePost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicLibraryPapersRemovePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+     * @param {AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicMockHandoffsHandoffIdSubmitPost(requestParameters.handoffId, requestParameters.apiCoreAcademicMockHandoffsHandoffIdSubmitPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read real full text without importing; continue using cursor only
+     * @param {AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPaperContentsReadPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperContentsReadPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPaperContentsReadPost(requestParameters.academicContentRead, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Retry failed full text download and parsing
+     * @param {AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPaperContentsRetryPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperContentsRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPaperContentsRetryPost(requestParameters.apiCoreAcademicPaperContentsRetryPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Expand folders completely and resolve distinct confirmed papers
+     * @param {AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPaperSelectionsResolvePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPaperSelectionsResolvePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPaperSelectionsResolvePost(requestParameters.apiCoreAcademicPaperSelectionsResolvePostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Set current user\'s personal importance
+     * @param {AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPapersPaperIdImportancePut(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersPaperIdImportancePutRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPapersPaperIdImportancePut(requestParameters.paperId, requestParameters.apiCoreAcademicPapersPaperIdImportancePutRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Search external arXiv candidates and pin their versions to an owned expansion
+     * @param {AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicPapersSearchPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPapersSearchPost(requestParameters.apiCoreAcademicPapersSearchPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Idempotently start expansion or a separate downstream Chat
+     * @param {AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicWorkflowLaunchesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicWorkflowLaunchesPost(requestParameters.academicTaskLaunch, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+export const ApiCoreAcademicImportsBatchIdGetViewEnum = {
+    Operations: 'operations'
+} as const;
+export type ApiCoreAcademicImportsBatchIdGetViewEnum = typeof ApiCoreAcademicImportsBatchIdGetViewEnum[keyof typeof ApiCoreAcademicImportsBatchIdGetViewEnum];
+export const ApiCoreAcademicImportsGetViewEnum = {
+    Operations: 'operations'
+} as const;
+export type ApiCoreAcademicImportsGetViewEnum = typeof ApiCoreAcademicImportsGetViewEnum[keyof typeof ApiCoreAcademicImportsGetViewEnum];
+
 
 /**
  * AgentApi - axios parameter creator
@@ -14250,39 +17807,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {string} batchId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsBatchIdGet: async (batchId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'batchId' is not null or undefined
-            assertParamExists('apiCoreAcademicImportsBatchIdGet', 'batchId', batchId)
-            const localVarPath = `/api/core/academic/imports/{batch_id}`
-                .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary POST /academic/imports/{batch_id}:retry
          * @param {string} batchId
          * @param {*} [options] Override http request option.
@@ -14293,93 +17817,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             assertParamExists('apiCoreAcademicImportsBatchIdRetryPost', 'batchId', batchId)
             const localVarPath = `/api/core/academic/imports/{batch_id}:retry`
                 .replace(`{${"batch_id"}}`, encodeURIComponent(String(batchId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/imports`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/imports`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /academic/imports:preview
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsPreviewPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/academic/imports:preview`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -16979,10 +20416,12 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {boolean} [selectionSnapshot]
+         * @param {string} [selectionGroupId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, selectionSnapshot?: boolean, selectionGroupId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/conversations`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -17009,6 +20448,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (pageToken !== undefined) {
                 localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            if (selectionSnapshot !== undefined) {
+                localVarQueryParameter['selection_snapshot'] = selectionSnapshot;
+            }
+
+            if (selectionGroupId !== undefined) {
+                localVarQueryParameter['selection_group_id'] = selectionGroupId;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -24074,6 +27521,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkflowEventsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/task-center/workflow-events`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {string} taskId
@@ -25976,6 +29452,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdPausePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdPausePost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:pause`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
          * @param {string} sessionId
          * @param {string} stage
@@ -26923,19 +30432,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {string} batchId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsBatchIdGet(batchId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdGet(batchId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsBatchIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /academic/imports/{batch_id}:retry
          * @param {string} batchId
          * @param {*} [options] Override http request option.
@@ -26945,42 +30441,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsBatchIdRetryPost(batchId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsBatchIdRetryPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /academic/imports:preview
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreAcademicImportsPreviewPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicImportsPreviewPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAcademicImportsPreviewPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -27983,11 +31443,13 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
+         * @param {boolean} [selectionSnapshot]
+         * @param {string} [selectionGroupId]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, options);
+        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, selectionSnapshot?: boolean, selectionGroupId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, selectionSnapshot, selectionGroupId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -30674,6 +34136,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterWorkflowEventsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterWorkflowEventsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {string} taskId
@@ -31414,6 +34888,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdPausePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdPausePost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdPausePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
          * @param {string} sessionId
          * @param {string} stage
@@ -31795,16 +35282,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /academic/imports/{batch_id}
-         * @param {DefaultApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsBatchIdGet(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary POST /academic/imports/{batch_id}:retry
          * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -31812,33 +35289,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /academic/imports
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsPost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /academic/imports:preview
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreAcademicImportsPreviewPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreAcademicImportsPreviewPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -32591,7 +36041,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationListResponse> {
-            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, requestParameters.selectionSnapshot, requestParameters.selectionGroupId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -34570,6 +38020,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
             return localVarFp.apiCoreTaskCenterTasksTaskIdRemovePost(requestParameters.taskId, requestParameters.taskRemovalRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         *
+         * @summary GET /task-center/workflow-events
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreTaskCenterWorkflowEventsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
          * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
          * @summary Read public stage artifacts
          * @param {DefaultApiApiCoreTasksTaskIdArtifactsGetRequest} requestParameters Request parameters.
@@ -35125,6 +38584,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}:pause
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdPausePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdPausePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /workflow-sessions/{session_id}/product-artifacts/{stage}
          * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -35392,13 +38861,6 @@ export interface DefaultApiApiCoreAcademicDocumentsDocumentIdReferencesGetReques
  * Request parameters for apiCoreAcademicImportsBatchIdCancelPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreAcademicImportsBatchIdCancelPostRequest {
-    readonly batchId: string
-}
-
-/**
- * Request parameters for apiCoreAcademicImportsBatchIdGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreAcademicImportsBatchIdGetRequest {
     readonly batchId: string
 }
 
@@ -35808,6 +39270,10 @@ export interface DefaultApiApiCoreConversationsGetRequest {
     readonly pageSize?: number
 
     readonly pageToken?: string
+
+    readonly selectionSnapshot?: boolean
+
+    readonly selectionGroupId?: string
 }
 
 /**
@@ -37292,6 +40758,13 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequ
 }
 
 /**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdPausePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest {
+    readonly sessionId: string
+}
+
+/**
  * Request parameters for apiCoreWorkflowSessionsSessionIdProductArtifactsStageGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdProductArtifactsStageGetRequest {
@@ -37529,17 +41002,6 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /academic/imports/{batch_id}
-     * @param {DefaultApiApiCoreAcademicImportsBatchIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsBatchIdGet(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdGet(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary POST /academic/imports/{batch_id}:retry
      * @param {DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -37547,36 +41009,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAcademicImportsBatchIdRetryPost(requestParameters: DefaultApiApiCoreAcademicImportsBatchIdRetryPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAcademicImportsBatchIdRetryPost(requestParameters.batchId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /academic/imports
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /academic/imports
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /academic/imports:preview
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreAcademicImportsPreviewPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreAcademicImportsPreviewPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -38407,7 +41839,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, requestParameters.selectionSnapshot, requestParameters.selectionGroupId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -40591,6 +44023,16 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
+     *
+     * @summary GET /task-center/workflow-events
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreTaskCenterWorkflowEventsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterWorkflowEventsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      * view=ordinary returns only public task presentation fields. Raw objectives, prompts, reasoning and tool logs are excluded. Unknown timings are null. Cursors are bound to display_key, collection and revision; a 409 requires a fresh first page.
      * @summary Read public stage artifacts
      * @param {DefaultApiApiCoreTasksTaskIdArtifactsGetRequest} requestParameters Request parameters.
@@ -41199,6 +44641,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:pause
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdPausePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdPausePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdPausePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -47583,7 +51036,85 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {string} modelProviderId
+         * @param {boolean} [confirmIndexedDowngrade] Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdDelete: async (modelProviderId: string, confirmIndexedDowngrade?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdDelete', 'modelProviderId', modelProviderId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (confirmIndexedDowngrade !== undefined) {
+                localVarQueryParameter['confirm_indexed_downgrade'] = confirmIndexedDowngrade;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+         * @summary Update a model supplier\'s shared endpoint
+         * @param {string} modelProviderId
+         * @param {UpdateModelProviderEndpointOpenAPIRequest} updateModelProviderEndpointOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdEndpointPut: async (modelProviderId: string, updateModelProviderEndpointOpenAPIRequest: UpdateModelProviderEndpointOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdEndpointPut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'updateModelProviderEndpointOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdEndpointPut', 'updateModelProviderEndpointOpenAPIRequest', updateModelProviderEndpointOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/endpoint`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateModelProviderEndpointOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
          * @summary List model provider connection groups
          * @param {string} modelProviderId
          * @param {*} [options] Override http request option.
@@ -47617,7 +51148,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47698,7 +51229,139 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+         * @summary Replace one saved supplier API key
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} keyId
+         * @param {ReplaceModelProviderKeyOpenAPIRequest} replaceModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut: async (modelProviderId: string, groupId: string, keyId: string, replaceModelProviderKeyOpenAPIRequest: ReplaceModelProviderKeyOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut', 'groupId', groupId)
+            // verify required parameter 'keyId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut', 'keyId', keyId)
+            // verify required parameter 'replaceModelProviderKeyOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut', 'replaceModelProviderKeyOpenAPIRequest', replaceModelProviderKeyOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"key_id"}}`, encodeURIComponent(String(keyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(replaceModelProviderKeyOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.
+         * @summary Explicitly reveal one saved supplier API key
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} keyId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost: async (modelProviderId: string, groupId: string, keyId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost', 'groupId', groupId)
+            // verify required parameter 'keyId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost', 'keyId', keyId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"key_id"}}`, encodeURIComponent(String(keyId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {AddModelProviderGroupModelsOpenAPIRequest} addModelProviderGroupModelsOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost: async (modelProviderId: string, groupId: string, addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'groupId', groupId)
+            // verify required parameter 'addModelProviderGroupModelsOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost', 'addModelProviderGroupModelsOpenAPIRequest', addModelProviderGroupModelsOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models:batch`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(addModelProviderGroupModelsOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47778,7 +51441,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47825,7 +51488,49 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost: async (modelProviderId: string, groupId: string, modelId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'modelProviderId', modelProviderId)
+            // verify required parameter 'groupId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'groupId', groupId)
+            // verify required parameter 'modelId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost', 'modelId', modelId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)))
+                .replace(`{${"group_id"}}`, encodeURIComponent(String(groupId)))
+                .replace(`{${"model_id"}}`, encodeURIComponent(String(modelId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47868,7 +51573,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+         * Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
          * @summary Update model provider connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47911,7 +51616,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -47949,7 +51654,7 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+         * Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
          * @summary Create model provider connection group
          * @param {string} modelProviderId
          * @param {CreateModelProviderGroupOpenAPIRequest} createModelProviderGroupOpenAPIRequest
@@ -47988,6 +51693,157 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {string} modelProviderId
+         * @param {SetActiveModelProviderKeyOpenAPIRequest} setActiveModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdKeysActivePut: async (modelProviderId: string, setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdKeysActivePut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'setActiveModelProviderKeyOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdKeysActivePut', 'setActiveModelProviderKeyOpenAPIRequest', setActiveModelProviderKeyOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/keys/active`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(setActiveModelProviderKeyOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {string} modelProviderId
+         * @param {UpdateCustomModelProviderOpenAPIRequest} updateCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdPatch: async (modelProviderId: string, updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdPatch', 'modelProviderId', modelProviderId)
+            // verify required parameter 'updateCustomModelProviderOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdPatch', 'updateCustomModelProviderOpenAPIRequest', updateCustomModelProviderOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateCustomModelProviderOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+         * @summary Get supplier request protocols and endpoint overrides
+         * @param {string} modelProviderId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdRequestConfigGet: async (modelProviderId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdRequestConfigGet', 'modelProviderId', modelProviderId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/request-config`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+         * @summary Update supplier request configuration
+         * @param {string} modelProviderId
+         * @param {UpdateProviderRequestConfigOpenAPIRequest} updateProviderRequestConfigOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdRequestConfigPut: async (modelProviderId: string, updateProviderRequestConfigOpenAPIRequest: UpdateProviderRequestConfigOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdRequestConfigPut', 'modelProviderId', modelProviderId)
+            // verify required parameter 'updateProviderRequestConfigOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdRequestConfigPut', 'updateProviderRequestConfigOpenAPIRequest', updateProviderRequestConfigOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/request-config`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(updateProviderRequestConfigOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -48016,6 +51872,41 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {CreateCustomModelProviderOpenAPIRequest} createCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersPost: async (createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'createCustomModelProviderOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreModelProvidersPost', 'createCustomModelProviderOpenAPIRequest', createCustomModelProviderOpenAPIRequest)
+            const localVarPath = `/api/core/model_providers`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(createCustomModelProviderOpenAPIRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -48329,7 +52220,35 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {string} modelProviderId
+         * @param {boolean} [confirmIndexedDowngrade] Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdDelete(modelProviderId: string, confirmIndexedDowngrade?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DeleteCustomModelProviderOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdDelete(modelProviderId, confirmIndexedDowngrade, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+         * @summary Update a model supplier\'s shared endpoint
+         * @param {string} modelProviderId
+         * @param {UpdateModelProviderEndpointOpenAPIRequest} updateModelProviderEndpointOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdEndpointPut(modelProviderId: string, updateModelProviderEndpointOpenAPIRequest: UpdateModelProviderEndpointOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<UpdateModelProviderEndpointOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdEndpointPut(modelProviderId, updateModelProviderEndpointOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdEndpointPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
          * @summary List model provider connection groups
          * @param {string} modelProviderId
          * @param {*} [options] Override http request option.
@@ -48342,7 +52261,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48371,7 +52290,53 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+         * @summary Replace one saved supplier API key
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} keyId
+         * @param {ReplaceModelProviderKeyOpenAPIRequest} replaceModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(modelProviderId: string, groupId: string, keyId: string, replaceModelProviderKeyOpenAPIRequest: ReplaceModelProviderKeyOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ReplaceModelProviderKeyOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(modelProviderId, groupId, keyId, replaceModelProviderKeyOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.
+         * @summary Explicitly reveal one saved supplier API key
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} keyId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(modelProviderId: string, groupId: string, keyId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RevealModelProviderKeyOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(modelProviderId, groupId, keyId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {AddModelProviderGroupModelsOpenAPIRequest} addModelProviderGroupModelsOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(modelProviderId: string, groupId: string, addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AddModelProviderGroupModelsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(modelProviderId, groupId, addModelProviderGroupModelsOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48400,7 +52365,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48416,7 +52381,22 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {string} modelProviderId
+         * @param {string} groupId
+         * @param {string} modelId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId: string, groupId: string, modelId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ModelProbeResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(modelProviderId, groupId, modelId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48431,7 +52411,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+         * Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
          * @summary Update model provider connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48446,7 +52426,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -48460,7 +52440,7 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+         * Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
          * @summary Create model provider connection group
          * @param {string} modelProviderId
          * @param {CreateModelProviderGroupOpenAPIRequest} createModelProviderGroupOpenAPIRequest
@@ -48474,6 +52454,61 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {string} modelProviderId
+         * @param {SetActiveModelProviderKeyOpenAPIRequest} setActiveModelProviderKeyOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdKeysActivePut(modelProviderId: string, setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SetActiveModelProviderKeyOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdKeysActivePut(modelProviderId, setActiveModelProviderKeyOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdKeysActivePut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {string} modelProviderId
+         * @param {UpdateCustomModelProviderOpenAPIRequest} updateCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdPatch(modelProviderId: string, updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CustomModelProviderMutationOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdPatch(modelProviderId, updateCustomModelProviderOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+         * @summary Get supplier request protocols and endpoint overrides
+         * @param {string} modelProviderId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdRequestConfigGet(modelProviderId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProviderRequestConfigOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdRequestConfigGet(modelProviderId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdRequestConfigGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+         * @summary Update supplier request configuration
+         * @param {string} modelProviderId
+         * @param {UpdateProviderRequestConfigOpenAPIRequest} updateProviderRequestConfigOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdRequestConfigPut(modelProviderId: string, updateProviderRequestConfigOpenAPIRequest: UpdateProviderRequestConfigOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ProviderRequestConfigOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdRequestConfigPut(modelProviderId, updateProviderRequestConfigOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdRequestConfigPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -48484,6 +52519,19 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelsGet(modelType, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {CreateCustomModelProviderOpenAPIRequest} createCustomModelProviderOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersPost(createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CreateCustomModelProviderOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersPost(createCustomModelProviderOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -48617,7 +52665,27 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersGet(requestParameters.category, requestParameters.excludeCategory, requestParameters.keyword, requestParameters.acceptLanguage, options).then((request) => request(axios, basePath));
         },
         /**
-         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+         * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+         * @summary Delete a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<DeleteCustomModelProviderOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdDelete(requestParameters.modelProviderId, requestParameters.confirmIndexedDowngrade, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+         * @summary Update a model supplier\'s shared endpoint
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdEndpointPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<UpdateModelProviderEndpointOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdEndpointPut(requestParameters.modelProviderId, requestParameters.updateModelProviderEndpointOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
          * @summary List model provider connection groups
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48627,7 +52695,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGet(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+         * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
          * @summary Check model provider connectivity
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48647,7 +52715,37 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete(requestParameters.modelProviderId, requestParameters.groupId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+         * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+         * @summary Replace one saved supplier API key
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ReplaceModelProviderKeyOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, requestParameters.replaceModelProviderKeyOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.
+         * @summary Explicitly reveal one saved supplier API key
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<RevealModelProviderKeyOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+         * @summary Add multiple models under a connection group
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AddModelProviderGroupModelsOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.addModelProviderGroupModelsOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
          * @summary List models under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48667,7 +52765,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdDelete(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+         * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
          * @summary Update a connection group model
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48677,7 +52775,17 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, requestParameters.updateModelProviderGroupModelOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+         * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+         * @summary Test one saved model with a minimal inference request
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ModelProbeResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
          * @summary Add custom model under a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48687,7 +52795,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.addModelProviderGroupModelOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+         * Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
          * @summary Update model provider connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48697,7 +52805,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.updateModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+         * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
          * @summary List models advertised by a connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48707,7 +52815,7 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGet(requestParameters.modelProviderId, requestParameters.groupId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+         * Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
          * @summary Create model provider connection group
          * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -48715,6 +52823,46 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CreateModelProviderGroupOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters.modelProviderId, requestParameters.createModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+         * @summary Set the single enabled key for a model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest, options?: RawAxiosRequestConfig): AxiosPromise<SetActiveModelProviderKeyOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters.modelProviderId, requestParameters.setActiveModelProviderKeyOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+         * @summary Rename a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CustomModelProviderMutationOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdPatch(requestParameters.modelProviderId, requestParameters.updateCustomModelProviderOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+         * @summary Get supplier request protocols and endpoint overrides
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdRequestConfigGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ProviderRequestConfigOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdRequestConfigGet(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+         * @summary Update supplier request configuration
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ProviderRequestConfigOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters.modelProviderId, requestParameters.updateProviderRequestConfigOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
@@ -48725,6 +52873,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
          */
         apiCoreModelProvidersModelsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ListModelProviderGroupModelsOpenAPIResponse> {
             return localVarFp.apiCoreModelProvidersModelsGet(requestParameters.modelType, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+         * @summary Create a custom model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersPost(requestParameters: ModelProvidersApiApiCoreModelProvidersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CreateCustomModelProviderOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersPost(requestParameters.createCustomModelProviderOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Lists verified provider groups owned by the current user for the given non-model category (for example ocr or search). Shared provider groups are intentionally excluded from this selectable list.
@@ -48824,6 +52982,27 @@ export interface ModelProvidersApiApiCoreModelProvidersGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdDelete operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest {
+    readonly modelProviderId: string
+
+    /**
+     * Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+     */
+    readonly confirmIndexedDowngrade?: boolean
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdEndpointPut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest {
+    readonly modelProviderId: string
+
+    readonly updateModelProviderEndpointOpenAPIRequest: UpdateModelProviderEndpointOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGetRequest {
@@ -48848,6 +53027,41 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
     readonly modelProviderId: string
 
     readonly groupId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly keyId: string
+
+    readonly replaceModelProviderKeyOpenAPIRequest: ReplaceModelProviderKeyOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly keyId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly addModelProviderGroupModelsOpenAPIRequest: AddModelProviderGroupModelsOpenAPIRequest
 }
 
 /**
@@ -48881,6 +53095,17 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGrou
     readonly modelId: string
 
     readonly updateModelProviderGroupModelOpenAPIRequest: UpdateModelProviderGroupModelOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest {
+    readonly modelProviderId: string
+
+    readonly groupId: string
+
+    readonly modelId: string
 }
 
 /**
@@ -48924,10 +53149,51 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPost
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdKeysActivePut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest {
+    readonly modelProviderId: string
+
+    readonly setActiveModelProviderKeyOpenAPIRequest: SetActiveModelProviderKeyOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdPatch operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest {
+    readonly modelProviderId: string
+
+    readonly updateCustomModelProviderOpenAPIRequest: UpdateCustomModelProviderOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdRequestConfigGet operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest {
+    readonly modelProviderId: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersModelProviderIdRequestConfigPut operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest {
+    readonly modelProviderId: string
+
+    readonly updateProviderRequestConfigOpenAPIRequest: UpdateProviderRequestConfigOpenAPIRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelsGetRequest {
     readonly modelType?: string
+}
+
+/**
+ * Request parameters for apiCoreModelProvidersPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersPostRequest {
+    readonly createCustomModelProviderOpenAPIRequest: CreateCustomModelProviderOpenAPIRequest
 }
 
 /**
@@ -49001,7 +53267,29 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+     * Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+     * @summary Delete a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdDelete(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdDelete(requestParameters.modelProviderId, requestParameters.confirmIndexedDowngrade, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Updates the current user\'s model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+     * @summary Update a model supplier\'s shared endpoint
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdEndpointPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdEndpointPutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdEndpointPut(requestParameters.modelProviderId, requestParameters.updateModelProviderEndpointOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
      * @summary List model provider connection groups
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49012,7 +53300,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+     * Checks the provider\'s model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model\'s probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
      * @summary Check model provider connectivity
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdCheckPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49034,7 +53322,40 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+     * Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+     * @summary Replace one saved supplier API key
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdPut(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, requestParameters.replaceModelProviderKeyOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.
+     * @summary Explicitly reveal one saved supplier API key
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysKeyIdRevealPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.keyId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+     * @summary Add multiple models under a connection group
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsBatchPost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.addModelProviderGroupModelsOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
      * @summary List models under a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49056,7 +53377,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+     * Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
      * @summary Update a connection group model
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49067,7 +53388,18 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+     * Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+     * @summary Test one saved model with a minimal inference request
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsModelIdProbePost(requestParameters.modelProviderId, requestParameters.groupId, requestParameters.modelId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
      * @summary Add custom model under a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdModelsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49078,7 +53410,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+     * Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
      * @summary Update model provider connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49089,7 +53421,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Calls the group\'s OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+     * Lists models with the supplier\'s saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
      * @summary List models advertised by a connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsGroupIdRemoteModelsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49100,7 +53432,7 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+     * Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
      * @summary Create model provider connection group
      * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -49108,6 +53440,50 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdGroupsPostRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters.modelProviderId, requestParameters.createModelProviderGroupOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+     * @summary Set the single enabled key for a model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdKeysActivePutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdKeysActivePut(requestParameters.modelProviderId, requestParameters.setActiveModelProviderKeyOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Changes an owned custom supplier\'s display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+     * @summary Rename a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdPatch(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdPatch(requestParameters.modelProviderId, requestParameters.updateCustomModelProviderOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+     * @summary Get supplier request protocols and endpoint overrides
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdRequestConfigGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigGetRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdRequestConfigGet(requestParameters.modelProviderId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+     * @summary Update supplier request configuration
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters.modelProviderId, requestParameters.updateProviderRequestConfigOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -49119,6 +53495,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelsGet(requestParameters: ModelProvidersApiApiCoreModelProvidersModelsGetRequest = {}, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelsGet(requestParameters.modelType, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+     * @summary Create a custom model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersPost(requestParameters: ModelProvidersApiApiCoreModelProvidersPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersPost(requestParameters.createCustomModelProviderOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -61655,6 +66042,163 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {string} fileId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet: async (artifactId: string, exportId: string, fileId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'exportId', exportId)
+            // verify required parameter 'fileId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet', 'fileId', fileId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}/files/{file_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)))
+                .replace(`{${"file_id"}}`, encodeURIComponent(String(fileId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet: async (artifactId: string, exportId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet', 'exportId', exportId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost: async (artifactId: string, exportId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost', 'artifactId', artifactId)
+            // verify required parameter 'exportId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost', 'exportId', exportId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports/{export_id}:retry`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)))
+                .replace(`{${"export_id"}}`, encodeURIComponent(String(exportId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {string} artifactId
+         * @param {DocumentImageExportRequest} documentImageExportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsPost: async (artifactId: string, documentImageExportRequest: DocumentImageExportRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsPost', 'artifactId', artifactId)
+            // verify required parameter 'documentImageExportRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdImageExportsPost', 'documentImageExportRequest', documentImageExportRequest)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/image-exports`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentImageExportRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {string} artifactId
          * @param {DocumentArtifactPatchRequest} documentArtifactPatchRequest
@@ -61720,6 +66264,79 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {string} artifactId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsGet: async (artifactId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsGet', 'artifactId', artifactId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/publications`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPost: async (artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPost', 'artifactId', artifactId)
+            // verify required parameter 'documentPublicationGroupRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPost', 'documentPublicationGroupRequest', documentPublicationGroupRequest)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/publications`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentPublicationGroupRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -62279,6 +66896,63 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {string} fileId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(artifactId: string, exportId: string, fileId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(artifactId, exportId, fileId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(artifactId: string, exportId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(artifactId, exportId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {string} artifactId
+         * @param {string} exportId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(artifactId: string, exportId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(artifactId, exportId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {string} artifactId
+         * @param {DocumentImageExportRequest} documentImageExportRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdImageExportsPost(artifactId: string, documentImageExportRequest: DocumentImageExportRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentImageExportResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdImageExportsPost(artifactId, documentImageExportRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdImageExportsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {string} artifactId
          * @param {DocumentArtifactPatchRequest} documentArtifactPatchRequest
@@ -62302,6 +66976,33 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationGet(artifactId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {string} artifactId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdPublicationsGet(artifactId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentPublicationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationsGet(artifactId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdPublicationsPost(artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DocumentPublicationGroupResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationsPost(artifactId, documentPublicationGroupRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationsPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -62560,6 +67261,46 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
+         * @summary Download an owned image archive or original image
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters.artifactId, requestParameters.exportId, requestParameters.fileId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read owned image export progress and individual outcomes
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Retry missing images without changing the captured document
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Prepare images referenced by the current document snapshot
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentImageExportResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters.artifactId, requestParameters.documentImageExportRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Save an Artifact with revision and draft preconditions
          * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -62577,6 +67318,26 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
          */
         apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationLookupResponse> {
             return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters.artifactId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Read current per-platform synchronization state and confirmed preferences
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationGroupResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters.artifactId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Confirm publication of the current saved document to independent targets
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationGroupResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -62751,6 +67512,44 @@ export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+
+    readonly fileId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest {
+    readonly artifactId: string
+
+    readonly exportId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdImageExportsPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest {
+    readonly artifactId: string
+
+    readonly documentImageExportRequest: DocumentImageExportRequest
+}
+
+/**
  * Request parameters for apiCoreWorkflowArtifactsArtifactIdPatch operation in WorkflowApi.
  */
 export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest {
@@ -62764,6 +67563,22 @@ export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest {
  */
 export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest {
     readonly artifactId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPublicationsGet operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest {
+    readonly artifactId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPublicationsPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest {
+    readonly artifactId: string
+
+    readonly documentPublicationGroupRequest: DocumentPublicationGroupRequest
 }
 
 /**
@@ -62983,6 +67798,50 @@ export class WorkflowApi extends BaseAPI {
 
     /**
      *
+     * @summary Download an owned image archive or original image
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdFilesFileIdGet(requestParameters.artifactId, requestParameters.exportId, requestParameters.fileId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read owned image export progress and individual outcomes
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdGet(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Retry missing images without changing the captured document
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsExportIdRetryPost(requestParameters.artifactId, requestParameters.exportId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Prepare images referenced by the current document snapshot
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdImageExportsPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdImageExportsPost(requestParameters.artifactId, requestParameters.documentImageExportRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Save an Artifact with revision and draft preconditions
      * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -63001,6 +67860,28 @@ export class WorkflowApi extends BaseAPI {
      */
     public apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationGetRequest, options?: RawAxiosRequestConfig) {
         return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationGet(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Read current per-platform synchronization state and confirmed preferences
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsGetRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsGet(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Confirm publication of the current saved document to independent targets
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

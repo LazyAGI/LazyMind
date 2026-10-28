@@ -11,7 +11,7 @@ const (
 )
 
 func supportsUserMaxInputTokens(modelType string) bool {
-	return strings.EqualFold(strings.TrimSpace(modelType), "llm")
+	return isChatTechnicalType(strings.ToLower(strings.TrimSpace(modelType)))
 }
 
 func supportsLookupMaxInputTokens(modelType string) bool {

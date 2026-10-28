@@ -16,7 +16,7 @@ import {
 } from "@ant-design/icons";
 import { Popover, Spin, Tooltip, message } from "antd";
 import { useTranslation } from "react-i18next";
-import { CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
+import { CHAT_MODEL_SELECTION_CHANGED_EVENT, CHAT_OPEN_MODEL_SELECTOR_EVENT } from "@/modules/chat/constants/chat";
 import { LAZYMIND_CLOUD_SESSION_CHANGED_EVENT } from "@/runtime/cloud/session";
 import { getProviderLogoUrl } from "@/modules/modelProvider/providerBranding";
 import {
@@ -109,6 +109,7 @@ function resolveStoredSelection(
     ...selection,
     provider_name: provider.name,
     model_name: model.name,
+    logo_data_url: model.logo_data_url || provider.logo_data_url,
     group_name: model.group_name,
     source: model.source ?? provider.source ?? selection.source,
     availability: isModelAvailable(model)
@@ -225,6 +226,10 @@ const ChatModelSelector = ({
           ? { ...preservedSelection, version: nextCatalog.selection.version }
           : nextCatalog.selection,
       };
+      const currentSelection = useModelSelectionStore.getState().selections[selectionKey];
+      if (normalizedConversationId && currentSelection && currentSelection.version > normalizedCatalog.selection.version) {
+        normalizedCatalog.selection = currentSelection;
+      }
       setCatalog(normalizedCatalog);
       setLoadStatus("ready");
       commitSelection(normalizedCatalog.selection);
@@ -252,6 +257,15 @@ const ChatModelSelector = ({
       }
     };
   }, [loadCatalog]);
+
+  useEffect(() => {
+    const refreshSelection = (event: Event) => {
+      const detail = (event as CustomEvent<{ conversationId?: string }>).detail;
+      if (normalizedConversationId && detail?.conversationId === normalizedConversationId) void loadCatalog();
+    };
+    window.addEventListener(CHAT_MODEL_SELECTION_CHANGED_EVENT, refreshSelection);
+    return () => window.removeEventListener(CHAT_MODEL_SELECTION_CHANGED_EVENT, refreshSelection);
+  }, [loadCatalog, normalizedConversationId]);
 
   useEffect(() => {
     const wasDisabled = previousDisabledRef.current;
@@ -368,9 +382,11 @@ const ChatModelSelector = ({
     (model) => model.id === currentSelection?.model_id,
   );
   const currentProviderName = currentProvider?.name ?? currentSelection?.provider_name;
-  const currentProviderLogoUrl = currentProviderName
-    ? getProviderLogoUrl(currentProviderName)
-    : undefined;
+  const currentProviderLogoUrl =
+    currentModel?.logo_data_url || currentProvider?.logo_data_url || currentSelection?.logo_data_url ||
+    (currentProviderName
+      ? getProviderLogoUrl(currentProviderName, currentProvider?.is_custom)
+      : undefined);
   const visibleProviders = useMemo(() => {
     const providers = (catalog?.providers ?? []).filter(
       (provider) => provider.models.length > 0,
@@ -747,7 +763,7 @@ const ChatModelSelector = ({
                       ) : null}
                     </div>
                     {provider.models.map((model) => {
-                      const logoUrl = getProviderLogoUrl(provider.name);
+                      const logoUrl = model.logo_data_url || provider.logo_data_url || getProviderLogoUrl(provider.name, provider.is_custom);
                       const isCurrent =
                         currentSelection?.mode === "fixed" &&
                         (currentSelection.model_id

@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"lazymind/core/algo"
+	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
 )
 
@@ -108,5 +110,76 @@ func TestReadPublicationResolvesOwnedWeChatDraft(t *testing.T) {
 	mustPublicationErrorNil(t, json.Unmarshal(w.Body.Bytes(), &failed))
 	if w.Code != 200 || failed.Data.Status != "succeeded" || failed.Data.TargetURL != "" {
 		t.Fatalf("preview failure changed write status or exposed console: %+v", failed)
+	}
+}
+
+func TestPublicationGroupKeepsLastSuccessfulWeChatLink(t *testing.T) {
+	for _, latestStatus := range []string{"canceled", "failed_no_write", "preparing"} {
+		t.Run(latestStatus, func(t *testing.T) {
+			f, input := publicationFixture(t, false)
+			input.Provider = "wechat"
+			op := preparePublication(t, f, input)
+			target := json.RawMessage(`{"doc_id":"saved-draft","adapter":"wechat","meta":{"article_index":1,"browser_url":"https://mp.weixin.qq.com/"}}`)
+			receipt, _ := json.Marshal(DocumentPublicationReceipt{Provider: "wechat", TargetDocument: target})
+			mustPublicationErrorNil(t, f.db.Model(op).Updates(map[string]any{"receipt_json": receipt, "status": "succeeded", "publication_id": "old-group"}).Error)
+			mustPublicationErrorNil(t, f.db.Create(&orm.DocumentPublicationBinding{
+				ID: "wechat-bound", SessionID: input.SessionID, SlotID: input.SlotID, ItemIndex: publicationIndex(input.ListIndex), OwnerUserID: "owner",
+				BindingScope: "wechat", Provider: "wechat", TargetDocument: target, LastOperationID: op.ID, LastSuccessHash: op.SourceHash,
+			}).Error)
+			latest := *op
+			latest.ID = "new-operation"
+			latest.IdempotencyKey = "new-confirmation"
+			latest.PublicationID = "new-group"
+			latest.Status = latestStatus
+			latest.ReceiptJSON = nil
+			latest.CreatedAt = op.CreatedAt.Add(time.Second)
+			mustPublicationErrorNil(t, f.db.Create(&latest).Error)
+			reads := 0
+			preview := "https://mp.weixin.qq.com/s?tempkey=refreshed"
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/authservice/v1/cloud/connections/internal/chat-enabled":
+					_, _ = w.Write([]byte(`{"data":{"items":[{"connection_id":"fixture","provider":"wechat","owner_user_id":"owner","status":"ACTIVE"}]}}`))
+				case "/api/authservice/v1/cloud/connections/fixture/token":
+					_, _ = w.Write([]byte(`{"data":{"connection_id":"fixture","provider":"wechat","status":"ACTIVE","access_token":"fixture-token"}}`))
+				case "/api/document/actions:invoke":
+					reads++
+					var request algo.DocumentActionInvokeRequest
+					mustPublicationErrorNil(t, json.NewDecoder(r.Body).Decode(&request))
+					args := request.Arguments.(map[string]any)
+					if request.Reference != "builtin:document.wechat_draft_url.v1" || request.Phase != "preview" || args["media_id"] != "saved-draft" || args["article_index"] != float64(1) {
+						t.Error("must only resolve the previous successful article, without writing")
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]string{"url": preview}})
+				default:
+					t.Errorf("unexpected request path: %s", r.URL.Path)
+					w.WriteHeader(404)
+				}
+			}))
+			defer server.Close()
+			t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+			t.Setenv("LAZYMIND_AUTH_SERVICE_URL", server.URL)
+			state, err := ReadDocumentPublicationGroup(t.Context(), f.db.DB, "owner", f.currentRevisionID)
+			mustPublicationErrorNil(t, err)
+			found := false
+			for _, targetState := range state.Targets {
+				if targetState.Provider != "wechat" {
+					continue
+				}
+				found = true
+				if targetState.TargetURL != preview || targetState.Operation == nil || targetState.Operation.Status != latestStatus || targetState.Operation.OperationID != latest.ID {
+					t.Fatalf("lost previous link or latest attempt status: %+v", targetState)
+				}
+			}
+			if !found || reads != 1 {
+				t.Fatalf("found=%v reads=%d", found, reads)
+			}
+			_, err = ReadDocumentPublicationGroup(t.Context(), f.db.DB, "stranger", f.currentRevisionID)
+			requirePublicationError(t, err, "PUBLICATION_NOT_FOUND")
+			if reads != 1 {
+				t.Fatal("unauthorized read reached provider")
+			}
+		})
 	}
 }

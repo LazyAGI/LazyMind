@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { Dataset, Algo } from "@/api/generated/knowledge-client";
 import type { Dataset as CoreDataset } from "@/api/generated/core-client";
 
-import { KnowledgeBaseServiceApi } from "@/modules/knowledge/utils/request";
+import { KnowledgeBaseServiceApi, getKnowledgeOptions } from "@/modules/knowledge/utils/request";
 import {
   KNOWLEDGE_BASE_NAME_MAX_LENGTH,
   KNOWLEDGE_BASE_NAME_PATTERN,
@@ -23,7 +23,7 @@ import {
   PROCESSING_LEVEL_ORDER,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
-import { getKnowledgeBaseCapabilities, getLearningCatalog,  type LearningCapability, type CapabilityRef } from "@/modules/learning/api";
+import { getKnowledgeBaseCapabilities,  type LearningCapability, type CapabilityRef } from "@/modules/learning/api";
 import CapabilitySettings, { capabilityRefsFromForm, parseCapabilitySettings } from "@/modules/learning/CapabilitySettings";
 import "./index.scss";
 
@@ -68,10 +68,10 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
     }, [algorithm, visible, form]);
 
     function getAlgorithm(sourceData?: Dataset) {
-      return KnowledgeBaseServiceApi()
-        .datasetServiceListAlgos()
-        .then((res) => {
-          const list = res.data.algos;
+      return getKnowledgeOptions()
+        .then((options) => {
+          setLearningCapabilities(options.capabilities);
+          const list = options.algorithms;
           setAlgorithm(list || []);
           const sourceAlgoId = sourceData?.algo?.algo_id;
           if (list?.length === 1) {
@@ -100,7 +100,6 @@ const UpdateAppModel = forwardRef<UpdateImperativeProps, ForwardProps>(
       initialCapabilityRefs.current = [];
       setData(sourceData);
       setHasTagLengthError(false);
-      getLearningCatalog().then((catalog) => setLearningCapabilities(catalog.capabilities)).catch(() => setLearningCapabilities([]));
       if (sourceData?.dataset_id) {
         getKnowledgeBaseCapabilities(sourceData.dataset_id).then((items) => {
           const enabled = items.filter((item) => item.enabled).sort((a, b) => a.display_order - b.display_order);

@@ -35,35 +35,43 @@ steps:
 
 slots:
   - id: prompt_result
+    user_visible: true
     label: Prompt Result
     type: text
     cardinality: single
   - id: metadata_json
+    user_visible: false
     label: JSON Metadata
     type: json
     cardinality: single
   - id: text_attachment
+    user_visible: true
     label: Text Attachment
     type: file
     cardinality: single
   - id: image_attachment
+    user_visible: true
     label: Image Attachment
     type: image
     cardinality: single
   - id: rewritten_attachment
+    user_visible: true
     label: Rewritten Attachment
     type: file
     cardinality: single
   - id: list_attachments
+    user_visible: true
     label: List Attachments
     type: file
     cardinality: list
     ordered: true
   - id: verification_report
+    user_visible: true
     label: Verification Report
     type: file
     cardinality: single
   - id: test_status
+    user_visible: true
     label: Test Status
     type: text
     cardinality: single

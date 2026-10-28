@@ -162,13 +162,14 @@ async function signUploadPaths(paths: string[]): Promise<Record<string, string>>
 
 export async function resolveMarkdownImageUrlAsync(
   url: string,
+  options?: { forceRefresh?: boolean },
 ): Promise<string> {
   const trimmed = (url || '').trim();
   if (!trimmed || trimmed.startsWith('data:')) {
     return trimmed;
   }
   if (
-    extractStaticFilesPath(trimmed)
+    !options?.forceRefresh && extractStaticFilesPath(trimmed)
     && parseExpires(trimmed) > 0
     && /[?&]sig=[^&]+/.test(trimmed)
     && !isExpiredSignedUrl(trimmed)
@@ -189,6 +190,7 @@ export async function resolveMarkdownImageUrlAsync(
   }
 
   const cacheKey = cacheKeyForUploadPath(uploadPath);
+  if (options?.forceRefresh) signCache.delete(cacheKey);
   if (signCache.has(cacheKey)) {
     const cached = signCache.get(cacheKey) || '';
     if (cached && !isExpiredSignedUrl(cached)) {

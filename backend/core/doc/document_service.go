@@ -469,7 +469,7 @@ func (s *DocumentService) loadRecord(ctx context.Context, userID, datasetID, doc
 		rec.taskData = s.latestTaskDataSource(ctx, row.ID)
 
 	}
-	rec.processing, rec.taskStat, rec.diagnostic, err = observeDocumentProcessingDetails(ctx, s.db, s.lazyDB, row)
+	rec.processing, rec.taskStat, rec.diagnostic, err = ObserveDocumentProcessingDetails(ctx, s.db, s.lazyDB, row)
 	if err != nil {
 		return documentServiceRecord{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "query document failed", Err: err}
 	}

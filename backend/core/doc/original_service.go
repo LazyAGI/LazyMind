@@ -47,7 +47,11 @@ type AcquireOriginalRequest struct {
 	Filename, ContentType, ContentSHA256, FinalURL string
 	Reader                                         io.Reader
 }
-type AcquireRemoteOriginalRequest struct{ URL, DisplayName, ExpectedMIME string }
+type AcquireRemoteOriginalRequest struct {
+	URL, DisplayName, ExpectedMIME string
+	// MaxBytes is an internal caller limit; zero uses the common upload maximum.
+	MaxBytes int64
+}
 type OriginalServiceDeps struct {
 	DB               *gorm.DB
 	SubmitProcessing func(context.Context, DatasetCatalogCaller, string, string) (StartTaskResult, error)
@@ -204,6 +208,35 @@ func (s *OriginalService) resolve(ctx context.Context, db *gorm.DB, caller Datas
 	}
 	return row, meta, nil
 }
+
+// OpenOriginal gives trusted Core workers read access to their own unexpired original.
+func (s *OriginalService) OpenOriginal(ctx context.Context, caller DatasetCatalogCaller, id string) (*os.File, error) {
+	_, meta, err := s.resolve(ctx, s.db, caller, id)
+	if err != nil {
+		return nil, err
+	}
+	return openControlledOriginal(meta.StoredPath)
+}
+
+// ReleaseOriginal removes only an unbound temporary original owned by the caller.
+func (s *OriginalService) ReleaseOriginal(ctx context.Context, caller DatasetCatalogCaller, id string) error {
+	row, meta, err := s.resolve(ctx, s.db, caller, id)
+	if err != nil {
+		return err
+	}
+	if row.DocumentID != "" || row.Status != UploadedFileStateUploaded {
+		return resourceErr("CONFLICT", "a bound original cannot be released")
+	}
+	result := s.db.WithContext(ctx).Where("upload_file_id = ? AND document_id = '' AND status = ?", id, UploadedFileStateUploaded).Delete(&orm.UploadedFile{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return resourceErr("CONFLICT", "original binding changed")
+	}
+	return os.Remove(meta.StoredPath)
+}
+
 func (s *OriginalService) PrepareOriginalBinding(ctx context.Context, caller DatasetCatalogCaller, req ImportOriginalRequest) (*PreparedOriginalBinding, error) {
 	row, meta, err := s.resolve(ctx, s.db, caller, req.FileRef)
 	if err != nil {
@@ -357,6 +390,11 @@ func (s *OriginalService) BindOriginalTx(ctx context.Context, tx *gorm.DB, calle
 	}
 	if err := createDocumentProcessingState(tx, dataset.ID, docID, now); err != nil {
 		return OriginalImportResult{}, err
+	}
+	if OnAcademicDocumentSubmitted != nil {
+		if err := OnAcademicDocumentSubmitted(tx, d); err != nil {
+			return OriginalImportResult{}, err
+		}
 	}
 	return OriginalImportResult{Document: d, Task: task, ContentSHA256: p.hash, SubmissionStatus: "pending"}, nil
 }

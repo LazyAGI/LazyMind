@@ -1,0 +1,14 @@
+{
+  "chat_model": "Qwen/Qwen2.5-7B-Instruct",
+  "embedding_model": "BAAI/bge-m3",
+  "chat": {
+    "resolved_url": "https://api.siliconflow.cn/v1/chat/completions",
+    "response": "OK",
+    "ok": true
+  },
+  "embedding": {
+    "resolved_url": "https://api.siliconflow.cn/v1/embeddings",
+    "dimensions": 1024,
+    "ok": true
+  }
+}

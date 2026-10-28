@@ -75,7 +75,6 @@ import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
-import WeChatNotificationMonitor from "@/modules/notifications/WeChatNotificationMonitor";
 import { beginCloudLogin, getCloudSession, LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, logoutCloudSession, type CloudSessionState } from "@/runtime/cloud/session";
 import {
   closeCloudLoginPopup,
@@ -85,6 +84,8 @@ import {
 } from "@/runtime/desktopBridge";
 import { useConversationOpening } from "@/modules/chat/hooks/useConversationOpening";
 import ConversationGroups from "@/modules/chat/conversationOrganizer/ConversationGroups";
+import { isPaperLibrary } from "@/modules/knowledge/paper/store";
+import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import SidebarResizeHandle, { normalizeSidebarWidth, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./SidebarResizeHandle";
 import "./index.scss";
 
@@ -140,7 +141,10 @@ export default function MainLayout() {
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
-  const notificationUserKey = JSON.stringify([userInfo?.userId || userInfo?.username || '', userInfo?.tenantId || userInfo?.tenant_id || userInfo?.tenantKey || userInfo?.tenant_key || '']);
+  const datasetUserKey = JSON.stringify([
+    userInfo?.userId || userInfo?.username || '',
+    userInfo?.tenantId || userInfo?.tenant_id || userInfo?.tenantKey || userInfo?.tenant_key || '',
+  ]);
   const [directoryPreference, setDirectoryPreference] = useState<{ user: string; enabled: boolean } | null>(null);
   const directoryUser = userInfo?.userId || userInfo?.username || "";
   const directoriesEnabled = isLoggedIn && directoryPreference?.user === directoryUser ? directoryPreference.enabled : null;
@@ -221,16 +225,34 @@ export default function MainLayout() {
     matchPath("/memory-management/workflows/published/:workflowRef", pathname) ||
     matchPath("/memory-management/workflows/cloud/:resourceId", pathname),
   );
-  const defaultSidebarWidth = isWorkflowDetail ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
+  const knowledgeDatasetId = matchPath("/lib/knowledge/detail/:id", pathname)?.params.id
+    || matchPath("/lib/knowledge/knowledge/:knowledgeBaseId/:knowledgeId", pathname)?.params.knowledgeBaseId;
+  const { currentDataset: currentKnowledgeDataset, requestedDatasetId, datasetLoading, datasetError, loadDataset, clearDataset } = useDatasetPermissionStore();
+  const datasetOwner = useRef(datasetUserKey);
+  const knowledgeDatasetReady = datasetOwner.current === datasetUserKey && currentKnowledgeDataset?.dataset_id === knowledgeDatasetId;
+  const isPaperPage = Boolean(
+    knowledgeDatasetReady && isPaperLibrary(currentKnowledgeDataset?.scene),
+  );
+  const startsWithCompactSidebar = isWorkflowDetail || isPaperPage;
+  const defaultSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : SIDEBAR_MAX_WIDTH;
   const [sidebarSize, setSidebarSize] = useState({
     pathname,
+    startsCompact: startsWithCompactSidebar,
+    manuallyResized: false,
     width: defaultSidebarWidth,
     normalWidth: SIDEBAR_MAX_WIDTH,
   });
-  // Workflow details start narrow without overwriting the width chosen for other pages.
-  const routeSidebarWidth = isWorkflowDetail ? SIDEBAR_MIN_WIDTH : sidebarSize.normalWidth;
-  if (sidebarSize.pathname !== pathname) {
-    setSidebarSize({ ...sidebarSize, pathname, width: routeSidebarWidth });
+  // Reading and workflow pages start narrow while preserving the user's width elsewhere.
+  const routeSidebarWidth = startsWithCompactSidebar ? SIDEBAR_MIN_WIDTH : sidebarSize.normalWidth;
+  const sidebarRouteChanged = sidebarSize.pathname !== pathname;
+  if (sidebarRouteChanged || sidebarSize.startsCompact !== startsWithCompactSidebar) {
+    setSidebarSize({
+      ...sidebarSize,
+      pathname,
+      startsCompact: startsWithCompactSidebar,
+      manuallyResized: sidebarRouteChanged ? false : sidebarSize.manuallyResized,
+      width: sidebarRouteChanged || !sidebarSize.manuallyResized ? routeSidebarWidth : sidebarSize.width,
+    });
   }
   const sidebarWidth = normalizeSidebarWidth(
     sidebarSize.pathname === pathname ? sidebarSize.width : routeSidebarWidth,
@@ -238,8 +260,10 @@ export default function MainLayout() {
   const isMenuCollapsed = sidebarWidth === SIDEBAR_MIN_WIDTH;
   const resizeSidebar = (width: number) => setSidebarSize({
     pathname,
+    startsCompact: startsWithCompactSidebar,
+    manuallyResized: true,
     width,
-    normalWidth: isWorkflowDetail ? sidebarSize.normalWidth : width,
+    normalWidth: startsWithCompactSidebar ? sidebarSize.normalWidth : width,
   });
   const sidebarSearchRef = useRef<InputRef>(null);
   const sidebarHistoryRef = useRef<HTMLDivElement>(null);
@@ -362,6 +386,19 @@ export default function MainLayout() {
     checkFailed: agreementCheckFailed,
     retryCheck: retryAgreementCheck,
   } = useUserAgreementConsentGate(isLoggedIn);
+
+  useEffect(() => {
+    if (datasetOwner.current !== datasetUserKey) {
+      datasetOwner.current = datasetUserKey;
+      clearDataset();
+    }
+    if (!isLoggedIn || !knowledgeDatasetId) {
+      clearDataset();
+      return;
+    }
+    if (localSessionGate.loading || localSessionGate.error || agreementLoading || agreementCheckFailed) return;
+    void loadDataset(knowledgeDatasetId).catch(() => {});
+  }, [knowledgeDatasetId, datasetUserKey, isLoggedIn, localSessionGate.loading, localSessionGate.error, agreementLoading, agreementCheckFailed, loadDataset, clearDataset]);
 
   useEffect(() => {
     if (!localSessionGate.enabled) {
@@ -923,13 +960,24 @@ export default function MainLayout() {
     );
   }
 
+  if (knowledgeDatasetId && !knowledgeDatasetReady) {
+    const error = requestedDatasetId === knowledgeDatasetId ? datasetError : '';
+    return <div className="local-session-gate" role="status">
+      <div className="local-session-panel">
+        {(datasetLoading || !error) && <Spin />}
+        <div className="local-session-message">{error ? t('layout.knowledgeLoadFailed') : t('layout.loadingKnowledge')}</div>
+        {error && <Button type="primary" onClick={() => void loadDataset(knowledgeDatasetId, true).catch(() => {})}>{t('common.retry')}</Button>}
+      </div>
+    </div>;
+  }
+
   return (
     <Layout hasSider className="main-layout">
       <Sider
         id="main-navigation"
         width={sidebarWidth}
         trigger={null}
-        className={`sider-bar-style${isMenuCollapsed ? " is-collapsed" : ""}`}
+        className={`sider-bar-style${isMenuCollapsed ? " is-collapsed" : ""}${!sidebarRouteChanged && sidebarSize.manuallyResized ? " is-manually-resized" : ""}`}
       >
         <div className="sider-inner">
           <div className="sider-brand-row">
@@ -1321,7 +1369,6 @@ export default function MainLayout() {
         <SidebarResizeHandle key={pathname} width={sidebarWidth} onResize={resizeSidebar} />
       </Sider>
       <Layout className={contentClassName}>
-        {isLoggedIn && <WeChatNotificationMonitor key={notificationUserKey} userKey={notificationUserKey} />}
         <Content className="main-layout-body">
           <div className="sub-app-container">
             <Suspense fallback={<div className="main-layout-page-loading"><Spin /></div>}>

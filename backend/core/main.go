@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"lazymind/core/academic"
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
 	"lazymind/core/browser"
@@ -43,6 +44,7 @@ import (
 	"lazymind/core/localworkspace"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
+	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	coreproviderconnection "lazymind/core/providerconnection"
 	"lazymind/core/recovery"
@@ -770,6 +772,7 @@ func (e *startupError) Unwrap() error { return e.err }
 // ordered shutdown completes. It returns an error only when initialization or
 // the HTTP listener fails; a signal-triggered shutdown is a nil return.
 func run(ctx context.Context) error {
+	modelconfig.SetConversationResolver(chat.LoadConversationLLMConfig)
 	// textInitialize ACL text（text：postgres/sqlite/mysql）。
 	// textSet ACL_DB_DRIVER textDefaulttext sqlite，text ./acl.db。
 	driver := os.Getenv("ACL_DB_DRIVER")
@@ -798,7 +801,16 @@ func run(ctx context.Context) error {
 	}
 	modelprovider.MustLoadContextWindows(filepath.Join(".", "config", "model_context_windows.yaml"))
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
-	modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
+	upstreamCatalogPath := filepath.Join(".", "config", "upstream_model_catalog.json")
+	if modelprovider.HardcodedModelCatalogEnabled() {
+		// Legacy path. The YAML model lists and SeedModelCatalog stay in the tree.
+		modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
+	} else {
+		modelprovider.MustSeedUpstreamModelCatalog(ctx, db.DB, catalogPath, upstreamCatalogPath)
+		if err := modelprovider.LoadUpstreamModelRecognitionCatalog(upstreamCatalogPath); err != nil {
+			return &startupError{msg: "load upstream model recognition catalog", err: err}
+		}
+	}
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
 	modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath)
 
@@ -874,6 +886,7 @@ func run(ctx context.Context) error {
 	doc.RegisterPDFTranslationJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflow.RegisterExternalWorkflowTaskJob()
+	workflow.RegisterDocumentPublicationJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
 		AllowAllCapabilities: true,
@@ -905,7 +918,7 @@ func run(ctx context.Context) error {
 		// History samples have already been downloaded and imported above.
 		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, chat.ConversationTitleJobTypes...)
+		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType}, chat.ConversationTitleJobTypes...)
 		if !systemdeps.PythonComponentActive("rag") {
 			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
 				doc.MarketUpdateAllJobType, "document_pdf_translation")
@@ -916,7 +929,11 @@ func run(ctx context.Context) error {
 			PollInterval:    asyncConfig.PollInterval,
 			LockTTL:         asyncConfig.LockTTL,
 		})
-		backgroundDone = append(backgroundDone, runner.Done())
+		backgroundDone = append(backgroundDone, runner.Done(), academic.StartPaperPDFCleanup(runtimeCtx, store.DB()))
+		paperChatRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{academic.ChatLaunchJobType}, Concurrency: asyncConfig.Concurrency, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+		backgroundDone = append(backgroundDone, paperChatRunner.Done())
+		academic.RecoverPaperExpansions(runtimeCtx, store.DB())
+		backgroundDone = append(backgroundDone, workflow.StartDocumentImageExportCleanup(runtimeCtx))
 		directoryRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
 		backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, resourceupdate.StartIdle(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv()))

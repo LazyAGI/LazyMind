@@ -1,0 +1,18 @@
+.model-identity-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in srgb, var(--provider-line, #e6e9ef) 65%, transparent);
+  border-radius: 50%;
+  background: var(--ant-color-bg-container, #fff);
+  overflow: hidden;
+  vertical-align: middle;
+
+  img {
+    display: block;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+}

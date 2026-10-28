@@ -18,14 +18,6 @@ class InputResource:
     content_hash: str
     revision: int
 
-    def to_binding(self) -> dict[str, Any]:
-        """Project resource metadata onto the Core input-binding reference contract."""
-        return {
-            'resource_id': self.resource_id,
-            'revision': self.revision,
-            'content_hash': self.content_hash,
-        }
-
 
 class LazyMindHostFileAdapter:
     def __init__(self, base_url: str, user_id: str, *, transport: Any):

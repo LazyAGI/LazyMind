@@ -129,10 +129,11 @@ class RemoteExecutorClient:
         return str(value.get('path') or '')
 
     async def fail(self, client: httpx.AsyncClient, attempt: str, lease: str,
-                   message: str, *, post_step_checkpoint: Dict[str, Any] | None = None) -> httpx.Response:
+                   message: str, *, error_code: str = 'LAZYMIND_EXECUTION_FAILED',
+                   post_step_checkpoint: Dict[str, Any] | None = None) -> httpx.Response:
         payload = {
             'lease_token': lease,
-            'error_code': 'LAZYMIND_EXECUTION_FAILED',
+            'error_code': error_code,
             'result': {'error': message, **(
                 {'post_step_checkpoint': post_step_checkpoint} if post_step_checkpoint else {}
             )},

@@ -28,6 +28,7 @@ func TestOrganizerRecoveryAndRetryEndpoint(t *testing.T) {
 		{"lock_expired", `{}`, recoveryRetry},
 		{"model_config_changed", `{}`, recoveryRestart},
 		{"invalid_snapshot", `{}`, recoveryRestart},
+		{"summary_preparation_failed", `{}`, recoveryRestart},
 		{"connection_error", `{"llm":{"model":"old"}}`, recoveryRestart},
 		{"authentication_failed", `{}`, recoveryRetry},
 		{"authentication_failed", `{"llm":{"model":"old"}}`, recoveryRestart},

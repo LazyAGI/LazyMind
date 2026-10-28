@@ -5,6 +5,7 @@ import {
   extractAcademicReferences,
   enqueueReferenceImport,
   listAcademicImportQueue,
+  isAcademicImportActive,
   listAcademicReferences,
   previewReferenceImport,
   type AcademicReference,
@@ -43,7 +44,6 @@ export default function DocumentReferencesPanel({ documentId, targetDatasetId, i
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const autoExtractedFor = useRef("");
-  const restoredPresenceFor = useRef("");
   const handledSelection = useRef(0);
 
   const load = useCallback(async () => {
@@ -68,27 +68,38 @@ export default function DocumentReferencesPanel({ documentId, targetDatasetId, i
       value(item, "ArxivIDBase", "arxiv_id_base"),
     ].join(" ")).includes(keyword));
   }, [query, references]);
-  const activeQueueCount = useMemo(() => queue.filter((item) => item.status === "pending" || item.status === "running").length, [queue]);
+  const activeQueueCount = useMemo(() => queue.filter(isAcademicImportActive).length, [queue]);
+  const queueRequest = useRef(0);
+  const queueLoading = useRef(false);
+  const [queueRevision, setQueueRevision] = useState(0);
   const loadQueue = useCallback(async () => {
+    if (queueLoading.current) return;
+    queueLoading.current = true;
+    const request = ++queueRequest.current;
     try {
-      setQueue(await listAcademicImportQueue(targetDatasetId, documentId));
-      if (ids.length) setPreview(await previewReferenceImport(ids, targetDatasetId, false));
-    } catch { /* best effort */ }
+      const next = await listAcademicImportQueue(targetDatasetId, documentId);
+      const presence = ids.length ? await previewReferenceImport(ids, targetDatasetId, false) : [];
+      if (request !== queueRequest.current) return;
+      setQueue(next); setPreview(presence);
+    } catch { /* Preserve the last successful queue and presence. */ }
+    finally { if (request === queueRequest.current) queueLoading.current = false; }
   }, [documentId, ids, targetDatasetId]);
 
+  const queueActive = queue.some(isAcademicImportActive);
   useEffect(() => {
     void loadQueue();
-    const timer = window.setInterval(() => void loadQueue(), 2500);
-    return () => window.clearInterval(timer);
-  }, [loadQueue]);
-
+    return () => { queueRequest.current += 1; queueLoading.current = false; };
+  }, [loadQueue, queueRevision]);
   useEffect(() => {
-    if (!ids.length || restoredPresenceFor.current === documentId) return;
-    restoredPresenceFor.current = documentId;
-    void previewReferenceImport(ids, targetDatasetId, false)
-      .then(setPreview)
-      .catch(() => { restoredPresenceFor.current = ""; });
-  }, [documentId, ids, targetDatasetId]);
+    const onFocus = () => { void loadQueue(); };
+    window.addEventListener('focus', onFocus);
+    const timer = queueActive ? window.setInterval(onFocus, 12000) : undefined;
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      if (timer) window.clearInterval(timer);
+    };
+  }, [loadQueue, queueActive]);
+
 
   const extract = async (quiet = false) => {
     setLoading(true);
@@ -138,7 +149,7 @@ export default function DocumentReferencesPanel({ documentId, targetDatasetId, i
       try {
         const task = await enqueueReferenceImport(targetDatasetId, [documentId], matchedIds);
         message.success(`已加入下载队列（${task.total_items} 篇）`);
-        await loadQueue();
+        setQueueRevision(value => value + 1);
       } catch (error) {
         message.error(error instanceof Error ? error.message : "论文导入失败");
       }
@@ -191,7 +202,7 @@ export default function DocumentReferencesPanel({ documentId, targetDatasetId, i
     try {
       const result = await enqueueReferenceImport(targetDatasetId, [documentId], referenceIds);
       message.success(`已加入下载队列（${result.total_items} 篇）`);
-      await loadQueue();
+      setQueueRevision(value => value + 1);
     } catch (error) { message.error(error instanceof Error ? error.message : "创建导入任务失败"); }
   };
 

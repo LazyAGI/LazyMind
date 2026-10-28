@@ -397,6 +397,8 @@ export function workflowSnapshotSteps(sessionId: string, history: WorkflowRuntim
 
 // UI tab/slot declaration from workflow.yaml.
 export interface SlotDef {
+  /** Hide internal outputs from ordinary users; omitted means visible. */
+  user_visible?: boolean;
   id: string;
   label: string;
   type: "image" | "text" | "file";
@@ -479,6 +481,8 @@ export interface TabDef {
   composite_layout?: CompositePanelNode | CompositeLayoutNode[];
   /** Composite mode: global tab-bar position. */
   composite_tab_position?: 'top' | 'bottom' | 'left' | 'right';
+  /** Tabs in a group share page focus and reorder their lists atomically. */
+  page_group?: string;
   /**
    * Generic composite display rules declared by the workflow.
    * WorkflowPanel must not special-case workflow IDs; it only executes these rules.
@@ -515,6 +519,7 @@ export function filterWorkflowTabs(
   tabs: TabDef[] = [],
   slots: SlotRevision[] = [],
   readyMaterial?: string,
+  runtime?: Pick<WorkflowSession, 'steps' | 'projection'>,
 ): TabDef[] {
   const present = new Set(
     slots.filter((slot) => slot.selected).map((slot) => slot.slot),
@@ -522,6 +527,12 @@ export function filterWorkflowTabs(
   const visibilityReady = !readyMaterial || present.has(readyMaterial);
   return tabs.filter((tab) => {
     if (!tab.hide_when_material) return true;
+    const stepIds = new Set([tab.step_id ?? tab.id, ...(tab.status_step_ids ?? [])]);
+    const effective = (id: string) => runtime?.projection?.nodes?.[id]?.validity !== 'stale'
+      && !runtime?.projection?.stale?.includes(id);
+    if (runtime?.steps?.some(step => step.validity !== 'stale' && effective(step.step_id) && stepIds.has(step.step_id))
+      || [...(runtime?.projection?.current ?? []), ...(runtime?.projection?.past ?? [])]
+        .some(id => effective(id) && stepIds.has(id))) return true;
     if (!visibilityReady) return false;
     return !present.has(tab.hide_when_material);
   });
@@ -549,6 +560,11 @@ export interface CompositeBehavior {
 }
 
 export interface WorkflowUI {
+  /** Root slot metadata, including slots not referenced by a tab. */
+  slotDefinitions?: SlotDef[];
+  source_type?: string;
+  default_panel_mode?: 'compact' | 'expanded';
+  follow_mode?: { default?: 'following' | 'free' };
   extensions?: string[];
   group_downloads?: boolean;
   task_presentation?: { grouped?: boolean; hide_final_artifacts?: boolean; hidden_steps?: string[] };
@@ -569,9 +585,13 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
   if (!raw || typeof raw !== 'object') return {};
   const spec = raw as Record<string, unknown>;
   const rawUI = spec.ui;
-  if (!rawUI || typeof rawUI !== 'object' || Array.isArray(rawUI)) return {};
+  if (rawUI != null && (typeof rawUI !== 'object' || Array.isArray(rawUI))) {
+    return typeof spec.source_type === 'string' ? { source_type: spec.source_type } : {};
+  }
 
-  const ui = rawUI as WorkflowUI;
+  const ui = typeof spec.source_type === 'string'
+    ? { ...(rawUI ?? {}) as WorkflowUI, source_type: spec.source_type }
+    : (rawUI ?? {}) as WorkflowUI;
   const slotDefs = new Map<string, SlotDef>();
   if (Array.isArray(spec.slots)) {
     for (const value of spec.slots) {
@@ -582,16 +602,18 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
   }
 
   const name = typeof spec.name === 'string' ? spec.name : fallbackName;
+  const metadata = slotDefs.size ? { slotDefinitions: [...slotDefs.values()] } : {};
   if (!Array.isArray(ui.tabs)) {
-    return name === undefined ? ui : { ...ui, name };
+    return name === undefined && !slotDefs.size ? ui : { ...ui, ...metadata, ...(name === undefined ? {} : { name }) };
   }
   const hasWidgetConfigs = Boolean(ui.slots && Object.keys(ui.slots).length > 0);
   if (slotDefs.size === 0 && !hasWidgetConfigs) {
-    return name === undefined ? ui : { ...ui, name };
+    return name === undefined && !slotDefs.size ? ui : { ...ui, ...metadata, ...(name === undefined ? {} : { name }) };
   }
   return {
     ...ui,
     ...(name === undefined ? {} : { name }),
+    ...metadata,
     tabs: ui.tabs.map((tab) => ({
       ...tab,
       slots: Array.isArray(tab.slots)
@@ -668,7 +690,7 @@ interface WorkflowStore {
     baseRevision?: number,
     baseDraftVersion?: number,
   ) => Promise<number | undefined>;
-  reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number) => Promise<void>;
+  reorderSlotItems: (sessionId: string, slotId: string, newSortOrderSeq: number[], version: number, linkedOrders?: { slot_id: string; order: number[]; version: number }[]) => Promise<void>;
   getSlotVersions: (sessionId: string, slotId: string, listIndex: number) => Promise<SlotVersionEntry[]>;
   rollbackSlotItem: (sessionId: string, slotId: string, listIndex: number, revision: number) => Promise<void>;
   createSlotItem: (sessionId: string, slotId: string, value: any, caption?: string, insertBefore?: number, contentType?: string) => Promise<void>;
@@ -974,8 +996,8 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     return typeof revision === 'number' ? revision : undefined;
   },
 
-  reorderSlotItems: async (sessionId, slotId, newSortOrderSeq, version) => {
-    await WorkflowSessionApi().reorderSlotItems(sessionId, slotId, newSortOrderSeq, version);
+  reorderSlotItems: async (sessionId, slotId, newSortOrderSeq, version, linkedOrders) => {
+    await WorkflowSessionApi().reorderSlotItems(sessionId, slotId, newSortOrderSeq, version, undefined, linkedOrders);
   },
 
   getSlotVersions: async (sessionId, slotId, listIndex) => {

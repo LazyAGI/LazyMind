@@ -1,4 +1,5 @@
 import { useConversationUnreadStore } from "@/modules/chat/store/conversationUnread";
+import { useDatasetPermissionStore } from "@/modules/knowledge/store/dataset_permission";
 import { lazy, Suspense } from "react";
 import { ConfigProvider } from "antd";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   initialOnRemove: null as null | ((conversation: { conversation_id?: string }) => void),
   latestRecordListProps: null as any,
   refreshRecordList: vi.fn(),
+  getDataset: vi.fn(),
   fetchPreferences: vi.fn().mockResolvedValue({ document_directories_enabled: true }),
   listDirectoryBatches: vi.fn().mockResolvedValue([]),
 }));
@@ -28,6 +30,12 @@ vi.mock("@/modules/user/uiPreferencesApi", () => ({
  USER_UI_PREFERENCES_CHANGED_EVENT: "lazymind:user-ui-preferences-changed",
 }));
 vi.mock("@/modules/documentDirectories/api", () => ({ listBatches: mocks.listDirectoryBatches }));
+vi.mock("@/modules/knowledge/utils/request", () => ({ KnowledgeBaseServiceApi: () => ({ datasetServiceGetDataset: mocks.getDataset }) }));
+
+beforeEach(() => {
+  useDatasetPermissionStore.getState().clearDataset();
+  mocks.getDataset.mockReset().mockImplementation(async ({ dataset }: { dataset: string }) => ({ data: { dataset_id: dataset, scene: dataset === "papers" ? "academic_papers" : "general", type: "DATASET_TYPE_TEXT" } }));
+});
 
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
@@ -289,18 +297,25 @@ describe("MainLayout resizable navigation", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    useDatasetPermissionStore.getState().clearDataset();
     mocks.initialOnRemove = null;
     mocks.latestRecordListProps = null;
     mocks.refreshRecordList.mockReset();
   });
 
-  function renderLayout(path = "/agent/chat/home") {
+  function renderLayout(path = "/agent/chat/home", loaded = true) {
+    const datasetId = path.match(/^\/lib\/knowledge\/(?:detail|knowledge)\/([^/]+)/)?.[1];
+    if (loaded && datasetId && useDatasetPermissionStore.getState().currentDataset?.dataset_id !== datasetId) {
+      useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: datasetId, scene: datasetId === "papers" ? "academic_papers" : "general", type: "DATASET_TYPE_TEXT" });
+    }
     return render(
       <MemoryRouter initialEntries={[path]}>
         <ConfigProvider theme={{ token: { motion: false } }}>
         <MainLayout />
         <LocationProbe />
         <Link to="/memory-management/workflows/draft-1">Open workflow</Link>
+        <Link to="/lib/knowledge/detail/papers">Open papers</Link>
+        <Link to="/lib/knowledge/knowledge/papers/paper-1">Read paper</Link>
         <Link to="/task-center">Open tasks</Link>
         </ConfigProvider>
       </MemoryRouter>,
@@ -322,6 +337,81 @@ describe("MainLayout resizable navigation", () => {
     renderLayout(path);
     expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
     expect(screen.getByTestId("record-list")).toBeVisible();
+  });
+
+  it.each(["/lib/knowledge/detail/papers", "/lib/knowledge/knowledge/papers/paper-1"])("starts paper pages collapsed on %s but allows manual expansion", async (path) => {
+    localStorage.setItem("lazymind.paper-library.ids", JSON.stringify(["papers"]));
+    renderLayout(path);
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
+    fireEvent.click(screen.getByRole("button", { name: "layout.expandMenu" }));
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
+    fireEvent.click(screen.getByRole("link", { name: "Open tasks" }));
+    fireEvent.click(screen.getByRole("link", { name: "Open papers" }));
+    await waitFor(() => expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72"));
+  });
+
+  it("preserves the normal sidebar width outside paper libraries", async () => {
+    localStorage.setItem("lazymind.paper-library.ids", JSON.stringify(["papers"]));
+    renderLayout("/lib/knowledge/detail/regular");
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
+    fireEvent.keyDown(resizeHandle(), { key: "ArrowLeft" });
+    fireEvent.click(screen.getByRole("link", { name: "Open papers" }));
+    await waitFor(() => expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72"));
+    fireEvent.click(screen.getByRole("button", { name: "layout.expandMenu" }));
+    fireEvent.click(screen.getByRole("link", { name: "Open tasks" }));
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "256");
+  });
+
+  it("keeps the sidebar collapsed when opening a paper and returning to its library", async () => {
+    localStorage.setItem("lazymind.paper-library.ids", JSON.stringify(["papers"]));
+    renderLayout("/lib/knowledge/detail/papers");
+    fireEvent.click(screen.getByRole("link", { name: "Read paper" }));
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
+    fireEvent.click(screen.getByRole("button", { name: "layout.expandMenu" }));
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
+    fireEvent.click(screen.getByRole("link", { name: "Open papers" }));
+    await waitFor(() => expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72"));
+    fireEvent.click(screen.getByRole("link", { name: "Open tasks" }));
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
+  });
+
+  it.each(["/lib/knowledge/detail/papers", "/lib/knowledge/knowledge/papers/paper-1"])("waits for the server kind before showing navigation on %s and preserves manual expansion", async (path) => {
+    let finish!: (value: unknown) => void;
+    mocks.getDataset.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    renderLayout(path, false);
+    expect(screen.queryByRole("separator", { name: "layout.resizeSidebar" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("layout.loadingKnowledge");
+    await act(async () => finish({ data: { dataset_id: "papers", scene: "academic_papers", type: "DATASET_TYPE_TEXT" } }));
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72");
+    fireEvent.click(screen.getByRole("button", { name: "layout.expandMenu" }));
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
+    act(() => useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", scene: "academic_papers", type: "DATASET_TYPE_TEXT" }));
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
+    fireEvent.click(screen.getByRole("link", { name: "Open tasks" }));
+    fireEvent.click(screen.getByRole("link", { name: "Open papers" }));
+    await waitFor(() => expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72"));
+  });
+
+  it.each(["/lib/knowledge/detail/papers", "/lib/knowledge/knowledge/papers/paper-1"])("uses an explicit server document kind over a stale paper marker on %s", (path) => {
+    localStorage.setItem("lazymind.paper-library.ids", JSON.stringify(["papers"]));
+    useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", scene: "general", type: "DATASET_TYPE_TEXT" });
+    renderLayout(path);
+    expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272");
+  });
+
+  it("does not apply a different dataset's server kind to the current route", async () => {
+    useDatasetPermissionStore.getState().setCurrentDataset({ dataset_id: "papers", scene: "academic_papers", type: "DATASET_TYPE_TEXT" });
+    renderLayout("/lib/knowledge/detail/regular", false);
+    expect(screen.queryByRole("separator", { name: "layout.resizeSidebar" })).not.toBeInTheDocument();
+    await waitFor(() => expect(resizeHandle()).toHaveAttribute("aria-valuenow", "272"));
+  });
+
+  it("offers a retry when the knowledge base cannot load and shows the correct initial width after retry", async () => {
+    mocks.getDataset.mockRejectedValueOnce(new Error("offline"));
+    renderLayout("/lib/knowledge/detail/papers", false);
+    fireEvent.click(await screen.findByRole("button", { name: "common.retry" }));
+    await waitFor(() => expect(resizeHandle()).toHaveAttribute("aria-valuenow", "72"));
+    expect(mocks.getDataset).toHaveBeenCalledTimes(2);
   });
 
   it.each([

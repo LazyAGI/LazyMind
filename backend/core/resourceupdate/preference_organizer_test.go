@@ -139,7 +139,7 @@ func TestPreferenceOrganizerWorkerPersistsStructuredResult(t *testing.T) {
 	for _, outcome := range []string{"organized_with_remaining", "budget_exhausted"} {
 		t.Run(outcome, func(t *testing.T) {
 			db := newResourceUpdateTestDB(t)
-			now := time.Date(2026, 9, 2, 1, 0, 0, 0, time.UTC)
+			now := time.Now().UTC()
 			requestJSON, err := json.Marshal(PreferenceOrganizerRequest{})
 			if err != nil {
 				t.Fatal(err)

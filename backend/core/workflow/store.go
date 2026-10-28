@@ -340,7 +340,7 @@ func prepareContinuation(ctx context.Context, db *gorm.DB, sessionID string) (bo
 // failIdleSession fences late driver callbacks against user pause, completion,
 // and a newer dispatch. A failed controller must never manufacture an approval.
 func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		busy := tx.Model(&orm.WorkflowSessionStep{}).Select("1").Where("session_id = ? AND validity <> ? AND status IN ?", sessionID, "stale", []string{"pending", "queued", "claimed", "running"})
 		result := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status = ?", sessionID, SessionStatusActive).
 			Where("NOT EXISTS (?)", busy).Updates(map[string]any{"status": SessionStatusFailed, "updated_at": time.Now().UTC(), "state_version": gorm.Expr("state_version + 1")})
@@ -356,11 +356,15 @@ func failIdleSession(ctx context.Context, db *gorm.DB, sessionID string) error {
 		}
 		return appendSessionStateEvent(tx, session, "workflow.patch", json.RawMessage(`{"status":"failed"}`))
 	})
+	if err == nil && OnAcademicRuntimeChanged != nil {
+		OnAcademicRuntimeChanged(ctx, db, sessionID)
+	}
+	return err
 }
 
 // UpdateSessionStatus transitions a session to a new status.
 func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status string) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Model(&orm.WorkflowSession{}).Where("id = ? AND status <> ? AND status <> ?", sessionID, status, "pausing")
 		if status == SessionStatusWaiting {
 			// Delayed pause callbacks cannot overwrite a terminal session or a
@@ -389,6 +393,10 @@ func UpdateSessionStatus(ctx context.Context, db *gorm.DB, sessionID, status str
 		payload, _ := json.Marshal(map[string]any{"status": status})
 		return appendSessionStateEvent(tx, session, "workflow.patch", payload)
 	})
+	if err == nil && OnAcademicRuntimeChanged != nil {
+		OnAcademicRuntimeChanged(ctx, db, sessionID)
+	}
+	return err
 }
 
 // UpdateSessionCurrentStep updates current_step_id for a session.
@@ -855,6 +863,7 @@ func GetSlotOrder(ctx context.Context, db *gorm.DB, sessionID, slotID string) (*
 // version is used for optimistic locking; a mismatch returns ErrConflict.
 var (
 	ErrConflict             = errors.New("version conflict")
+	ErrInvalidOrder         = errors.New("order must be a complete permutation")
 	ErrRevisionRequired     = errors.New("revision required")
 	ErrDraftVersionConflict = errors.New("draft version conflict")
 	ErrDraftVersionRequired = errors.New("draft version required")
@@ -887,10 +896,14 @@ func ReorderSlot(ctx context.Context, db *gorm.DB,
 		for _, v := range currentListIndexes {
 			currentSet[v] = struct{}{}
 		}
+		if len(newListIndexOrder) != len(currentListIndexes) {
+			return ErrInvalidOrder
+		}
 		for _, li := range newListIndexOrder {
 			if _, ok := currentSet[li]; !ok {
-				return errors.New("order list contains hidden or unknown list_index")
+				return ErrInvalidOrder
 			}
+			delete(currentSet, li)
 		}
 		newList, _ := json.Marshal(newListIndexOrder)
 		return tx.Model(&orm.WorkflowSlotOrder{}).
@@ -1808,4 +1821,28 @@ func appendSessionStateEvent(tx *gorm.DB, session orm.WorkflowSession, eventType
 	return tasktiming.PersistWorkflowEvent(tx, &orm.WorkflowEvent{SessionID: session.ID, OwnerUserID: session.CreateUserID,
 		ContractVersion: "workflow.v1", EventType: eventType, EntityID: session.ID,
 		StateVersion: session.StateVersion, PayloadJSON: payload, CreatedAt: time.Now().UTC()})
+}
+
+// SlotOrderChange identifies a list by stable item IDs, never visual page numbers.
+type SlotOrderChange struct {
+	SlotID  string `json:"slot_id"`
+	Order   []int  `json:"order"`
+	Version int    `json:"version"`
+}
+
+// ReorderSlots commits linked composite lists together, or rolls all of them back.
+func ReorderSlots(ctx context.Context, db *gorm.DB, sessionID string, changes []SlotOrderChange) error {
+	changes = append([]SlotOrderChange(nil), changes...)
+	sort.Slice(changes, func(i, j int) bool { return changes[i].SlotID < changes[j].SlotID })
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for i, change := range changes {
+			if change.SlotID == "" || (i > 0 && changes[i-1].SlotID == change.SlotID) {
+				return ErrInvalidOrder
+			}
+			if err := ReorderSlot(ctx, tx, sessionID, change.SlotID, change.Order, change.Version); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

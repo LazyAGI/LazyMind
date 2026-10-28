@@ -9,7 +9,7 @@ import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { reconcileWorkflowTasks } from "@/modules/chat/utils/workflowTaskStatus";
 import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
-import { useMemo, useState, useRef, useCallback, useEffect, useId } from "react";
+import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Image, Progress, Tooltip } from "antd";
@@ -34,6 +34,7 @@ import {
   TaskStatus,
   WritingSubtask,
   useTaskCenterStore,
+  sameTaskModelCall,
 } from "@/modules/chat/store/taskCenter";
 import {
   basenameFromPath,
@@ -53,7 +54,8 @@ import {
   type OrdinaryTaskState,
   type OrdinaryTaskTimeline,
 } from "./taskTimeline";
-import { TaskProcessTimeline } from "./TaskProcessTimeline";
+import { TaskModelSwitchSummary, TaskProcessTimeline } from "./TaskProcessTimeline";
+import { getChatConversationPath } from "@/modules/chat/constants/chat";
 import { TaskArtifactList, type ArtifactSourceContext } from "./TaskArtifactList";
 import type { OrdinaryCollection, OrdinaryRunView } from "@/modules/chat/types/ordinaryTask";
 import "./index.scss";
@@ -220,7 +222,7 @@ function ExecutionLog({ log, isRunning }: { log: TaskLogEntry[]; isRunning: bool
   // Merge consecutive same-type text/think entries to avoid per-token line breaks during streaming.
   const mergedLog = log.reduce<TaskLogEntry[]>((acc, entry) => {
     const prev = acc[acc.length - 1];
-    if (prev && (entry.type === "text" || entry.type === "think") && prev.type === entry.type) {
+    if (prev && (entry.type === "text" || entry.type === "think") && prev.type === entry.type && sameTaskModelCall(prev, entry)) {
       acc[acc.length - 1] = { ...prev, content: prev.content + entry.content };
       return acc;
     }
@@ -692,6 +694,14 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
   const sourceContext = artifactSourceContext(item);
   const { sources, context } = sourceContext;
   return <SourceImportProvider context={context} sources={sources}><div className="ordinary-task-details" aria-busy={loadingCollection !== null}>
+    {view?.failure_code && ["model_fallback_exhausted", "model_context_not_fit"].includes(view.failure_code) && (
+      <div className="ordinary-stale-warning" role="alert">
+        <span>{t(`chat.runStatus.codes.${view.failure_code}`)}</span>
+        <a href={`/settings?${new URLSearchParams({ section: "models", view: "providers",
+          return_to: getChatConversationPath(view.conversation_id ?? item.task?.conversation_id ?? ""),
+        })}`}>{t("chat.checkModelSettings")}</a>
+      </div>
+    )}
     <TaskProcessTimeline steps={view?.process_steps ?? []} legacyPlan={view ? view.plan_steps : item.task?.plan_steps}
       state={item.state} progress={view ? view.progress_pct : item.task?.progress_pct} />
     {more("process_steps")}
@@ -706,7 +716,8 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
     <OrdinaryReferenceSources operations={view?.knowledge_operations} sources={view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? []} />
     {more("sources")}
     {more("knowledge_operations")}
-    <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()} />
+    <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()}
+      workflow={view?.session_id ? { sessionId: view.session_id, stepId: view.workflow_step_id || item.step?.step_id || '' } : undefined} />
     {more("stage_artifacts")}
     {loadError && <div role="alert" className="ordinary-stale-warning">{t("taskCenter.ordinaryLoadError")}<button type="button" onClick={() => void reload().catch(() => undefined)}>{t("taskCenter.ordinaryReload")}</button></div>}
   </div></SourceImportProvider>;
@@ -743,6 +754,7 @@ function OrdinaryTaskCard({
               </Tooltip>
             )}
           </span>
+          {item.ordinary?.model_switch && <span className="ordinary-thinking-copy"><TaskModelSwitchSummary record={item.ordinary.model_switch} /></span>}
           <span className="ordinary-task-meta">
             {ordinaryTaskDurationSeconds(item) !== undefined && (
               <Tooltip title={t("taskCenter.ordinaryDurationExplanation")}>
@@ -1092,7 +1104,12 @@ function OrdinaryTaskCenter({
             })}
           </ol>}
           {/* A declared extension may own final deliverable presentation. */}
-          {!hideFinalArtifacts && !hideGroupedArtifacts && <TaskArtifactList artifacts={finalArtifacts} final sourceContexts={sourceContexts} onReload={onReloadArtifacts} />}
+          {!hideFinalArtifacts && !hideGroupedArtifacts && <TaskArtifactList artifacts={finalArtifacts} final sourceContexts={sourceContexts} onReload={onReloadArtifacts}
+            workflowForArtifact={artifact => {
+              const owner = timeline.items.find(item => item.ordinary?.display_key === artifact.producer_display_key);
+              const view = owner?.ordinary;
+              return view?.session_id ? { sessionId: view.session_id, stepId: view.workflow_step_id || owner?.step?.step_id || '' } : undefined;
+            }} />}
         </>
       )}
     </div>

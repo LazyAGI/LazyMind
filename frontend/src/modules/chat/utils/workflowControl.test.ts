@@ -3,7 +3,7 @@ import { controlActions, deliveryBanner, deliveryPending, overlayInfoBanner, REV
 
 const state = (): WorkflowControlView => ({
   protocol: 'workflow.control.v1', session_id: 'run-1', state_version: 3, continuation: 'awaiting_user',
-  admission: { can_begin: false }, active_executions: 0, active_execution_ids: [], binding: { bound: true, generation: 1 },
+  admission: { can_begin: false }, active_executions: 0, active_execution_ids: [], binding: { bound: true },
   reviews: [{ id: 'review-1', execution_id: 'attempt-1', step_id: 'write', status: 'pending', version: 1, manifest_hash: 'hash-1' }],
   delivery: null, available_actions: ['confirm', 'confirm_and_continue', 'stop'],
 });
@@ -81,7 +81,7 @@ it('keeps routine host delivery silent while preserving actionable notices', () 
 
 it('explains Codex cancellation limits without reporting that Workflow stop failed', () => {
   const delivery = { id: 'cancel', kind: 'cancel' as const, status: 'failed' };
-  const binding = { bound: true, generation: 2, provider: 'codex' };
+  const binding = { bound: true, provider: 'codex' };
   expect(overlayInfoBanner('', delivery, binding)).toEqual({ key: 'chat.workflowControlCodexStopped', tone: 'info' });
   expect(deliveryBanner({ ...delivery, kind: 'continue' }, binding)?.tone).toBe('warning');
   expect(deliveryBanner(delivery, { ...binding, provider: 'deepseek-harness' })?.tone).toBe('warning');

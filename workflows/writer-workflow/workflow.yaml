@@ -106,126 +106,157 @@ steps:
 
 slots:
   - id: writer_command
+    user_visible: false
     label: Writer Command
     type: file
     cardinality: single
   - id: writing_task
+    user_visible: false
     label: Writing Task
     type: file
     cardinality: single
   - id: media_assets
+    user_visible: false
     label: Available Media
     type: file
     cardinality: single
   - id: resolved_media_assets
+    user_visible: false
     label: Resolved Media
     type: file
     cardinality: single
   - id: visual_plan
+    user_visible: false
     label: Visual Plan
     type: file
     cardinality: single
   - id: resource_profiles
+    user_visible: false
     label: Resource Profiles
     type: file
     cardinality: single
   - id: writing_context
+    user_visible: false
     label: Writing Context
     type: file
     cardinality: single
   - id: source_document
+    user_visible: false
     label: Source Document
     type: file
     cardinality: single
   - id: target_document
+    user_visible: false
     label: Cloud Document Target
     type: file
     cardinality: single
 
   - id: outline_document
+    user_visible: true
     label: Outline
     type: file
     cardinality: single
 
   - id: outline_revision_task
+    user_visible: false
     label: Outline Revision Task
     type: file
     cardinality: single
   - id: outline_locate_result
+    user_visible: false
     label: Outline Located Blocks
     type: file
     cardinality: single
   - id: outline_modify_plan
+    user_visible: false
     label: Outline Modification Plan
     type: file
     cardinality: single
   - id: outline_revision_set
+    user_visible: false
     label: Outline Revision Set
     type: file
     cardinality: single
   - id: outline_revision_result
+    user_visible: false
     label: Outline Revision Result
     type: file
     cardinality: single
   - id: outline_write_result
+    user_visible: false
     label: Outline Cloud Sync Result
     type: file
     cardinality: single
 
   - id: section_instructions
+    user_visible: false
     label: Section Instructions
     type: file
     cardinality: single
   - id: short_writing_plan
+    user_visible: false
     label: Short Writing Plan
     type: file
     cardinality: single
   - id: draft_blocks
+    user_visible: false
     label: Draft Blocks
     type: file
     cardinality: list
     ordered: true
   - id: draft_document
+    user_visible: true
     label: Full Draft
     type: file
     cardinality: single
   - id: flat_draft_document
+    user_visible: true
     label: Flat Draft
     type: file
     cardinality: single
   - id: flat_visual_plan
+    user_visible: false
     label: Flat Visual Plan
     type: file
     cardinality: single
   - id: flat_resolved_media_assets
+    user_visible: false
     label: Flat Resolved Media
     type: file
     cardinality: single
   - id: document_revision_task
+    user_visible: false
     label: Document Revision Task
     type: file
     cardinality: single
   - id: document_locate_result
+    user_visible: false
     label: Document Located Blocks
     type: file
     cardinality: single
   - id: document_modify_plan
+    user_visible: false
     label: Document Modification Plan
     type: file
     cardinality: single
   - id: document_revision_set
+    user_visible: false
     label: Document Revision Set
     type: file
     cardinality: single
   - id: document_revision_result
+    user_visible: false
     label: Document Revision Result
     type: file
     cardinality: single
   - id: document_write_result
+    user_visible: false
     label: Document Cloud Sync Result
     type: file
     cardinality: single
 ui:
+  follow_mode:
+    default: following
   slots:
     outline_document:
       widgetType: writer-document

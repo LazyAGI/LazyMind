@@ -838,6 +838,10 @@ func OnSubAgentDone(
 	}
 
 	if sessionCompleted {
+		// Route freezing can complete the session without UpdateSessionStatus.
+		// Publish the committed terminal state so domain projections (including
+		// paper expansion results) also catch up after a manual retry.
+		NotifyWorkflowRuntimeUpdated(ctx, db, pctx.SessionID, taskID, "completed")
 		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "succeeded")
 		clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
 		onSSE("workflow_completed", map[string]any{
@@ -1002,9 +1006,15 @@ func advanceAutoMode(
 		attempt = step.Attempt
 	}
 
-	llmConfig, configErr := modelconfig.LoadLLMConfig(ctx, db, pctx.UserID)
+	llmConfig, configErr := modelconfig.LoadConversationLLMConfig(ctx, db, pctx.UserID, pctx.ConvID)
 	if configErr != nil {
 		fmt.Printf("[Workflow] load DriverAgent LLM config failed user=%s err=%v\n", pctx.UserID, configErr)
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		onSSE("step_waiting", map[string]any{
+			"session_id": pctx.SessionID, "step_id": pctx.StepID,
+			"reason": "model_config_unavailable",
+		})
+		return
 	}
 	acceptance, driverPrompt := loadWorkflowDriverPolicy(ctx, db, pctx.SessionID, pctx.StepID)
 	artifactsSummary, _ := buildWorkflowArtifactsSummary(ctx, db, pctx.SessionID, pctx.StepID)

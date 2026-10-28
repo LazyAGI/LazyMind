@@ -496,6 +496,18 @@ export function WorkflowSessionApi() {
     pauseSession(sessionId: string) {
       return axiosInstance.post(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}:pause`);
     },
+    createDocumentImageExport(artifactId: string, body: import('@/api/generated/core-client').DocumentImageExportRequest, options?: PublicationRequestOptions) {
+      return axiosInstance.post<import('@/api/generated/core-client').DocumentImageExportResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/image-exports`, body, { silentError: true, ...options } as PublicationRequestOptions);
+    },
+    readDocumentImageExport(artifactId: string, exportId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<import('@/api/generated/core-client').DocumentImageExportResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/image-exports/${encodeURIComponent(exportId)}`, { silentError: true, ...options } as PublicationRequestOptions);
+    },
+    retryDocumentImageExport(artifactId: string, exportId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.post<import('@/api/generated/core-client').DocumentImageExportResponse>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/image-exports/${encodeURIComponent(exportId)}:retry`, undefined, { silentError: true, ...options } as PublicationRequestOptions);
+    },
+    downloadDocumentImages(artifactId: string, exportId: string, fileId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<Blob>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/image-exports/${encodeURIComponent(exportId)}/files/${encodeURIComponent(fileId)}`, { silentError: true, ...options, responseType: 'blob' } as PublicationRequestOptions);
+    },
     getControl(sessionId: string, options?: RawAxiosRequestConfig) {
       return axiosInstance.get(`${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/control`, options);
     },
@@ -507,6 +519,12 @@ export function WorkflowSessionApi() {
     },
     publishDocument(artifactId: string, body: DocumentPublishRequest, options?: RawAxiosRequestConfig) {
       return axiosInstance.post<{ data: DocumentPublishResult }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/document-actions:execute`, body, options);
+    },
+    getPublicationTargets(artifactId: string, options?: PublicationRequestOptions) {
+      return axiosInstance.get<{ data: import('@/api/generated/core-client').DocumentPublicationGroupState }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publications`, options);
+    },
+    createPublicationGroup(artifactId: string, body: import('@/api/generated/core-client').DocumentPublicationGroupRequest, options?: PublicationRequestOptions) {
+      return axiosInstance.post<{ data: import('@/api/generated/core-client').DocumentPublicationGroupState }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publications`, body, options);
     },
     getPublicationForArtifact(artifactId: string, options?: PublicationRequestOptions) {
       return axiosInstance.get<{ data: DocumentPublicationLookup }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publication`, options);
@@ -785,10 +803,10 @@ export function WorkflowSessionApi() {
         options,
       );
     },
-    reorderSlotItems(sessionId: string, slotId: string, order: number[], version: number, options?: RawAxiosRequestConfig) {
+    reorderSlotItems(sessionId: string, slotId: string, order: number[], version: number, options?: RawAxiosRequestConfig, linkedOrders?: { slot_id: string; order: number[]; version: number }[]) {
       return axiosInstance.patch(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/order`,
-        { order, version },
+        { order, version, linked_orders: linkedOrders },
         options,
       );
     },

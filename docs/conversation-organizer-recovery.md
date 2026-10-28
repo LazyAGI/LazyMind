@@ -14,6 +14,7 @@ Core 的 `conversationgroup/recovery.go` 分别判断自动重试与用户恢复
 | 输出校验 | invalid_output | Algorithm 本地最多三轮；Core 本批方案最多三轮，不额外自动重启 job | 重置修复预算，保留已提交进度；已有待审核方案和审核页进度不丢弃 |
 | 范围无法收敛 | scope_audit_unresolved | 达到修复及保守模式上限后停止 | 保留已提交目录与拒绝证据，清除未提交方案及其新组映射，从保守模式重试本批 |
 | 配置或快照变化 | model_config_changed、invalid_snapshot | 否 | 新建任务，使用当前配置与会话范围 |
+| 摘要准备后无可用会话 | summary_preparation_failed | 否 | 重新整理，重新冻结当前会话并准备摘要；保留原任务的逐条失败原因 |
 | 容量 | input_too_large、output_too_large | batch 和 audit 都先减半；最小一条仍失败后停止 | 提示处理容量；更换有效配置后重新整理 |
 | 配置、请求、过滤与不明确供应商错误 | model_configuration、invalid_task_config、not_found、invalid_request、token_limit、input_filtered、output_filtered、protocol_error、provider_rejected、conflict、unprocessable_entity | 否 | 暂不可恢复，处理具体原因；有效配置变化后可重新整理 |
 | 未细分内部错误 | invalid_payload、run_not_found、handler_not_found、handler_failed、preparation_failed、incremental_step_failed、apply_failed、update_failed、step_limit、model_failed、worker_failed、worker_exited、未知或空码 | 否 | 不盲目重放旧状态，也不默认提供重新整理；先检查任务 |

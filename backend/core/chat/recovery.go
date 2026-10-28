@@ -309,6 +309,7 @@ func ArchiveConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation_id": conversationID, "newly_archived": newlyArchived, "archived_at": conversation.ArchivedAt,
+		"archived_ids": archivedConversationIDs,
 	})
 }
 

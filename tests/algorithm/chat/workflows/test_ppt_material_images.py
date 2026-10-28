@@ -32,15 +32,12 @@ def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
     assert ppt_slot == {
         **image_slot,
         'label': 'Material Images',
+        'exposed': False,
     }
 
     materials_tab = next(tab for tab in ppt['ui']['tabs'] if tab['id'] == 'materials')
     assert materials_tab['layout'] == 'list'
-    assert materials_tab['slots'] == [
-        {'id': 'uploaded_materials'},
-        {'id': 'material_summary'},
-        {'id': 'material_images'},
-    ]
+    assert materials_tab['slots'] == [{'id': 'material_summary'}]
 
 
 def test_ppt_analysis_and_material_summary_share_markdown_widget():

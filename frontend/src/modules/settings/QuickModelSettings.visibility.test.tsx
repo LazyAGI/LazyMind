@@ -145,4 +145,30 @@ describe("QuickModelSettings collaboration visibility", () => {
     expect(mocks.confirm).toHaveBeenCalledTimes(1);
     expect(mocks.saveSelectedModels).not.toHaveBeenCalled();
   });
+
+  it("uses canonical supplier IDs when optional legacy fields and group names are absent", async () => {
+    const current = {
+      ...currentEmbedding,
+      provider_id: "canonical-provider",
+      provider_group_id: "canonical-record",
+      user_model_provider_id: undefined,
+      user_model_provider_group_id: undefined,
+      group_name: undefined,
+    };
+    const next = { ...current, id: "embedding-next", name: "Next embedding" };
+    mocks.getSelectedModels.mockResolvedValue({ data: { selections: [current] } });
+    mocks.getModels.mockImplementation(({ modelType }: { modelType: string }) =>
+      Promise.resolve({ data: { models: modelType === "embed_main" ? [current, next] : [] } }),
+    );
+    renderSettings();
+    const selects = await screen.findAllByRole("combobox");
+    await waitFor(() => expect(selects[1]).toHaveValue("canonical-provider:canonical-record:embedding-current"));
+    expect(screen.getByRole("option", { name: "Current embedding · Provider" })).toBeInTheDocument();
+    fireEvent.change(selects[1], { target: { value: "canonical-provider:canonical-record:embedding-next" } });
+    await waitFor(() => expect(mocks.saveSelectedModels).toHaveBeenCalledWith({
+      setSelectedModelsOpenAPIRequest: {
+        selections: [{ model_key: "embed_main", model_id: "embedding-next" }],
+      },
+    }));
+  });
 });

@@ -1,0 +1,9 @@
+{
+  "concurrent_conversions": 2,
+  "pdf_sizes": [
+    9930,
+    9930
+  ],
+  "seconds": 1.45,
+  "boundary": "temporary libreoffice alias to installed soffice; not default deployment; not Windows"
+}

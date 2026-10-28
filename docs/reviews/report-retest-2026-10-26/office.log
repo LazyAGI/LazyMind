@@ -1,0 +1,3 @@
+running libreoffice convert source=/var/folders/_y/j57vhvl51pv_0zvkxnylzhr9bt4mzf/T/tmpqlbonln9/中文 测试.docx target=/var/folders/_y/j57vhvl51pv_0zvkxnylzhr9bt4mzf/T/tmpqlbonln9/out-1.pdf
+running libreoffice convert source=/var/folders/_y/j57vhvl51pv_0zvkxnylzhr9bt4mzf/T/tmpqlbonln9/中文 测试.docx target=/var/folders/_y/j57vhvl51pv_0zvkxnylzhr9bt4mzf/T/tmpqlbonln9/out-2.pdf
+{'concurrent_conversions': 2, 'pdf_sizes': [9930, 9930], 'seconds': 1.45, 'boundary': 'temporary libreoffice alias to installed soffice; not default deployment; not Windows'}

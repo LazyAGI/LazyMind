@@ -7,6 +7,7 @@ from lazymind.chat.workflow.client import (
     AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError,
 )
 from lazymind.chat.workflow.file_adapter import LazyMindHostFileAdapter
+from lazymind.workflow_sdk.input_bindings import normalize_input_reference
 
 
 def response(status, body):
@@ -63,7 +64,7 @@ def test_host_file_adapter_returns_only_stable_resource_fields(tmp_path: Path):
     assert resource.name == source.name
     assert resource.mime_type == 'text/plain'
     assert resource.size == 12
-    assert resource.to_binding() == {'resource_id': 'res1', 'revision': 1, 'content_hash': 'sha256:abc'}
+    assert normalize_input_reference(resource) == {'resource_id': 'res1', 'revision': 1, 'content_hash': 'sha256:abc'}
     assert not hasattr(resource, 'path')
     assert not hasattr(resource, 'url')
     assert str(tmp_path) not in repr(resource)
@@ -81,7 +82,7 @@ def test_imported_text_preparation_sends_binding_reference_not_resource_metadata
     adapter = LazyMindHostFileAdapter('http://core', 'u1', transport=transport)
     resource = adapter.import_text('request.txt', 'test me')
     result = adapter.client.prepare_workflow('novel-chapter-generation', input_bindings={
-        'user_request': resource.to_binding(),
+        'user_request': normalize_input_reference(resource),
     }, command_id='prepare-1')
 
     assert result.result['preparation_id'] == 'prepare-1'

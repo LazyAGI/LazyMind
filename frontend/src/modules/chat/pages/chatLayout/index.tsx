@@ -1,4 +1,5 @@
-import { FC, type ReactNode, type CSSProperties, useRef, useState, useEffect, useCallback, useMemo } from "react";
+import AcademicChatBanner from "@/modules/knowledge/components/PaperTasks/ChatBanner";
+import { FC, type ReactNode, type CSSProperties, useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import { Alert, Button, Dropdown, message, Space } from "antd";
@@ -51,11 +52,12 @@ import {
   CHAT_SELECT_CONVERSATION_EVENT,
   CHAT_OPEN_ARTIFACT_PANEL_EVENT,
   WORKFLOW_PANEL_EXPANDED_EVENT,
-  WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
   type ChatOpenArtifactPanelDetail,
 } from "@/modules/chat/constants/chat";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
+import ArtifactPreview from "@/modules/chat/components/ArtifactPreview";
+import { ArtifactPreviewContext, useArtifactPreviewController } from "@/modules/chat/components/ArtifactPreview/context";
 import ArtifactPanel from "@/modules/chat/components/ArtifactPanel";
 import TaskCenter from "@/modules/chat/components/TaskCenter";
 import { taskCenterDisplayCount } from "@/modules/chat/components/TaskCenter/taskTimeline";
@@ -139,6 +141,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     initPendingConversationSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
+  const [academicTask, setAcademicTask] = useState(false);
+  const [waitingForAcademicLaunch, setWaitingForAcademicLaunch] = useState(false);
+  const artifactPreview = useArtifactPreviewController(routeConversationId || sessionId);
   const fork = useForkConversation(routeConversationId || sessionId);
   const location = useLocation();
   const anchorHistoryId = new URLSearchParams(location.search).get("anchor_history_id") || undefined;
@@ -202,17 +207,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     };
   }, []);
 
-  useEffect(() => {
-    let restoredExpanded = false;
-    try {
-      restoredExpanded = localStorage.getItem(
-        `${WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX}${sessionId}`,
-      ) === "true";
-    } catch {
-      // Keep the default compact layout when browser storage is unavailable.
-    }
-    setWorkflowPanelExpanded(restoredExpanded);
-    if (restoredExpanded) setExpandedRailTab("chat");
+  useLayoutEffect(() => {
+    setWorkflowPanelExpanded(false);
 
     const handleExpandedChange = (event: Event) => {
       const detail = (event as CustomEvent<{ conversationId: string; expanded: boolean }>).detail;
@@ -789,6 +785,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       ]);
       if (requestId !== loadConversationRequestRef.current || owner !== AgentAppsAuth.getUserInfo()?.userId) return;
       const conversation = detailRes.data.conversation;
+      const isAcademicTask = Boolean((conversation as { academic_task?: boolean })?.academic_task);
       const relation = getConversationRelation(conversation);
       const depth = resolveConversationThinkingDepth(conversation);
       setForkThinkingDepth(relation?.relationType === "fork" ? depth : undefined);
@@ -809,6 +806,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       setKnowledgeRefreshKey((key) => key + 1);
       setConversationSettings(parseConversationRuntimeSettings(conversation));
       setIsTaskConversation(Boolean((conversation as { is_task_conv?: boolean })?.is_task_conv));
+      setAcademicTask(isAcademicTask);
+      setWaitingForAcademicLaunch(isAcademicTask && !historyRes.data.history?.length);
       revealChatConversation(conversation);
       setConversationRelation(getConversationRelation(conversation));
       setConversationId(conversationId);
@@ -836,6 +835,13 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
     }
   }, [setConversationId, setChatConfigFn, setIsChatContent, anchorHistoryId]);
+
+  // Paper tasks are queued before navigation; attach to their Chat once it starts.
+  useEffect(() => {
+    if (!waitingForAcademicLaunch || !routeConversationId || anchorHistoryId) return;
+    const timer = window.setInterval(() => void loadConversation(routeConversationId), 3000);
+    return () => window.clearInterval(timer);
+  }, [waitingForAcademicLaunch, routeConversationId, anchorHistoryId, loadConversation]);
 
   // Route changes own conversation loading, including browser reload/back/forward.
   useEffect(() => {
@@ -976,8 +982,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     (chatRef.current as any)?.uploadFiles?.(files);
   };
 
+  const sidebarPreview = artifactPreview.target?.workflow ? null : artifactPreview.target;
   const isTaskPanelRestoreVisible =
-    Boolean(sessionId) && !workflowPanelExpanded && isTaskPanelCollapsed;
+    Boolean(sessionId) && !workflowPanelExpanded && isTaskPanelCollapsed && !sidebarPreview;
   const isRetainedSidechat =
     conversationRelation?.relationType === CONVERSATION_RELATION_SIDECHAT;
   const canOpenSideChat =
@@ -987,6 +994,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     !conversationRelation;
 
   return (
+    <ArtifactPreviewContext.Provider value={artifactPreview}>
     <div
       className={`detail-container${workflowPanelExpanded ? " detail-container--workflow-expanded" : ""}`}
       onDragEnter={handleDragEnter}
@@ -1033,6 +1041,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       <div className={`chat-conversation-pane${workflowPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}${isTaskPanelRestoreVisible ? " chat-conversation-pane--task-restore-visible" : ""}`}>
         <ForkStatus fork={fork} source={sessionId} />
         <ConversationRelationBanner relation={conversationRelation} />
+        {academicTask && <AcademicChatBanner conversation={routeConversationId || sessionId} />}
         {loadError && <Alert type="error" message={t("chat.fork.historyLoadFailed")} action={<Button onClick={() => loadConversation(routeConversationId || sessionId)}>{t("chat.fork.retryRead")}</Button>} />}
         {anchorHistoryId && (historyWindow.older || historyWindow.newer) && <Space style={{ marginBottom: 12 }}>
           {historyWindow.older && <Button loading={windowLoading} onClick={() => loadWindowPage("older")}>{t("chat.fork.older")}</Button>}
@@ -1094,7 +1103,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           }
         />
       </div>
-      {sessionId && !workflowPanelExpanded && (
+      {sessionId && !workflowPanelExpanded && !sidebarPreview && (
         <button
           type="button"
           className={`task-panel-restore-btn${showOrdinaryRightBox ? " is-expanded" : ""}`}
@@ -1111,6 +1120,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       )}
       {(sessionId || workflowPanelExpanded) && (
         <div
+          hidden={Boolean(sidebarPreview) && !workflowPanelExpanded}
           id="conversation-context-panel"
           className={`right-box${!showOrdinaryRightBox && !workflowPanelExpanded ? " right-box--collapsed" : ""}${!developerModeActive && !workflowPanelExpanded ? " right-box--ordinary" : ""}${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" ? " right-box--tab-hidden" : ""}`}
           aria-hidden={(workflowPanelExpanded && expandedRailTab !== "tasks") || (!showOrdinaryRightBox && !workflowPanelExpanded)}
@@ -1190,7 +1200,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           )}
         </div>
       )}
+      {sidebarPreview && <ArtifactPreview target={sidebarPreview} onClose={artifactPreview.close}
+        onVersions={artifactPreview.onVersions} />}
     </div>
+    </ArtifactPreviewContext.Provider>
   );
 };
 
