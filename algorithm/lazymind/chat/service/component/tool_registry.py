@@ -511,14 +511,6 @@ _CLOUD_FILE_TOOLKIT = {
         GoogleDriveFS(dynamic_auth=True),
     ],
     'lazy': True,
-    'auto_activate': [
-        r'https?://[^\s/]+\.(?:feishu\.(?:cn|com)|larksuite\.com)(?:[/:?#]|$)',
-        r'https?://(?:[^\s/]+\.)?notion\.(?:so|site|com)(?:[/:?#]|$)',
-        r'https?://(?:drive|docs)\.google\.com(?:[/:?#]|$)',
-        r'飞书|(?<!\w)feishu(?!\w)',
-        r'谷歌云端硬盘|谷歌(?:文档|表格|幻灯片)|Google\s*云端硬盘',
-        r'(?<!\w)google\s+(?:drive|docs|sheets|slides)(?!\w)',
-    ],
 }
 
 

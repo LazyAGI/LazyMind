@@ -34,7 +34,6 @@ class KBToolkit:
         'read_document', 'kb_search',
         'kb_get_parent_node', 'kb_get_window_nodes', 'kb_keyword_search',
     ]
-    __tool_auto_activate__ = [r'知识库|资料库|(?<!\w)knowledge[\s_-]+bases?(?!\w)']
     __tool_input_adapters__ = {
         'kb_search': _adapt_kb_search_input,
     }
