@@ -716,6 +716,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/document-publications/{operation_id}:cancel", []string{"qa.write"}, workflow.CancelDocumentPublicationHTTP)
 	handleAPI(r, "POST", "/document-publications/{operation_id}:retry-local", []string{"qa.write"}, workflow.RetryDocumentPublicationLocal)
 	handleAPI(r, "GET", "/document-providers", []string{"qa.read"}, workflow.ListDocumentProviders)
+	handleAPI(r, "GET", "/document-providers/obsidian/status", []string{"qa.read"}, workflow.ReadObsidianPublicationStatus)
+	handleAPI(r, "POST", "/workflow-artifacts/{artifact_id}/publications:preflight", []string{"qa.write"}, workflow.PreflightDocumentPublicationHTTP)
 	handleAPI(r, "POST", "/workflow-artifacts/{artifact_id}/document-actions:preview", []string{"qa.write"}, workflow.PreviewDocumentAction)
 	handleAPI(r, "POST", "/workflow-artifacts/{artifact_id}/image-exports", []string{"qa.read"}, workflow.CreateDocumentImageExportHTTP)
 	handleAPI(r, "GET", "/workflow-artifacts/{artifact_id}/image-exports/{export_id}", []string{"qa.read"}, workflow.ReadDocumentImageExportHTTP)

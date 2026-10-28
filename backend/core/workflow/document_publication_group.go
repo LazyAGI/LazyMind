@@ -67,6 +67,9 @@ func validPublicationTarget(input DocumentPublicationTargetInput) bool {
 	}
 	if input.ParentURI != "" {
 		u, err := url.Parse(input.ParentURI)
+		if input.Provider == "obsidian" {
+			return err == nil && u.Scheme == "obsidian" && u.Host != "" && u.User == nil && u.Fragment == "" && len(input.ParentURI) <= 2048
+		}
 		if err != nil || u.User != nil || u.Scheme != "https" || u.Hostname() == "" || u.Port() != "" {
 			return false
 		}
@@ -154,7 +157,7 @@ func CreateDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, art
 			// The writer already derives the title from the fixed source and supports
 			// default destinations for cloud documents. GitHub still requires a
 			// repository; Obsidian must not create in an arbitrary discovered vault.
-			if len(op.TargetDocument) == 0 && (target.Provider == "obsidian" || target.Provider == "github" && strings.TrimSpace(target.ParentURI) == "") {
+			if len(op.TargetDocument) == 0 && target.Provider == "github" && strings.TrimSpace(target.ParentURI) == "" {
 				return documentFailure("DOCUMENT_ACTION_UNSUPPORTED", 422)
 			}
 			if err := tx.Model(op).Update("request_hash", fingerprint).Error; err != nil {
@@ -289,15 +292,32 @@ func ReadDocumentPublicationGroup(ctx context.Context, db *gorm.DB, owner, artif
 		for _, provider := range []string{"github", "feishu", "notion", "googledrive", "wechat", "obsidian"} {
 			binding := byProvider[provider]
 			state := DocumentPublicationTargetState{Provider: provider, ConnectionID: binding.ConnectionID, Bound: len(binding.TargetDocument) > 0, TargetURL: documentPublicationTargetURL(provider, binding.TargetDocument), LastSuccessHash: binding.LastSuccessHash, LastSuccessAt: binding.LastSuccessAt}
+			var destination struct {
+				Title string `json:"title"`
+				Meta  struct {
+					DisplayLocation string `json:"display_location"`
+				} `json:"meta"`
+			}
+			_ = json.Unmarshal(binding.TargetDocument, &destination)
+			state.Title = destination.Title
 			if op, ok := latestByProvider[provider]; ok {
 				status := publicationStatus(&op, time.Now())
 				state.Operation = &status
 				state.OperationHash = op.SourceHash
-				state.Title = op.Title
+				if state.Title == "" {
+					_ = json.Unmarshal(op.TargetDocument, &destination)
+					state.Title = destination.Title
+					if state.Title == "" {
+						state.Title = op.Title
+					}
+				}
 				state.ParentURI = op.ParentURI
 				if state.ConnectionID == "" {
 					state.ConnectionID = op.ConnectionID
 				}
+			}
+			if provider == "obsidian" && destination.Meta.DisplayLocation != "" {
+				state.Title = destination.Meta.DisplayLocation
 			}
 			result.Targets = append(result.Targets, state)
 		}

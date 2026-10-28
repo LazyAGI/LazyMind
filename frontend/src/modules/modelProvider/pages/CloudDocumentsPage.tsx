@@ -145,7 +145,7 @@ export default function CloudDocumentsPage() {
     useState<CloudDocumentGuideProvider>("feishu");
   const guideInitializedRef = useRef(false);
   const isObsidianReady =
-    vm.isDesktopRuntime && vm.obsidianConfig?.available === true;
+    vm.obsidianConfig?.available === true;
   const providerTotal =
     cloudAuthProviderOptions.length +
     (vm.canCreateLocalSource ? 1 : 0) +

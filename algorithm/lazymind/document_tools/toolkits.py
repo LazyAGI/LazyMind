@@ -74,6 +74,7 @@ class WriterResourceToolkit(WriterResourceCapabilities):
 
     __public_apis__ = [
         'load_document',
+        'obsidian_status',
         'create_document',
         'publish_revision',
         'convert_document',

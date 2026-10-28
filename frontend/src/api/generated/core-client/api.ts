@@ -6619,6 +6619,29 @@ export interface Publication {
     'artifact': WorkflowExecutionArtifact;
     'execution_handle': string;
 }
+export interface PublicationPreflightResponse {
+    'code': number;
+    'data': PublicationPreflightResult;
+}
+export interface PublicationPreflightResult {
+    'targets': Array<PublicationTargetCheck>;
+}
+export interface PublicationTargetCheck {
+    'code'?: string;
+    'provider': string;
+    'state': string;
+    'target_document'?: any;
+    'vaults': Array<PublicationVault>;
+}
+export interface PublicationTargetCheckResponse {
+    'code': number;
+    'data': PublicationTargetCheck;
+}
+export interface PublicationVault {
+    'id': string;
+    'name': string;
+    'writable': boolean;
+}
 export interface QuestionTypeOption {
     'label': string;
     'value': string;
@@ -65938,6 +65961,36 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Inspect configured Obsidian vault availability on the executor
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDocumentProvidersObsidianStatusGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/document-providers/obsidian/status`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Cancel a publication before its external write
          * @param {string} operationId
          * @param {*} [options] Override http request option.
@@ -66494,6 +66547,45 @@ export const WorkflowApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
+         * @summary Check saved document destinations without writing documents
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost: async (artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost', 'artifactId', artifactId)
+            // verify required parameter 'documentPublicationGroupRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost', 'documentPublicationGroupRequest', documentPublicationGroupRequest)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}/publications:preflight`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(documentPublicationGroupRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Read Workflow artifacts with document descriptors
          * @param {string} sessionId
          * @param {*} [options] Override http request option.
@@ -66951,6 +67043,18 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Inspect configured Obsidian vault availability on the executor
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreDocumentProvidersObsidianStatusGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PublicationTargetCheckResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDocumentProvidersObsidianStatusGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreDocumentProvidersObsidianStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Cancel a publication before its external write
          * @param {string} operationId
          * @param {*} [options] Override http request option.
@@ -67156,6 +67260,20 @@ export const WorkflowApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Check saved document destinations without writing documents
+         * @param {string} artifactId
+         * @param {DocumentPublicationGroupRequest} documentPublicationGroupRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(artifactId: string, documentPublicationGroupRequest: DocumentPublicationGroupRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PublicationPreflightResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(artifactId, documentPublicationGroupRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Read Workflow artifacts with document descriptors
          * @param {string} sessionId
          * @param {*} [options] Override http request option.
@@ -67340,6 +67458,15 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
         },
         /**
          *
+         * @summary Inspect configured Obsidian vault availability on the executor
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreDocumentProvidersObsidianStatusGet(options?: RawAxiosRequestConfig): AxiosPromise<PublicationTargetCheckResponse> {
+            return localVarFp.apiCoreDocumentProvidersObsidianStatusGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Cancel a publication before its external write
          * @param {WorkflowApiApiCoreDocumentPublicationsOperationIdCancelPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -67487,6 +67614,16 @@ export const WorkflowApiFactory = function (configuration?: Configuration, baseP
          */
         apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DocumentPublicationGroupResponse> {
             return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Check saved document destinations without writing documents
+         * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PublicationPreflightResponse> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -67731,6 +67868,15 @@ export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRe
 }
 
 /**
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest {
+    readonly artifactId: string
+
+    readonly documentPublicationGroupRequest: DocumentPublicationGroupRequest
+}
+
+/**
  * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactsGet operation in WorkflowApi.
  */
 export interface WorkflowApiApiCoreWorkflowSessionsSessionIdArtifactsGetRequest {
@@ -67866,6 +68012,16 @@ export class WorkflowApi extends BaseAPI {
      */
     public apiCoreDocumentProvidersGet(options?: RawAxiosRequestConfig) {
         return WorkflowApiFp(this.configuration).apiCoreDocumentProvidersGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Inspect configured Obsidian vault availability on the executor
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreDocumentProvidersObsidianStatusGet(options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreDocumentProvidersObsidianStatusGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -68031,6 +68187,17 @@ export class WorkflowApi extends BaseAPI {
      */
     public apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPostRequest, options?: RawAxiosRequestConfig) {
         return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Check saved document destinations without writing documents
+     * @param {WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(requestParameters: WorkflowApiApiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPublicationsPreflightPost(requestParameters.artifactId, requestParameters.documentPublicationGroupRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

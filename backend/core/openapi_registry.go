@@ -140,6 +140,14 @@ type documentPublicationGroupResponse struct {
 	Message string                                 `json:"message"`
 	Data    workflow.DocumentPublicationGroupState `json:"data" required:"true"`
 }
+type publicationTargetCheckResponse struct {
+	Code int                             `json:"code" required:"true"`
+	Data workflow.PublicationTargetCheck `json:"data" required:"true"`
+}
+type publicationPreflightResponse struct {
+	Code int                                 `json:"code" required:"true"`
+	Data workflow.PublicationPreflightResult `json:"data" required:"true"`
+}
 type documentImageExportResponse struct {
 	Code    int                               `json:"code" required:"true"`
 	Message string                            `json:"message"`
@@ -3133,6 +3141,8 @@ func registeredCoreOperations() []openAPIOperation {
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}", Summary: "Read owned image export progress and individual outcomes", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Image export", documentImageExportResponse{}), 404: resp("Export not found", documentActionErrorOpenAPIResponse{})}},
 		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}:retry", Summary: "Retry missing images without changing the captured document", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Image export accepted", documentImageExportResponse{}), 404: resp("Export not found", documentActionErrorOpenAPIResponse{}), 410: resp("Export expired", documentActionErrorOpenAPIResponse{})}},
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}/files/{file_id}", Summary: "Download an owned image archive or original image", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: {Description: "Image or ZIP attachment", ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}, 404: resp("File not found", documentActionErrorOpenAPIResponse{}), 410: resp("Export expired", documentActionErrorOpenAPIResponse{})}},
+		{Method: "GET", Path: "/document-providers/obsidian/status", Summary: "Inspect configured Obsidian vault availability on the executor", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Obsidian availability", publicationTargetCheckResponse{}), 502: resp("Executor unavailable", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/publications:preflight", Summary: "Check saved document destinations without writing documents", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(workflow.DocumentPublicationGroupRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Target checks", publicationPreflightResponse{}), 409: resp("Document changed", documentActionErrorOpenAPIResponse{}), 422: resp("Target invalid", documentActionErrorOpenAPIResponse{})}},
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/publications", Summary: "Read current per-platform synchronization state and confirmed preferences", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Publication targets", documentPublicationGroupResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{})}},
 		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/publications", Summary: "Confirm publication of the current saved document to independent targets", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(workflow.DocumentPublicationGroupRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Accepted publication", documentPublicationGroupResponse{}), 400: resp("Invalid targets", documentActionErrorOpenAPIResponse{}), 409: resp("Document or publication changed", documentActionErrorOpenAPIResponse{}), 422: resp("Target unsupported", documentActionErrorOpenAPIResponse{})}},
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/publication", Summary: "Find the blocking or latest owned document publication", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Publication lookup", documentPublicationLookupResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{})}},

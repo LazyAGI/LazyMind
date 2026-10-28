@@ -185,15 +185,15 @@ describe("CloudDocumentProviderPanel", () => {
     expect(within(screen.getByRole("dialog")).getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
   });
 
-  it("shows deployment guidance on the web without claiming a connection or offering native controls", () => {
+  it("shows server-verified readiness on the web without offering native controls", () => {
     render(<CloudDocumentProviderPanel vm={createVm({
       isDesktopRuntime: false,
       obsidianConfig: { configured: true, available: true, root: "/tmp/stale-desktop-root" },
     })} />);
     expect(screen.getByRole("heading", { name: "Obsidian" })).toBeInTheDocument();
-    expect(screen.getByText("按部署配置")).toBeInTheDocument();
+    expect(screen.getByText("已连接")).toBeInTheDocument();
     expect(screen.getByText(/本地 Markdown 笔记/)).toBeInTheDocument();
-    expect(screen.queryByText("已连接")).not.toBeInTheDocument();
+
     expect(screen.queryByRole("button", { name: /选择根目录|更换根目录/ })).not.toBeInTheDocument();
     const guide = screen.getByRole("link", { name: "查看 Obsidian 接入教程" });
     expect(guide).toHaveAttribute("href", "/cloud-documents/docs/obsidian-setup");

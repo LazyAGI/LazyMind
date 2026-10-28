@@ -126,6 +126,30 @@ class WriteDocumentArguments(_StrictModel):
     user_input: str = ''
 
 
+class PublicationTargetArguments(_StrictModel):
+    provider: Literal['obsidian', 'github']
+    title: str = ''
+    parent_uri: str = ''
+    target_document: dict[str, Any] | None = None
+
+
+class PublicationTargetResult(_StrictModel):
+    state: str
+    code: str = ''
+    target_document: dict[str, Any] | None = None
+    vaults: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ReconcileDocumentArguments(WriteDocumentArguments):
+    pass
+
+
+class ReconcileDocumentResult(_StrictModel):
+    state: Literal['confirmed', 'absent', 'unknown']
+    target_document: dict[str, Any] | None = None
+    persisted_document: Any = None
+
+
 class ActionArtifact(_StrictModel):
     content_type: str = Field(min_length=1)
     value: Any
@@ -695,11 +719,87 @@ def _convert(*, context: DocumentActionContext, **arguments: Any) -> dict[str, A
 def _write(*, context: DocumentActionContext, **arguments: Any) -> dict[str, Any]:
     del context
     from .resources import write_document
-    return write_document(**arguments)
+    from .obsidian import ObsidianTargetError
+    try:
+        return write_document(**arguments)
+    except ObsidianTargetError as exc:
+        return {'success': False, 'changed': False, 'provider_synced': False,
+                'patch_result': {'success': False, 'meta': {'code': exc.error_code, 'no_write': True}}}
+
+
+def _publication_target(provider, title, parent_uri, target_document, *, context):
+    from lazyllm.tools.writer.data_models import TargetDocument
+    from .resources import get_writer_provider
+    from .obsidian import ObsidianTargetError
+    from lazyllm.tools.fs.supplier.github import GitHubFSError
+    adapter = get_writer_provider(provider)
+    target = TargetDocument.model_validate(target_document) if target_document else None
+    try:
+        if provider == 'obsidian':
+            if not title and not parent_uri and target is None:
+                return adapter.status()
+            prepared = adapter.prepare_target(title, parent_uri, target)
+        elif target is not None:
+            prepared = adapter.load_document(target)['target_document']
+            # Preserve the publication baseline, rather than silently accepting a newer revision.
+            if target.meta.get('revision') and prepared.meta.get('revision') != target.meta['revision']:
+                return {'state': 'blocked', 'code': 'PUBLICATION_TARGET_CHANGED'}
+            repository = adapter._fs(adapter._target_type(prepared))._repository(
+                prepared.meta['owner'], prepared.meta['repo'])
+            if repository.get('permissions', {}).get('push') is False:
+                return {'state': 'blocked', 'code': 'PUBLICATION_PERMISSION_REQUIRED'}
+        else:
+            prepared = adapter._resolve_create_target(parent_uri)
+            prepared.title = title
+            # Resolve the exact proposed filename as well as the repository and branch.
+            adapter._fs(adapter._target_type(prepared)).resolve_create_target(prepared.meta, title)
+        return {'state': 'ready', 'target_document': prepared.model_dump()}
+    except ObsidianTargetError as exc:
+        return {'state': 'blocked', 'code': exc.error_code, 'vaults': adapter.status()['vaults']}
+    except FileNotFoundError:
+        return {'state': 'blocked', 'code': 'PUBLICATION_TARGET_MISSING'}
+    except GitHubFSError as exc:
+        codes = {'GITHUB_TARGET_EXISTS': 'PUBLICATION_TARGET_EXISTS',
+                 'GITHUB_PERMISSION_DENIED': 'PUBLICATION_PERMISSION_REQUIRED',
+                 'GITHUB_TARGET_NOT_FOUND': 'PUBLICATION_TARGET_MISSING'}
+        return {'state': 'blocked', 'code': codes.get(exc.code, 'PUBLICATION_TARGET_UNAVAILABLE')}
+    except (ValueError, PermissionError):
+        return {'state': 'blocked', 'code': 'PUBLICATION_TARGET_UNAVAILABLE'}
+
+
+def _reconcile(*, context, **arguments):
+    from lazyllm.tools.writer.data_models import MediaAssetLibrary, TargetDocument
+    from lazyllm.tools.writer.provider import WriterProviderDocument
+    from .resources import get_writer_provider
+    converted = WriterProviderDocument.model_validate(arguments['converted_document'])
+    if not arguments.get('target_document'):
+        return {'state': 'unknown'}
+    target = TargetDocument.model_validate(arguments['target_document'])
+    provider = get_writer_provider(converted.provider)
+    try:
+        if converted.provider == 'obsidian':
+            assets = arguments.get('media_assets')
+            return provider.reconcile(converted, target, MediaAssetLibrary.model_validate(assets) if assets else None)
+        # Provider readback is evidence only; never create or write during reconciliation.
+        loaded = provider.load_document(target)
+        if loaded['source_document'] == converted.content:
+            return {'state': 'confirmed', 'target_document': loaded['target_document'].model_dump(),
+                    'persisted_document': loaded['source_document']}
+    except (OSError, ValueError):
+        pass
+    return {'state': 'unknown'}
 
 
 def _install_builtins() -> None:
     definitions = (
+        DocumentActionSpec(
+            'builtin:document.publication_target.v1', 'publication_target', 1,
+            'preview', PublicationTargetArguments, PublicationTargetResult, _publication_target,
+        ),
+        DocumentActionSpec(
+            'builtin:document.reconcile.v1', 'reconcile', 1,
+            'preview', ReconcileDocumentArguments, ReconcileDocumentResult, _reconcile,
+        ),
         DocumentActionSpec(
             'builtin:document.rewrite_selection.v1', 'rewrite_selection', 1,
             'preview', RewriteSelectionPreviewArguments,

@@ -1,9 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { useWriterProviderAvailability } from './useWriterProviderAvailability';
+const status = vi.hoisted(() => vi.fn());
+vi.mock('@/modules/chat/utils/request', () => ({ WorkflowSessionApi: () => ({ getObsidianPublicationStatus: status }) }));
 const list = vi.hoisted(() => vi.fn());
 vi.mock('@/modules/dataSource/api/clients', () => ({ dataSourceCloudOauthApi: { listConnectionsApiAuthserviceV1CloudConnectionsGet: list } }));
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => { vi.clearAllMocks(); status.mockResolvedValue({ data: { data: { state: 'ready', vaults: [{ id: 'fixture', name: 'Fixture', writable: true }] } } }); });
 it.each([
   ['ACTIVE', true, true, 'ready'], ['ACTIVE', false, false, 'chat-disabled'], ['EXPIRED', true, false, 'authorize'], ['EXPIRED', true, true, 'authorize'],
   ['ACTIVE', true, false, 'authorize'], ['ACTIVE', true, undefined, 'failed'],
@@ -42,4 +44,10 @@ it('requires authorization when no connections exist', async () => {
   list.mockResolvedValue({ data: { items: [] } });
   const { result } = renderHook(() => useWriterProviderAvailability(['feishu']));
   await waitFor(() => expect(result.current.states.feishu).toBe('authorize'));
+});
+
+it.each(['not_configured', 'permission_required'])('does not enable Obsidian when server reports %s', async state => {
+  status.mockResolvedValue({ data: { data: { state, vaults: [] } } });
+  const { result } = renderHook(() => useWriterProviderAvailability(['obsidian']));
+  await waitFor(() => expect(result.current.states.obsidian).toBe('configure'));
 });
