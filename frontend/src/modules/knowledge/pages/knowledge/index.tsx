@@ -1,4 +1,4 @@
-import { Button, Input, message, Modal, Popover, Progress, Segmented, Spin, Tooltip, Row, Col, Select, Tabs } from "antd";
+import { Button, Input, message, Modal, Popover, Progress, Segmented, Tooltip, Row, Col, Select, Tabs } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -33,7 +33,7 @@ import {
   isDeveloperModeActive,
 } from "@/utils/developerMode";
 import { DetailPageHeader, type PdfReferenceAction, type PdfTextSelection, type PdfViewPosition } from "@/components/ui";
-import type { DocumentChatSelection, DocumentTranslationRequest } from "@/modules/knowledge/components/PdfTemporaryChat/types";
+import type { DocumentChatSelection } from "@/modules/knowledge/components/PdfTemporaryChat/types";
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
 import { readCachedPdfChat, touchCachedPdfChat } from "@/modules/knowledge/components/PdfTemporaryChat/cache";
 import { localizeErrorCode } from "@/components/request";
@@ -76,6 +76,9 @@ import DocumentLearningPanel from "@/modules/learning/DocumentLearningPanel";
 import DocumentReferencesPanel from "@/modules/knowledge/components/DocumentReferencesPanel";
 import { extractAcademicReferences, listAcademicReferences } from "@/modules/knowledge/api/academicReferences";
 import { capabilityFamilies, capabilityFamily, capabilityFamilyI18nKey, chooseFamilyCapability, type CapabilityFamily } from "@/modules/learning/capabilityFamilies";
+import { normalizePdfSelectionText } from "@/components/ui/pdfSelectionText";
+import PaperTranslationPanel from "./PaperTranslationPanel";
+import PdfTranslationNotice from "./PdfTranslationNotice";
 import {
   processingLevelSupportsSegments,
   type ProcessingLevel,
@@ -150,8 +153,6 @@ const KnowledgeDocumentContent = () => {
   const [documentChatHistory, setDocumentChatHistory] = useState<Conversation[]>([]);
   const [selectedDocumentConversation, setSelectedDocumentConversation] = useState<string>();
   const [chatHistoryPopoverOpen, setChatHistoryPopoverOpen] = useState(false);
-  const [translationRequest, setTranslationRequest] = useState<DocumentTranslationRequest | null>(null);
-  const [translationSelection, setTranslationSelection] = useState<PdfTextSelection | null>(null);
   const {
     configured: translationConfigured,
     provider: translationProvider,
@@ -182,6 +183,8 @@ const KnowledgeDocumentContent = () => {
     }
   };
   const [translationSource, setTranslationSource] = useState("");
+  const [vocabularyPhrase, setVocabularyPhrase] = useState<PdfTextSelection | null>(null);
+  const [vocabularyWord, setVocabularyWord] = useState<string>();
   const [regenerationArtifact, setRegenerationArtifact] = useState<PdfArtifact>();
   const [regenerationProviderGroupId, setRegenerationProviderGroupId] = useState<string>();
   const translationDialogMode = regenerationArtifact
@@ -303,23 +306,29 @@ const KnowledgeDocumentContent = () => {
   }, [canShowSegments, previewSideTab]);
 
   const translatePdfSelection = useCallback(async (selection: PdfTextSelection) => {
-    setTranslationSelection(selection);
-    setTranslationSource(selection.text);
+    const text = normalizePdfSelectionText(selection.text);
+    setTranslationSource(text);
     setPreviewSideTab("translation");
     setPreviewSideCollapsed(false);
-    await translateSelectedText(selection.text);
+    await translateSelectedText(text);
   }, [translateSelectedText]);
 
-  const translateWithModel = useCallback(() => {
-    if (!translationSource.trim()) return;
-    const selection: DocumentChatSelection = { source: "pdf", ...(translationSelection || { page: 1 }), text: translationSource };
-    setDocumentChatSelection(selection);
-    setTranslationRequest({ id: Date.now(), selection });
-    setTranslationSource("");
-    clearSelectedTranslation();
-    setPreviewSideCollapsed(false);
-    setPreviewSideTab("chat");
-  }, [clearSelectedTranslation, translationSelection, translationSource]);
+  const translateTypedText = useCallback((value: string) => {
+    const text = normalizePdfSelectionText(value);
+    setTranslationSource(text);
+    void translateSelectedText(text);
+  }, [translateSelectedText]);
+
+  const addVocabularySelection = useCallback((selection: PdfTextSelection) => {
+    if (isSingleEnglishWord(selection.text)) {
+      setVocabularySelection(selection);
+      return;
+    }
+    const words = Array.from(new Set(selection.text.match(/[A-Za-z][A-Za-z'-]*/g) || []));
+    if (!words.length) return;
+    setVocabularyPhrase(selection);
+    setVocabularyWord(words[0]);
+  }, []);
 
   const refreshDocumentChatHistory = useCallback(() => {
     if (!knowledgeId) return;
@@ -1069,7 +1078,7 @@ const KnowledgeDocumentContent = () => {
               onPdfRetranslateSelection={pdfCapabilities?.translations.length
                 ? (selection) => void openTranslationRevision(selection, pdfSourceView === "translation" ? "translation" : "source")
                 : undefined}
-              onAddVocabularySelection={isVocabularyEnabled() ? (selection) => setVocabularySelection(selection) : undefined}
+              onAddVocabularySelection={isVocabularyEnabled() ? addVocabularySelection : undefined}
               translationConfigured={translationConfigured}
               learningSelectionActions={capabilityFamilies(learningCapabilities).map(family=>({key:family,label:t(capabilityFamilyI18nKey(family)),languages:Array.from(new Set(learningCapabilities.filter(item=>item.key!=="pinyin"&&family===capabilityFamily(item.key)).flatMap(item=>item.languages))),subjectKinds:Array.from(new Set(learningCapabilities.filter(item=>family===capabilityFamily(item.key)).flatMap(item=>item.subject_kinds))),disabled:!learningLocalAvailable,disabledTip:t("vocabulary.localOnlyDesktop")}))}
               onLearningSelection={(family,selection)=>{const capability=chooseFamilyCapability(learningCapabilities,family as CapabilityFamily,selection.text);if(capability)setLearningSelection({capabilityKey:capability.key,selection})}}
@@ -1096,18 +1105,7 @@ const KnowledgeDocumentContent = () => {
           >
             {knowledgeDetail ? (
               <>
-                {(translationPreparing || (pdfTask?.kind === "TRANSLATION_PDF" && pdfTask.status !== "READY")) && !previewSideCollapsed ? (
-                  <div className={`pdf-processing-card pdf-processing-card--translation is-${translationPreparing ? "waiting_dependency" : pdfTask?.status.toLowerCase()}`}>
-                    <div>
-                      <strong>{translationPreparing ? "正在准备翻译" : pdfTask?.status === "FAILED" ? "翻译失败" : pdfTask?.status === "CANCELLED" ? "翻译已取消" : "正在翻译文档"}</strong>
-                      <span>{pdfTaskDetail}</span>
-                      {!translationPreparing && isActivePdfJob(pdfTask) ? <Button type="link" danger size="small" onClick={() => void cancelTranslationJob()}>取消</Button> : null}
-                    </div>
-                    <Progress percent={translationPreparing ? 0 : pdfTask?.progress || 0} status={pdfTask?.status === "FAILED" ? "exception" : "active"} size="small" />
-                    <small>{getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider)}</small>
-                    {pdfTask?.error_message ? <div className="pdf-processing-card__error">{pdfTask.error_message}</div> : null}
-                  </div>
-                ) : null}
+                {!previewSideCollapsed ? <PdfTranslationNotice documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider)} onCancel={() => void cancelTranslationJob()} /> : null}
                 <div className={`knowledge-preview-side${previewSideCollapsed ? " is-collapsed" : ""}`}>
                   <Tabs
                     className="knowledge-preview-mode-tabs"
@@ -1151,40 +1149,7 @@ const KnowledgeDocumentContent = () => {
                       </div>
                     )}
                     items={[
-                      { key: "translation", label: "翻译", children: <div className="knowledge-reader-translation">
-                        <label htmlFor="reader-translation-provider">默认机器翻译源</label>
-                        <Select id="reader-translation-provider" aria-label="默认机器翻译源" showSearch optionFilterProp="label" loading={translationStatusRefreshing || translationProviderSaving} disabled={translationProviderSaving} value={translationProviderGroupId} placeholder="请选择机器翻译源" options={translationDocumentProviders.map((item) => ({ value: item.group_id, label: item.provider_name }))} onChange={(groupId) => void selectDefaultTranslationProvider(groupId)} />
-                        <a href="/settings?section=model_defaults&service=translation">配置机器翻译</a>
-                        <Button onClick={() => void openTranslationModal()} disabled={!canTranslateDocument}>翻译全文</Button>
-                        <div className="knowledge-translation-block">
-                          <div className="knowledge-translation-label">{t("knowledge.translationOriginal")}</div>
-                          <Input.TextArea
-                            aria-label="待翻译文字"
-                            placeholder="选中论文文字，或在这里输入要翻译的内容"
-                            autoSize={{ minRows: 3, maxRows: 8 }}
-                            value={translationSource}
-                            onChange={(event) => { setTranslationSource(event.target.value); clearSelectedTranslation(); }}
-                          />
-                          <Button disabled={!translationSource.trim() || translationProviderSaving} loading={translationLoading} onClick={() => void translateSelectedText(translationSource)}>翻译文字</Button>
-                        </div>
-                        <div className="knowledge-translation-block">
-                          <div className="knowledge-translation-label">{t("knowledge.translationResult")}</div>
-                          {translationLoading ? <Spin size="small" /> : <div className="knowledge-translation-text">{translationResult}</div>}
-                        </div>
-                        {!translationLoading && translationResult ? (
-                          <div className="knowledge-translation-model-action">
-                            {isVocabularyEnabled() && isSingleEnglishWord(translationSource) ? (
-                              <Button className="knowledge-translation-add-button" onClick={() => {
-                                setVocabularySelection({ ...(translationSelection || { page: 1 }), text: translationSource });
-                                setTranslationSource("");
-                                clearSelectedTranslation();
-                              }}>加入生词本</Button>
-                            ) : null}
-                            <Button onClick={translateWithModel}>{t("knowledge.translateWithModel")}</Button>
-                            <span>{t("knowledge.translateWithModelHint")}</span>
-                          </div>
-                        ) : null}
-                      </div> },
+                      { key: "translation", label: "翻译", children: <PaperTranslationPanel source={translationSource} result={translationResult} loading={translationLoading} providers={translationDocumentProviders} providerGroupId={translationProviderGroupId} providerSaving={translationProviderSaving} providersLoading={translationStatusRefreshing} onProviderChange={(groupId) => void selectDefaultTranslationProvider(groupId)} onTranslate={translateTypedText} /> },
                       {
                         key: "chat",
                         label: t("knowledge.pdfChatTab"),
@@ -1194,7 +1159,6 @@ const KnowledgeDocumentContent = () => {
                             documentId={knowledgeId}
                             fileName={knowledgeDetail.display_name || ""}
                             selection={documentChatSelection || undefined}
-                            translationRequest={translationRequest}
                             conversationToLoad={selectedDocumentConversation}
                             onConversationChange={setSelectedDocumentConversation}
                             onHistoryChange={refreshDocumentChatHistory}
@@ -1335,6 +1299,14 @@ const KnowledgeDocumentContent = () => {
         />
       </Modal>
 
+      <Modal title="选择要加入生词本的单词" open={Boolean(vocabularyPhrase)} okText="加入生词" okButtonProps={{ disabled: !vocabularyWord }} onCancel={() => setVocabularyPhrase(null)} onOk={() => {
+        if (!vocabularyPhrase || !vocabularyWord) return;
+        setVocabularySelection({ ...vocabularyPhrase, text: vocabularyWord, context: vocabularyPhrase.context || vocabularyPhrase.text });
+        setVocabularyPhrase(null);
+      }}>
+        <p>从选中的段落中选择一个单词：</p>
+        <Select aria-label="选择生词" showSearch optionFilterProp="label" style={{ width: "100%" }} value={vocabularyWord} options={Array.from(new Set(vocabularyPhrase?.text.match(/[A-Za-z][A-Za-z'-]*/g) || [])).map((word) => ({ value: word, label: word }))} onChange={setVocabularyWord} />
+      </Modal>
       {isVocabularyEnabled() ? <AddVocabularyModal
         selection={vocabularySelection}
         datasetId={knowledgeBaseId}
