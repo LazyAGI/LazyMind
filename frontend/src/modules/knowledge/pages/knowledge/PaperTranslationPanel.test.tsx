@@ -19,4 +19,13 @@ describe("paper translation panel", () => {
     expect(screen.getByRole("region", { name: "翻译结果" })).toHaveTextContent("new result");
     expect(screen.queryByText("old result")).not.toBeInTheDocument();
   });
+
+  it("shows the Chinese provider name in the reader's translation settings", () => {
+    render(<PaperTranslationPanel source="" result="" loading={false}
+      providers={[{ group_id: "google", provider_name: "Google Translate Web", group_name: "Google Translate Web" }]}
+      providerGroupId="google" providerSaving={false} providersLoading={false}
+      onProviderChange={vi.fn()} onTranslate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "设置翻译引擎" }));
+    expect(screen.getByText("谷歌翻译（网页）")).toBeInTheDocument();
+  });
 });

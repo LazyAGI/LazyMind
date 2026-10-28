@@ -63706,7 +63706,7 @@ export const TranslationApiAxiosParamCreator = function (configuration?: Configu
             };
         },
         /**
-         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable. MyMemory requires the source language.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -63762,7 +63762,7 @@ export const TranslationApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable. MyMemory requires the source language.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -63793,7 +63793,7 @@ export const TranslationApiFactory = function (configuration?: Configuration, ba
             return localVarFp.apiCoreTranslationStatusGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable. MyMemory requires the source language.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -63827,7 +63827,7 @@ export class TranslationApi extends BaseAPI {
     }
 
     /**
-     * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable. MyMemory requires the source language.
+     * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
      * @summary Translate selected document text
      * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

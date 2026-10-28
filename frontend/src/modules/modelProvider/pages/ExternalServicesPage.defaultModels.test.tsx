@@ -97,8 +97,8 @@ describe("default-model service configuration", () => {
     expect(within(translation).getByRole("button", { name: /翻译服务/ })).toHaveAttribute("aria-expanded", "true");
     expect(within(translation).getByRole("heading", { name: "无需配置" })).toBeInTheDocument();
     expect(within(translation).getByRole("heading", { name: "需要密钥" })).toBeInTheDocument();
-    expect(within(translation).getByRole("button", { name: "配置 Google Translate Web" })).toBeInTheDocument();
-    expect(within(translation).getByRole("button", { name: "配置 Baidu Translation" })).toBeInTheDocument();
+    expect(within(translation).getByRole("button", { name: "配置 谷歌翻译（网页）" })).toBeInTheDocument();
+    expect(within(translation).getByRole("button", { name: "配置 百度翻译" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "学术检索" })).toHaveAttribute("id", "default-service-academic");
 
     fireEvent.click(screen.getByRole("button", { name: /文档解析/ }));
@@ -107,9 +107,9 @@ describe("default-model service configuration", () => {
 
   it("shows a three-step official guide for a translation source that requires a key", async () => {
     render(<ExternalServicesPage focusCategory="translation" variant="default-models" />);
-    fireEvent.click(await screen.findByRole("button", { name: "配置 Baidu Translation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "配置 百度翻译" }));
 
-    const guide = await screen.findByRole("region", { name: "Baidu Translation 简易配置教程" });
+    const guide = await screen.findByRole("region", { name: "百度翻译 简易配置教程" });
     expect(within(guide).getAllByRole("listitem")).toHaveLength(3);
     expect(within(guide).getByRole("link", { name: /打开官方接入说明/ }))
       .toHaveAttribute("href", "https://fanyi-api.baidu.com/");
@@ -128,10 +128,10 @@ describe("default-model service configuration", () => {
     ] } });
     render(<ExternalServicesPage focusCategory="translation" variant="default-models" />);
     for (const [name, icon] of [
-      ["Google Translate Web", "google.svg"], ["Bing Translate Web", "bing.png"],
-      ["Sogou Translate Web", "sogou.png"], ["DeepL Web", "deepl.png"],
-      ["Tencent TranSmart Web", "tencent.png"], ["Baidu Translation", "baidu.png"],
-      ["Aliyun Translation", "aliyun.png"], ["NiuTrans", "niutrans.png"],
+      ["谷歌翻译（网页）", "google.svg"], ["必应翻译（网页）", "bing.png"],
+      ["搜狗翻译（网页）", "sogou.png"], ["DeepL 网页翻译", "deepl.png"],
+      ["腾讯翻译君（网页）", "tencent.png"], ["百度翻译", "baidu.png"],
+      ["阿里云机器翻译", "aliyun.png"], ["小牛翻译", "niutrans.png"],
     ]) {
       const card = await screen.findByRole("button", { name: `配置 ${name}` });
       expect(card.querySelector("img")?.getAttribute("src")).toContain(icon);
@@ -145,7 +145,7 @@ describe("default-model service configuration", () => {
       onConfigurationChanged={onConfigurationChanged}
       variant="default-models"
     />);
-    fireEvent.click(await screen.findByRole("button", { name: "配置 Google Translate Web" }));
+    fireEvent.click(await screen.findByRole("button", { name: "配置 谷歌翻译（网页）" }));
     fireEvent.click(await screen.findByRole("button", { name: "启用此翻译源" }));
 
     await waitFor(() => expect(mocks.createGroup).toHaveBeenCalled());
@@ -165,7 +165,7 @@ describe("default-model service configuration", () => {
       onConfigurationChanged={onConfigurationChanged}
       variant="default-models"
     />);
-    fireEvent.click(await screen.findByRole("button", { name: "配置 Baidu Translation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "配置 百度翻译" }));
     expect(screen.queryByRole("button", { name: "modelProvider.external.selectTranslationSource" })).not.toBeInTheDocument();
     expect(mocks.selectProvider).not.toHaveBeenCalled();
     expect(onConfigurationChanged).not.toHaveBeenCalled();

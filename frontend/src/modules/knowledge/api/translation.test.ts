@@ -22,14 +22,14 @@ describe("translateSelectionText",()=>{
     mocks.post.mockResolvedValueOnce({data:{data:{translated_text:"后备翻译",source:"en",target:"zh"}}});
     await expect(translateSelectionText("fallbackword")).resolves.toMatchObject({translated_text:"后备翻译"});
   });
-  it("sends an explicit source and opposite target for MyMemory selection",async()=>{
-    mocks.get.mockResolvedValueOnce({data:{data:{configured:true,provider:"MyMemory",document_supported:false}}});
+  it("sends an explicit source and opposite target for a selected translation service",async()=>{
+    mocks.get.mockResolvedValueOnce({data:{data:{configured:true,provider:"Google Translate Web",document_supported:true}}});
     mocks.post.mockResolvedValueOnce({data:{data:{translated_text:"Hello",source:"zh",target:"en"}}});
     await expect(translateSelectionText("你好", "zh")).resolves.toMatchObject({translated_text:"Hello"});
     expect(mocks.post).toHaveBeenCalledWith("/api/core/translation:translate",{text:"你好",source:"zh",target:"en"});
   });
-  it("uses MyMemory rather than the dictionary when the source is explicit",async()=>{
-    mocks.get.mockResolvedValueOnce({data:{data:{configured:true,provider:"MyMemory",document_supported:false}}});
+  it("uses the selected translation service rather than the dictionary when the source is explicit",async()=>{
+    mocks.get.mockResolvedValueOnce({data:{data:{configured:true,provider:"Google Translate Web",document_supported:true}}});
     mocks.post.mockResolvedValueOnce({data:{data:{translated_text:"你好",source:"en",target:"zh"}}});
     await expect(translateSelectionText("Hello", "en")).resolves.toMatchObject({translated_text:"你好"});
     expect(mocks.get).toHaveBeenCalledTimes(1);

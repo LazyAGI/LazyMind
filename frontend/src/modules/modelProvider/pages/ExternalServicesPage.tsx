@@ -31,6 +31,7 @@ import {
 } from "../api";
 import ToolManagementSection from "../components/ToolManagementSection";
 import DependencyInstallSection from "../components/DependencyInstallSection";
+import { translationProviderDisplayName } from "../translationProviderNames";
 import {
   DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
@@ -651,6 +652,7 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
 
 interface ExternalServiceCardProps {
   ariaLabel: string;
+  displayName?: string;
   onOpen: (service: ExternalServiceConfig) => void;
   service: ExternalServiceConfig;
   statusLabel: string;
@@ -658,6 +660,7 @@ interface ExternalServiceCardProps {
 
 export function ExternalServiceCard({
   ariaLabel,
+  displayName,
   onOpen,
   service,
   statusLabel,
@@ -713,7 +716,7 @@ export function ExternalServiceCard({
       <div className="model-provider-service-card-copy">
         <div>
           <div className="model-provider-service-title-row">
-            <h4>{service.name}</h4>
+            <h4>{displayName || service.name}</h4>
             <Tag
               className="model-provider-service-status"
               color={
@@ -782,6 +785,9 @@ export default function ExternalServicesPage({
 }: ExternalServicesPageProps = {}) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
+  const serviceDisplayName = (service: ExternalServiceConfig) => service.category === "translation"
+    ? translationProviderDisplayName(service.name, currentLanguage)
+    : service.name;
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
   const configLocation = useSettingsEditor("service");
   const [activeService, setActiveService] = useState<ExternalServiceConfig | null>(null);
@@ -992,7 +998,7 @@ export default function ExternalServicesPage({
         : current);
       void loadExternalServices(normalizedSearchValue);
       onConfigurationChanged?.();
-      message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
+      message.success(t("modelProvider.external.configSaved", { name: serviceDisplayName(activeService) }));
     } catch (error) {
       message.error(getLocalizedErrorMessage(error));
     } finally {
@@ -1039,7 +1045,7 @@ export default function ExternalServicesPage({
         await selectServiceProvider(activeService, savedGroup.id);
       }
 
-      message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
+      message.success(t("modelProvider.external.configSaved", { name: serviceDisplayName(activeService) }));
       void loadExternalServices(normalizedSearchValue);
       onConfigurationChanged?.();
       confirmConfigClose.acceptSaved();
@@ -1188,7 +1194,8 @@ export default function ExternalServicesPage({
     <div className="model-provider-service-grid">
       {items.map((service) => (
         <ExternalServiceCard
-          ariaLabel={t("modelProvider.external.configModalTitle", { name: service.name })}
+          ariaLabel={t("modelProvider.external.configModalTitle", { name: serviceDisplayName(service) })}
+          displayName={serviceDisplayName(service)}
           key={service.key}
           onOpen={openConfigModal}
           service={service}
@@ -1361,7 +1368,7 @@ export default function ExternalServicesPage({
         width={600}
         title={
           activeService
-            ? t("modelProvider.external.configModalTitle", { name: activeService.name })
+            ? t("modelProvider.external.configModalTitle", { name: serviceDisplayName(activeService) })
             : t("modelProvider.external.configureAction")
         }
         footer={activeService?.category === "translation" && !isKeylessTranslation(activeService) ? null : [
@@ -1382,7 +1389,7 @@ export default function ExternalServicesPage({
               <ExternalServiceLogo service={activeService} />
               <div>
                 <div className="model-provider-service-title-row">
-                  <h4>{activeService.name}</h4>
+                  <h4>{serviceDisplayName(activeService)}</h4>
                   <Tag
                     color={
                       activeServiceDisplayStatus === "configured"
@@ -1400,11 +1407,11 @@ export default function ExternalServicesPage({
             </div>
             {activeService.category === "translation" && !isKeylessTranslation(activeService) ? (
               <section
-                aria-label={t("modelProvider.external.translationGuideTitle", { name: activeService.name })}
+                aria-label={t("modelProvider.external.translationGuideTitle", { name: serviceDisplayName(activeService) })}
                 className="model-provider-translation-setup-guide"
               >
                 <div className="model-provider-translation-setup-head">
-                  <strong>{t("modelProvider.external.translationGuideTitle", { name: activeService.name })}</strong>
+                  <strong>{t("modelProvider.external.translationGuideTitle", { name: serviceDisplayName(activeService) })}</strong>
                   {getTranslationSetupUrl(activeService) ? (
                     <a href={getTranslationSetupUrl(activeService)} rel="noreferrer" target="_blank">
                       {t("modelProvider.external.translationGuideOpenOfficial")}

@@ -94,6 +94,22 @@ describe("document translation service state", () => {
 });
 
 describe("PDF selection translation", () => {
+  it("ignores an old translation response after the reader clears its document", async () => {
+    let finishTranslation!: (value: { translated_text: string }) => void;
+    const pending = new Promise<{ translated_text: string }>((resolve) => { finishTranslation = resolve; });
+    mocks.translate.mockReturnValue(pending);
+    const refreshStatus = vi.fn().mockResolvedValue({ configured: true, provider: "Google Translate Web", document_supported: true });
+    const { result } = renderHook(() => usePdfSelectionTranslation(refreshStatus, vi.fn()));
+
+    act(() => { void result.current.translate("paper A"); });
+    await waitFor(() => expect(mocks.translate).toHaveBeenCalledWith("paper A", undefined));
+    act(() => result.current.clear());
+    await act(async () => { finishTranslation({ translated_text: "paper A result" }); await pending; });
+
+    expect(result.current.result).toBe("");
+    expect(result.current.loading).toBe(false);
+  });
+
   it("keeps other providers on automatic source detection", async () => {
     const refreshStatus = vi.fn().mockResolvedValue({ configured: true, provider: "DeepL", document_supported: true });
     mocks.translate.mockResolvedValue({ translated_text: "你好", source: "en", target: "zh" });

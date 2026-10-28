@@ -2,7 +2,7 @@ import { submitKnowledgeDecision } from "../SourceImports/api";
 import { ExecutionResults, SourceImportProvider } from "../SourceImports";
 import { ReferenceSourcesButton } from "../SourceImports/ReferenceSources";
 export { ChatSourcePanel } from "../SourceImports/ReferenceSources";
-import { Button, Divider, Flex, message, Modal, Segmented, Spin, Tooltip } from "antd";
+import { Button, Divider, Flex, message, Modal, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
@@ -382,10 +382,7 @@ const AssistantMessage = (props: any) => {
   const {
     result: translationResult,
     loading: translationLoading,
-    canChooseSource: canChooseTranslationSource,
-    sourceLanguage: translationSourceLanguage,
     translate: translateSelectedText,
-    changeSourceLanguage: changeTranslationSourceLanguage,
     clear: clearSelectedTranslation,
   } = usePdfSelectionTranslation(getTranslationServiceStatus, onTranslationError);
   const onCiteMessageRef = useRef(onCiteMessage);
@@ -676,20 +673,6 @@ const AssistantMessage = (props: any) => {
         <div className="chat-translation-label">{t("knowledge.translationOriginal")}</div>
         <div className="chat-translation-text">{translationSource}</div>
       </div>
-      {canChooseTranslationSource ? (
-        <div className="chat-translation-block">
-          <div className="chat-translation-label">{t("knowledge.translationSourceLanguage")}</div>
-          <Segmented
-            aria-label={t("knowledge.translationSourceLanguage")}
-            value={translationSourceLanguage}
-            onChange={(value) => void changeTranslationSourceLanguage(value as "en" | "zh")}
-            options={[
-              { label: t("knowledge.translationSourceEnglish"), value: "en" },
-              { label: t("knowledge.translationSourceChinese"), value: "zh" },
-            ]}
-          />
-        </div>
-      ) : null}
       <div className="chat-translation-block">
         <div className="chat-translation-label">{t("knowledge.translationResult")}</div>
         {translationLoading ? <Spin size="small" /> : <div className="chat-translation-text">{translationResult}</div>}

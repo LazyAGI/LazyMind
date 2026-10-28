@@ -39,6 +39,7 @@ import { readCachedPdfChat, touchCachedPdfChat } from "@/modules/knowledge/compo
 import { localizeErrorCode } from "@/components/request";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import { TranslationUnavailableError } from "@/modules/knowledge/api/translation";
+import { translationProviderDisplayName } from "@/modules/modelProvider/translationProviderNames";
 import { getTranslationProgressLabel, resolveDocumentTranslationProvider, useDocumentTranslationService, usePdfSelectionTranslation } from "./translationUiState";
 import {
   completePdfRenderJob,
@@ -135,7 +136,8 @@ async function writeTextToClipboard(text: string) {
 }
 
 const KnowledgeDocumentContent = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const displayTranslationName = (name: string) => translationProviderDisplayName(name, i18n.resolvedLanguage || i18n.language || "zh-CN");
   const [knowledgeDetail, setKnowledgeDetail] = useState<KnowledgeDetail>();
 
   const { knowledgeBaseId = "", knowledgeId = "" } = useParams();
@@ -292,6 +294,11 @@ const KnowledgeDocumentContent = () => {
   useEffect(()=>setLearningAnalysisSelection(undefined),[knowledgeId]);
 
   useEffect(() => {
+    setTranslationSource("");
+    clearSelectedTranslation();
+  }, [knowledgeId, clearSelectedTranslation]);
+
+  useEffect(() => {
     referencePreanalysisDocument.current = "";
     setReferencePreanalysisRetry(0);
     setReferenceImportSelection(undefined);
@@ -314,7 +321,7 @@ const KnowledgeDocumentContent = () => {
   }, [translateSelectedText]);
 
   const translateTypedText = useCallback((value: string) => {
-    const text = normalizePdfSelectionText(value);
+    const text = value.trim();
     setTranslationSource(text);
     void translateSelectedText(text);
   }, [translateSelectedText]);
@@ -1044,6 +1051,7 @@ const KnowledgeDocumentContent = () => {
                   onPdfSelection={askPdfSelection}
                   onPdfTranslateSelection={translatePdfSelection}
                   onPdfRetranslateSelection={(selection) => void openTranslationRevision(selection, "source")}
+                  onAddVocabularySelection={isVocabularyEnabled() ? addVocabularySelection : undefined}
                   translationConfigured={translationConfigured}
                   pdfViewPosition={pdfViewPosition}
                   onPdfViewPositionChange={handlePdfViewPositionChange}
@@ -1057,6 +1065,7 @@ const KnowledgeDocumentContent = () => {
                   onPdfSelection={askPdfSelection}
                   onPdfTranslateSelection={translatePdfSelection}
                   onPdfRetranslateSelection={(selection) => void openTranslationRevision(selection, "translation")}
+                  onAddVocabularySelection={isVocabularyEnabled() ? addVocabularySelection : undefined}
                   translationConfigured={translationConfigured}
                   pdfViewPosition={pdfViewPosition}
                   onPdfViewPositionChange={handlePdfViewPositionChange}
@@ -1105,7 +1114,7 @@ const KnowledgeDocumentContent = () => {
           >
             {knowledgeDetail ? (
               <>
-                {!previewSideCollapsed ? <PdfTranslationNotice documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider)} onCancel={() => void cancelTranslationJob()} /> : null}
+                {!previewSideCollapsed ? <PdfTranslationNotice documentId={knowledgeId} job={pdfTask} preparing={translationPreparing} detail={pdfTaskDetail} providerLabel={displayTranslationName(getTranslationProgressLabel(pdfTask, translationPreparing, translationMode, translationProvider))} onCancel={() => void cancelTranslationJob()} /> : null}
                 <div className={`knowledge-preview-side${previewSideCollapsed ? " is-collapsed" : ""}`}>
                   <Tabs
                     className="knowledge-preview-mode-tabs"
@@ -1218,12 +1227,15 @@ const KnowledgeDocumentContent = () => {
               value={regenerationArtifact ? regenerationProviderGroupId : translationProviderGroupId}
               onChange={regenerationArtifact ? setRegenerationProviderGroupId : setTranslationProviderGroupId}
               placeholder={regenerationArtifact ? "请选择用于重新生成的翻译 API" : "请选择翻译 API"}
-              options={translationDocumentProviders.map((item) => ({
-                value: item.group_id,
-                label: item.group_name && item.group_name !== item.provider_name
-                  ? `${item.provider_name} · ${item.group_name}`
-                  : item.provider_name,
-              }))}
+              options={translationDocumentProviders.map((item) => {
+                const name = displayTranslationName(item.provider_name);
+                return {
+                  value: item.group_id,
+                  label: item.group_name && item.group_name !== item.provider_name
+                    ? `${name} · ${item.group_name}`
+                    : name,
+                };
+              })}
             />
           </div> : null}
           {!translationDocumentSupported && !translationStatusRefreshing ? <p>

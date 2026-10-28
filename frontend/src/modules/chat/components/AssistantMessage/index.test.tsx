@@ -605,35 +605,6 @@ describe("AssistantMessage cancellation", () => {
     expect(screen.queryByText("knowledge.translationSourceLanguage")).not.toBeInTheDocument();
   });
 
-  it("lets MyMemory users choose the source language for selected chat text", async () => {
-    vi.mocked(getTranslationServiceStatus).mockResolvedValueOnce({ configured: true, provider: "MyMemory", document_supported: false });
-    vi.mocked(translateSelectionText).mockClear();
-    render(
-      <AssistantMessage
-        item={{ id: "assistant-mymemory", history_id: "history-mymemory", seq: 10, role: "assistant", delta: "hello world",
-          finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }}
-        index={0} length={1} sendMessage={vi.fn()} regenerate={vi.fn()} regenerateDisabled={false}
-        stopGeneration={vi.fn()} renderText={() => <span>hello world</span>} updateMessage={vi.fn()}
-      />,
-    );
-
-    const selected = screen.getByText("hello world");
-    const range = document.createRange();
-    range.selectNodeContents(selected);
-    Object.defineProperty(range, "getClientRects", { value: () => [{ top: 80, left: 100, right: 220, width: 120, height: 20 }] });
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    fireEvent.mouseUp(selected);
-    const translateButton = screen.getByRole("button", { name: "knowledge.translateSelection" });
-    await waitFor(() => expect(translateButton).toHaveAttribute("aria-disabled", "false"));
-    fireEvent.click(translateButton);
-
-    await waitFor(() => expect(translateSelectionText).toHaveBeenCalledWith("hello world", "en"));
-    expect(screen.getByText("knowledge.translationSourceLanguage")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("knowledge.translationSourceChinese"));
-    await waitFor(() => expect(translateSelectionText).toHaveBeenLastCalledWith("hello world", "zh"));
-  });
 });
 
 describe("externalProviderDisplayName", () => {

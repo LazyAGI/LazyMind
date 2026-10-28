@@ -33263,7 +33263,7 @@ paths:
                 - translation
     /api/core/translation:translate:
         post:
-            description: Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable. MyMemory requires the source language.
+            description: Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
             requestBody:
                 content:
                     application/json:

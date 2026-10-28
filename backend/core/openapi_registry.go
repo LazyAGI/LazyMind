@@ -4793,7 +4793,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/translation:translate",
 			Summary:     "Translate selected document text",
-			Description: "Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable. MyMemory requires the source language.",
+			Description: "Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.",
 			Tags:        []string{"translation"},
 			RequestBody: jsonBodyOf(translationOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Translated text", translationOpenAPIResponse{})},

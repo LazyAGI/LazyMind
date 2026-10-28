@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Button, Empty, Input, Modal, Select, Spin } from "antd";
 import { SendOutlined, SettingOutlined } from "@ant-design/icons";
+import { useTranslation } from "react-i18next";
 import type { DocumentTranslationProvider } from "@/modules/knowledge/api/translation";
+import { translationProviderDisplayName } from "@/modules/modelProvider/translationProviderNames";
 
 interface Props {
   source: string;
@@ -16,6 +18,8 @@ interface Props {
 }
 
 export default function PaperTranslationPanel(props: Props) {
+  const { i18n } = useTranslation();
+  const language = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [draft, setDraft] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const submit = () => {
@@ -26,7 +30,7 @@ export default function PaperTranslationPanel(props: Props) {
   };
   return <section className="knowledge-reader-translation" aria-label="论文翻译">
     <div className="knowledge-reader-translation-toolbar">
-      <Button icon={<SettingOutlined />} size="small" onClick={() => setSettingsOpen(true)}>设置翻译引擎</Button>
+      <Button aria-label="设置翻译引擎" icon={<SettingOutlined />} size="small" onClick={() => setSettingsOpen(true)}>设置翻译引擎</Button>
     </div>
     <section className="knowledge-reader-translation-pane" aria-label="翻译原文">
       <h3>原文</h3>
@@ -54,7 +58,10 @@ export default function PaperTranslationPanel(props: Props) {
         <Select id="reader-translation-provider" aria-label="默认机器翻译源" showSearch optionFilterProp="label"
           loading={props.providersLoading || props.providerSaving} disabled={props.providerSaving}
           value={props.providerGroupId} placeholder="请选择机器翻译源"
-          options={props.providers.map((item) => ({ value: item.group_id, label: item.group_name && item.group_name !== item.provider_name ? `${item.provider_name} · ${item.group_name}` : item.provider_name }))}
+          options={props.providers.map((item) => {
+            const name = translationProviderDisplayName(item.provider_name, language);
+            return { value: item.group_id, label: item.group_name && item.group_name !== item.provider_name ? `${name} · ${item.group_name}` : name };
+          })}
           onChange={props.onProviderChange} />
         <a href="/settings?section=model_defaults&service=translation">管理翻译服务和密钥</a>
       </div>
