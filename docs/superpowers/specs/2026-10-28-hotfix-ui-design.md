@@ -125,4 +125,3 @@ After verification:
 3. Archive the temporary worktree so the branch can be checked out elsewhere.
 4. Switch the original workspace to `fix/hotfix` while preserving its pre-existing uncommitted files.
 5. Start the repository stack using the Makefile’s Compose workflow and report service status and the local URL.
-
