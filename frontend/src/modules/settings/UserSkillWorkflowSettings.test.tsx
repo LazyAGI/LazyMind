@@ -1,8 +1,12 @@
-import { createRef } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { createRef, type ReactElement } from "react";
+import { fireEvent, render as renderComponent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MemoryRouter } from "react-router-dom";
+
 import UserSkillWorkflowSettings from "./UserSkillWorkflowSettings";
+
+const render = (component: ReactElement) => renderComponent(component, { wrapper: MemoryRouter });
 
 const mocks = vi.hoisted(() => ({
   listSkillAssetsPage: vi.fn(),
@@ -76,6 +80,55 @@ describe("UserSkillWorkflowSettings workflow controls", () => {
       call_mode: "auto",
       status: "active",
     }]);
+  });
+
+  it("links the header to the active resource view without nested interactive controls", async () => {
+    render(<UserSkillWorkflowSettings skillsEnabled workflowsEnabled groupSaving={null}
+      controlsDisabled={false} onGroupChange={mocks.onGroupChange} headingRef={createRef<HTMLHeadingElement>()} />);
+    await screen.findByText("settingsPage.skills.emptySkills");
+
+    const link = screen.getByRole("link", { name: "settingsPage.skills.openCapabilityManagement" });
+    expect(link.closest("header")).not.toBeNull();
+    expect(link).toHaveAttribute("href", "/memory-management/skills");
+    expect(link.tabIndex).toBe(0);
+    expect(link.closest("button")).toBeNull();
+    expect(link.querySelector("button, a, input, [tabindex]")).toBeNull();
+    expect(screen.getAllByRole("link", { name: "settingsPage.skills.openCapabilityManagement" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /我的工作流/ }));
+    expect(link).toHaveAttribute("href", "/memory-management/skills?skillView=workflows");
+    fireEvent.click(screen.getByRole("button", { name: /我的技能/ }));
+    expect(link).toHaveAttribute("href", "/memory-management/skills");
+  });
+
+  it.each([
+    ["skills", "loading", "/memory-management/skills"],
+    ["skills", "empty", "/memory-management/skills"],
+    ["skills", "failed", "/memory-management/skills"],
+    ["skills", "master off", "/memory-management/skills"],
+    ["workflows", "loading", "/memory-management/skills?skillView=workflows"],
+    ["workflows", "empty", "/memory-management/skills?skillView=workflows"],
+    ["workflows", "failed", "/memory-management/skills?skillView=workflows"],
+    ["workflows", "master off", "/memory-management/skills?skillView=workflows"],
+  ] as const)("keeps the %s management link available when %s", async (activeView, state, href) => {
+    if (state === "loading") mocks.listSkillAssetsPage.mockReturnValue(new Promise(() => {}));
+    if (state === "empty") mocks.listUserWorkflowSettings.mockResolvedValue([]);
+    if (state === "failed") mocks.listSkillAssetsPage.mockRejectedValue(new Error("unavailable"));
+    render(<UserSkillWorkflowSettings activeView={activeView}
+      skillsEnabled={state !== "master off"} workflowsEnabled={state !== "master off"}
+      groupSaving={null} controlsDisabled={state === "loading"}
+      onGroupChange={mocks.onGroupChange} headingRef={createRef<HTMLHeadingElement>()} />);
+
+    if (state === "loading") expect(screen.getByLabelText("settingsPage.skills.loadingAria")).toBeInTheDocument();
+    if (state === "empty") await screen.findByText(activeView === "skills"
+      ? "settingsPage.skills.emptySkills" : "settingsPage.skills.emptyWorkflows");
+    if (state === "failed") await screen.findByText("settingsPage.skills.loadFailed");
+    if (state === "master off") await screen.findByText(activeView === "skills"
+      ? "settingsPage.skills.masterOffSkillNotice" : "settingsPage.skills.masterOffWorkflowNotice");
+    const link = screen.getByRole("link", { name: "settingsPage.skills.openCapabilityManagement" });
+    expect(link).toHaveAttribute("href", href);
+    expect(link).toBeVisible();
+    expect(link).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("keeps workflow controls available independently", async () => {

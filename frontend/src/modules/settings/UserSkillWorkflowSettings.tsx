@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ChangeEvent, ReactNode, RefObject } from "react";
-import { Alert, Empty, Input, Pagination, Skeleton, Switch, message } from "antd";
+import { Alert, Button, Empty, Input, Pagination, Skeleton, Switch, message } from "antd";
 import { ApartmentOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import {
@@ -280,6 +280,12 @@ export default function UserSkillWorkflowSettings({
           <p>{t("settingsPage.skills.description")}</p>
         </div>
         <div className="settings-skill-group-controls">
+          <Button href={activeTab === "skills"
+            ? "/memory-management/skills"
+            : "/memory-management/skills?skillView=workflows"}
+          >
+            {t("settingsPage.skills.openCapabilityManagement")}
+          </Button>
           <div className="settings-skill-master">
             <div>
               <strong>{activeGroupLabel}</strong>
