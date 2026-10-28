@@ -294,6 +294,26 @@ describe('paper library behavior', () => {
         expect(screen.getByRole('heading', { name: 'Unfiled paper' })).toBeInTheDocument();
         expect(screen.queryByRole('heading', { name: 'Folder paper' })).not.toBeInTheDocument();
     });
+    it('expands child directories, opens a directory, and collapses them again when returning', async () => {
+        const data = readLibrary(datasetId);
+        for (let index = 3; index <= 8; index++)
+            data.folders.push({ id: `topic-${index}`, name: `主题${index}` });
+        data.papers[2].folderId = 'topic-8';
+        writeLibrary(datasetId, data);
+        await renderLibrary();
+        let directories = within(screen.getByRole('region', { name: '子目录' }));
+        expect(directories.queryByRole('button', { name: /主题8/ })).not.toBeInTheDocument();
+        fireEvent.click(directories.getByRole('button', { name: '展开全部（8）' }));
+        expect(directories.getByRole('button', { name: '收起' })).toHaveAttribute('aria-expanded', 'true');
+        fireEvent.click(directories.getByRole('button', { name: /主题8.*1 篇/ }));
+        expect(screen.getByRole('heading', { name: '主题8' })).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Unfiled paper' })).toBeInTheDocument();
+        expect(screen.queryByRole('heading', { name: 'Folder paper' })).not.toBeInTheDocument();
+        fireEvent.click(folderTitle(/论文库/));
+        directories = within(screen.getByRole('region', { name: '子目录' }));
+        expect(directories.getByRole('button', { name: '展开全部（8）' })).toHaveAttribute('aria-expanded', 'false');
+        expect(directories.queryByRole('button', { name: /主题8/ })).not.toBeInTheDocument();
+    });
     it('adds a PDF from metadata-only paper details and blocks a reliably different paper before upload', async () => {
         const data = readLibrary(datasetId);
         data.papers[2].metadata.identifiers.doi = '10.1000/target';
