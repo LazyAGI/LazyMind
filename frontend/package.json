@@ -37,6 +37,7 @@
     "@js-preview/docx": "^1.6.4",
     "@js-preview/excel": "^1.7.14",
     "@lexical/list": "0.35.0",
+    "@lexical/react": "0.35.0",
     "@mdxeditor/editor": "^3.53.1",
     "@progress/jszip-esm": "^1.0.4",
     "@xyflow/react": "12.6.0",

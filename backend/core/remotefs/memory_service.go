@@ -12,7 +12,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/currentmemory"
 	appLog "lazymind/core/log"
@@ -47,10 +46,11 @@ var (
 )
 
 type memoryCurrentService struct {
-	db            *gorm.DB
-	repository    *currentmemory.Repository
-	currentMemory *currentmemory.Module
-	clock         func() time.Time
+	db                        *gorm.DB
+	repository                *currentmemory.Repository
+	currentMemory             *currentmemory.Module
+	clock                     func() time.Time
+	preferenceContextMaxChars int
 }
 
 func newMemoryCurrentService(db *gorm.DB) *memoryCurrentService {
@@ -68,10 +68,11 @@ func newMemoryCurrentServiceWithPreferenceContextMaxChars(
 		panic("preference context max chars must be positive")
 	}
 	return &memoryCurrentService{
-		db:            db,
-		repository:    currentmemory.NewRepository(db),
-		currentMemory: currentmemory.NewModuleWithPreferenceContextMaxChars(db, maxChars),
-		clock:         time.Now,
+		db:                        db,
+		repository:                currentmemory.NewRepository(db),
+		currentMemory:             currentmemory.NewModuleWithPreferenceContextMaxChars(db, maxChars),
+		clock:                     time.Now,
+		preferenceContextMaxChars: maxChars,
 	}
 }
 
@@ -275,18 +276,9 @@ func (s *memoryCurrentService) enqueuePreferenceOrganizerIfNeeded(
 	userID string,
 	content []byte,
 ) {
-	document, err := currentmemory.ParsePreferences(content)
-	if err != nil {
-		return
-	}
-	state := s.currentMemory.BuildPreferenceProjectionState(document)
-	if !state.NeedsOrganization() {
-		return
-	}
 	now := s.clock().UTC()
-	_, _, err = resourceupdate.EnqueuePreferenceOrganizer(
-		ctx, s.db, userID, orm.ResourceUpdateTriggerTypePreferenceChange,
-		"preference-change:"+userID+":"+common.GenerateID(), now,
+	_, _, err := resourceupdate.EnqueuePreferenceOrganizerIfNeeded(
+		ctx, s.db, userID, s.preferenceContextMaxChars, now,
 	)
 	if err != nil {
 		appLog.Logger.Warn().Err(err).Str("event", "preference_organizer_enqueue_failed").Str("user_id", userID).Str("etag", currentmemory.ContentETag(content)).Msg("Preference was saved but Organizer enqueue failed")

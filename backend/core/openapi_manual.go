@@ -262,6 +262,9 @@ func manualSchemas() map[string]any {
 			prop("reason", strSchema()),
 			prop("target_reached", boolSchema()),
 			prop("stop_reason", strSchema()),
+			prop("initial_state", refSchema("PreferenceOrganizerState")),
+			prop("final_state", refSchema("PreferenceOrganizerState")),
+			prop("observed_state", refSchema("PreferenceOrganizerState")),
 		),
 		"PreferenceOrganizerState": objReq(
 			[]string{"stored_items", "full_projection_chars", "projected_items", "projected_chars", "projection_truncated", "etag"},
@@ -271,6 +274,8 @@ func manualSchemas() map[string]any {
 			prop("projected_chars", intSchema()),
 			prop("projection_truncated", boolSchema()),
 			prop("etag", strSchema()),
+			prop("max_chars", intSchema()),
+			prop("updated_at", dateTimeSchema()),
 		),
 		"PreferenceOrganizerPass": objReq(
 			[]string{"pass_number", "plan_hash", "before", "receipts", "changes", "operation_count", "outcome"},
@@ -288,6 +293,9 @@ func manualSchemas() map[string]any {
 			prop("task_id", strSchema()),
 			prop("status", enumStringSchema("pending", "running", "done", "failed", "skipped")),
 			prop("waiting_reason", enumStringSchema("memory_review", "resources")),
+			prop("current_state", refSchema("PreferenceOrganizerState")),
+			prop("result_validity", enumStringSchema("current", "stale", "unknown")),
+			prop("invalidation_reason", enumStringSchema("state_unavailable", "missing_snapshot", "preference_changed", "budget_changed")),
 			prop("result", refSchema("PreferenceOrganizerResult")),
 			prop("error_code", strSchema()),
 			prop("error_message", strSchema()),

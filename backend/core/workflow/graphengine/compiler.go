@@ -1055,6 +1055,15 @@ func validateUI(
 	}
 	placed := map[string]int{}
 	var out []Diagnostic
+	if value, exists := ui["default_panel_mode"]; exists && value != "compact" && value != "expanded" {
+		out = append(out, diag("E_UI_PANEL_MODE_INVALID", "error", "workflow.yaml.ui.default_panel_mode", "panel mode must be compact or expanded"))
+	}
+	if raw, exists := ui["follow_mode"]; exists {
+		mode, ok := raw.(map[string]any)
+		if !ok || (mode["default"] != "following" && mode["default"] != "free") {
+			out = append(out, diag("E_UI_FOLLOW_MODE_INVALID", "error", "workflow.yaml.ui.follow_mode.default", "follow mode default must be following or free"))
+		}
+	}
 	widgets := map[string]map[string]any{}
 	if rawWidgets, exists := ui["slots"]; exists {
 		widgetBytes, _ := yaml.Marshal(rawWidgets)

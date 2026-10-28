@@ -100,8 +100,11 @@ slots:
   - {id: pack_review, user_visible: false, label: Final Pack Review, type: json, cardinality: single}
 
 ui:
+  follow_mode:
+    default: following
   tabs:
     - id: plan
+      status_step_ids: [classify_request, ordinary_prepare, edit_prepare, meme_brief, meme_preflight, understand_states, design_best_performances, plan_static, plan_dynamic]
       label: Plan
       layout: list
       slots:
@@ -116,6 +119,7 @@ ui:
         - {id: static_plan}
         - {id: dynamic_plan}
     - id: character
+      status_step_ids: [canonical_character, build_identity_anchors]
       label: Character
       layout: grid
       slots:
@@ -128,6 +132,7 @@ ui:
         - {id: face_anchor_grid}
       composite_behavior: {hide_empty_columns: true, empty_column_scope: selected}
     - id: production
+      status_step_ids: [render_static, render_keyframes, video_canary, render_dynamic]
       label: Production
       layout: grid
       slots:
@@ -137,6 +142,7 @@ ui:
         - {id: remaining_videos}
       composite_behavior: {hide_empty_columns: true, empty_column_scope: selected}
     - id: result
+      status_step_ids: [ordinary_generate, edit_candidate, caption_static, caption_dynamic, review_pack]
       label: Result
       layout: composite
       slots:

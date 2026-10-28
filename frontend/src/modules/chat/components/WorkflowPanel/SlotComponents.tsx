@@ -956,6 +956,7 @@ export function SlotVersionPopover({
   onDiscardDraft,
 }: SlotVersionPopoverProps) {
   // effectiveDraftIndex: index used for draftStore operations (localStorage key).
+  const { onBrowse } = useContext(SlotEditingContext);
   const effectiveDraftIndex = draftListIndex ?? listIndex;
   const popoverKey: PopoverKey = `${sessionId}:${slotId}:${listIndex}`;
   const [open, setOpen] = useGlobalPopoverOpen(popoverKey);
@@ -994,6 +995,7 @@ export function SlotVersionPopover({
       setOpen(false);
       return;
     }
+    onBrowse?.();
     // Always load version history; in draft mode also default-select the draft entry.
     setLoading(true);
     setVersionError('');
@@ -1021,7 +1023,7 @@ export function SlotVersionPopover({
     } finally {
       setLoading(false);
     }
-  }, [getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId, readCurrentValue, currentValue]);
+  }, [getSlotVersions, hasDraftEntry, isWriterDraft, listIndex, open, sessionId, setOpen, slotId, readCurrentValue, currentValue, onBrowse]);
 
   const handleClose = useCallback(() => setOpen(false), [setOpen]);
 
