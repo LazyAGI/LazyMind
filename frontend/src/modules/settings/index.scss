@@ -224,9 +224,10 @@
 .settings-detail-page { max-width: 1280px; }
 .settings-integrated-page { width: 100%; max-width: none; }
 .settings-integrated-page.is-tasks-page,
-.settings-integrated-page.is-knowledge-page {
+.settings-integrated-page.is-knowledge-page,
+.settings-integrated-page.is-memory-page {
   width: 100%;
-  max-width: 864px;
+  max-width: 1120px;
   margin-inline: auto;
   padding-top: 32px;
   padding-bottom: 52px;
@@ -1372,7 +1373,8 @@
 
 @media (max-width: 800px) {
   .settings-integrated-page.is-tasks-page,
-  .settings-integrated-page.is-knowledge-page { padding-top: 20px; padding-bottom: 32px; }
+  .settings-integrated-page.is-knowledge-page,
+  .settings-integrated-page.is-memory-page { padding-top: 20px; padding-bottom: 32px; }
   .settings-reference { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
   .settings-reference-sidebar {
     display: grid;
@@ -1650,7 +1652,7 @@
     min-height: 0;
     overflow: visible;
     width: 100%;
-    max-width: 864px;
+    max-width: 1040px;
     margin-inline: auto;
     padding-block: 40px 48px;
   }

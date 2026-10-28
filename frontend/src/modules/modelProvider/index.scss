@@ -1684,6 +1684,40 @@
   .model-provider-translation-tier + .model-provider-translation-tier { padding-top: 16px; border-top: 1px solid var(--default-service-line); }
   .model-provider-translation-tier-heading h4 { margin: 0; color: var(--default-service-text); font-size: 13px; font-weight: 600; }
   .model-provider-translation-tier-heading p { margin: 3px 0 4px; color: var(--default-service-muted); font-size: 12px; line-height: 1.6; }
+  .model-provider-translation-tier .model-provider-service-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding-top: 8px;
+  }
+  .model-provider-translation-tier .model-provider-service-card {
+    min-height: 86px;
+    grid-template-columns: 40px minmax(0, 1fr) 16px;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid #dfe6f0;
+    border-radius: 10px;
+    background: #fff;
+    &:last-child { border-bottom: 1px solid #dfe6f0; }
+    &:hover { border-color: #9bbdf6; background: #f9fbff; }
+  }
+  .model-provider-translation-tier .model-provider-service-logo {
+    width: 40px;
+    height: 40px;
+    border-color: #dfe6f0;
+    border-radius: 9px;
+    background: #fff;
+    img { width: 27px; height: 27px; }
+  }
+  .model-provider-translation-tier .model-provider-service-card-copy p {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-height: 1.45;
+  }
+  @container default-services (max-width: 720px) {
+    .model-provider-translation-tier .model-provider-service-grid { grid-template-columns: minmax(0, 1fr); }
+  }
   .model-provider-default-parsing-control { padding: 4px 0 10px; border-bottom: 1px solid var(--default-service-line); }
 
   @container default-services (max-width: 560px) {
@@ -1692,6 +1726,7 @@
     .model-provider-default-service-content { margin-inline: 16px; }
     .model-provider-service-card { min-height: 72px; }
     .model-provider-service-card-copy .model-provider-service-title-row { flex-wrap: wrap; }
+    .model-provider-translation-tier .model-provider-service-grid { grid-template-columns: minmax(0, 1fr); }
   }
   @media (prefers-reduced-motion: reduce) {
     .model-provider-default-service-caret { transition: none; }

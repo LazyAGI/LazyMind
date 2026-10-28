@@ -11,10 +11,12 @@ import {
   MinusCircleOutlined,
   QuestionCircleOutlined,
   PictureOutlined,
+  ReadOutlined,
   RightOutlined,
   RocketOutlined,
   ScanOutlined,
   SearchOutlined,
+  TranslationOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
@@ -787,22 +789,21 @@ export default function DefaultModelConfigPanel({
   });
 
   const toolCards = onConfigureToolService ? ([
-    { key: "searchEngine", category: "search", title: "搜索引擎" },
-    { key: "academicSearch", category: "academic", title: "学术搜索引擎" },
-    { key: "cloudParsing", category: "parsing", title: "文档解析（OCR）" },
-    { key: "machineTranslation", category: "translation", title: "机器翻译" },
+    { key: "searchEngine", category: "search", title: "搜索引擎", icon: SearchOutlined },
+    { key: "academicSearch", category: "academic", title: "学术搜索引擎", icon: ReadOutlined },
+    { key: "cloudParsing", category: "parsing", title: "文档解析（OCR）", icon: ScanOutlined },
+    { key: "machineTranslation", category: "translation", title: "机器翻译", icon: TranslationOutlined },
   ] as const).map((service) => ({
     key: service.key,
     configured: Boolean(toolServiceSummaries?.[service.category]),
-    node: <div key={service.key} role="group" aria-label={service.title} className="model-provider-default-row model-provider-cloud-service-row">
+    node: <div key={service.key} role="group" aria-label={service.title} className="model-provider-default-row model-provider-cloud-service-row default-services-tool-row">
       <div className="model-provider-default-meta"><span className="model-provider-default-title">{service.title}</span></div>
       <div className="model-provider-default-controls">
-        <div className="model-provider-default-input">
-          <span className="default-services-summary">{toolServiceSummaries?.[service.category] || "尚未配置"}</span>
-          <Button type="text" size="small" className="model-provider-configure-capability" onClick={() => onConfigureToolService(service.category)}>
-            {t("modelProvider.configureCapability")}<RightOutlined aria-hidden="true" />
-          </Button>
-        </div>
+        <button type="button" className="default-services-tool-picker" aria-label={t("modelProvider.configureCapability")} onClick={() => onConfigureToolService(service.category)}>
+          <span className="default-services-tool-icon" aria-hidden="true"><service.icon /></span>
+          <span className="default-services-summary" title={toolServiceSummaries?.[service.category] || "尚未配置"}>{toolServiceSummaries?.[service.category] || "尚未配置"}</span>
+          <span className="default-services-tool-action">{t("modelProvider.configureCapability")}<RightOutlined aria-hidden="true" /></span>
+        </button>
       </div>
     </div>,
   })) : cloudCards;

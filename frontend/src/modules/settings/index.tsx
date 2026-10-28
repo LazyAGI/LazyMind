@@ -970,7 +970,7 @@ function SettingsPageContent() {
       </>;
     }
 
-    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "model_defaults" ? " settings-model-defaults-page" : section === "tasks" ? " is-tasks-page" : section === "knowledge" ? " is-knowledge-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
+    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "model_defaults" ? " settings-model-defaults-page" : section === "tasks" ? " is-tasks-page" : section === "knowledge" ? " is-knowledge-page" : section === "memory" ? " is-memory-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
       {content}
       <div className="settings-screenreader-status" role="status" aria-live="polite">
         {saving ? t("settingsPage.savingStatus") : checking ? t("settingsPage.checkingStatus") : ""}

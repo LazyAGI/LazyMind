@@ -115,6 +115,29 @@ describe("default-model service configuration", () => {
       .toHaveAttribute("href", "https://fanyi-api.baidu.com/");
   });
 
+  it("uses recognizable local logos for each visible translation service", async () => {
+    mocks.listProviders.mockResolvedValue({ data: { providers: [
+      { id: "google-web", name: "Google Translate Web", category: "translation", capabilities: ["keyless_translation"] },
+      { id: "bing-web", name: "Bing Translate Web", category: "translation", capabilities: ["keyless_translation"] },
+      { id: "sogou-web", name: "Sogou Translate Web", category: "translation", capabilities: ["keyless_translation"] },
+      { id: "deepl-web", name: "DeepL Web", category: "translation", capabilities: ["keyless_translation"] },
+      { id: "tencent-web", name: "Tencent TranSmart Web", category: "translation", capabilities: ["keyless_translation"] },
+      { id: "baidu", name: "Baidu Translation", category: "translation" },
+      { id: "aliyun", name: "Aliyun Translation", category: "translation" },
+      { id: "niutrans", name: "NiuTrans", category: "translation" },
+    ] } });
+    render(<ExternalServicesPage focusCategory="translation" variant="default-models" />);
+    for (const [name, icon] of [
+      ["Google Translate Web", "google.svg"], ["Bing Translate Web", "bing.png"],
+      ["Sogou Translate Web", "sogou.png"], ["DeepL Web", "deepl.png"],
+      ["Tencent TranSmart Web", "tencent.png"], ["Baidu Translation", "baidu.png"],
+      ["Aliyun Translation", "aliyun.png"], ["NiuTrans", "niutrans.png"],
+    ]) {
+      const card = await screen.findByRole("button", { name: `配置 ${name}` });
+      expect(card.querySelector("img")?.getAttribute("src")).toContain(icon);
+    }
+  });
+
   it("notifies the default-model page after enabling a keyless source", async () => {
     const onConfigurationChanged = vi.fn();
     render(<ExternalServicesPage
@@ -125,15 +148,12 @@ describe("default-model service configuration", () => {
     fireEvent.click(await screen.findByRole("button", { name: "配置 Google Translate Web" }));
     fireEvent.click(await screen.findByRole("button", { name: "启用此翻译源" }));
 
-    await waitFor(() => expect(mocks.selectProvider).toHaveBeenCalledWith({
-      setSelectedProviderOpenAPIRequest: {
-        selections: [{ category: "translation", group_id: "group-google-web" }],
-      },
-    }));
+    await waitFor(() => expect(mocks.createGroup).toHaveBeenCalled());
+    expect(mocks.selectProvider).not.toHaveBeenCalled();
     expect(onConfigurationChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("notifies the default-model page after selecting saved translation credentials", async () => {
+  it("does not offer source selection beside saved translation credentials", async () => {
     mocks.listGroups.mockResolvedValue({ data: { groups: [{
       id: "group-baidu",
       has_api_key: true,
@@ -146,13 +166,8 @@ describe("default-model service configuration", () => {
       variant="default-models"
     />);
     fireEvent.click(await screen.findByRole("button", { name: "配置 Baidu Translation" }));
-    fireEvent.click(await screen.findByRole("button", { name: "modelProvider.external.selectTranslationSource" }));
-
-    await waitFor(() => expect(mocks.selectProvider).toHaveBeenCalledWith({
-      setSelectedProviderOpenAPIRequest: {
-        selections: [{ category: "translation", group_id: "group-baidu" }],
-      },
-    }));
-    expect(onConfigurationChanged).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "modelProvider.external.selectTranslationSource" })).not.toBeInTheDocument();
+    expect(mocks.selectProvider).not.toHaveBeenCalled();
+    expect(onConfigurationChanged).not.toHaveBeenCalled();
   });
 });

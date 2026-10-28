@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -70,9 +70,7 @@ describe("translation service configuration", () => {
       }) }),
       undefined,
     ));
-    await waitFor(() => expect(mocks.select).toHaveBeenCalledWith({
-      setSelectedProviderOpenAPIRequest: { selections: [{ category: "translation", group_id: "group-new" }] },
-    }));
+    expect(mocks.select).not.toHaveBeenCalled();
   });
 
   it("stores Baidu's APP ID and secret together without a model check", async () => {
@@ -100,10 +98,10 @@ describe("translation service configuration", () => {
       updateModelProviderGroupOpenAPIRequest: expect.objectContaining({ api_key: "new-deepl-key", verify: false }),
     })));
     expect(mocks.addKey).not.toHaveBeenCalled();
-    await waitFor(() => expect(mocks.select).toHaveBeenCalled());
+    expect(mocks.select).not.toHaveBeenCalled();
   });
 
-  it("reselects a saved credentialed source without replacing its secret and updates the active marker", async () => {
+  it("keeps a saved credentialed source without a selection action", async () => {
     mocks.providers = [provider("deepl", "DeepL"), provider("google-cloud", "Google Cloud Translation")];
     mocks.groups.mockResolvedValue({ data: { groups: [{
       id: "group-deepl", base_url: "https://deepl.example/", has_api_key: true,
@@ -115,18 +113,10 @@ describe("translation service configuration", () => {
     }] } });
 
     await openProvider("DeepL");
-    const googleCard = screen.getByRole("button", { name: "modelProvider.external.configModalTitle:Google Cloud Translation" });
-    await waitFor(() => expect(within(googleCard).getByText("modelProvider.external.translationSelected")).toBeInTheDocument());
-    const selectButton = await screen.findByRole("button", { name: "modelProvider.external.selectTranslationSource" });
-    fireEvent.click(selectButton);
-
-    await waitFor(() => expect(mocks.select).toHaveBeenCalledWith({
-      setSelectedProviderOpenAPIRequest: { selections: [{ category: "translation", group_id: "group-deepl" }] },
-    }));
+    expect(screen.getByRole("button", { name: "modelProvider.external.configModalTitle:Google Cloud Translation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "modelProvider.external.selectTranslationSource" })).not.toBeInTheDocument();
     expect(mocks.patch).not.toHaveBeenCalled();
-    const deepLCard = screen.getByRole("button", { name: "modelProvider.external.configModalTitle:DeepL" });
-    await waitFor(() => expect(within(deepLCard).getByText("modelProvider.external.translationSelected")).toBeInTheDocument());
-    expect(within(googleCard).queryByText("modelProvider.external.translationSelected")).toBeNull();
+    expect(mocks.select).not.toHaveBeenCalled();
   });
 
   it("keeps the Azure resource region visible while entering credentials", async () => {

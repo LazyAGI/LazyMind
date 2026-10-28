@@ -93,11 +93,6 @@ interface ApiExternalGroup {
   user_model_provider_id?: string;
 }
 
-interface SelectedExternalProvider {
-  category: string;
-  user_model_provider_id: string;
-}
-
 interface CheckExternalServiceResult {
   success: boolean;
   message?: string;
@@ -366,6 +361,17 @@ function mapProviderCategory(category?: string): ServiceCategoryKey {
 
 function getProviderLogoUrl(name: string) {
   const normalizedName = normalizeProviderName(name);
+  const translationLogos: Record<string, string> = {
+    googletranslateweb: "/provider-icons/google.svg",
+    bingtranslateweb: "/provider-icons/translation/bing.png",
+    sogoutranslateweb: "/provider-icons/translation/sogou.png",
+    deeplweb: "/provider-icons/translation/deepl.png",
+    tencenttransmartweb: "/provider-icons/translation/tencent.png",
+    baidutranslation: "/provider-icons/translation/baidu.png",
+    aliyuntranslation: "/provider-icons/translation/aliyun.png",
+    niutrans: "/provider-icons/translation/niutrans.png",
+  };
+  if (translationLogos[normalizedName]) return translationLogos[normalizedName];
   if (!normalizedName) {
     return "";
   }
@@ -647,8 +653,6 @@ interface ExternalServiceCardProps {
   ariaLabel: string;
   onOpen: (service: ExternalServiceConfig) => void;
   service: ExternalServiceConfig;
-  selected?: boolean;
-  selectedLabel?: string;
   statusLabel: string;
 }
 
@@ -656,8 +660,6 @@ export function ExternalServiceCard({
   ariaLabel,
   onOpen,
   service,
-  selected = false,
-  selectedLabel,
   statusLabel,
 }: ExternalServiceCardProps) {
   const summaryRef = useRef<HTMLParagraphElement>(null);
@@ -724,9 +726,8 @@ export function ExternalServiceCard({
             >
               {statusLabel}
             </Tag>
-            {selected && selectedLabel ? <Tag color="processing">{selectedLabel}</Tag> : null}
           </div>
-          {overflowAware ? (
+          {overflowAware || service.category === "translation" ? (
             summary
           ) : (
             <Tooltip placement="topLeft" title={service.summary}>
@@ -810,10 +811,8 @@ export default function ExternalServicesPage({
   const [keysLoaded, setKeysLoaded] = useState(false);
   const [keysError, setKeysError] = useState(false);
   const [groupForActiveService, setGroupForActiveService] = useState<ApiExternalGroup | null>(null);
-  const [selectedTranslationProviderId, setSelectedTranslationProviderId] = useState<string | null>(null);
   const originalBaseUrlRef = useRef("");
   const loadGroupKeysGenRef = useRef(0);
-  const selectedTranslationLoadGenRef = useRef(0);
   const formValues = Form.useWatch([], form);
   const confirmConfigClose = useSettingsDraft({
     dirty: Boolean(activeService) && (Boolean(newKeyValue || newKeyEngineId) || (keysLoaded &&
@@ -854,26 +853,6 @@ export default function ExternalServicesPage({
   }, [currentLanguage, t]);
 
   useEffect(() => loadExternalServices(normalizedSearchValue), [loadExternalServices, normalizedSearchValue]);
-
-  useEffect(() => {
-    const generation = ++selectedTranslationLoadGenRef.current;
-    void modelProvidersApi.apiCoreModelProvidersSelectedProvidersGet()
-      .then((response) => {
-        if (selectedTranslationLoadGenRef.current !== generation) return;
-        const selections = unwrapModelProviderData<{ selections?: SelectedExternalProvider[] }>(response.data).selections || [];
-        setSelectedTranslationProviderId(selections.find((item) => item.category === "translation")?.user_model_provider_id || null);
-      })
-      .catch(() => {
-        if (selectedTranslationLoadGenRef.current === generation) setSelectedTranslationProviderId(null);
-      });
-    return () => { selectedTranslationLoadGenRef.current += 1; };
-  }, []);
-
-  async function selectTranslationService(service: ExternalServiceConfig, groupId: string) {
-    await selectServiceProvider(service, groupId);
-    selectedTranslationLoadGenRef.current += 1;
-    setSelectedTranslationProviderId(service.key);
-  }
 
   useEffect(() => {
     const syncDeveloperActive = () => {
@@ -968,13 +947,10 @@ export default function ExternalServicesPage({
         }
         setGroupForActiveService(savedGroup);
 
-        // Select the provider
-        if (isTranslation) await selectTranslationService(activeService, savedGroup.id);
-        else await selectServiceProvider(activeService, savedGroup.id);
+        if (!isTranslation) await selectServiceProvider(activeService, savedGroup.id);
       } else if (isTranslation) {
         const savedGroup = await replaceProviderCredential(activeService, groupForActiveService, apiKey);
         setGroupForActiveService(savedGroup);
-        await selectTranslationService(activeService, savedGroup.id);
       } else {
         // Add key to existing group
         await modelProvidersDefaultApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost(
@@ -1010,28 +986,11 @@ export default function ExternalServicesPage({
         api_key: "",
         verify: false,
       });
-      await selectTranslationService(activeService, group.id);
       setGroupForActiveService(group);
       setActiveService((current) => current?.key === activeService.key
         ? { ...current, status: "configured" }
         : current);
       void loadExternalServices(normalizedSearchValue);
-      onConfigurationChanged?.();
-      message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-    } finally {
-      setAddingKey(false);
-    }
-  }
-
-  async function handleSelectExistingTranslation() {
-    if (!activeService || activeService.category !== "translation" || isKeylessTranslation(activeService)
-      || !keysLoaded || keysError || addingKey || !groupForActiveService
-      || !(groupForActiveService.has_api_key || keyList.length > 0)) return;
-    setAddingKey(true);
-    try {
-      await selectTranslationService(activeService, groupForActiveService.id);
       onConfigurationChanged?.();
       message.success(t("modelProvider.external.configSaved", { name: activeService.name }));
     } catch (error) {
@@ -1076,7 +1035,7 @@ export default function ExternalServicesPage({
       }
 
       const hasSavedKeys = savedGroup?.has_api_key || Boolean(savedGroup?.keys?.length) || keyList.length > 0;
-      if (savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
+      if (activeService.category !== "translation" && savedGroup && (hasSavedKeys || isCustomServiceBaseUrl(activeService, normalizedBaseUrl))) {
         await selectServiceProvider(activeService, savedGroup.id);
       }
 
@@ -1233,8 +1192,6 @@ export default function ExternalServicesPage({
           key={service.key}
           onOpen={openConfigModal}
           service={service}
-          selected={service.category === "translation" && selectedTranslationProviderId === service.key}
-          selectedLabel={t("modelProvider.external.translationSelected")}
           statusLabel={variant === "default-models" && isKeylessTranslation(service) && service.status !== "configured"
             ? t("modelProvider.external.keylessTranslationStatus")
             : t(`modelProvider.external.status.${service.status}`)}
@@ -1407,19 +1364,7 @@ export default function ExternalServicesPage({
             ? t("modelProvider.external.configModalTitle", { name: activeService.name })
             : t("modelProvider.external.configureAction")
         }
-        footer={activeService?.category === "translation" && !isKeylessTranslation(activeService) ? (
-          groupForActiveService && (groupForActiveService.has_api_key || keyList.length > 0) ? [
-            <Button
-              disabled={!keysLoaded || keysError || addingKey || selectedTranslationProviderId === activeService.key}
-              key="select-translation"
-              loading={addingKey}
-              onClick={handleSelectExistingTranslation}
-              type="primary"
-            >
-              {t(selectedTranslationProviderId === activeService.key ? "modelProvider.external.translationSelected" : "modelProvider.external.selectTranslationSource")}
-            </Button>,
-          ] : null
-        ) : [
+        footer={activeService?.category === "translation" && !isKeylessTranslation(activeService) ? null : [
           <Button
             disabled={addingKey || !keysLoaded || keysError}
             key="save"
@@ -1449,8 +1394,6 @@ export default function ExternalServicesPage({
                   >
                     {t(`modelProvider.external.status.${activeServiceDisplayStatus}`)}
                   </Tag>
-                  {activeService.category === "translation" && selectedTranslationProviderId === activeService.key
-                    ? <Tag color="processing">{t("modelProvider.external.translationSelected")}</Tag> : null}
                 </div>
                 <p>{renderExternalServiceDescription(activeService.description)}</p>
               </div>

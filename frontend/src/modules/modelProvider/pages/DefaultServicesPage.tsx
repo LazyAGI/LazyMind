@@ -131,7 +131,9 @@ export default function DefaultServicesPage({
     for (const [category, result] of [["parsing", parsingResult], ["search", searchResult], ["academic", academicResult], ["translation", translationResult]] as const) {
       if (result.status !== "fulfilled") continue;
       const groups = unwrapModelProviderData<{ groups?: { name?: string; provider_name?: string }[] }>(result.value.data).groups || [];
-      if (groups.length) summaries[category] = groups.map((group) => group.name || group.provider_name).filter(Boolean).join("、") || `已配置 ${groups.length} 个服务`;
+      if (groups.length) summaries[category] = category === "translation"
+        ? `已配置 ${groups.length} 个翻译源`
+        : groups.map((group) => group.name || group.provider_name).filter(Boolean).join("、") || `已配置 ${groups.length} 个服务`;
     }
     setToolServiceSummaries(summaries);
   }, []);
