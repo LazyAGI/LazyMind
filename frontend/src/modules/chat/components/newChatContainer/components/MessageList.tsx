@@ -415,7 +415,7 @@ const MessageList: React.FC<MessageListProps> = ({
   };
 
   const renderUser = (item: any, index: number) => {
-    const isLastUserMessage = index === lastUserIndex;
+    const isLastUserMessage = index === lastUserIndex && !item.steering_message;
     const isEditing = editingUserMessageIndex === index;
     const citeMessageList = isEditing
       ? editingUserMessageCites

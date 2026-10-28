@@ -4,10 +4,26 @@ import importlib
 from typing import Annotated, Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Body, Header, HTTPException, Response
+from pydantic import BaseModel
 from lazymind.chat.service.chat_request import ChatRequest
 from lazymind.chat.runtime_loader import ensure_chat_runtime
 
 router = APIRouter()
+
+
+class ChatSteerRequest(BaseModel):
+    algorithm_id: Optional[str] = None
+    conversation_id: str
+    run_id: str
+    steer_id: str
+    input: str
+
+
+class ChatSteerResponse(BaseModel):
+    accepted: bool
+    steer_id: str = ''
+    code: str = ''
+    message: str = ''
 
 
 async def _chat_service():
@@ -113,6 +129,31 @@ async def chat(
 ):
     service = await _chat_service()
     return await service.handle_chat(request)
+
+
+@router.post('/api/chat/steer', response_model=ChatSteerResponse,
+             summary='Add user guidance to an active chat run')
+async def steer_chat(
+    request: ChatSteerRequest,
+    token: Annotated[Optional[str], Header(alias='X-LazyMind-Internal-Token')] = None,
+):
+    from lazymind.chat.api.knowledge_search_routes import require_internal_token
+    from lazymind.chat.engine.agent_runtime.steering import steering_registry
+
+    require_internal_token(token)
+    conversation_id = request.conversation_id.strip()
+    run_id = request.run_id.strip()
+    steer_id = request.steer_id.strip()
+    content = request.input.strip()
+    if not conversation_id or not run_id or not steer_id or not content:
+        raise HTTPException(status_code=400, detail='conversation_id, run_id, steer_id and input are required')
+    accepted, code = steering_registry.accept(run_id, conversation_id, steer_id, content)
+    if not accepted:
+        return ChatSteerResponse(
+            accepted=False, steer_id=steer_id, code=code,
+            message='The target response is no longer accepting guidance',
+        )
+    return ChatSteerResponse(accepted=True, steer_id=steer_id)
 
 
 @router.post('/api/chat/context-usage', summary='Estimate next-request ChatAgent context usage')

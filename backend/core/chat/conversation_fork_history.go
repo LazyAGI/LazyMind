@@ -119,6 +119,11 @@ func serveForkHistoryWindow(w http.ResponseWriter, r *http.Request, convID strin
 		forkReplyError(w, err)
 		return true
 	}
-	writeConversationJSON(w, http.StatusOK, map[string]any{"conversation_id": convID, "history": conversationHistoryResponseItems(window), "older_page_token": older, "newer_page_token": newer, "next_page_token": ""})
+	historyItems := conversationHistoryResponseItems(window)
+	if err := hydrateConversationSteeringHistory(r.Context(), db, convID, store.UserID(r), historyItems); err != nil {
+		forkReplyError(w, err)
+		return true
+	}
+	writeConversationJSON(w, http.StatusOK, map[string]any{"conversation_id": convID, "history": historyItems, "older_page_token": older, "newer_page_token": newer, "next_page_token": ""})
 	return true
 }

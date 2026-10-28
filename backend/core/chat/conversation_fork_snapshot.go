@@ -185,7 +185,7 @@ func forkDigest(value any) (string, error) {
 	return "v1:" + hex.EncodeToString(sum[:]), nil
 }
 
-var forkExtKeys = []string{"input", "display_query", "mentions", "trail", "model_route", "conversation_config_snapshot", "ask_answers", "ask_answers_structured"}
+var forkExtKeys = []string{"input", "display_query", "mentions", "trail", "model_route", "conversation_config_snapshot", "ask_answers", "ask_answers_structured", "steering_timeline"}
 
 func forkInheritableExt(raw json.RawMessage) (map[string]any, error) {
 	v, err := forkCanonicalJSON(raw)
@@ -266,6 +266,10 @@ func copyForkHistories(source []orm.ChatHistory, conversationID string) ([]orm.C
 		remapForkReferences(ext, ids)
 		if s, ok := ext["conversation_config_snapshot"].(map[string]any); ok {
 			delete(s, "run_id")
+		}
+		if timeline, ok := ext["steering_timeline"].(map[string]any); ok {
+			// Forked history is read-only and has no active source run owner.
+			delete(timeline, "run_id")
 		}
 		revision, err := forkPrefixRevision([]orm.ChatHistory{h})
 		if err != nil {

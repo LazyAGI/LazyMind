@@ -22,6 +22,7 @@ import (
 
 const (
 	streamChatPath = "/api/chat/stream"
+	steerChatPath  = "/api/chat/steer"
 
 	defaultDialTimeout = 10 * time.Second
 	// defaultTotalTimeout bounds the whole upstream stream. auto-mode SubAgents block the
@@ -29,6 +30,7 @@ const (
 	// longest expected SubAgent runtime. Override via LAZYMIND_CHAT_UPSTREAM_TIMEOUT_SEC.
 	defaultTotalTimeout = 2 * time.Hour
 	defaultTTFB         = 3 * time.Minute
+	defaultSteerTimeout = 15 * time.Second
 )
 
 func upstreamTotalTimeout() time.Duration {
@@ -160,6 +162,7 @@ type ChatWorkflowOptions struct {
 
 // LazyChatData text data text。
 type LazyChatData struct {
+	SteeringApplied          []steeringApplied              `json:"steering_applied,omitempty"`
 	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
 	Sources                  []any                          `json:"sources"`
@@ -342,6 +345,21 @@ type ChatService struct {
 	client        *http.Client
 }
 
+type LazyChatSteerRequest struct {
+	AlgorithmID    string `json:"algorithm_id,omitempty"`
+	ConversationID string `json:"conversation_id"`
+	RunID          string `json:"run_id"`
+	SteerID        string `json:"steer_id"`
+	Input          string `json:"input"`
+}
+
+type LazyChatSteerResponse struct {
+	Accepted bool   `json:"accepted"`
+	SteerID  string `json:"steer_id,omitempty"`
+	Code     string `json:"code,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
 // NewChatServiceWithEndpoint Createtext endpoint text ChatService，endpoint text http://host:port。
 func NewChatServiceWithEndpoint(endpoint string) *ChatService {
 	endpoint = strings.TrimRight(endpoint, "/")
@@ -406,6 +424,36 @@ func (c *ChatService) StreamChat(ctx context.Context, req *LazyChatRequest) (<-c
 	return lazyStreamHandler(ctx, resp), strings.TrimSpace(resp.Header.Get("X-Algorithm-Id")), nil
 }
 
+// SteerChat delivers input to the exact algorithm instance that owns an active
+// run. A successful HTTP response means the runtime owns the input, not that a
+// model has already consumed it.
+func (c *ChatService) SteerChat(ctx context.Context, req LazyChatSteerRequest) (*LazyChatSteerResponse, int, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	steerCtx, cancel := context.WithTimeout(ctx, defaultSteerTimeout)
+	defer cancel()
+	httpReq, err := http.NewRequestWithContext(steerCtx, http.MethodPost, c.baseURL+steerChatPath, bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		httpReq.Header.Set("X-LazyMind-Internal-Token", token)
+	}
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	var result LazyChatSteerResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return &result, resp.StatusCode, nil
+}
+
 func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStreamData {
 	scanner := bufio.NewScanner(resp.Body)
 	dataChan := make(chan *LazyStreamData)
@@ -447,6 +495,7 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 
 // UpstreamStreamChunk text ChatConversations text，text LazyChatResponse.Data。
 type UpstreamStreamChunk struct {
+	SteeringApplied          []steeringApplied              `json:"steering_applied,omitempty"`
 	ModelOutput              *ChatModelOutput               `json:"model_output,omitempty"`
 	Text                     string                         `json:"text"`
 	Think                    string                         `json:"think"`
@@ -1127,6 +1176,7 @@ func upstreamStreamErrorKind(kind lazyStreamErrorKind) UpstreamStreamErrorKind {
 
 func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 	return UpstreamStreamChunk{
+		SteeringApplied:          data.SteeringApplied,
 		ModelOutput:              data.ModelOutput,
 		Text:                     data.Text,
 		Think:                    data.ReasoningText,

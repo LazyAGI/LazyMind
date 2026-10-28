@@ -88,6 +88,103 @@ export interface PromptLibraryListParams {
 export const CHAT_STREAM_URL = `${coreApiBaseUrl}/conversations:chat`;
 export const CHAT_RESUME_STREAM_URL = `${coreApiBaseUrl}/conversations:resumeChat`;
 
+export type ConversationFollowUpStatus =
+  | "pending"
+  | "steering"
+  | "accepted"
+  | "failed"
+  | "dispatching";
+
+export interface ConversationFollowUp {
+  id: string;
+  conversation_id: string;
+  content: Record<string, unknown>;
+  text: string;
+  mode: "queued" | "steer";
+  status: ConversationFollowUpStatus;
+  sort_order: number;
+  revision: number;
+  target_run_id?: string;
+  target_history_id?: string;
+  steer_id?: string;
+  error_code?: string;
+  error_message?: string;
+  accepted_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationFollowUpList {
+  items: ConversationFollowUp[];
+  active_run_id: string;
+  supports_steering: boolean;
+}
+
+const followUpPath = (conversationId: string) =>
+  `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/follow-ups`;
+
+const followUpItemPath = (conversationId: string, followUpId: string) =>
+  `${followUpPath(conversationId)}/${encodeURIComponent(followUpId)}`;
+
+function envelopeData<T>(response: AxiosResponse<{ data: T }>) {
+  return response.data.data;
+}
+
+export const ConversationFollowUpApi = {
+  list(conversationId: string) {
+    return axiosInstance
+      .get<{ data: ConversationFollowUpList }>(followUpPath(conversationId), { silentError: true } as never)
+      .then(envelopeData);
+  },
+  create(conversationId: string, body: { text: string; content: Record<string, unknown>; idempotency_key: string }) {
+    return axiosInstance
+      .post<{ data: ConversationFollowUp }>(followUpPath(conversationId), body, { silentError: true } as never)
+      .then(envelopeData);
+  },
+  update(conversationId: string, followUpId: string, body: { text: string; content: Record<string, unknown> }) {
+    return axiosInstance
+      .patch<{ data: ConversationFollowUp }>(followUpItemPath(conversationId, followUpId), body, { silentError: true } as never)
+      .then(envelopeData);
+  },
+  remove(conversationId: string, followUpId: string) {
+    return axiosInstance.delete(followUpItemPath(conversationId, followUpId), { silentError: true } as never);
+  },
+  reorder(conversationId: string, orderedIds: string[]) {
+    return axiosInstance.post(`${followUpPath(conversationId)}:reorder`, { ordered_ids: orderedIds }, { silentError: true } as never);
+  },
+  steer(conversationId: string, followUpId: string, expectedRunId: string) {
+    return axiosInstance
+      .post<{ data: { item: ConversationFollowUp; delivery_mode: "steer" | "queued"; reason?: string } }>(
+        `${followUpItemPath(conversationId, followUpId)}:steer`,
+        { expected_run_id: expectedRunId },
+        { silentError: true } as never,
+      )
+      .then(envelopeData);
+  },
+  retry(conversationId: string, followUpId: string) {
+    return axiosInstance
+      .post<{ data: ConversationFollowUp }>(`${followUpItemPath(conversationId, followUpId)}:retry`, {}, { silentError: true } as never)
+      .then(envelopeData);
+  },
+  claimNext(conversationId: string) {
+    return axiosInstance
+      .post<{ data: { item: ConversationFollowUp | null } }>(`${followUpPath(conversationId)}:claim-next`, {}, { silentError: true } as never)
+      .then(envelopeData);
+  },
+  complete(conversationId: string, followUpId: string, success: boolean, error?: unknown, requeue = false) {
+    return axiosInstance.post(
+      `${followUpItemPath(conversationId, followUpId)}:complete`,
+      {
+        success,
+        requeue,
+        error_code: success ? "" : "send_failed",
+        error_message: success ? "" : String(error || "The queued message could not be sent"),
+      },
+      { silentError: true } as never,
+    );
+  },
+};
+
 export interface ContextUsageItem {
   item_id: string;
   category: string;

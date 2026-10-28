@@ -1305,6 +1305,43 @@ describe("useChatConversation regeneration recovery", () => {
     expect(result.current.messageList[1]).toMatchObject({ archived_failure: true, history_id: "h1:failed:run-1" });
   });
 
+  it("keeps every steering message and partial answer segment when paging history", () => {
+    const initial = { id: "h2", seq: 2, query: "current question", result: "current answer" };
+    const steered = {
+      id: "h1",
+      seq: 1,
+      query: "compare cities",
+      result: "partial answerfinal answer",
+      steering_messages: [{
+        id: "steer-1",
+        text: "only compare two cities",
+        target_history_id: "h1",
+        assistant_snapshot: "partial answer",
+      }],
+    };
+    const { result } = renderConversation();
+    act(() => {
+      result.current.replaceMessageList(
+        "conversation-1",
+        buildChatMessageListFromHistory([initial]),
+      );
+      result.current.mergeHistoryPage("conversation-1", [steered]);
+      result.current.mergeHistoryPage("conversation-1", [steered]);
+    });
+
+    expect(result.current.messageList.map((item) => item.delta)).toEqual([
+      "compare cities",
+      "partial answer",
+      "only compare two cities",
+      "final answer",
+      "current question",
+      "current answer",
+    ]);
+    expect(result.current.messageList.filter(
+      (item) => item.steering_follow_up_id === "steer-1",
+    )).toHaveLength(2);
+  });
+
   it("ignores a history page for a conversation that is no longer active", () => {
     const current = buildChatMessageListFromHistory([{ id: "current", query: "current question", result: "current answer" }]);
     const { result } = renderConversation();
@@ -2306,6 +2343,94 @@ describe("useChatConversation regeneration recovery", () => {
     act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
     act(() => emit({ finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }));
     expect(result.current.messageList.map(item => item.delta)).toEqual(["question", "answer"]);
+  });
+
+  it("moves an untouched assistant placeholder behind an early steering message", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    await act(async () => { await result.current.sendMessage({ text: "original question" }); });
+    act(() => result.current.replaceMessageList("conversation-1", [
+      {
+        role: RoleTypes.USER,
+        delta: "original question",
+        history_id: "history-1",
+      },
+      {
+        role: RoleTypes.ASSISTANT,
+        history_id: "history-1",
+        delta: "",
+        raw_delta: "",
+        reasoning_content: "",
+        answers: [],
+        sources: [],
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+      },
+    ]));
+
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "history-1",
+      steering_applied: [{ id: "steer-1", text: "narrow the answer" }],
+    } }) }));
+
+    expect(result.current.messageList).toHaveLength(3);
+    expect(result.current.messageList.map((item) => item.role)).toEqual([
+      RoleTypes.USER,
+      RoleTypes.USER,
+      RoleTypes.ASSISTANT,
+    ]);
+    expect(result.current.messageList[1]).toMatchObject({
+      delta: "narrow the answer",
+      steering_message: true,
+      steering_follow_up_id: "steer-1",
+    });
+    expect(result.current.messageList[2]).toMatchObject({
+      delta: "",
+      steering_continuation: true,
+      steering_follow_up_id: "steer-1",
+    });
+  });
+
+  it("keeps partial assistant output before a later steering message", async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    await act(async () => { await result.current.sendMessage({ text: "original question" }); });
+    act(() => result.current.replaceMessageList("conversation-1", [
+      {
+        role: RoleTypes.USER,
+        delta: "original question",
+        history_id: "history-1",
+      },
+      {
+        role: RoleTypes.ASSISTANT,
+        history_id: "history-1",
+        delta: "partial answer",
+        raw_delta: "partial answer",
+        reasoning_content: "",
+        answers: [],
+        sources: [],
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+      },
+    ]));
+
+    act(() => listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "conversation-1", history_id: "history-1",
+      steering_applied: [{ id: "steer-2", text: "change direction" }],
+    } }) }));
+
+    expect(result.current.messageList).toHaveLength(4);
+    expect(result.current.messageList.map((item) => item.role)).toEqual([
+      RoleTypes.USER,
+      RoleTypes.ASSISTANT,
+      RoleTypes.USER,
+      RoleTypes.ASSISTANT,
+    ]);
+    expect(result.current.messageList[1].delta).toBe("partial answer");
+    expect(result.current.messageList[2]).toMatchObject({
+      delta: "change direction",
+      steering_message: true,
+    });
   });
 
   it("ends generation when a model failure terminal also carries the final partial answer", async () => {

@@ -5,14 +5,17 @@ import { RoleTypes } from "@/modules/chat/constants/common";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
 import { useUserMessageEdit } from "./useUserMessageEdit";
 
-const { warningMock, successMock, errorMock } = vi.hoisted(() => ({
+const { warningMock, successMock, errorMock, copyDialogMock } = vi.hoisted(() => ({
   warningMock: vi.fn(),
   successMock: vi.fn(),
   errorMock: vi.fn(),
+  copyDialogMock: vi.fn(),
 }));
 
 vi.mock("antd", () => ({
   message: { warning: warningMock, success: successMock, error: errorMock },
+  Modal: { info: copyDialogMock },
+  Button: "button",
 }));
 
 vi.mock("react-i18next", () => ({
@@ -272,5 +275,25 @@ describe("useUserMessageEdit", () => {
     });
 
     expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("handleCopyUserMessage reports failure without opening a copy dialog", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.assign(navigator, { clipboard: { writeText } });
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(false),
+    });
+    const { result } = setup();
+
+    await act(async () => {
+      await result.current.handleCopyUserMessage({ delta: "copy me" });
+    });
+
+    expect(errorMock).toHaveBeenCalledWith("chat.copyFailedRetry");
+    expect(copyDialogMock).not.toHaveBeenCalled();
+    expect(successMock).not.toHaveBeenCalled();
+    expect(document.querySelector("textarea")).toBeNull();
   });
 });

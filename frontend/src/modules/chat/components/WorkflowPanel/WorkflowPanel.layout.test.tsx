@@ -557,8 +557,8 @@ describe('shared workflow compact layout', () => {
     fixture.ui.tabs![1].completed_continue_step = 'write_document';
     const send = vi.fn();
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    await screen.findByRole('tab', { name: '成稿' });
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: '继续' })));
+    const continueButton = await screen.findByRole('button', { name: '继续' });
+    await act(async () => fireEvent.click(continueButton));
     expect(send).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}write_document`, {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
@@ -569,8 +569,7 @@ describe('shared workflow compact layout', () => {
     fixture.ui.tabs![1].completed_continue_step = 'write_document';
     const send = vi.fn(async () => false);
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    await screen.findByRole('tab', { name: '成稿' });
-    fireEvent.click(screen.getByRole('button', { name: '继续' }));
+    fireEvent.click(await screen.findByRole('button', { name: '继续' }));
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByRole('button', { name: '继续' })).toBeEnabled());
     expect(fixture.session.projection!.display!.status).toBe('completed');

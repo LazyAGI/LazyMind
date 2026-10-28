@@ -20,6 +20,7 @@ const CITE_MESSAGE_GLOBAL_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/gi;
 const ASK_USER_RECEIPT_PATTERN =
   /^Question sent to user \(ask_id=[^)]+\)\.\s*Waiting for answer on next turn\.?$/i;
+const ASK_USER_PROTOCOL_TAG_PATTERN = /<\/?ask_user\b[^>]*>/gi;
 const CODEX_REQUEST_MARKER_PATTERN = /^#+\s*My request for Codex:\s*$/im;
 const CODEX_IMAGE_TAG_PATTERN = /<\/?image\b[^>]*>/gi;
 
@@ -37,7 +38,15 @@ export function stripAskUserReceipt(
   text: string | undefined,
   hasAskPending: boolean,
 ) {
-  const content = text || "";
+  // Some providers occasionally emit the ask_user protocol envelope as plain
+  // text instead of making the structured tool call. Keep its user-facing
+  // question, but never expose the internal XML-like tags. This also handles
+  // an unfinished opening/closing tag while the answer is still streaming.
+  const source = text || "";
+  const withoutProtocolTags = source.replace(ASK_USER_PROTOCOL_TAG_PATTERN, "");
+  const content = withoutProtocolTags === source
+    ? source
+    : withoutProtocolTags.trim();
   return hasAskPending && ASK_USER_RECEIPT_PATTERN.test(content.trim())
     ? ""
     : content;
@@ -191,6 +200,16 @@ export type ConversationHistoryRecord = Omit<
       model_switches?: ChatModelSwitchRecord[];
       create_time?: string;
     }>;
+    steering_messages?: Array<{
+      id?: string;
+      text?: string;
+      target_history_id?: string;
+      assistant_snapshot?: string;
+      assistant_segment?: string;
+      reasoning_content?: string;
+      accepted_at?: string;
+    }>;
+    assistant_remainder?: string;
   };
 
 export interface ExternalExecutionProjection {
@@ -400,20 +419,102 @@ export function buildChatMessageListFromHistory(
 
     const isLastRecord = record === lastRecord;
     const isActuallyGenerating = isGenerating && isLastRecord;
+    const steeringMessages = Array.isArray(record.steering_messages)
+      ? record.steering_messages
+      : [];
     const splitResult = record.model_output
       ? splitModelOutputContent(record.result, record.reasoning_content)
       : splitThinkingContent(record.result, record.reasoning_content);
     const hasAskPending = !!(record as any).ask_pending;
-    const displayAssistantContent = stripAskUserReceipt(
+    const fullAssistantContent = stripAskUserReceipt(
       splitResult.content,
       hasAskPending,
     );
+    const assistantSnapshots = steeringMessages.map((steeringMessage) =>
+      String(steeringMessage?.assistant_snapshot || ""),
+    );
+    let snapshotOffset = 0;
+    const snapshotsAreDurablePrefixes = assistantSnapshots.every((snapshot) => {
+      if (!snapshot) return true;
+      if (
+        snapshot.length < snapshotOffset ||
+        !fullAssistantContent.startsWith(snapshot)
+      ) {
+        return false;
+      }
+      snapshotOffset = snapshot.length;
+      return true;
+    });
+    let assistantOffset = 0;
+    steeringMessages.forEach((steeringMessage, steeringIndex) => {
+      const steeringID = String(steeringMessage?.id || "").trim();
+      const steeringText = String(steeringMessage?.text || "").trim();
+      if (!steeringID || !steeringText) {
+        return;
+      }
+      const snapshot = snapshotsAreDurablePrefixes
+        ? assistantSnapshots[steeringIndex]
+        : "";
+      const segment = stripAskUserReceipt(steeringMessage.assistant_segment ?? fullAssistantContent.slice(
+          assistantOffset,
+          snapshot.length,
+        ), hasAskPending);
+      // Reasoning without user-facing text is an interrupted pre-answer
+      // placeholder, not a completed assistant segment. Omitting it here keeps
+      // refreshed history identical to the live steering timeline without
+      // affecting ordinary (non-steering) reasoning messages.
+      if (segment.trim()) {
+        list.push({
+          id: `steering-segment:${steeringID}`,
+          history_id: `steering-segment:${record.id || "history"}:${steeringID}`,
+          original_history_id: record.id,
+          seq: record.seq,
+          role: RoleTypes.ASSISTANT,
+          reasoning_content: steeringMessage.reasoning_content || "",
+          delta: segment,
+          raw_delta: segment,
+          finish_reason:
+            ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+          create_time: steeringMessage.accepted_at || record.create_time,
+          steering_segment: true,
+          steering_follow_up_id: steeringID,
+          model_route: record.model_route,
+          fork_read_only: (record as any).fork_read_only,
+        });
+        assistantOffset = snapshot.length;
+      }
+      list.push({
+        id: `steering:${steeringID}`,
+        history_id: steeringMessage.target_history_id || record.id,
+        seq: record.seq,
+        role: RoleTypes.USER,
+        delta: steeringText,
+        display_delta: steeringText,
+        inputs: [{ input_type: "text", text: steeringText }],
+        finish_reason:
+          ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+        create_time: steeringMessage.accepted_at || record.create_time,
+        is_resumed: true,
+        steering_message: true,
+        steering_follow_up_id: steeringID,
+      });
+    });
+
+    const displayAssistantContent = stripAskUserReceipt(record.assistant_remainder ?? (snapshotsAreDurablePrefixes
+      ? fullAssistantContent.slice(assistantOffset)
+      : fullAssistantContent), hasAskPending);
+    const displayReasoningContent = steeringMessages.length > 0
+      && record.assistant_remainder !== undefined
+      ? record.reasoning_content || ""
+      : splitResult.reasoning_content;
     const assistantMessage: any = {
       role: RoleTypes.ASSISTANT,
-      reasoning_content: splitResult.reasoning_content,
+      reasoning_content: displayReasoningContent,
       delta: displayAssistantContent,
       exports: record.exports,
-      raw_delta: record.result || "",
+      raw_delta: assistantOffset > 0 || record.assistant_remainder !== undefined
+        ? displayAssistantContent
+        : record.result || "",
       ...(record.model_output ? { raw_reasoning_content: record.reasoning_content || "" } : {}),
       finish_reason: isActuallyGenerating
         ? ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified

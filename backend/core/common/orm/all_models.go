@@ -23,6 +23,7 @@ func AllModelsForDDL() []interface{} {
 		&ExternalCapabilityInvocation{},
 		&MultiAnswersSwitch{},
 		&Conversation{},
+		&ConversationFollowUp{},
 		&ConversationResultRead{},
 		&ConversationResultReadState{},
 		&LocalWorkspace{},
