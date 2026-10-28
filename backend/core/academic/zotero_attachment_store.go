@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -235,7 +236,7 @@ func storeZoteroFile(ctx context.Context, db *gorm.DB, datasetID, paperID, attac
 		bound = svc.SubmitOriginalProcessing(ctx, caller, bound)
 		imported = doc.LocalFileImportResult{DocumentID: bound.Document.ID, TaskID: bound.Task.ID, ContentSHA256: bound.ContentSHA256, Start: bound.Start}
 		if bound.SubmissionStatus == "failed" {
-			importErr = errors.New(bound.SubmissionError)
+			importErr = fmt.Errorf("PDF 已保存，但处理任务未能启动，请重试: %s", bound.SubmissionError)
 		}
 	} else {
 		imported, importErr = doc.ResumeLocalFileImport(ctx, doc.ResumeLocalFileImportRequest{DatasetID: datasetID, DocumentID: documentID, UserID: userID, UserName: userName})

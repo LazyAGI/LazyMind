@@ -15,6 +15,7 @@ func init() {
 		{2004930, http.StatusBadRequest, "Invalid paper folder hierarchy", []string{
 			"论文文件夹 parentid 无效", "论文文件夹的父文件夹不存在",
 			"论文文件夹不能包含循环层级", "论文文件夹最多支持 32 层",
+			"folder parent does not exist", "folder cycle", "folder depth exceeds 32",
 		}},
 		{2004931, http.StatusConflict, "The Zotero paper or attachment changed; reload the library", []string{
 			"zotero 文献或附件已移除，请重新读取论文库", "zotero 附件不属于目标文献",
