@@ -20,13 +20,10 @@ def publisher(tmp_path, monkeypatch):
     class Module:
         """Replace HTTP in the actual loaded namespace."""
 
-        def __getattr__(self, name):
-            return namespace[name]
-
-        def __setattr__(self, name, value):
-            namespace[name] = value
-
     module = Module()
+    # Keep attributes in the real namespace so monkeypatch can inspect and
+    # restore them, including pytest versions that use static attribute lookup.
+    module.__dict__ = namespace
     body = {'user_instruction': 'read actual evidence', 'candidate_directions': ['agents'],
             'selected_directions': ['agents'], 'papers': [
                 {'paper': {'paper_id': 'a', 'title': 'model title'}, 'is_seed': False, 'is_important': False}]}
