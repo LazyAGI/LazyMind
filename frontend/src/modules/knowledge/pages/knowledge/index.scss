@@ -356,13 +356,6 @@
   .ant-select { width: 100%; }
   .knowledge-translation-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 }
-.knowledge-reader-translation-toolbar {
-  flex: none;
-  display: flex;
-  justify-content: flex-end;
-  padding: 10px 14px;
-  border-bottom: 1px solid #edf0f4;
-}
 .knowledge-reader-translation-pane {
   flex: 1 1 0;
   min-height: 0;
@@ -372,7 +365,15 @@
   line-height: 1.7;
   h3 { margin: 0 0 12px; color: #66788c; font-size: 12px; font-weight: 600; }
   .ant-empty { margin: 28px 0; }
-  &.is-result { border-top: 1px solid #dce4ed; background: #f8faff; }
+  &.is-result { background: #f8faff; }
+  &.is-result + & { border-top: 1px solid #dce4ed; }
+}
+.knowledge-reader-translation-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  h3 { margin: 0; }
 }
 .knowledge-reader-translation-loading { min-height: 40px; }
 .knowledge-reader-translation-composer {

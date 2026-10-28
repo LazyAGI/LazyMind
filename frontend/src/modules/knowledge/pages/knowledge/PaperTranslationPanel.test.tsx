@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import PaperTranslationPanel from "./PaperTranslationPanel";
 
@@ -18,6 +18,11 @@ describe("paper translation panel", () => {
     expect(screen.getByRole("region", { name: "翻译原文" })).toHaveTextContent("new source");
     expect(screen.getByRole("region", { name: "翻译结果" })).toHaveTextContent("new result");
     expect(screen.queryByText("old result")).not.toBeInTheDocument();
+    const result = screen.getByRole("region", { name: "翻译结果" });
+    const source = screen.getByRole("region", { name: "翻译原文" });
+    expect(result.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(result).getByRole("heading", { name: "译文" }).parentElement)
+      .toContainElement(screen.getByRole("button", { name: "设置翻译引擎" }));
   });
 
   it("shows the Chinese provider name in the reader's translation settings", () => {

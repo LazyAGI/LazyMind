@@ -29,18 +29,18 @@ export default function PaperTranslationPanel(props: Props) {
     props.onTranslate(text);
   };
   return <section className="knowledge-reader-translation" aria-label="论文翻译">
-    <div className="knowledge-reader-translation-toolbar">
-      <Button aria-label="设置翻译引擎" icon={<SettingOutlined />} size="small" onClick={() => setSettingsOpen(true)}>设置翻译引擎</Button>
-    </div>
+    <section className="knowledge-reader-translation-pane is-result" aria-label="翻译结果" aria-live="polite" aria-busy={props.loading}>
+      <div className="knowledge-reader-translation-heading">
+        <h3>译文</h3>
+        <Button aria-label="设置翻译引擎" icon={<SettingOutlined />} size="small" onClick={() => setSettingsOpen(true)}>设置翻译引擎</Button>
+      </div>
+      {props.loading ? <Spin tip="正在翻译…"><div className="knowledge-reader-translation-loading" /></Spin>
+        : <div className="knowledge-translation-text">{props.result}</div>}
+    </section>
     <section className="knowledge-reader-translation-pane" aria-label="翻译原文">
       <h3>原文</h3>
       {props.source ? <div className="knowledge-translation-text">{props.source}</div>
         : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选中论文文字后点击翻译，或在底部输入文字" />}
-    </section>
-    <section className="knowledge-reader-translation-pane is-result" aria-label="翻译结果" aria-live="polite" aria-busy={props.loading}>
-      <h3>译文</h3>
-      {props.loading ? <Spin tip="正在翻译…"><div className="knowledge-reader-translation-loading" /></Spin>
-        : <div className="knowledge-translation-text">{props.result}</div>}
     </section>
     <form className="knowledge-reader-translation-composer" onSubmit={(event) => { event.preventDefault(); submit(); }}>
       <Input.TextArea aria-label="输入要翻译的文字" placeholder="输入文字，Enter 翻译，Shift + Enter 换行"
