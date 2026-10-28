@@ -215,9 +215,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
         self.fail_model('model-a')
         self.succeed('model-b')
         config = lazyllm.globals['config']
-        missing = object()
-        old_models = config.get('dynamic_model_configs', missing)
-        old_key = config.get('openai_api_key', missing)
+        old_models, old_key = config.get('dynamic_model_configs'), config.get('openai_api_key')
         try:
             inject_model_config(self.provider.config('model-a'))
             current, candidate = self.candidate('model-a'), self.candidate('model-b')
@@ -228,11 +226,7 @@ class ModelFallbackHTTPTests(unittest.TestCase):
             wrapper = FallbackLLM(create_fallback_state(raw, options))
             self.assertEqual(wrapper.share('unchanged system')('current input'), 'done')
         finally:
-            for key, value in [('dynamic_model_configs', old_models), ('openai_api_key', old_key)]:
-                if value is missing:
-                    config.pop(key, None)
-                else:
-                    config[key] = value
+            config['dynamic_model_configs'], config['openai_api_key'] = old_models, old_key
         self.assertEqual([item['model'] for item in self.provider.requests], ['model-a', 'model-b'])
 
     def test_visual_history_skips_text_only_candidates_while_text_attachments_do_not(self):

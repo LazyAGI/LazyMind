@@ -516,7 +516,6 @@ const Detail = () => {
             </>
           ) : null
         }
-
         breadcrumbs={[
           { title: <Link to={listUrl} onClick={(event: MouseEvent<HTMLAnchorElement>) => {
             if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -544,13 +543,6 @@ const Detail = () => {
               查看失败任务
             </Button>
           }
-        />
-      )}
-      {!paperLibrary && ragReady && detail?.processing_level === "stored" && (
-        <Alert
-          type="info"
-          showIcon
-          message={t("knowledge.storedModeRagReadyHint")}
         />
       )}
       {!paperLibrary && uploadingNoticeVisible && (

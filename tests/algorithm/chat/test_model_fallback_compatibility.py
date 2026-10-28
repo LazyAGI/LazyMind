@@ -110,9 +110,7 @@ def test_dynamic_reasoning_model_uses_its_role_configuration(provider, summary):
 
     current = candidate(provider, 'o3')
     runtime = lazyllm.globals['config']
-    missing = object()
-    old_models = runtime.get('dynamic_model_configs', missing)
-    old_key = runtime.get('openai_api_key', missing)
+    old_models, old_key = runtime.get('dynamic_model_configs'), runtime.get('openai_api_key')
     provider.on_request = reasoning_response
     try:
         inject_model_config(current.llm_config)
@@ -129,11 +127,7 @@ def test_dynamic_reasoning_model_uses_its_role_configuration(provider, summary):
             result = FallbackLLM(create_fallback_state(raw, options))('Complete.')
         assert result == 'reasoning completed'
     finally:
-        for key, value in [('dynamic_model_configs', old_models), ('openai_api_key', old_key)]:
-            if value is missing:
-                runtime.pop(key, None)
-            else:
-                runtime[key] = value
+        runtime['dynamic_model_configs'], runtime['openai_api_key'] = old_models, old_key
     assert len(provider.requests) == 1
     assert provider.requests[0]['model'] == 'o3'
     assert provider.requests[0]['max_completion_tokens'] == 8192

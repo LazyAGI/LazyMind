@@ -63,6 +63,7 @@ type Dataset = LegacyDataset & Pick<CoreDataset, "paper_count" | "pdf_attachment
 import KnowledgeTag from "@/modules/knowledge/components/KnowledgeTag";
 import FileUtils from "@/modules/knowledge/utils/file";
 import {
+  effectiveProcessingLevel,
   type ProcessingLevel,
 } from "@/modules/knowledge/utils/processingLevel";
 import { isPaperLibrary } from "@/modules/knowledge/paper/store";
@@ -494,7 +495,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     mineCloudSource,
     page,
     pageSize,
-    ragAvailability,
   ]);
 
   const loadCloudSources = useCallback(
@@ -509,8 +509,6 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         mineTableRequestSeqRef.current += 1;
         setCloudSources([]);
         setTotal(0);
-        setTableError(false);
-        setLoadedTableQuery(tableQueryKey);
         setLoading(false);
         return;
       }

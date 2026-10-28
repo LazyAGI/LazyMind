@@ -214,7 +214,7 @@ def fill_template(source: Path, output: Path, source_sha256: str, edits: list[di
         raise ValueError('Each action requires a unique text slot id')
     if set(ids) != set(slots):
         raise ValueError('Every template text slot requires an explicit keep or replace action; '
-                         f'missing={sorted(set(slots) - set(ids))}, unknown={sorted(set(ids) - set(slots))}')
+                         f'missing={sorted(set(slots)-set(ids))}, unknown={sorted(set(ids)-set(slots))}')
     changed, warnings = set(), []
     edited_paragraphs = {}
     for edit in edits:

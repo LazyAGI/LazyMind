@@ -273,7 +273,6 @@ const ImportKnowledgeModal = (props: IProps, ref: Ref<unknown> | undefined) => {
         </div>
       }
     >
-      {importError && <Alert type="error" showIcon message={importError} style={{ marginBottom: 16, whiteSpace: "pre-wrap" }} />}
       {storageOnly && (
         <Alert type="info" showIcon style={{ marginBottom: 16 }}
           message={props.storageOnly ? "文件将保留在知识库内，仅保存原文件，不解析、不建立索引。"
