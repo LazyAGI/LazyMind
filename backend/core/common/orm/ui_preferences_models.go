@@ -6,6 +6,7 @@ type UserUIPreferences struct {
 	DocumentDirectoriesGeneration int64     `gorm:"column:document_directories_generation;not null;default:0"`
 	UserID                        string    `gorm:"column:user_id;type:varchar(255);primaryKey"`
 	ChatPreferenceNoticeDismissed bool      `gorm:"column:chat_preference_notice_dismissed;not null;default:false"`
+	WorkflowTrustNoticeDismissed  bool      `gorm:"column:workflow_trust_notice_dismissed;not null;default:false"`
 	DeveloperModeActive           bool      `gorm:"column:developer_mode_active;not null;default:false"`
 	SensitiveWordFilterEnabled    bool      `gorm:"column:sensitive_word_filter_enabled;not null;default:false"`
 	AcceptedUserAgreementVersion  string    `gorm:"column:accepted_user_agreement_version;type:varchar(64);not null;default:''"`

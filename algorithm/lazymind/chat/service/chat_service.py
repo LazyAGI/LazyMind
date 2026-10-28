@@ -992,7 +992,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     if has_explicit_workflow or not provisional.routing_review_required:
         return await _run_chat_with_parse_status(request, task_profile_override=provisional)
 
-    raw_query = str(request.message.query or '')
+    raw_query = str(request.message.user_query or request.message.query or '')
     filter_query, _ = _normalize_cite_message_query_for_agent(raw_query)
     skip_sensitive_filter = (
         request.runtime.skip_sensitive_filter
@@ -1155,7 +1155,9 @@ async def _handle_chat_impl(
     if skip_sensitive_filter:
         sensitive_match = None
     elif sensitive_match_override is _SENSITIVE_MATCH_UNSET:
-        sensitive_match = check_sensitive_content(query)
+        # Core preserves the original user message separately from injected
+        # source material, such as paper abstracts and saved relationship notes.
+        sensitive_match = check_sensitive_content(user_input)
     else:
         sensitive_match = sensitive_match_override
     if sensitive_match is not None:

@@ -33,11 +33,13 @@ from .telemetry import (
     telemetry_enabled,
 )
 from .tool_call_guard import (
+    DEFAULT_ARGUMENT_REPAIR_LIMIT,
     ExactRepeatMonitor,
     FailureRetryPolicy,
     OneShotNoticeBuffer,
     ToolCallQuota,
     ToolExecutionMiddleware,
+    ToolArgumentRetryExhausted,
 )
 from .tool_limit_control import tool_limit_decision_coordinator
 from .skill_sandbox import configure_skill_sandbox
@@ -199,10 +201,14 @@ class AgentExecutor:
                     notice_buffer.clear()
                 return result
 
+        tool_middleware = None
+
         def stop_condition(value):
             # Cancellation must be evaluated before the normal final-answer path.
             if options.extra_stop_condition and options.extra_stop_condition(value):
                 return True
+            if tool_middleware is not None and tool_middleware.argument_failure:
+                raise ToolArgumentRetryExhausted(tool_middleware.argument_failure)
             return options.stop_on_repeated_results and repeat_monitor.stop_requested
         configuration_runtime = None if options.context_preview or not tools_enabled else options.configuration_runtime
 
@@ -271,7 +277,7 @@ class AgentExecutor:
             'history_compactor': history_compactor,
             'fs': _skill_filesystem(options.fs, options.skills_dir),
             'skills_dir': options.skills_dir,
-            'extra_stop_condition': stop_condition if options.stop_on_repeated_results else options.extra_stop_condition,
+            'extra_stop_condition': stop_condition,
             'runtime_observer': runtime_observer,
             'model_context_provider': model_context,
             'before_model_request': (
@@ -312,6 +318,7 @@ class AgentExecutor:
             CitationResultMiddleware(agent._tools_manager),
             failure_policy=FailureRetryPolicy(options.tool_failure_limits),
             call_quota=ToolCallQuota(options.tool_call_limits),
+            argument_limits={name: DEFAULT_ARGUMENT_REPAIR_LIMIT for name in plan.stop_tools},
             expanded_round_limit=(options.expanded_round_limit if options.expanded_round_limit is not None
                                   else max(2, int(_cfg['agentic_expanded_max_rounds']))),
             cancel_check=options.extra_stop_condition,
@@ -324,6 +331,8 @@ class AgentExecutor:
             trusted_opaque_tools=trusted_opaque_tools,
             directory_runtime=options.directory_runtime,
         )
+        tool_middleware = agent._tools_manager
+        tool_middleware.restore_argument_results(options.argument_result_history)
         agent._agent_lab_run_id = run_id
         agent._runtime_llm = llm
         agent._exact_repeat_monitor = repeat_monitor

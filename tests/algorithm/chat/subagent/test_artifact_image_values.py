@@ -215,7 +215,7 @@ def test_patch_artifact_rejects_invalid_json_string_without_dirtying_draft(tmp_p
     set_context(ctx)
     ctx.write_draft('report', 'text', 'before', pending_commit=False)
 
-    with pytest.raises(ToolExecutionError, match='Invalid patch payload'):
+    with pytest.raises(ToolExecutionError, match='ARTIFACT_ARGUMENT_INVALID: patch: invalid legacy JSON string'):
         patch_artifact('report', 'not-json', patch_type='str_replace')
 
     assert ctx.list_pending_drafts() == []

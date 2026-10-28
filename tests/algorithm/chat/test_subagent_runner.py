@@ -1148,6 +1148,24 @@ def test_completion_review_keeps_reasoning_separate_from_json(monkeypatch, verdi
     enqueue.assert_not_called()
 
 
+def test_completion_review_preserves_json_artifact_evidence(monkeypatch):
+    content = {'user_instruction': "研究 O'Reilly 的方法", 'papers': []}
+
+    def review(_model, prompt):
+        line = next(line for line in prompt.splitlines() if line.startswith('Actually saved artifacts: '))
+        evidence = json.loads(line.split(': ', 1)[1])
+        assert json.loads(evidence[0]['value']) == {'data': content}
+        return json.dumps({'completed': True, 'requires_artifact': True,
+                           'artifact_keys': ['result'], 'reason': 'JSON result was saved.'})
+
+    monkeypatch.setattr(runner_mod, '_silent_background_model_call', review)
+    completed, _, phase = runner_mod._evaluate_completion(
+        object(), 'Save a JSON result', [],
+        [{'slot': 'result', 'content_type': 'json', 'value': {'data': content}}], 'Saved',
+    )
+    assert completed and phase == ''
+
+
 @pytest.mark.parametrize('during_evaluation', [False, True])
 def test_cancel_at_completion_boundary_cannot_be_revived(monkeypatch, completion_case, during_evaluation):
     canceled = not during_evaluation
@@ -1582,7 +1600,8 @@ def test_run_subagent_stream_missing_artifact_emits_error(monkeypatch):
 # Test: AgentExecutor raises → outer except → error frame
 # ---------------------------------------------------------------------------
 
-def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
+@pytest.mark.parametrize('argument_failure', [False, True])
+def test_run_subagent_stream_agent_exception_emits_error(monkeypatch, argument_failure):
     _install_fake_db(monkeypatch)
     _install_fake_lazyllm(monkeypatch)
     _install_fake_build(monkeypatch)
@@ -1590,6 +1609,8 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
 
     class ExplodingExecutor:
         async def stream(self, llm, plan):
+            if argument_failure:
+                raise runner_mod.ToolArgumentRetryExhausted('参数修复次数已耗尽')
             raise RuntimeError('llm exploded')
             yield  # pragma: no cover
 
@@ -1604,7 +1625,12 @@ def test_run_subagent_stream_agent_exception_emits_error(monkeypatch):
     events_out = _sse_to_events(raw)
     error_events = [e for e in events_out if e.get('type') == 'error']
     assert error_events
-    assert 'llm exploded' in error_events[0]['message']
+    if argument_failure:
+        assert error_events[0]['error_code'] == 'TOOL_ARGUMENT_RETRY_EXHAUSTED'
+        assert '参数修复次数已耗尽' in error_events[0]['message']
+    else:
+        assert 'llm exploded' in error_events[0]['message']
+        assert 'error_code' not in error_events[0]
 
 
 # ---------------------------------------------------------------------------

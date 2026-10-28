@@ -18,15 +18,19 @@ import (
 
 func TestKnowledgeParityScenesAndAtomicConfiguration(t *testing.T) {
 	s, db, op := resourceFixture(t)
-	if err := db.AutoMigrate(&orm.KBModel{}, &orm.ACLModel{}); err != nil {
+	if err := db.AutoMigrate(&orm.KBModel{}, &orm.ACLModel{}, &orm.UserUIPreferences{}); err != nil {
 		t.Fatal(err)
 	}
 	s.provision = func(context.Context, DatasetCatalogCaller, *orm.Dataset) error { return nil }
 	ctx := context.Background()
 	for i, profile := range learning.BuiltinProfiles() {
+		level := "stored"
+		if profile.Key == "academic_papers" {
+			level = "parsed"
+		}
 		t.Run(profile.Key, func(t *testing.T) {
 			result, err := s.CreateKnowledge(ctx, op, CreateKnowledgeRequest{
-				Name: fmt.Sprintf("Scene-%d", i), Tags: []string{"论文", "论文"}, Scene: profile.Key, ProcessingLevel: "stored",
+				Name: fmt.Sprintf("Scene-%d", i), Tags: []string{"论文", "论文"}, Scene: profile.Key, ProcessingLevel: level,
 			})
 			if err != nil {
 				t.Fatal(err)

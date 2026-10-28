@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/gorm"
 	"lazymind/core/common/orm"
 	"lazymind/core/localworkspace"
 	"lazymind/core/subagent"
@@ -222,6 +223,62 @@ func seedEventLoopRevision(t *testing.T, db *orm.DB, revisionID string) (string,
 // ──────────────────────────────────────────────
 // OnSubAgentDone — status routing
 // ──────────────────────────────────────────────
+
+func TestOnSubAgentDonePublishesCompletedStateForDomainProjection(t *testing.T) {
+	db := newTestDB(t)
+	hash, schema := seedEventLoopRevision(t, db, "terminal-revision")
+	graph := graphengine.CompiledStateGraph{
+		SchemaVersion: schema, GraphHash: hash, StartRoute: "compose_result",
+		Nodes:        map[string]graphengine.CompiledNode{"compose_result": {ID: "compose_result"}},
+		ControlEdges: []graphengine.CompiledEdge{{From: "__start__", To: "compose_result"}, {From: "compose_result", To: "__end__"}},
+	}
+	if err := db.Model(&orm.WorkflowRevision{}).Where("id=?", "terminal-revision").Update("compiled_graph", graph.JSON()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateSession(t.Context(), db.DB, CreateSessionInput{SessionID: "terminal-session", ConversationID: "terminal-chat", WorkflowID: "paper_expansion", WorkflowRevisionID: "terminal-revision", GraphHash: hash, GraphSchemaVersion: schema}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateSessionStep(t.Context(), db.DB, "terminal-session", "compose_result", "terminal-task", 2); err != nil {
+		t.Fatal(err)
+	}
+	old := OnAcademicRuntimeChanged
+	t.Cleanup(func() { OnAcademicRuntimeChanged = old })
+	observed := ""
+	OnAcademicRuntimeChanged = func(ctx context.Context, db *gorm.DB, sessionID string) {
+		var session orm.WorkflowSession
+		if err := db.WithContext(ctx).Where("id=?", sessionID).Take(&session).Error; err != nil {
+			t.Fatal(err)
+		}
+		observed = session.Status
+	}
+	OnSubAgentDone(t.Context(), db.DB, nil, "terminal-task", subagent.StatusSucceeded, "saved result", func(string, map[string]any) {}, &WorkflowChatContext{SessionID: "terminal-session", StepID: "compose_result", WorkflowID: "paper_expansion", ConvID: "terminal-chat"})
+	if observed != SessionStatusCompleted {
+		t.Fatalf("domain projection saw %q instead of the committed completion", observed)
+	}
+}
+
+func TestIdleFailurePublishesCommittedStateForDomainProjection(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.Create(&orm.WorkflowSession{ID: "idle-session", Status: SessionStatusActive}).Error; err != nil {
+		t.Fatal(err)
+	}
+	old := OnAcademicRuntimeChanged
+	t.Cleanup(func() { OnAcademicRuntimeChanged = old })
+	observed := ""
+	OnAcademicRuntimeChanged = func(ctx context.Context, db *gorm.DB, sessionID string) {
+		var session orm.WorkflowSession
+		if err := db.WithContext(ctx).Where("id=?", sessionID).Take(&session).Error; err != nil {
+			t.Fatal(err)
+		}
+		observed = session.Status
+	}
+	if err := failIdleSession(t.Context(), db.DB, "idle-session"); err != nil {
+		t.Fatal(err)
+	}
+	if observed != SessionStatusFailed {
+		t.Fatalf("domain projection saw %q instead of the committed failure", observed)
+	}
+}
 
 func TestConversationPreflightMustBeReadyAndIsConsumed(t *testing.T) {
 	db := newTestDB(t)

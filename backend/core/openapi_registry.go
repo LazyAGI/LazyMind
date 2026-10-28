@@ -135,6 +135,16 @@ type documentPublicationReadResponse struct {
 	Message string                             `json:"message"`
 	Data    workflow.DocumentPublicationStatus `json:"data"`
 }
+type documentPublicationGroupResponse struct {
+	Code    int                                    `json:"code" required:"true"`
+	Message string                                 `json:"message"`
+	Data    workflow.DocumentPublicationGroupState `json:"data" required:"true"`
+}
+type documentImageExportResponse struct {
+	Code    int                               `json:"code" required:"true"`
+	Message string                            `json:"message"`
+	Data    workflow.DocumentImageExportState `json:"data" required:"true"`
+}
 type documentPublicationLookupResponse struct {
 	Code    int                                `json:"code"`
 	Message string                             `json:"message"`
@@ -2840,6 +2850,7 @@ type userChatSettingsOpenAPIResponse struct {
 
 type userUIPreferencesPatchOpenAPIRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed,omitempty"`
+	WorkflowTrustNoticeDismissed  *bool   `json:"workflow_trust_notice_dismissed,omitempty"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active,omitempty"`
 	SensitiveWordFilterEnabled    *bool   `json:"sensitive_word_filter_enabled,omitempty"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version,omitempty"`
@@ -2855,6 +2866,7 @@ type userUIPreferencesPatchOpenAPIRequest struct {
 
 type userUIPreferencesOpenAPIResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
+	WorkflowTrustNoticeDismissed  bool   `json:"workflow_trust_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
 	SensitiveWordFilterEnabled    bool   `json:"sensitive_word_filter_enabled"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
@@ -3117,6 +3129,12 @@ func registeredCoreOperations() []openAPIOperation {
 		{Method: "GET", Path: "/conversations/{conversation_id}/workflow-sessions:latest", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowSessionReadResponse{})}},
 		{Method: "GET", Path: "/workflow-sessions/{session_id}/artifacts", Summary: "Read Workflow artifacts with document descriptors", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Workflow artifact read result", workflowArtifactListReadResponse{})}},
 		{Method: "GET", Path: "/document-publications/{operation_id}", Summary: "Read an owned publication outcome", Tags: []string{"workflow"}, PathParams: documentPublicationPath{}, Responses: map[int]openAPIResponse{200: resp("Publication status", documentPublicationReadResponse{}), 404: resp("Publication not found", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/image-exports", Summary: "Prepare images referenced by the current document snapshot", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(workflow.DocumentImageExportRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Image export accepted", documentImageExportResponse{}), 400: resp("Invalid snapshot", documentActionErrorOpenAPIResponse{}), 403: resp("Permission denied", documentActionErrorOpenAPIResponse{}), 409: resp("Document changed", documentActionErrorOpenAPIResponse{}), 422: resp("No downloadable images", documentActionErrorOpenAPIResponse{}), 429: resp("Too many exports", documentActionErrorOpenAPIResponse{})}},
+		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}", Summary: "Read owned image export progress and individual outcomes", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Image export", documentImageExportResponse{}), 404: resp("Export not found", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}:retry", Summary: "Retry missing images without changing the captured document", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Image export accepted", documentImageExportResponse{}), 404: resp("Export not found", documentActionErrorOpenAPIResponse{}), 410: resp("Export expired", documentActionErrorOpenAPIResponse{})}},
+		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/image-exports/{export_id}/files/{file_id}", Summary: "Download an owned image archive or original image", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: {Description: "Image or ZIP attachment", ContentType: "application/octet-stream", Schema: schemaSource{Inline: map[string]any{"type": "string", "format": "binary"}}}, 404: resp("File not found", documentActionErrorOpenAPIResponse{}), 410: resp("Export expired", documentActionErrorOpenAPIResponse{})}},
+		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/publications", Summary: "Read current per-platform synchronization state and confirmed preferences", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Publication targets", documentPublicationGroupResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{})}},
+		{Method: "POST", Path: "/workflow-artifacts/{artifact_id}/publications", Summary: "Confirm publication of the current saved document to independent targets", Tags: []string{"workflow"}, RequestBody: jsonBodyOf(workflow.DocumentPublicationGroupRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Accepted publication", documentPublicationGroupResponse{}), 400: resp("Invalid targets", documentActionErrorOpenAPIResponse{}), 409: resp("Document or publication changed", documentActionErrorOpenAPIResponse{}), 422: resp("Target unsupported", documentActionErrorOpenAPIResponse{})}},
 		{Method: "GET", Path: "/workflow-artifacts/{artifact_id}/publication", Summary: "Find the blocking or latest owned document publication", Tags: []string{"workflow"}, Responses: map[int]openAPIResponse{200: resp("Publication lookup", documentPublicationLookupResponse{}), 404: resp("Artifact not found", documentActionErrorOpenAPIResponse{})}},
 		{Method: "POST", Path: "/document-publications/{operation_id}:recover", Summary: "Recover local publication tracking without repeating a provider write", Tags: []string{"workflow"}, PathParams: documentPublicationPath{}, RequestBody: jsonBodyOf(workflow.DocumentPublicationRecoveryRequest{}, true), Responses: map[int]openAPIResponse{200: resp("Recovered publication status", documentPublicationReadResponse{}), 400: resp("Explicit recovery confirmation required", documentActionErrorOpenAPIResponse{}), 404: resp("Publication not found", documentActionErrorOpenAPIResponse{}), 409: resp("Publication state changed", documentActionErrorOpenAPIResponse{})}},
 		{Method: "POST", Path: "/document-publications/{operation_id}:cancel", Summary: "Cancel a publication before its external write", Tags: []string{"workflow"}, PathParams: documentPublicationPath{}, Responses: map[int]openAPIResponse{200: resp("Canceled publication", documentPublicationReadResponse{}), 404: resp("Publication not found", documentActionErrorOpenAPIResponse{}), 409: resp("Write already started", documentActionErrorOpenAPIResponse{})}},

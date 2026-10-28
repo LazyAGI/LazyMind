@@ -248,9 +248,11 @@ const HtmlPreview = ({
 const HtmlBlockComponent = ({
   code,
   isStreaming = false,
+  allowDownload = true,
 }: {
   code: string;
   isStreaming?: boolean;
+  allowDownload?: boolean;
 }) => {
   const { t } = useTranslation();
   const [activeView, setActiveView] = useState<HtmlView>("preview");
@@ -264,7 +266,7 @@ const HtmlBlockComponent = ({
 
   const canShowPreview = hasRenderableHtml(code);
   const canCopySource = Boolean(code.trim());
-  const canDownload = canCopySource && !isStreaming;
+  const canDownload = canCopySource && !isStreaming && allowDownload;
   const previewDocument = useMemo(() => buildPreviewDocument(code), [code]);
   const filename = useMemo(
     () => getHtmlFilename(isStreaming ? "" : code),

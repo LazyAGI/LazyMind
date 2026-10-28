@@ -119,6 +119,14 @@ ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE 
     next_attempt_at = CURRENT_TIMESTAMP, last_error_code = 0, updated_at = CURRENT_TIMESTAMP;
 DROP TABLE model_provider_endpoint_backups;
 
+-- +migrate Dialect *
+DROP TABLE IF EXISTS academic_paper_contents;
+DROP TABLE IF EXISTS academic_handoffs;
+DROP TABLE IF EXISTS academic_expansion_rounds;
+DROP TABLE IF EXISTS academic_expansions;
+DROP TABLE IF EXISTS academic_user_paper_states;
+DROP TABLE IF EXISTS academic_document_states;
+
 -- +migrate Dialect postgres,sqlite
 DROP INDEX IF EXISTS uk_conversation_followups_idempotency;
 DROP INDEX IF EXISTS idx_conversation_followups_queue;
@@ -132,6 +140,10 @@ DROP TABLE IF EXISTS task_attempt_timings;
 DROP TABLE IF EXISTS task_execution_timings;
 
 -- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS paper_library_attachments;
+DROP TABLE IF EXISTS paper_library_notes;
+DROP TABLE IF EXISTS paper_library_entries;
+DROP TABLE IF EXISTS paper_library_folders;
 DROP TABLE rejected_document_publications;
 DROP TABLE document_ownership_backfills;
 
@@ -316,6 +328,7 @@ ALTER TABLE conversations
     DROP COLUMN IF EXISTS thinking_depth,
     DROP COLUMN IF EXISTS chat_executor;
 ALTER TABLE user_ui_preferences
+    DROP COLUMN IF EXISTS workflow_trust_notice_dismissed,
     DROP COLUMN IF EXISTS performance_stats_enabled,
     DROP COLUMN IF EXISTS sensitive_word_filter_enabled,
     DROP COLUMN IF EXISTS document_parsing_enabled,
@@ -504,6 +517,7 @@ DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN thinking_depth;
 ALTER TABLE conversations DROP COLUMN chat_executor;
+ALTER TABLE user_ui_preferences DROP COLUMN workflow_trust_notice_dismissed;
 ALTER TABLE user_ui_preferences DROP COLUMN performance_stats_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN sensitive_word_filter_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;

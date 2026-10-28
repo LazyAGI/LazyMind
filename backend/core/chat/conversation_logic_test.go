@@ -1209,6 +1209,36 @@ func TestBuildChatHistoryExtPreservesDocumentSelectionContext(t *testing.T) {
 	}
 }
 
+func TestBuildChatHistoryExtPreservesSyntheticSource(t *testing.T) {
+	for _, source := range []string{"", "driver", "auto_continue"} {
+		name := source
+		if name == "" {
+			name = "user"
+		}
+		t.Run(name, func(t *testing.T) {
+			query := "请重试本步，保留已选论文。"
+			raw := map[string]any{"query": query}
+			if source != "" {
+				raw["workflow_context"] = map[string]any{"synthetic_source": source}
+			}
+			ext := buildChatHistoryExt(raw, query)
+			var payload struct {
+				SyntheticSource string `json:"synthetic_source"`
+			}
+			if err := json.Unmarshal(ext, &payload); err != nil || payload.SyntheticSource != source {
+				t.Fatalf("history lost message source: %s %v", ext, err)
+			}
+			previous := orm.ChatHistory{Ext: ext}
+			regenerated := buildChatHistoryExtWithTrail(map[string]any{"query": query}, query, nil,
+				chatPersistTarget{IsRegeneration: true, Existing: &previous})
+			payload.SyntheticSource = ""
+			if err := json.Unmarshal(regenerated, &payload); err != nil || payload.SyntheticSource != source {
+				t.Fatalf("regeneration changed message source: %s %v", regenerated, err)
+			}
+		})
+	}
+}
+
 func TestBuildChatHistoryExtUsesDisplayQueryForAutomatedContext(t *testing.T) {
 	ext := buildChatHistoryExt(map[string]any{
 		"input": []any{

@@ -170,6 +170,7 @@ func init() {
 	registerAdditionalErrorPattern("browser extension manifest_version is %d, want 3", "Invalid request", http.StatusBadRequest, 2000103)
 
 	registerAdditionalErrorAlias("invalid opening batch result count", "Invalid opening batch result count", http.StatusBadGateway, 2002751)
+	registerAdditionalErrorAlias("summary preparation failed with no usable conversations", "Conversation summary preparation failed with no usable conversations", http.StatusBadGateway, 2002753)
 	registerAdditionalErrorAlias("unknown or cyclic candidate target", "Unknown or cyclic candidate target", http.StatusBadGateway, 2002737)
 	registerAdditionalErrorAlias("invalid candidate operation", "Invalid candidate operation", http.StatusBadGateway, 2002738)
 	registerAdditionalErrorAlias("duplicate group name", "Duplicate group name", http.StatusBadGateway, 2002739)

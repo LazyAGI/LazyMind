@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -19,6 +20,7 @@ import {
 } from '@/modules/chat/utils/request';
 import { selectionActionAnchor, type SelectionActionAnchor } from './artifactRewriteSelection';
 import { captureRewriteScrollAnchor } from './rewriteScrollAnchor';
+import { SlotEditingContext } from './slotEditingContext';
 import './ArtifactRewriteDialog.scss';
 import './ArtifactRewriteSelectionHighlight.scss';
 
@@ -141,6 +143,8 @@ export function ArtifactRewriteDialog({
   requestPreview: requestPreviewOverride,
 }: ArtifactRewriteDialogProps) {
   const { t } = useTranslation();
+  const { onBrowse } = useContext(SlotEditingContext);
+  useEffect(() => { if (open) onBrowse?.(); }, [open, onBrowse]);
   const translationPrefix = terminology === 'edit'
     ? 'chat.artifactEdit'
     : 'chat.artifactRewrite';

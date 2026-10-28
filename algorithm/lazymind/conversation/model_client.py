@@ -82,7 +82,8 @@ def call_model(request: Any, prompt: str, *, stream_output: bool = True,
         raise ConversationCallError('invalid_task_config') from exc
     try:
         validate_model_config(request.llm_config)
-        model = AutoModel(source='dynamic', type='llm', name='llm', dynamic_auth=True)
+        model = (AutoModel(source='dynamic', type='llm', name='llm', dynamic_auth=True)
+                 .formatter(lambda response: response.get('content')))
     except Exception as exc:
         raise ConversationCallError('model_configuration') from exc
     options = capped_output_kwargs(request.llm_config['llm'], options)
@@ -150,7 +151,7 @@ def json_object(raw: Any) -> dict[str, Any]:
 
 
 def _parse_json(text: str) -> Any:
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.S).strip()
+    text = text.strip()
     fenced = re.search(r'```(?:json)?\s*(\{.*\})\s*```', text, re.S)
     if fenced:
         text = fenced.group(1)

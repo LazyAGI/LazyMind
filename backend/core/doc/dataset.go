@@ -58,6 +58,8 @@ type Dataset struct {
 	State                  string                   `json:"state"`
 	IsEmpty                bool                     `json:"is_empty"`
 	DocumentCount          int64                    `json:"document_count"`
+	PaperCount             *int64                   `json:"paper_count,omitempty"`
+	PDFAttachmentCount     *int64                   `json:"pdf_attachment_count,omitempty"`
 	DocumentSize           int64                    `json:"document_size"`
 	SegmentCount           int64                    `json:"segment_count"`
 	TokenCount             int64                    `json:"token_count"`

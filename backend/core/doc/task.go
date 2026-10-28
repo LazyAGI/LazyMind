@@ -691,6 +691,18 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "items is required", http.StatusBadRequest)
 		return
 	}
+	var batchID string
+	var replay *orm.Task
+	var importErr error
+	r, batchID, replay, importErr = preparePaperUpload(r, ds, req)
+	if importErr != nil {
+		common.ReplyErr(w, importErr.Error(), http.StatusBadRequest)
+		return
+	}
+	if replay != nil {
+		common.ReplyJSON(w, CreateTasksResponse{Tasks: []TaskResponse{buildTaskResponse(r, *replay)}, PaperImportBatchID: batchID})
+		return
+	}
 	resp := make([]TaskResponse, 0, len(req.Items))
 
 	// Pre-allocate one new folder per unique relative_path prefix across all items in
@@ -762,7 +774,7 @@ func CreateTask(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	common.ReplyJSON(w, CreateTasksResponse{Tasks: resp})
+	common.ReplyJSON(w, CreateTasksResponse{Tasks: resp, PaperImportBatchID: batchID})
 }
 
 func GetTask(w http.ResponseWriter, r *http.Request) {
@@ -1455,6 +1467,7 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 				var ext taskExt
 				_ = json.Unmarshal(taskRow.Ext, &ext)
 				ext.TaskState = string(TaskStateSucceeded)
+				ext.ErrorMessage = ""
 				ext.MarketSubmission = "submitted"
 				ext.MarketPreviousTaskID = ""
 				if err := store.DB().WithContext(r.Context()).Model(&orm.Task{}).Where("id = ? AND dataset_id = ?", taskID, datasetID).Update("ext", mustJSON(ext)).Error; err != nil {
@@ -2257,6 +2270,8 @@ func bindExternalAddResults(datasetID string, baseTask orm.Task, baseDoc orm.Doc
 	return err
 }
 
+var OnAcademicDocumentSubmitted func(*gorm.DB, orm.Document) error
+
 func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDocs []orm.Document, baseDocExts []documentExt, results []addResultItem) (published []orm.Task, publishErr error) {
 	defer func() {
 		if publishErr != nil {
@@ -2316,6 +2331,12 @@ func bindExternalBatchAddResults(datasetID string, baseTasks []orm.Task, baseDoc
 			}
 			if updatedTask.RowsAffected != 1 {
 				return fmt.Errorf("task ownership changed before publication")
+			}
+			if OnAcademicDocumentSubmitted != nil {
+				baseDoc.DisplayName = displayName
+				if err := OnAcademicDocumentSubmitted(tx, baseDoc); err != nil {
+					return err
+				}
 			}
 			created = append(created, orm.Task{ID: baseTask.ID, LazyllmTaskID: newLazyllmTask, DocID: baseTask.DocID, KbID: baseTask.KbID, AlgoID: baseTask.AlgoID, DatasetID: datasetID, TaskType: baseTask.TaskType, DocumentPID: baseTask.DocumentPID, TargetPID: baseTask.TargetPID, TargetDatasetID: baseTask.TargetDatasetID, DisplayName: displayName, Ext: mustJSON(ext), BaseModel: orm.BaseModel{CreateUserID: baseTask.CreateUserID, CreateUserName: baseTask.CreateUserName, CreatedAt: baseTask.CreatedAt, UpdatedAt: now}})
 		}
@@ -2589,6 +2610,13 @@ func createTaskFromContentHash(r *http.Request, ds *orm.Dataset, datasetID, user
 }
 
 func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName string, item CreateTaskItem, tType string) ([]orm.Task, error) {
+	if scope, ok := r.Context().Value(paperUploadKey{}).(paperUploadScope); ok {
+		if task, err := existingPaperUpload(store.DB().WithContext(r.Context()), scope); err == nil {
+			return []orm.Task{task}, nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
 	uploadFileID := strings.TrimSpace(item.UploadFileID)
 	if uploadFileID == "" {
 		return nil, fmt.Errorf("upload_file_id is required")
@@ -2659,6 +2687,11 @@ func createTaskFromUploadedFile(r *http.Request, datasetID, userID, userName str
 	caller.UserID, caller.UserName = userID, userName
 	bound, err := bindPageOriginal(r.Context(), caller, ImportOriginalRequest{FileRef: uploadFileID, DatasetID: datasetID, ParentID: documentPID, DisplayName: displayName, Tags: tags, DocumentID: documentID, TaskID: taskID, RelativePath: relativePath, DataSourceType: item.Task.DataSourceType})
 	if err != nil {
+		if scope, ok := r.Context().Value(paperUploadKey{}).(paperUploadScope); ok {
+			if task, replayErr := existingPaperUpload(store.DB().WithContext(r.Context()), scope); replayErr == nil {
+				return []orm.Task{task}, nil
+			}
+		}
 		return nil, err
 	}
 	recalcAffectedFolderStats(r.Context(), datasetID, documentPID)

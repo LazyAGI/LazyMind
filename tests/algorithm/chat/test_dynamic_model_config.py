@@ -5,7 +5,7 @@ import importlib
 import sys
 import textwrap
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
@@ -119,6 +119,8 @@ class TestAutoModelDynamic:
     def test_shared_dynamic_chat_uses_injected_supplier(self, monkeypatch, tmp_path):
         '''A shared dynamic llm should still route to the per-request supplier/key/model.'''
         import json
+        from io import BytesIO
+
         import lazyllm
         import requests
         from lazyllm import AutoModel
@@ -147,32 +149,19 @@ class TestAutoModelDynamic:
 
         calls = []
 
-        class FakeResponse:
-            status_code = 200
-            raw = SimpleNamespace(enforce_content_length=False)
-            text = json.dumps({
+        def fake_post(url, **kwargs):
+            calls.append({'url': url, 'headers': kwargs.get('headers') or {}, 'json': kwargs.get('json') or {}})
+            response = requests.Response()
+            response.status_code = 200
+            response.encoding = 'utf-8'
+            response.raw = BytesIO(json.dumps({
                 'choices': [{
                     'message': {'content': 'ok'},
                     'finish_reason': 'stop',
                 }],
                 'usage': {},
-            })
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def iter_content(self, *args, **kwargs):
-                return []
-
-            def iter_lines(self):
-                return []
-
-        def fake_post(url, **kwargs):
-            calls.append({'url': url, 'headers': kwargs.get('headers') or {}, 'json': kwargs.get('json') or {}})
-            return FakeResponse()
+            }).encode('utf-8'))
+            return response
 
         monkeypatch.setattr(requests, 'post', fake_post)
 

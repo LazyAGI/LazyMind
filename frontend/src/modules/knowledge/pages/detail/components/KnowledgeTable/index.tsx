@@ -1,4 +1,5 @@
 import {
+  type MouseEvent,
   useEffect,
   useRef,
   useState,
@@ -30,6 +31,7 @@ import {
   Tag,
 } from "antd";
 import type { MenuProps } from "antd";
+import type { CheckboxChangeEvent } from "antd/es/checkbox";
 import moment from "moment";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import {
@@ -174,6 +176,9 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
   const navigate = useNavigate();
   const [tableData, setTableData] = useState<TreeNode[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  useEffect(() => {
+    setSelectedRowKeys([]);
+  }, [detail.dataset_id]);
   const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([]);
   const [currentNode, setCurrentNode] = useState<TreeNode | null>(null);
   const knowledgeRenameRef = useRef<RenameModalRef>(null);
@@ -292,9 +297,12 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
     return keys;
   };
 
+  const selectableKeys = getAllKeys(tableData);
+  const selectedVisibleCount = selectableKeys.filter(id => selectedRowKeys.includes(id)).length;
+
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedRowKeys(getAllKeys(tableData));
+      setSelectedRowKeys(selectableKeys);
     } else {
       setSelectedRowKeys([]);
     }
@@ -310,10 +318,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
       keys = [...new Set([...keys, ...selfAndChildren])];
     } else {
       keys = keys.filter((k) => !selfAndChildren.includes(k));
-      const ancestorIds = TreeUtils.findAncestorFolderIds(
-        tableData,
-        record.document_id!,
-      );
+      const ancestorIds = TreeUtils.findAncestorFolderIds(tableData, record.document_id!);
       keys = keys.filter((k) => !ancestorIds.includes(k));
     }
     setSelectedRowKeys(keys);
@@ -709,16 +714,14 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
           <Button type="link" size="small" className="mr-2" icon={<span />} />
           <Checkbox
             checked={
-              selectedRowKeys.length > 0 &&
-              selectedRowKeys.length === getAllKeys(tableData).length
+              selectableKeys.length > 0 && selectedVisibleCount === selectableKeys.length
             }
             indeterminate={
-              selectedRowKeys.length > 0 &&
-              selectedRowKeys.length < getAllKeys(tableData).length
+              selectedVisibleCount > 0 && selectedVisibleCount < selectableKeys.length
             }
-            onChange={(e) => handleSelectAll(e.target.checked)}
+            onChange={(e: CheckboxChangeEvent) => handleSelectAll(e.target.checked)}
           />
-          <span style={{ marginLeft: "12px" }}>{t("knowledge.knowledge")}</span>
+          <span style={{ marginLeft: "12px" }}>{t('paperTasks.name')}</span>
         </div>
       ),
       dataIndex: "display_name",
@@ -763,7 +766,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
                   ? isFolderFullySelected(record)
                   : selectedRowKeys.includes(record.document_id || "")
               }
-              onChange={(e) => handleSelect(record, e.target.checked)}
+              onChange={(e: CheckboxChangeEvent) => handleSelect(record, e.target.checked)}
             />
             <Button
               size="small"
@@ -829,8 +832,10 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
                 <Button
                   type="text"
                   size="small"
+                  aria-label={t('paperTasks.editTags')}
+                  title={t('paperTasks.editTags')}
                   icon={<EditFilled style={{ color: "#1890ff" }} />}
-                  onClick={(e) => {
+                  onClick={(e: MouseEvent<HTMLElement>) => {
                     e.stopPropagation();
                     handleOpenTagEdit(record);
                   }}
@@ -868,8 +873,10 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
               <Button
                 type="text"
                 size="small"
-                icon={<EditFilled style={{ color: "#1890ff" }} />}
-                onClick={(e) => {
+                aria-label={t('paperTasks.editTags')}
+                  title={t('paperTasks.editTags')}
+                  icon={<EditFilled style={{ color: "#1890ff" }} />}
+                onClick={(e: MouseEvent<HTMLElement>) => {
                   e.stopPropagation();
                   handleOpenTagEdit(record);
                 }}
@@ -883,23 +890,6 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
             )}
           </div>
         );
-      },
-    },
-    {
-      title: t("knowledge.directory"),
-      dataIndex: "rel_path",
-      width: 140,
-      render: (rel_path: string) => {
-        const kbName = detail.display_name || "-";
-        if (!rel_path?.length) {
-          return kbName;
-        }
-
-        const parts = rel_path.split("/").filter(Boolean);
-        if (parts.length >= 2) {
-          return `${kbName}/${parts[0]}`;
-        }
-        return kbName;
       },
     },
     {
@@ -961,7 +951,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
       },
     },
     {
-      title: t("knowledge.docType"),
+      title: t('paperTasks.fileType'),
       dataIndex: "type",
       width: 90,
       render: (type: string, record: TreeNode) => {
@@ -1036,7 +1026,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
         const defaultItems: MenuProps["items"] = [
           {
             key: "rename",
-            label: t("common.edit"),
+            label: t(record.isLeaf ? 'paperTasks.editFile' : 'paperTasks.editFolder'),
           },
           {
             key: "move",
@@ -1065,7 +1055,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
         const notLeafItems: MenuProps["items"] = [
           {
             key: "rename",
-            label: t("common.edit"),
+            label: t(record.isLeaf ? 'paperTasks.editFile' : 'paperTasks.editFolder'),
           },
           { key: "delete", label: t("common.delete"), danger: true },
         ];
@@ -1075,7 +1065,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
             <Dropdown
               menu={{
                 items: record.isLeaf ? isLeftItems : notLeafItems,
-                onClick: (e) => {
+                onClick: (e: Parameters<NonNullable<MenuProps["onClick"]>>[0]) => {
                   e.domEvent.preventDefault();
                   handleMenuClick(e, record);
                 },
@@ -1135,7 +1125,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
           ? 30
           : Math.max(300 - suffix.length, 1);
         knowledgeRenameRef.current?.onOpen({
-          title: t("common.edit"),
+          title: t(record.isLeaf ? 'paperTasks.editFile' : 'paperTasks.editFolder'),
           form: {
             name: !record.isLeaf
               ? t("knowledge.editFolderName")
@@ -1498,7 +1488,7 @@ const KnowledgeTable = forwardRef<IKnowledgeListRef, Props>((props, ref) => {
         scroll={{ x: 1155, y: "calc(100vh - 300px)" }}
         expandable={{
           expandedRowKeys,
-          onExpand: (expanded, record) => handleExpand(expanded, record),
+          onExpand: (expanded: boolean, record: TreeNode) => handleExpand(expanded, record),
           expandIcon: () => null,
         }}
       />
