@@ -890,10 +890,16 @@ func LoadTranslationConfig(ctx context.Context, db *gorm.DB, userID string) (*Tr
 	return &TranslationConfig{ProviderName: row.ProviderName, BaseURL: row.BaseURL, APIKey: row.APIKey}, nil
 }
 
+// IsTranslationProviderAvailable defines the translators exposed in this release.
+// Paused providers retain their saved credentials and implementations for restoration.
+func IsTranslationProviderAvailable(name string) bool {
+	return modelprovider.IsTranslationProviderAvailable(name)
+}
+
 // Only built-in, fixed-endpoint translators may be selected without a secret.
 func isKeylessTranslationProvider(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "google translate web", "bing translate web", "sogou translate web", "deepl web", "tencent transmart web", "mymemory":
+	case "google translate web", "bing translate web", "sogou translate web", "deepl web", "tencent transmart web":
 		return true
 	default:
 		return false

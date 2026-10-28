@@ -32,6 +32,21 @@
   padding: 14px 0;
 }
 
+.default-services-modal {
+  .ant-modal-body { max-height: 75vh; overflow-y: auto; }
+  .model-provider-service-page { height: auto; min-height: 0; padding: 0; overflow: visible; }
+}
+
+.default-services-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--provider-muted, #697586);
+  font-size: 13px;
+}
+
 .default-services-parsing-copy {
   min-width: 0;
 

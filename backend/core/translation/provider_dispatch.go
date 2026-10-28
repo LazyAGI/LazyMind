@@ -22,10 +22,6 @@ func waitForProvider(ctx context.Context, userID string, spec providerSpec) erro
 		return nil
 	}
 	key := userID + "\x00" + spec.Name
-	if spec.Name == "MyMemory" {
-		// Anonymous requests share the backend egress IP and its public quota.
-		key = spec.Name
-	}
 	providerRateGate.Lock()
 	now := time.Now()
 	at := now
@@ -92,11 +88,6 @@ func translateWithConfigSource(ctx context.Context, client *http.Client, userID 
 		return Response{}, errors.New("invalid translation credentials")
 	}
 	target = normalizeTarget(target, text)
-	if spec.Name == "MyMemory" {
-		if err := validateMyMemoryLanguagePair(source, target); err != nil {
-			return Response{}, err
-		}
-	}
 	parts, err := splitProviderText(text, spec)
 	if err != nil {
 		return Response{}, err
@@ -137,8 +128,6 @@ func callSelectedProvider(ctx context.Context, client *http.Client, config model
 		return callDeepLWeb(ctx, client, text, target)
 	case "Tencent TranSmart Web":
 		return callTencentTranSmartWeb(ctx, client, text, target)
-	case "MyMemory":
-		return callMyMemory(ctx, client, text, source, target)
 	case "Baidu Translation":
 		return callBaiduTranslation(ctx, client, config, text, target)
 	case "Niutrans":

@@ -89,15 +89,12 @@ export function usePdfSelectionTranslation(
   onError: (error: unknown) => void,
 ) {
   const [result, setResult] = useState("");
-  const [sourceText, setSourceText] = useState("");
-  const [sourceLanguage, setSourceLanguage] = useState<"en" | "zh">("en");
-  const [provider, setProvider] = useState("");
   const [loading, setLoading] = useState(false);
   const requestGeneration = useRef(0);
 
-  const performTranslation = useCallback(async (text: string, selectedProvider: string, language: "en" | "zh", generation: number) => {
+  const performTranslation = useCallback(async (text: string, generation: number) => {
     try {
-      const response = await translateSelectionText(text, selectedProvider === "MyMemory" ? language : undefined);
+      const response = await translateSelectionText(text, undefined);
       if (requestGeneration.current === generation) setResult(response.translated_text);
     } catch (error) {
       if (requestGeneration.current === generation) onError(error);
@@ -108,17 +105,12 @@ export function usePdfSelectionTranslation(
 
   const translate = useCallback(async (text: string) => {
     const generation = ++requestGeneration.current;
-    const language = /\p{Script=Han}/u.test(text) ? "zh" : "en";
-    setSourceText(text);
-    setSourceLanguage(language);
-    setProvider("");
     setResult("");
     setLoading(true);
     try {
-      const status = await refreshStatus();
+      await refreshStatus();
       if (requestGeneration.current !== generation) return;
-      setProvider(status.provider);
-      await performTranslation(text, status.provider, language, generation);
+      await performTranslation(text, generation);
     } catch (error) {
       if (requestGeneration.current === generation) {
         onError(error);
@@ -127,30 +119,16 @@ export function usePdfSelectionTranslation(
     }
   }, [onError, performTranslation, refreshStatus]);
 
-  const changeSourceLanguage = useCallback(async (language: "en" | "zh") => {
-    if (!sourceText || provider !== "MyMemory") return;
-    const generation = ++requestGeneration.current;
-    setSourceLanguage(language);
-    setResult("");
-    setLoading(true);
-    await performTranslation(sourceText, provider, language, generation);
-  }, [performTranslation, provider, sourceText]);
-
   const clear = useCallback(() => {
     requestGeneration.current += 1;
     setResult("");
-    setSourceText("");
-    setProvider("");
     setLoading(false);
   }, []);
 
   return {
     result,
     loading,
-    canChooseSource: provider === "MyMemory",
-    sourceLanguage,
     translate,
-    changeSourceLanguage,
     clear,
   };
 }

@@ -20,7 +20,7 @@ func TestLoadTranslationConfigAllowsOnlyKnownKeylessSources(t *testing.T) {
 	}{
 		{"Google Translate Web", true},
 		{"Tencent TranSmart Web", true},
-		{"MyMemory", true},
+		{"MyMemory", false},
 		{"Bing Translate Web", true},
 		{"Sogou Translate Web", true},
 		{"DeepL Web", true},

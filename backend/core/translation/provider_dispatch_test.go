@@ -92,13 +92,6 @@ func TestSplitProviderTextRespectsFreeBaiduLimit(t *testing.T) {
 	}
 }
 
-func TestMyMemoryRejectsOversizedSelection(t *testing.T) {
-	_, err := translateWithConfigSource(t.Context(), &http.Client{}, "user-1", modelconfig.TranslationConfig{ProviderName: "MyMemory"}, strings.Repeat("文", 168), "zh", "en")
-	if err == nil || !strings.Contains(err.Error(), "500 bytes") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
 func TestProviderChunkReassemblyDoesNotInventNewlines(t *testing.T) {
 	client := &http.Client{Transport: dispatchTransport(func(req *http.Request) (*http.Response, error) {
 		if err := req.ParseForm(); err != nil {
@@ -118,7 +111,7 @@ func TestProviderChunkReassemblyDoesNotInventNewlines(t *testing.T) {
 }
 
 func TestTokenHubChunksStayBelowInputTokenLimit(t *testing.T) {
-	spec, ok := lookupProvider("Tencent TokenHub Translation")
+	spec, ok := translationProviders["tencent tokenhub translation"]
 	if !ok {
 		t.Fatal("missing TokenHub provider")
 	}

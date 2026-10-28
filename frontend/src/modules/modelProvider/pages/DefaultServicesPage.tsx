@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Switch } from "antd";
+import { Modal, Switch } from "antd";
 import { useTranslation } from "react-i18next";
 import { modelProvidersApi, unwrapModelProviderData } from "../api";
 import DefaultModelConfigPanel, {
@@ -95,15 +95,13 @@ export default function DefaultServicesPage({
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
   const [selectionVersion, setSelectionVersion] = useState(0);
   const [activeFocusCategory, setActiveFocusCategory] = useState(focusServiceCategory);
+  const [toolServiceSummaries, setToolServiceSummaries] = useState<Partial<Record<ServiceCategory, string>>>({});
   const latestRequest = useRef(0);
-  const serviceArea = useRef<HTMLElement>(null);
-  const focusObserver = useRef<MutationObserver | null>(null);
-  const focusTimer = useRef<number | null>(null);
 
   const checkSetupAvailability = useCallback(async () => {
     const requestId = ++latestRequest.current;
     setSetupAvailability(loadingSetupAvailability);
-    const [modelResult, parsingResult, searchResult] = await Promise.allSettled([
+    const [modelResult, parsingResult, searchResult, academicResult, translationResult] = await Promise.allSettled([
       listAvailableModels(),
       modelProvidersApi.apiCoreModelProvidersProviderGroupsGet(
         { category: "ocr" },
@@ -113,6 +111,8 @@ export default function DefaultServicesPage({
         { category: "search" },
         silentSetupCheckOptions,
       ),
+      modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "datasource" }, silentSetupCheckOptions),
+      modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "translation" }, silentSetupCheckOptions),
     ]);
     if (requestId !== latestRequest.current) return;
 
@@ -127,6 +127,13 @@ export default function DefaultServicesPage({
       : "error";
 
     setSetupAvailability({ cloudParsing, modelProvider, searchEngine });
+    const summaries: Partial<Record<ServiceCategory, string>> = {};
+    for (const [category, result] of [["parsing", parsingResult], ["search", searchResult], ["academic", academicResult], ["translation", translationResult]] as const) {
+      if (result.status !== "fulfilled") continue;
+      const groups = unwrapModelProviderData<{ groups?: { name?: string; provider_name?: string }[] }>(result.value.data).groups || [];
+      if (groups.length) summaries[category] = groups.map((group) => group.name || group.provider_name).filter(Boolean).join("、") || `已配置 ${groups.length} 个服务`;
+    }
+    setToolServiceSummaries(summaries);
   }, []);
 
   useEffect(() => {
@@ -136,53 +143,13 @@ export default function DefaultServicesPage({
     };
   }, [checkSetupAvailability]);
 
-  const scrollToServiceCategory = useCallback((category: ServiceCategory) => {
-    focusObserver.current?.disconnect();
-    const container = serviceArea.current;
-    if (!container) return;
-    const scrollIfPresent = () => {
-      const section = container.querySelector<HTMLElement>(`[data-service-category="${category}"]`);
-      if (!section) return false;
-      const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      section.scrollIntoView?.({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
-      return true;
-    };
-    if (scrollIfPresent() || typeof MutationObserver === "undefined") return;
-    const observer = new MutationObserver(() => {
-      if (scrollIfPresent()) observer.disconnect();
-    });
-    observer.observe(container, { childList: true, subtree: true });
-    focusObserver.current = observer;
-  }, []);
-
   useEffect(() => {
     setActiveFocusCategory(focusServiceCategory);
-    if (focusServiceCategory) scrollToServiceCategory(focusServiceCategory);
-  }, [focusServiceCategory, scrollToServiceCategory]);
-
-  useEffect(() => () => {
-    focusObserver.current?.disconnect();
-    if (focusTimer.current !== null) window.clearTimeout(focusTimer.current);
-  }, []);
+  }, [focusServiceCategory]);
 
   const handleConfigureCloudService = (service: CloudServiceSlotKey) => {
-    const category = service === "cloudParsing" ? "parsing" : "search";
     onConfigureCloudService(service);
-    if (focusTimer.current !== null) {
-      window.clearTimeout(focusTimer.current);
-      focusTimer.current = null;
-    }
-    if (activeFocusCategory === category) {
-      // A second click on the same link should expand and focus the group again.
-      setActiveFocusCategory(undefined);
-      focusTimer.current = window.setTimeout(() => {
-        setActiveFocusCategory(category);
-        focusTimer.current = null;
-      }, 0);
-    } else {
-      setActiveFocusCategory(category);
-    }
-    scrollToServiceCategory(category);
+    setActiveFocusCategory(service === "cloudParsing" ? "parsing" : "search");
   };
 
   const handleServiceConfigurationChanged = () => {
@@ -220,21 +187,35 @@ export default function DefaultServicesPage({
         }}
         modelProviderSetupState={setupAvailability.modelProvider}
         onConfigureCloudService={handleConfigureCloudService}
+        onConfigureToolService={setActiveFocusCategory}
+        toolServiceSummaries={toolServiceSummaries}
         onConfigureProviders={onConfigureProviders}
         onModelSelectionChanged={onModelSelectionChanged}
         onRetrySetup={() => void checkSetupAvailability()}
         highlightTarget={highlightTarget}
         onHighlightResolved={onHighlightResolved}
       />
-      <section className="default-services-configuration" ref={serviceArea}>
-        <ExternalServicesPage
+      <Modal
+        open={Boolean(activeFocusCategory)}
+        title={activeFocusCategory ? ({ search: "搜索引擎", academic: "学术搜索引擎", parsing: "文档解析（OCR）", translation: "机器翻译" }[activeFocusCategory]) : ""}
+        width={1000}
+        footer={null}
+        destroyOnHidden
+        onCancel={() => setActiveFocusCategory(undefined)}
+        className="default-services-modal"
+      >
+        {activeFocusCategory ? <ExternalServicesPage
+          key={activeFocusCategory}
           variant="default-models"
-          visibleCategories={["parsing", "search", "academic", "translation"]}
+          includeMcp={false}
+          includeDependencies={false}
+          includeBuiltinTools={false}
+          visibleCategories={[activeFocusCategory]}
           focusCategory={activeFocusCategory}
-          parsingControl={parsingControl}
+          parsingControl={activeFocusCategory === "parsing" ? parsingControl : undefined}
           onConfigurationChanged={handleServiceConfigurationChanged}
-        />
-      </section>
+        /> : null}
+      </Modal>
     </div>
   );
 }

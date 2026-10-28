@@ -20,6 +20,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/modelconfig"
+	"lazymind/core/modelprovider"
 	"lazymind/core/store"
 )
 
@@ -109,6 +110,10 @@ type tencentResponse struct {
 }
 
 func Status(w http.ResponseWriter, r *http.Request) {
+	if err := modelprovider.EnsureDefaultTranslationServices(r.Context(), store.DB(), store.UserID(r)); err != nil {
+		common.ReplyErr(w, "initialize free translation services failed", http.StatusInternalServerError)
+		return
+	}
 	groups, err := modelconfig.ListTranslationProviderGroups(r.Context(), store.DB(), store.UserID(r))
 	if err != nil {
 		common.ReplyErr(w, "load translation providers failed", http.StatusInternalServerError)
@@ -170,12 +175,6 @@ func Translate(w http.ResponseWriter, r *http.Request) {
 	if !spec.Keyless && strings.TrimSpace(config.APIKey) == "" {
 		common.ReplyErr(w, "invalid translation credentials", http.StatusPreconditionFailed)
 		return
-	}
-	if spec.Name == "MyMemory" {
-		if err := validateMyMemoryLanguagePair(req.Source, normalizeTarget(req.Target, req.Text)); err != nil {
-			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
-			return
-		}
 	}
 	result, err := translateWithConfigSource(r.Context(), nil, store.UserID(r), *config, req.Text, req.Source, req.Target)
 	if err != nil {

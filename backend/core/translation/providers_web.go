@@ -21,7 +21,6 @@ import (
 const (
 	googleTranslateWebURL  = "https://translate.googleapis.com/translate_a/t"
 	tencentTranSmartWebURL = "https://transmart.qq.com/api/imt"
-	myMemoryURL            = "https://api.mymemory.translated.net/get"
 	webResponseLimit       = 1 << 20
 )
 
@@ -134,74 +133,4 @@ func callTencentTranSmartWeb(ctx context.Context, client *http.Client, text, tar
 		return "", "", errors.New("TranSmart translation returned an invalid response")
 	}
 	return html.UnescapeString(result.AutoTranslation[0]), result.SourceLanguage, nil
-}
-
-func validateMyMemoryLanguagePair(source, target string) error {
-	source, target = strings.ToLower(strings.TrimSpace(source)), strings.ToLower(strings.TrimSpace(target))
-	if source != "en" && source != "zh" {
-		return errors.New("MyMemory requires an explicit source language: en or zh")
-	}
-	if target != "en" && target != "zh" {
-		return errors.New("unsupported MyMemory translation target")
-	}
-	if source == target {
-		return errors.New("MyMemory source and target languages must differ")
-	}
-	return nil
-}
-
-func callMyMemory(ctx context.Context, client *http.Client, text, source, target string) (translated, detectedSource string, err error) {
-	if len([]byte(text)) > 500 {
-		return "", "", errors.New("MyMemory request exceeds 500 bytes")
-	}
-	if err := validateMyMemoryLanguagePair(source, target); err != nil {
-		return "", "", err
-	}
-	source, target = strings.ToLower(strings.TrimSpace(source)), strings.ToLower(strings.TrimSpace(target))
-	var sourceCode, targetCode string
-	if source == "zh" {
-		sourceCode = "zh-CN"
-	} else {
-		sourceCode = "en"
-	}
-	if target == "zh" {
-		targetCode = "zh-CN"
-	} else {
-		targetCode = "en"
-	}
-	endpoint, _ := url.Parse(myMemoryURL)
-	query := endpoint.Query()
-	query.Set("q", text)
-	query.Set("langpair", sourceCode+"|"+targetCode)
-	endpoint.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return "", "", err
-	}
-	resp, err := webTranslationClient(client).Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("MyMemory translation request failed: %w", err)
-	}
-	body, err := webTranslationBody(resp)
-	if err != nil {
-		return "", "", fmt.Errorf("MyMemory translation: %w", err)
-	}
-	var result struct {
-		ResponseData struct {
-			TranslatedText string `json:"translatedText"`
-		} `json:"responseData"`
-		ResponseStatus  int    `json:"responseStatus"`
-		ResponseDetails string `json:"responseDetails"`
-		QuotaFinished   bool   `json:"quotaFinished"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", "", errors.New("MyMemory translation returned an invalid response")
-	}
-	if result.QuotaFinished {
-		return "", "", errors.New("MyMemory free quota is exhausted")
-	}
-	if result.ResponseStatus != http.StatusOK || strings.TrimSpace(result.ResponseData.TranslatedText) == "" {
-		return "", "", fmt.Errorf("MyMemory translation failed: %s", result.ResponseDetails)
-	}
-	return html.UnescapeString(result.ResponseData.TranslatedText), source, nil
 }

@@ -1,8 +1,11 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react";
+import { ConfigProvider } from "antd";
 import { useEffect, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import DefaultServicesPage from "./DefaultServicesPage";
+
+const render = (children: ReactNode) => renderComponent(<ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>);
 
 const mocks = vi.hoisted(() => ({
   listModels: vi.fn(),
@@ -23,9 +26,10 @@ vi.mock("../api", () => ({
 }));
 
 vi.mock("../components/DefaultModelConfigPanel", () => ({
-  default: function MockDefaultModelConfigPanel({ modelProviderSetupState, onConfigureCloudService }: {
+  default: function MockDefaultModelConfigPanel({ modelProviderSetupState, onConfigureCloudService, onConfigureToolService }: {
     modelProviderSetupState: string;
     onConfigureCloudService: (service: "cloudParsing" | "searchEngine") => void;
+    onConfigureToolService: (category: "academic" | "translation") => void;
   }) {
     useEffect(() => { mocks.panelMounts(); }, []);
     return (
@@ -33,6 +37,8 @@ vi.mock("../components/DefaultModelConfigPanel", () => ({
         <div data-testid="model-provider-setup-state">{modelProviderSetupState}</div>
         <button onClick={() => onConfigureCloudService("cloudParsing")}>configure parsing</button>
         <button onClick={() => onConfigureCloudService("searchEngine")}>configure search</button>
+        <button onClick={() => onConfigureToolService("academic")}>configure academic</button>
+        <button onClick={() => onConfigureToolService("translation")}>configure translation</button>
       </div>
     );
   },
@@ -162,7 +168,7 @@ describe("DefaultServicesPage", () => {
     });
   });
 
-  it("places OCR, search, academic, and translation settings below defaults, with the OCR master switch", async () => {
+  it("opens OCR configuration only in a dialog, with the OCR master switch", async () => {
     mocks.listModels.mockResolvedValue({ data: { models: [] } });
     const onDocumentParsingChange = vi.fn();
     render(<DefaultServicesPage
@@ -175,9 +181,12 @@ describe("DefaultServicesPage", () => {
       onDocumentParsingChange={onDocumentParsingChange}
     />);
 
+    expect(screen.queryByTestId("external-services")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "configure parsing" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "文档解析（OCR）" })).toBeVisible());
     const services = screen.getByTestId("external-services");
     expect(services).toHaveAttribute("data-variant", "default-models");
-    expect(services).toHaveAttribute("data-categories", "parsing,search,academic,translation");
+    expect(services).toHaveAttribute("data-categories", "parsing");
     const switchControl = screen.getByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
     expect(switchControl).toBeChecked();
     fireEvent.click(switchControl);
@@ -197,16 +206,17 @@ describe("DefaultServicesPage", () => {
       controlsDisabled={false}
       onDocumentParsingChange={vi.fn()}
     />);
-    await waitFor(() => expect(mocks.listProviderGroups).toHaveBeenCalledTimes(2));
-
-    fireEvent.click(screen.getByRole("button", { name: "save service" }));
     await waitFor(() => expect(mocks.listProviderGroups).toHaveBeenCalledTimes(4));
+
+    fireEvent.click(screen.getByRole("button", { name: "configure search" }));
+    fireEvent.click(screen.getByRole("button", { name: "save service" }));
+    await waitFor(() => expect(mocks.listProviderGroups).toHaveBeenCalledTimes(8));
     expect(mocks.listModels).toHaveBeenCalledTimes(2);
     expect(onModelSelectionChanged).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(mocks.panelMounts).toHaveBeenCalledTimes(2));
   });
 
-  it("focuses a deep-linked category and scrolls again on repeated configure clicks", async () => {
+  it("opens a deep-linked category and allows reopening it after closing", async () => {
     mocks.listModels.mockResolvedValue({ data: { models: [] } });
     const onConfigureCloudService = vi.fn();
     render(<DefaultServicesPage
@@ -219,13 +229,22 @@ describe("DefaultServicesPage", () => {
       controlsDisabled={false}
       onDocumentParsingChange={vi.fn()}
     />);
-    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled());
-    const countBefore = vi.mocked(Element.prototype.scrollIntoView).mock.calls.length;
-
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "文档解析（OCR）" })).toBeVisible());
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "configure parsing" }));
     expect(onConfigureCloudService).toHaveBeenCalledWith("cloudParsing");
-    expect(screen.getByTestId("external-services")).not.toHaveAttribute("data-focus");
     await waitFor(() => expect(screen.getByTestId("external-services")).toHaveAttribute("data-focus", "parsing"));
-    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalledTimes(countBefore + 1));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "文档解析（OCR）" })).toBeVisible());
+  });
+
+  it.each([
+    ["search", "搜索引擎"], ["academic", "学术搜索引擎"], ["translation", "机器翻译"],
+  ])("opens only the requested %s configuration", async (category, title) => {
+    mocks.listModels.mockResolvedValue({ data: { models: [] } });
+    render(<DefaultServicesPage {...defaultOcrProps} onConfigureCloudService={vi.fn()} onConfigureProviders={vi.fn()} onModelSelectionChanged={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: `configure ${category}` }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: title })).toBeVisible());
+    expect(screen.getByTestId("external-services")).toHaveAttribute("data-categories", category);
   });
 });

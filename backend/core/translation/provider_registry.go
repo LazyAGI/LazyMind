@@ -3,6 +3,8 @@ package translation
 import (
 	"strings"
 	"time"
+
+	"lazymind/core/modelconfig"
 )
 
 // providerSpec keeps free-tier limits close to provider dispatch so document
@@ -23,7 +25,6 @@ var translationProviders = map[string]providerSpec{
 	"sogou translate web":      {Name: "Sogou Translate Web", Keyless: true, MaxChunkRunes: 500, MinInterval: time.Second, SupportsDocuments: true},
 	"deepl web":                {Name: "DeepL Web", Keyless: true, MaxChunkRunes: 1000, MinInterval: time.Second, SupportsDocuments: true},
 	"tencent transmart web":    {Name: "Tencent TranSmart Web", Keyless: true, MaxChunkRunes: 1000, MinInterval: time.Second, SupportsDocuments: true},
-	"mymemory":                 {Name: "MyMemory", Keyless: true, MaxInputBytes: 500, MinInterval: time.Second, SupportsDocuments: false},
 	"baidu translation":        {Name: "Baidu Translation", MaxChunkRunes: 1000, MinInterval: time.Second, SupportsDocuments: true},
 	"niutrans":                 {Name: "Niutrans", MaxChunkRunes: 5000, MinInterval: 200 * time.Millisecond, SupportsDocuments: true},
 	"aliyun translation":       {Name: "Aliyun Translation", MaxChunkRunes: 1000, MinInterval: 200 * time.Millisecond, SupportsDocuments: true},
@@ -39,6 +40,9 @@ var translationProviders = map[string]providerSpec{
 }
 
 func lookupProvider(name string) (providerSpec, bool) {
+	if !modelconfig.IsTranslationProviderAvailable(name) {
+		return providerSpec{}, false
+	}
 	provider, ok := translationProviders[strings.ToLower(strings.TrimSpace(name))]
 	return provider, ok
 }

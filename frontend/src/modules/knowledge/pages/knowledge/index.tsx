@@ -1,6 +1,6 @@
-import { Button, Input, message, Modal, Popover, Progress, Segmented, Spin, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
+import { Button, Input, message, Modal, Popover, Progress, Segmented, Spin, Tooltip, Row, Col, Select, Tabs } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import type { ChangeEvent, ReactNode } from "react";
+import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import {
@@ -19,12 +19,9 @@ import type { Conversation } from "@/api/generated/chatbot-client";
 import { Segment } from "@/api/generated/knowledge-client";
 
 import type { Dataset as KnowledgeDataset } from "@/api/generated/knowledge-client";
-import { TIME_FORMAT } from "@/modules/knowledge/constants/common";
-import FileUtils from "@/modules/knowledge/utils/file";
 import FileViewer, {
   type FileViewerRef,
 } from "@/modules/knowledge/components/FileViewer";
-import KnowledgeTabs from "./components/KnowledgeTabs";
 import {
   DocumentServiceApi,
   SegmentServiceApi,
@@ -71,6 +68,7 @@ import { buildSearchablePdf } from "@/modules/knowledge/utils/pdfDocumentRendere
 import { translatableDocumentExtensions } from "@/modules/knowledge/utils/documentTranslation";
 import AddVocabularyModal from "@/modules/vocabulary/AddVocabularyModal";
 import DocumentVocabularyPanel from "@/modules/vocabulary/DocumentVocabularyPanel";
+import { modelProvidersApi } from "@/modules/modelProvider/api";
 import { isVocabularyEnabled } from "@/runtime/mode";
 import AddLearningContentModal, { type LearningSelection } from "@/modules/learning/AddLearningContentModal";
 import { getKnowledgeBaseCapabilities, getLearningCatalog, type LearningCapability } from "@/modules/learning/api";
@@ -147,13 +145,8 @@ const KnowledgeDocumentContent = () => {
   const [exportingImagePdf, setExportingImagePdf] = useState(false);
   const [documentChatSelection, setDocumentChatSelection] =
     useState<DocumentChatSelection | null>(null);
-  const [previewSideTab, setPreviewSideTab] = useState("chat");
+  const [previewSideTab, setPreviewSideTab] = useState("translation");
   const [previewSideCollapsed, setPreviewSideCollapsed] = useState(false);
-  const [segmentViewKey, setSegmentViewKey] = useState("");
-  const [segmentViewOptions, setSegmentViewOptions] = useState<
-    Array<{ label: ReactNode; value: string }>
-  >([]);
-  const [showSegmentSequence, setShowSegmentSequence] = useState(true);
   const [documentChatHistory, setDocumentChatHistory] = useState<Conversation[]>([]);
   const [selectedDocumentConversation, setSelectedDocumentConversation] = useState<string>();
   const [chatHistoryPopoverOpen, setChatHistoryPopoverOpen] = useState(false);
@@ -174,6 +167,20 @@ const KnowledgeDocumentContent = () => {
     openModal: openTranslationModal,
     refreshStatus: refreshTranslationStatus,
   } = useDocumentTranslationService();
+  const [translationProviderSaving, setTranslationProviderSaving] = useState(false);
+  const selectDefaultTranslationProvider = async (groupId: string) => {
+    setTranslationProviderSaving(true);
+    try {
+      await modelProvidersApi.apiCoreModelProvidersSelectedProvidersPut({ setSelectedProviderOpenAPIRequest: { selections: [{ category: "translation", group_id: groupId }] } });
+      setTranslationProviderGroupId(groupId);
+      await refreshTranslationStatus();
+      clearSelectedTranslation();
+    } catch {
+      message.error("保存默认机器翻译源失败，请重试");
+    } finally {
+      setTranslationProviderSaving(false);
+    }
+  };
   const [translationSource, setTranslationSource] = useState("");
   const [regenerationArtifact, setRegenerationArtifact] = useState<PdfArtifact>();
   const [regenerationProviderGroupId, setRegenerationProviderGroupId] = useState<string>();
@@ -190,17 +197,14 @@ const KnowledgeDocumentContent = () => {
   const {
     loading: translationLoading,
     result: translationResult,
-    canChooseSource: canChooseTranslationSource,
-    sourceLanguage: translationSourceLanguage,
     translate: translateSelectedText,
-    changeSourceLanguage: changeTranslationSourceLanguage,
     clear: clearSelectedTranslation,
   } = usePdfSelectionTranslation(refreshTranslationStatus, onTranslationError);
   const [vocabularySelection, setVocabularySelection] = useState<PdfTextSelection | null>(null);
   const [vocabularyRefreshToken, setVocabularyRefreshToken] = useState(0);
   const [referenceImportSelection, setReferenceImportSelection] = useState<{ text: string; referenceId?: string; requestId: number }>();
   const [referenceActions, setReferenceActions] = useState<PdfReferenceAction[]>([]);
-  const [referenceCount, setReferenceCount] = useState<number>();
+  const [, setReferenceCount] = useState<number>();
   const referencePreanalysisDocument = useRef("");
   const [referencePreanalysisRetry, setReferencePreanalysisRetry] = useState(0);
   const [learningSelection,setLearningSelection]=useState<LearningSelection|null>(null);
@@ -301,19 +305,21 @@ const KnowledgeDocumentContent = () => {
   const translatePdfSelection = useCallback(async (selection: PdfTextSelection) => {
     setTranslationSelection(selection);
     setTranslationSource(selection.text);
+    setPreviewSideTab("translation");
+    setPreviewSideCollapsed(false);
     await translateSelectedText(selection.text);
   }, [translateSelectedText]);
 
   const translateWithModel = useCallback(() => {
-    if (!translationSelection) return;
-    const selection: DocumentChatSelection = { source: "pdf", ...translationSelection };
+    if (!translationSource.trim()) return;
+    const selection: DocumentChatSelection = { source: "pdf", ...(translationSelection || { page: 1 }), text: translationSource };
     setDocumentChatSelection(selection);
     setTranslationRequest({ id: Date.now(), selection });
     setTranslationSource("");
     clearSelectedTranslation();
     setPreviewSideCollapsed(false);
     setPreviewSideTab("chat");
-  }, [clearSelectedTranslation, translationSelection]);
+  }, [clearSelectedTranslation, translationSelection, translationSource]);
 
   const refreshDocumentChatHistory = useCallback(() => {
     if (!knowledgeId) return;
@@ -342,13 +348,6 @@ const KnowledgeDocumentContent = () => {
     setSelectedDocumentConversation(undefined);
     refreshDocumentChatHistory();
   }, [refreshDocumentChatHistory]);
-
-  const handleSegmentViewOptionsChange = useCallback(
-    (options: Array<{ label: ReactNode; value: string }>) => {
-      setSegmentViewOptions(options);
-    },
-    [],
-  );
 
   const askPdfSelection = useCallback((selection: PdfTextSelection) => {
     setDocumentChatSelection({ source: "pdf", ...selection });
@@ -402,49 +401,13 @@ const KnowledgeDocumentContent = () => {
 
   useEffect(() => { preanalyzeReferences(); }, [preanalyzeReferences, referencePreanalysisRetry]);
 
-  useEffect(() => {
-    if (referenceCount === 0 && previewSideTab === "references") {
-      setPreviewSideTab("chat");
-    }
-  }, [previewSideTab, referenceCount]);
 
-  const askSegment = useCallback((
-    segment: Segment,
-    selectedText?: string,
-    segmentGroup?: string,
-  ) => {
-    let metadata: Record<string, unknown> = {};
-    if (segment.meta) {
-      try {
-        metadata = JSON.parse(segment.meta) as Record<string, unknown>;
-      } catch {
-        metadata = {};
-      }
-    }
-    const rawPage = Number(metadata.page);
-    const rawBbox = metadata.bbox;
-    setDocumentChatSelection({
-      source: "segment",
-      text: selectedText || segment.display_content || segment.content || "",
-      page: Number.isFinite(rawPage) ? rawPage + 1 : undefined,
-      bbox: Array.isArray(rawBbox) && rawBbox.length === 4
-        ? rawBbox.map(Number) as [number, number, number, number]
-        : undefined,
-      segmentId: segment.segment_id,
-      segmentNumber: segment.number,
-      group: segmentGroup,
-    });
-    setPreviewSideCollapsed(false);
-    setPreviewSideTab("chat");
-  }, []);
 
   const {
     getDatasetDetail: getKbDetail,
     loadDataset,
   } = useDatasetPermissionStore();
-  const hasWritePermission = useDatasetPermissionStore((state) =>
-    state.hasWritePermission(),
-  );
+
 
   const group = useMemo(() => {
     return searchParams.get("group_name") || "";
@@ -1046,51 +1009,7 @@ const KnowledgeDocumentContent = () => {
             </div>
           ) : null
         }
-        extraContent={[
-          { label: t("knowledge.source"), value: t("knowledge.localFile") },
-          {
-            label: t("knowledge.createTime"),
-            value: moment(knowledgeDetail?.create_time).format(TIME_FORMAT),
-          },
-          {
-            label: t("knowledge.creator"),
-            value: knowledgeDetail?.creator || "-",
-          },
-          {
-            label: t("knowledge.originalFile"),
-            value: (
-              <a
-                href={previewFile}
-                rel="noreferrer noopener"
-                target="_blank"
-                title={knowledgeDetail?.display_name}
-              >
-                {knowledgeDetail?.display_name}
-              </a>
-            ),
-            hidden: !hasWritePermission,
-          },
-          {
-            label: t("knowledge.updateTime"),
-            value: moment(knowledgeDetail?.update_time).format(TIME_FORMAT),
-          },
-          {
-            label: t("knowledge.size"),
-            value:
-              FileUtils.formatFileSize(knowledgeDetail?.document_size) || "-",
-          },
-          {
-            label: t("knowledge.tags"),
-            value:
-              knowledgeDetail?.tags && knowledgeDetail?.tags.length > 0
-                ? knowledgeDetail.tags.map((tag) => (
-                    <Tag style={{ marginLeft: "8px" }} key={tag}>
-                      {tag}
-                    </Tag>
-                  ))
-                : "-",
-          },
-        ]}
+
       />
       <Row gutter={[12, 12]} className="knowledge-preview-layout mt-6 min-h-0 w-full flex-1">
         <Col
@@ -1196,30 +1115,7 @@ const KnowledgeDocumentContent = () => {
                     onChange={setPreviewSideTab}
                     tabBarExtraContent={(
                       <div className="knowledge-preview-toolbar">
-                        {previewSideTab === "segments" ? (
-                          <Popover
-                            trigger="click"
-                            placement="bottomRight"
-                            content={<div className="knowledge-preview-options-popover">
-                            <Select
-                              className="knowledge-preview-segment-select"
-                              value={segmentViewKey || undefined}
-                              options={segmentViewOptions}
-                              onChange={setSegmentViewKey}
-                            />
-                            <div className="knowledge-preview-sequence">
-                              <span>{t("knowledge.sequence")}</span>
-                              <Switch
-                                size="small"
-                                checked={showSegmentSequence}
-                                onChange={setShowSegmentSequence}
-                              />
-                            </div>
-                            </div>}
-                          >
-                            <Button type="text" icon={<SettingOutlined />} aria-label="切片显示选项" title="切片显示选项" />
-                          </Popover>
-                        ) : previewSideTab === "chat" ? (
+                        {previewSideTab === "chat" ? (
                           <Popover
                             trigger="click"
                             placement="bottomRight"
@@ -1254,6 +1150,40 @@ const KnowledgeDocumentContent = () => {
                       </div>
                     )}
                     items={[
+                      { key: "translation", label: "翻译", children: <div className="knowledge-reader-translation">
+                        <label htmlFor="reader-translation-provider">默认机器翻译源</label>
+                        <Select id="reader-translation-provider" aria-label="默认机器翻译源" showSearch optionFilterProp="label" loading={translationStatusRefreshing || translationProviderSaving} disabled={translationProviderSaving} value={translationProviderGroupId} placeholder="请选择机器翻译源" options={translationDocumentProviders.map((item) => ({ value: item.group_id, label: item.provider_name }))} onChange={(groupId) => void selectDefaultTranslationProvider(groupId)} />
+                        <a href="/settings?section=model_defaults&service=translation">配置机器翻译</a>
+                        <Button onClick={() => void openTranslationModal()} disabled={!canTranslateDocument}>翻译全文</Button>
+                        <div className="knowledge-translation-block">
+                          <div className="knowledge-translation-label">{t("knowledge.translationOriginal")}</div>
+                          <Input.TextArea
+                            aria-label="待翻译文字"
+                            placeholder="选中论文文字，或在这里输入要翻译的内容"
+                            autoSize={{ minRows: 3, maxRows: 8 }}
+                            value={translationSource}
+                            onChange={(event) => { setTranslationSource(event.target.value); clearSelectedTranslation(); }}
+                          />
+                          <Button disabled={!translationSource.trim() || translationProviderSaving} loading={translationLoading} onClick={() => void translateSelectedText(translationSource)}>翻译文字</Button>
+                        </div>
+                        <div className="knowledge-translation-block">
+                          <div className="knowledge-translation-label">{t("knowledge.translationResult")}</div>
+                          {translationLoading ? <Spin size="small" /> : <div className="knowledge-translation-text">{translationResult}</div>}
+                        </div>
+                        {!translationLoading && translationResult ? (
+                          <div className="knowledge-translation-model-action">
+                            {isVocabularyEnabled() && isSingleEnglishWord(translationSource) ? (
+                              <Button className="knowledge-translation-add-button" onClick={() => {
+                                setVocabularySelection({ ...(translationSelection || { page: 1 }), text: translationSource });
+                                setTranslationSource("");
+                                clearSelectedTranslation();
+                              }}>加入生词本</Button>
+                            ) : null}
+                            <Button onClick={translateWithModel}>{t("knowledge.translateWithModel")}</Button>
+                            <span>{t("knowledge.translateWithModelHint")}</span>
+                          </div>
+                        ) : null}
+                      </div> },
                       {
                         key: "chat",
                         label: t("knowledge.pdfChatTab"),
@@ -1269,36 +1199,21 @@ const KnowledgeDocumentContent = () => {
                             onHistoryChange={refreshDocumentChatHistory}
                             onClose={() => {
                               setDocumentChatSelection(null);
-                              setPreviewSideTab(canShowSegments ? "segments" : "chat");
+                              setPreviewSideTab("translation");
                             }}
                           />
                         ),
                       },
-                      ...(canShowSegments ? [{
-                        key: "segments",
-                        label: t("knowledge.segmentPreviewTab"),
-                        children: (
-                          <KnowledgeTabs
-                            knowledgeDetail={knowledgeDetail}
-                            onGetItemInfo={(data) => setSegmentDetail(data)}
-                            onAskSegment={askSegment}
-                            activeKey={segmentViewKey}
-                            onActiveKeyChange={setSegmentViewKey}
-                            onOptionsChange={handleSegmentViewOptionsChange}
-                            showSequence={showSegmentSequence}
-                          />
-                        ),
-                      }] : []),
                       ...(isVocabularyEnabled() ? [{
                         key: "vocabulary",
                         label: "生词",
                         children: <DocumentVocabularyPanel documentId={knowledgeId} refreshToken={vocabularyRefreshToken} />,
                       }] : []),
-                      ...(referenceCount && referenceCount > 0 ? [{
+                      {
                         key: "references",
                         label: "参考文献",
                         children: <DocumentReferencesPanel documentId={knowledgeId} targetDatasetId={knowledgeBaseId} importSelection={referenceImportSelection} onActionsChange={setReferenceActions} onReferenceCountChange={setReferenceCount} />,
-                      }] : []),
+                      },
                     ]}
                   />
                 </div>
@@ -1418,54 +1333,7 @@ const KnowledgeDocumentContent = () => {
           onRequestParagraphSelection={()=>{setQuickReferenceOpen(false);setParagraphSelectionMode(true)}}
         />
       </Modal>
-      <Modal
-        open={Boolean(translationSource)}
-        title={t("knowledge.translationTitle")}
-        footer={null}
-        onCancel={() => {
-          if (!translationLoading) {
-            setTranslationSource("");
-            clearSelectedTranslation();
-          }
-        }}
-      >
-        <div className="knowledge-translation-block">
-          <div className="knowledge-translation-label">{t("knowledge.translationOriginal")}</div>
-          <div className="knowledge-translation-text">{translationSource}</div>
-        </div>
-        {canChooseTranslationSource ? (
-          <div className="knowledge-translation-block">
-            <div className="knowledge-translation-label">{t("knowledge.translationSourceLanguage")}</div>
-            <Segmented
-              aria-label={t("knowledge.translationSourceLanguage")}
-              block
-              value={translationSourceLanguage}
-              onChange={(value) => void changeTranslationSourceLanguage(value as "en" | "zh")}
-              options={[
-                { label: t("knowledge.translationSourceEnglish"), value: "en" },
-                { label: t("knowledge.translationSourceChinese"), value: "zh" },
-              ]}
-            />
-          </div>
-        ) : null}
-        <div className="knowledge-translation-block">
-          <div className="knowledge-translation-label">{t("knowledge.translationResult")}</div>
-          {translationLoading ? <Spin size="small" /> : <div className="knowledge-translation-text">{translationResult}</div>}
-        </div>
-        {!translationLoading && translationResult ? (
-          <div className="knowledge-translation-model-action">
-            {isVocabularyEnabled() && isSingleEnglishWord(translationSource) ? (
-              <Button className="knowledge-translation-add-button" onClick={() => {
-                setVocabularySelection({ ...(translationSelection || { page: 1 }), text: translationSource });
-                setTranslationSource("");
-                clearSelectedTranslation();
-              }}>{t("learning.addToCollection")}</Button>
-            ) : null}
-            <Button onClick={translateWithModel}>{t("knowledge.translateWithModel")}</Button>
-            <span>{t("knowledge.translateWithModelHint")}</span>
-          </div>
-        ) : null}
-      </Modal>
+
       {isVocabularyEnabled() ? <AddVocabularyModal
         selection={vocabularySelection}
         datasetId={knowledgeBaseId}

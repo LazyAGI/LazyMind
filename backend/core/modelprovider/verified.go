@@ -144,6 +144,9 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 
 	out := make([]verifiedGroupItem, 0, len(rows))
 	for _, r := range rows {
+		if r.Category == "translation" && !IsTranslationProviderAvailable(r.ProviderName) {
+			continue
+		}
 		r.APIKey, err = ResolveAPIKey(r.APIKey, r.APIKeyCiphertext)
 		if err != nil {
 			return nil, err
