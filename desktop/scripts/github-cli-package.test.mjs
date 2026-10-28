@@ -13,6 +13,8 @@ const source = fs.readFileSync(path.join(repo, "desktop/scripts/build-darwin-arm
 const builder = fs.readFileSync(path.join(repo, "desktop/electron/electron-builder.config.cjs"), "utf8");
 const digest = value => createHash("sha256").update(value).digest("hex");
 const install = source.match(/install_github_cli\(\) \{\n[\s\S]*?\n\}/)?.[0];
+// These shell fixtures exercise the macOS packager and its POSIX toolchain.
+const macOSOnly = { skip: process.platform !== "darwin" };
 
 function staging({ arch = "arm64", badChecksum = false, binaryArch, license = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "github-package-test-"));
@@ -28,6 +30,7 @@ function staging({ arch = "arm64", badChecksum = false, binaryArch, license = tr
       " z.writestr('gh_2.102.1_macOS_' + sys.argv[2] + '/bin/gh', 'fixture executable, not gh')",
       " if sys.argv[3] == 'yes': z.writestr('gh_2.102.1_macOS_' + sys.argv[2] + '/LICENSE', 'fixture MIT license')",
     ].join("\n"), archive, arch, license ? "yes" : "no"], { encoding: "utf8" });
+    assert.ifError(made.error);
     assert.equal(made.status, 0, made.stderr);
     const release = path.join(root, "release.json");
     fs.writeFileSync(release, JSON.stringify({ version: "2.102.1", archive_sha256: {
@@ -48,7 +51,9 @@ cp "$FIXTURE_ARCHIVE" "$7"
         FIXTURE_ARCHIVE: archive, FIXTURE_URL: `https://github.com/cli/cli/releases/download/v2.102.1/gh_2.102.1_macOS_${arch}.zip`,
       }, encoding: "utf8",
     });
-    return { status: result.status, output: result.stderr, binary: fs.existsSync(path.join(runtime, "bin/gh")),
+    assert.ifError(result.error);
+    assert.equal(typeof result.status, "number", "installer must exit normally");
+    return { status: result.status, output: result.stdout + result.stderr, binary: fs.existsSync(path.join(runtime, "bin/gh")),
       sha: fs.existsSync(path.join(runtime, "bin/gh.sha256")) ? fs.readFileSync(path.join(runtime, "bin/gh.sha256"), "utf8").trim() : "",
       bytes: fs.existsSync(path.join(runtime, "bin/gh")) ? fs.readFileSync(path.join(runtime, "bin/gh")) : Buffer.alloc(0),
       license: fs.existsSync(path.join(runtime, "licenses/gh/LICENSE")),
@@ -68,22 +73,28 @@ test("release metadata retains the independently verified official version and b
   });
 });
 for (const arch of ["arm64", "amd64"]) {
-  test(`the actual installer stages executable, matching digest and license for ${arch}`, () => {
+  test(`the actual installer stages executable, matching digest and license for ${arch}`, macOSOnly, () => {
     const result = staging({ arch });
     assert.equal(result.status, 0, result.output);
     assert.ok(result.binary && result.license && result.executable);
     assert.equal(result.sha, digest(result.bytes));
   });
 }
-test("wrong archive checksum stops before installing an executable", () => {
+test("wrong archive checksum stops before installing an executable", macOSOnly, () => {
   const result = staging({ badChecksum: true });
   assert.notEqual(result.status, 0); assert.equal(result.binary, false);
+  assert.match(result.output, /checksum|FAILED/i);
 });
-test("wrong CPU architecture stops before installing an executable", () => {
+test("wrong CPU architecture stops before installing an executable", macOSOnly, () => {
   const result = staging({ binaryArch: "x86_64" });
   assert.notEqual(result.status, 0); assert.equal(result.binary, false);
+  assert.match(result.output, /GitHub CLI does not match/);
 });
-test("missing bundled license fails the build", () => { assert.notEqual(staging({ license: false }).status, 0); });
+test("missing bundled license fails the build", macOSOnly, () => {
+  const result = staging({ license: false });
+  assert.notEqual(result.status, 0);
+  assert.match(result.output, /LICENSE/);
+});
 
 for (const failure of [false, true]) {
   test(`Developer ID signing ${failure ? "failure blocks staging" : "refreshes digest after binary mutation"}`, async () => {
@@ -117,7 +128,7 @@ for (const failure of [false, true]) {
   });
 }
 
-test("final ad-hoc deep signing refreshes the digest before sealing the outer app", () => {
+test("final ad-hoc deep signing refreshes the digest before sealing the outer app", macOSOnly, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "github-adhoc-test-"));
   try {
     const app = path.join(root, "LazyMind.app");
@@ -140,6 +151,7 @@ fi
     const result = spawnSync("/bin/bash", ["-c", `set -euo pipefail\n${block}`], {
       env: { ...process.env, PATH: `${tools}:${process.env.PATH}`, APP_PATH: app }, encoding: "utf8",
     });
+    assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(fs.readFileSync(`${binary}.sha256`, "utf8").trim(), digest(fs.readFileSync(binary)));
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
