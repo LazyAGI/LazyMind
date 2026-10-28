@@ -19,6 +19,9 @@ type providerSpec struct {
 var translationProviders = map[string]providerSpec{
 	"tencent translation":      {Name: "Tencent Translation", MaxChunkRunes: 1800, MinInterval: 275 * time.Millisecond, SupportsDocuments: true},
 	"google translate web":     {Name: "Google Translate Web", Keyless: true, MaxChunkRunes: 1000, MinInterval: time.Second, SupportsDocuments: true},
+	"bing translate web":       {Name: "Bing Translate Web", Keyless: true, MaxChunkRunes: 800, MinInterval: time.Second, SupportsDocuments: true},
+	"sogou translate web":      {Name: "Sogou Translate Web", Keyless: true, MaxChunkRunes: 500, MinInterval: time.Second, SupportsDocuments: true},
+	"deepl web":                {Name: "DeepL Web", Keyless: true, MaxChunkRunes: 1000, MinInterval: time.Second, SupportsDocuments: true},
 	"tencent transmart web":    {Name: "Tencent TranSmart Web", Keyless: true, MaxChunkRunes: 1000, MinInterval: time.Second, SupportsDocuments: true},
 	"mymemory":                 {Name: "MyMemory", Keyless: true, MaxInputBytes: 500, MinInterval: time.Second, SupportsDocuments: false},
 	"baidu translation":        {Name: "Baidu Translation", MaxChunkRunes: 1000, MinInterval: time.Second, SupportsDocuments: true},

@@ -32,6 +32,52 @@ func TestTranslateWithSelectedKeylessProvider(t *testing.T) {
 	}
 }
 
+func TestTranslateWithSelectedSogouWebProvider(t *testing.T) {
+	client := &http.Client{Transport: dispatchTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || req.URL.Hostname() != "fanyi.sogou.com" {
+			t.Fatalf("unexpected Sogou request: %s %s", req.Method, req.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`<html><script>window.__INITIAL_STATE__={"textTranslate":{"translateData":{"translate":{"from":"en","to":"zh-CHS","dit":"你好世界","errorCode":"0"}}}};</script><p id="trans-result">你好世界</p></html>`)), Header: make(http.Header), Request: req}, nil
+	})}
+	got, err := translateWithConfig(t.Context(), client, "user-sogou", modelconfig.TranslationConfig{ProviderName: "Sogou Translate Web"}, "Hello world", "zh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TranslatedText != "你好世界" || got.Source != "en" || got.Target != "zh" {
+		t.Fatalf("translation = %#v", got)
+	}
+}
+
+func TestTranslateWithSelectedBingWebProvider(t *testing.T) {
+	client := &http.Client{Transport: dispatchTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Method == http.MethodGet {
+			response := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`<script>var params_AbusePreventionHelper = [1793163553393,"session-token",3600000]; var _G = {"ig":"ABCDEF0123456789ABCDEF0123456789"};</script><div data-iid="translator.5024"></div>`)), Header: make(http.Header), Request: req}
+			return response, nil
+		}
+		if req.Method != http.MethodPost || req.URL.Hostname() != "www.bing.com" {
+			t.Fatalf("unexpected Bing request: %s %s", req.Method, req.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[{"translations":[{"text":"你好"}],"detectedLanguage":{"language":"en"}}]`)), Header: make(http.Header), Request: req}, nil
+	})}
+	got, err := translateWithConfig(t.Context(), client, "user-bing", modelconfig.TranslationConfig{ProviderName: "Bing Translate Web"}, "Hello", "zh")
+	if err != nil || got.TranslatedText != "你好" || got.Source != "en" || got.Target != "zh" {
+		t.Fatalf("translation = %#v, err = %v", got, err)
+	}
+}
+
+func TestTranslateWithSelectedDeepLWebProvider(t *testing.T) {
+	client := &http.Client{Transport: dispatchTransport(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost || req.URL.Hostname() != "oneshot-free.www.deepl.com" {
+			t.Fatalf("unexpected DeepL web request: %s %s", req.Method, req.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"translations":[{"text":"你好","detected_source_language":"en"}]}`)), Header: make(http.Header), Request: req}, nil
+	})}
+	got, err := translateWithConfig(t.Context(), client, "user-deepl-web", modelconfig.TranslationConfig{ProviderName: "DeepL Web"}, "Hello", "zh")
+	if err != nil || got.TranslatedText != "你好" || got.Source != "en" || got.Target != "zh" {
+		t.Fatalf("translation = %#v, err = %v", got, err)
+	}
+}
+
 func TestSplitProviderTextRespectsFreeBaiduLimit(t *testing.T) {
 	spec, ok := lookupProvider("Baidu Translation")
 	if !ok {

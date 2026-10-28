@@ -129,6 +129,12 @@ func callSelectedProvider(ctx context.Context, client *http.Client, config model
 		return callTencent(ctx, config.BaseURL, credentials, text, target)
 	case "Google Translate Web":
 		return callGoogleTranslateWeb(ctx, client, text, target)
+	case "Bing Translate Web":
+		return callBingTranslateWeb(ctx, client, text, target)
+	case "Sogou Translate Web":
+		return callSogouTranslateWeb(ctx, client, text, target)
+	case "DeepL Web":
+		return callDeepLWeb(ctx, client, text, target)
 	case "Tencent TranSmart Web":
 		return callTencentTranSmartWeb(ctx, client, text, target)
 	case "MyMemory":

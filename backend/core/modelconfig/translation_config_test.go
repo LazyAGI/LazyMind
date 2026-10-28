@@ -21,6 +21,9 @@ func TestLoadTranslationConfigAllowsOnlyKnownKeylessSources(t *testing.T) {
 		{"Google Translate Web", true},
 		{"Tencent TranSmart Web", true},
 		{"MyMemory", true},
+		{"Bing Translate Web", true},
+		{"Sogou Translate Web", true},
+		{"DeepL Web", true},
 		{"Unknown Translation", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
