@@ -73,6 +73,22 @@ func TestPaperLaunchRoutesAndIdempotency(t *testing.T) {
 	if count != 4 {
 		t.Fatalf("four expansion entry paths should create four records, got %d", count)
 	}
+	var topic orm.AcademicExpansion
+	if err := db.Where("title=? AND goal=?", "agents", "expansion").Take(&topic).Error; err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	GetExpansion(w, mux.SetURLVars(paperRequest(`{}`), map[string]string{"expansion_id": topic.ID}))
+	var detail map[string]any
+	if json.Unmarshal(w.Body.Bytes(), &detail) != nil || w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if _, ok := detail["contents"].([]any); !ok {
+		t.Fatal("topic preparation must return an empty content array", w.Body.String())
+	}
+	if _, ok := detail["record"].(map[string]any)["result"].(map[string]any)["papers"].([]any); !ok {
+		t.Fatal("topic preparation must return an empty paper array", w.Body.String())
+	}
 	db.Model(&orm.AcademicHandoff{}).Count(&count)
 	if count != 2 {
 		t.Fatalf("reflection and ppt should have separate handoffs, got %d", count)

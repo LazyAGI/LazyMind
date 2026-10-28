@@ -1,0 +1,44 @@
+{
+  "16_chat_urls": {
+    "https://token.sensenova.cn/v1": "https://token.sensenova.cn/chat/completions",
+    "https://token.sensenova.cn/v1/": "https://token.sensenova.cn/v1/chat/completions",
+    "https://token.sensenova.cn/v1/chat/completions": "https://token.sensenova.cn/v1/chat/completions"
+  },
+  "32_rerank": {
+    "type": "EMBED",
+    "urls": {
+      "https://api.siliconflow.cn/v1": "https://api.siliconflow.cn/v1/embeddings",
+      "https://api.siliconflow.cn/v1/": "https://api.siliconflow.cn/v1/embeddings",
+      "https://api.siliconflow.cn/v1/rerank": "https://api.siliconflow.cn/v1/rerank"
+    }
+  },
+  "11_queue": {
+    "normal_ok": true,
+    "stale_lock_blocks_over_3_seconds": false,
+    "resumes_after_removing_test_lock": true
+  },
+  "9_worker": {
+    "same_prefix": true,
+    "requests_import_ok": true
+  },
+  "dependency_numpy": {
+    "import_ok": true,
+    "version": "1.26.4"
+  },
+  "dependency_pyarrow": {
+    "import_ok": true,
+    "version": "25.0.1"
+  },
+  "dependency_faiss": {
+    "import_ok": true,
+    "version": "1.15.0"
+  },
+  "dependency_Stemmer": {
+    "import_ok": true,
+    "version": "import-ok"
+  },
+  "dependency_fontTools": {
+    "import_ok": true,
+    "version": "4.67.0"
+  }
+}

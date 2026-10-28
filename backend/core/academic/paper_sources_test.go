@@ -244,3 +244,64 @@ func TestOpenAlexSearchIdentityAbstractCacheAndSourceFailures(t *testing.T) {
 		t.Fatal("unusable authenticated source was requested repeatedly")
 	}
 }
+
+func TestWebSearchLeadsAreSuccessfulResultsWithoutInventingPapers(t *testing.T) {
+	db := paperFixture(t)
+	base := orm.BaseModel{CreateUserID: "u", CreateUserName: "u"}
+	for _, row := range []any{
+		&orm.UserModelProvider{ID: "web-provider", Name: "Tavily", Category: "search", BaseModel: base},
+		&orm.UserModelProviderGroup{ID: "web-group", UserModelProviderID: "web-provider", Name: "test", APIKey: "fixture", IsVerified: true, BaseModel: base},
+		&orm.UserSelectedProvider{UserID: "u", Category: "search", UserModelProviderGroupID: "web-group"},
+	} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"items": []map[string]string{{"title": "CRAG tutorial", "url": "https://example.org/tutorial", "snippet": "A useful lead, not a verified paper"}}})
+	}))
+	defer server.Close()
+	t.Setenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "fixture")
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", server.URL)
+	record := orm.AcademicExpansion{ID: "web-lead", UserID: "u", DatasetID: "papers", RequestOwner: "u", RequestKey: "web-lead", Status: "preparing", DiscoveryMode: "external", PreparationRevision: 1, ResultJSON: marshal(ReviewWorkflowInput{Papers: []WorkflowPaper{}}), DiscoveryJSON: marshal([]paperDiscovery{})}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	SearchPapers(w, paperRequest(`{"expansion_id":"web-lead","query":"CRAG","sources":["web"],"max_results":5}`))
+	var response struct {
+		Papers  []PaperRef      `json:"papers"`
+		Leads   []discoveryLead `json:"leads"`
+		Sources []searchOutcome `json:"sources"`
+	}
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if len(response.Papers) != 0 || len(response.Leads) != 1 || len(response.Sources) != 1 || response.Sources[0].Status != "ok" || response.Sources[0].Count != 1 {
+		t.Fatal(w.Body.String())
+	}
+}
+
+func TestDiscoveryNormalizesArxivDOIAliasesAndRetainsConflictingOwners(t *testing.T) {
+	db := paperFixture(t)
+	original, _, err := findOrCreateWork(t.Context(), db.DB, WorkInput{Title: "Canonical paper", ArxivID: "2402.09353"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias, _, err := findOrCreateWork(t.Context(), db.DB, WorkInput{Title: "Canonical paper", DOI: "10.48550/arxiv.2402.09353", Provider: "sciverse", ProviderWorkID: "provider-paper"})
+	if err != nil || alias.ID != original.ID || alias.ArxivIDBase != "2402.09353" {
+		t.Fatal("arXiv DOI created a second identity", alias, err)
+	}
+	separate, _, err := findOrCreateWork(t.Context(), db.DB, WorkInput{Title: "Conflicting identity", DOI: "10.1234/separate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = findOrCreateWork(t.Context(), db.DB, WorkInput{Title: "Provider bridge", DOI: "10.1234/separate", ArxivID: "2402.09353"})
+	if !errors.Is(err, errConflictingPaperIdentifiers) {
+		t.Fatal("identifier bridge must be an explicit conflict", err)
+	}
+	var retained orm.AcademicWork
+	if err := db.Where("id=?", separate.ID).Take(&retained).Error; err != nil || retained.ArxivIDBase != "" {
+		t.Fatal("conflicting work was changed", err)
+	}
+}

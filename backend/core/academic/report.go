@@ -12,6 +12,8 @@ import (
 // Reports freeze producer-matched artifacts and server observations, separate
 // from ReviewWorkflowInput and from the mutable progress projection.
 func expansionReportSnapshot(db *gorm.DB, record orm.AcademicExpansion, session, attempt string, artifacts []workflowstore.Artifact) (json.RawMessage, error) {
+	var preparation expansionPreparation
+	_ = json.Unmarshal(record.PreparationJSON, &preparation)
 	report := map[string]any{}
 	metrics := map[string]any{}
 	for _, artifact := range artifacts {
@@ -30,7 +32,9 @@ func expansionReportSnapshot(db *gorm.DB, record orm.AcademicExpansion, session,
 			report = value
 		}
 		if artifact.Slot == "expansion_plan" || artifact.Slot == "candidate_set" || artifact.Slot == "relation_analysis" {
-			metrics[artifact.Slot] = value["metrics"]
+			if preparation.ExecutionStartedAt == nil || !artifact.CreatedAt.Before(*preparation.ExecutionStartedAt) {
+				metrics[artifact.Slot] = value["metrics"]
+			}
 		}
 	}
 	var searches []paperDiscovery
@@ -38,9 +42,14 @@ func expansionReportSnapshot(db *gorm.DB, record orm.AcademicExpansion, session,
 		return nil, err
 	}
 	calls := []paperDiscovery{}
+	reused := []paperDiscovery{}
 	for _, search := range searches {
 		if search.SessionID == session || search.SessionID == "" {
-			calls = append(calls, search)
+			if preparation.ExecutionStartedAt != nil && search.CreatedAt.Before(*preparation.ExecutionStartedAt) {
+				reused = append(reused, search)
+			} else {
+				calls = append(calls, search)
+			}
 		}
 	}
 	var steps []orm.WorkflowSessionStep
@@ -49,14 +58,16 @@ func expansionReportSnapshot(db *gorm.DB, record orm.AcademicExpansion, session,
 	}
 	timing := []map[string]any{}
 	for _, step := range steps {
+		if preparation.ExecutionStartedAt != nil && step.CreatedAt.Before(*preparation.ExecutionStartedAt) {
+			continue
+		}
 		timing = append(timing, map[string]any{"step_id": step.StepID, "attempt": step.Attempt, "status": step.Status, "queue_and_execution_ms": step.UpdatedAt.Sub(step.CreatedAt).Milliseconds()})
 	}
 	report["source_queries"] = calls
+	report["reused_source_queries"] = reused
 	report["stage_metrics"] = metrics
 	report["stage_timing"] = timing
 	report["currency_cost"] = nil
-	var preparation expansionPreparation
-	_ = json.Unmarshal(record.PreparationJSON, &preparation)
 	report["preparation_attempts"] = preparation.Attempts
 	if preparation.ExecutionStartedAt != nil {
 		report["execution_elapsed_ms"] = time.Since(*preparation.ExecutionStartedAt).Milliseconds()

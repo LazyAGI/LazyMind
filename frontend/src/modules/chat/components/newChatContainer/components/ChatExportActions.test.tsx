@@ -22,6 +22,20 @@ beforeEach(() => {
 });
 
 describe("Chat export actions", () => {
+  it("closes a withdrawn export preview and retains saved exports and real tool artifacts", () => {
+    const saved = { ...artifact, value: { text: "saved answer", chat_export: true } };
+    const tool = { ...artifact, artifact_id: "tool-file", filename: "tool.md", value: { text: "completed tool result" } };
+    useTaskCenterStore.setState({ artifactsByConversation: { conv: [saved, tool] as any } });
+    const view = render(<ChatExportActions {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "chat.exportView · 报告.md" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    view.rerender(<ChatExportActions {...props} content="restored" exports={[]} sources={[]} />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useTaskCenterStore.getState().artifactsByConversation.conv).toEqual([saved, tool]);
+    render(<ArtifactCollectorCard sessionId="conv" historyId="history" currentExportIds={[]} />);
+    expect(screen.getByText("报告.md")).toBeVisible();
+    expect(screen.getByText("tool.md")).toBeVisible();
+  });
   it("saves the exact slice once, opens the file list with download, and reopens saved artifacts", async () => {
     let resolve: (value: unknown) => void = () => {};
     api.create.mockReturnValue(new Promise((done) => { resolve = done; }));

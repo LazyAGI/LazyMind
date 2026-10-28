@@ -75,7 +75,6 @@ import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
-import WeChatNotificationMonitor from "@/modules/notifications/WeChatNotificationMonitor";
 import { beginCloudLogin, getCloudSession, LAZYMIND_CLOUD_SESSION_CHANGED_EVENT, logoutCloudSession, type CloudSessionState } from "@/runtime/cloud/session";
 import {
   closeCloudLoginPopup,
@@ -142,7 +141,10 @@ export default function MainLayout() {
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
-  const notificationUserKey = JSON.stringify([userInfo?.userId || userInfo?.username || '', userInfo?.tenantId || userInfo?.tenant_id || userInfo?.tenantKey || userInfo?.tenant_key || '']);
+  const datasetUserKey = JSON.stringify([
+    userInfo?.userId || userInfo?.username || '',
+    userInfo?.tenantId || userInfo?.tenant_id || userInfo?.tenantKey || userInfo?.tenant_key || '',
+  ]);
   const [directoryPreference, setDirectoryPreference] = useState<{ user: string; enabled: boolean } | null>(null);
   const directoryUser = userInfo?.userId || userInfo?.username || "";
   const directoriesEnabled = isLoggedIn && directoryPreference?.user === directoryUser ? directoryPreference.enabled : null;
@@ -226,8 +228,8 @@ export default function MainLayout() {
   const knowledgeDatasetId = matchPath("/lib/knowledge/detail/:id", pathname)?.params.id
     || matchPath("/lib/knowledge/knowledge/:knowledgeBaseId/:knowledgeId", pathname)?.params.knowledgeBaseId;
   const { currentDataset: currentKnowledgeDataset, requestedDatasetId, datasetLoading, datasetError, loadDataset, clearDataset } = useDatasetPermissionStore();
-  const datasetOwner = useRef(notificationUserKey);
-  const knowledgeDatasetReady = datasetOwner.current === notificationUserKey && currentKnowledgeDataset?.dataset_id === knowledgeDatasetId;
+  const datasetOwner = useRef(datasetUserKey);
+  const knowledgeDatasetReady = datasetOwner.current === datasetUserKey && currentKnowledgeDataset?.dataset_id === knowledgeDatasetId;
   const isPaperPage = Boolean(
     knowledgeDatasetReady && isPaperLibrary(currentKnowledgeDataset?.scene),
   );
@@ -386,8 +388,8 @@ export default function MainLayout() {
   } = useUserAgreementConsentGate(isLoggedIn);
 
   useEffect(() => {
-    if (datasetOwner.current !== notificationUserKey) {
-      datasetOwner.current = notificationUserKey;
+    if (datasetOwner.current !== datasetUserKey) {
+      datasetOwner.current = datasetUserKey;
       clearDataset();
     }
     if (!isLoggedIn || !knowledgeDatasetId) {
@@ -396,7 +398,7 @@ export default function MainLayout() {
     }
     if (localSessionGate.loading || localSessionGate.error || agreementLoading || agreementCheckFailed) return;
     void loadDataset(knowledgeDatasetId).catch(() => {});
-  }, [knowledgeDatasetId, notificationUserKey, isLoggedIn, localSessionGate.loading, localSessionGate.error, agreementLoading, agreementCheckFailed, loadDataset, clearDataset]);
+  }, [knowledgeDatasetId, datasetUserKey, isLoggedIn, localSessionGate.loading, localSessionGate.error, agreementLoading, agreementCheckFailed, loadDataset, clearDataset]);
 
   useEffect(() => {
     if (!localSessionGate.enabled) {
@@ -1367,7 +1369,6 @@ export default function MainLayout() {
         <SidebarResizeHandle key={pathname} width={sidebarWidth} onResize={resizeSidebar} />
       </Sider>
       <Layout className={contentClassName}>
-        {isLoggedIn && <WeChatNotificationMonitor key={notificationUserKey} userKey={notificationUserKey} />}
         <Content className="main-layout-body">
           <div className="sub-app-container">
             <Suspense fallback={<div className="main-layout-page-loading"><Spin /></div>}>

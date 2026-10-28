@@ -8,6 +8,7 @@ import {
 import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { axiosInstance } from "@/components/request";
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
+import type { ChatModelSwitchRecord } from "@/api/generated/core-client";
 import enUS from "@/i18n/locales/en-US";
 import zhCN from "@/i18n/locales/zh-CN";
 import AssistantMessage, { ChatSourcePanel, externalProviderDisplayName } from "./index";
@@ -253,6 +254,44 @@ describe("AssistantMessage cancellation", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
   });
 
+  it.each(["model_config_unavailable", "model_context_not_fit"])("keeps switch identities, reasons and outcomes in keyboard-accessible message details (%s)", (reasonCode) => {
+    const longName = "替代模型🌏".repeat(25);
+    const item = { role: "assistant", delta: "answer", finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+      model_switches: [{ event_id: "initial-switch", switch_index: 1,
+        reason_code: reasonCode, context_compacted: false,
+        from_max_input_tokens: null, to_max_input_tokens: null,
+        from: { source: "own", candidate_id: "own:removed", model_id: "removed-model", provider_group_id: "" },
+        to: { source: "own", candidate_id: "own:b", model_id: "b", model_name: longName, provider_name: "Provider B", provider_group_id: "b" } }] };
+    render(<AssistantMessage item={item} index={0} length={1} sendMessage={vi.fn()} regenerate={vi.fn()}
+      stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()} />);
+    const summary = screen.getByText("chat.modelFallbackHistory");
+    summary.focus();
+    expect(summary).toHaveFocus();
+    fireEvent.click(summary);
+    expect(summary.closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("removed-model (chat.modelFallbackWindowUnknown)")).toBeVisible();
+    expect(screen.getByText(`Provider B · ${longName} (chat.modelFallbackWindowUnknown)`)).toBeVisible();
+    expect(screen.getByText(`chat.modelFallbackReason.${reasonCode}`)).toBeVisible();
+    expect(screen.getByText("chat.modelFallbackSucceeded")).toBeVisible();
+  });
+
+  it.each([false, true])("restores declared windows and actual adaptation in history details (%s)", (compacted) => {
+    const record: ChatModelSwitchRecord = { event_id: "short-window", switch_index: 1,
+      reason_code: "rate_limited", context_compacted: compacted,
+      from_max_input_tokens: 131072, to_max_input_tokens: 65536,
+      from: { source: "own", candidate_id: "own:a", model_id: "a", model_name: "Model A", provider_group_id: "a" },
+      to: { source: "own", candidate_id: "own:b", model_id: "b", model_name: "Model B", provider_group_id: "b" } };
+    const history = buildChatMessageListFromHistory([{ id: "short-history", query: "task", result: "answer", model_switches: [record] }]);
+    render(<AssistantMessage item={history[1]} index={1} length={2} sendMessage={vi.fn()} regenerate={vi.fn()}
+      stopGeneration={vi.fn()} renderText={() => null} updateMessage={vi.fn()} />);
+    fireEvent.click(screen.getByText("chat.modelFallbackHistory"));
+    expect(screen.getByText("Model A (128K)")).toBeVisible();
+    expect(screen.getByText("Model B (64K)")).toBeVisible();
+    expect(screen.getByText("chat.runStatus.codes.rate_limited")).toBeVisible();
+    if (compacted) expect(screen.getByText("chat.modelFallbackContextAdapted")).toBeVisible();
+    else expect(screen.queryByText("chat.modelFallbackContextAdapted")).not.toBeInTheDocument();
+  });
+
   it.each([
     "initial_selection",
     "model_unavailable",
@@ -263,6 +302,7 @@ describe("AssistantMessage cancellation", () => {
     "complex_task",
     "long_context",
     "default_balanced",
+    "model_fallback",
   ] as const)("shows the actual model and the %s routing reason", async (reason) => {
     expect(enUS.chat.modelRouteReason[reason]).toBeTruthy();
     expect(zhCN.chat.modelRouteReason[reason]).toBeTruthy();

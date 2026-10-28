@@ -302,10 +302,14 @@ func parsePaperPDF(ctx context.Context, path, expectedHash string) ([]ContentPag
 		return nil, "", errors.New("PDF version changed")
 	}
 	var parsed struct {
-		Pages []ContentPage `json:"pages"`
+		Pages         []ContentPage `json:"pages"`
+		ParserVersion string        `json:"parser_version"`
 	}
 	if err = internalAcademic(ctx, "pdf:parse", map[string]string{"file_ref": ref, "content_hash": hash}, &parsed); err != nil {
 		return nil, hash, err
+	}
+	if parsed.ParserVersion != orm.AcademicPaperParserVersion {
+		return nil, hash, errors.New("PDF 解析服务版本不一致，请同步更新解析服务")
 	}
 	if len(parsed.Pages) == 0 {
 		return nil, hash, errors.New("PDF yielded no full text")

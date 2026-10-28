@@ -52,7 +52,7 @@ async def parse_pdf(payload: PDFRequest, token: Annotated[Optional[str], Header(
             pages.extend(unknown)
             if not pages:
                 raise ValueError('PDF yielded no text')
-            return {'pages': pages}
+            return {'pages': pages, 'parser_version': 'pdf-reader-v2'}
         finally:
             lazyllm.globals.clear()
     try:

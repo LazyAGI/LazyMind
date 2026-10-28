@@ -525,6 +525,25 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 				config.Model = fixedChatModelRoute(model)
 			}
 		}
+		// Inherited and replacement routes both persist a model reference.
+		// Revalidate under the supplier lock even when the preview was valid.
+		if config.Model != nil && config.Model.ModelID != "" {
+			models, err := loadAvailableChatModels(ctx, tx, caller.UserID)
+			if err != nil {
+				return err
+			}
+			model := findAvailableChatModelBySource(models, config.Model.ModelID, config.Model.Source)
+			model, err = lockAndReloadSelectableChatModel(ctx, tx, caller.UserID, model)
+			if errors.Is(err, errChatModelUnavailable) {
+				return forkFail("MODEL_UNAVAILABLE")
+			}
+			if err != nil {
+				return err
+			}
+			mode := config.Model.Mode
+			config.Model = fixedChatModelRoute(model)
+			config.Model.Mode = mode
+		}
 		now := time.Now().UTC()
 		title, err := nextForkTitle(tx, caller.UserID, c)
 		if err != nil {
@@ -540,6 +559,8 @@ func createConversationForkAttempt(ctx context.Context, db *gorm.DB, caller doc.
 		if config.Model.ModelID != "" {
 			modelID := config.Model.ModelID
 			branch.ChatModelID = &modelID
+			modelSource := config.Model.Source
+			branch.ChatModelSource = &modelSource
 		}
 		branch.ChatModelSnapshot, _ = json.Marshal(chatModelSnapshot{ModelID: config.Model.ModelID, ProviderID: config.Model.ProviderID, ProviderName: config.Model.ProviderName, ModelName: config.Model.ModelName, Source: config.Model.Source})
 		selectors := []map[string]string{}

@@ -496,6 +496,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 {detail.record.report?.narrative && <section aria-label="研究脉络与阅读建议">
                   <Typography.Title level={5}>研究脉络与阅读建议</Typography.Title>
                   <MarkdownViewer>{detail.record.report.narrative}</MarkdownViewer>
+                  {!!detail.record.report.reading_order?.length && <><Typography.Text strong>推荐阅读顺序</Typography.Text><ol>{detail.record.report.reading_order.map(id => <li key={id}>{detail.record.result.papers.find(item => item.paper.paper_id === id)?.paper.title || id}</li>)}</ol></>}
                   {detail.record.report.limitations?.map((item, index) => <Typography.Paragraph key={index} type="secondary">{item}</Typography.Paragraph>)}
                   <Typography.Text type="secondary">货币成本：{detail.record.report.currency_cost == null ? '未知' : detail.record.report.currency_cost}</Typography.Text>
                   {detail.record.report.execution_elapsed_ms != null && <Typography.Paragraph>本轮正式执行：{Math.round(detail.record.report.execution_elapsed_ms / 1000)} 秒</Typography.Paragraph>}
@@ -528,7 +529,9 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                     expandable={{ expandedRowRender: (item: WorkflowPaper) => {
                       const reading = source.record.report?.reading?.[item.paper.paper_id] || source.record.reading?.[item.paper.paper_id];
                       const claims = source.record.report?.claims?.filter(claim => claim.paper_id === item.paper.paper_id) || [];
+                      const quality = source.contents.find(content => content.paper_id === item.paper.paper_id)?.quality;
                       return <Space direction="vertical">
+                        {quality && <Typography.Text type="secondary">材料检查：PDF {quality.downloaded ? '已获取' : '未获取'}；文字{quality.parsed ? '已解析' : '未解析'}；身份{quality.identity === 'matched' ? '已匹配' : quality.identity === 'mismatch' ? '不匹配' : '待核对'}；{quality.eligible ? '可用正文' : '暂不可作为正文证据'}</Typography.Text>}
                         <Typography.Text>实际读取：{reading?.read_level === 'full' ? '已读取完整正文' : reading ? '已读相关部分' : '仅题录与摘要'}</Typography.Text>
                         {reading && <Typography.Text type="secondary">已返回 {reading.positions.length} / {reading.total_blocks} 个正文块；页码：{reading.pages.filter(page => page > 0).join('、') || '原文未提供可靠页码'}</Typography.Text>}
                         {item.paper.abstract && <Typography.Paragraph>{item.paper.abstract}</Typography.Paragraph>}
@@ -584,12 +587,17 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 </>}
                 <Typography.Title level={5}>{t('paperTasks.progress')}</Typography.Title>
                 <List dataSource={Object.entries(detail.record.progress || {}).filter(([key, value]) => stages.includes(key) && value && typeof value === 'object').sort(([a], [b]) => stages.indexOf(a) - stages.indexOf(b))}
-                    renderItem={([key, value]) => <List.Item><List.Item.Meta title={t(`paperTasks.stage.${key}`)} description={<><div>{value.candidate_directions?.join('；')}</div><div>{value.papers?.map(item => item.paper.title).filter(Boolean).join('；')}</div></>} /></List.Item>} />
+                    renderItem={([key, value]) => {
+                      const input = value.input || value;
+                      return <List.Item><List.Item.Meta title={t(`paperTasks.stage.${key}`)} description={<><div>{input.candidate_directions?.join('；')}</div><div>{input.papers?.map(item => item.paper.title).filter(Boolean).join('；')}</div>{value.plan?.map((item, index) => <div key={index}>{item}</div>)}{value.gaps?.map((item, index) => <div key={index}>{item}</div>)}</>} /></List.Item>;
+                    }} />
                 <Typography.Title level={5}>{t('paperTasks.rounds')}</Typography.Title>
                 <List dataSource={detail.rounds} renderItem={round => <List.Item><details>
                     <summary>{t('paperTasks.round', { count: round.version })} · {statusLabel(round.status)} · {t('paperTasks.paperCount', { count: distinctPapers(round.result.papers || []).length })}</summary>
                     <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{round.result.user_instruction}</Typography.Paragraph>
                     <Typography.Paragraph>{t('paperTasks.directions', { value: round.result.selected_directions?.join('；') })}</Typography.Paragraph>
+                    {round.report?.narrative && <MarkdownViewer>{round.report.narrative}</MarkdownViewer>}
+                    {round.report && <details><summary>本轮证据、读取范围与用量</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(round.report, null, 2)}</pre></details>}
                     <ul>{distinctPapers(round.result.papers || []).map(item => <li key={item.paper.paper_id}>{item.paper.title || item.paper.paper_id} <Tag>{sourceLabel(item)}</Tag></li>)}</ul>
                 </details></List.Item>} />
                 <Typography.Title level={5}>{t('paperTasks.generated')}</Typography.Title>

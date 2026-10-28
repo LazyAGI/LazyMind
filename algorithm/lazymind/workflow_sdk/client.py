@@ -13,6 +13,8 @@ from urllib.parse import quote, urlencode, urlsplit, urljoin
 
 import httpx
 
+from .input_bindings import normalize_input_bindings
+
 CONTRACT_VERSION = 'workflow.v1'
 
 
@@ -311,7 +313,7 @@ class WorkflowClient:
                          command_id: str = '', fields: Optional[Dict[str, Any]] = None) -> WorkflowResponse:
         command_id = command_id or str(uuid.uuid4())
         payload = {**(fields or {}), 'workflow_id': workflow_id, 'preparation_id': command_id,
-                   'idempotency_key': command_id, 'input_bindings': input_bindings or {},
+                   'idempotency_key': command_id, 'input_bindings': normalize_input_bindings(input_bindings),
                    'origin_host': self.host, 'controller_host': self.host}
         if self.trigger_history_id:
             payload['trigger_history_id'] = self.trigger_history_id
@@ -370,7 +372,23 @@ class WorkflowClient:
         return self._read(f'/workflow-commands/{quote(command_id, safe="")}')
 
     def list_artifacts(self, session_id: str) -> WorkflowResponse:
-        return self._read(f'/workflow-sessions/{quote(session_id, safe="")}/artifacts')
+        response = self._read(f'/workflow-sessions/{quote(session_id, safe="")}/artifacts')
+        artifacts = response.result.get('artifacts') or []
+        slot_ids = sorted({str(item.get('slot_id') or item.get('slot') or '')
+                           for item in artifacts if item.get('list_index') is not None})
+        for slot_id in slot_ids:
+            state = self.get_slot_order(session_id, slot_id).result
+            positions = {index: position for position, index in enumerate(state.get('order_list') or [], 1)}
+            for item in artifacts:
+                if str(item.get('slot_id') or item.get('slot') or '') == slot_id:
+                    item['sort_order'] = positions.get(item.get('list_index'))
+                    item['order_version'] = int(state.get('order_version') or 0)
+        # Page readers consume this list in display order, not stable allocation order.
+        artifacts.sort(key=lambda item: (
+            str(item.get('slot_id') or item.get('slot') or ''),
+            item.get('sort_order') or float('inf'), item.get('list_index') or 0,
+        ))
+        return response
 
     def get_slot_order(self, session_id: str, slot_id: str) -> WorkflowResponse:
         """Read the durable visual-order to list-index mapping for one slot."""
@@ -379,12 +397,24 @@ class WorkflowClient:
             f'{quote(slot_id, safe="")}/order'
         )
 
+    def reorder_slot_orders(self, session_id: str, changes: List[Dict[str, Any]]) -> WorkflowResponse:
+        """Atomically apply versioned permutations without restarting a producer."""
+        if not changes:
+            raise ValueError('at least one slot order is required')
+        first, *linked = changes
+        return self._decode(self.transport.patch(
+            f'{self.base_url}/workflow-sessions/{quote(session_id, safe="")}/slots/'
+            f'{quote(first["slot_id"], safe="")}/order',
+            json={'order': first['order'], 'version': first['version'], 'linked_orders': linked},
+            headers=self._headers(), timeout=self.timeout,
+        ))
+
     def read_artifact(self, artifact_id: str) -> WorkflowResponse:
         return self._read(f'/workflow-artifacts/{quote(artifact_id, safe="")}')
 
     def patch_artifact(self, artifact_id: str, base_revision: int, value: Any,
                        content_type: str = 'json', caption: str = '',
-                       command_id: str = '') -> WorkflowResponse:
+                       command_id: str = '', base_draft_version: Optional[int] = None) -> WorkflowResponse:
         command_id = command_id or str(uuid.uuid4())
         payload: Dict[str, Any] = {
             'base_revision': base_revision, 'value': value,
@@ -392,6 +422,8 @@ class WorkflowClient:
         }
         if caption:
             payload['caption'] = caption
+        if base_draft_version is not None:
+            payload['base_draft_version'] = base_draft_version
         return self._decode(self.transport.patch(
             f'{self.base_url}/workflow-artifacts/{quote(artifact_id, safe="")}', json=payload,
             headers=self._headers(command_id), timeout=self.timeout,
@@ -563,7 +595,7 @@ class WorkflowClient:
             'task_description': task_description,
             'external_conversation_id': external_conversation_id,
             'external_thread_id': external_thread_id,
-            'input_bindings': input_bindings or {},
+            'input_bindings': normalize_input_bindings(input_bindings),
             'input_files': input_files or [],
             'config': config or {},
             'idempotency_key': command_id,

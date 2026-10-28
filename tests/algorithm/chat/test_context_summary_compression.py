@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fallback_test_support import VALID_SUMMARY
+
 from typing import Any
 
 from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
@@ -15,30 +17,6 @@ from lazymind.chat.engine.agent_runtime.summary_range import (
 )
 from lazymind.chat.engine.agent_runtime.summarizer import apply_summary_compression
 from lazymind.config import config
-
-
-VALID_SUMMARY = '\n'.join(
-    [
-        '## Current task',
-        'Ship summary compression.',
-        '## Key constraints',
-        'Do not delete original history.',
-        '## Progress and decisions',
-        'Stage1 prune done; Stage2 pending.',
-        '## Important files and tool results',
-        'Touched summarizer.py; run_script exit 0.',
-        '## Pending work',
-        'Wire tests and lint.',
-        '## Active skills',
-        '[]',
-        '## Artifact coordinates',
-        '[]',
-        '## Citation map',
-        '[]',
-        '## Spill paths',
-        '[]',
-    ]
-)
 
 
 def _projected(result):

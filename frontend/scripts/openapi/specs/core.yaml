@@ -491,6 +491,11 @@ components:
                     items:
                         type: string
                     type: array
+                reused_source_queries:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
                 source_queries:
                     items:
                         properties: {}
@@ -1798,8 +1803,14 @@ components:
                     type: string
                 message:
                     type: string
+                model_output:
+                    $ref: '#/components/schemas/ChatModelOutput'
                 model_route:
                     $ref: '#/components/schemas/ChatModelRoute'
+                model_switches:
+                    items:
+                        $ref: '#/components/schemas/ChatModelSwitchRecord'
+                    type: array
                 performance_metrics:
                     $ref: '#/components/schemas/RunPerformanceMetrics'
                 prompt_questions:
@@ -1900,6 +1911,25 @@ components:
                             type: object
                     type: object
             type: object
+        ChatModelOutput:
+            properties:
+                call_index:
+                    description: Monotonic within this run. Host model calls start at 1; Core uses a closed 0 cursor to bind a new run.
+                    minimum: 0
+                    type: integer
+                phase:
+                    description: Absent on model content. Boundaries checkpoint, commit, or restore the current call. Fenced delta_mode=replace snapshots replace body, reasoning_content, sources, and exports including explicit empty values. The first resume snapshot hydrates its cursor even when already closed.
+                    enum:
+                        - begin
+                        - commit
+                        - rollback
+                    type: string
+                run_id:
+                    type: string
+            required:
+                - run_id
+                - call_index
+            type: object
         ChatModelRoute:
             properties:
                 mode:
@@ -1926,6 +1956,7 @@ components:
                         - fixed
                         - initial_selection
                         - model_unavailable
+                        - model_fallback
                     type: string
                 selection_version:
                     format: int64
@@ -1948,6 +1979,71 @@ components:
                         - auto
                     type: string
             type: object
+        ChatModelSwitchIdentity:
+            properties:
+                candidate_id:
+                    type: string
+                model_id:
+                    type: string
+                model_name:
+                    type: string
+                provider_group_id:
+                    type: string
+                provider_name:
+                    type: string
+                source:
+                    enum:
+                        - own
+                        - shared
+                        - cloud
+                    type: string
+            required:
+                - candidate_id
+                - source
+                - model_id
+                - provider_group_id
+            type: object
+        ChatModelSwitchRecord:
+            allOf:
+                - $ref: '#/components/schemas/ChatModelSwitchedData'
+                - properties:
+                    event_id:
+                        type: string
+                  required:
+                    - event_id
+                  type: object
+        ChatModelSwitchedData:
+            properties:
+                context_compacted:
+                    type: boolean
+                from:
+                    $ref: '#/components/schemas/ChatModelSwitchIdentity'
+                from_max_input_tokens:
+                    format: int64
+                    minimum: 1
+                    nullable: true
+                    type: integer
+                reason_code:
+                    type: string
+                switch_index:
+                    minimum: 1
+                    type: integer
+                to:
+                    $ref: '#/components/schemas/ChatModelSwitchIdentity'
+                to_max_input_tokens:
+                    format: int64
+                    minimum: 1
+                    nullable: true
+                    type: integer
+            required:
+                - switch_index
+                - from
+                - to
+                - reason_code
+                - from_max_input_tokens
+                - to_max_input_tokens
+                - context_compacted
+            type: object
         ChatRuntimeEvent:
             properties:
                 data:
@@ -1960,6 +2056,11 @@ components:
                 schema_version:
                     type: integer
                 type:
+                    enum:
+                        - model_retry_scheduled
+                        - model_call_finished
+                        - model_switched
+                        - run_finished
                     type: string
             type: object
         CheckDatabaseConnectionResponse:
@@ -1998,6 +2099,8 @@ components:
         CheckModelProviderData:
             properties:
                 message:
+                    type: string
+                reason:
                     type: string
                 success:
                     type: boolean
@@ -2805,6 +2908,10 @@ components:
                 archived_at:
                     format: date-time
                     type: string
+                archived_ids:
+                    items:
+                        type: string
+                    type: array
                 conversation_id:
                     type: string
                 newly_archived:
@@ -2813,6 +2920,7 @@ components:
                 - conversation_id
                 - newly_archived
                 - archived_at
+                - archived_ids
             type: object
         ConversationBatchDeleteRequest:
             properties:
@@ -3292,8 +3400,14 @@ components:
                         properties: {}
                         type: object
                     type: array
+                model_output:
+                    $ref: '#/components/schemas/ChatModelOutput'
                 model_route:
                     $ref: '#/components/schemas/ChatModelRoute'
+                model_switches:
+                    items:
+                        $ref: '#/components/schemas/ChatModelSwitchRecord'
+                    type: array
                 performance_metrics:
                     $ref: '#/components/schemas/RunPerformanceMetrics'
                 query:
@@ -3453,6 +3567,8 @@ components:
                     type: array
                 next_page_token:
                     type: string
+                selection_complete:
+                    type: boolean
                 total_size:
                     format: int64
                     type: integer
@@ -6770,6 +6886,16 @@ components:
                         type: string
                     type: array
             type: object
+        EmbeddingOptions:
+            properties:
+                batch_size:
+                    nullable: true
+                    type: integer
+                passage_prefix:
+                    type: string
+                query_prefix:
+                    type: string
+            type: object
         EmptyObject:
             properties: {}
             type: object
@@ -7251,6 +7377,10 @@ components:
                     type: string
                 model_route:
                     $ref: '#/components/schemas/ChatModelRoute'
+                model_switches:
+                    items:
+                        $ref: '#/components/schemas/ChatModelSwitchRecord'
+                    type: array
                 result:
                     type: string
                 run_id:
@@ -7262,6 +7392,15 @@ components:
                     type: string
                 run_terminal:
                     $ref: '#/components/schemas/RunTerminal'
+            type: object
+        FeatureFlags:
+            properties:
+                reasoning:
+                    type: boolean
+                tool_calling:
+                    type: boolean
+                vision:
+                    type: boolean
             type: object
         ForkAttachment:
             properties:
@@ -8347,6 +8486,36 @@ components:
                 - reason
                 - settings_url
             type: object
+        ModelCallFinishedData:
+            properties:
+                attempt_count:
+                    type: integer
+                failure:
+                    properties:
+                        code:
+                            type: string
+                        diagnostic_id:
+                            type: string
+                        origin:
+                            type: string
+                    type: object
+                finish:
+                    type: string
+                has_semantic_output:
+                    type: boolean
+                kind:
+                    enum:
+                        - finish
+                        - failure
+                    type: string
+                model_call_id:
+                    type: string
+            required:
+                - model_call_id
+                - attempt_count
+                - kind
+                - has_semantic_output
+            type: object
         ModelFailureCode:
             enum:
                 - authentication_failed
@@ -8383,6 +8552,54 @@ components:
             required:
                 - image_embed_enabled
                 - image_embed_required
+            type: object
+        ModelProbeResponse:
+            properties:
+                code:
+                    enum:
+                        - ok
+                        - accepted
+                        - unsupported_type
+                        - unsupported_provider
+                        - unknown_type
+                        - authentication_failed
+                        - permission_denied
+                        - model_not_found
+                        - rate_limited
+                        - quota_exceeded
+                        - invalid_request
+                        - timeout
+                        - connection_error
+                        - invalid_response
+                        - empty_response
+                        - upstream_error
+                        - configuration_changed
+                        - key_disabled
+                        - key_required
+                        - probe_in_progress
+                    type: string
+                elapsed_ms:
+                    format: int64
+                    type: integer
+                embedding_dimensions:
+                    format: int64
+                    type: integer
+                http_status:
+                    type: integer
+                model_type:
+                    type: string
+                status:
+                    enum:
+                        - passed
+                        - failed
+                        - unsupported
+                        - accepted
+                    type: string
+            required:
+                - code
+                - elapsed_ms
+                - model_type
+                - status
             type: object
         NotificationClaim:
             additionalProperties: false
@@ -8678,10 +8895,17 @@ components:
                     type: string
                 execution_id:
                     type: string
+                failure_code:
+                    enum:
+                        - model_fallback_exhausted
+                        - model_context_not_fit
+                    type: string
                 knowledge_operations:
                     items:
                         $ref: '#/components/schemas/KnowledgeOperation'
                     type: array
+                model_switch:
+                    $ref: '#/components/schemas/ChatModelSwitchRecord'
                 order:
                     type: integer
                 pages:
@@ -9594,6 +9818,20 @@ components:
                 - session_id
                 - status
             type: object
+        ProviderRequestAdvanced:
+            properties:
+                extra_body:
+                    additionalProperties: true
+                    type: object
+                headers:
+                    additionalProperties:
+                        type: string
+                    type: object
+                query:
+                    additionalProperties:
+                        type: string
+                    type: object
+            type: object
         PublicArtifact:
             properties:
                 artifact_id:
@@ -9675,6 +9913,8 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                model_switch:
+                    $ref: '#/components/schemas/ChatModelSwitchRecord'
                 order:
                     maximum: 1000
                     minimum: 0
@@ -10387,6 +10627,15 @@ components:
                         $ref: '#/components/schemas/AuthorizationSubjectGrant'
                     type: array
             type: object
+        Settings:
+            properties:
+                embedding:
+                    $ref: '#/components/schemas/EmbeddingOptions'
+                feature_enabled:
+                    $ref: '#/components/schemas/FeatureFlags'
+                feature_support:
+                    $ref: '#/components/schemas/FeatureFlags'
+            type: object
         ShowcaseCase:
             properties:
                 attachment_hint:
@@ -10891,6 +11140,95 @@ components:
                 document_state:
                     type: string
             type: object
+        TaskEvent:
+            description: Ordinary task model_output uses execution_id as run_id. type=model_output carries pure begin/commit/rollback controls; only commit may include the Host model_switched fact. Model text/think carry run/call identity without phase. SDK observations and Chat run_finished are not Task events. Developer reconnect or execution changes begin with a Core-generated task_start with snapshot=true and committed DB entries retaining call identity, followed by one closed cursor (0 when none), current open cache preview and ordered live events. Only this DB section initializes authoritative hydration; live task_start is idempotent for an established execution. On ordinary tool_calls/tool_results, seq is the zero-based durable step sequence used to merge snapshot and live delivery once. Terminal restores any open preview before done/error.
+            properties:
+                chunk_index:
+                    format: int64
+                    type: integer
+                content_type:
+                    type: string
+                current_phase:
+                    type: string
+                delta:
+                    type: string
+                durable_tool_results:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                estimated_sec:
+                    type: integer
+                event_id:
+                    type: string
+                execution_id:
+                    type: string
+                message:
+                    type: string
+                model_output:
+                    $ref: '#/components/schemas/ChatModelOutput'
+                process_step:
+                    $ref: '#/components/schemas/PublicProcessStep'
+                progress:
+                    type: integer
+                runtime_event:
+                    $ref: '#/components/schemas/TaskModelRuntimeEvent'
+                scope_version:
+                    type: integer
+                seq:
+                    type: integer
+                slot:
+                    type: string
+                snapshot:
+                    type: boolean
+                sources:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                status:
+                    type: string
+                steps:
+                    items:
+                        type: string
+                    type: array
+                stream_id:
+                    type: string
+                summary:
+                    type: string
+                task_id:
+                    type: string
+                text:
+                    type: string
+                think:
+                    type: string
+                tool_calls:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                tool_results:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                type:
+                    type: string
+                v2_artifact_id:
+                    type: string
+                v2_revision_id:
+                    type: string
+                value:
+                    properties: {}
+                    type: object
+                writing_subtasks:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+            required:
+                - type
+            type: object
         TaskFile:
             properties:
                 content_type:
@@ -10935,6 +11273,29 @@ components:
                 total_document_size:
                     format: int64
                     type: integer
+            type: object
+        TaskModelRuntimeEvent:
+            properties:
+                data:
+                    $ref: '#/components/schemas/ChatModelSwitchedData'
+                event_id:
+                    type: string
+                run_id:
+                    type: string
+                schema_version:
+                    enum:
+                        - 1
+                    type: integer
+                type:
+                    enum:
+                        - model_switched
+                    type: string
+            required:
+                - schema_version
+                - event_id
+                - run_id
+                - type
+                - data
             type: object
         TaskNotification:
             properties:
@@ -12035,10 +12396,22 @@ components:
             type: object
         addModelProviderGroupModelOpenAPIRequest:
             properties:
-                max_input_tokens:
-                    description: Optional override. When omitted, LLM/VLM windows are resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K.
+                input_token_limit:
+                    description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
                     type: string
+                max_input_tokens:
+                    description: Optional context window. Explicit discovered values are preserved for unclassified models. When omitted for LLM/VLM models, resolves from config/model_context_windows.yaml with a 128K fallback; unclassified models have no inferred default.
+                    type: string
+                max_output_tokens:
+                    description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings.
                 model_type:
+                    description: Supported technical model type, or an empty string to save an unclassified model. Unclassified models require a supported type before runtime use.
                     type: string
                 name:
                     type: string
@@ -12057,12 +12430,23 @@ components:
                     type: string
                 id:
                     type: string
+                input_token_limit:
+                    description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
                 is_default:
                     type: boolean
                 max_input_tokens:
-                    description: Stored LLM input context window, for example 512, 128K, or 1M
+                    description: Stored context window, including an explicit discovered value on an unclassified model; for example 262144, 128K, or 1M
                     nullable: true
                     type: string
+                max_output_tokens:
+                    description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings.
                 model_type:
                     type: string
                 name:
@@ -12087,6 +12471,48 @@ components:
                 - user_model_provider_group_id
                 - user_model_provider_id
                 - vision
+            type: object
+        addModelProviderGroupModelsOpenAPIFailure:
+            properties:
+                message:
+                    description: Safe per-model validation failure.
+                    type: string
+                name:
+                    type: string
+            required:
+                - message
+                - name
+            type: object
+        addModelProviderGroupModelsOpenAPIRequest:
+            properties:
+                models:
+                    description: One to 1000 models. Existing active names are returned without overwriting saved metadata; deleted models are restored with their original UUID.
+                    items:
+                        $ref: '#/components/schemas/addModelProviderGroupModelOpenAPIRequest'
+                    type: array
+            type: object
+        addModelProviderGroupModelsOpenAPIResponse:
+            properties:
+                added_count:
+                    type: integer
+                existing_count:
+                    type: integer
+                failures:
+                    items:
+                        $ref: '#/components/schemas/addModelProviderGroupModelsOpenAPIFailure'
+                    type: array
+                models:
+                    items:
+                        $ref: '#/components/schemas/addModelProviderGroupModelOpenAPIResponse'
+                    type: array
+                total_count:
+                    description: Total active saved models in this group after the batch, including models outside the request.
+                    format: int64
+                    type: integer
+            required:
+                - added_count
+                - existing_count
+                - total_count
             type: object
         agentRouterABAudit:
             properties:
@@ -12613,6 +13039,9 @@ components:
                         - deprecated
                         - retired
                     type: string
+                logo_data_url:
+                    description: Optional normalized PNG supplier logo data URL. Display metadata only.
+                    type: string
                 name:
                     type: string
                 shared:
@@ -12639,6 +13068,10 @@ components:
             properties:
                 id:
                     type: string
+                is_custom:
+                    type: boolean
+                logo_data_url:
+                    type: string
                 models:
                     items:
                         $ref: '#/components/schemas/chatModelListOpenAPIItem'
@@ -12653,6 +13086,7 @@ components:
                     type: string
             required:
                 - id
+                - is_custom
                 - name
                 - source
             type: object
@@ -12666,6 +13100,9 @@ components:
                 group_id:
                     type: string
                 group_name:
+                    type: string
+                logo_data_url:
+                    description: Optional normalized PNG logo inherited from the selected supplier, including a shared model.
                     type: string
                 mode:
                     enum:
@@ -12723,18 +13160,16 @@ components:
         checkModelProviderOpenAPIRequest:
             properties:
                 api_key:
+                    description: Omit to check the supplier's enabled key. An explicit empty string tests a keyless connection.
                     type: string
                 base_url:
                     type: string
                 dry_run:
                     type: boolean
+                model:
+                    type: string
                 provider_name:
                     type: string
-            required:
-                - api_key
-                - base_url
-                - dry_run
-                - provider_name
             type: object
         conversationSearchConfigOpenAPIRequest:
             properties:
@@ -12766,6 +13201,36 @@ components:
             required:
                 - conversation_id
             type: object
+        createCustomModelProviderOpenAPIRequest:
+            properties:
+                base_url:
+                    type: string
+                logo_data_url:
+                    description: Optional PNG data URL, at most 128 by 128 pixels and 96 KiB decoded. Empty uses the default custom supplier icon.
+                    type: string
+                name:
+                    type: string
+                source_provider_id:
+                    description: An owned model provider whose technical protocol is used for this custom supplier.
+                    type: string
+            required:
+                - base_url
+                - name
+                - source_provider_id
+            type: object
+        createCustomModelProviderOpenAPIResponse:
+            properties:
+                group_id:
+                    description: Private credential/model storage ID retained for API compatibility.
+                    type: string
+                id:
+                    type: string
+                logo_data_url:
+                    type: string
+            required:
+                - group_id
+                - id
+            type: object
         createModelProviderGroupOpenAPIRequest:
             properties:
                 api_key:
@@ -12775,9 +13240,9 @@ components:
                 name:
                     type: string
                 verify:
+                    description: Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
                     type: boolean
             required:
-                - base_url
                 - name
                 - verify
             type: object
@@ -12817,6 +13282,25 @@ components:
                         - high
                         - max
                     type: string
+            type: object
+        customModelProviderMutationOpenAPIResponse:
+            properties:
+                id:
+                    type: string
+                logo_data_url:
+                    type: string
+            required:
+                - id
+            type: object
+        deleteCustomModelProviderOpenAPIResponse:
+            properties:
+                downgraded_knowledge_bases:
+                    type: integer
+                id:
+                    type: string
+            required:
+                - downgraded_knowledge_bases
+                - id
             type: object
         deleteDatabaseConnectionOpenAPIResponse:
             properties:
@@ -13746,14 +14230,25 @@ components:
                     type: string
                 base_url:
                     type: string
+                brand_key:
+                    type: string
                 capabilities:
                     items:
                         type: string
                     type: array
+                enabled:
+                    description: False when the saved model is disabled. Disabled models keep their configuration.
+                    type: boolean
                 group_name:
                     type: string
                 id:
                     type: string
+                input_token_limit:
+                    description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
+                is_custom:
+                    type: boolean
                 is_default:
                     type: boolean
                 is_editable:
@@ -13765,10 +14260,19 @@ components:
                         - deprecated
                         - retired
                     type: string
+                logo_data_url:
+                    type: string
                 max_input_tokens:
-                    description: Maximum catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
+                    description: Stored model context window, including explicit values on custom or unclassified models, for example 262144, 128K, or 1M; null when not configured or unsupported
                     nullable: true
                     type: string
+                max_output_tokens:
+                    description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings.
                 model_type:
                     type: string
                 name:
@@ -13781,6 +14285,8 @@ components:
                     type: string
                 read_only:
                     type: boolean
+                service_key:
+                    type: string
                 source:
                     enum:
                         - own
@@ -13795,7 +14301,9 @@ components:
                     type: boolean
             required:
                 - availability
+                - enabled
                 - id
+                - is_custom
                 - is_default
                 - is_editable
                 - lifecycle
@@ -13816,23 +14324,30 @@ components:
             type: object
         listModelProviderGroupsOpenAPIItem:
             properties:
-                api_key:
-                    type: string
                 base_url:
                     type: string
+                has_api_key:
+                    type: boolean
                 id:
                     type: string
                 is_verified:
                     type: boolean
+                keys:
+                    items:
+                        $ref: '#/components/schemas/modelProviderGroupKeyOpenAPIItem'
+                    type: array
+                model_count:
+                    type: integer
                 name:
                     type: string
                 user_model_provider_id:
                     type: string
             required:
-                - api_key
                 - base_url
+                - has_api_key
                 - id
                 - is_verified
+                - model_count
                 - name
                 - user_model_provider_id
             type: object
@@ -13847,14 +14362,33 @@ components:
             properties:
                 added:
                     type: boolean
+                feature_support:
+                    $ref: '#/components/schemas/FeatureFlags'
+                    description: Explicit provider/catalog capability evidence; absent means unknown.
                 id:
                     type: string
+                input:
+                    items:
+                        type: string
+                    type: array
                 max_input_tokens:
                     type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Existing saved declarations and enabled overrides, preserved during discovery.
                 model_type:
                     type: string
                 name:
                     type: string
+                output:
+                    items:
+                        type: string
+                    type: array
+                sub_types:
+                    description: Provider discovery classifications, retained as a set. A blank model_type with nonempty sub_types is intentionally unresolved, not an invitation to guess from a catalog.
+                    items:
+                        type: string
+                    type: array
             required:
                 - added
                 - id
@@ -14044,6 +14578,19 @@ components:
             required:
                 - key
                 - value
+            type: object
+        modelProviderGroupKeyOpenAPIItem:
+            properties:
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                masked:
+                    type: string
+            required:
+                - enabled
+                - id
+                - masked
             type: object
         okOpenAPIResponse:
             properties:
@@ -14372,6 +14919,72 @@ components:
                 - is_favorite
                 - usage_count
             type: object
+        providerRequestConfigOpenAPIResponse:
+            properties:
+                advanced:
+                    $ref: '#/components/schemas/ProviderRequestAdvanced'
+                    description: Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
+                default_protocol:
+                    enum:
+                        - openai
+                        - anthropic
+                    type: string
+                protocols:
+                    items:
+                        $ref: '#/components/schemas/providerRequestProtocolOpenAPIItem'
+                    type: array
+            required:
+                - default_protocol
+            type: object
+        providerRequestProtocolOpenAPIItem:
+            properties:
+                base_url:
+                    type: string
+                default_base_url:
+                    type: string
+                name:
+                    type: string
+                protocol:
+                    enum:
+                        - openai
+                        - anthropic
+                        - gemini
+                        - openai-responses
+                    type: string
+                provider_supported:
+                    description: Official protocol declaration for this built-in service. False means undeclared, not proven vendor rejection. Omitted for custom suppliers.
+                    type: boolean
+                runtime_supported:
+                    description: Whether the current runtime adapter implements this protocol for this service, independently of the official declaration.
+                    type: boolean
+                supported:
+                    description: 'Whether this protocol can be configured: declared for the built-in service (or user-configurable custom service) and supported by the current runtime.'
+                    type: boolean
+            required:
+                - base_url
+                - default_base_url
+                - name
+                - protocol
+                - runtime_supported
+                - supported
+            type: object
+        replaceModelProviderKeyOpenAPIRequest:
+            properties:
+                api_key:
+                    type: string
+            required:
+                - api_key
+            type: object
+        replaceModelProviderKeyOpenAPIResponse:
+            properties:
+                enabled:
+                    type: boolean
+                key_id:
+                    type: string
+            required:
+                - enabled
+                - key_id
+            type: object
         resourceUpdateTaskOpenAPIResponse:
             properties:
                 attempt_count:
@@ -14424,6 +15037,14 @@ components:
                 - updated_at
                 - user_id
             type: object
+        revealModelProviderKeyOpenAPIResponse:
+            properties:
+                api_key:
+                    description: 'The selected saved secret, returned only by an explicit owner-authorized action with Cache-Control: no-store.'
+                    type: string
+            required:
+                - api_key
+            type: object
         selectedModelOpenAPIItem:
             properties:
                 availability:
@@ -14434,14 +15055,20 @@ components:
                     type: string
                 base_url:
                     type: string
+                brand_key:
+                    type: string
                 group_name:
                     type: string
+                is_custom:
+                    type: boolean
                 is_default:
                     description: True when the selection was copied from catalog YAML
                     type: boolean
                 is_editable:
                     description: Whether the selected model supports image editing
                     type: boolean
+                logo_data_url:
+                    type: string
                 max_input_tokens:
                     description: Maximum selected catalog LLM, VLM, or embedding-model input context window, for example 512, 128K, or 1M; null for other, custom, or unknown models
                     nullable: true
@@ -14449,6 +15076,11 @@ components:
                 model_id:
                     type: string
                 model_key:
+                    type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                model_type:
+                    description: Actual stored technical model type, independent of the default model role; omitted for cloud models without local metadata
                     type: string
                 name:
                     type: string
@@ -14460,6 +15092,8 @@ components:
                     type: string
                 read_only:
                     type: boolean
+                service_key:
+                    type: string
                 source:
                     enum:
                         - own
@@ -14471,8 +15105,12 @@ components:
                     type: string
                 user_model_provider_id:
                     type: string
+                vision:
+                    description: Actual configured vision support, including explicit false; omitted when unknown for cloud models
+                    type: boolean
             required:
                 - availability
+                - is_custom
                 - is_default
                 - is_editable
                 - model_id
@@ -14563,6 +15201,28 @@ components:
                 - updated_at
                 - workflow_id
                 - workflow_mode
+            type: object
+        setActiveModelProviderKeyOpenAPIRequest:
+            properties:
+                group_id:
+                    description: Connection containing the saved key; empty with key_id disables the supplier's active key.
+                    type: string
+                key_id:
+                    description: Opaque saved key ID. At most one key can be enabled across all connections to a supplier.
+                    type: string
+            required:
+                - group_id
+                - key_id
+            type: object
+        setActiveModelProviderKeyOpenAPIResponse:
+            properties:
+                group_id:
+                    type: string
+                key_id:
+                    type: string
+            required:
+                - group_id
+                - key_id
             type: object
         setSelectedModelOpenAPIItem:
             properties:
@@ -16255,13 +16915,63 @@ components:
             required:
                 - configured
             type: object
-        updateModelProviderGroupModelOpenAPIRequest:
+        updateCustomModelProviderOpenAPIRequest:
             properties:
-                max_input_tokens:
-                    description: LLM input context window, for example 512, 128K, or 1M
+                logo_data_url:
+                    description: Optional normalized PNG supplier logo. Omit to preserve; empty restores the default icon.
+                    type: string
+                name:
+                    description: Optional custom supplier display name. Omit for a logo-only edit.
+                    type: string
+            type: object
+        updateModelProviderEndpointOpenAPIRequest:
+            properties:
+                base_url:
                     type: string
             required:
-                - max_input_tokens
+                - base_url
+            type: object
+        updateModelProviderEndpointOpenAPIResponse:
+            properties:
+                base_url:
+                    type: string
+                id:
+                    type: string
+            required:
+                - base_url
+                - id
+            type: object
+        updateModelProviderGroupModelOpenAPIRequest:
+            properties:
+                customize:
+                    description: Explicitly convert a changed catalog model to a user override. Required when editing catalog metadata; no-op requests do not convert it.
+                    type: boolean
+                enabled:
+                    description: Optional saved-model enablement. Disabled models keep their UUID and configuration and stay out of default selection.
+                    type: boolean
+                input_token_limit:
+                    description: Optional maximum input tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
+                max_input_tokens:
+                    description: Optional stored context window for LLM/VLM or unclassified models, for example 262144, 128K, or 1M. Empty clears an unclassified model's value; omitted fields remain unchanged.
+                    type: string
+                max_output_tokens:
+                    description: Optional maximum generated output tokens, independent of context window. Positive integer or K/M suffix; empty string restores automatic behavior.
+                    nullable: true
+                    type: string
+                model_settings:
+                    $ref: '#/components/schemas/Settings'
+                    description: Per-model support declarations, enabled feature overrides and text embedding options. Missing feature flags remain unknown. Omit on updates to preserve, or pass an empty object to clear explicit settings.
+                model_type:
+                    description: Optional technical model type, or empty to keep an unreferenced model unclassified. Non-empty types must be compatible with the supplier runtime protocol and existing references.
+                    type: string
+                name:
+                    description: Optional API model identifier; 1 to 512 UTF-8 bytes. Preserves the local model UUID.
+                    type: string
+                vision:
+                    description: Optional image-input support for chat models.
+                    type: boolean
             type: object
         updateModelProviderGroupOpenAPIRequest:
             properties:
@@ -16272,11 +16982,29 @@ components:
                 name:
                     type: string
                 verify:
+                    description: Legacy flag. Model suppliers save independently of network validation; use the check or model probe endpoint separately.
                     type: boolean
             required:
-                - base_url
                 - name
                 - verify
+            type: object
+        updateProviderRequestConfigOpenAPIRequest:
+            properties:
+                advanced:
+                    $ref: '#/components/schemas/ProviderRequestAdvanced'
+                    description: Owner-private custom headers, query parameters and extra JSON body. Omit on updates to preserve; an empty object clears. Authentication, model/input and streaming fields are managed by LazyMind.
+                default_protocol:
+                    enum:
+                        - openai
+                        - anthropic
+                    type: string
+                endpoints:
+                    additionalProperties:
+                        type: string
+                    description: Optional OpenAI/Anthropic API-root overrides keyed by openai or anthropic. Empty resets that protocol to its default root. Unsupported protocol keys are rejected.
+                    type: object
+            required:
+                - default_protocol
             type: object
         updateSidechatSourceOpenAPIRequest:
             properties:
@@ -16355,6 +17083,9 @@ components:
                     items:
                         $ref: '#/components/schemas/modelProviderBaseURLPresetItem'
                     type: array
+                brand_key:
+                    description: Stable built-in navigation brand; absent for custom providers. Independent of the runtime protocol.
+                    type: string
                 capabilities:
                     items:
                         type: string
@@ -16369,11 +17100,20 @@ components:
                     type: string
                 is_configured:
                     type: boolean
+                is_custom:
+                    type: boolean
+                logo_data_url:
+                    type: string
                 model_types:
                     items:
                         type: string
                     type: array
                 name:
+                    type: string
+                protocol_name:
+                    type: string
+                service_key:
+                    description: Stable configurable service within the brand. Each service owns independent credentials and models.
                     type: string
             required:
                 - base_url
@@ -16382,7 +17122,9 @@ components:
                 - description
                 - id
                 - is_configured
+                - is_custom
                 - name
+                - protocol_name
             type: object
         userUIPreferencesOpenAPIResponse:
             properties:
@@ -18017,7 +18759,6 @@ paths:
                                     type: array
                             required:
                                 - expansion_id
-                                - query
                             type: object
                 required: true
             responses:
@@ -21325,6 +22066,16 @@ paths:
                     type: integer
                 - in: query
                   name: page_token
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: selection_snapshot
+                  required: false
+                  schema:
+                    type: boolean
+                - in: query
+                  name: selection_group_id
                   required: false
                   schema:
                     type: string
@@ -28404,9 +29155,101 @@ paths:
             summary: List user model providers
             tags:
                 - model_providers
+        post:
+            description: Creates an independent supplier with a display name, endpoint and technical protocol inherited from an owned source provider. Includes one private storage group; no credential is returned.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/createCustomModelProviderOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/createCustomModelProviderOpenAPIResponse'
+                    description: Created custom supplier
+            summary: Create a custom model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}:
+        delete:
+            description: Soft-deletes an owned custom supplier and its private models/credentials. Catalog suppliers cannot be deleted. Corresponding saved default selections are cleared.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - description: Explicitly confirm knowledge-base index downgrade when deleting an embedding supplier.
+                  in: query
+                  name: confirm_indexed_downgrade
+                  required: false
+                  schema:
+                    type: boolean
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/deleteCustomModelProviderOpenAPIResponse'
+                    description: Deleted custom supplier
+            summary: Delete a custom model supplier
+            tags:
+                - model_providers
+        patch:
+            description: Changes an owned custom supplier's display name without changing its technical protocol, credentials, model IDs or selections. Catalog suppliers cannot be renamed.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateCustomModelProviderOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/customModelProviderMutationOpenAPIResponse'
+                    description: Renamed custom supplier
+            summary: Rename a custom model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/endpoint:
+        put:
+            description: Updates the current user's model supplier endpoint and all its connection instances atomically. Keys and model IDs are retained; changing the endpoint invalidates connection verification. Other provider categories are not supported.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateModelProviderEndpointOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/updateModelProviderEndpointOpenAPIResponse'
+                    description: Updated supplier endpoint
+            summary: Update a model supplier's shared endpoint
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/groups:
         get:
-            description: Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Each item includes api_key.
+            description: Lists non-deleted groups for the user model provider. model_provider_id is the id from GET /model_providers. Keys are returned only as opaque IDs and masked values; plaintext credentials are never returned.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -28424,7 +29267,7 @@ paths:
             tags:
                 - model_providers
         post:
-            description: Creates a group (name, base_url, optional api_key) under the given user model provider. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
+            description: Creates a connection instance (name, optional api_key) under the given user model provider. Model suppliers always use their shared endpoint; base_url is optional and ignored for model suppliers. Other categories require base_url. OCR cloud services validate the submitted API key against the provider API before saving. The api_key is not returned in the response body.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -28472,7 +29315,7 @@ paths:
             tags:
                 - model_providers
         patch:
-            description: Updates name, base_url, and optionally api_key for a group. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
+            description: Updates name and optionally api_key for a connection instance. Model suppliers always use their shared endpoint; base_url is ignored for model suppliers. Other categories may update base_url. OCR cloud services validate the effective API key against the provider API before saving. Omit api_key or send an empty string to keep the existing API key. The api_key is not returned in the response body.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -28533,9 +29376,73 @@ paths:
                 "200":
                     description: OK
             summary: POST /model_providers/{model_provider_id}/groups/{group_id}/keys
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}:
+        put:
+            description: Atomically replaces a saved model supplier key without a network check. Replacing the enabled slot keeps it enabled; editing another slot never enables it. Connectivity is checked separately. Returns the new opaque key ID without plaintext.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: key_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/replaceModelProviderKeyOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/replaceModelProviderKeyOpenAPIResponse'
+                    description: Replaced key
+            summary: Replace one saved supplier API key
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal:
+        post:
+            description: 'Owner-authorized explicit reveal for copy/view actions. Returns one saved secret with Cache-Control: no-store; list responses remain masked.'
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: key_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/revealModelProviderKeyOpenAPIResponse'
+                    description: Selected saved key
+            summary: Explicitly reveal one saved supplier API key
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:
         get:
-            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M. Custom or unknown models return null.
+            description: Lists non-deleted user_model_provider_group_models for the group. Each item includes is_default (true when copied from default_models seeding; false for user-added models) and nullable max_input_tokens, the stored context window expressed as a string such as 262144, 128K, or 1M. Unclassified models retain an explicitly saved context window and have no inferred default.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -28558,7 +29465,7 @@ paths:
             tags:
                 - model_providers
         post:
-            description: Creates a user_model_provider_group_models row with is_default false (custom model name and model_type). Name must be unique within the group among active rows. For llm and vlm, max_input_tokens from the request is stored when provided; otherwise it is resolved from config/model_context_windows.yaml by model name and unknown names fall back to 128K. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
+            description: Creates a user_model_provider_group_models row with is_default false. An empty model_type saves an unclassified model without inferring a runtime capability. Name must be unique within the group among active rows. Explicit max_input_tokens is retained for unclassified and LLM/VLM models; when omitted for llm or vlm, resolves from config/model_context_windows.yaml by model name with a 128K fallback. Unclassified models cannot be selected or probed until assigned a supported type. provider_name and base_url are taken from the user provider and group. Response group_name is user_model_provider_groups.name (not stored on the model row).
             parameters:
                 - in: path
                   name: model_provider_id
@@ -28616,7 +29523,7 @@ paths:
             tags:
                 - model_providers
         patch:
-            description: Updates max_input_tokens for a custom (non-catalog) LLM. The field is required. Values use a positive integer or K/M suffix such as 512, 128K, or 1M and must be at most 16 characters. Catalog models keep the YAML value and cannot be patched.
+            description: Updates model metadata without replacing its UUID or default/conversation references. At least one metadata field must be supplied. Catalog models require customize=true for actual changes and become user overrides; unchanged saves do not convert them. Supported fields are the API model identifier, technical model type, chat vision support, and context window for unclassified or LLM/VLM models. Changing an unclassified model to LLM/VLM preserves an existing explicit context window unless overridden. Type/vision changes incompatible with existing references, or in-use embedding identity changes, return 409 without changing references or knowledge-base processing levels.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -28649,9 +29556,68 @@ paths:
             summary: Update a connection group model
             tags:
                 - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}:probe:
+        post:
+            description: Tests an owned model with its saved supplier protocol, shared API address and currently enabled key. No credential or metadata overrides are accepted. Does not modify verification, credentials, models or default selections. Media probes do not download output; accepted video tasks are distinct from completed inference.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: model_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ModelProbeResponse'
+                    description: Bounded model availability result without provider text or secrets
+            summary: Test one saved model with a minimal inference request
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/groups/{group_id}/models:batch:
+        post:
+            description: Imports up to 1000 models with one ownership check and one transaction. Existing active names are returned with their saved metadata unchanged; deleted names retain their UUID when restored. Duplicate names are counted once. Invalid entries return per-model failures while valid entries are saved; a database failure rolls back the whole batch. Empty technical types and explicit context windows follow the single-model inventory contract. No upstream model or inference requests are made.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: group_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/addModelProviderGroupModelsOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/addModelProviderGroupModelsOpenAPIResponse'
+                    description: Saved and existing models with per-item failures
+            summary: Add multiple models under a connection group
+            tags:
+                - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}/remote_models:
         get:
-            description: Calls the group's OpenAI-compatible /v1/models endpoint using the stored Base URL and API key. Each item includes an inferred model_type and whether it is already added to the group.
+            description: Lists models with the supplier's saved API root and enabled credential, preserving native protocol paths and explicit API versions. SiliconFlow merges its unfiltered list with documented sub_type queries and retains all classification evidence. Catalog recognition prefers exact IDs and basenames, then compares basenames ignoring case and dot, hyphen and underscore separators. Digits and other suffixes are preserved; explicit unknowns and conflicts block broader matching. vLLM may use its loaded model identity to recognize a served alias through the public catalog, preserves the served ID, and uses max_model_len as the actual context window. Filesystem paths are not returned. Coarse embedding evidence and conflicting types stay unresolved. Each item indicates whether it is already saved; discovery does not overwrite manual model types. Provider failures expose safe reason codes instead of upstream text.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -28675,7 +29641,7 @@ paths:
                 - model_providers
     /api/core/model_providers/{model_provider_id}/groups/{group_id}:check:
         post:
-            description: Validates credentials. Model providers are proxied to the algorithm check endpoint; OCR cloud services use the same provider API/key request shape as the OCR readers. The current user identity is injected by the auth gateway from the token.
+            description: Checks the provider's model-list endpoint with a bounded read-only request. No inference is performed, even when a legacy model field is present. Missing model-list support is distinct from an invalid model and does not undo saved credentials; use a saved model's probe for an inference test. Model suppliers use their shared endpoint and currently enabled key when api_key is omitted. Explicit empty api_key tests a keyless connection. Failures include a safe reason code without provider text or secrets. OCR cloud services retain their existing check behavior.
             parameters:
                 - in: path
                   name: model_provider_id
@@ -28701,6 +29667,74 @@ paths:
                                 $ref: '#/components/schemas/CheckModelProviderData'
                     description: 'data: success and message from provider check'
             summary: Check model provider connectivity
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/keys/active:
+        put:
+            description: Atomically enables a saved key for every connection to a model supplier without requiring its model-list endpoint to succeed. Changing the enabled key clears its diagnostic verification status. Both IDs empty disables the current key without selecting a replacement. Plaintext credentials are never returned.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/setActiveModelProviderKeyOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/setActiveModelProviderKeyOpenAPIResponse'
+                    description: Supplier active key
+            summary: Set the single enabled key for a model supplier
+            tags:
+                - model_providers
+    /api/core/model_providers/{model_provider_id}/request-config:
+        get:
+            description: Returns per-protocol API roots and the active default. Gemini and OpenAI Responses are listed with supported false until their runtime adapters are available.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/providerRequestConfigOpenAPIResponse'
+                    description: Supplier request configuration
+            summary: Get supplier request protocols and endpoint overrides
+            tags:
+                - model_providers
+        put:
+            description: Stores OpenAI/Anthropic endpoint overrides. Selecting a different default updates the effective runtime adapter and endpoint for existing model IDs, retains saved keys and default selections, and requires verification again. Anthropic defaults require chat/vision-only model lists. Unchanged saves preserve verification and native supplier adapters.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/updateProviderRequestConfigOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/providerRequestConfigOpenAPIResponse'
+                    description: Supplier request configuration
+            summary: Update supplier request configuration
             tags:
                 - model_providers
     /api/core/model_providers/features:

@@ -37,7 +37,8 @@ def test_pdf_bridge_validates_version_and_preserves_pages(tmp_path, monkeypatch)
     monkeypatch.setattr(ingest, 'parse_pdf_pages', lambda path: [(2, 'body B'), (1, 'body A')])
     payload = ar.PDFRequest(file_ref='paper.pdf', content_hash=hashlib.sha256(path.read_bytes()).hexdigest())
     result = asyncio.run(ar.parse_pdf(payload, 'token'))
-    assert result == {'pages': [{'page': 1, 'text': 'body A'}, {'page': 2, 'text': 'body B'}]}
+    assert result == {'pages': [{'page': 1, 'text': 'body A'}, {'page': 2, 'text': 'body B'}],
+                      'parser_version': 'pdf-reader-v2'}
     path.write_bytes(b'%PDF-changed')
     with pytest.raises(HTTPException) as exc:
         asyncio.run(ar.parse_pdf(payload, 'token'))

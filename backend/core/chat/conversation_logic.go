@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"lazymind/core/toolpolicy"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
@@ -54,12 +55,13 @@ type routerTrafficAttempt struct {
 }
 
 type failedRunAttempt struct {
-	Result      string          `json:"result"`
-	RunID       string          `json:"run_id"`
-	RunStatus   string          `json:"run_status"`
-	RunTerminal RunTerminal     `json:"run_terminal"`
-	ModelRoute  *chatModelRoute `json:"model_route,omitempty"`
-	CreateTime  time.Time       `json:"create_time"`
+	Result        string              `json:"result"`
+	RunID         string              `json:"run_id"`
+	RunStatus     string              `json:"run_status"`
+	RunTerminal   RunTerminal         `json:"run_terminal"`
+	ModelRoute    *chatModelRoute     `json:"model_route,omitempty"`
+	ModelSwitches []ModelSwitchRecord `json:"model_switches,omitempty"`
+	CreateTime    time.Time           `json:"create_time"`
 }
 
 func shouldEmitStreamFrame(delta string, sources []any) bool {
@@ -1072,12 +1074,13 @@ func archiveRegeneratedFailedRunAttempt(historyExt json.RawMessage, target chatP
 			}
 		}
 		attempts = append(attempts, failedRunAttempt{
-			Result:      target.Existing.Result,
-			RunID:       strings.TrimSpace(target.Existing.RunID),
-			RunStatus:   status,
-			RunTerminal: *terminal,
-			ModelRoute:  modelRoute,
-			CreateTime:  target.Existing.CreateTime.UTC(),
+			Result:        target.Existing.Result,
+			RunID:         strings.TrimSpace(target.Existing.RunID),
+			RunStatus:     status,
+			RunTerminal:   *terminal,
+			ModelRoute:    modelRoute,
+			ModelSwitches: modelSwitchesFromExt(target.Existing.Ext),
+			CreateTime:    target.Existing.CreateTime.UTC(),
 		})
 	}
 	if len(attempts) > 0 {
@@ -1888,7 +1891,11 @@ func handleNonStreamChat(
 		historyID = newID("h_")
 	}
 	reqBody["run_id"], reqBody["history_id"] = runID, historyID
+	outputOwner := newChatModelOutput(runID)
+	var output chatOutputProjection
+	historyExt = mergeModelOutputIntoExt(historyExt, nil)
 	historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
+	historyExt = mergeModelSwitchesIntoExt(historyExt, modelSwitchesFromBody(reqBody))
 	runCtx, cancel := context.WithCancel(reqCtx)
 	defer cancel()
 	workspaceBound, _ := reqBody["_workspace_bound"].(bool)
@@ -1909,6 +1916,31 @@ func handleNonStreamChat(
 		common.ReplyErr(w, "failed to start history run", http.StatusConflict)
 		return
 	}
+	finalized := false
+	defer func() {
+		if !finalized {
+			terminal := &RunTerminal{Status: "failed", Reason: "runtime_failure", Code: "upstream_request_failed"}
+			if runCtx.Err() != nil {
+				terminal.Status = "cancelled"
+				terminal.Reason = "user_cancel"
+			}
+			if outputOwner.enabled() {
+				outputOwner.rollback(&output)
+				terminal.PartialOutput = output.rawResult() != ""
+				if runCtx.Err() != nil {
+					event := cancelledRunEvent(runID, terminal.PartialOutput)
+					terminal, _ = event.Terminal()
+				}
+				historyExt = outputOwner.ext(historyExt, output, convID, historyID)
+				writeCtx, finishWrite := terminalWriteContext(runCtx)
+				defer finishWrite()
+				persistChatFallbackProgress(writeCtx, db, convID, historyID, runID, query, "", output.rawResult(), target.Seq, historyExt, marshalRetrievalResult(output.sources), nil)
+				updateOwnedChatHistory(writeCtx, db, historyID, runID, map[string]any{"run_status": terminal.Status, "run_terminal": terminalJSON(terminal)})
+			} else {
+				persistImmediateRunTerminal(runCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+			}
+		}
+	}()
 	chunks, _, err := StreamChatUpstream(runCtx, baseURL, reqBody)
 	if err != nil {
 		event := failedRunEvent(runID, "upstream_request_failed", false)
@@ -1917,30 +1949,93 @@ func handleNonStreamChat(
 		}
 		terminal, _ := event.Terminal()
 		terminal = resolveCandidateRunTerminal(runCtx, stateStore, convID, historyID, runID, terminal, "nonstream_request", stateStore != nil && requestUsesRunDecision(reqBody))
+		persisted := persistImmediateRunTerminal(runCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+		if !persisted {
+			persisted = persistImmediateRunTerminal(runCtx, db, convID, historyID, query, runID, target, historyExt, terminal)
+		}
 		persistedID := historyID
-		if !persistImmediateRunTerminal(runCtx, db, convID, historyID, query, runID, target, historyExt, terminal) {
+		if !persisted {
 			persistedID = ""
 		}
+		finalized = true
 		if stateStore != nil {
 			_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, terminal.Status, "", runID, terminal)
 		}
 		replyChatTerminalError(w, "chat service unavailable", http.StatusBadGateway, terminal, persistedID)
 		return
 	}
-	var fullText, pendingThink, rawAnswer string
 	var toolCallTurns int
-	var sources []any
 	var runEvent *ChatRuntimeEvent
 	var runTerminal *RunTerminal
 	var responseError string
 	for chunk := range chunks {
-		if decision, handled := consumeRuntimeChunk(chunk, runID, strings.TrimSpace(rawAnswer+pendingThink) != ""); handled {
-			if decision.Terminal != nil {
-				runEvent, runTerminal = decision.Event, decision.Terminal
-			}
-			if decision.Stop {
+		accepted, eventErr := outputOwner.accept(chunk)
+		if eventErr != nil {
+			chunk.Err, chunk.ErrKind = eventErr, UpstreamStreamErrorProtocol
+		}
+		if chunk.Err != nil {
+			outputOwner.rollback(&output)
+			decision, _ := consumeRuntimeChunk(chunk, runID, output.rawResult() != "")
+			runEvent, runTerminal = decision.Event, decision.Terminal
+			if !outputOwner.enabled() {
 				responseError = "chat service unavailable"
+			}
+			break
+		}
+		if !accepted {
+			continue
+		}
+		if outputOwner.enabled() {
+			if next := nonNegativeToolCallTurns(chunk.ToolCallTurns); next > toolCallTurns {
+				toolCallTurns = next
+			}
+		}
+		nextBody, nextExt, nextOwner := reqBody, historyExt, outputOwner
+		if chunk.RuntimeEvent != nil {
+			if chunk.RuntimeEvent.Type == RuntimeEventModelSwitched {
+				nextBody = copyChatFallbackBody(reqBody)
+			}
+			accepted, eventErr = acceptChatFallbackEvent(nextBody, chunk.RuntimeEvent, runID, &nextExt)
+			if eventErr != nil {
+				outputOwner.rollback(&output)
+				runEvent = failedRunEvent(runID, "model_fallback_protocol_error", output.rawResult() != "")
+				runTerminal, _ = runEvent.Terminal()
+				if !outputOwner.enabled() {
+					responseError = "invalid model fallback event"
+				}
 				break
+			}
+			if !accepted {
+				continue
+			}
+		}
+		nextOwner.apply(chunk.ModelOutput, &output)
+		if chunk.RuntimeEvent != nil && chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+			nextOwner.rollback(&output)
+		}
+		if chunk.ExportSnapshot != nil && !(chunk.RuntimeEvent != nil && chunk.RuntimeEvent.Type == RuntimeEventRunFinished && chunk.ModelOutput != nil) {
+			output.exportSnapshot = chunk.ExportSnapshot
+		}
+		if chunk.RuntimeEvent != nil || chunk.ModelOutput != nil && chunk.ModelOutput.Phase != "" {
+			nextExt = nextOwner.ext(nextExt, output, convID, historyID)
+			committed := nextOwner.committed(output)
+			var retrieval json.RawMessage
+			if nextOwner.enabled() {
+				retrieval = marshalRetrievalResult(committed.sources)
+			}
+			var selectionBody map[string]any
+			if chunk.RuntimeEvent != nil && chunk.RuntimeEvent.Type == RuntimeEventModelSwitched {
+				selectionBody = nextBody
+			}
+			if err := persistChatFallbackProgress(runCtx, db, convID, historyID, runID, query, "", committed.rawResult(), target.Seq, nextExt, retrieval, selectionBody); err != nil {
+				common.ReplyErr(w, "save model output failed", http.StatusInternalServerError)
+				return
+			}
+			maps.Copy(reqBody, nextBody)
+			historyExt, outputOwner = nextExt, nextOwner
+			if chunk.RuntimeEvent != nil && chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+				runEvent = chunk.RuntimeEvent
+				runTerminal, _ = runEvent.Terminal()
 			}
 			continue
 		}
@@ -1948,43 +2043,70 @@ func handleNonStreamChat(
 			toolCallTurns = next
 		}
 		if chunk.ReasoningText != "" {
-			pendingThink += chunk.ReasoningText
+			output.pendingThink += chunk.ReasoningText
 			continue
 		}
-		if pendingThink != "" {
-			rawAnswer += "<think>" + pendingThink + "</think>"
-			pendingThink = ""
+		if output.pendingThink != "" {
+			output.result += "<think>" + output.pendingThink + "</think>"
+			output.pendingThink = ""
 		}
-		fullText += chunk.Text
-		rawAnswer += chunk.Text
+		output.text += chunk.Text
+		output.result += chunk.Text
 		if len(chunk.Sources) > 0 {
-			sources = chunk.Sources
+			output.sources = chunk.Sources
 		}
 	}
-	if pendingThink != "" {
-		rawAnswer += "<think>" + pendingThink + "</think>"
+	if output.pendingThink != "" {
+		output.result += "<think>" + output.pendingThink + "</think>"
+		output.pendingThink = ""
+	}
+	if outputOwner.enabled() {
+		outputOwner.rollback(&output)
+		historyExt = outputOwner.ext(historyExt, output, convID, historyID)
+	}
+	if runTerminal == nil && outputOwner.enabled() {
+		if runCtx.Err() != nil {
+			runEvent = cancelledRunEvent(runID, output.rawResult() != "")
+		} else {
+			runEvent = failedRunEvent(runID, "missing_run_terminal", output.rawResult() != "")
+		}
+		runTerminal, _ = runEvent.Terminal()
 	}
 	if runTerminal == nil {
-		runTerminal, _ = failedRunEvent(runID, "missing_run_terminal", strings.TrimSpace(rawAnswer) != "").Terminal()
+		runTerminal, _ = failedRunEvent(runID, "missing_run_terminal", strings.TrimSpace(output.rawResult()) != "").Terminal()
 		responseError = "chat service returned no run terminal"
 	}
-	rawAnswer = strings.TrimSpace(rawAnswer)
-	answer := strings.TrimSpace(stripToolTags(fullText))
-	if answer == "" {
+	if outputOwner.enabled() && output.exportSnapshot != nil {
+		output.text = output.exportSnapshot.Content
+		output.result = replaceChatExportResult(output.result, output.text)
+		var exports []ChatExport
 		if runTerminal.Status == "completed" {
-			runTerminal, _ = failedRunEvent(runID, "upstream_request_failed", rawAnswer != "").Terminal()
+			exports = finalizeChatExports(output.exportSnapshot, convID, historyID, runID)
+		}
+		historyExt = withChatExports(historyExt, exports)
+	}
+	output.result = strings.TrimSpace(output.result)
+	answer := strings.TrimSpace(stripToolTags(output.text))
+	fallbackFailure := runTerminal.Status == "failed" && runTerminal.Reason == "model_failure" &&
+		(runTerminal.Code == "model_fallback_exhausted" || runTerminal.Code == "model_context_not_fit")
+	if answer == "" && !fallbackFailure && !(outputOwner.enabled() && runTerminal.Status != "completed") {
+		if runTerminal.Status == "completed" {
+			runTerminal, _ = failedRunEvent(runID, "upstream_request_failed", output.rawResult() != "").Terminal()
 		}
 		if responseError == "" {
 			responseError = "chat service returned no answer"
 		}
 	}
 	if runCtx.Err() != nil {
-		runTerminal, _ = cancelledRunEvent(runID, rawAnswer != "").Terminal()
+		runTerminal, _ = cancelledRunEvent(runID, output.rawResult() != "").Terminal()
+	}
+	if outputOwner.enabled() {
+		runTerminal.PartialOutput = output.rawResult() != ""
 	}
 	runTerminal = resolveCandidateRunTerminal(runCtx, stateStore, convID, historyID, runID, runTerminal, "nonstream_terminal", stateStore != nil && requestUsesRunDecision(reqBody))
 	runEvent = runFinishedEvent(runID, *runTerminal)
 	now := time.Now()
-	retrievalResult := marshalRetrievalResult(sources)
+	retrievalResult := marshalRetrievalResult(output.sources)
 
 	{
 		persistCtx, cancel := terminalWriteContext(reqCtx)
@@ -1993,7 +2115,7 @@ func handleNonStreamChat(
 			"seq":              target.Seq,
 			"raw_content":      query,
 			"content":          query,
-			"result":           rawAnswer,
+			"result":           output.result,
 			"run_id":           runID,
 			"run_status":       runTerminal.Status,
 			"run_terminal":     terminalJSON(runTerminal),
@@ -2017,6 +2139,7 @@ func handleNonStreamChat(
 			return
 		}
 	}
+	finalized = true
 	persistSuccessfulChatModel(reqCtx, db, userIDFromChatRequestBody(reqBody), convID, runID, reqBody, runTerminal)
 	if stateStore != nil {
 		_ = setChatRuntimeStatus(reqCtx, stateStore, convID, historyID, runTerminal.Status, answer, runID, runTerminal)
@@ -2031,16 +2154,19 @@ func handleNonStreamChat(
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).UpdateColumn("chat_times", gorm.Expr("chat_times + ?", 1))
 	}
 	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, answer, now)
-	common.ReplyOK(w, map[string]any{
+	response := map[string]any{
 		"conversation_id": convID,
 		"seq":             target.Seq,
 		"message":         answer,
 		"delta":           "",
 		"history_id":      historyID,
-		"sources":         sources,
+		"sources":         output.sources,
 		"runtime_event":   runEvent,
 		"model_route":     chatModelRouteFromBody(reqBody),
-	})
+		"model_switches":  modelSwitchesFromBody(reqBody),
+	}
+	addModelOutputSnapshot(response, orm.ChatHistory{RunID: runID, Result: output.result, Ext: historyExt})
+	common.ReplyOK(w, response)
 }
 
 func handleStreamChat(
@@ -2085,6 +2211,9 @@ func handleStreamChat(
 		primaryRunID = common.GeneratePrefixedID("run_", 36)
 	}
 	reqBody["run_id"], reqBody["history_id"] = primaryRunID, historyID
+	if !dualReply {
+		historyExt = mergeModelOutputIntoExt(historyExt, nil)
+	}
 	secondaryRunID := ""
 	if dualReply {
 		secondaryHistoryID = newID("h_")
@@ -2457,6 +2586,9 @@ func streamSingleAnswer(
 		runID = newID("run_")
 		reqBody["run_id"] = runID
 	}
+	outputOwner := newChatModelOutput(runID)
+	var output chatOutputProjection
+	historyExt = mergeModelOutputIntoExt(historyExt, nil)
 	// Reuse the snapshot captured before handleStreamChat registered this run.
 	if snapshot := forkConfigFromHistory(orm.ChatHistory{Ext: historyExt}); snapshot.Version != 1 || snapshot.RunID != runID {
 		historyExt = mergeConversationConfigSnapshot(historyExt, reqBody)
@@ -2484,6 +2616,7 @@ func streamSingleAnswer(
 			return
 		}
 	}
+	historyExt = mergeModelSwitchesIntoExt(historyExt, modelSwitchesFromBody(reqBody))
 	ch, algorithmID, err := streamChatOutput(
 		chatCtx, db, baseURL, reqBody, convID, historyID, query,
 		target.Seq, historyExt, target.IsRegeneration,
@@ -2515,30 +2648,22 @@ func streamSingleAnswer(
 				Str("run_id", runID).Msg("failed to project active external chat run to cache")
 		}
 	}
-	var fullText string
-	var pendingThink string
-	var fullResult string
 	var toolCallTurns int
-	var sources []any
 	var pendingAskPending any
 	var pendingConversationIntent *IntentUpdatedEvent
-	var exportSnapshot *ChatExportSnapshot
 	var exportTerminal *ChatRuntimeEvent
 	historyExt = withChatExports(historyExt, nil)
 	thinkStart := time.Now()
 	var thinkingDurationS int64
-	var thinkingActive bool
-	var sawToolResultPreview bool
 	var runTerminal *RunTerminal
 	var performanceMetrics *RunPerformanceMetrics
 	var progressRowCount int64
 	db.Model(&orm.ChatHistory{}).Where("id = ? AND run_id = ?", historyID, runID).Count(&progressRowCount)
 	progressRowCreated := progressRowCount > 0 || (target.IsRegeneration && target.Existing != nil)
 	persistThinkingProgress := func() {
-		partialResult := fullResult
-		if pendingThink != "" {
-			partialResult += "<think>" + pendingThink + "</think>"
-		}
+		historyExt = outputOwner.ext(historyExt, output, convID, historyID)
+		committed := outputOwner.committed(output)
+		partialResult := committed.rawResult()
 		values := map[string]any{
 			"algorithm_id":        algorithmID,
 			"seq":                 seq,
@@ -2551,6 +2676,9 @@ func streamSingleAnswer(
 			"run_status":          "generating",
 			"update_time":         time.Now(),
 		}
+		if outputOwner.enabled() {
+			values["retrieval_result"] = marshalRetrievalResult(committed.sources)
+		}
 		if progressRowCreated {
 			if _, err := updateOwnedChatHistory(chatCtx, db, historyID, runID, values); err != nil {
 				log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to persist thinking progress")
@@ -2560,7 +2688,7 @@ func streamSingleAnswer(
 		now := time.Now()
 		if err := db.Create(&orm.ChatHistory{
 			ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, AlgorithmID: algorithmID,
-			Result: partialResult, ThinkingDurationS: thinkingDurationS, RunID: runID, RunStatus: "generating", Ext: historyExt,
+			Result: partialResult, RetrievalResult: marshalRetrievalResult(committed.sources), ThinkingDurationS: thinkingDurationS, RunID: runID, RunStatus: "generating", Ext: historyExt,
 			TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 		}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("history_id", historyID).Msg("failed to create thinking progress")
@@ -2568,7 +2696,36 @@ func streamSingleAnswer(
 		}
 		progressRowCreated = true
 	}
+	persistOutputProgress := func(owner chatModelOutput, ext *json.RawMessage, selectionBody map[string]any) error {
+		*ext = owner.ext(*ext, output, convID, historyID)
+		committed := owner.committed(output)
+		var retrieval json.RawMessage
+		if owner.enabled() {
+			retrieval = marshalRetrievalResult(committed.sources)
+		}
+		err := persistChatFallbackProgress(chatCtx, db, convID, historyID, runID, query, algorithmID, committed.rawResult(), seq, *ext, retrieval, selectionBody)
+		if err == nil {
+			progressRowCreated = true
+		}
+		return err
+	}
+	publishOutput := func(replace bool) {
+		chunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq), ModelOutput: outputOwner.metadata()}
+		if replace {
+			chunk = outputOwner.replacement(output, convID, historyID, seq)
+		}
+		if reqCtx.Err() == nil {
+			writeSSEChunk(w, flusher, chunk)
+		}
+		if stateStore != nil {
+			ctx, cancel := terminalWriteContext(chatCtx)
+			_ = appendChatChunk(ctx, stateStore, convID, historyID, chunk)
+			cancel()
+		}
+	}
 	initialChunk := &ChatChunkResponse{
+		ModelOutput:       outputOwner.metadata(),
+		ModelSwitches:     modelSwitchesFromBody(reqBody),
 		ConversationID:    convID,
 		Seq:               int32(seq),
 		Message:           "",
@@ -2580,17 +2737,89 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 		ModelRoute:        chatModelRouteFromBody(reqBody),
 	}
+	if !usesCoreRun {
+		initialChunk.ModelOutput = nil
+	}
 	writeSSEChunk(w, flusher, initialChunk)
 	if stateStore != nil {
 		_ = appendChatChunk(chatCtx, stateStore, convID, historyID, initialChunk)
 	}
 	for d := range ch {
-		if d.ExportSnapshot != nil {
-			exportSnapshot = d.ExportSnapshot
+		accepted, outputErr := outputOwner.accept(d)
+		if outputErr != nil {
+			d.Err, d.ErrKind = outputErr, UpstreamStreamErrorProtocol
 		}
-		partialOutput := fullResult != "" || pendingThink != ""
+		if d.Err == nil && !accepted {
+			continue
+		}
+		if d.Err == nil && outputOwner.enabled() {
+			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > toolCallTurns {
+				toolCallTurns = next
+			}
+		}
+		if d.Err != nil || d.RuntimeEvent != nil && d.RuntimeEvent.Type == RuntimeEventRunFinished {
+			if outputOwner.rollback(&output) {
+				publishOutput(true)
+			}
+		}
+		if d.Err == nil && d.ModelOutput != nil && d.ModelOutput.Phase != "" && d.RuntimeEvent == nil {
+			nextOwner, nextExt := outputOwner, historyExt
+			nextOwner.apply(d.ModelOutput, &output)
+			if err := persistOutputProgress(nextOwner, &nextExt, nil); err != nil {
+				if outputOwner.rollback(&output) {
+					publishOutput(true)
+				}
+				event := failedRunEvent(runID, "model_output_persist_failed", output.rawResult() != "")
+				runTerminal, _ = event.Terminal()
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, event, nil, true)
+				break
+			}
+			outputOwner, historyExt = nextOwner, nextExt
+			publishOutput(d.ModelOutput.Phase == "rollback")
+			continue
+		}
+		if d.Err == nil && d.ExportSnapshot != nil {
+			output.exportSnapshot = d.ExportSnapshot
+		}
+		partialOutput := output.result != "" || output.pendingThink != ""
 		decision, handled := consumeRuntimeChunk(d, runID, partialOutput)
 		if handled {
+			fallbackState, _ := reqBody[chatModelFallbackBodyKey].(*chatFallbackState)
+			fallbackEvent := decision.Event != nil && (decision.Event.Type == RuntimeEventModelSwitched || decision.Event.Type == RuntimeEventModelCallFinished || decision.Event.Type == RuntimeEventRunFinished && fallbackState != nil)
+			if fallbackEvent {
+				nextBody, nextExt, nextOwner := reqBody, historyExt, outputOwner
+				if decision.Event.Type == RuntimeEventModelSwitched {
+					nextBody = copyChatFallbackBody(reqBody)
+				}
+				accepted, eventErr := acceptChatFallbackEvent(nextBody, decision.Event, runID, &nextExt)
+				if eventErr == nil && !accepted {
+					continue
+				}
+				code := "model_fallback_protocol_error"
+				if eventErr == nil {
+					nextOwner.apply(d.ModelOutput, &output)
+					var selectionBody map[string]any
+					if decision.Event.Type == RuntimeEventModelSwitched {
+						selectionBody = nextBody
+					}
+					eventErr = persistOutputProgress(nextOwner, &nextExt, selectionBody)
+					if eventErr == nil {
+						maps.Copy(reqBody, nextBody)
+						historyExt, outputOwner = nextExt, nextOwner
+					}
+					code = "model_fallback_persist_failed"
+				}
+				if eventErr != nil {
+					if outputOwner.rollback(&output) {
+						publishOutput(true)
+						partialOutput = output.rawResult() != ""
+					}
+					event := failedRunEvent(runID, code, partialOutput)
+					terminal, _ := event.Terminal()
+					decision = runtimeChunkDecision{Event: event, Terminal: terminal, Stop: true}
+					fallbackEvent = false
+				}
+			}
 			decision = resolveRuntimeChunkDecision(
 				chatCtx, stateStore, convID, historyID, runID,
 				decision, partialOutput, useRunDecision,
@@ -2599,11 +2828,23 @@ func streamSingleAnswer(
 				runTerminal = decision.Terminal
 				performanceMetrics = decision.PerformanceMetrics
 			}
-			if exportSnapshot != nil && decision.Terminal != nil {
+			if output.exportSnapshot != nil && decision.Terminal != nil {
 				exportTerminal = decision.Event
+			} else if fallbackEvent {
+				chunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq), RuntimeEvent: decision.Event, ModelOutput: func() *ChatModelOutput {
+					if decision.Terminal == nil {
+						return d.ModelOutput
+					}
+					return nil
+				}(), PerformanceMetrics: decision.PerformanceMetrics, ModelRoute: chatModelRouteFromBody(reqBody), ModelSwitches: modelSwitchesFromBody(reqBody)}
+				if reqCtx.Err() == nil {
+					writeSSEChunk(w, flusher, chunk)
+				}
+				if stateStore != nil {
+					_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
+				}
 			} else {
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq,
-					decision.Event, decision.PerformanceMetrics, true)
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, decision.PerformanceMetrics, true)
 			}
 			if decision.Stop {
 				break
@@ -2648,15 +2889,15 @@ func streamSingleAnswer(
 		if d.TaskCreated != nil {
 			userIDForTask, _ := reqBody["user_id"].(string)
 			workflowModeForTask := workflowModeFromReqBody(reqBody)
-			notice, taskErr := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), workflowModeForTask)
+			notice, taskErr := handleTaskCreated(chatCtx, db, stateStore, convID, historyID, userIDForTask, d.TaskCreated, llmConfigFromBody(reqBody), toolConfigFromBody(reqBody), workflowModeForTask, inheritedTaskModelOrigin(reqBody))
 			if taskErr != nil {
 				failurePrefix := "TASK_START_FAILED: "
 				if d.TaskCreated.AgentType == "workflow_step" {
 					failurePrefix = "WORKFLOW_START_FAILED: "
 				}
 				failure := failurePrefix + taskErr.Error()
-				fullText += failure
-				fullResult += failure
+				output.text += failure
+				output.result += failure
 				if reqCtx.Err() == nil {
 					writeSSEChunk(w, flusher, &ChatChunkResponse{
 						ConversationID: convID,
@@ -2748,11 +2989,11 @@ func streamSingleAnswer(
 			continue
 		}
 		if d.Heartbeat {
-			if thinkingActive || d.Execution != nil {
+			if output.thinkingActive || d.Execution != nil {
 				nextDuration := elapsedThinkingSeconds(time.Since(thinkStart))
 				if nextDuration != thinkingDurationS || d.Execution != nil {
 					thinkingDurationS = nextDuration
-					if thinkingActive {
+					if output.thinkingActive {
 						persistThinkingProgress()
 					}
 					thinkingChunk := &ChatChunkResponse{
@@ -2774,13 +3015,25 @@ func streamSingleAnswer(
 			toolCallTurns = next
 		}
 		if d.ReasoningText != "" {
-			thinkingActive = true
-			pendingThink += d.ReasoningText
+			output.thinkingActive = true
+			previousThinking := ""
+			if outputOwner.enabled() {
+				previousThinking = strings.TrimSpace(output.pendingThink)
+			}
+			output.pendingThink += d.ReasoningText
 			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 			persistThinkingProgress()
 			thinkingChunk := &ChatChunkResponse{
 				ConversationID: convID, Seq: int32(seq), HistoryID: historyID,
+				ModelOutput:       d.ModelOutput,
 				ThinkingDurationS: thinkingDurationS,
+			}
+			if outputOwner.enabled() {
+				nextThinking := strings.TrimSpace(output.pendingThink)
+				thinkingChunk.ReasoningContent = nextThinking[len(previousThinking):]
+				if previousThinking == "" && nextThinking != "" && extractThinkContent(output.result) != "" {
+					thinkingChunk.ReasoningContent = "\n" + thinkingChunk.ReasoningContent
+				}
 			}
 			if reqCtx.Err() == nil {
 				writeSSEChunk(w, flusher, thinkingChunk)
@@ -2792,23 +3045,23 @@ func streamSingleAnswer(
 		}
 		hasToolPreview := strings.Contains(d.Text, "<tp") || strings.Contains(d.Text, "<trp")
 		if hasToolPreview {
-			thinkingActive = true
+			output.thinkingActive = true
 			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
 			if strings.Contains(d.Text, "<trp") {
-				sawToolResultPreview = true
+				output.sawToolResultPreview = true
 			}
-		} else if sawToolResultPreview && d.Text != "" {
-			thinkingActive = false
+		} else if output.sawToolResultPreview && d.Text != "" {
+			output.thinkingActive = false
 		}
-		if pendingThink != "" {
+		if output.pendingThink != "" {
 			thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
-			fullResult += "<think>" + pendingThink + "</think>"
-			pendingThink = ""
+			output.result += "<think>" + output.pendingThink + "</think>"
+			output.pendingThink = ""
 		}
-		fullText += d.Text
-		fullResult += d.Text
+		output.text += d.Text
+		output.result += d.Text
 		if len(d.Sources) > 0 {
-			sources = d.Sources
+			output.sources = d.Sources
 		}
 		deltaToSend := stripToolTags(d.Text)
 		if !shouldEmitStreamFrame(deltaToSend, d.Sources) {
@@ -2819,8 +3072,9 @@ func streamSingleAnswer(
 			Seq:                   int32(seq),
 			Message:               "",
 			Delta:                 deltaToSend,
+			ModelOutput:           d.ModelOutput,
 			HistoryID:             historyID,
-			Sources:               sources,
+			Sources:               output.sources,
 			PromptQuestions:       []string{},
 			ReasoningContent:      "",
 			ThinkingDurationS:     thinkingDurationS,
@@ -2835,12 +3089,16 @@ func streamSingleAnswer(
 			_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
 		}
 	}
+	if outputOwner.rollback(&output) {
+		publishOutput(true)
+	}
+	historyExt = outputOwner.ext(historyExt, output, convID, historyID)
 	if runTerminal == nil {
 		var runEvent *ChatRuntimeEvent
 		if chatCtx.Err() != nil {
-			runEvent = cancelledRunEvent(runID, fullResult != "" || pendingThink != "")
+			runEvent = cancelledRunEvent(runID, output.result != "" || output.pendingThink != "")
 		} else {
-			runEvent = failedRunEvent(runID, "missing_run_terminal", fullResult != "" || pendingThink != "")
+			runEvent = failedRunEvent(runID, "missing_run_terminal", output.result != "" || output.pendingThink != "")
 		}
 		runTerminal, _ = runEvent.Terminal()
 		runTerminal = resolveCandidateRunTerminal(
@@ -2858,19 +3116,19 @@ func streamSingleAnswer(
 		}
 	}
 	now := time.Now()
-	retrievalResult := marshalRetrievalResult(sources)
-	if pendingThink != "" {
+	retrievalResult := marshalRetrievalResult(output.sources)
+	if output.pendingThink != "" {
 		thinkingDurationS = elapsedThinkingSeconds(time.Since(thinkStart))
-		fullResult += "<think>" + pendingThink + "</think>"
+		output.result += "<think>" + output.pendingThink + "</think>"
 	}
 	exports := []ChatExport{}
-	if exportSnapshot != nil {
+	if output.exportSnapshot != nil {
 		if runTerminal.Status == "completed" {
-			exports = finalizeChatExports(exportSnapshot, convID, historyID, runID)
+			exports = finalizeChatExports(output.exportSnapshot, convID, historyID, runID)
 		}
 		historyExt = withChatExports(historyExt, exports)
-		fullText = exportSnapshot.Content
-		fullResult = replaceChatExportResult(fullResult, fullText)
+		output.text = output.exportSnapshot.Content
+		output.result = replaceChatExportResult(output.result, output.text)
 	}
 	// Persist ask_pending into ext so the ask card survives page reload.
 	if pendingAskPending != nil {
@@ -2895,7 +3153,7 @@ func streamSingleAnswer(
 			"seq":                 seq,
 			"raw_content":         query,
 			"content":             query,
-			"result":              fullResult,
+			"result":              output.result,
 			"tool_call_turns":     toolCallTurns,
 			"thinking_duration_s": thinkingDurationS,
 			"retrieval_result":    retrievalResult,
@@ -2918,7 +3176,7 @@ func streamSingleAnswer(
 		}
 	} else if !externalFinalized && progressRowCreated {
 		values := map[string]any{
-			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": fullResult,
+			"algorithm_id": algorithmID, "seq": seq, "raw_content": query, "content": query, "result": output.result,
 			"tool_call_turns": toolCallTurns, "thinking_duration_s": thinkingDurationS,
 			"retrieval_result": retrievalResult, "ext": historyExt, "update_time": now,
 			"run_id": runID, "run_status": runTerminal.Status, "run_terminal": terminalJSON(runTerminal),
@@ -2939,7 +3197,7 @@ func streamSingleAnswer(
 			RawContent:        query,
 			RetrievalResult:   retrievalResult,
 			Content:           query,
-			Result:            fullResult,
+			Result:            output.result,
 			ToolCallTurns:     toolCallTurns,
 			ThinkingDurationS: thinkingDurationS,
 			RunID:             runID,
@@ -2953,13 +3211,17 @@ func streamSingleAnswer(
 			persisted = true
 		}
 	}
-	if exportSnapshot != nil {
+	if output.exportSnapshot != nil {
 		visibleExports := exports
 		if !persisted {
 			visibleExports = []ChatExport{}
 		}
 		finalChunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq),
-			Delta: exportSnapshot.Content, DeltaMode: ChatDeltaModeReplace, Exports: &visibleExports}
+			Delta: output.exportSnapshot.Content, DeltaMode: ChatDeltaModeReplace, Exports: &visibleExports, ModelRoute: chatModelRouteFromBody(reqBody), ModelSwitches: modelSwitchesFromBody(reqBody)}
+		if outputOwner.enabled() {
+			finalChunk.Delta = stripThinkTags(stripToolTags(output.result))
+			finalChunk.Sources = output.sources
+		}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, finalChunk)
 		}
@@ -2982,7 +3244,7 @@ func streamSingleAnswer(
 	}
 	if stateStore != nil && persisted {
 		statusCtx, cancel := terminalWriteContext(chatCtx)
-		_ = setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, finalStatus, stripToolTags(fullText), runID, runTerminal)
+		_ = setChatRuntimeStatus(statusCtx, stateStore, convID, historyID, finalStatus, stripToolTags(output.text), runID, runTerminal)
 		cancel()
 	}
 	if persisted && !externalFinalized {
@@ -3010,7 +3272,7 @@ func streamSingleAnswer(
 					Str("run_id", runID).Msg("failed to persist chat run performance")
 			}
 		}
-		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(fullText), now)
+		recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(output.text), now)
 	}
 }
 
@@ -3024,6 +3286,9 @@ func persistImmediateRunTerminal(
 ) bool {
 	if db == nil || terminal == nil {
 		return false
+	}
+	if cursor := modelOutputFromExt(historyExt); cursor != nil && cursor.RunID != runID {
+		historyExt = mergeModelOutputIntoExt(historyExt, nil)
 	}
 	defer notifyConversationTitle(db, convID)
 	ctx, cancel := terminalWriteContext(ctx)
@@ -3791,6 +4056,7 @@ func handleTaskCreated(
 	llmConfig map[string]any,
 	toolConfig map[string]any,
 	workflowMode string,
+	inheritedOrigin *subagent.InheritedModelOrigin,
 ) (*TaskCreatedNotice, error) {
 	if ev == nil || strings.TrimSpace(ev.TaskID) == "" {
 		return nil, fmt.Errorf("task_created event is missing task_id")
@@ -3844,7 +4110,7 @@ func handleTaskCreated(
 				WorkspacePath: existing.WorkspacePath,
 				Tools:         ev.Tools,
 				Resume:        true,
-				LLMConfig:     llmConfig,
+				LLMConfig:     cloneChatLLMConfig(llmConfig),
 				ToolConfig:    toolConfig,
 			})
 			return &TaskCreatedNotice{
@@ -3884,14 +4150,15 @@ func handleTaskCreated(
 	})
 
 	go subagent.Run(context.Background(), db, stateStore, subagent.RunRequest{
-		TaskID:        task.ID,
-		AgentType:     ev.AgentType,
-		Params:        params,
-		WorkspacePath: workspacePath,
-		Tools:         ev.Tools,
-		Resume:        false,
-		LLMConfig:     llmConfig,
-		ToolConfig:    toolConfig,
+		TaskID:               task.ID,
+		AgentType:            ev.AgentType,
+		Params:               params,
+		WorkspacePath:        workspacePath,
+		Tools:                ev.Tools,
+		Resume:               false,
+		LLMConfig:            cloneChatLLMConfig(llmConfig),
+		InheritedModelOrigin: inheritedOrigin,
+		ToolConfig:           toolConfig,
 	})
 
 	return &TaskCreatedNotice{

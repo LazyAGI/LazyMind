@@ -2,6 +2,7 @@ package modelprovider
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"lazymind/core/common"
@@ -58,5 +59,10 @@ func scheduleImageGroupLazyClear(_ context.Context) {
 }
 
 func isMultimodalEmbeddingModelType(modelType string) bool {
-	return modelType == "embed_image"
+	switch strings.ToLower(strings.TrimSpace(modelType)) {
+	case "embed_image", "multimodal_embedding", "cross_modal_embed":
+		return true
+	default:
+		return false
+	}
 }

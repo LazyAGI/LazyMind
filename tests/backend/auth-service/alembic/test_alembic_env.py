@@ -56,6 +56,7 @@ class _FakeAlembicContext:
 class _FakeConnection:
     def __init__(self, engine):
         self.engine = engine
+        self.dialect = types.SimpleNamespace(name='postgresql')
 
     def __enter__(self):
         self.engine.events.append('connect_enter')

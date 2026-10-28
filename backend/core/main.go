@@ -44,6 +44,7 @@ import (
 	"lazymind/core/localworkspace"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
+	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 	coreproviderconnection "lazymind/core/providerconnection"
 	"lazymind/core/recovery"
@@ -771,6 +772,7 @@ func (e *startupError) Unwrap() error { return e.err }
 // ordered shutdown completes. It returns an error only when initialization or
 // the HTTP listener fails; a signal-triggered shutdown is a nil return.
 func run(ctx context.Context) error {
+	modelconfig.SetConversationResolver(chat.LoadConversationLLMConfig)
 	// textInitialize ACL text（text：postgres/sqlite/mysql）。
 	// textSet ACL_DB_DRIVER textDefaulttext sqlite，text ./acl.db。
 	driver := os.Getenv("ACL_DB_DRIVER")
@@ -799,7 +801,16 @@ func run(ctx context.Context) error {
 	}
 	modelprovider.MustLoadContextWindows(filepath.Join(".", "config", "model_context_windows.yaml"))
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
-	modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
+	upstreamCatalogPath := filepath.Join(".", "config", "upstream_model_catalog.json")
+	if modelprovider.HardcodedModelCatalogEnabled() {
+		// Legacy path. The YAML model lists and SeedModelCatalog stay in the tree.
+		modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
+	} else {
+		modelprovider.MustSeedUpstreamModelCatalog(ctx, db.DB, catalogPath, upstreamCatalogPath)
+		if err := modelprovider.LoadUpstreamModelRecognitionCatalog(upstreamCatalogPath); err != nil {
+			return &startupError{msg: "load upstream model recognition catalog", err: err}
+		}
+	}
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
 	modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath)
 

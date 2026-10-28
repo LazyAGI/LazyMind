@@ -495,6 +495,26 @@ func findOrCreateWork(ctx context.Context, tx *gorm.DB, in WorkInput) (orm.Acade
 		err := tx.WithContext(ctx).Where("id = ?", in.WorkID).Take(&row).Error
 		return row, "id", err
 	}
+	in.DOI = NormalizeDOI(in.DOI)
+	if strings.HasPrefix(in.DOI, "10.48550/arxiv.") {
+		derived, _ := NormalizeArxivID(strings.TrimPrefix(in.DOI, "10.48550/arxiv."))
+		provided, _ := NormalizeArxivID(in.ArxivID)
+		if provided != "" && derived != "" && provided != derived {
+			return orm.AcademicWork{}, "", errConflictingPaperIdentifiers
+		}
+		in.ArxivID = firstNonEmpty(provided, derived)
+	}
+	// A provider can connect two identifiers already owned by separate works.
+	// Keep that hit as a conflicting lead instead of violating a unique index.
+	if arxiv, _ := NormalizeArxivID(in.ArxivID); in.DOI != "" && arxiv != "" {
+		var owners []orm.AcademicWork
+		if err := tx.WithContext(ctx).Where("doi_normalized=? OR arxiv_id_base=?", in.DOI, arxiv).Find(&owners).Error; err != nil {
+			return orm.AcademicWork{}, "", err
+		}
+		if len(owners) > 1 {
+			return owners[0], "", errConflictingPaperIdentifiers
+		}
+	}
 	if in.Provider != "" && in.ProviderWorkID != "" {
 		var possible []orm.AcademicWork
 		if err := tx.WithContext(ctx).Where("CAST(external_ids_json AS TEXT) LIKE ?", "%"+in.ProviderWorkID+"%").Find(&possible).Error; err != nil {

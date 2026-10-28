@@ -30,15 +30,11 @@ import ExternalServiceConfigModal from "../components/ExternalServiceConfigModal
 
 const keys = [{ id: "key-id-one", masked: "********...one1" }, { id: "key-id-two", masked: "********...two2" }];
 const group = { id: "group-one", has_api_key: true, is_verified: true, base_url: provider.base_url, keys };
-let confirmation: Parameters<typeof Modal.confirm>[0];
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.groups.mockResolvedValue({ data: { groups: [group] } });
   mocks.patch.mockResolvedValue({ data: { id: group.id, base_url: "https://new.example/api" } });
-  vi.spyOn(Modal, "confirm").mockImplementation((options: Parameters<typeof Modal.confirm>[0]) => {
-    confirmation = options;
-    return { destroy: vi.fn(), update: vi.fn() };
-  });
+  vi.spyOn(Modal, "confirm").mockReturnValue({ destroy: vi.fn(), update: vi.fn() });
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -74,10 +70,10 @@ describe("personal external service credentials without Cloud login", () => {
     await openPage();
     fireEvent.change(screen.getByDisplayValue(provider.base_url), { target: { value: "https://draft.example/api" } });
     fireEvent.click(screen.getByText("modelProvider.external.saveConfig"));
-    await waitFor(() => expect(Modal.confirm).toHaveBeenCalledTimes(1));
-    await act(async () => { confirmation.onOk?.(); });
     await screen.findByText("request failed");
     expect(screen.getByDisplayValue("https://draft.example/api")).toBeInTheDocument();
+    expect(screen.getByText(keys[0].masked)).toBeInTheDocument();
+    expect(Modal.confirm).not.toHaveBeenCalled();
     expect(screen.getByText("modelProvider.external.saveConfig").closest("button")).toBeEnabled();
   });
 
@@ -97,22 +93,45 @@ describe("personal external service credentials without Cloud login", () => {
     expect(screen.getByText("modelProvider.external.status.missing")).toBeInTheDocument();
   });
 
-  it.each([false, true])("requires confirmation before changing a URL with saved keys (confirm=%s)", async (accept) => {
+  it("saves a changed address without clearing saved keys or asking for destructive confirmation", async () => {
+    const updated = { ...group, base_url: "https://new.example/api", is_verified: false };
+    mocks.patch.mockImplementationOnce(async () => {
+      mocks.groups.mockResolvedValue({ data: { groups: [updated] } });
+      return { data: { id: group.id, base_url: updated.base_url, is_verified: false } };
+    });
     await openPage();
     const input = screen.getByDisplayValue(provider.base_url);
-    fireEvent.change(input, { target: { value: "https://new.example/api" } });
+    fireEvent.change(input, { target: { value: updated.base_url } });
     fireEvent.blur(input);
     expect(mocks.patch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("modelProvider.external.saveConfig"));
-    await waitFor(() => expect(Modal.confirm).toHaveBeenCalledTimes(1));
-    expect(mocks.patch).not.toHaveBeenCalled();
-    await act(async () => { if (accept) confirmation.onOk?.(); else confirmation.onCancel?.(); });
-    if (accept) {
-      await waitFor(() => expect(mocks.patch).toHaveBeenCalledTimes(1));
-    } else {
-      expect(mocks.patch).not.toHaveBeenCalled();
-      expect(screen.getByText(keys[0].masked)).toBeInTheDocument();
-    }
+    await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith({
+      modelProviderId: provider.id,
+      groupId: group.id,
+      updateModelProviderGroupOpenAPIRequest: { name: "MinerU", base_url: updated.base_url, verify: false },
+    }));
+    expect(Modal.confirm).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "modelProvider.external.saveConfig" })).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.external.configModalTitle:MinerU" }));
+    expect(await screen.findByText(keys[0].masked)).toBeInTheDocument();
+    expect(screen.getByText(keys[1].masked)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(updated.base_url)).toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.external.noKeysConfigured")).not.toBeInTheDocument();
+  });
+
+  it("retains the service selection when its address returns to the default and existing keys remain", async () => {
+    const customAddress = "https://previous.example/api";
+    mocks.groups.mockResolvedValue({ data: { groups: [{ ...group, base_url: customAddress }] } });
+    mocks.patch.mockResolvedValueOnce({ data: { id: group.id, base_url: provider.base_url, is_verified: false } });
+    await openPage();
+    fireEvent.change(screen.getByDisplayValue(customAddress), { target: { value: provider.base_url } });
+    fireEvent.click(screen.getByText("modelProvider.external.saveConfig"));
+    await waitFor(() => expect(mocks.select).toHaveBeenCalledWith({
+      setSelectedProviderOpenAPIRequest: { selections: [{ category: "ocr", group_id: group.id }] },
+    }));
+    expect(Modal.confirm).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
   });
 
   it("does not treat a failed key lookup as an empty group that can be overwritten", async () => {

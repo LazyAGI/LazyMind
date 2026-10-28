@@ -72,7 +72,7 @@ steps:
       先按原始摘要初筛，对关键论文按问题调用 academic_read_paper(keywords=[...]) 或指定 page_start/page_end。检查完整命中页、相邻页、表格标题、实验条件及运行前提；必要时扩大或完整阅读，不要求所有论文把
       cursor 读到底。内容 processing/failed/needs_review 时保留论文并限制分析。调用 academic_submit_relations(analyses,claims)：analyses
       精确覆盖 candidate_set 全部 ID，只提交 paper_id 及纯文本 seed_relation、direction_relation、key_contribution。claims
-      是需要独立核验的方法继承、效果改善、关键数字、适用条件，每项 paper_id、field、statement、positions（真实读取返回的0起始块位置，1..5个）。先补齐上下文，再统一提交一次核验；无法取正文时不作具体强结论。复核不支持的项由程序降为不确定。'
+      是需要独立核验的方法继承、效果改善、关键数字、适用条件。每项仅包含 paper_id、field、positions；field 必须是 seed_relation、direction_relation、key_contribution 之一，和 analyses 的字段名完全一致，不能填 method、result、condition。每个论文的每个分析字段合并为一条核验，程序直接取该字段完整文本，不要重复抄写分析。positions 合并支持该字段的真实读取返回的0起始块位置（1..5个）。每字段2~4句，保持简洁，先补齐上下文，再统一提交一次核验；无法取正文时不作具体强结论。复核不支持或未提交证据的项由程序降为不确定，不反复重提。'
     tools:
     - academic_expansion_context
     - academic_read_paper

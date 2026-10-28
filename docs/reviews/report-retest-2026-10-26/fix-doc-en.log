@@ -1,0 +1,61 @@
+........................................................................ [  4%]
+........................................................................ [  9%]
+........................................................................ [ 14%]
+........................................................................ [ 19%]
+........................................................................ [ 24%]
+........................................................................ [ 28%]
+........................................................................ [ 33%]
+........................................................................ [ 38%]
+........................................................................ [ 43%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 57%]
+........................................................................ [ 62%]
+........................................................................ [ 67%]
+........................................................................ [ 72%]
+........................................................................ [ 77%]
+........................................................................ [ 81%]
+........................................................................ [ 86%]
+........................................................................ [ 91%]
+........................................................................ [ 96%]
+....................................XXXXXXXXXXXXXXXXXXX                  [100%]
+=============================== warnings summary ===============================
+lazyllm/tools/rag/utils.py:40
+  /Users/cuishaoting/Documents/LazyMind/algorithm/lazyllm/lazyllm/tools/rag/utils.py:40: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.13/migration/
+    class BaseResponse(BaseModel):
+
+../../local/build/deps/python/algorithm/lib/python3.11/site-packages/dashscope/__init__.py:61
+  /Users/cuishaoting/Documents/LazyMind/local/build/deps/python/algorithm/lib/python3.11/site-packages/dashscope/__init__.py:61: DeprecationWarning: The Assistants API (dashscope.assistants) is deprecated and will be removed in a future release. Please migrate to the Responses API. See https://help.aliyun.com/zh/model-studio/synchronous-call-api-reference for migration details.
+    from dashscope.assistants import Assistant, AssistantList, Assistants
+
+../../local/build/deps/python/algorithm/lib/python3.11/site-packages/jieba/_compat.py:18
+  /Users/cuishaoting/Documents/LazyMind/local/build/deps/python/algorithm/lib/python3.11/site-packages/jieba/_compat.py:18: DeprecationWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html
+    import pkg_resources
+
+../../local/build/deps/python/algorithm/lib/python3.11/site-packages/spacy/cli/_util.py:23
+  /Users/cuishaoting/Documents/LazyMind/local/build/deps/python/algorithm/lib/python3.11/site-packages/spacy/cli/_util.py:23: DeprecationWarning: Importing 'parser.split_arg_string' is deprecated, it will only be available in 'shell_completion' in Click 9.0.
+    from click.parser import split_arg_string
+
+<unknown>:68
+  <unknown>:68: DeprecationWarning: invalid escape sequence '\$'
+
+<string>:326
+  <string>:326: DeprecationWarning: invalid escape sequence '\>'
+
+<string>:375
+  <string>:375: DeprecationWarning: invalid escape sequence '\>'
+
+<string>:810
+  <string>:810: DeprecationWarning: invalid escape sequence '\>'
+
+<string>:835
+  <string>:835: DeprecationWarning: invalid escape sequence '\>'
+
+<string>:867
+  <string>:867: DeprecationWarning: invalid escape sequence '\ '
+
+<string>:890
+  <string>:890: DeprecationWarning: invalid escape sequence '\ '
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1476 passed, 19 xpassed, 11 warnings in 7.27s

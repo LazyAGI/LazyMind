@@ -15,6 +15,12 @@ func SnapshotEdit(db *gorm.DB, sessionID, contentType string, value json.RawMess
 	if err := db.Where("id = ?", sessionID).First(&session).Error; err != nil {
 		return nil, "", err
 	}
+	// Inline bytes are a transport encoding, never a persisted/public file value.
+	// Older pinned packages may not enable transactional publication yet.
+	var metadata map[string]any
+	if json.Unmarshal(value, &metadata) == nil && metadata["storage"] == "inline_base64" {
+		return artifactfile.Materialize(sessionID, uuid.NewString(), value)
+	}
 	enabled, err := PublicationEnabled(db, session)
 	if err != nil {
 		return nil, "", err

@@ -149,6 +149,7 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 		expansionPreparation
 		Title string `json:"title"`
 	}{expansionPreparation: preparation}
+	output.Metrics = nil
 	role, err := chat.LoadDefaultChatLLMConfig(ctx, db, record.UserID)
 	if err == nil {
 		err = internalAcademic(ctx, "preparation:run", map[string]any{"expansion_id": record.ID, "user_id": record.UserID, "revision": payload.Revision, "input": json.RawMessage(record.ResultJSON), "preparation": preparation, "llm_config": map[string]any{"llm": role}, "depth": depth}, &output)
@@ -164,10 +165,12 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 		return asyncjob.Result{}, e
 	}
 	record = latest
+	attemptMetrics := result.Metrics
 	status := "awaiting_confirmation"
 	if err != nil {
 		status = "preparation_failed"
 		result = preparation
+		result.Metrics = attemptMetrics
 		result.Error = "初步调研未完成，请检查模型或检索配置后重试"
 		if ctx.Err() != nil {
 			return asyncjob.Result{}, ctx.Err()
@@ -177,6 +180,7 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 		if e := validatePreparation(db, record, result); e != nil {
 			status = "preparation_failed"
 			result = preparation
+			result.Metrics = attemptMetrics
 			result.Error = e.Error()
 		} else if len(result.Questions) > 0 {
 			status = "awaiting_info"
@@ -195,6 +199,7 @@ func runPreparation(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) 
 	}
 	result.Answers = preparation.Answers
 	result.RequestKey = preparation.RequestKey
+	result.Model = ""
 	if name, ok := role["model"].(string); ok {
 		result.Model = name
 	}
@@ -327,6 +332,7 @@ func SubmitPreparation(w http.ResponseWriter, r *http.Request) {
 		p.StartedAt = nil
 		p.FinishedAt = nil
 		p.Error = ""
+		p.Metrics = nil
 		p.RequestKey = req.RequestKey
 		p.Questions = nil
 		p.Selected = nil

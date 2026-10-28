@@ -5,7 +5,7 @@ import importlib
 import sys
 import textwrap
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 

@@ -306,6 +306,7 @@ func discoverPapers(ctx context.Context, user string, record orm.AcademicExpansi
 		}
 		start := time.Now()
 		var papers []discoveredPaper
+		var extra []discoveryLead
 		var more string
 		var err error
 		switch source {
@@ -322,13 +323,12 @@ func discoverPapers(ctx context.Context, user string, record orm.AcademicExpansi
 				papers = append(papers, discoveredPaper{Work: arxivWorkInput(m), Version: m.Version, PaperURL: "https://arxiv.org/abs/" + m.BaseID})
 			}
 		case "sciverse", "web":
-			var extra []discoveryLead
 			papers, extra, err = externalPaperSearch(ctx, user, source, request.Query, request.MaxResults)
 			leads = append(leads, extra...)
 		default:
 			err = errors.New("unsupported_source")
 		}
-		outcome := searchOutcome{Source: source, Status: "ok", Count: len(papers), ElapsedMS: time.Since(start).Milliseconds(), NextCursor: more}
+		outcome := searchOutcome{Source: source, Status: "ok", Count: len(papers) + len(extra), ElapsedMS: time.Since(start).Milliseconds(), NextCursor: more}
 		if err != nil {
 			outcome.Status = "failed"
 			outcome.Limitation = "来源请求失败，请切换来源或检查配置"
@@ -345,7 +345,7 @@ func discoverPapers(ctx context.Context, user string, record orm.AcademicExpansi
 				outcome.Status = "rate_limited"
 			}
 		}
-		if outcome.Status == "ok" && len(papers) == 0 {
+		if outcome.Status == "ok" && outcome.Count == 0 {
 			outcome.Status = "empty"
 		}
 		outcomes = append(outcomes, outcome)

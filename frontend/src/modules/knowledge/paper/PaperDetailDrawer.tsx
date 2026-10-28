@@ -1,6 +1,6 @@
 import {v4 as uuidv4} from 'uuid';
 import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
-import { Alert, Button, Dropdown, Input, Modal, Tabs, Tag, Tooltip } from 'antd';
+import { Alert, Button, Dropdown, Input, message, Modal, Select, Tabs, Tag, Tooltip } from 'antd';
 import { ArrowLeftOutlined, CloseOutlined, DownOutlined, EllipsisOutlined, ExclamationCircleOutlined, FilePdfOutlined, InfoCircleOutlined, PlusOutlined, PushpinOutlined, ReadOutlined } from '@ant-design/icons';
 import type { PaperLibraryData, PaperRecord, Attachment } from './libraryModel';
 import { readingSummary } from './libraryModel';
@@ -54,8 +54,9 @@ function sourceName(attachment?: Attachment) {
     return attachment.sourceProvider && attachment.sourceProvider !== 'manual' ? attachment.sourceProvider : '未记录';
 }
 export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenAttachment, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, onAddPdf, onDetachAttachment, onNotification, onNotificationResolved, disabled = false }: Props) {
-    const [tab, setTab] = useState(initialTab);
+    const [tab, setTab] = useState<PaperDetailTab>(initialEditing ? 'overview' : initialTab);
     const [editing, setEditing] = useState(initialEditing);
+    const [messageApi, messageHolder] = message.useMessage();
     const [note, setNote] = useState('');
  const noteDraft=useRef<{id:string;content:string}|null>(null);
     const [saving, setSaving] = useState(false);
@@ -92,6 +93,14 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
             setSaving(false);
         }
     };
+    const changeTab = (next: PaperDetailTab) => {
+        if (editing) {
+            void messageApi.warning({ key: 'paper-metadata-editing', content: '请先保存题录或取消编辑，再切换标签页。' });
+            return;
+        }
+        if (!saving)
+            setTab(next);
+    };
     const addNote = () => {
         if (!note.trim())
             return;
@@ -103,6 +112,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
     const attachmentLabel = (item: Attachment) => item.name + (item.sourceVersion && !item.name.toLowerCase().includes(item.sourceVersion.toLowerCase()) ? ` · ${item.sourceVersion}` : '');
     return <div className={mode === 'drawer' ? 'paper-detail-mask' : 'paper-detail-page'} onClick={(event) => { if (mode === 'drawer' && event.target === event.currentTarget && !saving)
         onClose(); }}>
+    {messageHolder}
     <section className={mode === 'drawer' ? 'paper-detail-drawer' : 'paper-detail-content'} role={mode === 'drawer' ? 'dialog' : 'region'} aria-modal={mode === 'drawer' ? true : undefined} aria-label="文献详情">
       <header className="paper-detail-head">
         <div className="paper-detail-toolbar">
@@ -113,9 +123,29 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
         </div>
         <div className="paper-detail-title"><h2>{current.metadata.title}</h2>{importanceControl}</div>
         <p>{current.metadata.authors.join('、')} · {current.metadata.venue} {current.metadata.year || ''}</p>
-        <div className="paper-detail-facts">{readButton}<Button disabled={saving || editing} onClick={() => setTab('notes')}>写笔记</Button>{onStatusChange ? <select aria-label="论文阅读状态" value={current.status} disabled={disabled || saving} onChange={event => void run(() => onStatusChange(event.target.value as PaperRecord['status']), '阅读状态保存失败')}>{Object.entries(statusLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select> : <span>{statusLabel[current.status]}</span>}{onSave && !editing && <Button type="text" disabled={disabled || saving} onClick={() => { onEdit?.(); setEditing(true); }}>编辑题录</Button>}</div>
+        <div className="paper-detail-actions">
+          {readButton}
+          <Button disabled={saving || editing} onClick={() => changeTab('notes')}>写笔记</Button>
+          {onStatusChange ? <Select<PaperRecord['status']>
+            className="paper-detail-reading-status"
+            aria-label="论文阅读状态"
+            value={current.status}
+            disabled={disabled || saving}
+            options={Object.entries(statusLabel).map(([value, label]) => ({ value, label }))}
+            onChange={status => void run(() => onStatusChange(status), '阅读状态保存失败')}
+          /> : <Tag>{statusLabel[current.status]}</Tag>}
+          {onSave && <Button type="text" disabled={disabled || saving} onClick={() => {
+            if (editing) {
+                setEditing(false);
+                return;
+            }
+            onEdit?.();
+            setTab('overview');
+            setEditing(true);
+          }}>{editing ? '取消编辑' : '编辑题录'}</Button>}
+        </div>
       </header>
-      {!pdfs.length && <p className="paper-detail-read-hint"><InfoCircleOutlined /><span>请先在<button type="button" className="paper-detail-tab-link" disabled={saving || editing} onClick={() => setTab('attachments')}>附件</button>中添加 PDF</span></p>}
+      {!pdfs.length && <p className="paper-detail-read-hint"><InfoCircleOutlined /><span>请先在<button type="button" className="paper-detail-tab-link" disabled={saving || editing} onClick={() => changeTab('attachments')}>附件</button>中添加 PDF</span></p>}
       <div className="paper-detail-summary">
         <div className="paper-detail-attachment-summary">
           <span><b>{summary.attachments}</b> 个附件</span>
@@ -130,8 +160,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
       </div>
       {error && (onNotification ? <p className="paper-detail-error" role="status">{error}</p> : <Alert className="paper-detail-error" type="error" showIcon message="操作未完成" description={error}/>)}
       {current.associationConflict && <Alert type="warning" showIcon message="附件归属待核对" description={current.associationConflict}/>}
-      <Tabs activeKey={tab} onChange={(next: string) => { if (!saving && !editing)
-        setTab(next as PaperDetailTab); }} items={[
+      <Tabs activeKey={tab} onChange={next => changeTab(next as PaperDetailTab)} items={[
             { key: 'overview', label: '概览', children: <div className="paper-detail-section">
           <div className="paper-detail-section-head">
             <h3>论文信息</h3>
@@ -153,7 +182,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
             <div className="paper-detail-tags">{current.tags.filter(tag => tag !== 'paper' && !tag.startsWith('arxiv:')).map(tag => <Tag key={tag}>{tag}</Tag>)}</div>
           </>}
           <div className="paper-detail-section-head"><h3>全文附件</h3></div>
-          <p className="paper-detail-muted">{pdfs.length ? <button type="button" className="paper-detail-tab-link" onClick={() => setTab('attachments')}>PDF · {pdfs.length} 份，查看附件与版本</button> : attachments.length ? '尚未添加入库 PDF，可在附件页查看其他材料。' : '仅题录，尚未添加 PDF。'}</p>
+          <p className="paper-detail-muted">{pdfs.length ? <button type="button" className="paper-detail-tab-link" onClick={() => changeTab('attachments')}>PDF · {pdfs.length} 份，查看附件与版本</button> : attachments.length ? '尚未添加入库 PDF，可在附件页查看其他材料。' : '仅题录，尚未添加 PDF。'}</p>
           <div className="paper-detail-section-head"><h3>来源</h3></div>
           <dl><dt>导入方式</dt><dd>{method ? importMethodLabel[method] || '未记录' : '未记录'}</dd><dt>原文来源</dt><dd>{sourceName(primary)}</dd><dt>原始链接</dt><dd>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer">{sourceUrl}</a> : '未记录'}</dd><dt>来源版本</dt><dd>{primary?.sourceVersion || '未记录'}</dd></dl>
         </div> },
@@ -176,7 +205,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
             </div> : <div className="paper-detail-section"><p className="paper-detail-muted">仅题录，尚未添加 PDF。</p>{onAddPdf && <Button disabled={disabled || saving || editing} onClick={onAddPdf}>添加 PDF</Button>}</div> },
             { key: 'notes', label: `笔记 ${summary.notes}`, children: <div className="paper-detail-section"><p className="paper-detail-muted">这篇论文的所有 PDF 附件共用笔记。</p><Input.TextArea disabled={disabled || saving} value={note} rows={3} placeholder="写下这篇文献的阅读笔记" onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setNote(event.target.value)}/><Button type="primary" loading={saving} disabled={disabled || saving || !note.trim()} onClick={addNote}>添加笔记</Button>{notes.map(item => <div className="paper-detail-note" key={item.id}><strong>{item.title}</strong><p>{item.content}</p></div>)}</div> },
             { key: 'annotations', label: '批注', children: <div className="paper-detail-section"><p className="paper-detail-muted">PDF 批注会显示在这里，并保留页码、原文和评论。</p></div> },
-            { key: 'relations', label: '关系', children: <PaperRelations key={current.id} datasetId={datasetId} paper={current} data={data} attachments={attachments} onOpenPaper={onOpenPaper} onAttachments={() => setTab('attachments')} onNotification={onNotification} onNotificationResolved={onNotificationResolved}/> },
+            { key: 'relations', label: '关系', children: <PaperRelations key={current.id} datasetId={datasetId} paper={current} data={data} attachments={attachments} onOpenPaper={onOpenPaper} onAttachments={() => changeTab('attachments')} onNotification={onNotification} onNotificationResolved={onNotificationResolved}/> },
         ]}/>
     </section>
   </div>;
