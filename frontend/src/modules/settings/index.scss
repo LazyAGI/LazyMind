@@ -1089,9 +1089,12 @@
 .settings-detail-row:last-child { border-bottom: 0; }
 .settings-detail-row strong { display: block; margin-bottom: 4px; color: #1f2937; font-size: 14px; }
 .settings-detail-row p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.55; }
-.settings-developer-inactive-notice { display: flex; align-items: flex-start; gap: 8px; padding: 10px 18px; border-bottom: 1px solid #e8eef6; background: #f7f9fc; color: #64748b; font-size: 12px; line-height: 1.55; }
-.settings-developer-inactive-notice .anticon { margin-top: 3px; }
-.settings-developer-options .settings-detail-row.is-master-paused { background: #f7f9fc; }
+.settings-developer-options.is-master-paused { background: #f3f4f6; }
+.settings-developer-options.is-master-paused .settings-detail-row { border-color: #dde2e8; background: transparent; }
+.settings-developer-options.is-master-paused .settings-detail-row strong { color: #4b5563; }
+.settings-developer-options.is-master-paused .settings-detail-row p { color: #5f6b7c; }
+.settings-developer-options.is-master-paused .settings-ref-switch.ant-switch { background: #aeb7c4; }
+.settings-developer-options.is-master-paused .settings-ref-switch.ant-switch.ant-switch-checked { background: #aeb7c4; }
 
 .settings-env-panel {
   overflow: hidden;

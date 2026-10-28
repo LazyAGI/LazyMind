@@ -92,7 +92,8 @@ describe("SettingsPage developer preferences", () => {
     const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
     const group = screen.getByRole("group", { name: "settingsPage.developer.optionsGroupAria" });
     expect(group).toHaveAttribute("aria-disabled", "true");
-    expect(within(group).getByRole("status")).toHaveTextContent("settingsPage.developer.inactiveNotice");
+    expect(within(group).queryByRole("status")).not.toBeInTheDocument();
+    expect(within(group).queryByText("settingsPage.developer.inactiveNotice")).not.toBeInTheDocument();
     fireEvent.click(toggle);
     await screen.findByText("settingsPage.confirm.developerEnableContent");
     expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -151,7 +152,7 @@ describe("SettingsPage developer preferences", () => {
     expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeDisabled();
   });
 
-  it("marks saved developer options as paused while the master is off", async () => {
+  it("grays and disables saved developer options without showing an explanatory notice", async () => {
     mocks.fetchUserUiPreferences.mockResolvedValue({
       developer_mode_active: false,
       performance_stats_enabled: true,
@@ -171,14 +172,13 @@ describe("SettingsPage developer preferences", () => {
     const group = screen.getByRole("group", { name: "settingsPage.developer.optionsGroupAria" });
     expect(group).toHaveAttribute("aria-disabled", "true");
     expect(group).toHaveClass("is-master-paused");
-    const notice = within(group).getByRole("status");
-    expect(notice).toHaveTextContent("settingsPage.developer.inactiveNotice");
-    expect(notice.id).not.toBe("");
+    expect(within(group).queryByRole("status")).not.toBeInTheDocument();
+    expect(within(group).queryByText("settingsPage.developer.inactiveNotice")).not.toBeInTheDocument();
     for (const childSwitch of [performanceSwitch, screen.getByRole("switch", { name: "settingsPage.developer.sensitiveWordFilterAria" })]) {
       expect(childSwitch).toBeChecked();
       expect(childSwitch).toBeDisabled();
-      expect(childSwitch).toHaveAttribute("aria-describedby", notice.id);
-      expect(childSwitch.closest(".settings-detail-row")).toHaveClass("is-master-paused");
+      expect(childSwitch).not.toHaveAttribute("aria-describedby");
+      expect(childSwitch.closest(".settings-detail-row")).not.toHaveClass("is-master-paused");
       expect(childSwitch.closest(".settings-detail-row")).toHaveAttribute("aria-disabled", "true");
     }
   });

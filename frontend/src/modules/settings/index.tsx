@@ -894,13 +894,7 @@ function SettingsPageContent() {
             aria-label={t("settingsPage.developer.optionsGroupAria")}
             aria-disabled={!developerActive}
           >
-            {!developerActive && (
-              <div id="settings-developer-inactive-notice" className="settings-developer-inactive-notice" role="status">
-                <InfoCircleOutlined />
-                <span>{t("settingsPage.developer.inactiveNotice")}</span>
-              </div>
-            )}
-            <div className={`settings-detail-row${developerActive ? "" : " is-master-paused"}`} aria-disabled={!developerActive}>
+            <div className="settings-detail-row" aria-disabled={!developerActive}>
               <div>
                 <strong>{t("settingsPage.developer.sensitiveWordFilter")}</strong>
                 <p>{t("settingsPage.developer.sensitiveWordFilterDesc")}</p>
@@ -923,11 +917,10 @@ function SettingsPageContent() {
                     setSaving(null);
                   }
                 }}
-                aria-describedby={developerActive ? undefined : "settings-developer-inactive-notice"}
                 aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
               />
             </div>
-            <div className={`settings-detail-row${developerActive ? "" : " is-master-paused"}`} aria-disabled={!developerActive}>
+            <div className="settings-detail-row" aria-disabled={!developerActive}>
               <div>
                 <strong>{t("settingsPage.developer.performanceTitle")}</strong>
                 <p>{t("settingsPage.developer.performanceDesc")}</p>
@@ -952,7 +945,6 @@ function SettingsPageContent() {
                     setSaving(null);
                   }
                 }}
-                aria-describedby={developerActive ? undefined : "settings-developer-inactive-notice"}
                 aria-label={t("settingsPage.developer.performanceAria")}
               />
             </div>
