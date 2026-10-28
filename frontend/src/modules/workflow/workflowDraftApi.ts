@@ -355,6 +355,13 @@ export async function cancelWorkflowDraftGeneration(id: string): Promise<Workflo
   return resp.data.data;
 }
 
+export async function cancelWorkflowDraftRepair(id: string): Promise<WorkflowDraftRecord> {
+  const resp = await axiosInstance.post<CoreResponse<WorkflowDraftRecord>>(
+    `${coreBasePath}/workflow-drafts/${id}:cancel-repair`,
+  );
+  return resp.data.data;
+}
+
 export type WorkflowGenerateStartPhase = 'design_brief' | 'skeleton' | 'state_machine' | 'scenario_scripts';
 
 export type PolishableField = 'description' | 'when_to_use' | 'overview' | 'notes';
@@ -381,6 +388,7 @@ export interface RepairWorkflowDraftPayload {
   mode?: 'workflow_local' | 'source_aware';
   draft_version: number;
   source_analysis_id?: string;
+  edit_context?: { node_ids: string[] };
 }
 
 export interface WorkflowCandidate { id: string; name?: string; goal?: string; inputs?: unknown; outputs?: unknown; steps?: unknown; evidence_paths?: string[] }
@@ -407,9 +415,9 @@ export async function repairWorkflowDraft(
   return resp.data.data;
 }
 export interface RepairPreview { target:string;mode:string;draft_version:number;diagnostics:Array<{code:string;path:string;message:string;severity:string}>;planned_files:string[] }
-export interface WorkflowRepairRun { repair_id:string;status:'queued'|'repairing'|'succeeded'|'failed'|'stale'|string;target:string;diagnostics_after:Array<{code:string;path:string;message:string;severity:string}> }
+export interface WorkflowRepairRun { repair_id:string;status:'queued'|'repairing'|'succeeded'|'failed'|'stale'|string;target:string;diagnostics_after:Array<{code:string;path:string;message:string;severity:string;node_id?:string;edge_id?:string;material_id?:string;details?:Record<string,unknown>}>;changes?:{files?:string[]} }
 export async function getWorkflowRepairRun(draftId:string,repairId:string):Promise<WorkflowRepairRun>{const r=await axiosInstance.get<CoreResponse<WorkflowRepairRun>>(`${coreBasePath}/workflow-drafts/${draftId}/repair-runs/${repairId}`);return r.data.data}
-export async function previewWorkflowRepair(id:string,payload:{target:string;mode:string}):Promise<RepairPreview>{
+export async function previewWorkflowRepair(id:string,payload:{target:string;mode:string;draft_version?:number}):Promise<RepairPreview>{
   const r=await axiosInstance.post<CoreResponse<RepairPreview>>(`${coreBasePath}/workflow-drafts/${id}:repair-preview`,payload);
   const data = r.data.data;
   const normalized = Array.isArray(data.diagnostics) ? data.diagnostics.map((raw) => {

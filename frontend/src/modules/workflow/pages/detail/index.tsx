@@ -4,17 +4,30 @@ import { Alert, Breadcrumb, Button, Modal, Input, Spin, Select, Space, Tag, mess
 import { SyncOutlined, CheckCircleOutlined, ExclamationCircleOutlined, DownOutlined, CloseOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
-import { getWorkflowDraft, listWorkflowDrafts, updateWorkflowDraftContent, aiGenerateWorkflowDraft, cancelWorkflowDraftGeneration, repairWorkflowDraft, publishWorkflowDraft, listWorkflowVersions, getWorkflowVersion, editWorkflowVersion, getWorkflowGenerationAnalysis, confirmWorkflowWorkflow, previewWorkflowRepair, getWorkflowRepairRun, validateWorkflowDraft } from '../../workflowDraftApi';
+import { getWorkflowDraft, listWorkflowDrafts, updateWorkflowDraftContent, aiGenerateWorkflowDraft, cancelWorkflowDraftGeneration, cancelWorkflowDraftRepair, repairWorkflowDraft, publishWorkflowDraft, listWorkflowVersions, getWorkflowVersion, editWorkflowVersion, getWorkflowGenerationAnalysis, confirmWorkflowWorkflow, previewWorkflowRepair, getWorkflowRepairRun, validateWorkflowDraft } from '../../workflowDraftApi';
 import type { WorkflowDraftRecord } from '../../workflowDraftApi';
-import type { WorkflowVersionSummary, WorkflowVersionContent, WorkflowGenerationAnalysis, RepairPreview, WorkflowGenerateStartPhase } from '../../workflowDraftApi';
+import type { WorkflowVersionSummary, WorkflowVersionContent, WorkflowGenerationAnalysis, RepairPreview, WorkflowGenerateStartPhase, WorkflowRepairRun } from '../../workflowDraftApi';
 import StateGraphEditor from '../../components/StateGraphEditor';
 import LinkedSkillButton from '../../components/LinkedSkillButton';
-import type { SavePayload, RepairTarget } from '../../components/StateGraphEditor';
+import type { SavePayload, RepairTarget, RepairContext, StateGraphEditorHandle } from '../../components/StateGraphEditor';
 import { getWorkflowDiagnosticMessage, type ValidationError } from '../../components/StateGraphEditor/core/validator';
 import type { WorkflowDiagnostic } from '../../workflowDraftApi';
 import './index.scss';
 
 const POLL_INTERVAL_MS = 3000;
+
+function effectiveRepairTarget(draft: WorkflowDraftRecord | null, target: RepairTarget): RepairTarget {
+  return draft?.source_type === 'skill' && draft.generate_status === 'done' && (target === 'statemachine' || target === 'full')
+    ? 'node_integration' : target;
+}
+
+function repairRunErrors(run: WorkflowRepairRun): ValidationError[] {
+  // Runs that fail before validation have no diagnostic array.
+  if (!Array.isArray(run.diagnostics_after)) return [];
+  return run.diagnostics_after.filter((item) => item.severity === 'error').map((item) => ({
+    ...item, nodeId: item.node_id, edgeKey: item.edge_id, materialId: item.material_id,
+  }));
+}
 
 // generate_status values that indicate AI generation is still in progress.
 const GENERATING_STATUSES = new Set(['analyzing', 'generating', 'brief_done', 'skeleton_done', 'state_done', 'repairing']);
@@ -172,6 +185,8 @@ function repairScopeForTarget(target: RepairTarget, plannedFiles: string[]) {
         primary: planned.filter((item) => item === '脚本与工具代码' || item === '工具声明'),
         linked: planned.filter((item) => item !== '脚本与工具代码' && item !== '工具声明'),
       };
+    case 'node_integration':
+      return { primary: ['执行流程与步骤配置', '基础结构与素材定义', '说明文档'], linked: ['界面展示配置', '脚本与工具代码'] };
     case 'full':
       return {
         primary: planned,
@@ -273,19 +288,31 @@ export default function WorkflowDetailPage() {
   const [repairModalOpen, setRepairModalOpen] = useState(false);
   // True while the :ai-repair API call is in-flight (keeps Modal open with a spinner).
   const [repairSubmitting, setRepairSubmitting] = useState(false);
+  const [repairCloseModalOpen, setRepairCloseModalOpen] = useState(false);
+  const [cancelingRepair, setCancelingRepair] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const publishingRef = useRef(false);
+  const editorRef = useRef<StateGraphEditorHandle>(null);
   const [hasAuthoritativeErrors, setHasAuthoritativeErrors] = useState(false);
   const [versions, setVersions] = useState<WorkflowVersionSummary[]>([]);
   const [selectedRevision, setSelectedRevision] = useState<string>('draft');
   const [versionContent, setVersionContent] = useState<WorkflowVersionContent | null>(null);
   const [switchingVersion, setSwitchingVersion] = useState(false);
+  const versionRequestRef = useRef(0);
   const [repairHint, setRepairHint] = useState('');
   const [repairTarget, setRepairTarget] = useState<RepairTarget>('statemachine');
   const [repairValidationErrors, setRepairValidationErrors] = useState<ValidationError[]>([]);
   const [generationAnalysis, setGenerationAnalysis] = useState<WorkflowGenerationAnalysis | null>(null);
   const [confirmingCandidate, setConfirmingCandidate] = useState('');
   const [repairPreview, setRepairPreview] = useState<RepairPreview | null>(null);
+  const [repairPreviewError, setRepairPreviewError] = useState('');
+  const [repairPreviewAttempt, setRepairPreviewAttempt] = useState(0);
   const [repairFailureDetails, setRepairFailureDetails] = useState<string[]>([]);
+  const [repairDiagnostics, setRepairDiagnostics] = useState<ValidationError[]>([]);
+  const [repairContext, setRepairContext] = useState<RepairContext>({ node_ids: [] });
+  const [repairRequestError, setRepairRequestError] = useState('');
+  const [repairChanges, setRepairChanges] = useState<string[]>([]);
+  const [repairRetryTarget, setRepairRetryTarget] = useState<RepairTarget>();
   const [generationProgressHidden, setGenerationProgressHidden] = useState(false);
   const [generationCloseModalOpen, setGenerationCloseModalOpen] = useState(false);
   const [cancelingGeneration, setCancelingGeneration] = useState(false);
@@ -432,6 +459,7 @@ export default function WorkflowDetailPage() {
   // true = show empty-canvas hint; false = user already has experience (≥1 non-empty workflow)
   const [showEmptyHint, setShowEmptyHint] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollEpochRef = useRef(0);
   const [generationPhaseElapsedMs, setGenerationPhaseElapsedMs] = useState(0);
   const generationPhaseStartedAtRef = useRef(Date.now());
   const generationVisualPhaseRef = useRef<GeneratePhase>('idle');
@@ -441,6 +469,7 @@ export default function WorkflowDetailPage() {
     setLoading(true);
     try {
       const data = await getWorkflowDraft(workflowId);
+      prevStatusRef.current = data.generate_status;
       setDraft(data);
       setNameValue(data.name);
     } catch {
@@ -469,6 +498,7 @@ export default function WorkflowDetailPage() {
 
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
+    const epoch = ++pollEpochRef.current;
     pollRef.current = setInterval(async () => {
       if (!workflowId) return;
       try {
@@ -476,30 +506,38 @@ export default function WorkflowDetailPage() {
           workflowId,
           { silentError: true } as never,
         );
+        if (epoch !== pollEpochRef.current) return;
         setDraft(data);
         if (!GENERATING_STATUSES.has(data.generate_status)) {
           if (pollRef.current) clearInterval(pollRef.current);
           pollRef.current = null;
           const wasRepairing = prevStatusRef.current === 'repairing';
           if (wasRepairing) {
+            let repairCanceled = false;
             let repairFailed = data.generate_warning?.startsWith('[修复失败]') ?? false;
             let repairDetails: string[] = [];
             if (data.last_repair_run_id) {
               try {
                 const run = await getWorkflowRepairRun(workflowId, data.last_repair_run_id);
+                if (epoch !== pollEpochRef.current) return;
+                repairCanceled = run.status === 'canceled';
                 repairDetails = Array.isArray(run.diagnostics_after)
                   ? run.diagnostics_after
                     .filter((item) => item.severity === 'error')
                     .map((item) => `${item.path}: ${getWorkflowDiagnosticMessage(t, item)}`)
                   : [];
-                repairFailed = run.status !== 'succeeded' || repairDetails.length > 0;
+                repairFailed = !repairCanceled && (run.status !== 'succeeded' || repairDetails.length > 0);
+                setRepairDiagnostics(repairRunErrors(run));
+                setRepairChanges(run.status === 'succeeded' ? (run.changes?.files ?? []) : []);
+                setRepairRetryTarget(run.status === 'succeeded' || repairCanceled ? undefined : run.target as RepairTarget);
               } catch {
                 // Keep the warning-prefix fallback when repair-run lookup is unavailable.
               }
             }
             // Close the repair Modal now that the job finished.
             setRepairModalOpen(false);
-            setRepairHint('');
+            setRepairCloseModalOpen(false);
+            if (!repairFailed) setRepairHint('');
             setRepairValidationErrors([]);
             setRepairSubmitting(false);
             if (repairFailed) {
@@ -516,7 +554,7 @@ export default function WorkflowDetailPage() {
                 });
                 void warningKey; // used only for type-check
               }
-            } else {
+            } else if (!repairCanceled) {
               setRepairFailureDetails([]);
               message.success(t('selfEvolutionRun.workflowDetailRepairSuccess'));
             }
@@ -531,7 +569,10 @@ export default function WorkflowDetailPage() {
 
   useEffect(() => {
     void loadDraft();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      pollEpochRef.current += 1;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [loadDraft]);
 
   useEffect(() => {
@@ -594,6 +635,7 @@ export default function WorkflowDetailPage() {
     setCancelingGeneration(true);
     try {
       const updated = await cancelWorkflowDraftGeneration(workflowId);
+      pollEpochRef.current += 1;
       setDraft(updated);
       setGenerationProgressHidden(false);
       setGenerationCloseModalOpen(false);
@@ -609,14 +651,45 @@ export default function WorkflowDetailPage() {
     }
   }, [workflowId, t]);
 
+  const handleBackgroundRepair = useCallback(() => {
+    setRepairModalOpen(false);
+    setRepairCloseModalOpen(false);
+  }, []);
+
+  const handleCancelRepair = useCallback(async () => {
+    if (!workflowId || draftRef.current?.generate_status !== 'repairing') return;
+    setCancelingRepair(true);
+    try {
+      const updated = await cancelWorkflowDraftRepair(workflowId);
+      pollEpochRef.current += 1;
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = null;
+      prevStatusRef.current = updated.generate_status;
+      setDraft(updated);
+      setRepairSubmitting(false);
+      setRepairModalOpen(false);
+      setRepairCloseModalOpen(false);
+      setRepairPreview(null);
+      setRepairDiagnostics([]);
+      setRepairFailureDetails([]);
+      setRepairChanges([]);
+      message.success(t('selfEvolutionRun.workflowDetailRepairCanceledToast'));
+    } catch {
+      // Keep the repair and choice dialog open when cancellation was not confirmed.
+    } finally {
+      setCancelingRepair(false);
+    }
+  }, [workflowId, t]);
+
   const handleRepair = useCallback(async () => {
     if (!workflowId) return;
     const hintSnapshot = repairHint.trim();
     const errorsSnapshot = repairValidationErrors;
-    const targetSnapshot = repairTarget;
+    const targetSnapshot = effectiveRepairTarget(draftRef.current, repairTarget);
+    setRepairRequestError('');
     try {
       let fullHint = hintSnapshot;
-      if (errorsSnapshot.length > 0) {
+      if (errorsSnapshot.length > 0 && targetSnapshot !== 'node_integration') {
         const errText = JSON.stringify(errorsSnapshot.map((e) => ({
           code: e.code,
           path: e.path,
@@ -639,23 +712,41 @@ export default function WorkflowDetailPage() {
       const updated = await repairWorkflowDraft(workflowId, {
         repair_hint: fullHint,
         target: targetSnapshot,
-        mode: draftRef.current?.source_analysis_id ? 'source_aware' : 'workflow_local',
+        mode: targetSnapshot === 'node_integration' ? 'workflow_local' : draftRef.current?.source_analysis_id ? 'source_aware' : 'workflow_local',
         draft_version: draftRef.current?.version || 0,
         source_analysis_id: draftRef.current?.source_analysis_id || undefined,
+        edit_context: targetSnapshot === 'node_integration' ? repairContext : undefined,
       });
       setDraft(updated);
       startPolling();
-    } catch {
+    } catch (error: unknown) {
+      const response = (error as { response?: { status?: number; data?: { message?: string } } }).response;
+      setRepairModalOpen(true);
+      setRepairCloseModalOpen(false);
+      setRepairRequestError(response?.data?.message || t('selfEvolutionRun.workflowDetailRepairRequestFailed'));
       setRepairSubmitting(false);
       // Reset prevStatusRef since we never entered repairing state.
       prevStatusRef.current = '';
+      if (response?.status === 409) {
+        saveConflictRef.current = true;
+        setRepairPreview(null);
+        setRepairRequestError(t('selfEvolutionRun.workflowDetailSaveConflict'));
+        return;
+      }
       try {
         const latest = await getWorkflowDraft(workflowId);
+        if (latest.version !== draftRef.current?.version) {
+          saveConflictRef.current = true;
+          setRepairPreview(null);
+          setRepairRequestError(t('selfEvolutionRun.workflowDetailSaveConflict'));
+          return;
+        }
+        if (latest.generate_status === 'repairing') prevStatusRef.current = 'repairing';
         setDraft(latest);
       } catch { /* ignore */ }
     }
     // repairSubmitting stays true until polling ends (handled in startPolling callback)
-  }, [workflowId, repairHint, repairValidationErrors, repairTarget, startPolling]);
+  }, [workflowId, repairHint, repairValidationErrors, repairTarget, repairContext, startPolling, t]);
 
   useEffect(() => {
     if (!workflowId || !draft?.source_analysis_id) return;
@@ -673,28 +764,53 @@ export default function WorkflowDetailPage() {
   },[workflowId,draft,generationAnalysis,startPolling]);
 
   useEffect(() => {
-    if (!workflowId || !repairModalOpen) return;
+    if (!workflowId || !repairModalOpen || repairSubmitting || draft?.generate_status === 'repairing' || saveConflictRef.current) return;
     const requestId = ++repairPreviewRequestRef.current;
     setRepairPreview(null);
+    setRepairPreviewError('');
     previewWorkflowRepair(workflowId, {
       target: repairTarget,
-      mode: draft?.source_analysis_id ? 'source_aware' : 'workflow_local',
+      mode: repairTarget === 'node_integration' ? 'workflow_local' : draft?.source_analysis_id ? 'source_aware' : 'workflow_local',
+      draft_version: draftRef.current?.version,
     }).then((preview) => {
       if (repairPreviewRequestRef.current === requestId) setRepairPreview(preview);
-    }).catch(() => {
-      if (repairPreviewRequestRef.current === requestId) setRepairPreview(null);
+    }).catch((error: unknown) => {
+      if (repairPreviewRequestRef.current !== requestId) return;
+      if ((error as { response?: { status?: number } }).response?.status === 409) {
+        saveConflictRef.current = true;
+        setRepairRequestError(t('selfEvolutionRun.workflowDetailSaveConflict'));
+      } else {
+        setRepairPreviewError(t('selfEvolutionRun.workflowDetailRepairPreviewFailed'));
+      }
     });
     return () => {
       if (repairPreviewRequestRef.current === requestId) repairPreviewRequestRef.current += 1;
     };
-  }, [workflowId, repairModalOpen, repairTarget, draft?.source_analysis_id]);
+  }, [workflowId, repairModalOpen, repairSubmitting, repairPreviewAttempt, repairTarget, draft?.source_analysis_id, draft?.generate_status, t]);
 
-  const handleOpenRepair = useCallback((target: RepairTarget, validationErrors?: ValidationError[]) => {
+  const handleOpenRepair = useCallback((target: RepairTarget, validationErrors?: ValidationError[], context?: RepairContext) => {
     setRepairPreview(null);
-    setRepairTarget(target);
+    setRepairPreviewError('');
+    setRepairRequestError('');
+    setRepairContext(context ?? { node_ids: [] });
+    setRepairTarget(effectiveRepairTarget(draftRef.current, target));
     setRepairValidationErrors(validationErrors ?? []);
     setRepairModalOpen(true);
   }, []);
+
+  // Repair diagnostics remain actionable after reopening a failed draft.
+  useEffect(() => {
+    if (!workflowId || !draft?.last_repair_run_id || !draft.generate_warning?.startsWith('[修复失败]') || draft.generate_status === 'repairing') return;
+    let active = true;
+    getWorkflowRepairRun(workflowId, draft.last_repair_run_id).then((run) => {
+      if (!active) return;
+      setRepairRetryTarget(run.target as RepairTarget);
+      setRepairDiagnostics(repairRunErrors(run));
+    }).catch(() => {
+      // The persisted failure banner still contains the failure reason.
+    });
+    return () => { active = false; };
+  }, [workflowId, draft?.last_repair_run_id, draft?.generate_status, draft?.generate_warning]);
 
   const handleSave = useCallback(
     (payload: SavePayload) => {
@@ -734,6 +850,9 @@ export default function WorkflowDetailPage() {
         // response's version even before React commits setDraft.
         draftRef.current = updated;
         setDraft(updated);
+        setRepairDiagnostics([]);
+        setRepairChanges([]);
+        setRepairFailureDetails([]);
       });
       saveQueueRef.current = save;
       return save;
@@ -774,9 +893,15 @@ export default function WorkflowDetailPage() {
   }, [workflowId]);
 
   const handlePublish = useCallback(async () => {
-    if (!draft) return;
+    if (!draft || publishingRef.current || saveConflictRef.current) return;
+    publishingRef.current = true;
     setPublishing(true);
     try {
+      if (!await editorRef.current?.flushPendingChanges()) return;
+      // Metadata changes (e.g. rename) share the same serialized save queue.
+      // A pending or failed save must not publish an earlier draft snapshot.
+      await saveQueueRef.current;
+      if (saveConflictRef.current) return;
       const result = await publishWorkflowDraft(draft.id);
       message.success(t('selfEvolutionRun.workflowDetailPublishSuccess', { version: result.revision_no }));
       if (result.warnings?.some((item) => item.code === 'WORKFLOW_CREDENTIAL_CONFIGURATION_RECOMMENDED')) {
@@ -787,6 +912,7 @@ export default function WorkflowDetailPage() {
     } catch {
       // API errors are reported by the shared request interceptor.
     } finally {
+      publishingRef.current = false;
       setPublishing(false);
     }
   }, [draft, t]);
@@ -797,20 +923,32 @@ export default function WorkflowDetailPage() {
   }, [draft?.published_workflow_ref]);
 
   const handleVersionChange = useCallback(async (value: string) => {
-    if (value === 'draft') { setSelectedRevision('draft'); setVersionContent(null); return; }
+    const request = ++versionRequestRef.current;
+    if (value === 'draft') { setSelectedRevision('draft'); setVersionContent(null); setSwitchingVersion(false); return; }
     if (!draft?.published_workflow_ref) return;
     const loadVersion = async () => {
-      setSelectedRevision(value); setSwitchingVersion(true);
-      try { setVersionContent(await getWorkflowVersion(draft.published_workflow_ref, value)); }
-      catch { setSelectedRevision('draft'); }
-      finally { setSwitchingVersion(false); }
+      if (request !== versionRequestRef.current) return;
+      setSelectedRevision(value);
+      setSwitchingVersion(true);
+      try {
+        const content = await getWorkflowVersion(draft.published_workflow_ref, value);
+        if (request !== versionRequestRef.current) return;
+        // Mount the immutable editor only when its matching content is ready.
+        setVersionContent(content);
+        setSelectedRevision(value);
+      } catch {
+        // The request interceptor reports the failure; retain the current editor.
+        if (request === versionRequestRef.current) setSelectedRevision(versionContent?.revision_id ?? 'draft');
+      } finally {
+        if (request === versionRequestRef.current) setSwitchingVersion(false);
+      }
     };
     if (draft.draft_dirty) {
       Modal.confirm({ title: '当前草稿有未发布的修改', content: '历史版本将以只读方式打开。若随后点击“编辑此版本”，当前草稿会被清空并替换为该历史版本。', okText: '继续查看', cancelText: '取消', onOk: loadVersion });
       return;
     }
     await loadVersion();
-  }, [draft?.published_workflow_ref, draft?.draft_dirty]);
+  }, [draft?.published_workflow_ref, draft?.draft_dirty, versionContent?.revision_id]);
 
   const handleEditHistoricalVersion = useCallback(async () => {
     if (!draft?.published_workflow_ref || selectedRevision === 'draft') return;
@@ -895,6 +1033,7 @@ export default function WorkflowDetailPage() {
     setRegenerateModalOpen(true);
   };
   const repairTargetOptions: Array<{ value: RepairTarget; label: string; description: string }> = [
+    { value: 'node_integration', label: t('selfEvolutionRun.workflowNodeIntegration'), description: t('selfEvolutionRun.workflowNodeIntegrationDescription') },
     { value: 'statemachine', label: '执行流程', description: '修复步骤顺序、连线、输入输出依赖，以及这些内容需要的素材定义。' },
     { value: 'ui', label: '界面展示', description: '修复素材在界面里的展示方式；只在引用不一致时同步相关素材。' },
     { value: 'scenario', label: '说明文档', description: '补全或修正每个步骤的说明，不主动改执行流程。' },
@@ -1013,6 +1152,18 @@ export default function WorkflowDetailPage() {
           </Space>
         </div>
       )}
+      {(repairSubmitting || isRepairing) && !repairModalOpen && (
+        <div className="workflow-generation-background-banner" role="status">
+          <div className="workflow-generation-background-main">
+            <SyncOutlined spin className="workflow-generation-background-icon" />
+            <span className="workflow-generation-background-title">{t('selfEvolutionRun.workflowDetailRepairBackgroundTitle')}</span>
+          </div>
+          <Space size={8}>
+            <Button type="primary" size="small" onClick={() => setRepairModalOpen(true)}>{t('selfEvolutionRun.workflowDetailGenerationView')}</Button>
+            <Button danger size="small" onClick={() => setRepairCloseModalOpen(true)}>{t('selfEvolutionRun.workflowDetailRepairStop')}</Button>
+          </Space>
+        </div>
+      )}
       {/* Generation progress banner — shown while Phase 3 is still running (editor already ready) */}
       {isPhase3Running && !generationProgressHidden && !repairModalOpen && (
         <Alert
@@ -1043,7 +1194,7 @@ export default function WorkflowDetailPage() {
                 {t(failureDetailsExpanded ? 'selfEvolutionRun.workflowDetailHideFailureDetails' : 'selfEvolutionRun.workflowDetailShowFailureDetails')}
                 <DownOutlined aria-hidden="true" rotate={failureDetailsExpanded ? 180 : 0} />
               </Button>}
-              <Button type="primary" icon={<ReloadOutlined aria-hidden="true" />} loading={isRegenerating} disabled={isRepairing} onClick={openRegenerateModal}>
+              <Button type="primary" icon={<ReloadOutlined aria-hidden="true" />} loading={isRegenerating} disabled={isRepairing || repairSubmitting} onClick={openRegenerateModal}>
                 {t('selfEvolutionRun.workflowDetailRegenerate')}
               </Button>
               <Button type="text" className="workflow-generation-failure-dismiss" icon={<CloseOutlined />} aria-label={t('selfEvolutionRun.workflowDetailDismissFailure')} title={t('selfEvolutionRun.workflowDetailDismissFailure')} onClick={() => dismissBanner('failed')} />
@@ -1167,15 +1318,19 @@ export default function WorkflowDetailPage() {
       </Modal>
 
       {/* Editor area — always rendered so it's ready when generation completes */}
+      {repairChanges.length > 0 && <Alert className="workflow-detail-banner" type="success" showIcon message={t('selfEvolutionRun.workflowDetailRepairSuccess')} description={repairChanges.map(describeRepairFile).join('、')} closable onClose={() => setRepairChanges([])} />}
       <div className="workflow-detail-editor">
           <StateGraphEditor
-            key={`${draft.generate_status}:${selectedRevision}`}
+            editorRef={editorRef}
+            key={`${draft.generate_status}:${viewingHistory ? versionContent.revision_id : 'draft'}`}
             initialStateYaml={stateYaml}
             initialWorkflowYaml={workflowYaml}
             initialScenarioContent={(viewingHistory ? versionContent.scenario_content : draft.scenario_content) || undefined}
             initialScriptsContent={(viewingHistory ? versionContent.scripts_content : draft.scripts_content) || undefined}
             onRepair={handleOpenRepair}
-            readonly={viewingHistory || isStillGenerating || repairModalOpen}
+            repairDiagnostics={repairDiagnostics}
+            repairRetryTarget={repairRetryTarget}
+            readonly={viewingHistory || switchingVersion || isStillGenerating || repairSubmitting || publishing || draft.generate_status === 'needs_confirmation' || repairModalOpen}
             readonlyReason={isStillGenerating ? t('selfEvolutionRun.workflowDetailGenerationReadonly') : undefined}
             generationLog={[draft.generate_error, draft.generate_warning, ...repairFailureDetails].filter(Boolean).join('\n\n')}
             defaultShowArtifacts={showArtifactsRef.current}
@@ -1205,7 +1360,7 @@ export default function WorkflowDetailPage() {
                       <button
                         type="button"
                         className="workflow-detail-name"
-                        disabled={viewingHistory || isStillGenerating || repairModalOpen}
+                        disabled={viewingHistory || isStillGenerating || repairSubmitting || publishing || repairModalOpen}
                         onClick={() => { setNameValue(draft.name); setEditingName(true); }}
                         title={t('selfEvolutionRun.workflowDetailEditNameTitle')}
                       >
@@ -1218,6 +1373,7 @@ export default function WorkflowDetailPage() {
                 <Select
                   variant="borderless"
                   loading={switchingVersion}
+                  disabled={publishing}
                   value={selectedRevision}
                   style={{ minWidth: 110 }}
                   onChange={(value) => void handleVersionChange(value)}
@@ -1233,7 +1389,7 @@ export default function WorkflowDetailPage() {
               <LinkedSkillButton
                 key={draft.id}
                 draft={draft}
-                conversionDisabled={viewingHistory || isRepairing || repairModalOpen || isStillGenerating}
+                conversionDisabled={viewingHistory || isRepairing || repairSubmitting || publishing || repairModalOpen || isStillGenerating}
                 onCreated={(draftId) => navigate(`/memory-management/workflows/${draftId}`)}
               />
               {showGenerationWarningEntry && (
@@ -1244,7 +1400,7 @@ export default function WorkflowDetailPage() {
               {viewingHistory ? (
                 <Button onClick={() => void handleEditHistoricalVersion()}>编辑此版本</Button>
               ) : editorReady ? (
-                <Button type="primary" loading={publishing} disabled={hasAuthoritativeErrors || (draft.published && !draft.draft_dirty) || isRepairing || isStillGenerating} title={hasAuthoritativeErrors ? '请先修复 Go 校验返回的错误' : draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
+                <Button type="primary" loading={publishing} disabled={hasAuthoritativeErrors || (draft.published && !draft.draft_dirty) || isRepairing || repairSubmitting || isStillGenerating} title={hasAuthoritativeErrors ? '请先修复 Go 校验返回的错误' : draft.published && !draft.draft_dirty ? '草稿相对于基础版本没有变更' : undefined} onClick={handlePublish}>发布插件</Button>
               ) : null}
             </>}
             onSave={handleSave}
@@ -1297,16 +1453,22 @@ export default function WorkflowDetailPage() {
         open={repairModalOpen}
         title={t('selfEvolutionRun.workflowDetailRepairModalTitle')}
         onCancel={() => {
-          if (repairSubmitting || isRepairing) return;
+          if (repairSubmitting || isRepairing) {
+            setRepairCloseModalOpen(true);
+            return;
+          }
           setRepairModalOpen(false);
           setRepairPreview(null);
           setRepairHint('');
           setRepairValidationErrors([]);
         }}
-        closable={!repairSubmitting && !isRepairing}
+        closable
         maskClosable={false}
         footer={repairSubmitting || isRepairing ? null : (
-          <Button type="primary" onClick={handleRepair}>{t('selfEvolutionRun.workflowDetailRepairSubmit')}</Button>
+          <Space>
+            {repairPreviewError && <Button onClick={() => setRepairPreviewAttempt((attempt) => attempt + 1)}>{t('selfEvolutionRun.workflowDetailRepairPreviewRetry')}</Button>}
+            <Button type="primary" disabled={!repairPreview} onClick={handleRepair}>{t('selfEvolutionRun.workflowDetailRepairSubmit')}</Button>
+          </Space>
         )}
       >
         {(repairSubmitting || isRepairing) ? (
@@ -1323,17 +1485,19 @@ export default function WorkflowDetailPage() {
           </div>
         ) : (
           <>
+            {repairRequestError && <Alert type="error" showIcon message={repairRequestError} />}
+            {repairPreviewError && <Alert type="error" showIcon message={repairPreviewError} />}
             <Select
               value={repairTarget}
-              onChange={(value) => setRepairTarget(value)}
+              onChange={(value) => setRepairTarget(effectiveRepairTarget(draftRef.current, value))}
               style={{ width: '100%', marginBottom: 12 }}
-              options={repairTargetOptions.map((option) => ({ value: option.value, label: option.label }))}
+              options={repairTargetOptions.filter((option) => effectiveRepairTarget(draft, option.value) === option.value).map((option) => ({ value: option.value, label: option.label }))}
             />
             <div className="workflow-repair-target-summary">
               <div className="workflow-repair-target-title">{repairTargetMeta.label}</div>
               <div className="workflow-repair-target-description">{repairTargetMeta.description}</div>
             </div>
-            {(repairTarget === 'statemachine' || repairTarget === 'full') && repairValidationErrors.length > 0 && (
+            {(repairTarget === 'statemachine' || repairTarget === 'node_integration' || repairTarget === 'full') && repairValidationErrors.length > 0 && (
               <>
                 <p style={{ marginBottom: 6 }}>{t('selfEvolutionRun.workflowDetailRepairValidationBasis')}</p>
                 <ul style={{ margin: '0 0 12px 0', paddingLeft: 18, fontSize: 13, color: 'var(--color-text-secondary, #888)' }}>
@@ -1381,7 +1545,7 @@ export default function WorkflowDetailPage() {
             )}
             <p style={{ marginBottom: 8 }}>{t('selfEvolutionRun.workflowDetailRepairHintLabel')}</p>
             <Input.TextArea
-              placeholder={repairTarget === 'scenario' ? t('selfEvolutionRun.workflowDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.workflowDetailRepairStatePlaceholder')}
+              placeholder={repairTarget === 'node_integration' ? t('selfEvolutionRun.workflowNodeIntegrationPlaceholder') : repairTarget === 'scenario' ? t('selfEvolutionRun.workflowDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.workflowDetailRepairStatePlaceholder')}
               value={repairHint}
               onChange={(e) => setRepairHint(e.target.value)}
               rows={3}
@@ -1389,6 +1553,25 @@ export default function WorkflowDetailPage() {
             />
           </>
         )}
+      </Modal>
+      <Modal
+        open={repairCloseModalOpen}
+        title={t('selfEvolutionRun.workflowDetailRepairCloseTitle')}
+        onCancel={() => { if (!cancelingRepair) setRepairCloseModalOpen(false); }}
+        maskClosable={false}
+        closable={!cancelingRepair}
+        centered
+        width={420}
+        footer={[
+          <Button key="stop" danger loading={cancelingRepair} disabled={!isRepairing} onClick={() => void handleCancelRepair()}>
+            {t('selfEvolutionRun.workflowDetailRepairStop')}
+          </Button>,
+          <Button key="background" type="primary" disabled={cancelingRepair} onClick={handleBackgroundRepair}>
+            {t('selfEvolutionRun.workflowDetailRepairBackground')}
+          </Button>,
+        ]}
+      >
+        <p>{t('selfEvolutionRun.workflowDetailRepairCloseDescription')}</p>
       </Modal>
     </div>
     </div>

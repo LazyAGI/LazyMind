@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import httpx
@@ -600,7 +600,7 @@ def _import_attachment(path: str) -> Dict[str, Any]:
     value = LazyMindHostFileAdapter(
         str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''), transport=httpx,
     ).import_attachment(path)
-    return asdict(value)
+    return value.to_binding()
 
 
 def _import_text_binding(material_id: str, value: str) -> Dict[str, Any]:
@@ -611,7 +611,7 @@ def _import_text_binding(material_id: str, value: str) -> Dict[str, Any]:
     resource = LazyMindHostFileAdapter(
         str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''), transport=httpx,
     ).import_text(f'{safe_name}.txt', str(value))
-    return asdict(resource)
+    return resource.to_binding()
 
 
 def _conversation_has_attachments() -> bool:

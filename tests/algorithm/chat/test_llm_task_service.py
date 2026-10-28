@@ -91,6 +91,43 @@ def test_workflow_task_loads_builtin_skill_and_returns_json(monkeypatch):
     assert 'Return schema: {"design_brief":"markdown"}' in model.prompts[0]
 
 
+def test_node_integration_repair_preserves_intent_and_reports_missing_information(monkeypatch):
+    model = _JSONModel({'needs_input': 'Where should rejected reviews go?', 'edits': []})
+    monkeypatch.setattr(llm_task, 'inject_model_config', lambda _config: None)
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_kwargs: model)
+    result = run_llm_task(LLMTaskRequest(
+        task_type='workflow.repair',
+        input=LLMTaskInput(data={
+            'target': 'node_integration', 'edit_context': {'node_ids': ['review']},
+            'repair_hint': 'Review before export',
+        }),
+    ))
+    assert result.status == 'succeeded'
+    assert result.output['needs_input'] == 'Where should rejected reviews go?'
+    assert 'current saved files and user edit intent take precedence' in model.prompts[0]
+    assert 'Never delete or skip a node' in model.prompts[0]
+    assert 'Review before export' in model.prompts[0]
+
+
+@pytest.mark.parametrize('path,content,invalid', [
+    ('scripts/review.py', 'def run():\n    return True\n', False),
+    ('scripts/review.py', 'raise AssertionError("must not execute")', False),
+    ('scripts/review.py', 'def run(:\n', True),
+    ('scripts/../review.py', 'print(1)', True),
+])
+def test_node_integration_checks_scripts_without_running_them(monkeypatch, path, content, invalid):
+    model = _JSONModel({'scripts': {path: content}})
+    monkeypatch.setattr(llm_task, 'inject_model_config', lambda _config: None)
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_kwargs: model)
+    result = run_llm_task(LLMTaskRequest(
+        task_type='workflow.repair', input=LLMTaskInput(data={'target': 'node_integration'}),
+    ))
+    assert result.status == 'succeeded'
+    assert bool(result.output['script_errors']) is invalid
+    if invalid:
+        assert result.output['script_errors'][0]['path'] == path
+
+
 def test_workflow_repair_applies_unique_str_replace_edit(monkeypatch):
     payload = {
         'state_yaml': '',
@@ -119,6 +156,55 @@ def test_workflow_repair_applies_unique_str_replace_edit(monkeypatch):
     assert result.status == 'succeeded'
     assert result.output['state_yaml'] == 'steps:\n  a: {outputs: [summary]}\n'
     assert result.files[0].path == 'scenario/state.yml'
+
+
+@pytest.mark.parametrize('source,full,old', [
+    ('outputs: []', 'outputs: []', 'outputs: []'),
+    ('outputs: []', '', 'not present'),
+    ('outputs: []\noutputs: []', '', 'outputs: []'),
+])
+def test_workflow_repair_rejects_conflicting_or_unapplied_edits(monkeypatch, source, full, old):
+    model = _JSONModel({'state_yaml': full, 'edits': [
+        {'file': 'scenario/state.yml', 'old': old, 'new': 'outputs: [review_result]'},
+    ]})
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_: model)
+    result = run_llm_task(LLMTaskRequest(
+        task_type='workflow.repair', input=LLMTaskInput(
+            files=[LLMTaskFile(path='scenario/state.yml', content=source)],
+        ),
+    ))
+    assert result.status == 'failed'
+    assert not result.files
+    assert len(model.prompts) == 2
+    assert 'conflicting' in result.error or 'match exactly once' in result.error
+
+
+def test_workflow_repair_retries_edit_contract_then_returns_connected_output(monkeypatch):
+    source = 'steps:\n  review:\n    outputs: []\n'
+    fixed = 'steps:\n  review:\n    outputs: [{material: review_result}]\n'
+    responses = iter([
+        {'edits': [{'file': 'scenario/state.yml', 'old': 'missing', 'new': 'replacement'}]},
+        {'state_yaml': fixed},
+    ])
+    prompts = []
+
+    def model(prompt, **kwargs):
+        prompts.append(prompt)
+        return json.dumps(next(responses))
+
+    monkeypatch.setattr(llm_task, 'AutoModel', lambda **_: model)
+    result = run_llm_task(LLMTaskRequest(
+        task_type='workflow.repair', skills=['create-workflow'], input=LLMTaskInput(
+            data={'target': 'node_integration'},
+            files=[LLMTaskFile(path='scenario/state.yml', content=source)],
+        ),
+    ))
+    assert result.status == 'succeeded'
+    assert result.output['state_yaml'] == fixed
+    assert result.files[0].content == fixed
+    assert 'match exactly once' in prompts[1]
+    assert 'outputs[].material' in prompts[0]
+    assert "A source Skill's tools are NOT automatically available" in prompts[0]
 
 
 @pytest.mark.parametrize('json_output', [False, True])

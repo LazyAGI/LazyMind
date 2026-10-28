@@ -450,7 +450,7 @@ def _prepare_artifact(key: str, value: Any, content_type: str = 'text',
             'publisher tool; it writes the correct existing list_index and revision '
             'automatically. Do not save this slot directly.',
         )
-    if ctx.output_slots and key not in ctx.output_slots:
+    if (ctx.agent_type == 'workflow_step' or ctx.output_slots) and key not in ctx.output_slots:
         raise ToolExecutionError(
             f'Artifact key {key!r} is not declared for this step. '
             f'Allowed keys: {", ".join(ctx.output_slots)}',

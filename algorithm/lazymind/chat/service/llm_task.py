@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -165,9 +166,16 @@ def _run_task(
 
 def _run_workflow_task(request: LLMTaskRequest) -> tuple[dict[str, Any], str, list[LLMTaskFile]]:
     prompt = _workflow_prompt(request)
-    output = _call_json(request, prompt)
+
+    def validate_repair(output):
+        return _apply_workflow_edits(request, output)
+
+    output = _call_json(request, prompt, validate_output=(
+        validate_repair if request.task_type == 'workflow.repair' else None
+    ))
     if request.task_type == 'workflow.repair':
-        output = _apply_workflow_edits(request, output)
+        if request.input.data.get('target') == 'node_integration':
+            output['script_errors'] = _validate_integration_scripts(request, output)
     text = json.dumps(output, ensure_ascii=False)
     files = _output_files(output)
     return output, text, files
@@ -297,10 +305,11 @@ def _workflow_prompt(request: LLMTaskRequest) -> str:
         ),
         'workflow.repair': (
             'Return schema: {"workflow_yaml":"string","state_yaml":"string","scenario_md":"string",'
-            '"scripts":{"path":"content"},"remaining_warnings":["string"],'
+            '"scripts":{"path":"content"},"remaining_warnings":["string"],"needs_input":"string",'
             '"edits":[{"file":"workflow.yaml|scenario/state.yml|scenario/scenario.md|scripts/name.py",'
             '"old":"exact old text","new":"replacement text"}]}. '
-            'Prefer edits for small local repairs. Also include the final full content for every repaired core file.'
+            'For each changed file return EITHER precise edits OR final full content, not both. '
+            'Unchanged files must be omitted. An edit must match exactly once; invalid or conflicting edits are errors.'
         ),
         'workflow.polish_info': (
             'Return schema: any subset of {"description":"string","when_to_use":"string",'
@@ -308,6 +317,21 @@ def _workflow_prompt(request: LLMTaskRequest) -> str:
         ),
     }
     base.append(schemas.get(task, 'Return a JSON object.'))
+    if task == 'workflow.repair' and request.input.data.get('target') == 'node_integration':
+        base.append(
+            'Integrate the user-added nodes identified in edit_context.node_ids into the CURRENT workflow. '
+            'The current saved files and user edit intent take precedence over the original Skill design. '
+            'Preserve every existing node id, execution mode, required input expression and declared output. '
+            'Never delete or skip a node, make a required input optional, or mark internal materials external '
+            'just to pass validation. Repair predecessor/successor edges and material producers/consumers; '
+            'preserve existing branch conditions and only change edges required for the insertion. '
+            'Synchronize workflow steps, slots, affected UI references and complete scenario documentation '
+            '(purpose, inputs, outputs and executable instructions for each step). '
+            'Only edit or add scripts if the new node actually needs them; preserve unrelated files. '
+            'If purpose, insertion point or input source is ambiguous, return needs_input describing exactly '
+            'what the user must specify, rather than guessing. Otherwise needs_input must be empty. '
+            'Return final full content for changed files only, with no placeholders.'
+        )
     if request.instruction:
         base.append(f'Caller instruction:\n{request.instruction}')
     return '\n\n'.join(part for part in base if part).strip()
@@ -379,15 +403,15 @@ def _apply_workflow_edits(request: LLMTaskRequest, output: dict[str, Any]) -> di
     changed: dict[str, str] = {}
     for raw in output.get('edits') or []:
         if not isinstance(raw, dict):
-            continue
+            raise ValueError('workflow edit must be an object')
         path = str(raw.get('file') or raw.get('path') or '')
         old = str(raw.get('old') or '')
         new = str(raw.get('new') or '')
-        if not path or old == '':
-            continue
+        if path not in files or old == '':
+            raise ValueError(f'workflow edit requires an existing file and nonempty old text: {path}')
         current = changed.get(path, files.get(path, ''))
         if current.count(old) != 1:
-            continue
+            raise ValueError(f'workflow edit old text must match exactly once: {path}')
         changed[path] = current.replace(old, new, 1)
     field_to_path = {
         'workflow_yaml': 'workflow.yaml',
@@ -395,7 +419,9 @@ def _apply_workflow_edits(request: LLMTaskRequest, output: dict[str, Any]) -> di
         'scenario_md': 'scenario/scenario.md',
     }
     for field, path in field_to_path.items():
-        if path in changed and not str(output.get(field) or '').strip():
+        if path in changed:
+            if str(output.get(field) or '').strip() and output[field] != changed[path]:
+                raise ValueError(f'conflicting full content and edits: {path}')
             output[field] = changed[path]
     raw_scripts = output.get('scripts')
     has_script_output = isinstance(raw_scripts, dict)
@@ -404,10 +430,30 @@ def _apply_workflow_edits(request: LLMTaskRequest, output: dict[str, Any]) -> di
     for path, content in changed.items():
         if path.startswith('scripts/'):
             has_script_edit = True
+            if path in scripts and scripts[path] != content:
+                raise ValueError(f'conflicting full content and edits: {path}')
             scripts[path] = content
     if has_script_output or has_script_edit:
         output['scripts'] = {str(k): str(v) for k, v in scripts.items()}
     return output
+
+
+def _validate_integration_scripts(request: LLMTaskRequest, output: dict[str, Any]) -> list[dict[str, str]]:
+    """Check changed scripts without executing any generated code."""
+    originals = {file.path: file.content for file in request.input.files}
+    errors = []
+    for path, content in (output.get('scripts') or {}).items():
+        if originals.get(path) == content:
+            continue
+        parsed = PurePosixPath(path)
+        if not path.startswith('scripts/') or '..' in parsed.parts or '\\' in path or parsed.suffix != '.py':
+            errors.append({'path': path, 'message': 'Expected a Python file inside scripts/.'})
+            continue
+        try:
+            ast.parse(content, filename=path)
+        except (SyntaxError, ValueError) as error:
+            errors.append({'path': path, 'message': str(error)})
+    return errors
 
 
 def _output_files(output: dict[str, Any]) -> list[LLMTaskFile]:

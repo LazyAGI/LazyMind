@@ -921,6 +921,7 @@ func run(ctx context.Context) error {
 		backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, resourceupdate.StartIdle(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv()))
 		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
+		backgroundDone = append(backgroundDone, workflow.StartWorkflowRepairRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
 		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
 		if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {

@@ -572,6 +572,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:validate", []string{"qa.read"}, workflow.ValidateWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-generate", []string{"qa.write"}, workflow.AIGenerateWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:cancel-generation", []string{"qa.write"}, workflow.CancelWorkflowDraftGeneration)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:cancel-repair", []string{"qa.write"}, workflow.CancelWorkflowDraftRepair)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:ai-repair", []string{"qa.write"}, workflow.AIRepairWorkflowDraft)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}/generation-analysis", []string{"qa.read"}, workflow.GetWorkflowGenerationAnalysis)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:confirm-workflow", []string{"qa.write"}, workflow.ConfirmWorkflowWorkflow)

@@ -20,8 +20,13 @@ def batch_context(tmp_path, monkeypatch):
         emit=events.append,
     )
     monkeypatch.setattr(tools, 'require_context', lambda: ctx)
-    monkeypatch.setitem(lazyllm.globals, 'agentic_config', {'workflow_session_id': 'session'})
-    return ctx, events
+    previous = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session'}
+    yield ctx, events
+    if previous is None:
+        lazyllm.globals.pop('agentic_config', None)
+    else:
+        lazyllm.globals['agentic_config'] = previous
 
 
 def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context):
@@ -38,6 +43,26 @@ def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context):
     assert ctx.read_draft('report') == ('Report', 'text')
     assert ctx.read_draft('summary') == ('{"ok": true}', 'json')
     assert ctx.list_pending_drafts() == []
+
+
+def test_workflow_without_outputs_rejects_artifacts_before_emission(batch_context):
+    ctx, events = batch_context
+    ctx.output_slots = []
+    with pytest.raises(ToolExecutionError, match='not declared for this step'):
+        tools.save_artifacts([{'key': 'project_md', 'value': 'invented memory write'}])
+    assert events == []
+    assert ctx.local_artifacts() == []
+    assert ctx.read_draft('project_md') is None
+    assert ctx.next_artifact_seq('project_md') == 1
+
+
+def test_ordinary_agent_without_output_contract_can_save_artifacts(batch_context):
+    ctx, events = batch_context
+    ctx.agent_type = 'general'
+    ctx.output_slots = []
+    result = tools.save_artifacts([{'key': 'report', 'value': 'ordinary deliverable'}])
+    assert result['saved_count'] == 1
+    assert events[0]['slot'] == 'report'
 
 
 @pytest.mark.parametrize('invalid', [

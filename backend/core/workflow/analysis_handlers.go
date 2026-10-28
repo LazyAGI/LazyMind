@@ -10,6 +10,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/graphengine"
 )
 
 func GetWorkflowGenerationAnalysis(w http.ResponseWriter, r *http.Request) {
@@ -47,29 +48,44 @@ func PreviewWorkflowRepair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Target string `json:"target"`
-		Mode   string `json:"mode"`
+		Target       string `json:"target"`
+		Mode         string `json:"mode"`
+		DraftVersion int    `json:"draft_version"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.DraftVersion != 0 && body.DraftVersion != draft.Version {
+		common.ReplyErr(w, "repair stale draft", http.StatusConflict)
+		return
+	}
 	if body.Target == "" {
 		body.Target = "statemachine"
 	}
+	body.Target = effectiveWorkflowRepairTarget(draft, body.Target)
 	if body.Mode == "" {
 		body.Mode = "workflow_local"
 	}
+	profile := graphengine.ProfileEditor
+	if body.Target == "node_integration" {
+		body.Mode = "workflow_local"
+		profile = graphengine.ProfilePublish
+	}
 	diagnostics := diagnosticsForTarget(
-		diagnoseWorkflow(draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent),
+		diagnoseWorkflowWithProfile(draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent, profile),
 		body.Target,
 	)
 	if diagnostics == nil {
 		diagnostics = []repairDiagnostic{}
 	}
 	files := map[string][]string{
-		"statemachine": {"workflow.yaml.steps", "workflow.yaml.slots", "scenario/state.yml"},
-		"ui":           {"workflow.yaml.ui", "workflow.yaml.slots"},
-		"scenario":     {"scenario/scenario.md"},
-		"scripts":      {"scripts/*", "workflow.yaml.tools", "scenario/state.yml.steps"},
-		"full":         {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"},
+		"statemachine":     {"workflow.yaml.steps", "workflow.yaml.slots", "scenario/state.yml"},
+		"node_integration": {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"},
+		"ui":               {"workflow.yaml.ui", "workflow.yaml.slots"},
+		"scenario":         {"scenario/scenario.md"},
+		"scripts":          {"scripts/*", "workflow.yaml.tools", "scenario/state.yml.steps"},
+		"full":             {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"},
 	}
 	common.ReplyOK(w, map[string]any{"target": body.Target, "mode": body.Mode, "draft_version": draft.Version, "diagnostics": diagnostics, "planned_files": files[body.Target]})
 }

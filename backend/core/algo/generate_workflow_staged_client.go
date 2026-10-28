@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"lazymind/core/common"
@@ -369,26 +370,38 @@ func GenerateScenarioScripts(ctx context.Context, req GenerateScenarioScriptsReq
 
 const repairStateMachinePath = "/api/chat/generate_workflow/repair"
 
+type WorkflowEditContext struct {
+	NodeIDs []string `json:"node_ids"`
+}
+
 // RepairStateMachineRequest is the request body for the repair endpoint.
 type RepairStateMachineRequest struct {
-	WorkflowYAML string            `json:"workflow_yaml"`
-	StateYAML    string            `json:"state_yaml"`
-	RepairHint   string            `json:"repair_hint,omitempty"`
-	Warnings     []string          `json:"warnings,omitempty"`
-	Diagnostics  []map[string]any  `json:"diagnostics,omitempty"`
-	Target       string            `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
-	ScenarioMD   string            `json:"scenario_md,omitempty"`
-	Scripts      map[string]string `json:"scripts,omitempty"`
-	LLMConfig    map[string]any    `json:"llm_config"`
+	WorkflowYAML string               `json:"workflow_yaml"`
+	StateYAML    string               `json:"state_yaml"`
+	RepairHint   string               `json:"repair_hint,omitempty"`
+	Warnings     []string             `json:"warnings,omitempty"`
+	Diagnostics  []map[string]any     `json:"diagnostics,omitempty"`
+	Target       string               `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
+	ScenarioMD   string               `json:"scenario_md,omitempty"`
+	Scripts      map[string]string    `json:"scripts,omitempty"`
+	LLMConfig    map[string]any       `json:"llm_config"`
+	EditContext  *WorkflowEditContext `json:"edit_context,omitempty"`
 }
 
 // RepairStateMachineResponse is the response body from the repair endpoint.
 type RepairStateMachineResponse struct {
-	StateYAML         string            `json:"state_yaml"`
-	WorkflowYAML      string            `json:"workflow_yaml"` // may be updated when slot repair was applied
-	RemainingWarnings []string          `json:"remaining_warnings"`
-	ScenarioMD        string            `json:"scenario_md"`
-	Scripts           map[string]string `json:"scripts"`
+	StateYAML         string              `json:"state_yaml"`
+	WorkflowYAML      string              `json:"workflow_yaml"` // may be updated when slot repair was applied
+	RemainingWarnings []string            `json:"remaining_warnings"`
+	ScenarioMD        string              `json:"scenario_md"`
+	Scripts           map[string]string   `json:"scripts"`
+	NeedsInput        string              `json:"needs_input"`
+	ScriptErrors      []RepairScriptError `json:"script_errors"`
+}
+
+type RepairScriptError struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
 }
 
 // RepairStateMachine calls the repair endpoint to fix an incomplete state.yml.
@@ -404,7 +417,7 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 	for path, content := range req.Scripts {
 		files = append(files, llmTaskFile{Path: path, Content: content, ContentType: "text/x-python"})
 	}
-	raw, err := callWorkflowLLMTask(ctx, "workflow.repair", "Repair only the requested Workflow target. Prefer precise edits for local changes and return final full content for changed files.", map[string]any{
+	raw, err := callWorkflowLLMTask(ctx, "workflow.repair", "Repair only the requested Workflow target. For each changed file return either precise edits or final full content, not both.", map[string]any{
 		"workflow_yaml": req.WorkflowYAML,
 		"state_yaml":    req.StateYAML,
 		"repair_hint":   req.RepairHint,
@@ -413,6 +426,7 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 		"target":        req.Target,
 		"scenario_md":   req.ScenarioMD,
 		"scripts":       req.Scripts,
+		"edit_context":  req.EditContext,
 	}, files, req.LLMConfig)
 	if err != nil {
 		return nil, err
@@ -422,11 +436,21 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 		WorkflowYAML: extractStringField(raw, "workflow_yaml"),
 		ScenarioMD:   extractStringField(raw, "scenario_md"),
 		Scripts:      extractScripts(raw),
+		NeedsInput:   extractStringField(raw, "needs_input"),
 	}
 	if req.Target == "scenario" && resp.StateYAML == "" {
 		resp.StateYAML = resp.ScenarioMD
 	}
 	resp.RemainingWarnings = extractStringSlice(raw, "remaining_warnings")
+	if rawErrors, ok := raw["script_errors"]; ok {
+		body, err := json.Marshal(rawErrors)
+		if err != nil {
+			return nil, fmt.Errorf("invalid script diagnostics: %w", err)
+		}
+		if err := json.Unmarshal(body, &resp.ScriptErrors); err != nil {
+			return nil, fmt.Errorf("invalid script diagnostics: %w", err)
+		}
+	}
 	return resp, nil
 }
 

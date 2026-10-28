@@ -60,6 +60,34 @@ def test_host_file_adapter_returns_only_stable_resource_fields(tmp_path: Path):
     }})
     resource = LazyMindHostFileAdapter('http://core', 'u1', transport=transport).import_attachment(str(source))
     assert resource.resource_id == 'res1'
+    assert resource.name == source.name
+    assert resource.mime_type == 'text/plain'
+    assert resource.size == 12
+    assert resource.to_binding() == {'resource_id': 'res1', 'revision': 1, 'content_hash': 'sha256:abc'}
     assert not hasattr(resource, 'path')
     assert not hasattr(resource, 'url')
     assert str(tmp_path) not in repr(resource)
+
+
+def test_imported_text_preparation_sends_binding_reference_not_resource_metadata():
+    transport = MagicMock()
+    transport.post.side_effect = [
+        response(200, {'ok': True, 'result': {
+            'resource_id': 'text-1', 'name': 'request.txt', 'mime_type': 'text/plain; charset=utf-8',
+            'size': 7, 'content_hash': 'sha256:request', 'revision': 2,
+        }}),
+        response(200, {'ok': True, 'result': {'preparation_id': 'prepare-1'}}),
+    ]
+    adapter = LazyMindHostFileAdapter('http://core', 'u1', transport=transport)
+    resource = adapter.import_text('request.txt', 'test me')
+    result = adapter.client.prepare_workflow('novel-chapter-generation', input_bindings={
+        'user_request': resource.to_binding(),
+    }, command_id='prepare-1')
+
+    assert result.result['preparation_id'] == 'prepare-1'
+    assert transport.post.call_count == 2
+    call = transport.post.call_args
+    assert call.args[0].endswith('/workflow-preparations')
+    assert call.kwargs['json']['input_bindings'] == {
+        'user_request': {'resource_id': 'text-1', 'revision': 2, 'content_hash': 'sha256:request'},
+    }

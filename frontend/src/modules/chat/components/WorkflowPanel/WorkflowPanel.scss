@@ -695,7 +695,10 @@
       flex-shrink: 0;
     }
 
-    .workflow-panel__body > [role='tabpanel']:not([hidden]) .workflow-panel__tab-content--list {
+    // Every tab layout needs a bounded scroll viewport. Without it, vertical
+    // text grows beyond the tabpanel and its hidden overflow clips the bottom
+    // of the text widget's own (taller) scroll viewport.
+    .workflow-panel__body > [role='tabpanel']:not([hidden]) > .workflow-panel__tab-content {
       flex: 1 1 auto;
       min-height: 0;
       overflow-y: auto;
@@ -819,9 +822,23 @@
     flex-direction: column;
     gap: 12px;
 
+    > .workflow-panel__named-slot:not(.workflow-panel__named-slot--writer-document) {
+      // The tab scrolls ordinary text together with its metadata. A second
+      // default 520px text viewport can extend underneath the panel footer.
+      // Explicit widget maxHeight/overflow inline styles still take priority.
+      .workflow-slot__text {
+        max-height: none;
+        overflow-y: visible;
+      }
+    }
+
     &--vertical,
     &--list {
       flex-direction: column;
+
+      > .workflow-panel__named-slot:not(.workflow-panel__named-slot--writer-document) {
+        flex-shrink: 0;
+      }
     }
 
     &--horizontal {

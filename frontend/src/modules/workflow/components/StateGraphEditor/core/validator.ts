@@ -29,6 +29,9 @@ export function getWorkflowDiagnosticMessage(t: TFunction, error: Partial<Valida
     edge: error.edgeKey ?? error.edge_id ?? '',
     material: error.materialId ?? error.material_id ?? '',
     producer: String(error.details?.producer_step_id ?? ''),
+    // These are explicit user-action diagnostics, not raw transport errors.
+    reason: error.code === 'E_REPAIR_NEEDS_INPUT' || error.code === 'E_REPAIR_SCENARIO_INCOMPLETE' || error.code === 'E_REPAIR_SCRIPT_INVALID' ? error.message ?? '' : '',
+    path: error.path ?? '',
   });
 }
 

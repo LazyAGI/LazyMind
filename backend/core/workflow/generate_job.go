@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -99,17 +100,18 @@ type workflowDraftGeneratePayload struct {
 }
 
 type workflowDraftRepairPayload struct {
-	DraftID      string           `json:"draft_id"`
-	UserID       string           `json:"user_id"`
-	Target       string           `json:"target"`      // 'statemachine' | 'ui' | 'scenario'
-	RepairHint   string           `json:"repair_hint"` // optional
-	Warnings     []string         `json:"warnings,omitempty"`
-	Diagnostics  []map[string]any `json:"diagnostics,omitempty"`
-	PrevStatus   string           `json:"prev_status"`
-	LLMConfig    map[string]any   `json:"llm_config,omitempty"`
-	DraftVersion int              `json:"draft_version"`
-	Mode         string           `json:"mode,omitempty"`
-	RepairRunID  string           `json:"repair_run_id,omitempty"`
+	DraftID      string                    `json:"draft_id"`
+	UserID       string                    `json:"user_id"`
+	Target       string                    `json:"target"`      // 'statemachine' | 'ui' | 'scenario'
+	RepairHint   string                    `json:"repair_hint"` // optional
+	Warnings     []string                  `json:"warnings,omitempty"`
+	Diagnostics  []map[string]any          `json:"diagnostics,omitempty"`
+	PrevStatus   string                    `json:"prev_status"`
+	LLMConfig    map[string]any            `json:"llm_config,omitempty"`
+	DraftVersion int                       `json:"draft_version"`
+	Mode         string                    `json:"mode,omitempty"`
+	RepairRunID  string                    `json:"repair_run_id,omitempty"`
+	EditContext  *algo.WorkflowEditContext `json:"edit_context,omitempty"`
 }
 
 type workflowRepairSnapshot struct {
@@ -817,19 +819,29 @@ func alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML string) (string, 
 		return workflowYAML, false, nil
 	}
 	slotDefs := workflowSlotDefsByID(workflowDoc["slots"])
-	fallbackSlots := workflowFallbackUISlots(steps, slotDefs)
-	if len(fallbackSlots) == 0 {
-		return workflowYAML, false, nil
-	}
 	ui := mapValue(workflowDoc["ui"])
 	if ui == nil {
 		ui = map[string]any{}
 	}
 	existingTabs := listValue(ui["tabs"])
+	oldTabsYAML, _ := yaml.Marshal(existingTabs)
 	nextTabs := make([]any, 0, len(steps))
 	usedExisting := map[int]bool{}
+	stepIDs := map[string]bool{}
 	for _, step := range steps {
-		tab, index := findExistingTabForStep(existingTabs, step, usedExisting)
+		stepIDs[step.ID] = true
+	}
+	for _, step := range steps {
+		tab, index := findExistingTabForStep(existingTabs, step, usedExisting, stepIDs)
+		slotIDs := step.Outputs
+		if len(slotIDs) == 0 && tab != nil {
+			slotIDs = materialIDsFromList(tab["slots"])
+		}
+		// Approval and side-effect-only steps have no material to display. Never
+		// borrow another step's outputs: exposed materials may appear only once.
+		if len(slotIDs) == 0 {
+			continue
+		}
 		if tab == nil {
 			tab = map[string]any{}
 		} else {
@@ -843,17 +855,12 @@ func alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML string) (string, 
 		if strings.TrimSpace(scalarAny(tab["layout"])) == "" {
 			tab["layout"] = "vertical"
 		}
-		slotIDs := step.Outputs
-		if len(slotIDs) == 0 {
-			slotIDs = materialIDsFromList(tab["slots"])
-		}
-		if len(slotIDs) == 0 {
-			slotIDs = fallbackSlots
-		}
 		tab["slots"] = workflowTabSlotDefs(slotIDs, slotDefs)
 		nextTabs = append(nextTabs, tab)
 	}
-	oldTabsYAML, _ := yaml.Marshal(existingTabs)
+	if len(nextTabs) == 0 {
+		return workflowYAML, false, nil
+	}
 	nextTabsYAML, _ := yaml.Marshal(nextTabs)
 	if string(oldTabsYAML) == string(nextTabsYAML) {
 		return workflowYAML, false, nil
@@ -942,20 +949,6 @@ func workflowSlotDefsByID(raw any) map[string]map[string]any {
 	return out
 }
 
-func workflowFallbackUISlots(steps []workflowStepTabCandidate, slotDefs map[string]map[string]any) []string {
-	for i := len(steps) - 1; i >= 0; i-- {
-		if len(steps[i].Outputs) > 0 {
-			return steps[i].Outputs
-		}
-	}
-	keys := make([]string, 0, len(slotDefs))
-	for key := range slotDefs {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 func workflowTabSlotDefs(slotIDs []string, slotDefs map[string]map[string]any) []any {
 	seen := map[string]bool{}
 	out := make([]any, 0, len(slotIDs))
@@ -984,7 +977,7 @@ func workflowTabSlotDefs(slotIDs []string, slotDefs map[string]map[string]any) [
 	return out
 }
 
-func findExistingTabForStep(tabs []any, step workflowStepTabCandidate, used map[int]bool) (map[string]any, int) {
+func findExistingTabForStep(tabs []any, step workflowStepTabCandidate, used map[int]bool, stepIDs map[string]bool) (map[string]any, int) {
 	for i, raw := range tabs {
 		if used[i] {
 			continue
@@ -1007,6 +1000,11 @@ func findExistingTabForStep(tabs []any, step workflowStepTabCandidate, used map[
 		}
 		tab := mapValue(raw)
 		if tab == nil {
+			continue
+		}
+		// An explicitly bound tab belongs to that step even when it displays
+		// another step's output (for example a review tab showing its inputs).
+		if strings.TrimSpace(scalarAny(tab["step_id"])) != "" || stepIDs[strings.TrimSpace(scalarAny(tab["id"]))] {
 			continue
 		}
 		if strings.Join(uniqueStrings(materialIDsFromList(tab["slots"])), "\x00") == want {
@@ -1145,27 +1143,61 @@ func validateGeneratedScenarioContent(scenarioMD, stateYAML string) error {
 		}
 	}
 	var stateDoc struct {
-		Steps map[string]any `yaml:"steps"`
+		Steps any `yaml:"steps"`
 	}
 	if err := yaml.Unmarshal([]byte(stateYAML), &stateDoc); err != nil {
 		return fmt.Errorf("state_yaml invalid while checking scenario.md: %w", err)
 	}
-	for stepID := range stateDoc.Steps {
+	var stepIDs []string
+	switch steps := stateDoc.Steps.(type) {
+	case map[string]any:
+		for id := range steps {
+			stepIDs = append(stepIDs, id)
+		}
+	case []any:
+		for _, raw := range steps {
+			step, ok := raw.(map[string]any)
+			if !ok {
+				return fmt.Errorf("invalid scenario step")
+			}
+			id, _ := step["id"].(string)
+			stepIDs = append(stepIDs, id)
+		}
+	default:
+		return fmt.Errorf("state_yaml has no valid steps")
+	}
+	sort.Strings(stepIDs)
+	headings := regexp.MustCompile(`(?m)^(#{1,6})[\t ]+([^\r\n]+)`).FindAllStringSubmatchIndex(content, -1)
+	for _, stepID := range stepIDs {
 		if strings.TrimSpace(stepID) == "" {
 			continue
 		}
-		index := strings.Index(content, stepID)
-		if index < 0 {
+		// References in a summary, TOC or preceding step are not the step's
+		// documentation. Match its heading, then inspect that section's body.
+		idPattern := regexp.MustCompile(`(^|[^a-zA-Z0-9_-])` + regexp.QuoteMeta(stepID) + `([^a-zA-Z0-9_-]|$)`)
+		section := ""
+		found := false
+		for i, heading := range headings {
+			if !idPattern.MatchString(content[heading[4]:heading[5]]) {
+				continue
+			}
+			found = true
+			end := len(content)
+			level := heading[3] - heading[2]
+			for _, next := range headings[i+1:] {
+				if next[3]-next[2] <= level {
+					end = next[0]
+					break
+				}
+			}
+			section = strings.TrimSpace(content[heading[1]:end])
+			break
+		}
+		if !found {
 			return fmt.Errorf("scenario.md does not document step %s", stepID)
 		}
-		after := strings.TrimSpace(content[index+len(stepID):])
-		if after == "" {
+		if section == "" {
 			return fmt.Errorf("scenario.md has no description after step %s", stepID)
-		}
-		nextHeading := strings.Index(after, "\n### ")
-		section := after
-		if nextHeading >= 0 {
-			section = after[:nextHeading]
 		}
 		section = strings.TrimSpace(strings.Trim(section, "()[]#- \t\r\n"))
 		if len([]rune(section)) < 24 {
@@ -1474,18 +1506,34 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	if db == nil {
 		return asyncjob.Result{ErrorCode: generateErrSaveFailed}, fmt.Errorf("db unavailable")
 	}
-	if payload.RepairRunID != "" {
-		_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "repairing", "updated_at": time.Now().UTC()}).Error
+	if payload.Target != "node_integration" && payload.RepairRunID != "" {
+		_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "repairing", "updated_at": time.Now().UTC()}).Error
 	}
 
 	var draft orm.WorkflowDraft
-	if err := db.Where("id = ? AND deleted_at IS NULL", payload.DraftID).First(&draft).Error; err != nil {
+	if payload.Target == "node_integration" {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			current, owns, err := lockWorkflowRepairOwner(tx, payload)
+			if err != nil {
+				return err
+			}
+			if !owns || current.Version != payload.DraftVersion {
+				return errRepairStaleDraft
+			}
+			draft = current
+			return tx.Model(&orm.WorkflowRepairRun{}).Where("id = ?", payload.RepairRunID).Updates(map[string]any{"status": "repairing", "updated_at": time.Now().UTC()}).Error
+		})
+		if err != nil {
+			finishErr := finishNodeIntegrationFailure(db, payload, "stale", "E_REPAIR_STALE_DRAFT", "草稿或修复任务已更新，本次修复未应用。请基于最新草稿重新修复。")
+			return asyncjob.Result{ErrorCode: "repair_stale_draft"}, errors.Join(err, finishErr)
+		}
+	} else if err := db.Where("id = ? AND deleted_at IS NULL", payload.DraftID).First(&draft).Error; err != nil {
 		log.Printf("[repair_job] draft not found draft_id=%s err=%v", payload.DraftID, err)
 		return asyncjob.Result{ErrorCode: generateErrDraftNotFound}, fmt.Errorf("draft not found: %w", err)
 	}
 	if draft.Version != payload.DraftVersion {
 		if payload.RepairRunID != "" {
-			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "stale", "updated_at": time.Now().UTC()}).Error
+			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "stale", "updated_at": time.Now().UTC()}).Error
 		}
 		return asyncjob.Result{ErrorCode: "repair_stale_draft"}, fmt.Errorf("repair stale draft")
 	}
@@ -1515,14 +1563,17 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		}
 		log.Printf("[repair_job] RESTORE draft_id=%s status=%q warning=%q",
 			payload.DraftID, payload.PrevStatus, updates["generate_warning"])
-		_ = db.Model(&orm.WorkflowDraft{}).Where("id = ? AND deleted_at IS NULL", payload.DraftID).Updates(updates)
-		if payload.RepairRunID != "" {
+		result := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND generate_status = ? AND deleted_at IS NULL", payload.DraftID, payload.DraftVersion, generateStatusRepairing).Updates(updates)
+		if result.Error == nil && result.RowsAffected == 1 && payload.RepairRunID != "" {
 			// diagnostics_after_json is written by the validation path with the
 			// structured report. Do not replace it with a generic error string.
-			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "failed", "updated_at": time.Now().UTC()}).Error
+			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "failed", "updated_at": time.Now().UTC()}).Error
 		}
 	}
 
+	if payload.Target == "node_integration" {
+		return handleNodeIntegrationRepair(ctx, db, draft, payload, llmConfig)
+	}
 	if payload.Target == "scripts" || payload.Target == "full" {
 		snapshot := workflowRepairSnapshot{
 			WorkflowYAML: draft.WorkflowYAMLContent,
@@ -1561,7 +1612,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		scriptsJSON := string(scriptsBytes)
 		afterDiagnostics := diagnoseWorkflowWithProfile(snapshot.WorkflowYAML, snapshot.StateYAML, snapshot.ScenarioMD, scriptsJSON, graphengine.ProfilePublish)
 		if payload.RepairRunID != "" {
-			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
+			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 		}
 		if hasDiagnosticErrorsForTarget(afterDiagnostics, "full") {
 			restoreStatus("repair validation failed")
@@ -1576,14 +1627,14 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		result := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND deleted_at IS NULL", draft.ID, payload.DraftVersion).Updates(updates)
 		if result.Error != nil || result.RowsAffected != 1 {
 			if payload.RepairRunID != "" {
-				_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Update("status", "stale").Error
+				_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Update("status", "stale").Error
 			}
 			return asyncjob.Result{ErrorCode: "repair_stale_draft"}, fmt.Errorf("repair stale draft")
 		}
 		if payload.RepairRunID != "" {
 			files := []string{"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts"}
 			changes, _ := json.Marshal(map[string]any{"files": files})
-			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "succeeded", "changes_json": string(changes), "updated_at": time.Now().UTC()}).Error
+			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "succeeded", "changes_json": string(changes), "updated_at": time.Now().UTC()}).Error
 		}
 		return asyncjob.Result{}, nil
 	}
@@ -1623,7 +1674,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		}
 		afterDiagnostics := diagnoseWorkflow(draft.WorkflowYAMLContent, draft.StateYAMLContent, scenarioMD, draft.ScriptsContent)
 		if payload.RepairRunID != "" {
-			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
+			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 		}
 		if hasDiagnosticErrorsForTarget(afterDiagnostics, "scenario") {
 			restoreStatus("repair validation failed")
@@ -1639,13 +1690,13 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		result := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND deleted_at IS NULL", draft.ID, payload.DraftVersion).Updates(updates)
 		if result.Error != nil || result.RowsAffected != 1 {
 			if payload.RepairRunID != "" {
-				_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "stale", "updated_at": time.Now().UTC()}).Error
+				_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "stale", "updated_at": time.Now().UTC()}).Error
 			}
 			log.Printf("[repair_job/scenario] DB save failed: %v", err)
 			return asyncjob.Result{ErrorCode: "repair_stale_draft"}, fmt.Errorf("save repair: stale draft")
 		}
 		if payload.RepairRunID != "" {
-			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "succeeded", "changes_json": `{"files":["scenario/scenario.md"]}`, "updated_at": time.Now().UTC()}).Error
+			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "succeeded", "changes_json": `{"files":["scenario/scenario.md"]}`, "updated_at": time.Now().UTC()}).Error
 		}
 		log.Printf("[repair_job/scenario] SUCCESS draft_id=%s new_version=%d", payload.DraftID, draft.Version+1)
 		return asyncjob.Result{}, nil
@@ -1688,7 +1739,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	}
 	afterDiagnostics := diagnoseWorkflowWithProfile(finalWorkflowYAML, finalStateYAML, draft.ScenarioContent, draft.ScriptsContent, profile)
 	if payload.RepairRunID != "" {
-		_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
+		_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Update("diagnostics_after_json", diagnosticsJSON(afterDiagnostics)).Error
 	}
 	if hasDiagnosticErrorsForTarget(afterDiagnostics, payload.Target) {
 		restoreStatus("repair validation failed")
@@ -1707,7 +1758,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	result := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND deleted_at IS NULL", draft.ID, payload.DraftVersion).Updates(updates)
 	if result.Error != nil || result.RowsAffected != 1 {
 		if payload.RepairRunID != "" {
-			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "stale", "updated_at": time.Now().UTC()}).Error
+			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "stale", "updated_at": time.Now().UTC()}).Error
 		}
 		log.Printf("[repair_job/statemachine] DB save failed: %v", err)
 		return asyncjob.Result{ErrorCode: "repair_stale_draft"}, fmt.Errorf("save repair: stale draft")
@@ -1717,7 +1768,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		if resp.WorkflowYAML != "" {
 			files = `["workflow.yaml","scenario/state.yml"]`
 		}
-		_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=?", payload.RepairRunID).Updates(map[string]any{"status": "succeeded", "changes_json": `{"files":` + files + `}`, "updated_at": time.Now().UTC()}).Error
+		_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "succeeded", "changes_json": `{"files":` + files + `}`, "updated_at": time.Now().UTC()}).Error
 	}
 	log.Printf("[repair_job/statemachine] SUCCESS draft_id=%s new_version=%d status=%q warning=%q",
 		payload.DraftID, draft.Version+1, payload.PrevStatus, newWarning)

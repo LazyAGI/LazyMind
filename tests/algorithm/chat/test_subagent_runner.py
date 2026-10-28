@@ -617,7 +617,8 @@ async def _run_completion_review_scenario(
 
 
 @pytest.mark.asyncio
-async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path):
+@pytest.mark.parametrize('agent_type', ['research', 'workflow_step'])
+async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path, agent_type):
     verdict = json.dumps({
         'completed': True,
         'requires_artifact': False,
@@ -654,7 +655,7 @@ async def test_completion_review_does_not_block_event_loop(monkeypatch, tmp_path
 
     monkeypatch.setattr(runner_mod, '_evaluate_completion_async', timed_evaluate)
     _raw, events = await _run_completion_review_scenario(
-        monkeypatch, tmp_path, SlowModel(),
+        monkeypatch, tmp_path, SlowModel(), agent_type=agent_type,
     )
 
     assert timer is not None
@@ -724,7 +725,8 @@ async def test_missing_resumed_file_is_not_completion_evidence(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
-async def test_cancel_during_completion_review_discards_late_success(monkeypatch, tmp_path):
+@pytest.mark.parametrize('agent_type', ['research', 'workflow_step'])
+async def test_cancel_during_completion_review_discards_late_success(monkeypatch, tmp_path, agent_type):
     evaluation_started = threading.Event()
 
     class SlowModel:
@@ -754,7 +756,7 @@ async def test_cancel_during_completion_review_discards_late_success(monkeypatch
         evaluation_boundary = asyncio.get_running_loop().time()
 
     raw, events = await _run_completion_review_scenario(
-        monkeypatch, tmp_path, SlowModel(), before_final=before_final,
+        monkeypatch, tmp_path, SlowModel(), before_final=before_final, agent_type=agent_type,
     )
 
     assert asyncio.get_running_loop().time() - evaluation_boundary < 0.15
@@ -1005,9 +1007,15 @@ def test_stopped_task_never_evaluates_or_succeeds(completion_case, stopped):
 def test_workflow_output_contracts_keep_their_existing_rules(completion_case, params, save, expected):
     events, model, _ = completion_case(
         agent_type='workflow_step', params=params, output_slots=['document'], save=save,
+        objective='Explain the result.' if not params else 'Generate the declared document.',
+        verdict={'completed': True, 'requires_artifact': False, 'artifact_keys': [],
+                 'reason': 'The explanation is complete.'},
     )
     assert _terminal(events)['status'] == expected
-    model.share.assert_not_called()
+    if params:
+        model.share.assert_not_called()
+    else:
+        model.share.assert_called_once()
 
 
 def test_text_cannot_replace_a_declared_file_artifact(completion_case):
@@ -1036,13 +1044,9 @@ def test_required_text_draft_is_committed_before_completion(completion_case):
 
 
 @pytest.mark.parametrize('final', [
-    '成功 9 页，0 失败。',
     '成功 9 页，失败 0。',
-    'The first conversion failed, but the retry succeeded.',
-    'I cannot complete the required action.',
-    '缺少页脚，需要用户审核。',
 ])
-def test_workflow_summary_does_not_introduce_model_review(completion_case, final):
+def test_workflow_zero_failure_counts_do_not_introduce_model_review(completion_case, final):
     events, model, _ = completion_case(
         agent_type='workflow_step', final=final,
         params={'required_output_artifact_keys': ['document'],
@@ -1054,6 +1058,59 @@ def test_workflow_summary_does_not_introduce_model_review(completion_case, final
     assert _terminal(events)['status'] == 'succeeded'
     assert any(event['type'] == 'artifact' for event in events)
     model.share.assert_not_called()
+
+
+@pytest.mark.parametrize('final,completed', [
+    ('成功 9 页，0 失败。', True),
+    ('The first conversion failed, but the retry succeeded.', True),
+    ('I cannot complete the required action.', False),
+    ('缺少页脚，需要用户审核。', False),
+])
+def test_workflow_uncertain_completion_is_reviewed_without_losing_artifacts(completion_case, final, completed):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', final=final,
+        params={'required_output_artifact_keys': ['document'],
+                'output_slot_types': {'document': 'file'}},
+        output_slots=['document'], save=('document', 'file'),
+        verdict={'completed': completed, 'requires_artifact': True, 'artifact_keys': ['document'],
+                 'reason': 'Required action completed.' if completed else 'Required action incomplete.'},
+    )
+    assert _terminal(events)['status'] == ('succeeded' if completed else 'failed')
+    assert any(event['type'] == 'artifact' for event in events)
+    model.share.assert_called_once()
+
+
+@pytest.mark.parametrize('objective,final,completed', [
+    ('使用记忆写入工具更新项目记忆文件。', '步骤结论：任务失败，缺少更新记忆文件工具，未写入任何文件。', False),
+    ('读取章节并提出复核意见，不写入文件。', '已完成复核，情节与摘要一致。', True),
+])
+def test_workflow_without_outputs_checks_actual_completion(completion_case, objective, final, completed):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', objective=objective, final=final,
+        params={'required_output_artifact_keys': []}, output_slots=[],
+        verdict={'completed': completed, 'requires_artifact': False, 'artifact_keys': [], 'reason': final},
+    )
+    terminal = _terminal(events)
+    assert terminal['status'] == ('succeeded' if completed else 'failed')
+    assert terminal['summary'] == final
+    if not completed:
+        assert terminal['type'] == 'error'
+        assert terminal['current_phase'] == 'objective_incomplete'
+    assert not any(event['type'] == 'artifact' for event in events)
+    model.share.assert_called_once()
+
+
+def test_completed_negative_review_is_not_an_execution_failure(completion_case):
+    final = '复核完成：passed=false，章节超过用户要求的200字，审核失败。'
+    events, model, _ = completion_case(
+        agent_type='workflow_step', objective='审核章节，输出审核结果，可以通过或不通过。', final=final,
+        params={'required_output_artifact_keys': ['document'], 'output_slot_types': {'document': 'text'}},
+        output_slots=['document'], save=('document', 'text'),
+        verdict={'completed': True, 'requires_artifact': True, 'artifact_keys': ['document'], 'reason': final},
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    model.share.assert_called_once()
+    assert 'negative findings' in model.share.return_value.call_args.args[0]
 
 
 def test_workflow_without_model_review_still_requires_actual_delivery(completion_case):
@@ -1248,6 +1305,73 @@ def test_subagent_plan_preserves_extension_params_without_structured_duplicates(
     assert 'must never ask the user a question' in role_section.content
     assert 'Never emit a fenced Markdown block with the language `editable`' in role_section.content
     assert all(section.section_id != 'editable_writing' for section in plan.prompt.sections)
+
+
+@pytest.mark.parametrize('agent_type', ['workflow_step', 'general'])
+def test_empty_output_contract_does_not_invite_undeclared_workflow_artifacts(tmp_path, agent_type):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='empty-outputs', conversation_id='conversation', agent_type=agent_type,
+        objective='Update project memory using the declared writer.', params={},
+        workspace_path=str(tmp_path), input_slots=[], output_slots=[], db=None,
+        emit=lambda _event: None,
+    )
+    plan = runner_mod._build_subagent_plan(ctx, None, tools=[], tool_prompt_appendices={})
+    contract = next(s.content for s in plan.prompt.sections if s.section_id == 'subagent_output_contract')
+    if agent_type == 'workflow_step':
+        assert 'an empty declared list forbids artifact writes' in contract
+        assert 'report the missing capability as a task failure' in contract
+        assert 'can still require a deliverable: save it' not in contract
+        assert 'Exact save_artifacts call shape' not in contract
+    else:
+        assert 'can still require a deliverable: save it' in contract
+        assert 'Exact save_artifacts call shape' in contract
+
+
+@pytest.mark.parametrize('params,expected', [
+    ({'user_input': '请写约200字的章节。'}, '请写约200字的章节。'),
+    ({'launch_user_input': '请写约200字的章节。', 'user_input': '继续',
+      'current_user_input': '继续'}, '请写约200字的章节。'),
+    ({'launch_user_input': '请写约200字的章节。', 'current_user_input': '重新执行',
+      'runtime_instruction': '本次改为约300字。'}, '本次改为约300字。'),
+])
+def test_workflow_plan_keeps_runtime_length_above_step_defaults_without_db(tmp_path, params, expected):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='runtime-length', conversation_id='conversation', agent_type='workflow_step',
+        objective='生成2000–3000字的章节并保存到chapter_text。', params=params,
+        workspace_path=str(tmp_path), input_slots=[], output_slots=['chapter_text'], db=None,
+        emit=lambda _event: None,
+    )
+    plan = runner_mod._build_subagent_plan(ctx, None, tools=[], tool_prompt_appendices={})
+    intent = next(s for s in plan.prompt.sections if s.section_id == 'subagent_intent')
+    assert expected in intent.content
+    assert '请写约200字的章节。' in intent.content
+    assert intent.authoritative
+    assert intent.content_kind == 'instruction'
+    assert 'instead of conflicting defaults or examples in the step prompt' in intent.content
+    assert 'declared output keys/types' in intent.content
+    assert 'tool permissions, workflow transitions or approval gates' in intent.content
+    assert '继续' not in intent.content
+    assert '重新执行' not in intent.content
+    contract = next(s.content for s in plan.prompt.sections if s.section_id == 'subagent_output_contract')
+    assert 'chapter_text' in contract
+
+
+def test_completion_review_uses_the_same_runtime_length_requirement(completion_case):
+    events, model, _ = completion_case(
+        agent_type='workflow_step', objective='生成2000–3000字章节。',
+        params={'launch_user_input': '请写约200字的章节。', 'runtime_instruction': '本次改为约300字。'},
+        output_slots=[], final='已完成约300字的章节。',
+        verdict={'completed': True, 'requires_artifact': False, 'artifact_keys': [], 'reason': '满足本次字数要求。'},
+    )
+    assert _terminal(events)['status'] == 'succeeded'
+    prompt = model.share.return_value.call_args.args[0]
+    assert '请写约200字的章节。' in prompt
+    assert '本次改为约300字。' in prompt
+    assert 'runtime content requirements over conflicting step defaults' in prompt
 
 
 def test_subagent_plan_uses_200_rounds_in_max_mode(tmp_path):
@@ -2097,8 +2221,10 @@ def test_completion_invalid_format_retry_preserves_negative_verdict():
     assert model.share.call_count == 2
 
 
-def test_invalid_reviewer_retains_saved_delivery(completion_case):
+@pytest.mark.parametrize('agent_type', ['document_generation', 'workflow_step'])
+def test_invalid_reviewer_retains_saved_delivery(completion_case, agent_type):
     events, model, _ = completion_case(
+        agent_type=agent_type, params={'required_output_artifact_keys': ['document']},
         output_slots=['document'], save=('document', 'file'),
         final='The conversion failed before retrying.', verdict={'completed': 'true'},
     )

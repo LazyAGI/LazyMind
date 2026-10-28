@@ -36,4 +36,12 @@ describe.each([
     expect(getWorkflowDiagnosticMessage(t, { code: '2000102' })).toBe(t('errors.2000102'));
     expect(getWorkflowDiagnosticMessage(t, { code: 'UNRECOGNIZED_WORKFLOW_TEST_CODE', message: 'private backend detail' })).toBe(t('errors.2000509'));
   });
+
+  it('shows actionable integration failures and the exact missing user input', async () => {
+    await ready;
+    const t = i18n.getFixedT(language);
+    expect(getWorkflowDiagnosticMessage(t, { code: 'E_REPAIR_NODE_REMOVED', node_id: 'review' })).toContain('review');
+    expect(getWorkflowDiagnosticMessage(t, { code: 'E_REPAIR_NEEDS_INPUT', message: 'Where should a rejected review go?' })).toContain('Where should a rejected review go?');
+    expect(getWorkflowDiagnosticMessage(t, { code: 'E_REPAIR_MODEL_FAILED', message: 'private provider detail' })).not.toContain('private provider detail');
+  });
 });
