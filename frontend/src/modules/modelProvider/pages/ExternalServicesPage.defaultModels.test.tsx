@@ -103,6 +103,10 @@ describe("default-model service configuration", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /文档解析/ }));
     expect(screen.getByText("文档解析总开关")).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "文档解析" })).queryByRole("textbox")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /搜索引擎/ }));
+    expect(within(screen.getByRole("region", { name: "搜索引擎" })).queryByRole("textbox")).not.toBeInTheDocument();
   });
 
   it("shows a three-step official guide for a translation source that requires a key", async () => {

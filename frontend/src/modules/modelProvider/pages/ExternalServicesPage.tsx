@@ -400,16 +400,6 @@ function getServiceFields(provider: ApiExternalProvider, category: ServiceCatego
   return provider.base_url ? ["baseUrl", "apiKey"] : ["apiKey"];
 }
 
-function serviceMatchesKeyword(service: ExternalServiceConfig, keyword: string) {
-  const normalizedKeyword = keyword.trim().toLowerCase();
-  if (!normalizedKeyword) {
-    return true;
-  }
-  return [service.name, service.description, service.summary].some((value) =>
-    value.toLowerCase().includes(normalizedKeyword),
-  );
-}
-
 export function renderExternalServiceDescription(description: string) {
   const parts = description.split(/(https?:\/\/[^\s，。；、）)]+)/g);
 
@@ -797,10 +787,6 @@ export default function ExternalServicesPage({
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const requestIdRef = useRef(0);
   const normalizedSearchValue = "";
-  const [categorySearchValues, setCategorySearchValues] = useState<Record<"parsing" | "search", string>>({
-    parsing: "",
-    search: "",
-  });
   const [expandedCategories, setExpandedCategories] = useState<ServiceCategoryKey[]>([]);
 
   useEffect(() => {
@@ -1143,18 +1129,6 @@ export default function ExternalServicesPage({
     return byCategory;
   }, [services]);
 
-  const filteredCategorizedServices = useMemo(() => {
-    return {
-      parsing: categorizedServices.parsing.filter((service) =>
-        serviceMatchesKeyword(service, categorySearchValues.parsing),
-      ),
-      search: categorizedServices.search.filter((service) =>
-        serviceMatchesKeyword(service, categorySearchValues.search),
-      ),
-      academic: categorizedServices.academic,
-      translation: categorizedServices.translation,
-    };
-  }, [categorizedServices, categorySearchValues]);
   const activeServiceDisplayStatus =
     activeService?.status === "tbd"
       ? "tbd"
@@ -1163,32 +1137,6 @@ export default function ExternalServicesPage({
           ? "configured"
           : "missing"
         : activeService?.status;
-
-  const renderCategorySearch = (categoryKey: ServiceCategoryKey) => {
-    if (categoryKey !== "parsing" && categoryKey !== "search") {
-      return null;
-    }
-
-    return (
-      <Input
-        allowClear
-        className="model-provider-category-search"
-        prefix={<SearchOutlined />}
-        placeholder={
-          categoryKey === "parsing"
-            ? t("modelProvider.external.parsingSearchPlaceholder")
-            : t("modelProvider.external.searchEngineSearchPlaceholder")
-        }
-        value={categorySearchValues[categoryKey]}
-        onChange={(event) =>
-          setCategorySearchValues((previous) => ({
-            ...previous,
-            [categoryKey]: event.target.value,
-          }))
-        }
-      />
-    );
-  };
 
   const renderServiceCards = (items: ExternalServiceConfig[]) => items.length ? (
     <div className="model-provider-service-grid">
@@ -1224,7 +1172,7 @@ export default function ExternalServicesPage({
     }
 
     const categoryServices = categorizedServices[categoryKey];
-    const visibleServices = filteredCategorizedServices[categoryKey];
+    const visibleServices = categoryServices;
     if (!categoryServices.length && !(variant === "default-models" && category.key === "parsing" && parsingControl)) {
       return null;
     }
@@ -1270,7 +1218,6 @@ export default function ExternalServicesPage({
             {category.key === "parsing" && parsingControl ? (
               <div className="model-provider-default-parsing-control">{parsingControl}</div>
             ) : null}
-            {renderCategorySearch(category.key)}
             {category.key === "translation" ? (
               <div className="model-provider-translation-tiers">
                 {[
@@ -1314,7 +1261,6 @@ export default function ExternalServicesPage({
               <p>{t(category.descKey)}</p>
             </div>
           </div>
-          {renderCategorySearch(category.key)}
         </div>
 
         {renderServiceCards(visibleServices)}
