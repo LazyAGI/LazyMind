@@ -1,32 +1,11 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
 from lazymind.config import config
+from lazymind.model_token_limits import parse_token_limit
 
 from .models import ContextBudget
-
-_TOKEN_LIMIT_PATTERN = re.compile(r'^(\d+(?:\.\d+)?)\s*([KM])?$', re.IGNORECASE)
-
-
-def parse_token_limit(value: Any) -> Optional[int]:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int) and value > 0:
-        return value
-    if isinstance(value, float) and value > 0:
-        return int(value)
-    if not isinstance(value, str):
-        return None
-    match = _TOKEN_LIMIT_PATTERN.fullmatch(value.strip())
-    if not match:
-        return None
-    amount = float(match.group(1))
-    suffix = (match.group(2) or '').upper()
-    multiplier = {'K': 1024, 'M': 1024 * 1024}.get(suffix, 1)
-    parsed = int(amount * multiplier)
-    return parsed if parsed > 0 else None
 
 
 def _role_max_input_tokens(role_cfg: Any) -> Optional[int]:
@@ -49,13 +28,17 @@ def resolve_max_input_tokens(
     max_input_tokens: Any = None,
     llm_config: Optional[dict[str, Any]] = None,
 ) -> int:
-    parsed = parse_token_limit(max_input_tokens)
-    if parsed:
-        return parsed
-    parsed = _llm_config_max_input_tokens(llm_config)
-    if parsed:
-        return parsed
-    return max(1, int(config['context_compression_default_max_input_tokens']))
+    resolved = (parse_token_limit(max_input_tokens)
+                or _llm_config_max_input_tokens(llm_config)
+                or max(1, int(config['context_compression_default_max_input_tokens'])))
+    if isinstance(llm_config, dict):
+        selected = next((llm_config[role] for role in ('llm', 'vlm', 'chat')
+                         if isinstance(llm_config.get(role), dict)
+                         and _role_max_input_tokens(llm_config[role])), llm_config)
+        limit = parse_token_limit(selected.get('input_token_limit'))
+        if limit:
+            resolved = min(resolved, limit)
+    return resolved
 
 
 def _budget_source(

@@ -808,6 +808,30 @@ func TestValidateUIDeclarativeHTMLSlideExport(t *testing.T) {
 	}
 }
 
+func TestValidateUIViewModes(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ui   map[string]any
+		code string
+	}{
+		{"omitted", map[string]any{}, ""},
+		{"following", map[string]any{"default_panel_mode": "expanded", "follow_mode": map[string]any{"default": "following"}}, ""},
+		{"free", map[string]any{"default_panel_mode": "compact", "follow_mode": map[string]any{"default": "free"}}, ""},
+		{"unknown panel mode", map[string]any{"default_panel_mode": "fullscreen"}, "E_UI_PANEL_MODE_INVALID"},
+		{"invalid panel type", map[string]any{"default_panel_mode": []string{"expanded"}}, "E_UI_PANEL_MODE_INVALID"},
+		{"unknown follow mode", map[string]any{"follow_mode": map[string]any{"default": "auto"}}, "E_UI_FOLLOW_MODE_INVALID"},
+		{"missing default", map[string]any{"follow_mode": map[string]any{}}, "E_UI_FOLLOW_MODE_INVALID"},
+		{"invalid follow type", map[string]any{"follow_mode": true}, "E_UI_FOLLOW_MODE_INVALID"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			diagnostics := validateUI(test.ui, nil, nil, nil, ProfilePublish)
+			if test.code == "" && len(diagnostics) != 0 || test.code != "" && !hasDiagnostic(diagnostics, test.code) {
+				t.Fatalf("unexpected diagnostics: %#v", diagnostics)
+			}
+		})
+	}
+}
+
 func TestValidateUITabVisibilityAndHTMLPreview(t *testing.T) {
 	known := map[string]bool{"plan": true, "skip_prototype": true, "prototype": true}
 	specs := map[string]uiMaterialSpec{

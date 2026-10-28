@@ -716,7 +716,8 @@ function OrdinaryTaskDetails({ item }: { item: OrdinaryTaskItem }) {
     <OrdinaryReferenceSources operations={view?.knowledge_operations} sources={view ? publicSourcesToChatSources(view.sources) : item.task?.sources ?? []} />
     {more("sources")}
     {more("knowledge_operations")}
-    <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()} />
+    <TaskArtifactList artifacts={view?.stage_artifacts ?? []} sourceContexts={view ? { [view.display_key]: sourceContext } : undefined} onReload={() => reload()}
+      workflow={view?.session_id ? { sessionId: view.session_id, stepId: view.workflow_step_id || item.step?.step_id || '' } : undefined} />
     {more("stage_artifacts")}
     {loadError && <div role="alert" className="ordinary-stale-warning">{t("taskCenter.ordinaryLoadError")}<button type="button" onClick={() => void reload().catch(() => undefined)}>{t("taskCenter.ordinaryReload")}</button></div>}
   </div></SourceImportProvider>;
@@ -1103,7 +1104,12 @@ function OrdinaryTaskCenter({
             })}
           </ol>}
           {/* A declared extension may own final deliverable presentation. */}
-          {!hideFinalArtifacts && !hideGroupedArtifacts && <TaskArtifactList artifacts={finalArtifacts} final sourceContexts={sourceContexts} onReload={onReloadArtifacts} />}
+          {!hideFinalArtifacts && !hideGroupedArtifacts && <TaskArtifactList artifacts={finalArtifacts} final sourceContexts={sourceContexts} onReload={onReloadArtifacts}
+            workflowForArtifact={artifact => {
+              const owner = timeline.items.find(item => item.ordinary?.display_key === artifact.producer_display_key);
+              const view = owner?.ordinary;
+              return view?.session_id ? { sessionId: view.session_id, stepId: view.workflow_step_id || owner?.step?.step_id || '' } : undefined;
+            }} />}
         </>
       )}
     </div>

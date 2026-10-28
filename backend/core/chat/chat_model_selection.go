@@ -16,6 +16,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/credentialvault"
 	"lazymind/core/log"
 	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
@@ -84,6 +85,7 @@ type chatModelRoute struct {
 }
 
 type chatModelSelectionResponse struct {
+	LogoDataURL  string `json:"logo_data_url,omitempty"`
 	Mode         string `json:"mode"`
 	ModelID      string `json:"model_id,omitempty"`
 	ProviderID   string `json:"provider_id,omitempty"`
@@ -97,6 +99,7 @@ type chatModelSelectionResponse struct {
 }
 
 type chatModelListItem struct {
+	LogoDataURL  string   `json:"logo_data_url,omitempty"`
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	GroupID      string   `json:"group_id"`
@@ -112,10 +115,12 @@ type chatModelListItem struct {
 }
 
 type chatModelProviderItem struct {
-	ID     string              `json:"id"`
-	Name   string              `json:"name"`
-	Source string              `json:"source"`
-	Models []chatModelListItem `json:"models"`
+	LogoDataURL string              `json:"logo_data_url,omitempty"`
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	IsCustom    bool                `json:"is_custom"`
+	Source      string              `json:"source"`
+	Models      []chatModelListItem `json:"models"`
 }
 
 type chatModelsResponse struct {
@@ -428,6 +433,30 @@ func snapshotForChatModel(model *availableChatModel) (json.RawMessage, error) {
 	return json.Marshal(chatModelSnapshotForModel(model))
 }
 
+// lockAndReloadSelectableChatModel keeps every durable fixed binding in the
+// same supplier lock order as metadata edits. The caller owns the transaction
+// and must hold it until the conversation reference has been persisted.
+func lockAndReloadSelectableChatModel(ctx context.Context, db *gorm.DB, userID string, model *availableChatModel) (*availableChatModel, error) {
+	if !chatModelSelectable(model) {
+		return nil, errChatModelUnavailable
+	}
+	if model.Source == "cloud" {
+		return model, nil
+	}
+	if err := modelprovider.LockModelSupplierForConfiguration(db, model.ID); err != nil {
+		return nil, errChatModelUnavailable
+	}
+	models, err := loadAvailableChatModels(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
+	current := findAvailableChatModelBySource(models, model.ID, model.Source)
+	if !chatModelSelectable(current) {
+		return nil, errChatModelUnavailable
+	}
+	return current, nil
+}
+
 func resolveInitialChatModelBinding(ctx context.Context, db *gorm.DB, userID string, requested *initialChatModelSelection) (*resolvedChatModelBinding, error) {
 	models, err := loadAvailableChatModels(ctx, db, userID)
 	if err != nil {
@@ -454,6 +483,10 @@ func resolveInitialChatModelBinding(ctx context.Context, db *gorm.DB, userID str
 		return &resolvedChatModelBinding{
 			Mode: chatModelModeFixed, ModelID: &modelID, Source: &source, Version: 1,
 		}, nil
+	}
+	model, err = lockAndReloadSelectableChatModel(ctx, db, userID, model)
+	if err != nil {
+		return nil, err
 	}
 	snapshot, err := snapshotForChatModel(model)
 	if err != nil {
@@ -495,6 +528,7 @@ func selectionFromModel(mode string, model *availableChatModel, version int64) c
 	selection.GroupID = model.ProviderGroupID
 	selection.GroupName = model.GroupName
 	selection.ModelName = model.ModelName
+	selection.LogoDataURL = model.LogoDataURL
 	selection.Source = model.Source
 	if chatModelUsable(model) {
 		selection.Availability = chatModelAvailabilityAvailable
@@ -563,6 +597,20 @@ func resolvedSelectionForConversation(conversation *orm.Conversation, models []a
 		selection.Mode = chatModelModeAuto
 		selection.Version = conversation.ChatModelVersion
 		selection.Availability = chatModelAvailabilityUnavailable
+		// The snapshot identifies the last model; its logo follows only the same
+		// supplier and connection that remain visible to the current user.
+		var snapshot chatModelSnapshot
+		if json.Unmarshal(conversation.ChatModelSnapshot, &snapshot) == nil && snapshot.ModelID != "" &&
+			snapshot.ProviderID != "" && snapshot.ProviderGroupID != "" && snapshot.Source != "" {
+			for index := range models {
+				model := &models[index]
+				if model.ID == snapshot.ModelID && model.ProviderID == snapshot.ProviderID &&
+					model.ProviderGroupID == snapshot.ProviderGroupID && model.Source == snapshot.Source {
+					selection.LogoDataURL = model.LogoDataURL
+					break
+				}
+			}
+		}
 		for index := range models {
 			if chatModelUsable(&models[index]) {
 				selection.Availability = chatModelAvailabilityAvailable
@@ -651,8 +699,12 @@ func buildChatModelsResponse(ctx context.Context, db *gorm.DB, userID string, co
 		key := model.ProviderID + "\x00" + model.Source
 		provider := providerByKey[key]
 		if provider == nil {
+			displayName := strings.TrimSpace(model.ProviderDisplayName)
+			if displayName == "" {
+				displayName = model.ProviderName
+			}
 			provider = &chatModelProviderItem{
-				ID: model.ProviderID, Name: model.ProviderName, Source: model.Source, Models: []chatModelListItem{},
+				ID: model.ProviderID, Name: displayName, IsCustom: model.ProviderIsCustom, LogoDataURL: model.LogoDataURL, Source: model.Source, Models: []chatModelListItem{},
 			}
 			providerByKey[key] = provider
 			providerKeys = append(providerKeys, key)
@@ -676,7 +728,7 @@ func buildChatModelsResponse(ctx context.Context, db *gorm.DB, userID string, co
 			badges = append(badges, "degraded")
 		}
 		provider.Models = append(provider.Models, chatModelListItem{
-			ID: model.ID, Name: model.ModelName, GroupID: model.ProviderGroupID, GroupName: model.GroupName,
+			ID: model.ID, Name: model.ModelName, LogoDataURL: model.LogoDataURL, GroupID: model.ProviderGroupID, GroupName: model.GroupName,
 			Source: model.Source, Capabilities: append([]string(nil), model.Capabilities...), Badges: badges,
 			Availability: model.Availability, Lifecycle: model.Lifecycle,
 			Current: current, Default: isDefault, Shared: model.Source == "shared",
@@ -834,8 +886,9 @@ func PatchConversationModel(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			model := findAvailableChatModelBySource(models, request.ModelID, request.Source)
-			if !chatModelSelectable(model) {
-				return errChatModelUnavailable
+			model, err = lockAndReloadSelectableChatModel(r.Context(), tx, userID, model)
+			if err != nil {
+				return err
 			}
 			snapshot, err := snapshotForChatModel(model)
 			if err != nil {
@@ -1223,7 +1276,7 @@ func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (
 	if !chatModelUsable(model) {
 		return nil, errChatModelUnavailable
 	}
-	fixed, err := buildChatLLMConfig(ctx, model)
+	fixed, err := buildChatLLMConfig(ctx, db, model)
 	if err != nil {
 		return nil, err
 	}
@@ -1234,7 +1287,7 @@ func LoadDefaultChatLLMConfig(ctx context.Context, db *gorm.DB, userID string) (
 	return cfg, nil
 }
 
-func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, error) {
+func buildChatLLMConfig(ctx context.Context, db *gorm.DB, model *availableChatModel) (any, error) {
 	if model == nil {
 		return nil, errChatModelUnavailable
 	}
@@ -1250,13 +1303,22 @@ func buildChatLLMConfig(ctx context.Context, model *availableChatModel) (any, er
 		}
 		return fixedLLM, nil
 	}
-	apiKey, err := modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
+	baseURL, apiKey := model.BaseURL, model.APIKey
+	var advanced credentialvault.ProviderRequestAdvanced
+	var err error
+	if model.ProviderGroupID != "" {
+		var runtimeConfig modelprovider.RuntimeProviderConfiguration
+		runtimeConfig, err = modelprovider.ResolveProviderRuntimeConfiguration(ctx, db, model.ProviderGroupID)
+		baseURL, apiKey, advanced = runtimeConfig.BaseURL, runtimeConfig.APIKey, runtimeConfig.Advanced
+	} else {
+		apiKey, err = modelprovider.ResolveAPIKey(model.APIKey, model.APIKeyCiphertext)
+	}
 	if err != nil {
 		return nil, errChatModelUnavailable
 	}
 	fixed := modelconfig.BuildLLMConfig([]modelconfig.SelectedRuntimeModel{{
-		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ProviderName: model.ProviderName, ModelName: model.ModelName,
-		BaseURL: model.BaseURL, APIKey: apiKey, MaxInputTokens: model.MaxInputTokens,
+		ModelType: "llm", TechnicalModelType: model.ModelType, Vision: model.Vision, ModelSettings: model.ModelSettings, RequestAdvanced: advanced, ProviderName: model.ProviderName, ModelName: model.ModelName,
+		BaseURL: baseURL, APIKey: apiKey, SkipAuth: strings.TrimSpace(apiKey) == "" && strings.TrimSpace(baseURL) != "", MaxInputTokens: model.MaxInputTokens, InputTokenLimit: model.InputTokenLimit, MaxOutputTokens: model.MaxOutputTokens,
 	}})
 	fixedLLM, _ := fixed["llm"]
 	if fixedLLM == nil {

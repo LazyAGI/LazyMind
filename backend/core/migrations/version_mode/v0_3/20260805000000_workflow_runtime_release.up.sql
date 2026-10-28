@@ -127,6 +127,7 @@ ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_ui_preferences ADD COLUMN IF NOT EXISTS workflow_trust_notice_dismissed BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks
     ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE sub_agent_tasks
@@ -157,6 +158,7 @@ UPDATE user_ui_preferences SET document_directories_enabled = TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN document_directories_generation BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE user_ui_preferences ADD COLUMN sensitive_word_filter_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE user_ui_preferences ADD COLUMN performance_stats_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_ui_preferences ADD COLUMN workflow_trust_notice_dismissed BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE sub_agent_tasks ADD COLUMN sources JSON NOT NULL DEFAULT '[]';
 ALTER TABLE sub_agent_tasks ADD COLUMN writing_subtasks JSON NOT NULL DEFAULT '[]';
 
@@ -2651,6 +2653,7 @@ CREATE TABLE IF NOT EXISTS conversation_result_read_state (
 );
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS document_publication_operations (
+ publication_id VARCHAR(64) NOT NULL DEFAULT '', connection_id VARCHAR(255) NOT NULL DEFAULT '',
  id VARCHAR(64) PRIMARY KEY, owner_user_id VARCHAR(255) NOT NULL,
  idempotency_key VARCHAR(128) NOT NULL, session_id VARCHAR(64) NOT NULL,
  slot_id VARCHAR(255) NOT NULL, item_index INTEGER NOT NULL,
@@ -2667,17 +2670,21 @@ CREATE TABLE IF NOT EXISTS document_publication_operations (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_key ON document_publication_operations(owner_user_id,idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_document_publication_session ON document_publication_operations(session_id);
+CREATE INDEX IF NOT EXISTS idx_document_publication_operations_publication_id ON document_publication_operations(publication_id);
 CREATE TABLE IF NOT EXISTS document_publication_bindings (
+ binding_scope VARCHAR(64) NOT NULL DEFAULT '', connection_id VARCHAR(255) NOT NULL DEFAULT '',
+ last_success_hash VARCHAR(64) NOT NULL DEFAULT '', last_operation_id VARCHAR(64) NOT NULL DEFAULT '', last_success_at TIMESTAMP,
  id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, slot_id VARCHAR(255) NOT NULL,
  item_index INTEGER NOT NULL, owner_user_id VARCHAR(255) NOT NULL,
  pending_operation_id VARCHAR(64) NOT NULL DEFAULT '', provider VARCHAR(64) NOT NULL DEFAULT '',
  target_document JSON, remote_value JSON, source_revision_id VARCHAR(64) NOT NULL DEFAULT '',
  result_revision_id VARCHAR(64) NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index,binding_scope);
 
 -- +migrate Dialect sqlite
 CREATE TABLE IF NOT EXISTS document_publication_operations (
+ publication_id VARCHAR(64) NOT NULL DEFAULT '', connection_id VARCHAR(255) NOT NULL DEFAULT '',
  id VARCHAR(64) PRIMARY KEY, owner_user_id VARCHAR(255) NOT NULL,
  idempotency_key VARCHAR(128) NOT NULL, session_id VARCHAR(64) NOT NULL,
  slot_id VARCHAR(255) NOT NULL, item_index INTEGER NOT NULL,
@@ -2694,14 +2701,17 @@ CREATE TABLE IF NOT EXISTS document_publication_operations (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_key ON document_publication_operations(owner_user_id,idempotency_key);
 CREATE INDEX IF NOT EXISTS idx_document_publication_session ON document_publication_operations(session_id);
+CREATE INDEX IF NOT EXISTS idx_document_publication_operations_publication_id ON document_publication_operations(publication_id);
 CREATE TABLE IF NOT EXISTS document_publication_bindings (
+ binding_scope VARCHAR(64) NOT NULL DEFAULT '', connection_id VARCHAR(255) NOT NULL DEFAULT '',
+ last_success_hash VARCHAR(64) NOT NULL DEFAULT '', last_operation_id VARCHAR(64) NOT NULL DEFAULT '', last_success_at TIMESTAMP,
  id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, slot_id VARCHAR(255) NOT NULL,
  item_index INTEGER NOT NULL, owner_user_id VARCHAR(255) NOT NULL,
  pending_operation_id VARCHAR(64) NOT NULL DEFAULT '', provider VARCHAR(64) NOT NULL DEFAULT '',
  target_document JSON, remote_value JSON, source_revision_id VARCHAR(64) NOT NULL DEFAULT '',
  result_revision_id VARCHAR(64) NOT NULL DEFAULT ''
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_document_publication_item ON document_publication_bindings(session_id,slot_id,item_index,binding_scope);
 
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS user_environment_variables (
@@ -2828,7 +2838,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_skill_recordings_active_user ON skill_reco
 
 -- +migrate Dialect postgres,sqlite
 ALTER TABLE default_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE default_models ADD COLUMN model_settings TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE user_model_provider_group_models ADD COLUMN vision BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_model_provider_group_models ADD COLUMN input_token_limit VARCHAR(16);
+ALTER TABLE user_model_provider_group_models ADD COLUMN max_output_tokens VARCHAR(16);
 
 ALTER TABLE user_chat_settings ADD COLUMN default_permission_mode VARCHAR(32) NOT NULL DEFAULT 'always_ask';
 ALTER TABLE user_chat_settings ADD COLUMN permission_version BIGINT NOT NULL DEFAULT 1;
@@ -3474,3 +3487,222 @@ UPDATE datasets SET scene='academic_papers'
 -- +migrate Dialect sqlite
 UPDATE datasets SET scene='academic_papers'
  WHERE scene='general' AND CASE WHEN json_valid(ext) THEN json_extract(ext,'$.library_kind') ELSE NULL END='paper';
+
+-- Promote the oldest active connection endpoint once. Keep rollback metadata
+-- without storing API keys; connection/model IDs and ciphertext stay intact.
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE model_provider_endpoint_backups (
+    row_kind VARCHAR(16) NOT NULL,
+    row_id VARCHAR(64) NOT NULL,
+    base_url VARCHAR(1024) NOT NULL,
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    credential_revision BIGINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (row_kind, row_id)
+);
+INSERT INTO model_provider_endpoint_backups (row_kind, row_id, base_url, is_verified, credential_revision)
+SELECT 'provider', p.id, p.base_url, FALSE, 0
+FROM user_model_providers p
+WHERE p.deleted_at IS NULL AND LOWER(TRIM(p.category)) = 'model';
+INSERT INTO model_provider_endpoint_backups (row_kind, row_id, base_url, is_verified, credential_revision)
+SELECT 'connection', g.id, g.base_url, g.is_verified, g.credential_revision
+FROM user_model_provider_groups g
+JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id
+WHERE p.deleted_at IS NULL AND g.deleted_at IS NULL AND LOWER(TRIM(p.category)) = 'model';
+UPDATE user_model_providers
+SET base_url = COALESCE((
+    SELECT g.base_url FROM user_model_provider_groups g
+    WHERE g.user_model_provider_id = user_model_providers.id
+      AND g.create_user_id = user_model_providers.create_user_id AND g.deleted_at IS NULL
+    ORDER BY g.created_at ASC, g.id ASC LIMIT 1
+), base_url)
+WHERE deleted_at IS NULL AND LOWER(TRIM(category)) = 'model';
+UPDATE user_model_provider_groups
+SET is_verified = CASE WHEN base_url <> (
+        SELECT p.base_url FROM user_model_providers p WHERE p.id = user_model_provider_groups.user_model_provider_id
+    ) THEN FALSE ELSE is_verified END,
+    base_url = (SELECT p.base_url FROM user_model_providers p WHERE p.id = user_model_provider_groups.user_model_provider_id)
+WHERE deleted_at IS NULL AND EXISTS (
+    SELECT 1 FROM user_model_providers p
+    WHERE p.id = user_model_provider_groups.user_model_provider_id
+      AND p.create_user_id = user_model_provider_groups.create_user_id
+      AND p.deleted_at IS NULL AND LOWER(TRIM(p.category)) = 'model'
+);
+-- Keep the local credential revision/ciphertext unchanged: V2 authentication
+-- binds to that revision. Cloud revisions are independent; refresh their payload.
+INSERT INTO credential_backup_outbox
+(id, cloud_issuer, cloud_account_id, local_provider_group_id, local_credential_revision,
+ operation, backup_state, attempt_count, next_attempt_at, last_error_code, created_at, updated_at)
+SELECT b.id, b.cloud_issuer, b.cloud_account_id, g.id,
+       CASE WHEN g.credential_revision < 1 THEN 1 ELSE g.credential_revision END,
+       'upsert', 'pending', 0, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+FROM cloud_credential_bindings b
+JOIN cloud_credential_vault_accounts a ON a.cloud_issuer = b.cloud_issuer AND a.cloud_account_id = b.cloud_account_id
+JOIN user_model_provider_groups g ON g.id = b.local_provider_group_id
+JOIN model_provider_endpoint_backups old ON old.row_kind = 'connection' AND old.row_id = g.id
+WHERE a.backup_enabled = TRUE AND old.base_url <> g.base_url
+ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE SET
+    local_credential_revision = excluded.local_credential_revision,
+    operation = 'upsert', backup_state = 'pending', attempt_count = 0,
+    next_attempt_at = CURRENT_TIMESTAMP, last_error_code = 0, updated_at = CURRENT_TIMESTAMP;
+
+-- Supplier-wide selection references opaque key IDs; saved credential pools
+-- and ciphertext are preserved. Go initializes legacy pools after decryption.
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers ADD COLUMN active_key_group_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE user_model_providers ADD COLUMN active_key_id VARCHAR(64) NOT NULL DEFAULT '';
+ALTER TABLE user_model_providers ADD COLUMN active_key_initialized BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_model_providers ADD COLUMN active_key_revision BIGINT NOT NULL DEFAULT 0;
+
+-- A supplier owns one private credential/model store. Legacy customized or
+-- additional stores become independent custom suppliers without changing any
+-- group/model IDs or encrypted credential AAD. Keep metadata for safe rollback.
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers ADD COLUMN is_custom BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE user_model_providers ADD COLUMN protocol_name VARCHAR(255) NOT NULL DEFAULT '';
+DROP INDEX IF EXISTS uk_user_model_providers_user_default_provider;
+CREATE UNIQUE INDEX uk_user_model_providers_user_default_provider
+ON user_model_providers (create_user_id, default_model_provider_id) WHERE is_custom = FALSE;
+
+CREATE TABLE model_provider_custom_group_backups (
+    group_id VARCHAR(64) PRIMARY KEY,
+    provider_id VARCHAR(64) NOT NULL,
+    custom_provider_id VARCHAR(64) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    base_url VARCHAR(1024) NOT NULL,
+    is_verified BOOLEAN NOT NULL,
+    credential_revision BIGINT NOT NULL,
+    migrated_name VARCHAR(255) NOT NULL,
+    migrated_base_url VARCHAR(1024) NOT NULL
+);
+WITH source_rows AS (
+    SELECT g.id AS group_id, g.user_model_provider_id AS provider_id,
+           g.name, g.base_url, g.is_verified, g.credential_revision, g.created_at,
+           p.name AS provider_name, d.name AS catalog_name, d.base_url AS catalog_url,
+           CASE WHEN old.base_url IS NOT NULL AND RTRIM(p.base_url, '/') = RTRIM((
+               SELECT first_old.base_url
+               FROM user_model_provider_groups first_group
+               JOIN model_provider_endpoint_backups first_old ON first_old.row_kind = 'connection' AND first_old.row_id = first_group.id
+               WHERE first_group.user_model_provider_id = p.id AND first_group.create_user_id = p.create_user_id
+               ORDER BY first_group.created_at ASC, first_group.id ASC LIMIT 1
+           ), '/') THEN old.base_url ELSE g.base_url END AS effective_url
+    FROM user_model_provider_groups g
+    JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id
+    JOIN default_model_providers d ON d.id = p.default_model_provider_id
+    LEFT JOIN model_provider_endpoint_backups old ON old.row_kind = 'connection' AND old.row_id = g.id
+    WHERE p.deleted_at IS NULL AND g.deleted_at IS NULL AND LOWER(TRIM(p.category)) = 'model'
+), classified AS (
+    SELECT source_rows.*,
+           CASE WHEN TRIM(provider_name) = TRIM(catalog_name) AND TRIM(name) = TRIM(catalog_name)
+                     AND RTRIM(effective_url, '/') = RTRIM(catalog_url, '/') THEN 1 ELSE 0 END AS standard
+    FROM source_rows
+), numbered AS (
+    SELECT classified.*,
+           SUM(standard) OVER (PARTITION BY provider_id ORDER BY created_at ASC, group_id ASC ROWS UNBOUNDED PRECEDING) AS standard_position,
+           ROW_NUMBER() OVER (ORDER BY group_id ASC) AS migration_position
+    FROM classified
+)
+INSERT INTO model_provider_custom_group_backups
+(group_id, provider_id, custom_provider_id, name, base_url, is_verified, credential_revision, migrated_name, migrated_base_url)
+SELECT group_id, provider_id,
+       CASE WHEN standard = 1 AND standard_position = 1 THEN ''
+            ELSE 'mpc20261022072824-' || CAST(migration_position AS VARCHAR(20)) || '-' || SUBSTR(group_id, 1, 24) END,
+       name, base_url, is_verified, credential_revision,
+       CASE WHEN standard = 1 AND standard_position = 1 THEN name
+            WHEN TRIM(provider_name) <> TRIM(catalog_name) AND (TRIM(name) = TRIM(provider_name) OR TRIM(name) = TRIM(catalog_name) OR TRIM(name) = '') THEN provider_name
+            WHEN TRIM(name) = '' THEN catalog_name || ' (' || SUBSTR(group_id, 1, 8) || ')'
+            WHEN TRIM(name) = TRIM(catalog_name) OR TRIM(name) = TRIM(provider_name)
+                 THEN SUBSTR(name, 1, 242) || ' (' || SUBSTR(group_id, 1, 8) || ')'
+            ELSE name END,
+       effective_url
+FROM numbered;
+
+CREATE TABLE model_provider_custom_parent_backups (
+    provider_id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    migrated_name VARCHAR(255) NOT NULL,
+    base_url VARCHAR(1024) NOT NULL,
+    active_key_group_id VARCHAR(64) NOT NULL,
+    active_key_id VARCHAR(64) NOT NULL,
+    active_key_initialized BOOLEAN NOT NULL,
+    active_key_revision BIGINT NOT NULL,
+    migrated_base_url VARCHAR(1024) NOT NULL,
+    migrated_key_revision BIGINT NOT NULL
+);
+INSERT INTO model_provider_custom_parent_backups
+(provider_id, name, migrated_name, base_url, active_key_group_id, active_key_id, active_key_initialized, active_key_revision, migrated_base_url, migrated_key_revision)
+SELECT p.id, p.name, d.name, p.base_url, p.active_key_group_id, p.active_key_id, p.active_key_initialized, p.active_key_revision,
+       CASE WHEN EXISTS (SELECT 1 FROM model_provider_custom_group_backups b WHERE b.provider_id = p.id AND b.custom_provider_id <> '') THEN d.base_url ELSE p.base_url END,
+       p.active_key_revision + CASE WHEN EXISTS (SELECT 1 FROM model_provider_custom_group_backups b WHERE b.provider_id = p.id AND b.custom_provider_id <> '') THEN 1 ELSE 0 END
+FROM user_model_providers p JOIN default_model_providers d ON d.id = p.default_model_provider_id
+WHERE p.deleted_at IS NULL AND LOWER(TRIM(p.category)) = 'model';
+
+INSERT INTO user_model_providers
+(id, default_model_provider_id, name, description, base_url, active_key_group_id, active_key_id,
+ active_key_initialized, active_key_revision, category, capabilities, create_user_id, create_user_name,
+ created_at, updated_at, deleted_at, is_custom, protocol_name)
+SELECT b.custom_provider_id, p.default_model_provider_id, b.migrated_name, p.description, b.migrated_base_url,
+       CASE WHEN p.active_key_group_id = g.id AND RTRIM(b.migrated_base_url, '/') = RTRIM(g.base_url, '/') THEN p.active_key_group_id ELSE '' END,
+       CASE WHEN p.active_key_group_id = g.id AND RTRIM(b.migrated_base_url, '/') = RTRIM(g.base_url, '/') THEN p.active_key_id ELSE '' END,
+       CASE WHEN p.active_key_initialized = TRUE AND p.active_key_id = '' THEN TRUE
+            WHEN p.active_key_group_id = g.id AND RTRIM(b.migrated_base_url, '/') = RTRIM(g.base_url, '/') THEN p.active_key_initialized ELSE FALSE END,
+       0, p.category, REPLACE(REPLACE(REPLACE(p.capabilities, 'multi_group,', ''), ',multi_group', ''), 'multi_group', ''),
+       p.create_user_id, p.create_user_name, g.created_at, g.updated_at, NULL, TRUE, d.name
+FROM model_provider_custom_group_backups b
+JOIN user_model_provider_groups g ON g.id = b.group_id
+JOIN user_model_providers p ON p.id = b.provider_id
+JOIN default_model_providers d ON d.id = p.default_model_provider_id
+WHERE b.custom_provider_id <> '';
+
+UPDATE user_model_provider_groups
+SET user_model_provider_id = (SELECT CASE WHEN b.custom_provider_id <> '' THEN b.custom_provider_id ELSE b.provider_id END FROM model_provider_custom_group_backups b WHERE b.group_id = user_model_provider_groups.id),
+    name = (SELECT b.migrated_name FROM model_provider_custom_group_backups b WHERE b.group_id = user_model_provider_groups.id),
+    base_url = (SELECT b.migrated_base_url FROM model_provider_custom_group_backups b WHERE b.group_id = user_model_provider_groups.id),
+    is_verified = (SELECT CASE
+        WHEN RTRIM(b.base_url, '/') <> RTRIM(b.migrated_base_url, '/') THEN FALSE
+        WHEN b.custom_provider_id = '' THEN CASE WHEN p.active_key_group_id = '' OR p.active_key_group_id = b.group_id THEN b.is_verified ELSE FALSE END
+        WHEN p.active_key_group_id = b.group_id AND p.active_key_id <> '' THEN b.is_verified
+        WHEN p.active_key_id = '' AND p.active_key_initialized = FALSE AND TRIM(user_model_provider_groups.api_key) = '' AND TRIM(user_model_provider_groups.api_key_ciphertext) = '' THEN b.is_verified
+        ELSE FALSE END
+        FROM model_provider_custom_group_backups b JOIN user_model_providers p ON p.id = b.provider_id
+        WHERE b.group_id = user_model_provider_groups.id)
+WHERE id IN (SELECT group_id FROM model_provider_custom_group_backups);
+
+UPDATE user_model_provider_group_models
+SET user_model_provider_id = (SELECT g.user_model_provider_id FROM user_model_provider_groups g WHERE g.id = user_model_provider_group_models.user_model_provider_group_id)
+WHERE user_model_provider_group_id IN (SELECT group_id FROM model_provider_custom_group_backups)
+  AND EXISTS (SELECT 1 FROM user_model_provider_groups g WHERE g.id = user_model_provider_group_models.user_model_provider_group_id AND g.create_user_id = user_model_provider_group_models.create_user_id);
+
+UPDATE user_model_providers
+SET name = (SELECT b.migrated_name FROM model_provider_custom_parent_backups b WHERE b.provider_id = user_model_providers.id),
+    base_url = (SELECT b.migrated_base_url FROM model_provider_custom_parent_backups b WHERE b.provider_id = user_model_providers.id),
+    protocol_name = (SELECT d.name FROM default_model_providers d WHERE d.id = user_model_providers.default_model_provider_id),
+    active_key_group_id = CASE WHEN EXISTS (SELECT 1 FROM model_provider_custom_group_backups g WHERE g.provider_id = user_model_providers.id AND g.group_id = user_model_providers.active_key_group_id AND g.custom_provider_id <> '') THEN '' ELSE active_key_group_id END,
+    active_key_id = CASE WHEN EXISTS (SELECT 1 FROM model_provider_custom_group_backups g WHERE g.provider_id = user_model_providers.id AND g.group_id = user_model_providers.active_key_group_id AND g.custom_provider_id <> '') THEN '' ELSE active_key_id END,
+    active_key_initialized = CASE WHEN active_key_group_id <> '' AND EXISTS (SELECT 1 FROM model_provider_custom_group_backups g WHERE g.provider_id = user_model_providers.id AND g.group_id = user_model_providers.active_key_group_id AND g.custom_provider_id <> '') THEN TRUE ELSE active_key_initialized END,
+    active_key_revision = (SELECT b.migrated_key_revision FROM model_provider_custom_parent_backups b WHERE b.provider_id = user_model_providers.id)
+WHERE id IN (SELECT provider_id FROM model_provider_custom_parent_backups);
+
+INSERT INTO credential_backup_outbox
+(id, cloud_issuer, cloud_account_id, local_provider_group_id, local_credential_revision,
+ operation, backup_state, attempt_count, next_attempt_at, last_error_code, created_at, updated_at)
+SELECT b.id, b.cloud_issuer, b.cloud_account_id, g.id,
+       CASE WHEN g.credential_revision < 1 THEN 1 ELSE g.credential_revision END,
+       'upsert', 'pending', 0, CURRENT_TIMESTAMP, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+FROM cloud_credential_bindings b
+JOIN cloud_credential_vault_accounts a ON a.cloud_issuer = b.cloud_issuer AND a.cloud_account_id = b.cloud_account_id
+JOIN user_model_provider_groups g ON g.id = b.local_provider_group_id
+JOIN model_provider_custom_group_backups old ON old.group_id = g.id
+WHERE a.backup_enabled = TRUE AND old.custom_provider_id <> ''
+ON CONFLICT (cloud_issuer, cloud_account_id, local_provider_group_id) DO UPDATE SET
+    local_credential_revision = excluded.local_credential_revision,
+    operation = 'upsert', backup_state = 'pending', attempt_count = 0,
+    next_attempt_at = CURRENT_TIMESTAMP, last_error_code = 0, updated_at = CURRENT_TIMESTAMP;
+
+-- Supplier request protocol overrides, PostgreSQL and SQLite.
+-- +migrate Dialect postgres,sqlite
+ALTER TABLE user_model_providers ADD COLUMN request_config TEXT NOT NULL DEFAULT '';
+ALTER TABLE user_model_providers ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT '';
+
+-- Per-model capability declarations and runtime options.
+ALTER TABLE user_model_provider_group_models ADD COLUMN model_settings TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE user_model_provider_group_models ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;

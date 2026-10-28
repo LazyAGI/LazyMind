@@ -14,6 +14,16 @@
 
 运行中的任务不能通过普通消息刷新凭证或更换模型；需要改变模型配置时创建新任务。模型配置更新后旧验收结果不代表新配置，新配置展示“尚未验证”，仍按原有权限、连接验证、凭证与执行器适配规则判断能否使用。
 
+## 模型请求配置边界
+
+供应商高级请求配置保存自定义 Headers、Query 参数和额外 JSON body；本地存储使用系统保护的凭据根密钥加密，凭据备份中的可移植配置位于加密载荷内，恢复时重新绑定目标供应商并加密。已有本地供应商绑定的恢复继续保留该供应商当前的共享地址及请求配置。
+
+模型发现与供应商连接检查仅应用 Headers 和 Query；模型探测及 LazyLLM JSON 推理请求同时应用额外 body。模型身份、输入、认证及流式字段由应用管理，额外 body 不能覆盖。multipart 推理不支持额外 JSON body；Qwen WebSocket 语音适配器及 GLM 原生语音识别、文生图 SDK 不支持高级请求配置，模型探测和实际调用都会在发送请求前明确拒绝。非 2xx HTTP 响应在供应商适配器读取和记录日志前替换为安全状态及失败类别，不保留上游回显的私有内容。
+
+**自进化暂不支持非空高级请求配置。** Core 传递 `request_advanced` 后，Evo 在解析模型、生成 OpenCode 私有配置之前以 `advanced_request_options_unsupported` 拒绝，错误不包含私有配置。工具调用显式关闭的配置也会以 `tool_calling_required` 拒绝；空配置保持兼容。
+
+当前执行器生成 OpenCode 的 `provider` / `npm` / `options` 配置。官方文档确认此配置提供 `options.headers`，但本仓库尚未建立覆盖 Headers、Query 与任意 JSON body 的通用适配与验证，所以不部分转发后忽略其余字段。后续接入须同时验证最终 HTTP 请求与协议字段保护，不能仅写入未消费的 SDK 参数。参见 [OpenCode 自定义供应商文档](https://opencode.ai/docs/providers/#custom-provider)；核实日期为 2026-10-24。
+
 ## 真实模型验收工具
 
 入口：`backend/core/cmd/evolution-validate` 与 `python -m evo.validation`。这是受信任运维工具，没有允许浏览器提交“验证通过”记录的接口。

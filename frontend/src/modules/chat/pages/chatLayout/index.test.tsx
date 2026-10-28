@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ChatLayout from "./index";
 import { readChatConversationFilters, selectChatConversationSources } from "../../constants/chat";
 
+vi.mock("@/modules/chat/components/ArtifactPreview", () => ({ default: () => null }));
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => {

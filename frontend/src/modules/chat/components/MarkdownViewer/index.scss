@@ -822,3 +822,9 @@
     animation: none;
   }
 }
+
+.md-file-actions { display: inline-flex; align-items: baseline; gap: 8px; max-width: 100%; }
+.md-file-link--preview { border: 0; padding: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.md-file-download { flex-shrink: 0; border: 0; padding: 0 3px; background: transparent; color: #64748b; font-size: 12px; cursor: pointer; }
+.md-file-actions button:focus-visible { outline: 2px solid #2f6bff; outline-offset: 2px; border-radius: 3px; }
+.md-file-download:disabled { opacity: .5; cursor: default; }

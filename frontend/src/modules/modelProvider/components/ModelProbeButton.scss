@@ -1,0 +1,34 @@
+.model-probe-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  &[tabindex]:focus-visible {
+    outline: 2px solid var(--provider-blue, #2f6df6);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  button.ant-btn:not(:disabled):not(.ant-btn-disabled) {
+    &[data-probe-status="passed"] { color: var(--ant-color-success, #16865a); }
+    &[data-probe-status="passed"][data-probe-latency="slow"] { color: var(--ant-color-warning, #ad7d23); }
+    &[data-probe-status="failed"] { color: var(--ant-color-error, #d04747); }
+    &[data-probe-status="accepted"] { color: var(--ant-color-warning, #ad7d23); }
+  }
+}
+.model-probe-result {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 280px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.5;
+  small { opacity: .8; }
+}
+.model-probe-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

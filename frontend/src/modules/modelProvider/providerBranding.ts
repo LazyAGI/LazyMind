@@ -10,9 +10,12 @@ const providerLogoAssets: Array<[RegExp, string]> = [
   [/openai/, "openai.svg"],
   [/qwen|tongyi|通义/, "qwen.svg"],
   [/siliconflow/, "siliconflow.svg"],
+  [/^vllm$/, "vllm.svg"],
+  [/^lmdeploy$/, "lmdeploy.svg"],
 ];
 
-export function getProviderLogoUrl(name: string) {
+export function getProviderLogoUrl(name: string, isCustom = false) {
+  if (isCustom) return "/provider-icons/custom.svg";
   const normalized = name.trim().toLowerCase();
   const match = providerLogoAssets.find(([pattern]) => pattern.test(normalized));
   return match ? `/provider-icons/${match[1]}` : undefined;

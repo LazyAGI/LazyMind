@@ -9,6 +9,7 @@ from . import (
     knowledge_search_routes,
     llm_task_routes,
     model_check_routes,
+    model_probe_routes,
     model_features_routes,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     'knowledge_search_routes',
     'llm_task_routes',
     'model_check_routes',
+    'model_probe_routes',
     'model_features_routes',
 ]

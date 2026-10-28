@@ -42,9 +42,17 @@ func seedAvailableChatModel(
 ) orm.UserModelProviderGroupModel {
 	t.Helper()
 	now := time.Now().UTC()
+	// Friendly fixture names describe independent connections; each still needs
+	// a real registered runtime protocol, just like a custom supplier in the UI.
+	runtimeProvider := "OpenAI"
+	switch providerName {
+	case "OpenAI", "DeepSeek", "Moonshot", "Qwen", "Claude", "SiliconFlow":
+		runtimeProvider = providerName
+	}
 	provider := orm.UserModelProvider{
 		ID: providerID, DefaultModelProviderID: "catalog-" + providerID,
 		Name: providerName, Description: providerName, Category: "model", Capabilities: "has_models",
+		ProtocolName: runtimeProvider, IsCustom: runtimeProvider != providerName,
 		BaseModel: orm.BaseModel{
 			CreateUserID: owner, CreateUserName: owner, CreatedAt: now, UpdatedAt: now,
 		},
@@ -64,7 +72,7 @@ func seedAvailableChatModel(
 	}
 	model := orm.UserModelProviderGroupModel{
 		ID: modelID, UserModelProviderID: providerID, UserModelProviderGroupID: groupID,
-		ProviderName: providerName, Name: modelName, ModelType: modelType,
+		ProviderName: runtimeProvider, Name: modelName, ModelType: modelType,
 		BaseModel: orm.BaseModel{
 			CreateUserID: owner, CreateUserName: owner, CreatedAt: now, UpdatedAt: now,
 		},
@@ -143,11 +151,29 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	}
 }
 
+func TestLoadDefaultChatLLMConfigAllowsSelectedOwnerModelWithUsableUnverifiedGroup(t *testing.T) {
+	database := newChatModelTestDB(t)
+	db := database.DB
+	model := seedAvailableChatModel(t, db, "user-1", "provider-private", "group-private", "model-private", "Private", "私有 API", "private-chat", "llm", false, "private-secret")
+	seedSelectedChatModel(t, db, "user-1", model.ID, false)
+
+	config, err := LoadDefaultChatLLMConfig(context.Background(), db, "user-1")
+	if err != nil {
+		t.Fatalf("load default config for selected unverified model: %v", err)
+	}
+	if config["model"] != "private-chat" || config["api_key"] != "private-secret" {
+		t.Fatalf("config=%#v, want selected private model and key", config)
+	}
+}
+
 func TestConversationFixedModelOverridesOnlyLLMAndPreparesTemporaryFallback(t *testing.T) {
 	database := newChatModelTestDB(t)
 	db := database.DB
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-default", "llm", true, "secret-a")
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "DeepSeek", "B", "deepseek-chat", "llm", true, "secret-b")
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-b").Updates(map[string]any{"input_token_limit": "64K", "max_output_tokens": "32K"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	seedSelectedChatModel(t, db, "user-1", "model-a", false)
 
 	binding, err := resolveInitialChatModelBinding(context.Background(), db, "user-1", &initialChatModelSelection{Mode: chatModelModeFixed, ModelID: "model-b"})
@@ -175,6 +201,9 @@ func TestConversationFixedModelOverridesOnlyLLMAndPreparesTemporaryFallback(t *t
 	llm := config["llm"].(map[string]any)
 	if llm["model"] != "deepseek-chat" || llm["api_key"] != "secret-b" {
 		t.Fatalf("fixed llm config=%#v", llm)
+	}
+	if llm["input_token_limit"] != "64K" || llm["max_output_tokens"] != "32K" {
+		t.Fatal("fixed model lost its token limits")
 	}
 	if config["embed_main"].(map[string]any)["model"] != "embedding-model" {
 		t.Fatalf("non-chat role changed: %#v", config)
@@ -1121,7 +1150,7 @@ func TestConversationModelHandlersPersistVersionAndBlockActiveRuns(t *testing.T)
 
 func TestBuildChatLLMConfigKeepsDeclaredVision(t *testing.T) {
 	for _, vision := range []bool{false, true} {
-		config, err := buildChatLLMConfig(context.Background(), &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
+		config, err := buildChatLLMConfig(context.Background(), nil, &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
 		if err != nil {
 			t.Fatal(err)
 		}
