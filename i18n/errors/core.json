@@ -2042,5 +2042,11 @@
   "2005136": {"en-US": "The paper identifiers conflict", "zh-CN": "论文身份标识冲突"},
   "2005137": {"en-US": "The paper content or cache is unavailable or changed; retry the read", "zh-CN": "论文内容或缓存不可用或已变化，请重试读取"},
   "2005138": {"en-US": "The paper library changed; refresh and retry", "zh-CN": "论文库已发生变化，请刷新后重试"},
-  "2005139": {"en-US": "Failed to read the paper library data", "zh-CN": "读取论文库数据失败"}
+  "2005139": {"en-US": "Failed to read the paper library data", "zh-CN": "读取论文库数据失败"},
+  "2005200": {"en-US": "Translation configuration is unavailable or changed", "zh-CN": "翻译配置不可用或已发生变化"},
+  "2005201": {"en-US": "Translation provider credentials or endpoint are invalid", "zh-CN": "翻译服务凭据或接口地址无效"},
+  "2005202": {"en-US": "The translation request is not supported", "zh-CN": "当前翻译请求不受支持"},
+  "2005203": {"en-US": "Translation provider request failed", "zh-CN": "翻译服务请求失败"},
+  "2005204": {"en-US": "Translation service initialization failed", "zh-CN": "翻译服务初始化失败"},
+  "2005205": {"en-US": "The selected translation provider does not support documents", "zh-CN": "所选翻译服务不支持文档翻译"}
 }
