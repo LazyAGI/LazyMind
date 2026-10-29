@@ -10,3 +10,5 @@
 .pdf-formula-footer [role=status] { font-size:12px; }
 .pdf-formula-controls { position:sticky; top:0; z-index:30; display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 12px; min-height:34px; background:#f8fafcf5; border-bottom:1px solid #d6e0ed; color:#33455c; font-size:12px; }
 .pdf-formula-controls button { border:1px solid #bfd0e5; border-radius:6px; padding:4px 10px; background:white; color:#174b86; cursor:pointer; }
+
+.pdf-formula-footer { flex-wrap:wrap; }

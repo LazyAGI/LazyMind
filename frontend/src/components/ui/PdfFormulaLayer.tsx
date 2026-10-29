@@ -15,7 +15,7 @@ export function formulaAtPoint(blocks: PdfIRBlock[], x: number, y: number, rect:
   const nx=(x-rect.left)/rect.width, ny=(y-rect.top)/rect.height;
   return blocks.find(b=>hasFormulaGeometry(b) && nx>=b.bbox![0] && nx<=b.bbox![2] && ny>=b.bbox![1] && ny<=b.bbox![3]);
 }
-export function PdfFormulaLayer({blocks}: {blocks:PdfIRBlock[]}) {
+export function PdfFormulaLayer({blocks,onExplain}: {blocks:PdfIRBlock[];onExplain?:(block:PdfIRBlock)=>void}) {
   const { t } = useTranslation();
   const root=useRef<HTMLDivElement>(null);
   const card=useRef<HTMLDivElement>(null);
@@ -74,7 +74,7 @@ export function PdfFormulaLayer({blocks}: {blocks:PdfIRBlock[]}) {
       <div className="pdf-formula-heading"><strong>{t("pdfFormula.formula")}</strong><button aria-label={t("pdfFormula.close")} onClick={()=>{close();trigger.current?.focus();}}>×</button></div>
       {preview ? <div className="pdf-formula-preview" dangerouslySetInnerHTML={{__html:preview}}/> : <p>{t("pdfFormula.previewError")}</p>}
       <label>{t("pdfFormula.raw")}<textarea readOnly value={active.latex} aria-label={t("pdfFormula.raw")} /></label>
-      <div className="pdf-formula-footer"><span role="status">{copyStatus}</span><button onClick={async()=>{try{await navigator.clipboard.writeText(active.latex!);setCopyStatus(t("pdfFormula.copied"));}catch{setCopyStatus(t("pdfFormula.copyError"));}}}>{t("pdfFormula.copy")}</button></div>
+      <div className="pdf-formula-footer">{onExplain&&<button onClick={()=>{onExplain(active);close();}}>{t("pdfFormula.explain")}</button>}<span role="status">{copyStatus}</span><button onClick={async()=>{try{await navigator.clipboard.writeText(active.latex!);setCopyStatus(t("pdfFormula.copied"));}catch{setCopyStatus(t("pdfFormula.copyError"));}}}>{t("pdfFormula.copy")}</button></div>
     </div>,document.body)}
   </div>;
 }

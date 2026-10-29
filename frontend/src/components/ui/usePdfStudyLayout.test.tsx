@@ -1,0 +1,27 @@
+import {act, renderHook} from '@testing-library/react';
+import {afterEach, describe, expect, it, vi} from 'vitest';
+import {usePdfStudyLayout} from './usePdfStudyLayout';
+afterEach(()=>vi.unstubAllGlobals());
+describe('reader container layout',()=>{
+ it('stacks by outer reader width and responds to resize independently of viewport width',()=>{
+  let notify!:ResizeObserverCallback;
+  const disconnect=vi.fn();
+  const observe=vi.fn();
+  vi.stubGlobal('ResizeObserver',class {constructor(callback:ResizeObserverCallback){notify=callback;}observe=observe;disconnect=disconnect;});
+  const reader=document.createElement('div');
+  let width=560;
+  Object.defineProperty(reader,'clientWidth',{get:()=>width});
+  const ref={current:reader};
+  const view=renderHook(()=>usePdfStudyLayout(ref));
+  expect(view.result.current).toBe('stacked');
+  expect(observe).toHaveBeenCalledWith(reader);
+  width=900;
+  act(()=>notify([],{} as ResizeObserver));
+  expect(view.result.current).toBe('split');
+  width=400;
+  act(()=>notify([],{} as ResizeObserver));
+  expect(view.result.current).toBe('stacked');
+  view.unmount();
+  expect(disconnect).toHaveBeenCalled();
+ });
+});

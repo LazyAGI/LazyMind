@@ -1,0 +1,38 @@
+.pdf-reader-with-study{display:flex; min-width:0; min-height:0; position:relative; overflow:hidden;}
+.pdf-formula-study{flex:0 0 350px; width:350px; max-width:46%; height:100%; overflow:auto; background:#fbfcff; color:#26374c; border-left:1px solid #d9e3ef; font:13px/1.65 system-ui,sans-serif; box-shadow:-4px 0 18px #172f4f08;}
+.pdf-formula-study header{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:16px 20px 12px;background:#fbfcfff5;border-bottom:1px solid #e4ebf4;backdrop-filter:blur(8px);}
+.pdf-study-eyebrow{color:#657990;font-size:10px;letter-spacing:.12em;text-transform:uppercase;}
+.pdf-formula-study h2{margin:2px 0 0;font-size:18px;line-height:1.4;font-weight:650;}
+.pdf-formula-study button{border:1px solid #cbd9e9;border-radius:7px;background:white;color:#285788;padding:6px 10px;cursor:pointer;font:inherit;line-height:1.4;}
+.pdf-formula-study button:hover{background:#edf4fc;border-color:#87a8cf;}
+.pdf-formula-study button:focus-visible,.pdf-formula-study select:focus-visible{outline:2px solid #4486c8;outline-offset:2px;}
+.pdf-formula-study .pdf-study-close{border:0;font-size:23px;padding:1px 9px;background:transparent;}
+.pdf-study-navigation{padding:14px 20px;display:grid;gap:10px;border-bottom:1px solid #e4ebf4;}
+.pdf-study-navigation label{font-size:11px;font-weight:600;color:#63768b;}
+.pdf-study-navigation select{display:block;width:100%;margin-top:5px;padding:8px 10px;color:#26374c;background:white;border:1px solid #cad8e8;border-radius:7px;font-size:13px;}
+.pdf-study-body{padding:0 20px 24px;overflow-wrap:anywhere;}
+.pdf-study-body section{padding:18px 0;border-bottom:1px solid #e4ebf4;}
+.pdf-study-body h3{font-size:13px;margin:0 0 10px;font-weight:650;}
+.pdf-study-body p{margin:6px 0;white-space:pre-wrap;}
+.pdf-study-preview{overflow:auto;margin:12px -4px;color:#172a44;}
+.pdf-study-section-label{font-size:11px;color:#697d93;}
+.pdf-study-disclaimer{font-size:11px;color:#6b7d90;}
+.pdf-study-actions,.pdf-study-loading{padding:10px 0;}
+.pdf-study-loading{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.pdf-formula-study .pdf-study-primary{background:#285c94;color:white;border-color:#285c94;}
+.pdf-study-symbols{margin:0;}.pdf-study-symbols>div{display:grid;grid-template-columns:minmax(30px,auto) 1fr;gap:12px;padding:10px 0;}.pdf-study-symbols dt code{background:#eaf1f9;color:#234c7b;padding:3px 6px;border-radius:4px;}.pdf-study-symbols dd{margin:0;}
+.pdf-study-citations{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:7px;}
+.pdf-formula-study .pdf-study-citation{font-size:11px;padding:3px 7px;background:#edf4fc;border-color:#d4e2f1;}
+.pdf-study-inferred{font-size:10px;color:#8a642c;background:#fbf1de;padding:2px 6px;border-radius:4px;}
+.pdf-study-steps{margin:0;padding-left:22px;}.pdf-study-steps li{padding:3px 0 12px;}
+.pdf-study-evidence article{margin-top:14px;}.pdf-study-evidence blockquote{white-space:pre-wrap;margin:7px 0 0;border-left:2px solid #8eafcf;padding:8px 11px;background:#f0f5fb;font-size:12px;color:#425b74;}.pdf-study-evidence small{color:#77899b;}
+.pdf-study-warnings{font-size:11px;color:#786340;}.pdf-study-warnings ul{padding-left:16px;}.pdf-study-model{font-size:10px;color:#8797a9;}.pdf-study-empty{padding:24px 20px;color:#6b8097;}
+.pdf-study-highlight{position:absolute;pointer-events:none;z-index:7;background:#f6c34435;border:2px solid #d59b25;border-radius:3px;box-shadow:0 0 0 3px #f6c34418;}
+/* Use the reader width: adjacent chat/sidebar panes may consume most of the viewport. */
+.pdf-reader-with-study[data-study-layout="stacked"]{flex-direction:column;}
+.pdf-reader-with-study[data-study-layout="stacked"]>.pdf-formula-study{flex:0 0 45%;width:100%;max-width:100%;height:45%;min-height:0;border-left:0;border-top:1px solid #d9e3ef;}
+.pdf-reader-with-study[data-study-layout="stacked"] .pdf-formula-study header,.pdf-reader-with-study[data-study-layout="stacked"] .pdf-study-navigation{padding-left:14px;padding-right:14px;}
+.pdf-reader-with-study[data-study-layout="stacked"] .pdf-study-body{padding-left:14px;padding-right:14px;}
+
+.pdf-study-inline-math{display:inline-block;max-width:100%;overflow-x:auto;overflow-y:hidden;vertical-align:middle;line-height:normal;padding:4px;}
+.pdf-study-symbols dt{max-width:110px;overflow-wrap:anywhere;}

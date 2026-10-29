@@ -1121,6 +1121,7 @@ services:
     # Healthcheck disabled: newer MinIO images lack curl; use service_started in milvus depends_on
 
   milvus:
+    restart: unless-stopped
     profiles:
       - milvus
     image: ${MILVUS_IMAGE:-milvusdb/milvus:v2.4.15}
@@ -1162,6 +1163,7 @@ services:
 
   # ---------- Segment store: OpenSearch single-node (profile: opensearch) ----------
   opensearch:
+    restart: unless-stopped
     profiles:
       - opensearch
     image: ${OPENSEARCH_IMAGE:-opensearchproject/opensearch:2.18.0}

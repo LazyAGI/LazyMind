@@ -78,6 +78,7 @@ export default function PdfTemporaryChat({
     // discover that no chunks exist.
     let cancelled = false;
     setParseState("loading");
+    setParseError("");
     let timer: number | undefined;
     const poll = async () => {
       try {
@@ -320,7 +321,10 @@ export default function PdfTemporaryChat({
       </div>
       <div className="pdf-temporary-chat__body">
         {parseState === "parsing" ? (
-          <Alert className="pdf-temporary-chat__parse-status" type="info" showIcon message={t("knowledge.pdfChatParsing")} />
+          <Alert className="pdf-temporary-chat__parse-status" type="info" showIcon message={t("knowledge.pdfChatParsing")} description={t("knowledge.pdfChatParsingHint")} />
+        ) : null}
+        {parseState === "parsed" ? (
+          <Alert className="pdf-temporary-chat__parse-status" type="success" showIcon message={t("knowledge.pdfChatParsed")} />
         ) : null}
         {parseState === "failed" ? (
           <Alert className="pdf-temporary-chat__parse-status" type="error" showIcon message={t("knowledge.pdfChatParseFailed")} description={parseError} action={<Button size="small" loading={retrying} onClick={async () => {
@@ -330,11 +334,18 @@ export default function PdfTemporaryChat({
             finally { setRetrying(false); }
           }}>{t("knowledge.pdfChatRetryParse")}</Button>} />
         ) : null}
-        {["loading", "unknown", "not_requested"].includes(parseState) && <Alert type="warning" showIcon message={t(parseState === "loading" ? "knowledge.pdfChatChecking" : parseState === "not_requested" ? "knowledge.pdfChatNotParsed" : "knowledge.pdfChatUnknown")} description={parseError} />}
+        {["loading", "unknown", "not_requested"].includes(parseState) && <Alert
+          className="pdf-temporary-chat__parse-status"
+          type={parseState === "loading" ? "info" : "warning"}
+          showIcon
+          message={t(parseState === "loading" ? "knowledge.pdfChatChecking" : parseState === "not_requested" ? "knowledge.pdfChatNotParsed" : "knowledge.pdfChatUnknown")}
+          description={parseError}
+          action={parseState !== "loading" ? <Button size="small" onClick={() => setParseAttempt(value => value + 1)}>{t("knowledge.pdfChatRefreshStatus")}</Button> : undefined}
+        />}
         <ChatContainerComponent
           ref={chatRef}
           canChat={parseState === "parsed"}
-          disabledReason={parseState === "parsed" ? undefined : t(parseState === "failed" ? "knowledge.pdfChatParseFailed" : parseState === "parsing" ? "knowledge.pdfChatParsing" : "knowledge.pdfChatUnknown")}
+          disabledReason={parseState === "parsed" ? undefined : t(parseState === "failed" ? "knowledge.pdfChatParseFailed" : parseState === "parsing" ? "knowledge.pdfChatParsing" : parseState === "loading" ? "knowledge.pdfChatChecking" : "knowledge.pdfChatUnknown")}
           sessionId={conversationId}
           onOpenSSE={openSSE}
           onOpenResumeSSE={openResumeSSE}

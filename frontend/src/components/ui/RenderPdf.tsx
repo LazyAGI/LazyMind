@@ -8,6 +8,11 @@ import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { extractPdfSelectionContext } from "./pdfSelectionContext";
 import { isLearningActionCompatible, type LearningSelectionAction } from "./learningSelection";
 import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
+import { usePdfStudyLayout } from "./usePdfStudyLayout";
+import { PdfFormulaStudy } from "./PdfFormulaStudy";
+import { formulaNumberMap, formulaReferenceForClick } from "./pdfFormulaReferences";
+import type { FormulaEvidence } from "@/modules/knowledge/api/formulaExplanation";
+import type { PdfIRBlock } from "@/modules/knowledge/api/pdfIR";
 import { PdfFormulaLayer, hasFormulaGeometry } from "./PdfFormulaLayer";
 import { usePdfIR, usablePdfIR, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
 import pdfWorkerUrl from "@react-pdf-worker/pdf.worker.min.mjs?url";
@@ -121,6 +126,21 @@ export default function RenderPdf({
   const pdfIR = usePdfIR(pdfIRTarget);
   const [formulasEnabled, setFormulasEnabled] = useState(true);
   const formulaDocument = usablePdfIR(pdfIR.state, pdfSourceHash);
+  const studyReaderRef = useRef<HTMLDivElement>(null);
+  const studyLayout = usePdfStudyLayout(studyReaderRef);
+  const [studyOpen, setStudyOpen] = useState(false);
+  const [studySelection, setStudySelection] = useState<{block: PdfIRBlock; explain: boolean}>();
+  const [studyHighlight, setStudyHighlight] = useState<FormulaEvidence>();
+  const [studyReturn, setStudyReturn] = useState<PdfViewPosition>();
+  const [pendingStudyNavigation, setPendingStudyNavigation] = useState<FormulaEvidence>();
+  const studyPointer = useRef<{x:number;y:number}>();
+  const studyBlocks = useMemo(() => (formulaDocument?.blocks || []).filter(block => block.type === "formula" && !!block.latex?.trim()), [formulaDocument]);
+  const numberedFormulas = useMemo(() => formulaNumberMap(studyBlocks), [studyBlocks]);
+  const studySourceKey = formulaDocument ? `${formulaDocument.source_sha256}:${formulaDocument.version}:${formulaDocument.parser.name}:${formulaDocument.parser.model}` : "";
+  useEffect(() => {
+    setStudyOpen(false); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); setPendingStudyNavigation(undefined);
+  }, [studySourceKey]);
+  const explainFormula = (block: PdfIRBlock) => { setStudySelection({block,explain:true}); setStudyOpen(true); };
   const formulaPages = useMemo(() => {
     const pages = new Map<number, import("@/modules/knowledge/api/pdfIR").PdfIRBlock[]>();
     for (const block of formulaDocument?.blocks || []) {
@@ -651,6 +671,37 @@ export default function RenderPdf({
     );
   };
 
+  const navigateStudyEvidence = (evidence: FormulaEvidence) => {
+    if (!Number.isInteger(evidence.page) || evidence.page < 0 || evidence.page >= numPages) return;
+    if (!studyReturn && containerRef.current) {
+      const top = containerRef.current.scrollTop;
+      let page = 0;
+      for (let index = 0; index < pageTops.length; index++) if (pageTops[index] <= top) page = index;
+      setStudyReturn({page:page+1,progress:Math.max(0,(top-pageTops[page])/(pageHeightsPx[page] || 1))});
+    }
+    setStudyHighlight(evidence);
+    setPendingStudyNavigation(evidence);
+  };
+  useEffect(() => {
+    if (!pendingStudyNavigation) return;
+    const timer = window.setTimeout(() => {
+      const page = pendingStudyNavigation.page;
+      const y = pendingStudyNavigation.bbox?.[1] || 0;
+      const top = Math.max(0,(pageTops[page] || 0) + y * (pageHeightsPx[page] || 0) - 64);
+      containerRef.current?.scrollTo({top,behavior:"auto"});
+      setScrollTop(top);
+      if (pageSizesMap[page]) setPendingStudyNavigation(undefined);
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [pendingStudyNavigation,pageTops,pageHeightsPx,pageSizesMap]);
+  const returnFromStudy = () => {
+    if (!studyReturn) return;
+    const page=studyReturn.page-1;
+    const top=(pageTops[page] || 0) + studyReturn.progress * (pageHeightsPx[page] || 0);
+    containerRef.current?.scrollTo({top,behavior:"auto"}); setScrollTop(top);
+    setStudyHighlight(undefined); setPendingStudyNavigation(undefined); setStudyReturn(undefined);
+  };
+
   const renderVirtualPage = (index: number) => {
     const { width, height } = pageSizesMap[index] || {
       width: WIDTH_PT,
@@ -664,6 +715,16 @@ export default function RenderPdf({
       <div
         key={`page_${index + 1}`}
         data-pdf-page-index={index}
+        onPointerDownCapture={event => { studyPointer.current = {x:event.clientX,y:event.clientY}; }}
+        onClickCapture={event => {
+          if (!formulasEnabled || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          const block=formulaReferenceForClick(event.currentTarget,numberedFormulas,event.target as Element,studyPointer.current,event.clientX,event.clientY,window.getSelection()?.toString() || "");
+          if (block) {
+            event.preventDefault(); event.stopPropagation();
+            setStudyOpen(true);setStudySelection({block,explain:false});
+            navigateStudyEvidence({id:block.id,page:block.page,text:block.latex || "",bbox:block.bbox});
+          }
+        }}
         ref={(el) => (pageRefs.current[index] = el)}
         style={{
           position: "absolute",
@@ -698,7 +759,12 @@ export default function RenderPdf({
             }));
           }}
         />
-        {formulasEnabled && formulaDocument && formulaPages.has(index) && <PdfFormulaLayer key={`${formulaDocument.source_sha256}:${formulaDocument.version}`} blocks={formulaPages.get(index)!} />}
+        {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
+          const box = studyHighlight.bbox;
+          const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
+          return valid ? {left:`${box[0]*100}%`,top:`${box[1]*100}%`,width:`${(box[2]-box[0])*100}%`,height:`${(box[3]-box[1])*100}%`} : {inset:3,background:"transparent"};
+        })()} />}
+        {formulasEnabled && formulaDocument && formulaPages.has(index) && <PdfFormulaLayer key={`${formulaDocument.source_sha256}:${formulaDocument.version}`} blocks={formulaPages.get(index)!} onExplain={explainFormula} />}
         <div
           style={{
             position: "absolute",
@@ -734,6 +800,7 @@ export default function RenderPdf({
 
   const translationUnavailable=translateSelectionDisabled&&!isSingleEnglishWord(selectionAction?.selection.text||"");
   return (
+    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
     <div
       className={className}
       ref={containerRef}
@@ -748,14 +815,15 @@ export default function RenderPdf({
       }}
       style={{
         overflow: "auto",
-        height: "calc(100vh - 220px)",
         position: "relative",
         backgroundColor: gapBackground,
         ...style,
+        flex: "1 1 0", minWidth: 0, minHeight: 0, height: "100%",
       }}
     >
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
         <span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
+        {formulaDocument && studyBlocks.length > 0 && <button onClick={() => setStudyOpen(true)}>{t("pdfFormula.openCatalog")}</button>}
         {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
         {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
       </div>}
@@ -980,6 +1048,8 @@ export default function RenderPdf({
           {visiblePages.map((i) => renderVirtualPage(i))}
         </div>
       </Document>
+    </div>
+    {studyOpen && formulaDocument && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} onSelect={block=>{setStudySelection({block,explain:false});navigateStudyEvidence({id:block.id,text:block.latex || "",page:block.page,bbox:block.bbox});}} onNavigate={navigateStudyEvidence} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={()=>{setStudyOpen(false);setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);}} />}
     </div>
   );
 }

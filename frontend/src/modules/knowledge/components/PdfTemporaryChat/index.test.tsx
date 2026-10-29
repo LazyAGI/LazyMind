@@ -98,6 +98,39 @@ describe("document question context", () => {
     expect(screen.queryByText("Reader could not decode the PDF")).not.toBeInTheDocument();
   });
 
+  it("distinguishes chat text readiness from formula parsing", async () => {
+    ensureDocumentParsed.mockResolvedValueOnce({ status: "parsed" });
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="ready-pdf" fileName="ready.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("knowledge.pdfChatParsed")).toBeInTheDocument();
+    expect(screen.queryByText("knowledge.pdfChatParsing")).not.toBeInTheDocument();
+  });
+
+  it("replaces a running indicator with the terminal parser failure and stops polling", async () => {
+    vi.useFakeTimers();
+    ensureDocumentParsed.mockResolvedValueOnce({ status: "parsing" }).mockResolvedValueOnce({ status: "failed", error: { message: "Root storage unavailable" } });
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="stalled-pdf" fileName="stalled.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("knowledge.pdfChatParsingHint")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByText("Root storage unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("knowledge.pdfChatParsing")).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(ensureDocumentParsed).toHaveBeenCalledTimes(2);
+    expect(retryDocumentParsed).not.toHaveBeenCalled();
+  });
+
+  it("refreshes an unknown status without requesting a new parse attempt", async () => {
+    ensureDocumentParsed.mockRejectedValueOnce(new Error("Status service unavailable")).mockResolvedValueOnce({ status: "parsed" });
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="unknown-pdf" fileName="unknown.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByRole("button", { name: "knowledge.pdfChatRefreshStatus" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("knowledge.pdfChatParsed")).toBeInTheDocument();
+    expect(screen.queryByText("Status service unavailable")).not.toBeInTheDocument();
+    expect(retryDocumentParsed).not.toHaveBeenCalled();
+  });
+
   it("does not turn a failed status lookup into parsing", async () => {
     ensureDocumentParsed.mockRejectedValueOnce(new Error("unavailable"));
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="unknown-pdf" fileName="unknown.pdf" onClose={() => {}} />);

@@ -1,12 +1,26 @@
 # PDF formula reading
 
-The original-PDF reader can parse formulas with the selected official MinerU service and show a LaTeX preview on hover. The formula marker also supports click and keyboard activation. The card exposes the recognized source for copying and shows that source even when the preview renderer does not support a command.
+The original-PDF reader can parse formulas with the selected official MinerU service and show a LaTeX preview on hover. The formula marker also supports click and keyboard activation. The card exposes the recognized source for copying and opens a persistent study panel with explanations and original-paper evidence.
 
 ## Enable and use
 
 Configure and select an official MinerU OCR credential in external-service settings. Open an original PDF in a knowledge document or paper attachment and enable formula parsing. Browser fingerprint validation requires HTTPS or localhost; insecure remote HTTP displays an explicit unsupported-context message. Parsing runs as a durable background job; the reader polls its status. Once ready, hover over an equation or activate its formula marker. Dragging to select document text keeps the existing text-selection behavior. Escape dismisses the formula card.
 
 Parsing requires document write permission; existing results require read permission. The initial read does not upload the document. Local or custom MinerU services are currently reported as unavailable for this feature and are never silently redirected to the official service. Only the original PDF is supported; translated or regenerated PDFs must not reuse original coordinates.
+
+## Formula study and navigation
+
+Choose Explain on a formula card to request an explanation from the selected chat model. The panel presents its purpose, symbol meanings, interpretation steps, and exact source passages. Evidence buttons navigate to the original page and highlight the recorded region; Return restores the previous reading position. The formula catalog includes unnumbered equations. Inline `Eq. (n)`, `Equation (n)`, and `式 (n)` references navigate only when the IR contains a unique explicit matching formula tag. Ambiguous or missing numbers retain their original behavior. Native PDF internal links are intercepted only for a positively matched formula reference; external links and text selection remain available.
+
+Explanations use bounded nearby PDF IR blocks, not retrieval results or embeddings. The selected model receives the recognized formula and those passages. Evidence text and coordinates are reconstructed from the IR on the server, never accepted from model-generated positions or quotations. Symbol associations and non-verbatim explanation steps are marked as interpretations even when they cite supporting text. This does not establish that the model's mathematical reasoning is correct.
+
+The server caches explanations per user, source, parser, formula, context, selected model configuration, and language. Regenerate bypasses that cache. Closing the panel or switching formulas cancels the browser request. Access and source identity are checked again after generation. Source passages can contain MinerU markup, which is displayed as plain text rather than executed.
+
+## Retrieval preparation status
+
+The PDF chat preparation banner describes the separate retrieval pipeline. A formula result can be ready while retrieval preparation is still running or has failed. The banner checks the current remote parser task instead of treating a historical local running flag as authoritative. Remote failures expose retry; a completed reparse with readable roots can recover from an earlier upload failure. Roots without a task version are not treated as completion while the current worker still reports working, since they can belong to an older parse.
+
+If retrieval preparation fails, inspect the parser worker and its OpenSearch and Milvus dependencies. Restoring those services and explicitly retrying preparation is preferable to changing document states by hand. Compose uses restart policies for both stores; this does not remove their health or storage requirements.
 
 ## Independent document structure
 
@@ -22,8 +36,10 @@ Coordinates use `normalized_top_left`: `[left, top, right, bottom]` in `[0,1]`, 
 
 `GET /api/core/datasets/{dataset}/documents/{document}/pdf-ir` returns the current result without starting a job. `POST` to the same path starts parsing; `{ "force": true }` requests a new parse after a completed result. An active job is reused. Responses use the `data` envelope and statuses `not_requested`, `queued`, `running`, `ready`, `failed`, or `unavailable`. A ready response includes `document`, with `version`, `source_sha256`, `parser`, `coordinate_space`, `pages`, `blocks`, and optional `warnings`.
 
+`POST /api/core/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation` accepts `{ "force": false, "language": "zh" }` (`en` is also supported). Its `data` contains `summary`, `symbols`, `steps`, authoritative `evidence`, `warnings`, and `model`. Evidence pages are zero-based and boxes use the IR coordinate space. Non-success responses expose an actionable `data.error_message`. The endpoint requires read access and a current source-matched IR.
+
 ## Limits and correctness
 
-The first version targets detected standalone equations. It does not promise inline formula detection, symbol-level selection, variable explanations, or automatic formula-reference links. Recognition and rendering are separate: valid LaTeX can still contain an OCR error. Users should compare critical equations with the original PDF. Missing geometry prevents hover rather than placing a misleading hit region. A mismatched source fingerprint prevents reuse and requires parsing the displayed original again.
+The reader targets detected standalone equations. It does not promise inline formula detection, symbol-level selection, complete cross-paper reasoning, or references that lack explicit unique tags. Recognition and rendering are separate: valid LaTeX can still contain an OCR error. Users should compare critical equations with the original PDF. Missing geometry prevents hover rather than placing a misleading hit region. A mismatched source fingerprint prevents reuse and requires parsing the displayed original again.
 
 The official parser currently uses the `vlm` model. Source PDFs are limited to 128 MiB and result archives to 256 MiB, with bounded JSON decoding. Restarted or retried work may incur another service request; the remote provider does not share the application's job transaction.

@@ -379,6 +379,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}:download", []string{"document.read"}, doc.DownloadDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}", []string{"document.read"}, doc.GetDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-ir", []string{"document.read"}, doc.GetPDFIR)
+	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation", []string{"document.read"}, doc.ExplainPDFFormula)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir", []string{"document.write"}, doc.CreatePDFIR)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-capabilities", []string{"document.read"}, systemdeps.RequireRAG(doc.GetPDFCapabilities))
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-artifacts/searchable", []string{"document.write"}, systemdeps.RequireRAG(doc.CreateSearchablePDFJob))
