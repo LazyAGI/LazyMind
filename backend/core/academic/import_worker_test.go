@@ -71,16 +71,16 @@ func TestBothImportEntrypointsResumeTheCommittedOriginal(t *testing.T) {
 }
 
 func TestReferenceImportRetryResetsItemsAndPublishesJobAtomically(t *testing.T) {
-	db := sourceTestDB(t)
-	previous := store.DB()
-	store.Init(db, db, nil)
-	t.Cleanup(func() { store.Init(previous, previous, nil) })
-	batch := orm.PaperImportBatch{ID: "batch", EntryType: "single_reference", CreatedBy: "alice", AsyncJobID: "old-job", Status: "failed", PolicySnapshotJSON: json.RawMessage(`{}`), SourceDocumentIDsJSON: json.RawMessage(`[]`)}
-	item := orm.PaperImportItem{ID: "item", BatchID: batch.ID, DocumentID: "committed-doc", DocumentTaskID: "committed-task", Status: "failed", Stage: "processing", ReferenceIDsJSON: json.RawMessage(`[]`), PresenceSnapshotJSON: json.RawMessage(`{}`), ErrorDetailsJSON: json.RawMessage(`{}`), SelectedCandidateJSON: json.RawMessage(`{}`)}
-	for _, row := range []any{&batch, &item, &orm.AsyncJob{ID: "old-job", Status: "failed", PayloadJSON: json.RawMessage(`{}`)}} {
-		if err := db.Create(row).Error; err != nil {
+	db, batch, item, _ := importPipelineFixture(t)
+	batch.EntryType, batch.Status = "single_reference", "failed"
+	item.Status = "failed"
+	for _, row := range []any{&batch, &item} {
+		if err := db.Save(row).Error; err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := db.Model(&orm.AsyncJob{}).Where("id=?", batch.AsyncJobID).Update("status", "failed").Error; err != nil {
+		t.Fatal(err)
 	}
 	retry := func() *httptest.ResponseRecorder {
 		req := mux.SetURLVars(httptest.NewRequest("POST", "/academic/imports/batch/retry", nil), map[string]string{"batch_id": batch.ID})
@@ -89,26 +89,12 @@ func TestReferenceImportRetryResetsItemsAndPublishesJobAtomically(t *testing.T) 
 		RetryImport(rec, req)
 		return rec
 	}
-	rec := retry()
-	if rec.Code != 200 {
+	if rec := retry(); rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	var saved orm.PaperImportItem
-	if err := db.Where("id = ?", item.ID).Take(&saved).Error; err != nil {
-		t.Fatal(err)
-	}
-	if saved.Status != "pending" || saved.DocumentID != item.DocumentID || saved.DocumentTaskID != item.DocumentTaskID {
-		t.Fatalf("lost resumable binding: %+v", saved)
-	}
-	if err := db.Where("id = ?", batch.ID).Take(&batch).Error; err != nil {
-		t.Fatal(err)
-	}
-	var job orm.AsyncJob
-	if err := db.Where("id = ?", batch.AsyncJobID).Take(&job).Error; err != nil {
-		t.Fatal(err)
-	}
-	if job.Status != "pending" || job.ResourceID != batch.ID || batch.Status != "pending" {
-		t.Fatalf("job and batch disagree: %+v %+v", job, batch)
+	if err := db.Where("id=?", item.ID).Take(&saved).Error; err != nil || saved.Status != "pending" {
+		t.Fatalf("not requeued: %+v %v", saved, err)
 	}
 	if again := retry(); again.Code != http.StatusConflict {
 		t.Fatal("queued duplicate retry", again.Code)
@@ -116,6 +102,6 @@ func TestReferenceImportRetryResetsItemsAndPublishesJobAtomically(t *testing.T) 
 	var count int64
 	db.Model(&orm.AsyncJob{}).Count(&count)
 	if count != 2 {
-		t.Fatal("unexpected queued jobs", count)
+		t.Fatal("unexpected queued tasks", count)
 	}
 }

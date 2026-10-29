@@ -1,10 +1,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AgentAppsAuth } from '@/components/auth';
+import { axiosInstance } from '@/components/request';
 import PaperImportStatus from './PaperImportStatus';
 import { emptyImportBatchPage, getAcademicImportBatch, listAcademicImportBatches, type ImportOperation, type ImportOperationItem } from '../api/academicReferences';
 vi.mock('../api/academicReferences', async original => ({ ...await original<typeof import('../api/academicReferences')>(), getAcademicImportBatch: vi.fn(), listAcademicImportBatches: vi.fn() }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 beforeEach(() => vi.clearAllMocks());
 const operation = (id: string, extra: Partial<ImportOperation> = {}): ImportOperation => ({
   id, entry_type: 'paper_expansion', target_dataset_id: 'papers', source: { title: '研究方向' }, status: 'succeeded', created_at: '2026-10-23T02:00:00Z',
@@ -15,12 +17,65 @@ const paper = (id: string, extra: Partial<ImportOperationItem> = {}): ImportOper
   status: 'skipped', stage: 'done', result_kind: 'already_present', current_state: 'skipped', document_deleted: false, resolved_later: false, can_retry: false,
   current_document: { document_id: id, processing_status: 'ready' }, created_at: '2026-10-23T02:00:00Z', updated_at: '2026-10-23T02:00:00Z', ...extra,
 });
-function Notice(props: Omit<ComponentProps<typeof PaperImportStatus>, 'open' | 'onOpenChange' | 'datasetId' | 'onOpenPaper'> & { onOpenPaper?: (id: string) => void }) {
+function Notice(props: Omit<ComponentProps<typeof PaperImportStatus>, 'open' | 'onOpenChange' | 'datasetId' | 'onOpenPaper' | 'currentPage'> & { currentPage?: ComponentProps<typeof PaperImportStatus>['currentPage']; onOpenPaper?: (id: string) => void }) {
   const [open, setOpen] = useState(false);
-  return <PaperImportStatus {...props} datasetId="papers" onOpenPaper={props.onOpenPaper || vi.fn()} open={open} onOpenChange={setOpen} />;
+  return <PaperImportStatus {...props} currentPage={props.currentPage || { ...props.page, items: props.page.items.filter(item => item.summary.active > 0 || item.summary.needs_action > 0) }} datasetId="papers" onOpenPaper={props.onOpenPaper || vi.fn()} open={open} onOpenChange={setOpen} />;
 }
 const openNotice = () => fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
 describe('paper import operations', () => {
+  it('keeps persisted research notifications out of import history', async () => {
+    vi.spyOn(AgentAppsAuth, 'getUserInfo').mockReturnValue({ userId: 'user' } as ReturnType<typeof AgentAppsAuth.getUserInfo>);
+    vi.spyOn(axiosInstance, 'get').mockResolvedValue({ data: { items: [{ notification_id: 'ready', event: 'paper_ready', title: '初步调研已完成', body: '请确认研究方向', navigation: { dataset_id: 'papers', expansion_id: 'expansion' } }] } });
+    render(<Notice canWrite onRetry={vi.fn()} page={emptyImportBatchPage()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /通知：.*1 条待处理/ })).toBeInTheDocument());
+    openNotice();
+    expect(await screen.findByText('初步调研已完成')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '导入记录' }));
+    expect(screen.queryByText('初步调研已完成')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '当前事项' }));
+    expect(screen.getByText('初步调研已完成')).toBeInTheDocument();
+  });
+  it('keeps retry progress and completion in place until the panel closes', async () => {
+    const failed = operation('retry', { status: 'failed' });
+    failed.summary = { ...failed.summary, total: 1, ready: 0, skipped: 0, failed: 1, needs_action: 1, retryable: 1 };
+    const active = operation('retry', { status: 'running', summary: { ...failed.summary, active: 1, failed: 0, needs_action: 0, retryable: 0 } });
+    const complete = operation('retry', { summary: { ...active.summary, active: 0, ready: 1 } });
+    let current = failed;
+    vi.mocked(getAcademicImportBatch).mockImplementation(async () => ({ operation: current, items: [paper('one', { status: 'succeeded', current_state: current === failed ? 'failed' : current === active ? 'processing' : 'ready' })], next_cursor: '' }));
+    const onRetry = vi.fn(async () => { current = active; });
+    const view = render(<Notice canWrite onRetry={onRetry} page={{ ...emptyImportBatchPage(), items: [failed], notification: { active: 0, needs_action: 1 } }} />);
+    openNotice();
+    fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
+    await screen.findByText('Paper one');
+    fireEvent.click(screen.getByRole('button', { name: '重试失败项（1）' }));
+    await screen.findByText('PDF 已保存 · 正文处理中');
+    view.rerender(<Notice canWrite onRetry={onRetry} page={{ ...emptyImportBatchPage(), items: [active], notification: { active: 1, needs_action: 0 } }} />);
+    expect(screen.getByRole('tab', { name: '当前事项' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: /^收起导入记录/ })).toBeInTheDocument();
+    current = complete;
+    view.rerender(<Notice canWrite onRetry={onRetry} page={{ ...emptyImportBatchPage(), items: [complete] }} />);
+    await screen.findByText('已完成');
+    expect(screen.getByRole('button', { name: /^收起导入记录/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '关闭通知' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /^通知：/ })).toHaveAttribute('aria-expanded', 'false'));
+    openNotice();
+    fireEvent.click(screen.getByRole('tab', { name: '当前事项' }));
+    expect(screen.queryByRole('button', { name: /^收起导入记录/ })).not.toBeInTheDocument();
+    expect(screen.getByText('当前没有进行中或待处理事项')).toBeInTheDocument();
+  });
+
+  it('renders a research confirmation as a normal notice and preserves it after opening', async () => {
+    const action = vi.fn();
+    render(<Notice canWrite onRetry={vi.fn()} page={emptyImportBatchPage()} notifications={[{ id: 'ready', title: '初步调研已完成', message: '请确认研究方向', level: 'success', action: { label: '打开拓展记录', onClick: action } }]} />);
+    openNotice();
+    expect(screen.getByText('待确认')).toBeInTheDocument();
+    expect(screen.getByText('请确认研究方向').closest('.paper-library-import-error')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '打开拓展记录' }));
+    await waitFor(() => expect(action).toHaveBeenCalledOnce());
+    expect(screen.getByText('初步调研已完成')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: '导入记录' }));
+    expect(screen.queryByText('初步调研已完成')).not.toBeInTheDocument();
+  });
   it('keeps an empty notification entry and closes its panel', () => {
     render(<Notice canWrite onRetry={vi.fn()} page={emptyImportBatchPage()} />); openNotice();
     expect(screen.getByText('暂无论文导入记录')).toBeInTheDocument();
@@ -64,7 +119,7 @@ describe('paper import operations', () => {
     const batch = operation('failed'); batch.summary.retryable = 1; batch.summary.needs_action = 1;
     render(<Notice canWrite onRetry={retry} page={{ ...emptyImportBatchPage(), items: [batch], notification: { active: 0, needs_action: 1 } }} />); openNotice();
     const button = screen.getByRole('button', { name: '重试失败项（1）' }); fireEvent.click(button); fireEvent.click(button);
-    expect(retry).toHaveBeenCalledOnce(); expect(retry).toHaveBeenCalledWith('failed'); expect(button).toBeDisabled(); await act(async () => finish());
+    expect(retry).toHaveBeenCalledOnce(); expect(retry).toHaveBeenCalledWith('failed', expect.any(String)); expect(button).toBeDisabled(); await act(async () => finish());
   });
   it('uses complete notification totals and keeps resolved historical failures visible to read-only users', async () => {
     const batch = operation('failed', { status: 'failed' });
@@ -74,7 +129,7 @@ describe('paper import operations', () => {
     expect(screen.getByRole('button', { name: '通知：2 项进行中 · 0 条待处理' })).toBeInTheDocument(); openNotice();
     expect(screen.getByRole('status')).toHaveTextContent('2 项进行中');
     expect(screen.getByRole('status')).not.toHaveTextContent('待处理');
-    expect(screen.queryByRole('button', { name: /重试失败项/ })).not.toBeInTheDocument(); fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
+    expect(screen.queryByRole('button', { name: /重试失败项/ })).not.toBeInTheDocument(); fireEvent.click(screen.getByRole('tab', { name: '导入记录' })); fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
     expect(await screen.findByText('已通过后续操作入库')).toBeInTheDocument();
     expect(screen.getByText('失败（已解决）')).toBeInTheDocument();
     expect(screen.getByText('导入失败（已解决）')).toBeInTheDocument();
@@ -96,11 +151,11 @@ describe('paper import operations', () => {
     const refresh = vi.fn();
     const view = render(<Notice canWrite onRetry={vi.fn()} onRefresh={refresh} syncError="HTTP 404" page={emptyImportBatchPage()} />);
     openNotice();
-    expect(screen.getByRole('tab', { name: '待处理 1' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '当前事项' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('导入记录同步失败')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: '导入记录' }));
     expect(screen.queryByText('暂无论文导入记录')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('tab', { name: '待处理 1' }));
+    fireEvent.click(screen.getByRole('tab', { name: '当前事项' }));
     fireEvent.click(screen.getByRole('button', { name: '重新同步' }));
     expect(refresh).toHaveBeenCalledOnce();
     view.rerender(<Notice canWrite onRetry={vi.fn()} page={emptyImportBatchPage()} />);

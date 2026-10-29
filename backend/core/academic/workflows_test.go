@@ -73,6 +73,22 @@ func TestPaperLaunchRoutesAndIdempotency(t *testing.T) {
 	if count != 4 {
 		t.Fatalf("four expansion entry paths should create four records, got %d", count)
 	}
+	var topic orm.AcademicExpansion
+	if err := db.Where("title=? AND goal=?", "agents", "expansion").Take(&topic).Error; err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	GetExpansion(w, mux.SetURLVars(paperRequest(`{}`), map[string]string{"expansion_id": topic.ID}))
+	var detail map[string]any
+	if json.Unmarshal(w.Body.Bytes(), &detail) != nil || w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if _, ok := detail["contents"].([]any); !ok {
+		t.Fatal("topic preparation must return an empty content array", w.Body.String())
+	}
+	if _, ok := detail["record"].(map[string]any)["result"].(map[string]any)["papers"].([]any); !ok {
+		t.Fatal("topic preparation must return an empty paper array", w.Body.String())
+	}
 	db.Model(&orm.AcademicHandoff{}).Count(&count)
 	if count != 2 {
 		t.Fatalf("reflection and ppt should have separate handoffs, got %d", count)
@@ -115,7 +131,7 @@ func TestReviewGateFullManifestImportanceAndSeparateChat(t *testing.T) {
 	}
 	db.Create(&orm.AcademicUserPaperState{UserID: "other", DatasetID: "papers", PaperID: "b", IsImportant: true})
 	for i, id := range []string{"a", "b"} {
-		content := orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "content-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "real parsed body"}})}
+		content := orm.AcademicPaperContent{QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"}), SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ParserVersion: orm.AcademicPaperParserVersion, ID: "content-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "real parsed body"}})}
 		if err := db.Create(&content).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -261,7 +277,7 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a", "b"} {
-		if err = db.Create(&orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "ready-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "body"}})}).Error; err != nil {
+		if err = db.Create(&orm.AcademicPaperContent{QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"}), SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ParserVersion: orm.AcademicPaperParserVersion, ID: "ready-" + id, UserID: "u", PaperID: id, Status: "ready", ContentHash: id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "body"}})}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -421,14 +437,32 @@ func TestMockAdapterFreezesOriginalPapers(t *testing.T) {
 		}
 	}
 	var output struct {
-		Papers []PaperRef `json:"papers"`
-		Status string     `json:"status"`
+		Input  PaperTaskInput `json:"input"`
+		Status string         `json:"status"`
 	}
 	if err := json.Unmarshal([]byte(first), &output); err != nil {
 		t.Fatal(err)
 	}
-	if output.Status != "awaiting_downstream" || len(output.Papers) != 2 || output.Papers[0].PaperID != "a" || output.Papers[0].Title != "original a" || output.Papers[1].PaperID != "b" {
+	if output.Status != "awaiting_downstream" || len(output.Input.Papers) != 2 || output.Input.Papers[0].PaperID != "a" || output.Input.Papers[0].Title != "original a" || output.Input.Papers[1].PaperID != "b" {
 		t.Fatal("mock adapter rewrote original manifest", first)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(first), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["papers"] != nil || fields["reflection_markdown"] != nil {
+		t.Fatal("direct PPT receipt included duplicate papers or an empty reflection", first)
+	}
+	fields["papers"] = marshal(output.Input.Papers)
+	fields["reflection_markdown"] = marshal("")
+	cached := marshal(fields)
+	if err := db.Model(&handoff).Update("mock_result_json", cached).Error; err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	SubmitMockHandoff(w, mux.SetURLVars(paperRequest(`{}`), map[string]string{"handoff_id": handoff.ID}))
+	if w.Code != 200 || w.Body.String() != first {
+		t.Fatal("cached receipt did not follow the same response contract", w.Code, w.Body.String())
 	}
 }
 
@@ -505,7 +539,7 @@ func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"a", "b"} {
-		if err := db.Create(&orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "body-" + id, UserID: "u", PaperID: id, ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "parsed full text"}})}).Error; err != nil {
+		if err := db.Create(&orm.AcademicPaperContent{QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"}), SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "body-" + id, UserID: "u", PaperID: id, ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "parsed full text"}})}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -565,6 +599,7 @@ func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 		PaperImportance map[string]bool              `json:"paper_importance"`
 		Record          orm.AcademicExpansion        `json:"record"`
 		Rounds          []orm.AcademicExpansionRound `json:"rounds"`
+		Handoffs        []map[string]json.RawMessage `json:"handoffs"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
@@ -574,6 +609,14 @@ func TestHistoryReviewUsesRequestedVersionAndPersonalImportance(t *testing.T) {
 	}
 	if string(response.Record.ResultJSON) != string(record.ResultJSON) || len(response.Rounds) != 2 || string(response.Rounds[0].ResultJSON) != string(marshal(oldInput)) || string(response.Rounds[1].ResultJSON) != string(marshal(newInput)) {
 		t.Fatal("live importance modified saved result")
+	}
+	if len(response.Handoffs) != 2 {
+		t.Fatal("handoff navigation links were lost", response.Handoffs)
+	}
+	for _, link := range response.Handoffs {
+		if len(link) != 4 || link["id"] == nil || link["kind"] == nil || link["conversation_id"] == nil || link["version"] == nil {
+			t.Fatal("handoff list leaked materials or lost navigation fields", link)
+		}
 	}
 }
 
@@ -669,7 +712,7 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"a", "b", "c"} {
-		if err := db.Create(&orm.AcademicPaperContent{SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "selected-" + id, UserID: "u", PaperID: id, ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "full text"}})}).Error; err != nil {
+		if err := db.Create(&orm.AcademicPaperContent{QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"}), SourceKind: "external", SourceProvider: "arxiv", SourceVersion: "v1", SourceKey: "test-external", ID: "selected-" + id, UserID: "u", PaperID: id, ParserVersion: orm.AcademicPaperParserVersion, Status: "ready", ContentHash: "hash-" + id, PagesJSON: marshal([]ContentPage{{Page: 1, Text: "full text"}})}).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -720,7 +763,7 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 	if len(snapshot.Papers) != 2 || snapshot.Papers[0].Paper.PaperID != "a" || !snapshot.Papers[0].IsSeed || snapshot.Papers[1].Paper.PaperID != "b" || snapshot.UserInstruction != input.UserInstruction || len(contents.Contents) != 2 || len(contents.Sources) != 2 {
 		t.Fatal("review snapshot did not preserve exactly the selected papers", snapshot, contents)
 	}
-	if err := db.Model(&orm.AcademicPaperContent{}).Where("paper_id=?", "c").Update("status", "failed").Error; err != nil {
+	if err := db.Model(&orm.AcademicPaperContent{QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"})}).Where("paper_id=?", "c").Update("status", "failed").Error; err != nil {
 		t.Fatal(err)
 	}
 	launch("no-fallback", 2, []string{"a", "c"}, 422)
@@ -732,7 +775,7 @@ func TestHistoryReviewSelectedPapersAndIdempotency(t *testing.T) {
 	if err := json.Unmarshal(legacyHandoff.InputJSON, &snapshot); err != nil || len(snapshot.Papers) != 3 {
 		t.Fatal("legacy launch lost the full manifest", err)
 	}
-	if err := db.Model(&orm.AcademicPaperContent{}).Where("paper_id=?", "b").Updates(map[string]any{"source_kind": "kb", "source_document_id": "inaccessible", "source_dataset_id": "papers"}).Error; err != nil {
+	if err := db.Model(&orm.AcademicPaperContent{QualityJSON: marshal(contentQuality{Eligible: true, Identity: "matched", Material: "main", Text: "usable"})}).Where("paper_id=?", "b").Updates(map[string]any{"source_kind": "kb", "source_document_id": "inaccessible", "source_dataset_id": "papers"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	launch("inaccessible", 2, []string{"a", "b"}, 422)

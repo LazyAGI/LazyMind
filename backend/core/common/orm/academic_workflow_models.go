@@ -33,30 +33,36 @@ type AcademicUserPaperState struct {
 func (AcademicUserPaperState) TableName() string { return "academic_user_paper_states" }
 
 type AcademicExpansion struct {
-	DiscoveryMode    string          `gorm:"type:varchar(32);not null;default:'external'" json:"discovery_mode"`
-	SeedSnapshotJSON json.RawMessage `gorm:"serializer:json;type:json;not null;default:'[]'" json:"-"`
-	DiscoveryJSON    json.RawMessage `gorm:"serializer:json;type:json;not null;default:'[]'" json:"-"`
-	ProgressJSON     json.RawMessage `gorm:"serializer:json;type:json;not null;default:'{}'" json:"progress"`
-	ID               string          `gorm:"primaryKey;type:varchar(36)" json:"id"`
-	UserID           string          `gorm:"index;type:varchar(255);not null" json:"-"`
-	DatasetID        string          `gorm:"index;type:varchar(255);not null" json:"dataset_id"`
-	ConversationID   string          `gorm:"uniqueIndex;type:varchar(36);not null" json:"conversation_id"`
-	RequestKey       string          `gorm:"uniqueIndex:uk_academic_expansion_request,priority:2;type:varchar(128);not null" json:"-"`
-	RequestOwner     string          `gorm:"uniqueIndex:uk_academic_expansion_request,priority:1;type:varchar(255);not null" json:"-"`
-	Title            string          `gorm:"type:text;not null" json:"title"`
-	Goal             string          `gorm:"type:varchar(16);not null" json:"goal"`
-	Status           string          `gorm:"type:varchar(32);not null" json:"status"`
-	Version          int64           `gorm:"not null;default:0" json:"version"`
-	ResultJSON       json.RawMessage `gorm:"type:json;not null" json:"result"`
-	AutoReviewID     string          `gorm:"type:varchar(36);not null;default:''" json:"auto_review_id,omitempty"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
-	DeletedAt        *time.Time      `gorm:"index" json:"-"`
+	PreparationJSON     json.RawMessage `gorm:"serializer:json;type:json;not null;default:'{}'" json:"preparation"`
+	PreparationRevision int64           `gorm:"not null;default:0" json:"preparation_revision"`
+	BudgetMode          string          `gorm:"type:varchar(16);not null;default:'balanced'" json:"budget_mode"`
+	ReadingJSON         json.RawMessage `gorm:"serializer:json;type:json;not null;default:'{}'" json:"reading"`
+	ReportJSON          json.RawMessage `gorm:"serializer:json;type:json;not null;default:'{}'" json:"report"`
+	DiscoveryMode       string          `gorm:"type:varchar(32);not null;default:'external'" json:"discovery_mode"`
+	SeedSnapshotJSON    json.RawMessage `gorm:"serializer:json;type:json;not null;default:'[]'" json:"-"`
+	DiscoveryJSON       json.RawMessage `gorm:"serializer:json;type:json;not null;default:'[]'" json:"-"`
+	ProgressJSON        json.RawMessage `gorm:"serializer:json;type:json;not null;default:'{}'" json:"progress"`
+	ID                  string          `gorm:"primaryKey;type:varchar(36)" json:"id"`
+	UserID              string          `gorm:"index;type:varchar(255);not null" json:"-"`
+	DatasetID           string          `gorm:"index;type:varchar(255);not null" json:"dataset_id"`
+	ConversationID      string          `gorm:"uniqueIndex;type:varchar(36);default:null" json:"conversation_id,omitempty"`
+	RequestKey          string          `gorm:"uniqueIndex:uk_academic_expansion_request,priority:2;type:varchar(128);not null" json:"-"`
+	RequestOwner        string          `gorm:"uniqueIndex:uk_academic_expansion_request,priority:1;type:varchar(255);not null" json:"-"`
+	Title               string          `gorm:"type:text;not null" json:"title"`
+	Goal                string          `gorm:"type:varchar(16);not null" json:"goal"`
+	Status              string          `gorm:"type:varchar(32);not null" json:"status"`
+	Version             int64           `gorm:"not null;default:0" json:"version"`
+	ResultJSON          json.RawMessage `gorm:"type:json;not null" json:"result"`
+	AutoReviewID        string          `gorm:"type:varchar(36);not null;default:''" json:"auto_review_id,omitempty"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+	DeletedAt           *time.Time      `gorm:"index" json:"-"`
 }
 
 func (AcademicExpansion) TableName() string { return "academic_expansions" }
 
 type AcademicExpansionRound struct {
+	ReportJSON    json.RawMessage `gorm:"serializer:json;type:json;not null;default:'{}'" json:"report"`
 	DiscoveryMode string          `gorm:"type:varchar(32);not null;default:'external'" json:"discovery_mode"`
 	ID            string          `gorm:"primaryKey;type:varchar(36)" json:"id"`
 	ExpansionID   string          `gorm:"uniqueIndex:uk_academic_round,priority:1;type:varchar(36);not null" json:"expansion_id"`
@@ -91,9 +97,10 @@ type AcademicHandoff struct {
 
 func (AcademicHandoff) TableName() string { return "academic_handoffs" }
 
-const AcademicPaperParserVersion = "pdf-reader-v1"
+const AcademicPaperParserVersion = "pdf-reader-v2"
 
 type AcademicPaperContent struct {
+	QualityJSON      json.RawMessage `gorm:"serializer:json;type:json;not null;default:'{}'" json:"quality"`
 	SourceProvider   string          `gorm:"type:varchar(64);not null;default:''" json:"source_provider"`
 	SourceKind       string          `gorm:"type:varchar(16);not null;default:'legacy'" json:"source_kind"`
 	SourceVersion    string          `gorm:"type:varchar(64);not null;default:''" json:"source_version"`

@@ -168,7 +168,7 @@ func isSupportedOCRCloudProvider(providerName string) bool {
 
 func isSupportedSearchCloudProvider(providerName string) bool {
 	switch normalizeProviderName(providerName) {
-	case "tavily", "bing", "bingsearch", "google", "googlesearch", "googlecustomsearch", "bocha", "bochasearch", "sciverse", "sciversesearch":
+	case "openalex", "tavily", "bing", "bingsearch", "google", "googlesearch", "googlecustomsearch", "bocha", "bochasearch", "sciverse", "sciversesearch":
 		return true
 	default:
 		return false
@@ -199,6 +199,22 @@ func doOCRCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey s
 
 func doSearchCloudServiceCheck(ctx context.Context, providerName, baseURL, apiKey string) (*modelCheckResponse, error) {
 	switch normalizeProviderName(providerName) {
+	case "openalex":
+		endpoint, err := url.Parse(strings.TrimRight(baseURL, "/") + "/works")
+		if err != nil {
+			return nil, err
+		}
+		q := endpoint.Query()
+		q.Set("search", "retrieval augmented generation")
+		q.Set("per-page", "1")
+		q.Set("api_key", apiKey)
+		endpoint.RawQuery = q.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		return doSearchServiceCheckRequest(req, providerName, baseURL, apiKey, "OpenAlex API key accepted")
+
 	case "tavily":
 		return doTavilySearchCloudServiceCheck(ctx, providerName, baseURL, apiKey)
 	case "bing", "bingsearch":

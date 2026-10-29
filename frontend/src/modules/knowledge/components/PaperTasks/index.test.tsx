@@ -11,16 +11,16 @@ import PaperTasks from './index';
 import PaperImportanceButton from './PaperImportanceButton';
 import { deleteExpansion, getExpansion, launchPaperTask, listExpansions, resolvePaperSelection, setPaperImportance, type ExpansionDetail, type PaperTask } from '../../api/paperWorkflows';
 import { previewPaperImport, startReferenceImport, getPaperImportStatus, type ImportPreviewItem } from '../../api/academicReferences';
-vi.mock('../../api/paperWorkflows', () => ({ launchPaperTask: vi.fn(), getExpansion: vi.fn(), listExpansions: vi.fn(), resolvePaperSelection: vi.fn(), retryPaperContent: vi.fn(), deleteExpansion: vi.fn(), setPaperImportance: vi.fn() }));
+vi.mock('../../api/paperWorkflows', () => ({ launchPaperTask: vi.fn(), getExpansion: vi.fn(), listExpansions: vi.fn(), resolvePaperSelection: vi.fn(), retryPaperContent: vi.fn(), deleteExpansion: vi.fn(), setPaperImportance: vi.fn(), getExpansionCapabilities: vi.fn().mockResolvedValue({ openalex_key: true, sciverse: true, web_search: true }), submitPreparation: vi.fn(), confirmExpansion: vi.fn() }));
 vi.mock('../../api/academicReferences', () => ({ previewPaperImport: vi.fn(), startReferenceImport: vi.fn(), getPaperImportStatus: vi.fn(), isImportPreviewExpired: () => false }));
 const importsChanged = vi.fn();
 const i18n = createInstance();
 void i18n.init({ lng: 'zh-CN', resources: { 'zh-CN': { translation: zhCN }, 'en-US': { translation: enUS } }, initImmediate: false });
 const input = { user_instruction: 'agent research', candidate_directions: ['tools'], selected_directions: ['tools'], papers: [{ paper: { paper_id: 'a', abstract: null, title: 'A' }, is_seed: true, is_important: false }, { paper: { paper_id: 'b', abstract: null, title: 'B' }, is_seed: false, is_important: false }] };
-const record = { id: 'r', dataset_id: 'd', conversation_id: 'expansion-chat', title: 'agents', goal: 'expansion', status: 'completed', version: 1, result: input, created_at: '', updated_at: '' };
-const detail: ExpansionDetail = { record, paper_importance: {}, chat_status: 'available', rounds: [], contents: [{ id: 'ca', paper_id: 'a', status: 'ready', content_hash: 'a' }, { id: 'cb', paper_id: 'b', status: 'ready', content_hash: 'b' }], handoffs: [] };
+const record = { id: 'r', preparation_revision: 1, budget_mode: 'balanced' as const, dataset_id: 'd', conversation_id: 'expansion-chat', title: 'agents', goal: 'expansion', status: 'completed', version: 1, result: input, created_at: '', updated_at: '' };
+const detail: ExpansionDetail = { record, paper_importance: {}, chat_status: 'available', rounds: [], contents: [{ id: 'ca', paper_id: 'a', status: 'ready', content_hash: 'a', quality: { eligible: true, downloaded: true, parsed: true, identity: 'matched', text: 'usable', material: 'main' } }, { id: 'cb', paper_id: 'b', status: 'ready', content_hash: 'b', quality: { eligible: true, downloaded: true, parsed: true, identity: 'matched', text: 'usable', material: 'main' } }], handoffs: [] };
 const third = { paper: { paper_id: 'c', abstract: null, title: 'C' }, is_seed: false, is_important: false };
-const threePapers: ExpansionDetail = { ...detail, record: { ...record, result: { ...input, papers: [...input.papers, third] } }, contents: [...detail.contents, { id: 'cc', paper_id: 'c', status: 'ready', content_hash: 'c' }] };
+const threePapers: ExpansionDetail = { ...detail, record: { ...record, result: { ...input, papers: [...input.papers, third] } }, contents: [...detail.contents, { id: 'cc', paper_id: 'c', status: 'ready', content_hash: 'c', quality: { eligible: true, downloaded: true, parsed: true, identity: 'matched', text: 'usable', material: 'main' } }] };
 const preview = (id: string, disposition: ImportPreviewItem['disposition'] = 'downloadable'): ImportPreviewItem => ({ work_id: id, title: id, disposition, presence: { status: '', current_dataset: [], other_datasets: [], importing: false, coverage_complete: true }, fulltext_candidates: disposition === 'downloadable' ? [{ url: `https://arxiv.org/pdf/${id}v2`, source_type: 'official_pdf', source_provider: 'arxiv', version: 'v2' }] : [], paper: { paper_id: id, abstract: null, source_provider: 'arxiv', source_version: 'v2' } });
 function Harness({ selected = ['a'], canImport = true, selectionError, onNotification, onNotificationResolved }: { selected?: string[]; canImport?: boolean; selectionError?: string; onNotification?: React.ComponentProps<typeof PaperTasks>["onNotification"]; onNotificationResolved?: (id: string) => void }) {
     const [actionsContainer, setActionsContainer] = useState<HTMLDivElement | null>(null);
@@ -43,7 +43,7 @@ beforeEach(() => {
 });
 afterEach(() => { Modal.destroyAll(); cleanup(); vi.useRealTimers(); });
 const submit = async () => {
-    fireEvent.click(screen.getByRole('button', { name: /^开\s*始$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^(开\s*始|开始初步调研)$/ }));
     await waitFor(() => expect(launchPaperTask).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/agent/chat/home/new-chat'));
 };
@@ -60,7 +60,7 @@ describe('paper task startup routes', () => {
         mount(['a'], '', true, { onNotification, onNotificationResolved });
         fireEvent.click(screen.getByRole('button', { name: '阅读心得' }));
         fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Keep this instruction' } });
-        fireEvent.click(screen.getByRole('button', { name: /^开\s*始$/ }));
+        fireEvent.click(screen.getByRole('button', { name: /^(开\s*始|开始初步调研)$/ }));
         await waitFor(() => expect(onNotification).toHaveBeenCalledWith(expect.objectContaining({ id: 'paper-task-launch', message: 'launch unavailable' })));
         expect(screen.getByRole('textbox')).toHaveValue('Keep this instruction');
         expect(launchPaperTask).toHaveBeenLastCalledWith(expect.objectContaining({ user_instruction: 'Keep this instruction' }), true);
@@ -82,6 +82,17 @@ describe('paper task startup routes', () => {
         await submit();
         expect(resolvePaperSelection).toHaveBeenCalledWith('d', ['a'], false);
         expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ kind: 'expansion', document_ids: ['a'] }), false);
+    });
+    it('chooses research depth at launch and resets it for a new task', async () => {
+        mount(['a']);
+        fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
+        fireEvent.click(await screen.findByText('基于选中论文扩展'));
+        fireEvent.click(screen.getByRole('radio', { name: /深入/ }));
+        await submit();
+        expect(launchPaperTask).toHaveBeenCalledWith(expect.objectContaining({ budget_mode: 'deep' }), false);
+        fireEvent.click(screen.getByRole('button', { name: /自动扩展/ }));
+        fireEvent.click(await screen.findByText('基于选中论文扩展'));
+        expect(screen.getByRole('radio', { name: /标准/ })).toBeChecked();
     });
     it('starts direction expansion with one topic input and no papers', async () => {
         mount([]);

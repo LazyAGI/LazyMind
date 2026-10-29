@@ -44,13 +44,66 @@ components:
                 upload_state:
                     type: string
             type: object
+        AcademicChatContext:
+            allOf:
+                - $ref: '#/components/schemas/AcademicChatSummary'
+                - properties:
+                    input:
+                        $ref: '#/components/schemas/AcademicHandoffInput'
+                  type: object
+        AcademicChatSummary:
+            properties:
+                dataset_id:
+                    type: string
+                expansion_id:
+                    type: string
+                handoff_id:
+                    type: string
+                kind:
+                    type: string
+                next_conversation_id:
+                    type: string
+                paper_count:
+                    type: integer
+                ready_count:
+                    type: integer
+                source_available:
+                    type: boolean
+                source_conversation_id:
+                    type: string
+                status:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - kind
+                - dataset_id
+                - status
+                - version
+            type: object
         AcademicContentRead:
             oneOf:
                 - properties:
                     expansion_id:
                         type: string
+                    keywords:
+                        items:
+                            type: string
+                        type: array
+                    page_end:
+                        type: integer
+                    page_start:
+                        type: integer
                     paper_id:
                         type: string
+                    positions:
+                        items:
+                            type: integer
+                        type: array
+                    preparation_revision:
+                        format: int64
+                        type: integer
                   required:
                     - expansion_id
                     - paper_id
@@ -58,8 +111,20 @@ components:
                 - properties:
                     handoff_id:
                         type: string
+                    keywords:
+                        items:
+                            type: string
+                        type: array
+                    page_end:
+                        type: integer
+                    page_start:
+                        type: integer
                     paper_id:
                         type: string
+                    positions:
+                        items:
+                            type: integer
+                        type: array
                   required:
                     - handoff_id
                     - paper_id
@@ -101,6 +166,13 @@ components:
                     $ref: '#/components/schemas/AcademicPaperRef'
                 parser_version:
                     type: string
+                positions:
+                    items:
+                        type: integer
+                    type: array
+                quality:
+                    properties: {}
+                    type: object
                 source_kind:
                     enum:
                         - kb
@@ -115,7 +187,10 @@ components:
                         - ready
                         - unavailable
                         - failed
+                        - needs_review
                     type: string
+                total_blocks:
+                    type: integer
                 warnings:
                     items:
                         type: string
@@ -183,6 +258,13 @@ components:
             type: object
         AcademicExpansion:
             properties:
+                budget_mode:
+                    description: Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget.
+                    enum:
+                        - fast
+                        - balanced
+                        - deep
+                    type: string
                 conversation_id:
                     type: string
                 created_at:
@@ -198,9 +280,104 @@ components:
                     type: string
                 id:
                     type: string
+                preparation:
+                    properties:
+                        answers:
+                            additionalProperties:
+                                type: string
+                            type: object
+                        auto_confirmed:
+                            type: boolean
+                        directions:
+                            items:
+                                properties:
+                                    difference:
+                                        type: string
+                                    name:
+                                        type: string
+                                    paper_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    papers:
+                                        items:
+                                            $ref: '#/components/schemas/AcademicPaperRef'
+                                        type: array
+                                    question:
+                                        type: string
+                                    reason:
+                                        type: string
+                                required:
+                                    - name
+                                    - question
+                                    - reason
+                                    - difference
+                                    - paper_ids
+                                type: object
+                            maxItems: 5
+                            type: array
+                        error:
+                            type: string
+                        metrics:
+                            properties: {}
+                            type: object
+                        questions:
+                            items:
+                                properties:
+                                    id:
+                                        type: string
+                                    options:
+                                        items:
+                                            type: string
+                                        type: array
+                                    question:
+                                        type: string
+                                required:
+                                    - id
+                                    - question
+                                type: object
+                            type: array
+                        selected_directions:
+                            items:
+                                type: string
+                            type: array
+                        summary:
+                            type: string
+                        user_instruction:
+                            type: string
+                    type: object
+                preparation_revision:
+                    format: int64
+                    type: integer
                 progress:
                     properties: {}
                     type: object
+                reading:
+                    additionalProperties:
+                        properties:
+                            content_hash:
+                                type: string
+                            pages:
+                                items:
+                                    type: integer
+                                type: array
+                            positions:
+                                items:
+                                    type: integer
+                                type: array
+                            read_level:
+                                enum:
+                                    - related_sections
+                                    - full
+                                type: string
+                            source_version:
+                                type: string
+                            total_blocks:
+                                type: integer
+                        type: object
+                    type: object
+                report:
+                    $ref: '#/components/schemas/AcademicExpansionReport'
                 result:
                     $ref: '#/components/schemas/AcademicReviewInput'
                 status:
@@ -216,18 +393,188 @@ components:
             required:
                 - id
                 - dataset_id
-                - conversation_id
                 - status
                 - version
                 - result
+                - preparation_revision
+                - budget_mode
+            type: object
+        AcademicExpansionReport:
+            properties:
+                claims:
+                    items:
+                        properties:
+                            content_hash:
+                                type: string
+                            field:
+                                type: string
+                            paper_id:
+                                type: string
+                            positions:
+                                items:
+                                    type: integer
+                                type: array
+                            reason:
+                                type: string
+                            source_version:
+                                type: string
+                            statement:
+                                type: string
+                            status:
+                                enum:
+                                    - supported
+                                    - unsupported
+                                    - uncertain
+                                type: string
+                        type: object
+                    type: array
+                compose_metrics:
+                    properties:
+                        currency_cost:
+                            nullable: true
+                            type: number
+                        model:
+                            type: string
+                        provider_usage_records:
+                            items:
+                                properties: {}
+                                type: object
+                            type: array
+                    type: object
+                currency_cost:
+                    nullable: true
+                    type: number
+                execution_elapsed_ms:
+                    format: int64
+                    type: integer
+                limitations:
+                    items:
+                        type: string
+                    type: array
+                materials:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                narrative:
+                    type: string
+                preparation_attempts:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                reading:
+                    additionalProperties:
+                        properties:
+                            content_hash:
+                                type: string
+                            pages:
+                                items:
+                                    type: integer
+                                type: array
+                            positions:
+                                items:
+                                    type: integer
+                                type: array
+                            read_level:
+                                enum:
+                                    - related_sections
+                                    - full
+                                type: string
+                            source_version:
+                                type: string
+                            total_blocks:
+                                type: integer
+                        type: object
+                    type: object
+                reading_order:
+                    items:
+                        type: string
+                    type: array
+                reused_source_queries:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                source_queries:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
+                stage_metrics:
+                    additionalProperties:
+                        properties:
+                            currency_cost:
+                                nullable: true
+                                type: number
+                            model:
+                                type: string
+                            provider_usage_records:
+                                items:
+                                    properties: {}
+                                    type: object
+                                type: array
+                        type: object
+                    type: object
+                stage_timing:
+                    items:
+                        properties:
+                            attempt:
+                                type: integer
+                            queue_and_execution_ms:
+                                format: int64
+                                type: integer
+                            status:
+                                type: string
+                            step_id:
+                                type: string
+                        type: object
+                    type: array
             type: object
         AcademicHandoffInput:
             oneOf:
                 - $ref: '#/components/schemas/AcademicReviewInput'
                 - $ref: '#/components/schemas/AcademicPaperTaskInput'
+        AcademicHandoffLink:
+            properties:
+                conversation_id:
+                    type: string
+                id:
+                    type: string
+                kind:
+                    type: string
+                version:
+                    format: int64
+                    type: integer
+            required:
+                - id
+                - kind
+                - conversation_id
+                - version
+            type: object
+        AcademicHandoffResult:
+            properties:
+                feedback:
+                    type: string
+                input:
+                    $ref: '#/components/schemas/AcademicHandoffInput'
+                kind:
+                    type: string
+                reflection_markdown:
+                    type: string
+                status:
+                    type: string
+            required:
+                - kind
+                - input
+                - status
+                - feedback
+            type: object
         AcademicImportCandidate:
             properties:
                 expected_mime:
+                    type: string
+                license:
                     type: string
                 source_provider:
                     type: string
@@ -364,6 +711,14 @@ components:
                     type: boolean
                 document_id:
                     type: string
+                error_code:
+                    type: string
+                error_detail:
+                    type: string
+                error_message:
+                    type: string
+                error_recovery:
+                    type: string
                 item_id:
                     type: string
                 library_paper_id:
@@ -374,6 +729,12 @@ components:
                 resolved_later:
                     type: boolean
                 result_kind:
+                    type: string
+                source_provider:
+                    type: string
+                source_version:
+                    type: string
+                stage:
                     type: string
                 status:
                     type: string
@@ -393,6 +754,8 @@ components:
                                 items:
                                     $ref: '#/components/schemas/AcademicImportCandidate'
                                 type: array
+                            fulltext_error:
+                                $ref: '#/components/schemas/ProcessingDiagnostic'
                             paper:
                                 $ref: '#/components/schemas/AcademicPaperRef'
                             presence:
@@ -438,7 +801,11 @@ components:
                     type: string
                 error_code:
                     type: string
+                error_detail:
+                    type: string
                 error_message:
+                    type: string
+                error_recovery:
                     type: string
                 item_id:
                     type: string
@@ -459,6 +826,19 @@ components:
                     type: string
                 work_id:
                     type: string
+            type: object
+        AcademicModelMetrics:
+            properties:
+                currency_cost:
+                    nullable: true
+                    type: number
+                model:
+                    type: string
+                provider_usage_records:
+                    items:
+                        properties: {}
+                        type: object
+                    type: array
             type: object
         AcademicPaperRef:
             properties:
@@ -627,7 +1007,13 @@ components:
                     type: boolean
                 document_id:
                     type: string
+                error_code:
+                    type: string
+                error_detail:
+                    type: string
                 error_message:
+                    type: string
+                error_recovery:
                     type: string
                 item_id:
                     type: string
@@ -665,6 +1051,13 @@ components:
             type: object
         AcademicTaskLaunch:
             properties:
+                budget_mode:
+                    description: Research depth fixed at task creation; controls investigation breadth and evidence checks, without a wall-clock budget.
+                    enum:
+                        - fast
+                        - balanced
+                        - deep
+                    type: string
                 dataset_id:
                     type: string
                 direction:
@@ -17488,48 +17881,21 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: view
+                  required: false
+                  schema:
+                    enum:
+                        - summary
+                    type: string
             responses:
                 "200":
                     content:
                         application/json:
                             schema:
-                                properties:
-                                    contents:
-                                        oneOf:
-                                            - properties: {}
-                                              type: object
-                                            - items:
-                                                properties: {}
-                                                type: object
-                                              type: array
-                                    dataset_id:
-                                        type: string
-                                    expansion_id:
-                                        type: string
-                                    handoff_id:
-                                        type: string
-                                    input:
-                                        $ref: '#/components/schemas/AcademicHandoffInput'
-                                    kind:
-                                        type: string
-                                    next_conversation_id:
-                                        type: string
-                                    paper_count:
-                                        type: integer
-                                    ready_count:
-                                        type: integer
-                                    source_available:
-                                        type: boolean
-                                    source_conversation_id:
-                                        type: string
-                                    status:
-                                        type: string
-                                    version:
-                                        format: int64
-                                        type: integer
-                                type: object
-                    description: Read owned academic Chat progress and complete frozen handoff
-            summary: Read owned academic Chat progress and complete frozen handoff
+                                $ref: '#/components/schemas/AcademicChatContext'
+                    description: Read owned academic Chat progress or frozen business input without internal sources
+            summary: Read owned academic Chat progress or frozen business input without internal sources
             tags:
                 - AcademicWorkflows
     /api/core/academic/documents/{document_id}/identity:
@@ -17583,6 +17949,28 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/documents/{document_id}/references:extract
+    /api/core/academic/expansion-capabilities:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    budgets:
+                                        properties: {}
+                                        type: object
+                                    openalex_key:
+                                        type: boolean
+                                    sciverse:
+                                        type: boolean
+                                    web_search:
+                                        type: boolean
+                                type: object
+                    description: Read available academic search configuration and budget profiles
+            summary: Read available academic search configuration and budget profiles
+            tags:
+                - AcademicWorkflows
     /api/core/academic/expansions:
         get:
             parameters:
@@ -17653,6 +18041,7 @@ paths:
                                 properties:
                                     chat_status:
                                         enum:
+                                            - uncreated
                                             - available
                                             - trashed
                                             - deleted
@@ -17664,8 +18053,7 @@ paths:
                                         type: array
                                     handoffs:
                                         items:
-                                            properties: {}
-                                            type: object
+                                            $ref: '#/components/schemas/AcademicHandoffLink'
                                         type: array
                                     paper_importance:
                                         additionalProperties:
@@ -17677,6 +18065,8 @@ paths:
                                         type: array
                                     record:
                                         $ref: '#/components/schemas/AcademicExpansion'
+                                    research_guidance:
+                                        type: string
                                     rounds:
                                         items:
                                             properties: {}
@@ -17719,9 +18109,116 @@ paths:
             summary: Resolve registered expansion papers and version-scoped content metadata without full bodies
             tags:
                 - AcademicWorkflows
+    /api/core/academic/expansions/{expansion_id}/preparation:
+        post:
+            parameters:
+                - in: path
+                  name: expansion_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                action:
+                                    enum:
+                                        - answer
+                                        - revise
+                                        - retry
+                                    type: string
+                                answers:
+                                    additionalProperties:
+                                        type: string
+                                    type: object
+                                request_key:
+                                    type: string
+                                revision:
+                                    format: int64
+                                    type: integer
+                                user_instruction:
+                                    type: string
+                            required:
+                                - action
+                                - revision
+                                - request_key
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    expansion_id:
+                                        type: string
+                                    revision:
+                                        format: int64
+                                        type: integer
+                                    status:
+                                        type: string
+                                type: object
+                    description: Answer, revise or retry the current preparation revision
+            summary: Answer, revise or retry the current preparation revision
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/expansions/{expansion_id}:confirm:
+        post:
+            parameters:
+                - in: path
+                  name: expansion_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                request_key:
+                                    type: string
+                                revision:
+                                    format: int64
+                                    type: integer
+                                selected_directions:
+                                    items:
+                                        type: string
+                                    type: array
+                            required:
+                                - revision
+                                - request_key
+                                - selected_directions
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    conversation_id:
+                                        type: string
+                                    expansion_id:
+                                        type: string
+                                    status:
+                                        type: string
+                                type: object
+                    description: Confirm the current prepared scope and idempotently launch its Chat
+            summary: Confirm the current prepared scope and idempotently launch its Chat
+            tags:
+                - AcademicWorkflows
     /api/core/academic/imports:
         get:
             parameters:
+                - in: query
+                  name: filter
+                  required: false
+                  schema:
+                    enum:
+                        - all
+                        - current
+                    type: string
                 - in: query
                   name: view
                   required: false
@@ -17917,10 +18414,38 @@ paths:
                   required: true
                   schema:
                     type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                idempotency_key:
+                                    type: string
+                                item_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                            type: object
+                required: false
             responses:
                 "200":
-                    description: OK
-            summary: POST /academic/imports/{batch_id}:retry
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    batch_id:
+                                        type: string
+                                    job_id:
+                                        type: string
+                                    retry_items:
+                                        type: integer
+                                    status:
+                                        type: string
+                                type: object
+                    description: Retry failed imports or processing without duplicating saved originals
+            summary: Retry failed imports or processing without duplicating saved originals
+            tags:
+                - AcademicWorkflows
     /api/core/academic/imports:preview:
         post:
             requestBody:
@@ -18307,24 +18832,48 @@ paths:
                     content:
                         application/json:
                             schema:
-                                properties:
-                                    feedback:
-                                        type: string
-                                    input:
-                                        $ref: '#/components/schemas/AcademicHandoffInput'
-                                    kind:
-                                        type: string
-                                    papers:
-                                        items:
-                                            $ref: '#/components/schemas/AcademicPaperRef'
-                                        type: array
-                                    reflection_markdown:
-                                        type: string
-                                    status:
-                                        type: string
-                                type: object
+                                $ref: '#/components/schemas/AcademicHandoffResult'
                     description: Acknowledge the frozen downstream input; PPT relay reads its saved reflection
             summary: Acknowledge the frozen downstream input; PPT relay reads its saved reflection
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/notifications:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    items:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
+                                type: object
+                    description: List unread paper preparation notifications
+            summary: List unread paper preparation notifications
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/notifications/{notification_id}:read:
+        post:
+            parameters:
+                - in: path
+                  name: notification_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    read:
+                                        type: boolean
+                                type: object
+                    description: Dismiss a paper notice without changing the pending action
+            summary: Dismiss a paper notice without changing the pending action
             tags:
                 - AcademicWorkflows
     /api/core/academic/paper-contents:read:
@@ -18458,6 +19007,8 @@ paths:
                     application/json:
                         schema:
                             properties:
+                                cursor:
+                                    type: string
                                 expansion_id:
                                     type: string
                                 max_results:
@@ -18465,11 +19016,30 @@ paths:
                                     maximum: 20
                                     minimum: 1
                                     type: integer
+                                mode:
+                                    enum:
+                                        - keyword
+                                        - references
+                                        - citations
+                                    type: string
+                                paper_id:
+                                    type: string
+                                preparation_revision:
+                                    format: int64
+                                    type: integer
                                 query:
                                     type: string
+                                sources:
+                                    items:
+                                        enum:
+                                            - openalex
+                                            - arxiv
+                                            - sciverse
+                                            - web
+                                        type: string
+                                    type: array
                             required:
                                 - expansion_id
-                                - query
                             type: object
                 required: true
             responses:
@@ -18478,17 +19048,25 @@ paths:
                         application/json:
                             schema:
                                 properties:
+                                    leads:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
                                     mock:
                                         type: boolean
                                     papers:
                                         items:
                                             $ref: '#/components/schemas/AcademicPaperRef'
                                         type: array
-                                    source:
-                                        type: string
+                                    sources:
+                                        items:
+                                            properties: {}
+                                            type: object
+                                        type: array
                                 type: object
-                    description: Search external arXiv candidates and pin their versions to an owned expansion
-            summary: Search external arXiv candidates and pin their versions to an owned expansion
+                    description: Search scholarly providers and configured web search; register papers and preserve web leads
+            summary: Search scholarly providers and configured web search; register papers and preserve web leads
             tags:
                 - AcademicWorkflows
     /api/core/academic/references:resolve:
@@ -18529,9 +19107,11 @@ paths:
                                         type: string
                                     handoff_id:
                                         type: string
+                                    status:
+                                        type: string
                                 type: object
-                    description: Idempotently start expansion or a separate downstream Chat
-            summary: Idempotently start expansion or a separate downstream Chat
+                    description: Create background preparation, or start a separate downstream Chat
+            summary: Create background preparation, or start a separate downstream Chat
             tags:
                 - AcademicWorkflows
     /api/core/academic/works:presence:

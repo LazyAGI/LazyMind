@@ -9,6 +9,10 @@ import { getChatConversationPath, CHAT_CONVERSATION_LIST_REFRESH_EVENT } from '@
 import { deleteExpansion, getExpansion, launchPaperTask, listExpansions, resolvePaperSelection, retryPaperContent, type Expansion, type ExpansionDetail, type PaperTask, type WorkflowPaper } from '../../api/paperWorkflows';
 import { previewPaperImport, startReferenceImport, getPaperImportStatus, type ImportPreviewItem, isImportPreviewExpired } from '../../api/academicReferences';
 import './index.scss';
+import MarkdownViewer from '../MarkdownViewer';
+import PreparationPanel from './PreparationPanel';
+import ResearchDepth from './ResearchDepth';
+import { getExpansionCapabilities, type BudgetMode } from '../../api/paperWorkflows';
 import type { PaperNotification } from '../../paper/usePaperNotifications';
 
 interface Props {
@@ -54,7 +58,7 @@ function currentPaperDocument(detail: ExpansionDetail, item: WorkflowPaper, prev
             : item.is_seed
     ));
 }
-const stages = ['direction_research', 'seed_set', 'expanded_papers', 'paper_relations', 'expansion_result'];
+const stages = ['expansion_plan', 'candidate_set', 'relation_analysis', 'expansion_result'];
 
 export default function PaperTasks({ dataset, selected, selectedTitles = [], selectionError, canImport, onImportSubmitted, actionsContainer, onNotification, onNotificationResolved }: Props) {
     const { t } = useTranslation();
@@ -63,6 +67,9 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const [launch, setLaunch] = useState<{ kind: PaperTask; direction: boolean }>();
     const [instruction, setInstruction] = useState('');
     const [reflectionFirst, setReflectionFirst] = useState(false);
+    const [budgetMode, setBudgetMode] = useState<BudgetMode>('balanced');
+    const [capabilities, setCapabilities] = useState<{openalex_key: boolean; sciverse: boolean; web_search: boolean}>();
+    useEffect(() => { if (launch) void getExpansionCapabilities().then(setCapabilities).catch(() => setCapabilities(undefined)); }, [launch]);
     const [busy, setBusy] = useState(false);
     const [history, setHistory] = useState(false);
     const [historyError, setHistoryError] = useState(false);
@@ -85,7 +92,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
     const detailRequest = useRef(0);
     const detailTarget = useRef<string>();
     const taskLabel = (kind: string) => t(`paperTasks.task.${kind}`, { defaultValue: kind });
-    const statusLabel = (status: string) => t(`paperTasks.status.${status}`, { defaultValue: status });
+    const statusLabel = (status: string) => (({ preparing: '初步调研中', awaiting_info: '待补充信息', awaiting_confirmation: '待确认方向', preparation_failed: '初步调研失败' } as Record<string, string>)[status] || t(`paperTasks.status.${status}`, { defaultValue: status }));
     const selectedPaperTaskError = selectionError || (!selected.length ? t('paperTasks.selectPaperFirst') : '');
     const openLaunch = useCallback((kind: PaperTask, direction: boolean) => {
         if (!direction) {
@@ -94,6 +101,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
         setActionError('');
         setInstruction('');
         setReflectionFirst(false);
+        setBudgetMode('balanced');
         setLaunch({ kind, direction });
         requestKey.current = crypto.randomUUID();
         requestInput.current = '';
@@ -130,6 +138,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             const result = await pending.promise;
             if (request === detailRequest.current) {
                 setDetail(result);
+                setParams(current => { if (current.get('expansion_id') === id) return current; const next = new URLSearchParams(current); next.set('expansion_id', id); return next; }, { replace: true });
                 onNotificationResolved?.(`expansion-detail:${id}`);
                 for (const content of result.contents) {
                     const noticeId = `expansion-content:${id}:${content.paper_id}`;
@@ -144,12 +153,21 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             throw error;
         } finally { if (pendingDetail.current === pending) pendingDetail.current = undefined; }
     };
+    useEffect(() => {
+        const open = (event: Event) => { const id = (event as CustomEvent<{id: string}>).detail?.id; if (id) void openDetail(id).catch(() => {}); };
+        window.addEventListener('paper-expansion-open', open);
+        return () => window.removeEventListener('paper-expansion-open', open);
+    }, [dataset]);
+    useEffect(() => {
+        if (detail) document.documentElement.dataset.paperExpansion = detail.record.id;
+        return () => { delete document.documentElement.dataset.paperExpansion; };
+    }, [detail?.record.id]);
     const expansionID = params.get('expansion_id');
     useEffect(() => {
-        if (expansionID) void openDetail(expansionID).catch(() => {});
+        if (expansionID && detailTarget.current !== expansionID) void openDetail(expansionID).catch(() => {});
     }, [expansionID]);
     const expanding = !!detail && ['running', 'active'].includes(detail.record.status);
-    const detailActive = !!detail && (['pending', 'running', 'active'].includes(detail.record.status)
+    const detailActive = !!detail && (['pending', 'running', 'active', 'preparing'].includes(detail.record.status)
         || detail.contents.some(content => ['pending', 'processing'].includes(content.status))
         || detail.presence?.some(item => item.importing));
     useEffect(() => {
@@ -222,7 +240,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             const body = {
                 kind: launch.kind, dataset_id: dataset, document_ids: launch.direction ? [] : selected,
                 direction: launch.direction ? instruction.trim() : undefined,
-                user_instruction: launch.direction ? undefined : instruction.trim(), reflection_first: reflectionFirst,
+                user_instruction: launch.direction ? undefined : instruction.trim(), reflection_first: reflectionFirst, budget_mode: budgetMode,
             };
             const fingerprint = JSON.stringify(body);
             if (requestInput.current && requestInput.current !== fingerprint) requestKey.current = crypto.randomUUID();
@@ -230,7 +248,9 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             const result = await launchPaperTask({ ...body, request_key: requestKey.current }, !!onNotification);
             onNotificationResolved?.('paper-task-launch');
             setLaunch(undefined);
-            goChat(result.conversation_id, launch.kind === 'review');
+            if (result.expansion_id && ['expansion', 'review'].includes(launch.kind)) await openDetail(result.expansion_id);
+            else if (result.conversation_id) goChat(result.conversation_id, launch.kind === 'review');
+            else throw new Error('任务未返回有效记录，请重试');
         } catch (error) {
             if (onNotification) {
                 setActionError('任务尚未创建，请重试或查看通知。');
@@ -240,9 +260,10 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             setBusy(false);
         }
     };
-    const contentReady = (source: ExpansionDetail, id: string) => source.contents.some(content => content.paper_id === id && content.status === 'ready' && !!content.content_hash);
+    const contentReady = (source: ExpansionDetail, id: string) => source.contents.some(content => content.paper_id === id && content.status === 'ready' && !!content.content_hash && !!content.quality?.eligible);
     const contentStatus = (source: ExpansionDetail, id: string) => {
         const content = source.contents.find(item => item.paper_id === id);
+        if (content?.status === 'needs_review') return '材料待核对';
         return t(`paperTasks.content.${content?.status === 'ready' && !content.content_hash ? 'pending' : content?.status || 'pending'}`);
     };
     // Keep the selected result snapshot stable while polling live content and import status.
@@ -326,6 +347,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 paper_ids: selection.selected, request_key: selection.requestKey,
             }, !!onNotification);
             onNotificationResolved?.(`expansion-review:${source.record.id}`);
+            if (!result.conversation_id) throw new Error('任务未返回 Chat，请重试');
             goChat(result.conversation_id);
         } catch (error) {
             setActionError(onNotification ? '提交尚未完成，请重试或查看通知。' : t('paperTasks.submitFailed'));
@@ -418,10 +440,20 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             <Tooltip title={selectedPaperTaskError || undefined} placement="right"><span><Button type="text" className={`paper-library-task-action ${activeTask === 'ppt' ? 'is-active' : ''}`} icon={<FundProjectionScreenOutlined aria-hidden />} aria-pressed={activeTask === 'ppt'} disabled={!!selectedPaperTaskError} onClick={() => openLaunch('ppt', false)}>{taskLabel('ppt')}</Button></span></Tooltip>
             <Button type="text" className="paper-library-task-action" icon={<HistoryOutlined aria-hidden />} onClick={openHistory}>{t('paperTasks.records')}</Button>
         </div>;
+    const confirmDeleteExpansion = () => {
+        if (!detail) return;
+        Modal.confirm({
+            title: t('paperTasks.deleteTitle'), content: t('paperTasks.deleteHint'), okText: t('paperTasks.confirmDelete'), cancelText: t('paperTasks.cancel'), okButtonProps: { danger: true },
+            onOk: async () => {
+                try { await deleteExpansion(detail.record.id, !!onNotification); onNotificationResolved?.(`expansion-delete:${detail.record.id}`); closeDetail(); await refreshHistory(); }
+                catch (error) { onNotification?.({ id: `expansion-delete:${detail.record.id}`, title: '论文扩展记录删除失败', message: error instanceof Error ? error.message : '删除失败，请重试' }); throw error; }
+            },
+        });
+    };
     return <>
         {actionsContainer ? createPortal(actions, actionsContainer) : actions}
-        <Modal okText={t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
-            title={launch ? taskLabel(launch.kind) : ''}
+        <Modal okText={launch && ['expansion', 'review'].includes(launch.kind) ? '开始初步调研' : t('paperTasks.start')} cancelText={t('paperTasks.cancel')} open={!!launch}
+            title={launch ? taskLabel(launch.kind) : ''} className={launch && ['expansion', 'review'].includes(launch.kind) ? 'paper-task-launch-modal' : undefined} width={launch && ['expansion', 'review'].includes(launch.kind) ? 660 : 520}
             onCancel={() => !busy && setLaunch(undefined)} onOk={() => void submit()} confirmLoading={busy}>
             {actionError && onNotification && <p role="status">{actionError}</p>}
             {launch?.kind === 'review' && <Alert type="info" showIcon message={t('paperTasks.reviewStartHint')} />}
@@ -433,6 +465,14 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
             <Input.TextArea aria-label={t(launch?.direction ? 'paperTasks.topic' : 'paperTasks.additional')}
                 placeholder={t(launch?.direction ? 'paperTasks.topicPlaceholder' : `paperTasks.placeholder.${launch?.kind || 'expansion'}`)}
                 value={instruction} onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setInstruction(event.target.value)} />
+            {launch && ['expansion', 'review'].includes(launch.kind) && <Space direction="vertical" style={{ width: '100%', marginTop: 12 }}>
+                <ResearchDepth value={budgetMode} onChange={setBudgetMode} />
+                <p className="paper-task-launch-flow-hint"><BranchesOutlined />有多个方向时请你选择；只有一个方向时自动继续拓展。</p>
+                {capabilities && (!capabilities.openalex_key || !capabilities.sciverse) && <Alert type="info" message="可使用当前配置开始调研" description={<>
+                  {!capabilities.openalex_key && <div>OpenAlex 使用基础访问，部分检索深度与托管全文受限。<Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=openalex">配置 OpenAlex</Link></div>}
+                  {!capabilities.sciverse && <div>Sciverse 检索未启用。<Link to="/settings?section=knowledge&tool=academic-search&editor=service&item=sciverse">配置 Sciverse</Link></div>}
+                </>} />}
+            </Space>}
             {launch?.kind === 'ppt' && <Checkbox style={{ marginTop: 12 }} checked={reflectionFirst} onChange={(event: CheckboxChangeEvent) => setReflectionFirst(event.target.checked)}>{t('paperTasks.reflectionFirst')}</Checkbox>}
         </Modal>
         <Drawer open={history} title={t('paperTasks.personalRecords')} width={780} onClose={() => setHistory(false)}>
@@ -441,24 +481,32 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 <Button key="view" onClick={() => void openDetail(record.id).catch(() => {})}>{t('paperTasks.viewResult')}</Button>,
             ]}><List.Item.Meta title={record.title} description={`${statusLabel(record.status)} · ${t('paperTasks.paperCount', { count: distinctPapers(record.result?.papers || []).length })}`} /></List.Item>} />
         </Drawer>
-        <Drawer open={!!detail} title={t('paperTasks.resultTitle')} width={1000} onClose={closeDetail} closable={!busy}>
+        <Drawer className="paper-expansion-detail-drawer" open={!!detail} title={detail?.record.preparation ? '论文拓展' : t('paperTasks.resultTitle')} width={1000} onClose={closeDetail} closable={!busy}
+            extra={detail?.record.preparation && detail.record.version === 0 ? <Button type="text" danger onClick={confirmDeleteExpansion}>{t('paperTasks.deleteResult')}</Button> : undefined}>
             {detail && <>
                 <div className="paper-expansion-result-heading">
                     <Typography.Title level={4} ellipsis={{ rows: 2 }}>{detail.record.title}</Typography.Title>
-                    <Tag role="status" color={expanding ? 'processing' : detail.record.status === 'failed' ? 'error' : detail.record.status === 'completed' ? 'success' : undefined} icon={expanding ? <LoadingOutlined /> : undefined}>
+                    <Tag role="status" color={expanding || detail.record.status === 'preparing' ? 'processing' : ['failed', 'preparation_failed'].includes(detail.record.status) ? 'error' : detail.record.status === 'completed' ? 'success' : ['awaiting_info', 'awaiting_confirmation', 'pending'].includes(detail.record.status) ? 'blue' : undefined} icon={expanding ? <LoadingOutlined /> : undefined}>
                         {expanding ? t('paperTasks.expanding') : statusLabel(detail.record.status)}
                     </Tag>
                 </div>
-                {detail.chat_status !== 'available' && <Alert type="warning" message={t(detail.chat_status === 'trashed' ? 'paperTasks.expansionTrashed' : 'paperTasks.expansionDeleted')} />}
+                {detail.chat_status !== 'available' && detail.chat_status !== 'uncreated' && <Alert type="warning" message={t(detail.chat_status === 'trashed' ? 'paperTasks.expansionTrashed' : 'paperTasks.expansionDeleted')} />}
+                <PreparationPanel detail={detail} onRefresh={() => openDetail(detail.record.id)} onStart={id => goChat(id, detail.record.goal === 'review')} />
+                {(!detail.record.preparation || detail.record.version > 0) && <>
+                {detail.record.report?.narrative && <section aria-label="研究脉络与阅读建议">
+                  <Typography.Title level={5}>研究脉络与阅读建议</Typography.Title>
+                  <MarkdownViewer>{detail.record.report.narrative}</MarkdownViewer>
+                  {!!detail.record.report.reading_order?.length && <><Typography.Text strong>推荐阅读顺序</Typography.Text><ol>{detail.record.report.reading_order.map(id => <li key={id}>{detail.record.result.papers.find(item => item.paper.paper_id === id)?.paper.title || id}</li>)}</ol></>}
+                  {detail.record.report.limitations?.map((item, index) => <Typography.Paragraph key={index} type="secondary">{item}</Typography.Paragraph>)}
+                  <Typography.Text type="secondary">货币成本：{detail.record.report.currency_cost == null ? '未知' : detail.record.report.currency_cost}</Typography.Text>
+                  {detail.record.report.execution_elapsed_ms != null && <Typography.Paragraph>本轮正式执行：{Math.round(detail.record.report.execution_elapsed_ms / 1000)} 秒</Typography.Paragraph>}
+                  {detail.record.report.stage_timing?.map((stage, index) => <div key={index}>{({prepare_plan: '准备检索计划', expand_and_screen: '拓展与筛选', analyze_relations: '分析论文关系', compose_result: '研究脉络与阅读建议'} as Record<string, string>)[stage.step_id] || stage.step_id} · 第 {stage.attempt} 次 · {Math.round(stage.queue_and_execution_ms / 1000)} 秒 · {stage.status}</div>)}
+                  {detail.record.report.source_queries?.map((query, index) => <div key={index}>{query.query}：{query.sources?.map(source => `${source.source} ${source.status}（${source.count} 篇，${Math.round(source.elapsed_ms / 1000)} 秒）`).join('；')}</div>)}
+                  <details><summary>模型与上游用量记录</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify({ preparation: detail.record.report.preparation_attempts, stages: detail.record.report.stage_metrics, composition: detail.record.report.compose_metrics }, null, 2)}</pre></details>
+                </section>}
                 <Space wrap style={{ margin: '12px 0' }}>
                     <Button disabled={detail.chat_status !== 'available'} onClick={() => goChat(detail.record.conversation_id)}>{t('paperTasks.returnExpansion')}</Button>
-                    <Button danger onClick={() => Modal.confirm({
-                        title: t('paperTasks.deleteTitle'), content: t('paperTasks.deleteHint'), okText: t('paperTasks.confirmDelete'), cancelText: t('paperTasks.cancel'), okButtonProps: { danger: true },
-                        onOk: async () => {
-                            try { await deleteExpansion(detail.record.id, !!onNotification); onNotificationResolved?.(`expansion-delete:${detail.record.id}`); closeDetail(); await refreshHistory(); }
-                            catch (error) { onNotification?.({ id: `expansion-delete:${detail.record.id}`, title: '论文扩展记录删除失败', message: error instanceof Error ? error.message : '删除失败，请重试' }); throw error; }
-                        },
-                    })}>{t('paperTasks.deleteResult')}</Button>
+                    <Button danger onClick={confirmDeleteExpansion}>{t('paperTasks.deleteResult')}</Button>
                 </Space>
                 <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: t('paperTasks.expand') }} style={{ whiteSpace: 'pre-wrap', marginTop: 12 }}>{detail.record.result.user_instruction}</Typography.Paragraph>
                 <Typography.Paragraph>{t('paperTasks.directions', { value: detail.record.result.selected_directions?.join('；') || t('paperTasks.undetermined') })}</Typography.Paragraph>
@@ -478,6 +526,18 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 {actionError && !confirmation && (onNotification ? <p role="status">{actionError}</p> : <Alert type="error" showIcon message={actionError} style={{ marginBottom: 12 }} />)}
                 {canImport && preview?.status === 'error' && <Alert type="warning" message={t('paperTasks.previewFailed')} action={<Button onClick={() => void refreshImportPreview(source)}>{t('paperTasks.retry')}</Button>} style={{ marginBottom: 12 }} />}
                 <Table<WorkflowPaper> className={`paper-expansion-result-table${selection?.selected.length ? ' has-selection' : ''}`} rowKey={(item: WorkflowPaper) => item.paper.paper_id} dataSource={papers} pagination={false} scroll={{ x: 960 }}
+                    expandable={{ expandedRowRender: (item: WorkflowPaper) => {
+                      const reading = source.record.report?.reading?.[item.paper.paper_id] || source.record.reading?.[item.paper.paper_id];
+                      const claims = source.record.report?.claims?.filter(claim => claim.paper_id === item.paper.paper_id) || [];
+                      const quality = source.contents.find(content => content.paper_id === item.paper.paper_id)?.quality;
+                      return <Space direction="vertical">
+                        {quality && <Typography.Text type="secondary">材料检查：PDF {quality.downloaded ? '已获取' : '未获取'}；文字{quality.parsed ? '已解析' : '未解析'}；身份{quality.identity === 'matched' ? '已匹配' : quality.identity === 'mismatch' ? '不匹配' : '待核对'}；{quality.eligible ? '可用正文' : '暂不可作为正文证据'}</Typography.Text>}
+                        <Typography.Text>实际读取：{reading?.read_level === 'full' ? '已读取完整正文' : reading ? '已读相关部分' : '仅题录与摘要'}</Typography.Text>
+                        {reading && <Typography.Text type="secondary">已返回 {reading.positions.length} / {reading.total_blocks} 个正文块；页码：{reading.pages.filter(page => page > 0).join('、') || '原文未提供可靠页码'}</Typography.Text>}
+                        {item.paper.abstract && <Typography.Paragraph>{item.paper.abstract}</Typography.Paragraph>}
+                        {claims.map((claim, index) => <Typography.Paragraph key={index}>[{claim.status}] {claim.statement}：{claim.reason}（正文块 {claim.positions.join('、')}）</Typography.Paragraph>)}
+                      </Space>;
+                    } }}
                     rowSelection={{ selectedRowKeys: selection?.selected || [], onChange: changeSelection, getCheckboxProps: (item: WorkflowPaper) => ({ disabled: busy || !!confirmation, 'aria-label': t('paperTasks.selectPaper', { title: item.paper.title || item.paper.paper_id }) }) }}
                     columns={[
                     { title: t('paperTasks.paper'), width: 280, render: (_: unknown, item: WorkflowPaper) => {
@@ -504,7 +564,7 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                         const content = source.contents.find(entry => entry.paper_id === item.paper.paper_id);
                         return <Space direction="vertical"><span>{contentStatus(source, item.paper.paper_id)}</span>
                             {content?.error && <Typography.Text type={onNotification ? 'secondary' : 'danger'}>{onNotification ? '全文尚未获取，详情见通知。' : content.error}</Typography.Text>}
-                            {(content?.status === 'failed' || content?.status === 'unavailable') && <Button disabled={source.record.version !== detail.record.version} onClick={async () => {
+                            {(content?.status === 'failed' || content?.status === 'unavailable' || content?.status === 'needs_review') && <Button disabled={source.record.version !== detail.record.version} onClick={async () => {
                                 try { await retryPaperContent(item.paper.paper_id, detail.record.id, !!onNotification); onNotificationResolved?.(`content-retry:${item.paper.paper_id}`); await openDetail(detail.record.id); }
                                 catch (error) { onNotification?.({ id: `content-retry:${item.paper.paper_id}`, title: `《${item.paper.title || item.paper.paper_id}》全文重试失败`, message: error instanceof Error ? error.message : "重试失败" }); }
                             }}>{t('paperTasks.retryContent')}</Button>}
@@ -527,16 +587,22 @@ export default function PaperTasks({ dataset, selected, selectedTitles = [], sel
                 </>}
                 <Typography.Title level={5}>{t('paperTasks.progress')}</Typography.Title>
                 <List dataSource={Object.entries(detail.record.progress || {}).filter(([key, value]) => stages.includes(key) && value && typeof value === 'object').sort(([a], [b]) => stages.indexOf(a) - stages.indexOf(b))}
-                    renderItem={([key, value]) => <List.Item><List.Item.Meta title={t(`paperTasks.stage.${key}`)} description={<><div>{value.candidate_directions?.join('；')}</div><div>{value.papers?.map(item => item.paper.title).filter(Boolean).join('；')}</div></>} /></List.Item>} />
+                    renderItem={([key, value]) => {
+                      const input = value.input || value;
+                      return <List.Item><List.Item.Meta title={t(`paperTasks.stage.${key}`)} description={<><div>{input.candidate_directions?.join('；')}</div><div>{input.papers?.map(item => item.paper.title).filter(Boolean).join('；')}</div>{value.plan?.map((item, index) => <div key={index}>{item}</div>)}{value.gaps?.map((item, index) => <div key={index}>{item}</div>)}</>} /></List.Item>;
+                    }} />
                 <Typography.Title level={5}>{t('paperTasks.rounds')}</Typography.Title>
                 <List dataSource={detail.rounds} renderItem={round => <List.Item><details>
                     <summary>{t('paperTasks.round', { count: round.version })} · {statusLabel(round.status)} · {t('paperTasks.paperCount', { count: distinctPapers(round.result.papers || []).length })}</summary>
                     <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{round.result.user_instruction}</Typography.Paragraph>
                     <Typography.Paragraph>{t('paperTasks.directions', { value: round.result.selected_directions?.join('；') })}</Typography.Paragraph>
+                    {round.report?.narrative && <MarkdownViewer>{round.report.narrative}</MarkdownViewer>}
+                    {round.report && <details><summary>本轮证据、读取范围与用量</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(round.report, null, 2)}</pre></details>}
                     <ul>{distinctPapers(round.result.papers || []).map(item => <li key={item.paper.paper_id}>{item.paper.title || item.paper.paper_id} <Tag>{sourceLabel(item)}</Tag></li>)}</ul>
                 </details></List.Item>} />
                 <Typography.Title level={5}>{t('paperTasks.generated')}</Typography.Title>
                 <List dataSource={detail.handoffs} renderItem={item => <List.Item><Button onClick={() => goChat(item.conversation_id)}>{t('paperTasks.viewTask', { task: taskLabel(item.kind) })}</Button></List.Item>} />
+                </>}
             </>}
         </Drawer>
         <Modal open={!!confirmation} width={720} title={t('paperTasks.bulkImportTitle')}

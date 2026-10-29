@@ -26,6 +26,32 @@ type PaperTaskInput struct {
 	Notes           []PaperTaskNote `json:"notes,omitempty"`
 }
 
+type academicChatSummary struct {
+	Kind                 string `json:"kind"`
+	DatasetID            string `json:"dataset_id"`
+	Status               string `json:"status"`
+	Version              int64  `json:"version"`
+	HandoffID            string `json:"handoff_id,omitempty"`
+	ExpansionID          string `json:"expansion_id,omitempty"`
+	NextConversationID   string `json:"next_conversation_id,omitempty"`
+	SourceConversationID string `json:"source_conversation_id,omitempty"`
+	SourceAvailable      bool   `json:"source_available,omitempty"`
+	ReadyCount           int    `json:"ready_count,omitempty"`
+	PaperCount           int    `json:"paper_count,omitempty"`
+}
+
+type academicHandoffContext struct {
+	academicChatSummary
+	Input json.RawMessage `json:"input"`
+}
+
+type academicHandoffLink struct {
+	ID             string `json:"id"`
+	Kind           string `json:"kind"`
+	ConversationID string `json:"conversation_id"`
+	Version        int64  `json:"version"`
+}
+
 type handoffContentSnapshot struct {
 	Sources  []paperSource              `json:"sources"`
 	Contents []orm.AcademicPaperContent `json:"contents"`

@@ -34,16 +34,27 @@ async def parse_pdf(payload: PDFRequest, token: Annotated[Optional[str], Header(
         raise HTTPException(422, 'invalid academic file reference')
 
     def run():
-        from lazymind.chat.engine.tools.file_resources.ingest import parse_pdf_pages
-        if hashlib.sha256(path.read_bytes()).hexdigest() != payload.content_hash:
-            raise ValueError('PDF version changed')
-        grouped: dict[int, list[str]] = {}
-        for page, text in parse_pdf_pages(str(path)):
-            grouped.setdefault(page, []).append(text)
-        pages = [{'page': page, 'text': '\n\n'.join(texts)} for page, texts in sorted(grouped.items())]
-        if not pages:
-            raise ValueError('PDF yielded no text')
-        return {'pages': pages}
+        import lazyllm
+        from lazyllm.common.globals import init_session
+        init_session()
+        try:
+            from lazymind.chat.engine.tools.file_resources.ingest import parse_pdf_pages
+            if hashlib.sha256(path.read_bytes()).hexdigest() != payload.content_hash:
+                raise ValueError('PDF version changed')
+            grouped: dict[int, list[str]] = {}
+            unknown = []
+            for page, text in parse_pdf_pages(str(path)):
+                if page > 0:
+                    grouped.setdefault(page, []).append(text)
+                else:
+                    unknown.append({'page': 0, 'text': text})
+            pages = [{'page': page, 'text': '\n\n'.join(texts)} for page, texts in sorted(grouped.items())]
+            pages.extend(unknown)
+            if not pages:
+                raise ValueError('PDF yielded no text')
+            return {'pages': pages, 'parser_version': 'pdf-reader-v2'}
+        finally:
+            lazyllm.globals.clear()
     try:
         return await asyncio.to_thread(run)
     except ValueError as exc:
@@ -77,3 +88,46 @@ async def extract_metadata(
         return await asyncio.to_thread(run)
     except (ValueError, TypeError):
         raise HTTPException(422, 'metadata extraction returned invalid JSON') from None
+
+
+class PreparationRequest(BaseModel):
+    expansion_id: str = Field(min_length=1, max_length=36)
+    user_id: str = Field(min_length=1, max_length=255)
+    revision: int = Field(ge=1)
+    input: dict
+    preparation: dict
+    llm_config: dict
+    depth: dict
+
+
+@router.post('/internal/academic/preparation:run')
+async def prepare_expansion(payload: PreparationRequest,
+                            token: Annotated[Optional[str], Header(alias=INTERNAL_TOKEN_HEADER)] = None):
+    require_internal_token(token)
+    from lazymind.chat.service.academic_preparation import run_preparation
+    return await asyncio.to_thread(run_preparation, payload.model_dump())
+
+
+class AcademicSearchRequest(BaseModel):
+    source: str = Field(pattern=r'^(sciverse|web)$')
+    query: str = Field(min_length=1, max_length=2000)
+    limit: int = Field(ge=1, le=20)
+    tool_config: dict = Field(default_factory=dict)
+
+
+@router.post('/internal/academic/search')
+async def academic_search(payload: AcademicSearchRequest,
+                          token: Annotated[Optional[str], Header(alias=INTERNAL_TOKEN_HEADER)] = None):
+    require_internal_token(token)
+    from lazymind.chat.service.academic_preparation import search_registry
+    try:
+        return await asyncio.to_thread(search_registry, payload.model_dump())
+    except ValueError as exc:
+        if str(exc) == 'missing_configuration':
+            raise HTTPException(422, 'missing_configuration') from None
+        raise HTTPException(502, 'academic source request failed') from None
+    except Exception as exc:
+        status = getattr(getattr(exc, 'response', None), 'status_code', None)
+        if status in (401, 402, 403, 429):
+            raise HTTPException(status, 'academic source request failed') from None
+        raise HTTPException(502, 'academic source request failed') from None

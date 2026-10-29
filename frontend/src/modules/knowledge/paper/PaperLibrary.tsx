@@ -1,5 +1,5 @@
 import { usePaperImports, PaperImportDialog } from './usePaperImports';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ChangeEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ChangeEvent } from "react";
 import { Alert, Button, Dropdown, Input, Modal, Popover, Select, Spin, Tooltip, message } from "antd";
 import { DndContext, DragOverlay, PointerSensor, pointerWithin, useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type DragOverEvent } from "@dnd-kit/core";
 import { ArrowLeftOutlined, DownOutlined, FileTextOutlined, FolderOutlined, LinkOutlined, PlusOutlined, DeleteOutlined, StarOutlined, CloseOutlined, UploadOutlined, FilterOutlined, ExportOutlined, HolderOutlined, EllipsisOutlined } from "@ant-design/icons";
@@ -82,6 +82,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const [syncError, setSyncError] = useState<string | null>(null);
     const initialLoading = !snapshotReady && loading && !persistenceError;
     const [importPage, setImportPage] = useState<ImportBatchPage>(emptyImportBatchPage);
+    const [currentImportPage, setCurrentImportPage] = useState<ImportBatchPage>(emptyImportBatchPage);
     const [detailPaperId, setDetailPaperId] = useState<string | null>(null);
     const [detailTab, setDetailTab] = useState<PaperDetailTab>("overview");
     const [detailEditing, setDetailEditing] = useState(false);
@@ -146,9 +147,10 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                     setPersistenceError(error instanceof Error ? error.message : "无法加载已保存的文献，请重试");
                 }
             }),
-            listAcademicImportBatches(datasetId).then(queue => {
+            Promise.all([listAcademicImportBatches(datasetId), listAcademicImportBatches(datasetId, undefined, 'current')]).then(([queue, currentQueue]) => {
                 if (current()) {
                     setImportPage(queue);
+                    setCurrentImportPage(currentQueue);
                     setSyncError(null);
                 }
             }).catch(error => {
@@ -182,6 +184,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         setSnapshotReady(false);
         setLibraryActive(false);
         setImportPage(emptyImportBatchPage());
+        setCurrentImportPage(emptyImportBatchPage());
         refreshPendingRef.current = false;
         setDetailPaperId(null);
         setFolderId(null);
@@ -310,7 +313,6 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         }
     };
     const currentFolder = data.folders.find(folder => folder.id === folderId);
-    const childFolders = data.folders.filter(folder => (folder.parentId || null) === folderId);
     const directoryPaperCount = folderId ? data.papers.filter(paper => paper.folderId && descendantFolderIds(data.folders, folderId).has(paper.folderId)).length : data.papers.length;
     const selectView = (id: string | null, view: LibraryView) => { setFolderId(view === 'directory' ? id : null); setLibraryView(view); setSelected([]); setDetailPaperId(null); };
     const openFolderDialog = (parentId: string | null) => { setNewFolderParent(parentId); setFolderName(''); setFolderError(false); setFolderDialogOpen(true); };
@@ -486,7 +488,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                 }] }}>
             <Button type="text" className="paper-library-tool" icon={<ExportOutlined />} aria-label="导出题录" title="仅导出论文题录，不包含 PDF、附件、笔记和批注" disabled={!exportPapers.length}>导出题录</Button>
           </Dropdown>
-          <PaperImportStatus key={datasetId} datasetId={datasetId} page={importPage} notifications={libraryNotices} syncError={syncError} refreshing={loading} onRefresh={() => { void reload(); }} canWrite={canWrite} onOpenPaper={id => openDetail(id)} onResumeAssociation={resumeAssociation} open={activeTool === "imports"} onOpenChange={open => setActiveTool(current => open ? "imports" : current === "imports" ? null : current)} onRetry={async (batch) => { await retryAcademicImport(batch, true); setSyncRevision(value => value + 1); }}/>
+          <PaperImportStatus key={datasetId} datasetId={datasetId} page={importPage} currentPage={currentImportPage} notifications={libraryNotices} syncError={syncError} refreshing={loading} onRefresh={() => { void reload(); }} canWrite={canWrite} onOpenPaper={id => openDetail(id)} onResumeAssociation={resumeAssociation} open={activeTool === "imports"} onOpenChange={open => setActiveTool(current => open ? "imports" : current === "imports" ? null : current)} onRetry={async (batch, key) => { await retryAcademicImport(batch, true, key); setSyncRevision(value => value + 1); }}/>
         </div>
       </header>
       {!loading && !canWrite && !persistenceError && <Alert type="info" showIcon message="当前文献库为只读，无法编辑"/>}
@@ -515,23 +517,20 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
           {detailPresentation === 'page' && detailContent}
           <div hidden={detailPresentation === 'page' && !!detailPaper}>
           <div className="paper-library-view-heading">
-            <div><span className="paper-library-view-path">{libraryView === 'directory' ? [title, paperFolderPath(data.folders, folderId)].filter(Boolean).join(' / ') : '浏览视图'}</span><h2>{libraryView === 'all' ? '全部论文' : libraryView === 'important' ? '重点论文' : currentFolder?.name || title}</h2></div>
-            <span>{libraryView === 'directory' ? `本层 ${scoped.length} 篇 · 含子目录 ${directoryPaperCount} 篇` : `${viewed.length} 篇论文`}</span>
+            <span className="paper-library-view-path">{libraryView === 'directory' ? currentFolder ? [title, paperFolderPath(data.folders, currentFolder.parentId)].filter(Boolean).join(' / ') : '目录' : '浏览视图'}</span>
+            <h2>{libraryView === 'all' ? '全部论文' : libraryView === 'important' ? '重点论文' : currentFolder?.name || title}</h2>
+            <p>{libraryView === 'directory' ? `本层 ${scoped.length} 篇 · 含子目录 ${directoryPaperCount} 篇` : `${viewed.length} 篇论文`}</p>
           </div>
-          {childFolders.length > 0 && <div className="paper-library-child-folders" aria-label="子目录">{childFolders.map(folder => {
-                const descendants = descendantFolderIds(data.folders, folder.id);
-                const count = data.papers.filter(paper => !!paper.folderId && descendants.has(paper.folderId)).length;
-                return <Button type="text" key={folder.id} icon={<FolderOutlined />} onClick={() => selectView(folder.id, 'directory')}><span>{folder.name}</span><span className="paper-library-child-count">{count} 篇</span></Button>;
-            })}</div>}
+          <PaperChildFolders key={`${datasetId}:${libraryView}:${folderId}`} data={data} parentId={folderId} onSelect={id => selectView(id, 'directory')}/>
           <PaperTasks key={datasetId} dataset={datasetId} actionsContainer={taskActionsContainer} selected={selectedDocuments} selectedTitles={selectedPapers.map(item => item.metadata.title)} selectionError={selectionError} canImport={canWrite} onImportSubmitted={() => setSyncRevision(value => value + 1)} onNotification={notify} onNotificationResolved={resolve}/>
           {selectedPapers.length > 0 && (<div className="paper-library-selection-bar" role="region" aria-label="已选论文">
           <div className="paper-library-selection-summary"><Button type="text" size="small" aria-label="取消选择" icon={<CloseOutlined />} onClick={() => setSelected([])}/><span>已选 <strong>{selectedPapers.length}</strong> 篇</span></div>
           <Dropdown trigger={["click"]} menu={{ items: folderOptions.map((folder) => ({ key: folder.value, label: folder.label, onClick: () => placePapers(selected, folder.value) })) }}><Button type="text" size="small" disabled={disabled} icon={<FolderOutlined />}>移动到<DownOutlined /></Button></Dropdown>
           <Button type="text" size="small" disabled={disabled} danger icon={<DeleteOutlined />} onClick={() => Modal.confirm({ title: `移除已选的 ${selectedPapers.length} 篇题录？`, okText: "移除", cancelText: "取消", onOk: () => dropPapers(selected) })}>移除</Button>
           </div>)}
-          <div className="paper-library-table-scroll" tabIndex={0} aria-label="论文列表，可横向滚动" aria-busy={initialLoading || loading}>
+          <div className="paper-library-table-scroll" aria-busy={initialLoading || loading}>
           <table className="paper-library-table" aria-label="论文列表">
-            <colgroup><col className="paper-library-controls-col"/><col /><col className="paper-library-year-col"/><col className="paper-library-venue-col"/><col className="paper-library-actions-col"/></colgroup>
+            <colgroup><col className="paper-library-controls-col"/><col /><col className="paper-library-actions-col"/></colgroup>
             <thead>
               <tr>
                 <th scope="col" className={`paper-library-selection-head ${selectedVisibleCount ? "has-selection" : ""}`}>
@@ -540,12 +539,12 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                 element.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visible.length;
         }} onChange={(event) => setSelected(event.target.checked ? [...new Set([...selected, ...visible.map((item) => item.id)])] : selected.filter((id) => !visible.some((item) => item.id === id)))}/>
                 </th>
-                <th scope="col">标题</th><th scope="col">年份</th><th scope="col">会议／期刊</th><th scope="col"><span className="paper-library-visually-hidden">文献操作</span></th>
+                <th scope="col">{libraryView === 'directory' ? '本层论文' : '论文'}</th><th scope="col"><span className="paper-library-visually-hidden">文献操作</span></th>
               </tr>
             </thead>
             <tbody>
-          {initialLoading && <tr><td colSpan={5}><div className="paper-library-loading" role="status"><Spin size="small"/>正在加载文献…</div></td></tr>}
-          {!initialLoading && !visible.length && <tr><td colSpan={5}><div className="paper-library-empty">{persistenceError && !snapshotReady ? "论文库尚未加载成功，请打开右上角的通知重新加载。" : "没有符合条件的论文。可以导入 DOI、arXiv、BibTeX、RIS、CSV，或上传 PDF。"}</div></td></tr>}
+          {initialLoading && <tr><td colSpan={3}><div className="paper-library-loading" role="status"><Spin size="small"/>正在加载文献…</div></td></tr>}
+          {!initialLoading && !visible.length && <tr><td colSpan={3}><div className="paper-library-empty">{persistenceError && !snapshotReady ? "论文库尚未加载成功，请打开右上角的通知重新加载。" : "没有符合条件的论文。可以导入 DOI、arXiv、BibTeX、RIS、CSV，或上传 PDF。"}</div></td></tr>}
           {!initialLoading && visible.map((item) => (<tr className={`paper-library-row ${selected.includes(item.id) ? "selected" : ""} ${draggedIds.includes(item.id) ? "is-dragging" : ""}`} key={item.id}>
               <td className="paper-library-controls-cell"><div className="paper-library-row-controls">
               <input type="checkbox" className="paper-library-checkbox" aria-label={`选择 ${item.metadata.title}`} checked={selected.includes(item.id)} onChange={(event: ChangeEvent<HTMLInputElement>) => setSelected(event.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))}/>
@@ -556,13 +555,15 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                     {renderImportance(item)}
 
                   </div>
-                <p className="paper-library-cite">{item.metadata.authors.length ? item.metadata.authors.join("、") : "作者待补全"}</p>
+                <Tooltip title={item.metadata.authors.length ? item.metadata.authors.join("、") : undefined}><p className="paper-library-cite">{item.metadata.authors.length ? item.metadata.authors.join("、") : "作者待补全"}</p></Tooltip>
                 {(() => {
                 const identity = paperDocument(dataState, item.id);
                 const status = identity?.state.status;
                 return status && status !== 'succeeded' ? <button type="button" className="paper-library-state" onClick={() => openDetail(item.id)}>{status === 'failed' ? '论文信息识别失败' : '论文信息识别中'}</button> : null;
             })()}
                 <div className="paper-library-meta">
+                  <span className="paper-library-year">{item.metadata.year || "—"}</span>
+                  <span className="paper-library-venue" title={venueName(item)}>{item.metadata.venue?.trim() ? venueName(item) : "—"}</span>
                   {item.tags.filter((tag) => tag !== "paper" && !tag.startsWith("arxiv:")).map((tag) => (<span key={tag} className="paper-library-tag">{tag}</span>))}
                   {item.incomplete && snapshotReady && <Tooltip title="尚未提取到正式论文题名，当前使用文件名。点击补全题名"><button type="button" className="paper-library-state" disabled={disabled} onClick={() => {
                     openDetail(item.id);
@@ -579,10 +580,8 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                   {!!materialByPaper.get(item.id)?.notes && <button type="button" className="paper-library-material" onClick={() => openDetail(item.id, "notes")}>{materialByPaper.get(item.id)?.notes} 条笔记</button>}
                 </div>
               </td>
-              <td className="paper-library-year">{item.metadata.year || "—"}</td>
-              <td className="paper-library-venue"><span title={venueName(item)}>{item.metadata.venue?.trim() ? venueName(item) : "—"}</span></td>
               <td><div className="paper-library-row-actions">
-                    <Select className="paper-library-status" size="small" value={item.status} disabled={disabled} aria-label={`${item.metadata.title} 的阅读状态`} options={(Object.keys(statusLabel) as ReadingStatus[]).map((key) => ({ value: key, label: statusLabel[key] }))} onChange={(value: ReadingStatus) => void updatePaper(item.id, { status: value })}/>
+                    <Select className="paper-library-status" variant="filled" size="small" value={item.status} disabled={disabled} aria-label={`${item.metadata.title} 的阅读状态`} options={(Object.keys(statusLabel) as ReadingStatus[]).map((key) => ({ value: key, label: statusLabel[key] }))} onChange={(value: ReadingStatus) => void updatePaper(item.id, { status: value })}/>
                   <Dropdown menu={{ items: [
                     { key: "detail", label: "查看详情", onClick: () => openDetail(item.id) },
                     { key: "citation", label: "复制引用", children: (Object.keys(citationLabel) as CitationStyle[]).map(style => ({
@@ -627,6 +626,38 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     </section>
     <DragOverlay dropAnimation={null}>{draggedIds.length > 0 && <div className="paper-library-drag-preview"><HolderOutlined /><span><strong>移动 {draggedIds.length} 篇文献</strong><small>{data.papers.find(p => p.id === draggedIds[0])?.metadata.title}</small></span></div>}</DragOverlay>
     </DndContext>);
+}
+function PaperChildFolders({ data, parentId, onSelect }: {
+    data: PaperLibraryData;
+    parentId: string | null;
+    onSelect: (id: string) => void;
+}) {
+    const gridRef = useRef<HTMLDivElement>(null);
+    const gridId = useId();
+    const [columns, setColumns] = useState(3);
+    const [expanded, setExpanded] = useState(false);
+    const folders = data.folders.filter(folder => (folder.parentId || null) === parentId);
+    useEffect(() => {
+        const grid = gridRef.current;
+        if (!grid) return;
+        const measure = () => {
+            if (!grid.clientWidth) return;
+            setColumns(getComputedStyle(grid).gridTemplateColumns.split(' ').length);
+        };
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(grid);
+        return () => observer.disconnect();
+    }, [folders.length]);
+    if (!folders.length) return null;
+    return <section className="paper-library-child-folders" aria-label="子目录">
+      <div className="paper-library-child-heading"><span>子目录 · {folders.length}</span>{folders.length > columns * 2 && <Button type="text" size="small" aria-expanded={expanded} aria-controls={gridId} onClick={() => setExpanded(value => !value)}>{expanded ? '收起' : `展开全部（${folders.length}）`}</Button>}</div>
+      <div ref={gridRef} id={gridId} className="paper-library-child-grid">{folders.slice(0, expanded ? folders.length : columns * 2).map(folder => {
+          const descendants = descendantFolderIds(data.folders, folder.id);
+          const count = data.papers.filter(paper => !!paper.folderId && descendants.has(paper.folderId)).length;
+          return <Tooltip title={folder.name} key={folder.id}><Button type="text" icon={<FolderOutlined />} onClick={() => onSelect(folder.id)}><span className="paper-library-child-name">{folder.name}</span><span className="paper-library-child-count">{count} 篇</span></Button></Tooltip>;
+      })}</div>
+    </section>;
 }
 function PaperDragHandle({ item, folders, onMove, disabled }: {
     item: PaperRecord;

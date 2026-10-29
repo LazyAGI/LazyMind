@@ -10474,6 +10474,9 @@ const zhCN = {
       "not_imported": "未入库"
     },
     "stage": {
+      "expansion_plan": "准备参考论文与检索计划",
+      "candidate_set": "拓展与筛选",
+      "relation_analysis": "分析论文关系",
       "direction_research": "调研与方向",
       "seed_set": "种子论文",
       "expanded_papers": "扩展与筛选",

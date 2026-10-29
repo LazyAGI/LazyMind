@@ -557,12 +557,12 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 	}
 	for step, limit := range graph.Runtime.ExecutionLimits {
 		_, exists := graph.Nodes[step]
-		valid := exists && limit.Rounds >= 1 && limit.Rounds <= 64 && limit.Timeout >= 1 && limit.Timeout <= 3600
+		valid := exists && limit.Rounds >= 1 && limit.Rounds <= 64 && limit.Timeout >= 0 && limit.Timeout <= 3600
 		for name, count := range limit.ToolCalls {
 			valid = valid && strings.TrimSpace(name) != "" && count >= 1 && count <= 100
 		}
 		if !valid {
-			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step and bounded positive values"))
+			result.Diagnostics = append(result.Diagnostics, nodeDiag("E_RUNTIME_EXECUTION_LIMIT_INVALID", "error", "workflow.yaml.runtime.execution_limits", step, "execution limits require a declared step, bounded positive work limits and an optional timeout"))
 		}
 	}
 	if graph.Runtime.TriggerInputs != nil {

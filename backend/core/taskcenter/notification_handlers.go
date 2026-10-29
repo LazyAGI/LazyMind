@@ -491,7 +491,7 @@ func DesktopNotifications(w http.ResponseWriter, r *http.Request) {
 		ID    string    `json:"id"`
 		Owner string    `json:"owner"`
 	}
-	query := db.Where("user_id = ? AND channel = 'desktop' AND status = 'pending'", owner).Where("NOT EXISTS (SELECT 1 FROM desktop_notification_receipts receipt WHERE receipt.notification_id = task_notifications.id AND receipt.device_id = ? AND receipt.user_id = ?)", device, owner)
+	query := db.Where("user_id = ? AND channel = 'desktop' AND status = 'pending' AND read_at IS NULL", owner).Where("NOT EXISTS (SELECT 1 FROM desktop_notification_receipts receipt WHERE receipt.notification_id = task_notifications.id AND receipt.device_id = ? AND receipt.user_id = ?)", device, owner)
 	if value := r.URL.Query().Get("cursor"); value != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(value)
 		if err != nil || len(raw) > 1024 || json.Unmarshal(raw, &cursor) != nil || cursor.At.IsZero() || len(cursor.ID) != 64 || cursor.Owner != owner {
@@ -524,7 +524,13 @@ func DesktopNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]desktopView, 0, len(items))
 	for _, item := range items {
-		views = append(views, desktopView{item, owner, "LazyMind", item.TaskID, map[string]string{"type": "task", "task_id": item.TaskID, "schedule_id": item.ScheduleID}})
+		navigation := map[string]string{"type": "task", "task_id": item.TaskID, "schedule_id": item.ScheduleID}
+		if len(item.TargetJSON) > 2 {
+			if err := json.Unmarshal(item.TargetJSON, &navigation); err != nil {
+				continue
+			}
+		}
+		views = append(views, desktopView{item, owner, "LazyMind", item.TaskID, navigation})
 	}
 	common.ReplyOK(w, map[string]any{"items": views, "next_cursor": next, "device_id": device})
 }

@@ -10731,6 +10731,9 @@ const enUS = {
       "not_imported": "Not added"
     },
     "stage": {
+      "expansion_plan": "Reference papers and search plan",
+      "candidate_set": "Expansion and screening",
+      "relation_analysis": "Paper relationships",
       "direction_research": "Research directions",
       "seed_set": "Seed papers",
       "expanded_papers": "Expansion and screening",

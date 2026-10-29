@@ -1,21 +1,25 @@
 package academic
 
-import "time"
+import (
+	"lazymind/core/doc"
+	"time"
+)
 
 type WorkInput struct {
-	CitationCount   *int64         `json:"citation_count,omitempty"`
-	TrustedFulltext bool           `json:"-"`
-	WorkID          string         `json:"work_id,omitempty"`
-	Title           string         `json:"title,omitempty"`
-	Authors         []string       `json:"authors,omitempty"`
-	Year            int            `json:"year,omitempty"`
-	Venue           string         `json:"venue,omitempty"`
-	Abstract        string         `json:"abstract,omitempty"`
-	DOI             string         `json:"doi,omitempty"`
-	ArxivID         string         `json:"arxiv_id,omitempty"`
-	Provider        string         `json:"provider,omitempty"`
-	ProviderWorkID  string         `json:"provider_work_id,omitempty"`
-	Provenance      map[string]any `json:"provenance,omitempty"`
+	FulltextError   *doc.ProcessingDiagnostic `json:"-"`
+	CitationCount   *int64                    `json:"citation_count,omitempty"`
+	TrustedFulltext bool                      `json:"-"`
+	WorkID          string                    `json:"work_id,omitempty"`
+	Title           string                    `json:"title,omitempty"`
+	Authors         []string                  `json:"authors,omitempty"`
+	Year            int                       `json:"year,omitempty"`
+	Venue           string                    `json:"venue,omitempty"`
+	Abstract        string                    `json:"abstract,omitempty"`
+	DOI             string                    `json:"doi,omitempty"`
+	ArxivID         string                    `json:"arxiv_id,omitempty"`
+	Provider        string                    `json:"provider,omitempty"`
+	ProviderWorkID  string                    `json:"provider_work_id,omitempty"`
+	Provenance      map[string]any            `json:"provenance,omitempty"`
 }
 
 type FulltextCandidate struct {
@@ -48,19 +52,22 @@ type PresenceResult struct {
 }
 
 type PreviewItem struct {
-	LibraryPaperID string              `json:"library_paper_id,omitempty"`
-	Paper          PaperRef            `json:"paper"`
-	WorkID         string              `json:"work_id"`
-	ReferenceIDs   []string            `json:"reference_ids,omitempty"`
-	Title          string              `json:"title"`
-	DOI            string              `json:"doi,omitempty"`
-	ArxivID        string              `json:"arxiv_id,omitempty"`
-	Presence       PresenceResult      `json:"presence"`
-	Candidates     []FulltextCandidate `json:"fulltext_candidates"`
-	Disposition    string              `json:"disposition"`
+	FulltextError  *doc.ProcessingDiagnostic `json:"fulltext_error,omitempty"`
+	LibraryPaperID string                    `json:"library_paper_id,omitempty"`
+	Paper          PaperRef                  `json:"paper"`
+	WorkID         string                    `json:"work_id"`
+	ReferenceIDs   []string                  `json:"reference_ids,omitempty"`
+	Title          string                    `json:"title"`
+	DOI            string                    `json:"doi,omitempty"`
+	ArxivID        string                    `json:"arxiv_id,omitempty"`
+	Presence       PresenceResult            `json:"presence"`
+	Candidates     []FulltextCandidate       `json:"fulltext_candidates"`
+	Disposition    string                    `json:"disposition"`
 }
 
 type ImportQueueItem struct {
+	ErrorDetail      string               `json:"error_detail,omitempty"`
+	ErrorRecovery    string               `json:"error_recovery,omitempty"`
 	TargetDatasetID  string               `json:"target_dataset_id"`
 	SourceProvider   string               `json:"source_provider,omitempty"`
 	SourceVersion    string               `json:"source_version,omitempty"`

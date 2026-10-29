@@ -42,6 +42,7 @@ export interface FulltextCandidate {
 }
 
 export interface ImportPreviewItem {
+	fulltext_error?: { stage: string; code: string; message: string; recovery: string };
   preview_token?: string;
   paper?: import("./paperWorkflows").PaperRef;
   work_id: string;
@@ -76,6 +77,8 @@ export interface AcademicImportQueueItem {
   document_id?: string;
   error_code?: string;
   error_message?: string;
+  error_detail?: string;
+  error_recovery?: string;
   created_at: string;
   updated_at: string;
 }
@@ -202,8 +205,13 @@ export async function importPaperLink(targetDatasetId: string, item: ImportPrevi
   return unwrap<{ batch_id?: string; status?: string }>(response.data);
 }
 
-export async function retryAcademicImport(batchId: string, silentError = false) {
-  await axiosInstance.post(`${core}/imports/${encodeURIComponent(batchId)}:retry`, {}, { silentError } as never);
+export async function retryAcademicImport(batchId: string, silentError = false, idempotencyKey: string = crypto.randomUUID()) {
+  try {
+    await axiosInstance.post(`${core}/imports/${encodeURIComponent(batchId)}:retry`, { idempotency_key: idempotencyKey }, { silentError } as never);
+  } catch (error) {
+    if (axios.isAxiosError(error) && ['IMPORT_ALREADY_PROCESSING', 'NO_FAILED_ITEMS'].includes(error.response?.data?.code)) return;
+    throw error;
+  }
 }
 
 export interface PaperUploadContext {
@@ -244,8 +252,9 @@ export interface ImportBatchDetail {
   next_cursor: string;
 }
 export const emptyImportBatchPage = (): ImportBatchPage => ({ items: [], next_cursor: '', notification: { active: 0, needs_action: 0 } });
-export async function listAcademicImportBatches(datasetId: string, cursor?: string): Promise<ImportBatchPage> {
-  const response = await axiosInstance.get(`${core}/imports`, { params: { target_dataset_id: datasetId, cursor, view: 'operations' }, silentError: true } as never);
+export type ImportOperationFilter = 'all' | 'current';
+export async function listAcademicImportBatches(datasetId: string, cursor?: string, filter: ImportOperationFilter = 'all'): Promise<ImportBatchPage> {
+  const response = await axiosInstance.get(`${core}/imports`, { params: { target_dataset_id: datasetId, cursor, view: 'operations', filter }, silentError: true } as never);
   return unwrap<ImportBatchPage>(response.data);
 }
 export async function getAcademicImportBatch(batchId: string, cursor?: string): Promise<ImportBatchDetail> {

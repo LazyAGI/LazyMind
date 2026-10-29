@@ -179,10 +179,11 @@ describe('paper library behavior', () => {
             vi.mocked(loadPersistedPaperLibrary).mockImplementation(async id => ({ ...snapshot(readLibrary(id)), active: true }));
             await renderLibrary();
             expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
-            expect(listAcademicImportBatches).toHaveBeenCalledOnce();
+            expect(listAcademicImportBatches).toHaveBeenCalledTimes(2);
+            expect(listAcademicImportBatches).toHaveBeenCalledWith(datasetId, undefined, 'current');
             await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
             expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(2);
-            expect(listAcademicImportBatches).toHaveBeenCalledTimes(2);
+            expect(listAcademicImportBatches).toHaveBeenCalledTimes(4);
             await act(async () => { fireEvent.focus(window); });
             expect(loadPersistedPaperLibrary).toHaveBeenCalledTimes(3);
         } finally {
@@ -195,7 +196,7 @@ describe('paper library behavior', () => {
         expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
-        expect(await screen.findByText('通知暂时不可用', { selector: 'summary' })).toBeInTheDocument();
+        expect(await screen.findByText('通知暂时不可用')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('tab', { name: '导入记录' }));
         expect(screen.queryByText('暂无论文导入记录')).not.toBeInTheDocument();
         expect(loadPersistedPaperLibrary).toHaveBeenCalledOnce();
@@ -293,6 +294,26 @@ describe('paper library behavior', () => {
         fireEvent.click(folderTitle(/我的论文知识库/));
         expect(screen.getByRole('heading', { name: 'Unfiled paper' })).toBeInTheDocument();
         expect(screen.queryByRole('heading', { name: 'Folder paper' })).not.toBeInTheDocument();
+    });
+    it('expands child directories, opens a directory, and collapses them again when returning', async () => {
+        const data = readLibrary(datasetId);
+        for (let index = 3; index <= 8; index++)
+            data.folders.push({ id: `topic-${index}`, name: `主题${index}` });
+        data.papers[2].folderId = 'topic-8';
+        writeLibrary(datasetId, data);
+        await renderLibrary();
+        let directories = within(screen.getByRole('region', { name: '子目录' }));
+        expect(directories.queryByRole('button', { name: /主题8/ })).not.toBeInTheDocument();
+        fireEvent.click(directories.getByRole('button', { name: '展开全部（8）' }));
+        expect(directories.getByRole('button', { name: '收起' })).toHaveAttribute('aria-expanded', 'true');
+        fireEvent.click(directories.getByRole('button', { name: /主题8.*1 篇/ }));
+        expect(screen.getByRole('heading', { name: '主题8' })).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Unfiled paper' })).toBeInTheDocument();
+        expect(screen.queryByRole('heading', { name: 'Folder paper' })).not.toBeInTheDocument();
+        fireEvent.click(folderTitle(/论文库/));
+        directories = within(screen.getByRole('region', { name: '子目录' }));
+        expect(directories.getByRole('button', { name: '展开全部（8）' })).toHaveAttribute('aria-expanded', 'false');
+        expect(directories.queryByRole('button', { name: /主题8/ })).not.toBeInTheDocument();
     });
     it('adds a PDF from metadata-only paper details and blocks a reliably different paper before upload', async () => {
         const data = readLibrary(datasetId);
@@ -657,6 +678,7 @@ describe('paper library behavior', () => {
         fireEvent.click(await screen.findByRole("menuitem", { name: "查看详情" }));
         const dialog = await screen.findByRole("dialog", { name: "文献详情" });
         const details = within(dialog);
+        fireEvent.click(details.getByRole("tab", { name: /^笔记/ }));
         fireEvent.click(details.getByRole("button", { name: "编辑题录" }));
         const titleInput = details.getByLabelText("题名");
         const saveButton = details.getByRole("button", { name: "保存题录" });
@@ -674,6 +696,10 @@ describe('paper library behavior', () => {
         expect(titleInput).toBeEnabled();
         expect(closeButton).toBeEnabled();
         expect(details.getByText(/修改尚未保存/)).toBeInTheDocument();
+        fireEvent.click(details.getByRole("tab", { name: /^附件/ }));
+        expect(await screen.findByText("请先保存题录或取消编辑，再切换标签页。")).toBeVisible();
+        expect(details.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
+        expect(titleInput).toHaveValue("Keep this draft");
         await act(async () => fireEvent.focus(window));
         expect(notificationButton).toBeInTheDocument();
         expect(notificationButton).toHaveAccessibleName(/通知：.*1 条待处理/);
@@ -683,6 +709,8 @@ describe('paper library behavior', () => {
             expect(notificationButton).toHaveAccessibleName(/通知：.*0 条待处理/);
         });
         expect(readLibrary(datasetId).papers[0].metadata.title).toBe("Keep this draft");
+        fireEvent.click(details.getByRole("tab", { name: /^附件/ }));
+        expect(details.getByRole("tab", { name: /^附件/ })).toHaveAttribute("aria-selected", "true");
     });
     it("honors reader access and never writes an arXiv synchronization snapshot", async () => {
         mockReload({ data: readLibrary(datasetId), canWrite: false });
@@ -704,7 +732,7 @@ describe('paper library behavior', () => {
         await waitFor(() => expect(screen.getByRole('button', { name: /通知：.*1 条待处理/ })).toBeInTheDocument());
         expect(error).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
-        expect(await screen.findByText('temporarily unavailable', { selector: 'summary' })).toBeInTheDocument();
+        expect(await screen.findByText('temporarily unavailable')).toBeInTheDocument();
         expect(readLibrary(datasetId).papers[0].important).toBe(true);
         expect(star).toHaveAttribute('aria-pressed', 'true');
         expect(readLibrary(datasetId)).toEqual(before);
