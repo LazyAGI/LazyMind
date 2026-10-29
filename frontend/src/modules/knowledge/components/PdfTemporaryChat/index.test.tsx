@@ -45,7 +45,7 @@ vi.mock("@/modules/chat/components/newChatContainer", async () => {
 beforeEach(() => {
   requests.options.length = 0;
   chatActions.createNewChat.mockClear();
-  chatActions.sendMessage.mockClear();
+  chatActions.sendMessage.mockReset().mockResolvedValue(true);
   chatActions.prepareMessage.mockClear();
   ensureDocumentParsed.mockClear();
   retryDocumentParsed.mockClear();
@@ -146,6 +146,9 @@ describe("document question context", () => {
   });
 
   it("starts a new temporary chat and sends a concise contextual translation request", async () => {
+    vi.useFakeTimers();
+    let accept!: (sent: boolean) => void;
+    chatActions.sendMessage.mockImplementationOnce(() => new Promise<boolean>(resolve => { accept = resolve; }));
     const selection = {
       source: "pdf" as const,
       text: "Workloads",
@@ -161,12 +164,15 @@ describe("document question context", () => {
       onClose={() => {}}
     />);
 
-    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 10)); });
+    // Finish selection preparation while translation acceptance is still pending.
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(chatActions.createNewChat).toHaveBeenCalledOnce();
+    expect(chatActions.sendMessage).toHaveBeenCalledOnce();
     expect(chatActions.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       citeMessage: "Workloads",
       text: expect.stringContaining("当前语境下最合适的中文释义"),
     }));
+    await act(async () => accept(true));
     expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessages: [] });
   });
 });

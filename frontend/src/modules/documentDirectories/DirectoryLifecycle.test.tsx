@@ -50,8 +50,7 @@ it('acknowledges a successful result after opening its directory', async () => {
  vi.mocked(api.listBatches).mockResolvedValue([{id:'done',directory_id:'A',parent_id:'',status:'succeeded',acknowledged:false,created_at:directory.last_used_at}]);
  view();
  await screen.findByRole('heading',{name:'Directory A'});
- const commands=vi.mocked(api.directoryAction).mock.calls.map(([c])=>c.operation);
- expect(commands).toContain('acknowledge');
+ await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'acknowledge', batch_id: 'done' }));
 });
 
 

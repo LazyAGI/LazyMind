@@ -167,7 +167,7 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 1
       matrix:
         shard: [1, 2, 3, 4]
     permissions:
@@ -191,7 +191,7 @@ jobs:
         run: pnpm typecheck
       - name: Test frontend including model settings and workflow boundaries
         working-directory: frontend
-        run: pnpm test --shard=${{ matrix.shard }}/4 --maxWorkers=2 --minWorkers=1
+        run: pnpm test --shard=${{ matrix.shard }}/4 --maxWorkers=1 --minWorkers=1 --no-file-parallelism
 
   test-workflow-panel:
     needs: [test-frontend-shards]
