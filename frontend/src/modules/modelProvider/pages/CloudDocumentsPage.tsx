@@ -30,6 +30,9 @@ import {
   type CloudDocumentGuideProvider,
 } from "../utils/cloudDocumentOnboarding";
 
+import { isVocabularyEnabled } from "@/runtime/mode";
+import CloudVocabularyConnections from "@/modules/vocabulary/CloudVocabularyConnections";
+
 const CLOUD_DOCUMENTS_ONBOARDING_KEY =
   "lazymind.cloud-documents.onboarding.v2";
 const CHAT_PATH = "/agent/chat/home";
@@ -320,6 +323,7 @@ export default function CloudDocumentsPage() {
         connectionId={recoveryConnection}
       />}
       <CloudDocumentProviderPanel vm={vm} />
+      {isVocabularyEnabled() && <CloudVocabularyConnections />}
 
       <Modal
         className="model-provider-cloud-doc-guide-modal"

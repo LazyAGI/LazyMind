@@ -1,3 +1,12 @@
+vi.mock("@/modules/vocabulary/cloudApi", () => ({
+  listCloudConnections: vi.fn(async()=>[]), listCloudOperations: vi.fn(async()=>[]),
+}));
+vi.mock("@/runtime/mode", async(importOriginal)=>({
+  ...await importOriginal<typeof import("@/runtime/mode")>(),
+  isVocabularyEnabled: vi.fn(()=>true),
+}));
+import { isVocabularyEnabled } from "@/runtime/mode";
+import { listCloudConnections } from "@/modules/vocabulary/cloudApi";
 import {
   fireEvent,
   render,
@@ -157,6 +166,8 @@ describe("CloudDocumentsPage onboarding", () => {
   });
 
   beforeEach(() => {
+    vi.mocked(isVocabularyEnabled).mockReturnValue(true);
+    vi.mocked(listCloudConnections).mockClear();
     mocks.getConnection.mockReset();
     mocks.authorize.mockReset();
     mocks.enable.mockReset();
@@ -180,6 +191,14 @@ describe("CloudDocumentsPage onboarding", () => {
       handleOpenNotionSetup: vi.fn(),
       handleOpenGitHubSetup: vi.fn(),
     };
+  });
+
+  it("does not request vocabulary endpoints when the feature is disabled", async()=>{
+    vi.mocked(isVocabularyEnabled).mockReturnValue(false);
+    renderPage();
+    await screen.findByText("现在进行");
+    expect(listCloudConnections).not.toHaveBeenCalled();
+    expect(screen.queryByText("vocabularyCloud.title")).not.toBeInTheDocument();
   });
 
   it.each(["feishu", "notion", "googledrive"])("reauthorizes the exact %s connection without automatically starting OAuth", async (provider) => {

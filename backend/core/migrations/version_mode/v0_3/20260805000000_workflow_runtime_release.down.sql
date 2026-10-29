@@ -950,3 +950,7 @@ DROP TABLE IF EXISTS document_directories;
 -- Personal AI reading preparation policy.
 -- +migrate Dialect postgres,sqlite
 DROP TABLE IF EXISTS user_reading_policies;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS vocabulary_cloud_operations;
+DROP TABLE IF EXISTS vocabulary_cloud_connections;

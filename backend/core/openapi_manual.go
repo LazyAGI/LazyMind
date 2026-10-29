@@ -55,6 +55,12 @@ func manualOpenAPISpec() map[string]any {
 	for path, operations := range conversationGroupPaths() {
 		paths[path] = operations
 	}
+	for name, schema := range vocabularyCloudSchemas() {
+		schemas[name] = schema
+	}
+	for path, operations := range vocabularyCloudPaths() {
+		paths[path] = operations
+	}
 	for name, schema := range learningOpenAPISchemas() {
 		schemas[name] = schema
 	}

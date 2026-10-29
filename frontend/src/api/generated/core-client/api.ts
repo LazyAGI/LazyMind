@@ -8623,6 +8623,127 @@ export interface VerifiedProviderOpenAPIResponse {
     'shared_by_name'?: string;
     'source'?: string;
 }
+export interface VocabularyCloudConnection {
+    'add_to_study': boolean;
+    'configured': boolean;
+    'enabled': boolean;
+    'failed': number;
+    'last_error': string;
+    'pending': number;
+    'provider': VocabularyCloudConnectionProviderEnum;
+    'succeeded': number;
+    'target_id': string;
+    'target_name': string;
+}
+
+export const VocabularyCloudConnectionProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+
+export type VocabularyCloudConnectionProviderEnum = typeof VocabularyCloudConnectionProviderEnum[keyof typeof VocabularyCloudConnectionProviderEnum];
+
+export interface VocabularyCloudConnectionRequest {
+    'add_to_study'?: boolean;
+    'enabled'?: boolean;
+    'target_id'?: string;
+    'target_name'?: string;
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudConnectionResponse {
+    'code': number;
+    'data': VocabularyCloudConnection;
+    'message': string;
+}
+export interface VocabularyCloudConnectionsResponse {
+    'code': number;
+    'data': VocabularyCloudConnectionsResponseData;
+    'message': string;
+}
+export interface VocabularyCloudConnectionsResponseData {
+    'items': Array<VocabularyCloudConnection>;
+}
+export interface VocabularyCloudDisconnectResponse {
+    'code': number;
+    'data': VocabularyCloudDisconnectResponseData;
+    'message': string;
+}
+export interface VocabularyCloudDisconnectResponseData {
+    'deleted': boolean;
+}
+export interface VocabularyCloudOperation {
+    'id': string;
+    'last_error': string;
+    'provider': VocabularyCloudOperationProviderEnum;
+    'status': VocabularyCloudOperationStatusEnum;
+    'term': string;
+    'updated_at': string;
+}
+
+export const VocabularyCloudOperationProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+
+export type VocabularyCloudOperationProviderEnum = typeof VocabularyCloudOperationProviderEnum[keyof typeof VocabularyCloudOperationProviderEnum];
+export const VocabularyCloudOperationStatusEnum = {
+    Pending: 'pending',
+    Failed: 'failed',
+    Succeeded: 'succeeded',
+    Canceled: 'canceled'
+} as const;
+
+export type VocabularyCloudOperationStatusEnum = typeof VocabularyCloudOperationStatusEnum[keyof typeof VocabularyCloudOperationStatusEnum];
+
+export interface VocabularyCloudOperationsResponse {
+    'code': number;
+    'data': VocabularyCloudOperationsResponseData;
+    'message': string;
+}
+export interface VocabularyCloudOperationsResponseData {
+    'items': Array<VocabularyCloudOperation>;
+}
+export interface VocabularyCloudSyncResponse {
+    'code': number;
+    'data': VocabularyCloudSyncResponseData;
+    'message': string;
+}
+export interface VocabularyCloudSyncResponseData {
+    'queued': number;
+}
+export interface VocabularyCloudTokenRequest {
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudWordbook {
+    'id': string;
+    'name': string;
+}
+export interface VocabularyCloudWordbookRequest {
+    'name': string;
+    /**
+     * Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+     */
+    'token'?: string;
+}
+export interface VocabularyCloudWordbookResponse {
+    'code': number;
+    'data': VocabularyCloudWordbook;
+    'message': string;
+}
+export interface VocabularyCloudWordbooksResponse {
+    'code': number;
+    'data': VocabularyCloudWordbooksResponseData;
+    'message': string;
+}
+export interface VocabularyCloudWordbooksResponseData {
+    'items': Array<VocabularyCloudWordbook>;
+}
 export interface WeChatNotificationTargets {
     'items': Array<WeChatNotificationTargetsItemsInner>;
 }
@@ -68379,6 +68500,585 @@ export class UserApi extends BaseAPI {
     }
 }
 
+
+
+/**
+ * VocabularyCloudApi - axios parameter creator
+ */
+export const VocabularyCloudApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/cloud/connections`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderDelete: async (provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderDelete', 'provider', provider)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum} provider
+         * @param {VocabularyCloudConnectionRequest} vocabularyCloudConnectionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderPut: async (provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum, vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderPut', 'provider', provider)
+            // verify required parameter 'vocabularyCloudConnectionRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderPut', 'vocabularyCloudConnectionRequest', vocabularyCloudConnectionRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudConnectionRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderSyncPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderSyncPost', 'provider', provider)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/sync`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum} provider
+         * @param {VocabularyCloudTokenRequest} vocabularyCloudTokenRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderTestPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum, vocabularyCloudTokenRequest: VocabularyCloudTokenRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderTestPost', 'provider', provider)
+            // verify required parameter 'vocabularyCloudTokenRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderTestPost', 'vocabularyCloudTokenRequest', vocabularyCloudTokenRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/test`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudTokenRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum} provider
+         * @param {VocabularyCloudWordbookRequest} vocabularyCloudWordbookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderWordbooksPost: async (provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum, vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderWordbooksPost', 'provider', provider)
+            // verify required parameter 'vocabularyCloudWordbookRequest' is not null or undefined
+            assertParamExists('apiCoreVocabularyCloudConnectionsProviderWordbooksPost', 'vocabularyCloudWordbookRequest', vocabularyCloudWordbookRequest)
+            const localVarPath = `/api/core/vocabulary/cloud/connections/{provider}/wordbooks`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(vocabularyCloudWordbookRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudOperationsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/vocabulary/cloud/operations`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * VocabularyCloudApi - functional programming interface
+ */
+export const VocabularyCloudApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = VocabularyCloudApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudConnectionsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderDelete(provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudDisconnectResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderDelete(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum} provider
+         * @param {VocabularyCloudConnectionRequest} vocabularyCloudConnectionRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderPut(provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum, vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudConnectionResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderPut(provider, vocabularyCloudConnectionRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderSyncPost(provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudSyncResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderSyncPost(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderSyncPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum} provider
+         * @param {VocabularyCloudTokenRequest} vocabularyCloudTokenRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderTestPost(provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum, vocabularyCloudTokenRequest: VocabularyCloudTokenRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudWordbooksResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderTestPost(provider, vocabularyCloudTokenRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderTestPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum} provider
+         * @param {VocabularyCloudWordbookRequest} vocabularyCloudWordbookRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudConnectionsProviderWordbooksPost(provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum, vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudWordbookResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudConnectionsProviderWordbooksPost(provider, vocabularyCloudWordbookRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudConnectionsProviderWordbooksPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<VocabularyCloudOperationsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreVocabularyCloudOperationsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['VocabularyCloudApi.apiCoreVocabularyCloudOperationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * VocabularyCloudApi - factory interface
+ */
+export const VocabularyCloudApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = VocabularyCloudApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary List the current user\'s vocabulary cloud connections and sync counts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudConnectionsResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Disconnect vocabulary cloud sync and cancel queued operations
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudDisconnectResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Save vocabulary cloud credentials and target settings
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderPut(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudConnectionResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderPut(requestParameters.provider, requestParameters.vocabularyCloudConnectionRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Queue historical local English words and retry unsuccessful sync operations
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudSyncResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Test supplied or stored credentials and list wordbooks
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudWordbooksResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters.provider, requestParameters.vocabularyCloudTokenRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a remote vocabulary wordbook
+         * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudWordbookResponse> {
+            return localVarFp.apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters.provider, requestParameters.vocabularyCloudWordbookRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig): AxiosPromise<VocabularyCloudOperationsResponse> {
+            return localVarFp.apiCoreVocabularyCloudOperationsGet(options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderDelete operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderPut operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum
+
+    readonly vocabularyCloudConnectionRequest: VocabularyCloudConnectionRequest
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderSyncPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderTestPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum
+
+    readonly vocabularyCloudTokenRequest: VocabularyCloudTokenRequest
+}
+
+/**
+ * Request parameters for apiCoreVocabularyCloudConnectionsProviderWordbooksPost operation in VocabularyCloudApi.
+ */
+export interface VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest {
+    readonly provider: ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum
+
+    readonly vocabularyCloudWordbookRequest: VocabularyCloudWordbookRequest
+}
+
+/**
+ * VocabularyCloudApi - object-oriented interface
+ */
+export class VocabularyCloudApi extends BaseAPI {
+    /**
+     *
+     * @summary List the current user\'s vocabulary cloud connections and sync counts
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsGet(options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Disconnect vocabulary cloud sync and cancel queued operations
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderDeleteRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderDelete(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Save vocabulary cloud credentials and target settings
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderPut(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderPutRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderPut(requestParameters.provider, requestParameters.vocabularyCloudConnectionRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Queue historical local English words and retry unsuccessful sync operations
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderSyncPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderSyncPost(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Test supplied or stored credentials and list wordbooks
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderTestPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderTestPost(requestParameters.provider, requestParameters.vocabularyCloudTokenRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a remote vocabulary wordbook
+     * @param {VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters: VocabularyCloudApiApiCoreVocabularyCloudConnectionsProviderWordbooksPostRequest, options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudConnectionsProviderWordbooksPost(requestParameters.provider, requestParameters.vocabularyCloudWordbookRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List up to 50 recent vocabulary cloud sync operations for the current user
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreVocabularyCloudOperationsGet(options?: RawAxiosRequestConfig) {
+        return VocabularyCloudApiFp(this.configuration).apiCoreVocabularyCloudOperationsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+export const ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderDeleteProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderPutProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderSyncPostProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderTestPostProviderEnum];
+export const ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum = {
+    Eudic: 'eudic',
+    Maimemo: 'maimemo'
+} as const;
+export type ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum = typeof ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum[keyof typeof ApiCoreVocabularyCloudConnectionsProviderWordbooksPostProviderEnum];
 
 
 /**

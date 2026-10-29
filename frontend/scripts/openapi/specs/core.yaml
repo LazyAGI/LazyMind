@@ -11709,6 +11709,244 @@ components:
                 name:
                     type: string
             type: object
+        VocabularyCloudConnection:
+            properties:
+                add_to_study:
+                    type: boolean
+                configured:
+                    type: boolean
+                enabled:
+                    type: boolean
+                failed:
+                    format: int64
+                    type: integer
+                last_error:
+                    type: string
+                pending:
+                    format: int64
+                    type: integer
+                provider:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+                succeeded:
+                    format: int64
+                    type: integer
+                target_id:
+                    type: string
+                target_name:
+                    type: string
+            required:
+                - provider
+                - configured
+                - enabled
+                - target_id
+                - target_name
+                - add_to_study
+                - pending
+                - failed
+                - succeeded
+                - last_error
+            type: object
+        VocabularyCloudConnectionRequest:
+            properties:
+                add_to_study:
+                    type: boolean
+                enabled:
+                    type: boolean
+                target_id:
+                    type: string
+                target_name:
+                    type: string
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            type: object
+        VocabularyCloudConnectionResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/VocabularyCloudConnection'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudConnectionsResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudConnection'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudDisconnectResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        deleted:
+                            type: boolean
+                    required:
+                        - deleted
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudOperation:
+            properties:
+                id:
+                    type: string
+                last_error:
+                    type: string
+                provider:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - failed
+                        - succeeded
+                        - canceled
+                    type: string
+                term:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - id
+                - provider
+                - term
+                - status
+                - last_error
+                - updated_at
+            type: object
+        VocabularyCloudOperationsResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudOperation'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudSyncResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        queued:
+                            type: integer
+                    required:
+                        - queued
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudTokenRequest:
+            properties:
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            type: object
+        VocabularyCloudWordbook:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
+            type: object
+        VocabularyCloudWordbookRequest:
+            properties:
+                name:
+                    maxLength: 255
+                    minLength: 1
+                    type: string
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            required:
+                - name
+            type: object
+        VocabularyCloudWordbookResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/VocabularyCloudWordbook'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudWordbooksResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudWordbook'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         WeChatNotificationTargets:
             properties:
                 items:
@@ -33759,6 +33997,488 @@ paths:
                 "200":
                     description: OK
             summary: GET /vocabulary/capabilities
+    /api/core/vocabulary/cloud/connections:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudConnectionsResponse'
+                    description: List the current user's vocabulary cloud connections and sync counts
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: List the current user's vocabulary cloud connections and sync counts
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}:
+        delete:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudDisconnectResponse'
+                    description: Disconnect vocabulary cloud sync and cancel queued operations
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Disconnect vocabulary cloud sync and cancel queued operations
+            tags:
+                - VocabularyCloud
+        put:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudConnectionResponse'
+                    description: Save vocabulary cloud credentials and target settings
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Save vocabulary cloud credentials and target settings
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/sync:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudSyncResponse'
+                    description: Queue historical local English words and retry unsuccessful sync operations
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Queue historical local English words and retry unsuccessful sync operations
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/test:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudTokenRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudWordbooksResponse'
+                    description: Test supplied or stored credentials and list wordbooks
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Test supplied or stored credentials and list wordbooks
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/wordbooks:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudWordbookRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudWordbookResponse'
+                    description: Create a remote vocabulary wordbook
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Create a remote vocabulary wordbook
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/operations:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudOperationsResponse'
+                    description: List up to 50 recent vocabulary cloud sync operations for the current user
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: List up to 50 recent vocabulary cloud sync operations for the current user
+            tags:
+                - VocabularyCloud
     /api/core/vocabulary/dictionary:lookup:
         get:
             responses:
