@@ -95,7 +95,7 @@ export async function deleteCustomProvider(
     await modelProvidersApi.apiCoreModelProvidersModelProviderIdDelete({
       modelProviderId: providerId,
       confirmIndexedDowngrade: confirmIndexedDowngrade || undefined,
-    });
+    }, { silentError: true } as never);
   return unwrapModelProviderData(response.data);
 }
 
@@ -481,4 +481,8 @@ export async function replaceProviderKey(
       { timeout: 180000 },
     );
   return unwrapModelProviderData(response.data);
+}
+
+export async function resetProvider(providerId: string): Promise<void> {
+  await modelProvidersApi.apiCoreModelProvidersModelProviderIdResetPost({ modelProviderId: providerId }, { silentError: true } as never);
 }

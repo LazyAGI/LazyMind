@@ -11,12 +11,14 @@ import {
 } from "antd";
 import {
   DownOutlined,
+  WarningOutlined,
   MinusOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import { builtInCatalog } from "../builtInCatalog";
 import { getProviderConnectionFailureMessage } from "../connectionFailure";
 import { isModelTypeSupportedByProtocol } from "../modelCapabilities";
 import { listRemoteGroupModels, type RemoteGroupModel } from "../api";
@@ -54,6 +56,7 @@ interface Props {
   groupId: string;
   models: ProviderModel[];
   initialRemoteModels?: RemoteGroupModel[];
+  initialDiscoveryError?: string;
   modelsLoading?: boolean;
   requiresVerification?: boolean;
   onCheckConnection?: () => void;
@@ -131,10 +134,20 @@ export function ProviderModelCatalogDrawer(props: Props) {
     setLoading(true);
     setError("");
     if (props.requiresVerification) {
+      const builtIn = builtInCatalog(props.runtimeIdentity || props.protocolName);
+      setRemote(builtIn);
+      if (builtIn.length) setError(copy("builtInFallback"));
       setLoading(false);
       return () => {
         sequence.current += 1;
       };
+    }
+    if (props.initialDiscoveryError && refresh === 0) {
+      setRemote(builtInCatalog(props.runtimeIdentity || props.protocolName));
+      setError(props.initialDiscoveryError);
+      setLoaded(false);
+      setLoading(false);
+      return () => { sequence.current += 1; };
     }
     if (props.initialRemoteModels && consumedRemoteModels.current !== props.initialRemoteModels) {
       consumedRemoteModels.current = props.initialRemoteModels;
@@ -153,8 +166,11 @@ export function ProviderModelCatalogDrawer(props: Props) {
         setError("");
       })
       .catch((cause) => {
-        if (request === sequence.current)
+        if (request === sequence.current) {
+          if (!keepResults) setRemote(builtInCatalog(props.runtimeIdentity || props.protocolName));
+          setLoaded(false);
           setError(getProviderConnectionFailureMessage(cause, t));
+        }
       })
       .finally(() => {
         if (request === sequence.current) setLoading(false);
@@ -168,6 +184,9 @@ export function ProviderModelCatalogDrawer(props: Props) {
     props.groupId,
     props.requiresVerification,
     props.initialRemoteModels,
+    props.initialDiscoveryError,
+    props.runtimeIdentity,
+    props.protocolName,
     refresh,
   ]);
 
@@ -286,6 +305,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
     let index = 0;
     let succeeded = 0;
     let failed = 0;
+    const failures = new Set<string>();
     const worker = async () => {
       while (index < items.length) {
         const model = items[index++];
@@ -305,7 +325,8 @@ export function ProviderModelCatalogDrawer(props: Props) {
             });
           }
           succeeded += 1;
-        } catch {
+        } catch (error) {
+          if (error instanceof Error && error.message !== copy("removeFailed")) failures.add(error.message);
           failed += 1;
         } finally {
           setPending((current) => {
@@ -336,10 +357,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
       if (succeeded) props.onChanged?.();
       if (failed) {
         messageApi.error(
-          copy("partialFailure", {
-            success: succeeded,
-            failed,
-          }),
+          [copy("partialFailure", { success: succeeded, failed }), ...failures].join(" · "),
         );
       } else {
         messageApi.success(
@@ -378,6 +396,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
       }
       extra={
         <div className="provider-model-catalog-toolbar">
+          {error && <Tooltip title={error}><span role="status" className="provider-model-catalog-fetch-error"><WarningOutlined /> {copy("discoveryFailed")}</span></Tooltip>}
           <Tooltip title={copy("addAll")}>
             <Button
               type="text"
@@ -486,7 +505,7 @@ export function ProviderModelCatalogDrawer(props: Props) {
           type="error"
           showIcon
           message={t("modelProvider.error.loadRemoteModelsFailed")}
-          description={error}
+          description={<><span>{error}</span><br />{copy("builtInFallback")}</>}
           action={
             <Button
               size="small"

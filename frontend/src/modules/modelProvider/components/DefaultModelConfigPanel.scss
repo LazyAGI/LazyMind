@@ -61,7 +61,7 @@
 
   .model-provider-default-row {
     display: grid;
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 200px minmax(0, 1fr);
     align-items: center;
     gap: 24px;
     min-height: 64px;
@@ -84,7 +84,7 @@
     > * { min-width: 0; }
   }
 
-  .model-provider-default-meta { min-height: 32px; flex-wrap: wrap; gap: 4px 6px; }
+  .model-provider-default-meta { min-height: 32px; flex-wrap: nowrap; gap: 4px 6px; }
   .model-provider-default-controls {
     display: flex;
     align-items: center;
@@ -103,6 +103,7 @@
   }
   .model-provider-default-title { min-width: 0; flex: 0 1 auto; color: var(--defaults-text); font-size: 13px; font-weight: 500; line-height: 1.6; }
   .model-provider-default-title-text { overflow-wrap: anywhere; }
+  .model-provider-default-help { flex-shrink: 0; }
   .model-provider-select-suffix { display: flex; align-items: center; gap: 8px; }
   .model-provider-model-select.has-context-window .ant-select-selector { padding-inline-end: 76px !important; }
   .model-provider-model-select.has-context-window .ant-select-clear { inset-inline-end: 76px; }
@@ -218,7 +219,7 @@
   .model-defaults-group > section > .model-defaults-rows { margin: 0 16px 0 50px; border-top: 1px solid var(--defaults-line); }
 
   .model-defaults-group .model-provider-default-row {
-    grid-template-columns: 129px minmax(0, 1fr);
+    grid-template-columns: 180px minmax(0, 1fr);
   }
 
   > .ant-alert { margin-bottom: 16px; }
@@ -231,7 +232,7 @@
     .model-provider-default-row,
     .model-defaults-group .model-provider-default-row { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-block: 12px; }
     .model-provider-default-meta { min-height: 28px; }
-    .model-provider-default-row:has(.model-provider-configure-capability):not(:has(.ant-select)) { grid-template-columns: minmax(0, 1fr) auto; }
+    .model-provider-default-row:has(.model-provider-configure-capability):not(:has(.ant-select)) { grid-template-columns: minmax(0, 1fr); }
     .model-provider-configure-capability.ant-btn { min-height: 44px; }
     .model-provider-model-select { --defaults-control-height: 44px; }
   }
@@ -292,4 +293,10 @@
     border-radius: 5px;
     img { padding: 2px; }
   }
+}
+
+@container model-defaults (max-width: 400px) {
+  .model-defaults-panel .model-provider-default-controls { flex-wrap: wrap; }
+  .model-defaults-panel .model-provider-default-input { flex-basis: 100%; }
+  .model-defaults-panel .model-provider-cloud-service-row .model-provider-default-input:has(.ant-select) { flex-wrap: wrap; }
 }

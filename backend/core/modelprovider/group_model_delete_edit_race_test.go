@@ -100,7 +100,7 @@ func TestDeleteGroupModelRevalidatesTypeAfterConcurrentEdit(t *testing.T) {
 			if rec.Code != test.wantStatus {
 				t.Errorf("DELETE after %s -> %s: status=%d want=%d body=%s", test.before, test.after, rec.Code, test.wantStatus, rec.Body.String())
 			}
-			if test.wantStatus == http.StatusConflict && !strings.Contains(rec.Body.String(), "requires confirmation to downgrade all indexed knowledge bases") {
+			if test.wantStatus == http.StatusConflict && !strings.Contains(rec.Body.String(), "embedding model is in use") {
 				t.Errorf("wrong confirmation error: %s", rec.Body.String())
 			}
 			if !locked.Load() || !rereadUnderLock.Load() {

@@ -521,7 +521,7 @@ export default function ModelProviderPage({
   const [modelsError, setModelsError] = useState<Record<string, string>>({});
   const [remoteModels, setRemoteModels] = useState<RemoteGroupModel[]>([]);
   const [remoteModelsLoading, setRemoteModelsLoading] = useState(false);
-  const [catalogTarget, setCatalogTarget] = useState<{ providerId: string; groupId: string; remoteModels?: RemoteGroupModel[] } | null>(null);
+  const [catalogTarget, setCatalogTarget] = useState<{ providerId: string; groupId: string; remoteModels?: RemoteGroupModel[]; discoveryError?: string } | null>(null);
   const keyDiscoveryRequests = useRef(new Set<string>());
   const [discoveringGroupIds, setDiscoveringGroupIds] = useState<Record<string, boolean>>({});
   const [contextWindowMode, setContextWindowMode] = useState<"auto" | "manual">(
@@ -1386,8 +1386,7 @@ export default function ModelProviderPage({
       }
     } catch (error) {
       if (isCurrent()) {
-        if (discovered) openCatalog();
-        message.error(getProviderConnectionFailureMessage(error, t));
+        setCatalogTarget({ providerId: provider.id, groupId, remoteModels: discovered, discoveryError: getProviderConnectionFailureMessage(error, t) });
       }
     } finally {
       if (added) void onConfigurationChanged?.();
@@ -1549,7 +1548,6 @@ export default function ModelProviderPage({
     groupId: string,
     model: ProviderModel,
     notify = true,
-    confirmIndexedDowngrade = false,
   ) => {
     const operationKey = `${providerId}:${groupId}:${model.id}`;
     const existing = modelDeleteRequests.current.get(operationKey);
@@ -1562,9 +1560,7 @@ export default function ModelProviderPage({
             groupId,
             modelId: model.id,
           },
-          model.capability === "EMBEDDING" && confirmIndexedDowngrade
-            ? { params: { confirm_indexed_downgrade: true } }
-            : undefined,
+          { silentError: true } as never,
         );
         const key = `${providerId}:${groupId}`;
         groupModelVersions.current[key] = (groupModelVersions.current[key] || 0) + 1;
@@ -1596,19 +1592,13 @@ export default function ModelProviderPage({
       } catch (error) {
         const response = (error as { response?: { status?: number; data?: { detail?: unknown; message?: unknown } } })?.response;
         const detail = String(response?.data?.detail || response?.data?.message || "");
-        const needsEmbeddingConfirmation = model.capability === "EMBEDDING" &&
-          response?.status === 409 && detail.includes("requires confirmation to downgrade");
-        if (needsEmbeddingConfirmation) {
-          Modal.confirm({
-            centered: true,
-            title: t("modelProvider.confirmDeleteModel", { name: model.name }),
-            content: t("modelProvider.confirmDeleteEmbeddingDesc"),
-            okText: t("common.delete"),
-            cancelText: t("common.cancel"),
-            okButtonProps: { danger: true },
-            onOk: () => deleteCustomModel(providerId, groupId, model, notify, true),
-          });
+        const embeddingBlocked = response?.status === 409 &&
+          (detail.includes("requires confirmation to downgrade") || detail.includes("embedding model is in use"));
+        if (embeddingBlocked) {
+          if (notify) message.warning({ key: "embedding-in-use", content: t("modelProvider.embeddingInUse") });
+          else throw new Error(t("modelProvider.embeddingInUse"));
         } else if (notify) message.error(getLocalizedErrorMessage(error));
+
         return false;
       } finally {
         modelDeleteRequests.current.delete(operationKey);
@@ -1701,6 +1691,7 @@ export default function ModelProviderPage({
         groupId={catalogGroup.id}
         models={catalogGroup.models}
         initialRemoteModels={catalogTarget?.remoteModels}
+        initialDiscoveryError={catalogTarget?.discoveryError}
         modelsLoading={loadingGroupModelIds[`${catalogProvider.id}:${catalogGroup.id}`] || discoveringGroupIds[`${catalogProvider.id}:${catalogGroup.id}`]}
         requiresVerification={!catalogGroup.verified && !canDiscoverWithoutApiKey(catalogProvider, catalogGroup)}
         onCheckConnection={() => {

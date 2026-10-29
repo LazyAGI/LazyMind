@@ -288,7 +288,8 @@ describe("model discovery after verified key save", () => {
     expect(mocks.failed).not.toHaveBeenCalled();
     expect(mocks.add).not.toHaveBeenCalled();
     expect(mocks.remove).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
   });
 
   it("leaves an empty remote catalog empty without creating placeholder models", async () => {

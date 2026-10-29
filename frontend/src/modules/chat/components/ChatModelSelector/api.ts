@@ -2,6 +2,7 @@ import { axiosInstance, BASE_URL } from "@/components/request";
 import {
   ChatApiFactory,
   ConversationsApiFactory,
+  ModelProvidersApiFactory,
 } from "@/api/generated/core-client";
 import type {
   ChatModelCatalog,
@@ -61,4 +62,12 @@ export async function updateConversationChatModel(
     return payload.selection;
   }
   return payload as ChatModelSelection;
+}
+
+/** Fixed selections made before creating a conversation also become its default. */
+export async function updateDefaultChatModel(selection: ChatModelSelectionRequest, signal?: AbortSignal): Promise<void> {
+  if (selection.mode !== "fixed" || !selection.model_id || selection.source === "shared") return;
+  await ModelProvidersApiFactory(undefined, BASE_URL, axiosInstance).apiCoreModelProvidersSelectedModelsPut({
+    setSelectedModelsOpenAPIRequest: { selections: [{ model_key: "llm", model_id: selection.model_id, source: selection.source || "own" }] },
+  }, { signal, silentError: true } as never);
 }

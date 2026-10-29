@@ -227,8 +227,8 @@ export default function AppRouter() {
             <Route path="docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="docs/google-drive-setup" element={<GoogleDriveSetupGuide />} />
           </Route>
-          <Route path="model-providers" element={<Navigate to="/settings?section=models" replace />} />
-          <Route path="model-providers/default-services" element={<Navigate to="/settings?section=models" replace />} />
+          <Route path="model-providers" element={<Navigate to="/settings?section=model_defaults" replace />} />
+          <Route path="model-providers/default-services" element={<Navigate to="/settings?section=model_defaults" replace />} />
           <Route path="model-providers/models" element={<Navigate to="/settings?section=models&view=providers" replace />} />
           <Route path="model-providers/document-parsing" element={<Navigate to="/settings?section=knowledge&tool=document-parsing" replace />} />
           <Route path="model-providers/tools" element={<Navigate to="/settings?section=system_tools" replace />} />

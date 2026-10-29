@@ -459,6 +459,15 @@ describe("provider model catalog drawer", () => {
     expect(screen.getByText("BAAI/bge-large")).toBeInTheDocument();
   });
 
+  it("shows built-in Doubao suggestions with a visible failed-fetch status", async () => {
+    mocks.remote.mockRejectedValue(new Error("models endpoint unsupported"));
+    draw({ ...fixture([]), providerName: "Doubao", protocolName: "Doubao" });
+    expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
+    expect(await screen.findByText("doubao-seed-1-6-251015")).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.catalog.builtInFallback")).toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.catalog.missingRemote")).not.toBeInTheDocument();
+  });
+
   it("allows removing saved models without mislabeling them when discovery fails", async () => {
     mocks.remote.mockRejectedValue(new Error("discovery offline"));
     draw(fixture());

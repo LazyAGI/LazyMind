@@ -1003,6 +1003,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/model_providers", []string{"model.write"}, modelprovider.CreateCustomProvider)
 	handleAPI(r, "PATCH", "/model_providers/{model_provider_id}", []string{"model.write"}, modelprovider.UpdateCustomProvider)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}", []string{"model.write"}, modelprovider.DeleteCustomProvider)
+	handleAPI(r, "POST", "/model_providers/{model_provider_id}/reset", []string{"model.write"}, modelprovider.ResetProvider)
 	handleAPI(r, "GET", "/model_providers:with_groups", []string{"model.read"}, modelprovider.ListUserProvidersWithGroups)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}:check", []string{"model.write"}, modelprovider.CheckGroup)
 	handleAPI(r, "GET", "/model_providers/models", []string{"model.read"}, modelprovider.ListUserModelsByModelType)

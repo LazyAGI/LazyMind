@@ -592,7 +592,6 @@ function SettingsPageContent() {
   );
 
   const renderDiagnostics = () => {
-    const models = overview?.sections.find((item) => item.id === "models") || sectionFallback("models", t);
     const mcp = overview?.sections.find((item) => item.id === "mcp") || sectionFallback("mcp", t);
     const lastCheckedLabel = lastCheckedAt
       ? new Date(lastCheckedAt).toLocaleString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", { hour12: false })
@@ -609,17 +608,6 @@ function SettingsPageContent() {
         : t("settingsPage.diagnostics.pendingConfig");
     const mcpReadinessStatus = resolveMcpReadinessStatus(mcp, overview?.issues);
     const rows = [
-      {
-        id: "models",
-        title: t("settingsPage.diagnostics.modelProviders"),
-        description: models.counts.configured > 0
-          ? t("settingsPage.diagnostics.modelsConfigured", { count: models.counts.configured })
-          : t("settingsPage.diagnostics.modelsEmpty"),
-        status: models.counts.configured > 0 ? t("settingsPage.diagnostics.configured") : t("settingsPage.diagnostics.pendingConfig"),
-        tone: models.counts.configured > 0 ? "success" : "warning",
-        action: t("settingsPage.diagnostics.viewConnection"),
-        onClick: () => selectSection("models"),
-      },
       {
         id: "mcp",
         title: t("settingsPage.sections.mcp"),

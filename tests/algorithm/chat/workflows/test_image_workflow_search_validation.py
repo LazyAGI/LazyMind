@@ -283,7 +283,7 @@ class ImageWorkflowSearchValidationTests(unittest.TestCase):
             self.tools.check_image_workflow_capabilities(routing)
 
         message = str(captured.exception)
-        self.assertIn('/settings?section=models', message)
+        self.assertIn('/settings?section=model_defaults', message)
         self.assertIn('/settings?section=system_tools#ffmpeg-dependency', message)
         self.assertIn('视频生成模型', message)
         self.assertIn('FFmpeg', message)

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   createProvider: vi.fn(),
   updateProvider: vi.fn(),
   deleteProvider: vi.fn(),
+  resetProvider: vi.fn(),
   getModels: vi.fn(),
   getRequestConfig: vi.fn(),
   updateRequestConfig: vi.fn(),
@@ -52,6 +53,7 @@ vi.mock("../api", () => ({
   createCustomProvider: mocks.createProvider,
   updateCustomProviderName: mocks.updateProvider,
   deleteCustomProvider: mocks.deleteProvider,
+  resetProvider: mocks.resetProvider,
   unwrapModelProviderData: (data: unknown) => data,
   modelProvidersDefaultApi: {
     apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysPost: mocks.addKey,
@@ -1295,7 +1297,7 @@ describe("compact provider workspace", () => {
       await screen.findByText("settingsPage.unsaved.title"),
     ).toBeInTheDocument();
   });
-  it("offers loading retry and preserves access to signed-out cloud login", async () => {
+  it("offers loading retry without the cloud footer button", async () => {
     const callbacks = setup({ loadError: true });
     expect(screen.getByRole("alert")).toHaveTextContent(
       "modelProvider.workspace.loadFailed",
@@ -1304,10 +1306,7 @@ describe("compact provider workspace", () => {
       screen.getByRole("button", { name: "modelProvider.workspace.retry" }),
     );
     expect(callbacks.onRetry).toHaveBeenCalledOnce();
-    fireEvent.click(
-      screen.getByRole("button", { name: "modelProvider.workspace.cloud" }),
-    );
-    expect(await screen.findByText("Cloud login")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "modelProvider.workspace.cloud" })).not.toBeInTheDocument();
   });
   it("removes a catalog model directly without confirmation", () => {
     const callbacks = setup();
@@ -1430,7 +1429,7 @@ describe("compact provider workspace", () => {
       ),
     );
   });
-  it("checks fresh embedding impact before confirming custom supplier deletion", async () => {
+  it("asks once before custom supplier deletion without requesting indexed downgrade", async () => {
     const custom = {
       ...provider,
       id: "custom",
@@ -1447,13 +1446,23 @@ describe("compact provider workspace", () => {
       }),
     );
     expect(
-      await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
+      await screen.findByText("modelProvider.workspace.deleteSupplierHint"),
     ).toBeInTheDocument();
     expect(mocks.deleteProvider).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
     await waitFor(() =>
-      expect(mocks.deleteProvider).toHaveBeenCalledWith("custom", true),
+      expect(mocks.deleteProvider).toHaveBeenCalledWith("custom"),
     );
+  });
+  it("resets a built-in supplier while keeping its entry", async () => {
+    const callbacks = setup();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.resetSupplier" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByText("modelProvider.workspace.resetSupplierHint")).toBeInTheDocument();
+    fireEvent.click(dialog.getByRole("button", { name: "modelProvider.workspace.resetSupplier" }));
+    await waitFor(() => expect(mocks.resetProvider).toHaveBeenCalledWith(provider.id));
+    expect(mocks.deleteProvider).not.toHaveBeenCalled();
+    await waitFor(() => expect(callbacks.onReload).toHaveBeenCalled());
   });
   it("configures the first key through management for an unconfigured supplier", async () => {
     const callbacks = setup({ configuredProviders: [] });

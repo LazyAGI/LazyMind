@@ -2,7 +2,6 @@ import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "rea
 import {
   ArrowLeftOutlined,
   CheckCircleFilled,
-  CloudOutlined,
   DeleteOutlined,
   DownOutlined,
   EditOutlined,
@@ -38,6 +37,7 @@ import {
   createCustomProvider,
   updateCustomProviderName,
   deleteCustomProvider,
+  resetProvider,
   unwrapModelProviderData,
   updateProviderEndpoint,
   setProviderActiveKey,
@@ -292,7 +292,8 @@ export function ProviderWorkspace(props: Props) {
     if (destination && (destination === "detail") === mobileDetail) {
       navigationFocus.current = null;
       // Desktop keeps both panes visible, so retain the initiating control's focus.
-      if (narrowViewport.matches) {
+      const paneWidth = supplierDetail.current?.parentElement?.getBoundingClientRect().width || 0;
+      if (narrowViewport.matches || (paneWidth > 0 && paneWidth <= 700)) {
         if (destination === "detail") focusDetail(); else focusList();
       }
     }
@@ -525,54 +526,38 @@ export function ProviderWorkspace(props: Props) {
       setProviderSaving(false);
     }
   };
-  const removeProvider = async (confirmIndexedDowngrade: boolean) => {
-    if (!provider?.isCustom || providerDeleting) return;
+  const removeProvider = async () => {
+    if (!provider || providerDeleting) return;
+    const target = provider;
     setProviderDeleting(true);
     try {
-      await deleteCustomProvider(provider.id, confirmIndexedDowngrade);
+      if (target.isCustom) await deleteCustomProvider(target.id);
+      else await resetProvider(target.id);
+      loadedGroups.current.clear();
       await props.onReload();
-      setSelectedId("");
-      message.success(label("supplierDeleted"));
+      setRequestConfigRevision((current) => current + 1);
+      if (target.isCustom) setSelectedId("");
+      message.success(label(target.isCustom ? "supplierDeleted" : "supplierReset"));
     } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
+      const response = (error as { response?: { status?: number; data?: { detail?: string; message?: string } } })?.response;
+      const detail = String(response?.data?.detail || response?.data?.message || "");
+      if (response?.status === 409 && (detail.includes("embedding model is in use") || detail.includes("requires confirmation to downgrade"))) {
+        message.warning(t("modelProvider.embeddingInUse"));
+      } else message.error(getLocalizedErrorMessage(error));
     } finally {
       setProviderDeleting(false);
     }
   };
-  const confirmDeleteProvider = async () => {
-    if (!provider?.isCustom || providerDeleting) return;
-    setProviderDeleting(true);
-    try {
-      let hasEmbedding = false;
-      if (group) {
-        const response =
-          await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdModelsGet(
-            { modelProviderId: provider.id, groupId: group.id },
-          );
-        const data = unwrapModelProviderData<{
-          models?: Array<{ model_type?: string }>;
-        }>(response.data);
-        hasEmbedding = (data.models || []).some((model) =>
-          ["embed", "embedding", "embed_main"].includes(
-            (model.model_type || "").trim().toLowerCase(),
-          ),
-        );
-      }
-      deleteModal.confirm({
-        title: label("deleteSupplier"),
-        content: hasEmbedding
-          ? t("modelProvider.confirmDeleteEmbeddingDesc")
-          : label("deleteSupplierHint"),
-        okText: t("common.delete"),
-        cancelText: t("common.cancel"),
-        okButtonProps: { danger: true },
-        onOk: () => removeProvider(hasEmbedding),
-      });
-    } catch (error) {
-      message.error(getLocalizedErrorMessage(error));
-    } finally {
-      setProviderDeleting(false);
-    }
+  const confirmDeleteProvider = () => {
+    if (!provider || providerDeleting) return;
+    deleteModal.confirm({
+      title: label(provider.isCustom ? "deleteSupplier" : "resetSupplier"),
+      content: label(provider.isCustom ? "deleteSupplierHint" : "resetSupplierHint"),
+      okText: label(provider.isCustom ? "deleteSupplier" : "resetSupplier"),
+      cancelText: t("common.cancel"),
+      okButtonProps: { danger: true },
+      onOk: removeProvider,
+    });
   };
   const withProviderModels = async (
     action: (
@@ -770,13 +755,6 @@ export function ProviderWorkspace(props: Props) {
             ) : null}
           </nav>
           <div className="provider-workspace-sidebar-actions">
-            <Tooltip title={label("cloud")}>
-              <Button
-                aria-label={label("cloud")}
-                icon={<CloudOutlined aria-hidden="true" />}
-                onClick={() => setCloudOpen(true)}
-              />
-            </Tooltip>
             <Tooltip title={label("addSupplier")}>
               <Button
                 aria-label={label("addSupplier")}
@@ -841,17 +819,16 @@ export function ProviderWorkspace(props: Props) {
                           Boolean(changingActiveKey) || providerDeleting
                         }
                       />
-                      <Button
-                        type="text"
-                        danger
-                        aria-label={label("deleteSupplier")}
-                        icon={<DeleteOutlined aria-hidden="true" />}
-                        loading={providerDeleting}
-                        disabled={endpointDirty || Boolean(changingActiveKey)}
-                        onClick={() => void confirmDeleteProvider()}
-                      />
                     </>
                   ) : null}
+                  <Tooltip title={label(provider.isCustom ? "deleteSupplier" : "resetSupplier")}>
+                    <Button type="text" danger
+                      aria-label={label(provider.isCustom ? "deleteSupplier" : "resetSupplier")}
+                      icon={<DeleteOutlined aria-hidden="true" />}
+                      loading={providerDeleting}
+                      disabled={endpointDirty || Boolean(changingActiveKey)}
+                      onClick={confirmDeleteProvider} />
+                  </Tooltip>
                 </div>
               </header>
               <div className="provider-workspace-scroll">

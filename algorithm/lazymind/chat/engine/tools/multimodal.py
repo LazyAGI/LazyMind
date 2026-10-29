@@ -33,17 +33,17 @@ from lazymind.model_config import is_model_role_available
 _MEDIA_MODEL_DEPENDENCIES = {
     'image_generator': {
         'label': '文生图模型',
-        'settings_url': '/settings?section=models&target=image_generator',
+        'settings_url': '/settings?section=model_defaults&target=image_generator',
         'reason': '当前任务需要生成图片，但尚未配置可用的文生图模型。',
     },
     'image_editor': {
         'label': '图片编辑模型',
-        'settings_url': '/settings?section=models&target=image_editor',
+        'settings_url': '/settings?section=model_defaults&target=image_editor',
         'reason': '当前任务需要编辑图片，但尚未配置可用的图片编辑模型。',
     },
     'video_generator': {
         'label': '视频生成模型',
-        'settings_url': '/settings?section=models&target=video_generator',
+        'settings_url': '/settings?section=model_defaults&target=video_generator',
         'reason': '当前任务需要生成视频，但尚未配置可用的视频生成模型。',
     },
 }
