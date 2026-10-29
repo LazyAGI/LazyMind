@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import type { ReactNode, Ref } from 'react';
+import type { WorkflowRepairEditContext } from '../../workflowDraftApi';
 import { Button, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
@@ -61,7 +62,13 @@ function codeFileForTab(tab: ContentTab): CodeFile {
 
 const AUTO_SAVE_DELAY_MS = 1500;
 
-export type RepairTarget = 'statemachine' | 'ui' | 'scenario' | 'scripts' | 'full';
+export type RepairTarget = 'statemachine' | 'node_integration' | 'ui' | 'scenario' | 'scripts' | 'full';
+export type RepairContext = WorkflowRepairEditContext;
+
+export interface StateGraphEditorHandle {
+  /** Flush code parsing and the latest autosave before a parent action. */
+  flushPendingChanges: () => Promise<boolean>;
+}
 
 export interface SavePayload {
   stateYaml: string;
@@ -74,6 +81,7 @@ export interface SavePayload {
 }
 
 interface Props {
+  editorRef?: Ref<StateGraphEditorHandle>;
   initialStateYaml?: string;
   initialWorkflowYaml?: string;
   initialScenarioContent?: string;
@@ -105,7 +113,9 @@ interface Props {
    * `target` indicates which part the user wants to repair.
    * `validationErrors` carries the current graph validation errors (only for 'statemachine' target).
    */
-  onRepair?: (target: RepairTarget, validationErrors?: ValidationError[]) => void;
+  onRepair?: (target: RepairTarget, validationErrors?: ValidationError[], context?: RepairContext) => void;
+  repairDiagnostics?: ValidationError[];
+  repairRetryTarget?: RepairTarget;
   /** Design draft used as reference while converting a Skill into a Workflow. */
   designBriefContent?: string;
   /** Analysis produced by Skill-to-Workflow conversion. */
@@ -213,6 +223,7 @@ function initGraphModel(stateYaml: string | undefined, workflowYaml: string | un
 }
 
 export default function StateGraphEditor({
+  editorRef,
   initialStateYaml,
   initialWorkflowYaml,
   initialScenarioContent,
@@ -224,7 +235,7 @@ export default function StateGraphEditor({
   onValidate,
   onClose,
   showEmptyHint = true,
-  readonly = false,
+  readonly: readonlyProp = false,
   defaultShowArtifacts = true,
   onRepair,
   onArtifactsChange,
@@ -232,8 +243,13 @@ export default function StateGraphEditor({
   skillConversionReport,
   readonlyReason,
   generationLog,
+  repairDiagnostics = [],
+  repairRetryTarget,
 }: Props) {
   const { t } = useTranslation();
+  const [preparingRepair, setPreparingRepair] = useState(false);
+  const preparingRepairRef = useRef(false);
+  const readonly = readonlyProp || preparingRepair;
   const [contentTab, setContentTab] = useState<ContentTab>('statemachine');
   const [viewMode, setViewMode] = useState<ViewMode>('preview');
   // In code mode, the active file is tracked independently of contentTab
@@ -277,9 +293,11 @@ export default function StateGraphEditor({
 
   // state.yml model — back-fill slots from workflow.yaml when state.yml has none (post-migration drafts).
   const modelRef = useRef<GraphModel>(initGraphModel(initialStateYaml, initialWorkflowYaml));
+  const initialNodeIds = useRef(new Set(modelRef.current.nodes.map((node) => node.id)));
   const [model, setModelState] = useState<GraphModel>(modelRef.current);
   const [errors, setErrors] = useState<ValidationError[]>(() => validateStateGraph(modelRef.current));
   const [authoritativeErrors, setAuthoritativeErrors] = useState<ValidationError[]>([]);
+  const authoritativeErrorsRef = useRef<ValidationError[]>([]);
   const displayErrors = useMemo(() => [
     ...errors.filter((local) => !authoritativeErrors.some((server) => server.code === local.code)),
     ...authoritativeErrors,
@@ -302,6 +320,9 @@ export default function StateGraphEditor({
 
   // Auto-save
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editRevisionRef = useRef(0);
+  const savedRevisionRef = useRef(0);
+  const savingRef = useRef<{ revision: number; promise: Promise<boolean> } | null>(null);
   const onSaveRef = useRef(onSave);
   useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
   const onValidateRef = useRef(onValidate);
@@ -315,6 +336,7 @@ export default function StateGraphEditor({
     try {
       const nextErrors = await validate();
       if (validationRequestRef.current === requestId) {
+        authoritativeErrorsRef.current = nextErrors;
         setAuthoritativeErrors(nextErrors);
       }
     } catch {
@@ -340,25 +362,36 @@ export default function StateGraphEditor({
     stateLayoutContent: serializeLayout(m),
   }), []);
 
-  const doSave = useCallback(async (m: GraphModel, pm: WorkflowModel, sd: ScenarioData, sc: string) => {
+  const doSave = useCallback((m: GraphModel, pm: WorkflowModel, sd: ScenarioData, sc: string) => {
     const fn = onSaveRef.current;
-    if (!fn) return;
+    if (!fn) return Promise.resolve(true);
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current);
       autoSaveTimerRef.current = null;
     }
     setSaveStatus('saving');
-    try {
-      await fn(buildPayload(m, pm, sd, sc));
-      setSaveStatus('saved');
-      await runAuthoritativeValidation();
-    } catch (error: unknown) {
-      setSaveStatus('error');
-    }
+    const revision = editRevisionRef.current;
+    const promise: Promise<boolean> = Promise.resolve().then(async () => {
+      try {
+        await fn(buildPayload(m, pm, sd, sc));
+        savedRevisionRef.current = revision;
+        setSaveStatus(revision === editRevisionRef.current ? 'saved' : 'pending');
+        await runAuthoritativeValidation();
+        return true;
+      } catch {
+        setSaveStatus('error');
+        return false;
+      } finally {
+        if (savingRef.current?.promise === promise) savingRef.current = null;
+      }
+    });
+    savingRef.current = { revision, promise };
+    return promise;
   }, [buildPayload, runAuthoritativeValidation]);
 
   const triggerAutoSave = useCallback((m: GraphModel, pm: WorkflowModel, sd: ScenarioData, sc: string) => {
     if (!onSaveRef.current) return;
+    editRevisionRef.current += 1;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     setSaveStatus('pending');
     autoSaveTimerRef.current = setTimeout(() => void doSave(m, pm, sd, sc), AUTO_SAVE_DELAY_MS);
@@ -403,6 +436,12 @@ export default function StateGraphEditor({
   }, [triggerAutoSave, doSave, readonly]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingStateYamlRef = useRef<string | null>(null);
+  const invalidStateYamlRef = useRef(false);
+  const invalidWorkflowYamlRef = useRef(false);
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
 
   const updateModel = useCallback((nextModel: GraphModel) => {
     const prev = modelRef.current;
@@ -449,28 +488,67 @@ export default function StateGraphEditor({
     [updateModel],
   );
 
-  const handleYamlChange = useCallback((text: string) => {
+  const flushPendingStateYaml = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      const parsed = parseYaml(text);
-      if (parsed) {
-        const mergedModel: GraphModel = {
-          ...parsed,
-          layout: { ...parsed.layout, ...modelRef.current.layout },
-          edgeLayout: { ...parsed.edgeLayout, ...modelRef.current.edgeLayout },
-          // parseYaml always returns slots:{} — slot definitions live in workflow.yaml.
-          // Preserve the current slots so editing state.yml never wipes them.
-          slots: modelRef.current.slots,
-        };
-        modelRef.current = mergedModel;
-        setModelState(mergedModel);
-        setErrors(validateStateGraph(mergedModel));
-        triggerAutoSave(mergedModel, workflowModelRef.current, scenarioDataRef.current, scriptsContentRef.current);
-      } else {
-        setErrors([{ code: 'V10_YAML_SYNTAX', message: t('selfEvolutionRun.sgeYamlSyntaxError') }]);
-      }
-    }, 500);
-  }, [triggerAutoSave, t]);
+    debounceRef.current = null;
+    const text = pendingStateYamlRef.current;
+    if (text === null) return !invalidStateYamlRef.current;
+    pendingStateYamlRef.current = null;
+    const parsed = parseYaml(text);
+    invalidStateYamlRef.current = !parsed;
+    if (!parsed) {
+      setErrors([{ code: 'V10_YAML_SYNTAX', message: t('selfEvolutionRun.sgeYamlSyntaxError') }]);
+      return false;
+    }
+    // Use the same model update as canvas edits, including workflow step metadata.
+    updateModel({
+      ...parsed,
+      layout: { ...parsed.layout, ...modelRef.current.layout },
+      edgeLayout: { ...parsed.edgeLayout, ...modelRef.current.edgeLayout },
+      slots: modelRef.current.slots,
+    });
+    return true;
+  }, [updateModel, t]);
+
+  const handleYamlChange = useCallback((text: string) => {
+    pendingStateYamlRef.current = text;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(flushPendingStateYaml, 500);
+  }, [flushPendingStateYaml]);
+
+  const flushPendingChanges = useCallback(async () => {
+    // Code parsing precedes autosave. Flush both stages before taking a snapshot.
+    if (!flushPendingStateYaml() || invalidWorkflowYamlRef.current) return false;
+    const currentSave = savingRef.current;
+    return currentSave?.revision === editRevisionRef.current
+      ? await currentSave.promise
+      : editRevisionRef.current !== savedRevisionRef.current
+        ? await doSave(modelRef.current, workflowModelRef.current, scenarioDataRef.current, scriptsContentRef.current)
+        : true;
+  }, [doSave, flushPendingStateYaml]);
+
+  useImperativeHandle(editorRef, () => ({ flushPendingChanges }), [flushPendingChanges]);
+
+  const openRepair = useCallback(async (target: RepairTarget) => {
+    if (readonlyProp || preparingRepairRef.current || !onRepair) return;
+    preparingRepairRef.current = true;
+    setPreparingRepair(true);
+    try {
+      if (!await flushPendingChanges()) return;
+      const currentErrors = [
+        ...validateStateGraph(modelRef.current).filter((local) => !authoritativeErrorsRef.current.some((server) => server.code === local.code)),
+        ...authoritativeErrorsRef.current,
+      ];
+      const nodeIds = modelRef.current.nodes.filter((node) =>
+        !initialNodeIds.current.has(node.id) || (initialScenarioContent?.includes('（暂无描述）') && !scenarioDataRef.current.stepDescriptions[node.id]?.trim()) || currentErrors.some((error) =>
+          error.nodeId === node.id && error.code.includes('UNREACHABLE')),
+      ).map((node) => node.id);
+      onRepair(target, currentErrors, { node_ids: nodeIds });
+    } finally {
+      preparingRepairRef.current = false;
+      setPreparingRepair(false);
+    }
+  }, [readonlyProp, onRepair, initialScenarioContent, flushPendingChanges]);
 
   const handleWorkflowModelChange = useCallback((pm: WorkflowModel) => {
     setWorkflowModel(pm);
@@ -503,6 +581,7 @@ export default function StateGraphEditor({
   // workflow.yaml: parse → validate → sync both workflowModel and graphModel.slots
   const handleWorkflowYamlCodeChange = useCallback((text: string) => {
     const pm = parseWorkflowYaml(text);
+    invalidWorkflowYamlRef.current = !pm;
     if (pm) {
       // Sync slots into GraphModel so serializeWorkflowModel always has the correct source
       const slots: Record<string, import('./core/model').SlotDef> = {};
@@ -678,7 +757,7 @@ export default function StateGraphEditor({
               {saveStatus === 'error' && <span className="sge-autosave-error">{t('selfEvolutionRun.sgeSaveError')}</span>}
             </span>
           )}
-          {readonly && <span className="sge-readonly-badge">{readonlyReason || t('selfEvolutionRun.sgeReadonlyBadge')}</span>}
+          {readonly && <span className="sge-readonly-badge">{preparingRepair ? t('selfEvolutionRun.sgePreparingRepair') : readonlyReason || t('selfEvolutionRun.sgeReadonlyBadge')}</span>}
           {topbarExtra}
           <Button size="small" icon={<SettingOutlined />} onClick={() => setWorkflowInfoOpen(true)}>
             {t('selfEvolutionRun.sgeWorkflowConfigBtn')}
@@ -743,7 +822,7 @@ export default function StateGraphEditor({
           {!readonly && contentTab === 'statemachine' && viewMode === 'preview' && (
             <>
               {onRepair && (
-                <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('statemachine', displayErrors)}>
+                <Button size="small" icon={<ToolOutlined />} onClick={() => void openRepair('statemachine')}>
                   {t('selfEvolutionRun.sgeAiRepairBtn')}
                 </Button>
               )}
@@ -776,12 +855,12 @@ export default function StateGraphEditor({
             </Button>
           )}
           {!readonly && contentTab === 'ui' && viewMode === 'preview' && onRepair && (
-            <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('ui')}>
+            <Button size="small" icon={<ToolOutlined />} onClick={() => void openRepair('ui')}>
               {t('selfEvolutionRun.sgeAiRepairBtn')}
             </Button>
           )}
           {!readonly && contentTab === 'scenario' && viewMode === 'preview' && onRepair && (
-            <Button size="small" icon={<ToolOutlined />} onClick={() => onRepair('scenario')}>
+            <Button size="small" icon={<ToolOutlined />} onClick={() => void openRepair('scenario')}>
               {t('selfEvolutionRun.sgeAiRepairBtn')}
             </Button>
           )}
@@ -856,6 +935,18 @@ export default function StateGraphEditor({
               getTargetNodeId={(error) => validationTargetNode(error, model)}
               onSelectNode={handleSelectNode}
             />
+            <ValidationPanel
+              errors={repairDiagnostics}
+              title={t('selfEvolutionRun.workflowRepairCandidateRejected')}
+              getTargetNodeId={(error) => validationTargetNode(error, model)}
+              onSelectNode={handleSelectNode}
+            />
+            {!readonly && onRepair && repairRetryTarget && repairDiagnostics.length > 0 && (
+              <div className="sge-repair-retry">
+                <span>{t('selfEvolutionRun.sgeRepairFailureHint')}</span>
+                <Button size="small" onClick={() => void openRepair(repairRetryTarget)}>{t('selfEvolutionRun.sgeRetryRepair')}</Button>
+              </div>
+            )}
           </div>
         )}
 

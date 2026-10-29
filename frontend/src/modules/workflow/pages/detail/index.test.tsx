@@ -1,23 +1,29 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { ConfigProvider } from 'antd';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ComponentProps } from 'react';
+import { useImperativeHandle, useState, type ComponentProps } from 'react';
 import type StateGraphEditor from '../../components/StateGraphEditor';
 import type { WorkflowDraftRecord } from '../../workflowDraftApi';
 import WorkflowDetailPage from './index';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), generate: vi.fn(), props: {} as ComponentProps<typeof StateGraphEditor>, t: (key: string) => key }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), flush: vi.fn(), publish: vi.fn(), generate: vi.fn(), repair: vi.fn(), cancelRepair: vi.fn(), preview: vi.fn(), repairRun: vi.fn(), versions: vi.fn(), version: vi.fn(), props: {} as ComponentProps<typeof StateGraphEditor>, t: (key: string) => key }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: mocks.t }) }));
 vi.mock('react-router-dom', () => ({ useParams: () => ({ workflowId: 'draft-test' }), useNavigate: () => vi.fn(), useOutletContext: () => ({}) }));
 vi.mock('@/components/request', () => ({ localizeErrorCode: () => 'Request failed' }));
 vi.mock('../../components/LinkedSkillButton', () => ({ default: () => null }));
 vi.mock('../../components/StateGraphEditor', () => ({ default: (props: ComponentProps<typeof StateGraphEditor>) => {
   mocks.props = props;
-  return <div role="region" aria-label="Editor" data-readonly={props.readonly}>{props.workflowName}</div>;
+  useImperativeHandle(props.editorRef, () => ({ flushPendingChanges: mocks.flush }));
+  const [mountedState] = useState(props.initialStateYaml);
+  return <div role="region" aria-label="Editor" data-state={mountedState} data-readonly={props.readonly}>{props.workflowName}{props.topbarExtra}{props.topbarActions}</div>;
 } }));
 vi.mock('../../workflowDraftApi', () => ({
   getWorkflowDraft: mocks.get, updateWorkflowDraftContent: mocks.save, aiGenerateWorkflowDraft: mocks.generate,
-  listWorkflowDrafts: vi.fn(async () => ({ records: [], total: 0 })), listWorkflowVersions: vi.fn(async () => []),
+  repairWorkflowDraft: mocks.repair, previewWorkflowRepair: mocks.preview, getWorkflowRepairRun: mocks.repairRun,
+  cancelWorkflowDraftRepair: mocks.cancelRepair,
+  publishWorkflowDraft: mocks.publish,
+  getWorkflowGenerationAnalysis: vi.fn(async () => null),
+  listWorkflowDrafts: vi.fn(async () => ({ records: [], total: 0 })), listWorkflowVersions: mocks.versions, getWorkflowVersion: mocks.version,
 }));
 
 const draft = {
@@ -30,13 +36,435 @@ function show(value: Partial<WorkflowDraftRecord> = {}) {
   mocks.get.mockResolvedValue({ ...draft, ...value });
   return render(<ConfigProvider theme={{ token: { motion: false } }}><WorkflowDetailPage /></ConfigProvider>);
 }
-beforeEach(() => { mocks.save.mockReset(); mocks.generate.mockReset(); localStorage.clear(); });
+beforeEach(() => {
+  mocks.save.mockReset(); mocks.publish.mockReset(); mocks.generate.mockReset(); mocks.repair.mockReset(); mocks.repairRun.mockReset();
+  mocks.flush.mockReset().mockResolvedValue(true);
+  mocks.cancelRepair.mockReset();
+  mocks.versions.mockReset().mockResolvedValue([]); mocks.version.mockReset();
+  mocks.preview.mockReset().mockResolvedValue({ target: 'node_integration', mode: 'workflow_local', draft_version: 4, diagnostics: [], planned_files: ['workflow.yaml', 'scenario/state.yml', 'scenario/scenario.md'] });
+  localStorage.clear();
+});
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('workflow draft lifecycle', () => {
-  it.each(['analyzing', 'generating', 'brief_done', 'skeleton_done', 'state_done'])('prevents edits during %s', async (generate_status) => {
+  it('shows global blockers and submits only explicitly selected unknown-input corrections', async () => {
+    mocks.preview.mockResolvedValue({ target: 'statemachine', mode: 'workflow_local', draft_version: 3, diagnostics: [], planned_files: [],
+      blocking_diagnostics: [{ code: 'E_UI_TAB_EMPTY', severity: 'error', path: 'workflow.yaml.ui', message: 'UI invalid' }],
+      input_corrections: [{ node_id: 'review', material_id: 'report_typo', choices: ['report'] }],
+    });
+    show({ source_type: 'skill' });
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('statemachine', [], { node_ids: ['review'] }); });
+    await waitFor(() => expect(screen.getByText('selfEvolutionRun.workflowRepairGlobalBlockers')).toBeVisible());
+    const select = screen.getByRole('combobox', { name: 'selfEvolutionRun.workflowRepairInputCorrection' });
+    fireEvent.mouseDown(select);
+    fireEvent.click(await screen.findByText('report', { selector: '.ant-select-item-option-content' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith(draft.id, expect.objectContaining({ edit_context: {
+      node_ids: ['review'], input_corrections: [{ node_id: 'review', from: 'report_typo', to: 'report' }],
+    } })));
+    mocks.repair.mockResolvedValue({ ...draft, generate_status: 'repairing' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
+    await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({ edit_context: {
+      node_ids: ['review'], input_corrections: [{ node_id: 'review', from: 'report_typo', to: 'report' }],
+    } })));
+  });
+
+  it('displays rejected candidate differences without changing the draft', async () => {
+    mocks.repairRun.mockResolvedValue({ repair_id: 'failed-run', status: 'failed', target: 'statemachine', diagnostics_after: [],
+      changes: { files: [], attempts: [{ diagnostics: [], changes: [{ path: 'scenario/state.yml', before: 'ORIGINAL YAML', after: 'REJECTED YAML' }] }] },
+    });
+    show({ last_repair_run_id: 'failed-run' });
+    const summary = await screen.findByText('selfEvolutionRun.workflowRepairCandidateDiff');
+    fireEvent.click(summary);
+    fireEvent.click(screen.getByText('scenario/state.yml', { selector: 'summary' }));
+    expect(screen.getByText('ORIGINAL YAML')).toBeVisible();
+    expect(screen.getByText('REJECTED YAML')).toBeVisible();
+    expect(mocks.props.initialStateYaml).toBe(draft.state_yaml_content);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('shows the five repair scopes after Skill conversion and submits full scope without remapping', async () => {
+    show({ source_type: 'skill', source_analysis_id: 'original-analysis' });
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('statemachine', [], { node_ids: ['review'] }); });
+    const dialog = screen.getByRole('dialog', { name: 'selfEvolutionRun.workflowDetailRepairModalTitle' });
+    fireEvent.mouseDown(within(dialog).getByRole('combobox'));
+    for (const label of ['执行流程', '界面展示', '说明文档', '脚本与工具', '完整修复']) {
+      await waitFor(() => expect(screen.getByText(label, { selector: '.ant-select-item-option-content' })).toBeVisible());
+    }
+    expect(screen.queryByText('selfEvolutionRun.workflowNodeIntegration', { selector: '.ant-select-item-option-content' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('完整修复', { selector: '.ant-select-item-option-content' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith(draft.id, {
+      target: 'full', mode: 'workflow_local', draft_version: 3, edit_context: { node_ids: ['review'] },
+    }));
+    mocks.repair.mockResolvedValue({ ...draft, source_type: 'skill', generate_status: 'repairing' });
+    fireEvent.change(screen.getByPlaceholderText('selfEvolutionRun.workflowDetailRepairStatePlaceholder'), { target: { value: 'Fix all current files without deleting review' } });
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
+    await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({
+      target: 'full', mode: 'workflow_local', edit_context: { node_ids: ['review'] }, repair_hint: 'Fix all current files without deleting review',
+    })));
+  });
+
+  it('flushes editor changes and waits for the shared save queue before publishing once', async () => {
+    show();
+    const publish = await screen.findByRole('button', { name: '发布插件' });
+    let finishFlush!: (saved: boolean) => void;
+    let finishSave!: (saved: WorkflowDraftRecord) => void;
+    let finishPublish!: (result: unknown) => void;
+    mocks.flush.mockImplementation(() => new Promise((resolve) => { finishFlush = resolve; }));
+    mocks.save.mockImplementation(() => new Promise((resolve) => { finishSave = resolve; }));
+    mocks.publish.mockImplementation(() => new Promise((resolve) => { finishPublish = resolve; }));
+    let pendingSave!: Promise<void>;
+    await act(async () => {
+      pendingSave = mocks.props.onSave!({ stateYaml: 'latest graph', workflowYaml: 'id: latest', scenarioContent: 'latest instructions', scriptsContent: '{}', stateLayoutContent: '{}' });
+    });
+    fireEvent.click(publish);
+    fireEvent.click(publish);
+    expect(mocks.flush).toHaveBeenCalledTimes(1);
+    expect(mocks.props.readonly).toBe(true);
+    expect(mocks.publish).not.toHaveBeenCalled();
+    await act(async () => { finishFlush(true); });
+    expect(mocks.publish).not.toHaveBeenCalled();
+    await act(async () => { finishSave({ ...draft, version: 4 }); await pendingSave; });
+    expect(mocks.publish).toHaveBeenCalledTimes(1);
+    expect(mocks.props.readonly).toBe(true);
+    await act(async () => { finishPublish({ workflow_ref: 'user:owner:research-v2', revision_no: 2 }); });
+    await waitFor(() => expect(mocks.props.readonly).toBe(false));
+  });
+
+  it('does not publish when the editor cannot flush the current draft', async () => {
+    show();
+    mocks.flush.mockResolvedValue(false);
+    fireEvent.click(await screen.findByRole('button', { name: '发布插件' }));
+    await waitFor(() => expect(mocks.props.readonly).toBe(false));
+    expect(mocks.flush).toHaveBeenCalledTimes(1);
+    expect(mocks.publish).not.toHaveBeenCalled();
+    expect(mocks.props.initialStateYaml).toBe(draft.state_yaml_content);
+  });
+
+  it('does not publish when a queued metadata save fails', async () => {
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: draft.name }));
+    let rejectSave!: (error: Error) => void;
+    mocks.save.mockImplementation(() => new Promise((_, reject) => { rejectSave = reject; }));
+    const input = screen.getByDisplayValue(draft.name);
+    fireEvent.change(input, { target: { value: 'Rename pending' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '发布插件' }));
+    await act(async () => { rejectSave(new Error('save failed')); });
+    await waitFor(() => expect(mocks.props.readonly).toBe(false));
+    expect(mocks.publish).not.toHaveBeenCalled();
+  });
+
+  it('retries a failed preview in place without losing the hint or submitting a repair', async () => {
+    mocks.preview.mockRejectedValueOnce(new Error('temporary network failure'));
+    show();
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('node_integration', [], { node_ids: ['review'] }); });
+    const hint = screen.getByPlaceholderText('selfEvolutionRun.workflowNodeIntegrationPlaceholder');
+    fireEvent.change(hint, { target: { value: 'Review before export; keep the output length' } });
+    const retry = await screen.findByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairPreviewRetry' });
+    expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeDisabled();
+    expect(mocks.preview).toHaveBeenCalledTimes(1);
+    fireEvent.click(retry);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeEnabled());
+    expect(hint).toHaveValue('Review before export; keep the output length');
+    expect(mocks.preview).toHaveBeenCalledTimes(2);
+    expect(mocks.repair).not.toHaveBeenCalled();
+  });
+
+  it('previews a newly selected target after a preview failure', async () => {
+    mocks.preview.mockRejectedValueOnce(new Error('temporary network failure'));
+    show();
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('node_integration'); });
+    await screen.findByText('selfEvolutionRun.workflowDetailRepairPreviewFailed');
+    const dialog = screen.getByRole('dialog', { name: 'selfEvolutionRun.workflowDetailRepairModalTitle' });
+    fireEvent.mouseDown(within(dialog).getByRole('combobox'));
+    fireEvent.click(await screen.findByText('界面展示', { selector: '.ant-select-item-option-content' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith(draft.id, expect.objectContaining({ target: 'ui', draft_version: 3 })));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeEnabled());
+    expect(screen.queryByText('selfEvolutionRun.workflowDetailRepairPreviewFailed')).not.toBeInTheDocument();
+  });
+
+  it('ignores an older preview response after switching repair targets', async () => {
+    let rejectOldPreview!: (error: Error) => void;
+    mocks.preview.mockImplementationOnce(() => new Promise((_, reject) => { rejectOldPreview = reject; }));
+    show();
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('node_integration'); });
+    const dialog = screen.getByRole('dialog', { name: 'selfEvolutionRun.workflowDetailRepairModalTitle' });
+    fireEvent.mouseDown(within(dialog).getByRole('combobox'));
+    fireEvent.click(await screen.findByText('界面展示', { selector: '.ant-select-item-option-content' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeEnabled());
+    await act(async () => { rejectOldPreview(new Error('old scope network failure')); });
+    expect(screen.queryByText('selfEvolutionRun.workflowDetailRepairPreviewFailed')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeEnabled();
+    expect(mocks.preview).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a preview version conflict blocked instead of retrying or adopting another draft', async () => {
+    mocks.preview.mockRejectedValueOnce({ response: { status: 409 } });
+    show();
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('node_integration'); });
+    await screen.findByText('selfEvolutionRun.workflowDetailSaveConflict');
+    expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairPreviewRetry' })).not.toBeInTheDocument();
+    expect(mocks.preview).toHaveBeenCalledTimes(1);
+    expect(mocks.props.initialStateYaml).toBe(draft.state_yaml_content);
+  });
+
+  async function openRepairProgress() {
+    fireEvent.click(await screen.findByRole('button', { name: 'selfEvolutionRun.workflowDetailGenerationView' }));
+    return screen.findByRole('dialog', { name: 'selfEvolutionRun.workflowDetailRepairModalTitle' });
+  }
+
+  async function openRepairCloseChoice() {
+    const progress = await openRepairProgress();
+    fireEvent.click(within(progress).getByRole('button', { name: 'Close' }));
+    // The test setup assigns the same generated title id to every Ant Modal.
+    const title = await screen.findByText('selfEvolutionRun.workflowDetailRepairCloseTitle');
+    return title.closest('[role="dialog"]') as HTMLElement;
+  }
+
+  it('offers background or terminate after closing repair and keeps polling in the background', async () => {
+    const intervals = vi.spyOn(globalThis, 'setInterval');
+    show({ generate_status: 'repairing' });
+    const choice = await openRepairCloseChoice();
+    expect(within(choice).getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairStop' })).toBeEnabled();
+    fireEvent.click(within(choice).getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairBackground' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('status')).toHaveTextContent('selfEvolutionRun.workflowDetailRepairBackgroundTitle');
+    expect(mocks.props.readonly).toBe(true);
+    expect(mocks.cancelRepair).not.toHaveBeenCalled();
+    expect(mocks.repair).not.toHaveBeenCalled();
+    mocks.get.mockResolvedValue({ ...draft, version: 4, last_repair_run_id: 'repair-1' });
+    mocks.repairRun.mockResolvedValue({ status: 'succeeded', target: 'node_integration', diagnostics_after: [] });
+    const poll = intervals.mock.calls.filter(([, delay]) => delay === 3000).slice(-1)[0]?.[0];
+    if (typeof poll !== 'function') throw new Error('Repair polling did not start');
+    await act(async () => { await poll(); });
+    await waitFor(() => expect(mocks.props.readonly).toBe(false));
+    expect(mocks.repairRun).toHaveBeenCalledWith(draft.id, 'repair-1');
+    expect(screen.queryByText('selfEvolutionRun.workflowDetailRepairBackgroundTitle')).not.toBeInTheDocument();
+  });
+
+  it('terminates repair, preserves the draft, and ignores a pre-cancel poll response', async () => {
+    const intervals = vi.spyOn(globalThis, 'setInterval');
+    show({ generate_status: 'repairing' });
+    const choice = await openRepairCloseChoice();
+    let resolvePoll!: (value: WorkflowDraftRecord) => void;
+    mocks.get.mockImplementationOnce(() => new Promise((resolve) => { resolvePoll = resolve; }));
+    const poll = intervals.mock.calls.filter(([, delay]) => delay === 3000).slice(-1)[0]?.[0];
+    if (typeof poll !== 'function') throw new Error('Repair polling did not start');
+    let pendingPoll!: Promise<unknown>;
+    await act(async () => { pendingPoll = Promise.resolve(poll()); });
+    mocks.cancelRepair.mockResolvedValue({ ...draft, version: 4 });
+    fireEvent.click(within(choice).getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairStop' }));
+    await waitFor(() => expect(mocks.cancelRepair).toHaveBeenCalledWith(draft.id));
+    await waitFor(() => expect(mocks.props.readonly).toBe(false));
+    await act(async () => { resolvePoll({ ...draft, generate_status: 'repairing' }); await pendingPoll; });
+    expect(mocks.props.readonly).toBe(false);
+    expect(mocks.props.initialStateYaml).toBe(draft.state_yaml_content);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText('selfEvolutionRun.workflowDetailRepairBackgroundTitle')).not.toBeInTheDocument();
+  });
+
+  it('keeps repair active and the choice dialog available when termination fails', async () => {
+    show({ generate_status: 'repairing' });
+    const choice = await openRepairCloseChoice();
+    mocks.cancelRepair.mockRejectedValue(new Error('network unavailable'));
+    fireEvent.click(within(choice).getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairStop' }));
+    await waitFor(() => expect(mocks.cancelRepair).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(within(choice).getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairStop' })).toBeEnabled());
+    expect(choice).toBeVisible();
+    expect(mocks.props.readonly).toBe(true);
+  });
+
+  it('can background a pending repair submission and restores the form if admission fails', async () => {
+    show();
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('node_integration', [], { node_ids: ['review'] }); });
+    let rejectRepair!: (reason: unknown) => void;
+    mocks.repair.mockImplementation(() => new Promise((_, reject) => { rejectRepair = reject; }));
+    const submit = screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    const progress = screen.getByRole('dialog', { name: 'selfEvolutionRun.workflowDetailRepairModalTitle' });
+    fireEvent.click(within(progress).getByRole('button', { name: 'Close' }));
+    const title = await screen.findByText('selfEvolutionRun.workflowDetailRepairCloseTitle');
+    const choice = title.closest('[role="dialog"]') as HTMLElement;
+    expect(within(choice).getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairStop' })).toBeDisabled();
+    fireEvent.click(within(choice).getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairBackground' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mocks.props.readonly).toBe(true);
+    expect(screen.getByRole('button', { name: '发布插件' })).toBeDisabled();
+    await act(async () => { rejectRepair({ response: { data: { message: 'Admission failed' } } }); });
+    await waitFor(() => expect(screen.getByText('Admission failed')).toBeVisible());
+    expect(screen.getByRole('dialog', { name: 'selfEvolutionRun.workflowDetailRepairModalTitle' })).toBeVisible();
+    expect(mocks.cancelRepair).not.toHaveBeenCalled();
+  });
+
+  it('mounts the history graph only with its loaded revision and ignores stale responses', async () => {
+    mocks.versions.mockResolvedValue([{ revision_id: 'r1', revision_no: 1 }, { revision_id: 'r2', revision_no: 2 }]);
+    show({ published_workflow_ref: 'user:owner:research-v2', draft_dirty: false });
+    const editor = await screen.findByRole('region', { name: 'Editor' });
+    let resolveFirst!: (value: unknown) => void;
+    let resolveSecond!: (value: unknown) => void;
+    mocks.version.mockImplementation((_ref, revision) => new Promise((resolve) => {
+      if (revision === 'r1') resolveFirst = resolve; else resolveSecond = resolve;
+    }));
+    const selectVersion = async (label: string) => {
+      fireEvent.mouseDown(screen.getByRole('combobox'));
+      fireEvent.click(await screen.findByText(label, { selector: '.ant-select-item-option-content' }));
+    };
+    await selectVersion('v1');
+    expect(editor).toHaveAttribute('data-state', draft.state_yaml_content);
+    expect(editor).toHaveAttribute('data-readonly', 'true');
+    await selectVersion('v2');
+    await act(async () => resolveSecond({ revision_id: 'r2', state_yaml_content: 'v2 graph', workflow_yaml_content: 'id: v2' }));
+    expect(screen.getByRole('region', { name: 'Editor' })).toHaveAttribute('data-state', 'v2 graph');
+    await act(async () => resolveFirst({ revision_id: 'r1', state_yaml_content: 'v1 graph' }));
+    expect(screen.getByRole('region', { name: 'Editor' })).toHaveAttribute('data-state', 'v2 graph');
+    await selectVersion('v1');
+    await selectVersion('草稿');
+    await act(async () => resolveFirst({ revision_id: 'r1', state_yaml_content: 'late graph' }));
+    expect(screen.getByRole('region', { name: 'Editor' })).toHaveAttribute('data-state', draft.state_yaml_content);
+    expect(mocks.props.readonly).toBe(false);
+  });
+
+  it.each(['succeeded', 'failed'] as const)('only restores publishing after a validated repair (%s) of a failed Skill conversion', async (status) => {
+    const intervals = vi.spyOn(globalThis, 'setInterval');
+    show({ source_type: 'skill', generate_status: 'failed', generate_error: 'generation validation failed' });
+    await screen.findByRole('region', { name: 'Editor' });
+    expect(screen.queryByRole('button', { name: '发布插件' })).not.toBeInTheDocument();
+    await act(async () => { mocks.props.onRepair?.('node_integration', [], { node_ids: ['research'] }); });
+    mocks.repair.mockResolvedValue({ ...draft, source_type: 'skill', generate_status: 'repairing' });
+    mocks.repairRun.mockResolvedValue({ status, target: 'node_integration', diagnostics_after: status === 'succeeded' ? [] : [{ code: 'E_UI_EMPTY', severity: 'error', message: 'UI tabs required' }] });
+    const repaired = { ...draft, source_type: 'skill', version: 4, last_repair_run_id: 'repair-1', generate_status: status === 'succeeded' ? 'done' : 'failed', generate_error: status === 'succeeded' ? '' : 'generation validation failed' };
+    mocks.get.mockResolvedValue(repaired);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })); });
+    const poll = intervals.mock.calls.filter(([, delay]) => delay === 3000).slice(-1)[0]?.[0];
+    if (typeof poll !== 'function') throw new Error('Repair polling did not start');
+    await act(async () => { await poll(); });
+    expect(mocks.repairRun).toHaveBeenCalledWith(draft.id, 'repair-1');
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Editor' })).toHaveAttribute('data-readonly', 'false'));
+    if (status === 'failed') {
+      expect(screen.queryByRole('button', { name: '发布插件' })).not.toBeInTheDocument();
+      expect(mocks.publish).not.toHaveBeenCalled();
+      return;
+    }
+    expect(screen.queryByRole('button', { name: 'selfEvolutionRun.workflowDetailShowFailureDetails' })).not.toBeInTheDocument();
+    const publish = screen.getByRole('button', { name: '发布插件' });
+    expect(publish).toBeEnabled();
+    mocks.publish.mockResolvedValue({ workflow_ref: 'user:owner:research-v2', revision_no: 1 });
+    mocks.get.mockResolvedValue({ ...repaired, published: true, current_revision_no: 1, draft_dirty: false });
+    fireEvent.click(publish);
+    await waitFor(() => expect(mocks.publish).toHaveBeenCalledWith(draft.id));
+    expect(await screen.findByText('线上：v1')).toBeVisible();
+    expect(await screen.findByRole('button', { name: '发布插件' })).toBeDisabled();
+  });
+
+  it.each(['analyzing', 'generating', 'brief_done', 'skeleton_done', 'state_done', 'repairing', 'needs_confirmation'])('prevents edits during %s', async (generate_status) => {
     show({ generate_status });
     expect(await screen.findByRole('region', { name: 'Editor' })).toHaveAttribute('data-readonly', 'true');
+  });
+
+  it('repairs the latest saved version using current workflow intent rather than the source Skill', async () => {
+    show({ source_analysis_id: 'original-skill-analysis' });
+    await screen.findByRole('region', { name: 'Editor' });
+    mocks.save.mockResolvedValue({ ...draft, source_analysis_id: 'original-skill-analysis', version: 4 });
+    const payload = { stateYaml: 'steps: [{id: review}]', workflowYaml: 'id: research-v2', scenarioContent: 'Review before export', scriptsContent: '{}', stateLayoutContent: '{}' };
+    await act(async () => { await mocks.props.onSave?.(payload); });
+    await act(async () => { mocks.props.onRepair?.('node_integration', [], { node_ids: ['review'] }); });
+    expect(mocks.preview).toHaveBeenCalledWith(draft.id, { target: 'statemachine', mode: 'workflow_local', draft_version: 4, edit_context: { node_ids: ['review'] } });
+    fireEvent.change(screen.getByPlaceholderText('selfEvolutionRun.workflowNodeIntegrationPlaceholder'), { target: { value: 'Review before export' } });
+    mocks.repair.mockResolvedValue({ ...draft, version: 4, generate_status: 'repairing' });
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
+    await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({
+      target: 'statemachine', mode: 'workflow_local', draft_version: 4,
+      repair_hint: 'Review before export', edit_context: { node_ids: ['review'] },
+    })));
+  });
+
+  it('retains the user hint and allows retry after repair admission rejects incomplete intent', async () => {
+    show();
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('node_integration', [], { node_ids: ['review'] }); });
+    const hint = screen.getByPlaceholderText('selfEvolutionRun.workflowNodeIntegrationPlaceholder');
+    fireEvent.change(hint, { target: { value: 'Review report' } });
+    mocks.repair.mockRejectedValue({ response: { data: { message: 'Please specify the insertion point' } } });
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
+    await waitFor(() => expect(screen.getByText('Please specify the insertion point')).toBeVisible());
+    expect(screen.getByPlaceholderText('selfEvolutionRun.workflowNodeIntegrationPlaceholder')).toHaveValue('Review report');
+    expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeEnabled();
+  });
+
+  it.each(['statemachine', 'full'] as const)('keeps %s repair local after reopening a completed Skill workflow', async (target) => {
+    show({ source_type: 'skill', source_analysis_id: 'original-analysis' });
+    await screen.findByRole('region', { name: 'Editor' });
+    // A freshly mounted editor has no in-session added nodes or placeholders.
+    await act(async () => { mocks.props.onRepair?.(target, [{ code: 'E_MATERIAL_UNKNOWN', nodeId: 'research', message: 'Fix input' }], { node_ids: [] }); });
+    expect(mocks.preview).toHaveBeenCalledWith(draft.id, { target, mode: 'workflow_local', draft_version: 3, edit_context: { node_ids: [] } });
+    mocks.repair.mockResolvedValue({ ...draft, source_type: 'skill', version: 3, generate_status: 'repairing' });
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
+    await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({ target, mode: 'workflow_local', edit_context: { node_ids: [] } })));
+  });
+
+  it('restores actionable repair diagnostics after reopening a failed draft', async () => {
+    mocks.repairRun.mockResolvedValue({ status: 'failed', diagnostics_after: [{ code: 'E_REPAIR_MODE_CHANGED', severity: 'error', node_id: 'research', message: 'Keep human review' }] });
+    show({ last_repair_run_id: 'repair-1', generate_warning: '[修复失败] Keep human review' });
+    await waitFor(() => expect(mocks.props.repairDiagnostics).toEqual([expect.objectContaining({ code: 'E_REPAIR_MODE_CHANGED', nodeId: 'research' })]));
+    expect(mocks.props.readonly).toBe(false);
+  });
+
+  it('retains previous repair failure after editing without treating old diagnostics as current validation', async () => {
+    mocks.repairRun.mockResolvedValue({ status: 'failed', target: 'statemachine', diagnostics_after: [{ code: 'E_REPAIR_MODEL_TIMEOUT', severity: 'error', message: 'Timed out' }] });
+    show({ last_repair_run_id: 'repair-1', generate_warning: '[修复失败] Timed out' });
+    await waitFor(() => expect(mocks.props.repairDiagnostics).toHaveLength(1));
+    mocks.save.mockResolvedValue({ ...draft, version: 4, scenario_content: 'Manual correction', last_repair_run_id: 'repair-1', generate_warning: '' });
+    await act(async () => { await mocks.props.onSave?.({ stateYaml: draft.state_yaml_content, workflowYaml: draft.workflow_yaml_content, scenarioContent: 'Manual correction', scriptsContent: '{}', stateLayoutContent: '{}' }); });
+    expect(await screen.findByText('selfEvolutionRun.workflowDetailPreviousRepairFailed')).toBeVisible();
+    expect(screen.getByText('selfEvolutionRun.validationErrors.E_REPAIR_MODEL_TIMEOUT')).toBeVisible();
+    await waitFor(() => expect(mocks.props.repairDiagnostics).toEqual([]));
+    expect(mocks.props.readonly).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailPreviousRepairRetry' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith(draft.id, expect.objectContaining({ target: 'statemachine', draft_version: 4 })));
+    expect(mocks.repair).not.toHaveBeenCalled();
+  });
+
+  it('recovers previous failure history on refresh after a save cleared the warning', async () => {
+    mocks.repairRun.mockResolvedValue({ status: 'failed', target: 'full', diagnostics_after: [{ code: 'E_REPAIR_MODEL_TRANSPORT', severity: 'error', message: 'Connection failed' }] });
+    show({ version: 4, last_repair_run_id: 'repair-1', generate_warning: '' });
+    expect(await screen.findByText('selfEvolutionRun.workflowDetailPreviousRepairFailed')).toBeVisible();
+    expect(mocks.props.repairDiagnostics).toEqual([]);
+    expect(mocks.props.readonly).toBe(false);
+    mocks.publish.mockResolvedValue({ workflow_ref: 'user:owner:research-v2', revision_no: 2 });
+    fireEvent.click(screen.getByRole('button', { name: '发布插件' }));
+    await waitFor(() => expect(mocks.publish).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(['succeeded', 'canceled', 'stale'])('does not show failure history for a %s repair', async (status) => {
+    mocks.repairRun.mockResolvedValue({ status, target: 'statemachine', diagnostics_after: [] });
+    show({ last_repair_run_id: 'repair-2' });
+    await waitFor(() => expect(mocks.repairRun).toHaveBeenCalled());
+    expect(screen.queryByText('selfEvolutionRun.workflowDetailPreviousRepairFailed')).not.toBeInTheDocument();
+  });
+
+  it('does not adopt a newer version and overwrite it after a repair conflict', async () => {
+    show();
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('node_integration', [], { node_ids: ['review'] }); });
+    mocks.repair.mockRejectedValue({ response: { status: 409, data: { message: 'repair stale draft' } } });
+    mocks.get.mockResolvedValue({ ...draft, version: 5, scenario_content: 'Another editor changed this' });
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
+    await waitFor(() => expect(screen.getByText('selfEvolutionRun.workflowDetailSaveConflict')).toBeVisible());
+    expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeDisabled();
+    await expect(mocks.props.onSave?.({ stateYaml: 'old graph', workflowYaml: 'id: old', scenarioContent: 'old description', scriptsContent: '{}', stateLayoutContent: '{}' })).rejects.toBeTruthy();
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(mocks.props.initialScenarioContent).toBe(draft.scenario_content);
   });
 
   it('shows the same display name before and during editing and persists a rename', async () => {

@@ -17,7 +17,8 @@ describe('settings copy contract', () => {
       '连接外部 MCP 服务，验证连接、发现工具，并决定 LazyMind 可以调用哪些工具。',
       '在配置的本地路径内进行 glob 匹配、grep 搜索、文件读取和精确文本替换。',
       '在对话中读取并使用已保存的个人记忆和偏好；关闭后不再把这些内容带入回答。',
-      '分别启停当前账号的个人技能和工作流。',
+      '分别启停当前账号的个人技能和工作流；创建、安装、编辑或整理资源，请前往能力管理。',
+      'openCapabilityManagement: "前往能力管理"',
     ].forEach((copy) => expect(zhCN).toContain(copy));
 
     [
@@ -26,7 +27,8 @@ describe('settings copy contract', () => {
       'Connect external MCP services, verify connections, discover tools, and choose which tools LazyMind may call.',
       'Run glob matching, grep searches, file reads, and precise text replacements within configured local paths.',
       'Read and use saved personal memories and preferences in conversations; when off, this content is no longer included in responses.',
-      'Enable or disable personal skills and workflows for the current account independently.',
+      'Enable or disable personal skills and workflows for the current account independently. To create, install, edit, or organize them, go to Capability Management.',
+      'openCapabilityManagement: "Open Capability Management"',
     ].forEach((copy) => expect(enUS).toContain(copy));
   });
 
@@ -73,12 +75,12 @@ describe('settings copy contract', () => {
     expect(zhCN).toContain('disableTitle: "关闭开发者模式"');
     expect(zhCN).toContain('developerEnableContent: "开启后将激活开发者模式相关功能"');
     expect(zhCN).toContain('developerDisableContent: "关闭后将停用开发者模式相关功能，但不会删除已有的自进化数据"');
-    expect(zhCN).toContain('enableDesc: "本页总开关。关闭后下方选项不可用；开启后可使用工具管理、算法跃迁、内部 ID 和完整执行过程。"');
-    expect(zhCN).toContain('enableDescWithoutEvo: "本页总开关。关闭后下方选项不可用；开启后可使用工具管理、内部 ID 和完整执行过程。"');
+    expect(zhCN).toContain('enableDesc: "本页总开关。关闭后暂停开发者专属功能及下方选项，但保留已保存的偏好设置；开启后可使用工具管理、算法跃迁、内部 ID 和完整执行过程。"');
+    expect(zhCN).toContain('enableDescWithoutEvo: "本页总开关。关闭后暂停开发者专属功能及下方选项，但保留已保存的偏好设置；开启后可使用工具管理、内部 ID 和完整执行过程。"');
     expect(enUS).toContain('disableTitle: "Disable developer mode"');
     expect(enUS).toContain('developerEnableContent: "Turning this on activates developer-mode features."');
     expect(enUS).toContain('developerDisableContent: "Turning this off disables developer-mode features but does not delete existing self-evolution data."');
-    expect(enUS).toContain('enableDesc: "Master switch for this page. When off, the options below are unavailable. When on, tool management, algorithm leap, internal IDs, and full execution traces are available."');
-    expect(enUS).toContain('enableDescWithoutEvo: "Master switch for this page. When off, the options below are unavailable. When on, tool management, internal IDs, and full execution traces are available."');
+    expect(enUS).toContain('enableDesc: "Master switch for this page. Turning it off pauses developer-only features and the options below without deleting your saved preferences. When on, tool management, algorithm leap, internal IDs, and full execution traces are available."');
+    expect(enUS).toContain('enableDescWithoutEvo: "Master switch for this page. Turning it off pauses developer-only features and the options below without deleting your saved preferences. When on, tool management, internal IDs, and full execution traces are available."');
   });
 });

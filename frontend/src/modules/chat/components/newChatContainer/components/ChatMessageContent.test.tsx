@@ -107,6 +107,40 @@ describe("ChatMessageContent thinking terminal", () => {
     code: "model_fallback_exhausted", partial_output: true,
   };
 
+  it.each(["generating", "running"])("keeps %s messages streaming until completion", (runStatus) => {
+    const isThinkingCollapsed = vi.fn((_key: string, collapsed?: boolean) => collapsed ?? false);
+    const props = { isThinkingCollapsed, onToggleThinkingCollapse: vi.fn() };
+    const item = {
+      role: "assistant", delta: "", reasoning_content: "KEPT THINK",
+      run_status: runStatus, thinking_duration_s: 82,
+    };
+    const { rerender } = render(<ChatMessageContent {...props} item={item} />);
+    expect(screen.getByText("chat.thinking (1m22s)")).toBeInTheDocument();
+    expect(isThinkingCollapsed).toHaveBeenLastCalledWith("default", false);
+    expect(screen.queryByText(/chat\.runStatus\./)).not.toBeInTheDocument();
+
+    rerender(<ChatMessageContent {...props} item={{ ...item, delta: "KEPT ANSWER" }} />);
+    expect(screen.getByText("chat.thinkingDone (1m22s)")).toBeInTheDocument();
+    expect(isThinkingCollapsed).toHaveBeenLastCalledWith("default", false);
+
+    rerender(<ChatMessageContent {...props} item={{ ...item, run_status: "completed" }} />);
+    expect(screen.getByText("chat.thinkingDone (1m22s)")).toBeInTheDocument();
+    expect(isThinkingCollapsed).toHaveBeenLastCalledWith("default", true);
+    expect(screen.getAllByText("KEPT THINK")).toHaveLength(1);
+  });
+
+  it.each(["generating", "running"])("honors a stop marker with a stale %s status", (runStatus) => {
+    const isThinkingCollapsed = vi.fn((_key: string, collapsed?: boolean) => collapsed ?? false);
+    render(<ChatMessageContent
+      item={{ role: "assistant", reasoning_content: "KEPT THINK", run_status: runStatus,
+        finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }}
+      isThinkingCollapsed={isThinkingCollapsed} onToggleThinkingCollapse={vi.fn()}
+    />);
+    expect(screen.getByText("chat.thinkingDone")).toBeInTheDocument();
+    expect(isThinkingCollapsed).toHaveBeenCalledWith("default", true);
+    expect(screen.queryByText(/chat\.runStatus\./)).not.toBeInTheDocument();
+  });
+
   it.each([
     { name: "active reasoning", item: {}, title: "chat.thinking" },
     { name: "active answer", item: { delta: "KEPT ANSWER" }, title: "chat.thinkingDone" },
@@ -118,6 +152,8 @@ describe("ChatMessageContent thinking terminal", () => {
     { name: "runtime failure terminal only", item: { run_terminal: { ...failedTerminal, reason: "runtime_failure" } }, title: "chat.runStatus.runtimeFailed" },
     { name: "model failure terminal only", item: { run_terminal: failedTerminal }, title: "chat.runStatus.failed" },
     { name: "terminal failure overrides completed status", item: { run_terminal: failedTerminal, run_status: "completed" }, title: "chat.runStatus.failed" },
+    { name: "terminal failure overrides generating status", item: { run_terminal: failedTerminal, run_status: "generating" }, title: "chat.runStatus.failed" },
+    { name: "terminal success overrides generating status", item: { run_terminal: { ...failedTerminal, status: "completed", reason: "normal" }, run_status: "generating" }, title: "chat.thinkingDone" },
     { name: "terminal success overrides failed status", item: { run_terminal: { ...failedTerminal, status: "completed", reason: "normal" }, run_status: "failed" }, title: "chat.thinkingDone" },
     { name: "legacy stop without answer", item: { finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop }, title: "chat.thinkingDone" },
   ])("uses the actual state for $name", ({ item, title }) => {

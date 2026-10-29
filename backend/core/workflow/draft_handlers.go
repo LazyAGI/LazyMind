@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/algo"
 	"lazymind/core/asyncjob"
@@ -445,7 +446,7 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		ScenarioContent     *string `json:"scenario_content"`
 		ScriptsContent      *string `json:"scripts_content"`
 		// Version is the caller's last-known version. Required when writing
-		// name, workflow_yaml_content or state_yaml_content; ignored otherwise.
+		// workflow content; layout-only updates are unversioned.
 		Version *int `json:"version"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -461,13 +462,13 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generation and repair own the draft until the background job finishes.
-	if generatingStatusesForResponse[draft.GenerateStatus] || draft.GenerateStatus == generateStatusRepairing {
+	if generatingStatusesForResponse[draft.GenerateStatus] || draft.GenerateStatus == generateStatusRepairing || draft.GenerateStatus == "needs_confirmation" {
 		common.ReplyErr(w, "repair in progress, please wait", http.StatusConflict)
 		return
 	}
 
 	// --- Optimistic-lock check for versioned fields ---
-	needsVersionCheck := body.Name != nil || body.WorkflowYAMLContent != nil || body.StateYAMLContent != nil
+	needsVersionCheck := body.Name != nil || body.WorkflowYAMLContent != nil || body.StateYAMLContent != nil || body.ScenarioContent != nil || body.ScriptsContent != nil
 	if needsVersionCheck && body.Version == nil {
 		common.ReplyErr(w, "version required", http.StatusBadRequest)
 		return
@@ -501,11 +502,21 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	if body.ScriptsContent != nil {
 		updates["scripts_content"] = *body.ScriptsContent
 	}
+	// A failed repair describes a rejected candidate for the previous content.
+	// Invalidate that warning only on an actual content change, not a rename,
+	// layout save or no-op autosave. Keep the run itself for audit/retry history.
+	contentChanged := (body.WorkflowYAMLContent != nil && *body.WorkflowYAMLContent != draft.WorkflowYAMLContent) ||
+		(body.StateYAMLContent != nil && *body.StateYAMLContent != draft.StateYAMLContent) ||
+		(body.ScenarioContent != nil && *body.ScenarioContent != draft.ScenarioContent) ||
+		(body.ScriptsContent != nil && *body.ScriptsContent != draft.ScriptsContent)
+	if contentChanged && strings.HasPrefix(draft.GenerateWarning, "[修复失败]") {
+		updates["generate_warning"] = ""
+	}
 	if needsVersionCheck {
 		updates["version"] = gorm.Expr("version + 1")
 	}
 
-	query := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID)
+	query := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND created_by = ? AND generate_status = ? AND deleted_at IS NULL", draftID, userID, draft.GenerateStatus)
 	if needsVersionCheck {
 		query = query.Where("version = ?", *body.Version)
 	}
@@ -521,7 +532,7 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "save failed", http.StatusInternalServerError)
 		return
 	}
-	if needsVersionCheck && result.RowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		// The version predicate and update execute as one SQL statement, so two
 		// concurrent writers cannot both pass a separate check and overwrite one
 		// another. Return the winner's authoritative state to the stale caller.
@@ -660,17 +671,29 @@ func CancelWorkflowDraftGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
-	if _, err := asyncjob.CancelResourceJobs(r.Context(), db, workflowDraftGenerateJobType, "workflow_draft", draftID, "workflow draft generation canceled by user"); err != nil {
-		common.ReplyErr(w, "cancel generation failed", http.StatusInternalServerError)
-		return
-	}
 	updates := map[string]any{
 		"generate_status":  generateStatusFailed,
 		"generate_error":   workflowDraftGenerationCanceledJSON(),
 		"generate_warning": "",
 		"updated_at":       now,
 	}
-	if err := db.Model(&draft).Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).Updates(updates).Error; err != nil {
+	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
+			return err
+		}
+		if !generatingStatusesForResponse[draft.GenerateStatus] && draft.GenerateStatus != "needs_confirmation" {
+			return errRepairStaleDraft
+		}
+		if _, err := asyncjob.CancelResourceJobs(r.Context(), tx, workflowDraftGenerateJobType, "workflow_draft", draftID, "workflow draft generation canceled by user"); err != nil {
+			return err
+		}
+		return tx.Model(&draft).Updates(updates).Error
+	})
+	if errors.Is(err, errRepairStaleDraft) {
+		common.ReplyErr(w, "workflow is not generating", http.StatusConflict)
+		return
+	}
+	if err != nil {
 		common.ReplyErr(w, "cancel generation failed", http.StatusInternalServerError)
 		return
 	}
@@ -752,11 +775,12 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		RepairHint       string `json:"repair_hint"`
-		Target           string `json:"target"` // 'statemachine' | 'ui' | 'scenario'
-		Mode             string `json:"mode"`
-		DraftVersion     int    `json:"draft_version"`
-		SourceAnalysisID string `json:"source_analysis_id"`
+		RepairHint       string                    `json:"repair_hint"`
+		Target           string                    `json:"target"` // 'statemachine' | 'ui' | 'scenario'
+		Mode             string                    `json:"mode"`
+		DraftVersion     int                       `json:"draft_version"`
+		SourceAnalysisID string                    `json:"source_analysis_id"`
+		EditContext      *algo.WorkflowEditContext `json:"edit_context,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
@@ -765,7 +789,7 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	if body.Target == "" {
 		body.Target = "statemachine"
 	}
-	if body.Target != "statemachine" && body.Target != "ui" && body.Target != "scenario" && body.Target != "scripts" && body.Target != "full" {
+	if body.Target != "statemachine" && body.Target != "node_integration" && body.Target != "ui" && body.Target != "scenario" && body.Target != "scripts" && body.Target != "full" {
 		common.ReplyErr(w, "invalid repair target", http.StatusBadRequest)
 		return
 	}
@@ -781,7 +805,12 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "draft has no generated content to repair", http.StatusBadRequest)
 		return
 	}
+	preserveCurrent := shouldPreserveCurrentWorkflow(draft, body.Target, body.EditContext)
 	if body.DraftVersion == 0 {
+		if preserveCurrent {
+			common.ReplyErr(w, "draft_version required", http.StatusBadRequest)
+			return
+		}
 		body.DraftVersion = draft.Version
 	}
 	if body.DraftVersion != draft.Version {
@@ -790,6 +819,17 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Mode == "" {
 		body.Mode = "workflow_local"
+	}
+	if generatingStatusesForResponse[draft.GenerateStatus] || draft.GenerateStatus == generateStatusRepairing || draft.GenerateStatus == "needs_confirmation" {
+		common.ReplyErr(w, "workflow is not editable", http.StatusConflict)
+		return
+	}
+	if preserveCurrent {
+		body.Mode = "workflow_local"
+		if err := validateNodeIntegrationContext(draft, body.EditContext, body.RepairHint); err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	if body.Mode != "workflow_local" && body.Mode != "source_aware" {
 		common.ReplyErr(w, "invalid repair mode", http.StatusBadRequest)
@@ -828,42 +868,62 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 
 	prevStatus := draft.GenerateStatus
 	beforeDiagnostics := diagnoseWorkflowWithProfile(draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent, graphengine.ProfilePublish)
+	if preserveCurrent {
+		base := workflowRepairSnapshot{WorkflowYAML: draft.WorkflowYAMLContent, StateYAML: draft.StateYAMLContent, ScenarioMD: draft.ScenarioContent, Scripts: scriptsFromDraft(draft.ScriptsContent)}
+		beforeDiagnostics = diagnoseNodeIntegration(base, base)
+	}
 	payload := workflowDraftRepairPayload{
-		DraftID:      draftID,
-		UserID:       userID,
-		Target:       strings.TrimSpace(body.Target),
-		RepairHint:   strings.TrimSpace(body.RepairHint),
-		Warnings:     warnings,
-		Diagnostics:  repairDiagnosticsPayload(beforeDiagnostics),
-		PrevStatus:   prevStatus,
-		LLMConfig:    llmConfig,
-		DraftVersion: draft.Version,
-		Mode:         body.Mode,
+		DraftID:                 draftID,
+		UserID:                  userID,
+		Target:                  strings.TrimSpace(body.Target),
+		RepairHint:              strings.TrimSpace(body.RepairHint),
+		Warnings:                warnings,
+		Diagnostics:             repairDiagnosticsPayload(beforeDiagnostics),
+		PrevStatus:              prevStatus,
+		LLMConfig:               llmConfig,
+		DraftVersion:            draft.Version,
+		Mode:                    body.Mode,
+		EditContext:             body.EditContext,
+		PreserveCurrentWorkflow: preserveCurrent,
 	}
 	repairRun := orm.WorkflowRepairRun{ID: uuid.NewString(), DraftID: draft.ID, UserID: userID, BaseWorkflowRevisionID: draft.BaseRevisionID, DraftVersionBefore: draft.Version, Target: body.Target, Mode: body.Mode, SourceAnalysisID: body.SourceAnalysisID, SourceSkillRevisionID: draft.SourceSkillRevisionID, RepairHint: body.RepairHint, DiagnosticsBeforeJSON: diagnosticsJSON(beforeDiagnostics), ChangesJSON: "{}", DiagnosticsAfterJSON: "{}", Status: "queued", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
-	if err := db.Create(&repairRun).Error; err != nil {
-		common.ReplyErr(w, "create repair run failed", http.StatusInternalServerError)
-		return
-	}
 	payload.RepairRunID = repairRun.ID
-
-	// Set status to repairing before enqueueing so the client sees it immediately.
-	if err := db.Model(&draft).Update("generate_status", generateStatusRepairing).Error; err != nil {
-		common.ReplyErr(w, "lock failed", http.StatusInternalServerError)
-		return
-	}
-
-	if _, err := asyncjob.Enqueue(r.Context(), db, asyncjob.EnqueueRequest{
-		JobType:      workflowDraftRepairJobType,
-		ResourceType: "workflow_draft",
-		ResourceID:   draftID,
-		Payload:      payload,
-		MaxAttempts:  1,
-		CreateUserID: userID,
-	}); err != nil {
-		// Roll back status if we can't enqueue.
-		log.Printf("[ai_repair] enqueue failed draft_id=%s err=%v, rolling back to prev_status=%q", draftID, err, prevStatus)
-		_ = db.Model(&draft).Update("generate_status", prevStatus)
+	// Claim this exact editable snapshot and enqueue its repair atomically.
+	err = db.Transaction(func(tx *gorm.DB) error {
+		claimed := tx.Model(&orm.WorkflowDraft{}).Where("id = ? AND version = ? AND generate_status = ? AND deleted_at IS NULL", draft.ID, draft.Version, prevStatus).Update("generate_status", generateStatusRepairing)
+		if claimed.Error != nil {
+			return claimed.Error
+		}
+		if claimed.RowsAffected != 1 {
+			return errRepairStaleDraft
+		}
+		// A newly admitted repair owns the draft. Retire any interrupted older
+		// owner so its late response can never acquire this same version again.
+		if err := tx.Model(&orm.WorkflowRepairRun{}).Where("draft_id = ? AND status IN ?", draft.ID, []string{"queued", "repairing"}).Updates(map[string]any{
+			"status": "stale", "updated_at": time.Now().UTC(),
+			"diagnostics_after_json": diagnosticsJSON([]repairDiagnostic{{Code: "E_REPAIR_STALE_DRAFT", Severity: "error", Message: "已有新的修复任务，本次修复未应用。"}}),
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&repairRun).Error; err != nil {
+			return err
+		}
+		_, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{
+			JobType:      workflowDraftRepairJobType,
+			ResourceType: "workflow_draft",
+			ResourceID:   draftID,
+			Payload:      payload,
+			MaxAttempts:  1,
+			CreateUserID: userID,
+		})
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, errRepairStaleDraft) {
+			common.ReplyErr(w, "repair stale draft", http.StatusConflict)
+			return
+		}
+		log.Printf("[ai_repair] enqueue failed draft_id=%s err=%v", draftID, err)
 		common.ReplyErr(w, "enqueue failed", http.StatusInternalServerError)
 		return
 	}

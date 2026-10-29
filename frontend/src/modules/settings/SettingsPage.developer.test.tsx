@@ -83,8 +83,17 @@ describe("SettingsPage developer preferences", () => {
   });
 
   it("enables developer mode only after confirmation and persistence", async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      developer_mode_active: false,
+      performance_stats_enabled: true,
+      sensitive_word_filter_enabled: true,
+    });
     render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter initialEntries={["/settings?section=developer"]}><SettingsPage /></MemoryRouter></ConfigProvider>);
     const toggle = await screen.findByRole("switch", { name: "settingsPage.developer.modeAria" });
+    const group = screen.getByRole("group", { name: "settingsPage.developer.optionsGroupAria" });
+    expect(group).toHaveAttribute("aria-disabled", "true");
+    expect(within(group).queryByRole("status")).not.toBeInTheDocument();
+    expect(within(group).queryByText("settingsPage.developer.inactiveNotice")).not.toBeInTheDocument();
     fireEvent.click(toggle);
     await screen.findByText("settingsPage.confirm.developerEnableContent");
     expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -95,7 +104,17 @@ describe("SettingsPage developer preferences", () => {
     expect(mocks.applySettingsChange).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(mocks.listTasks).not.toHaveBeenCalled();
-    expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeEnabled();
+    expect(group).toHaveAttribute("aria-disabled", "false");
+    expect(group).not.toHaveClass("is-master-paused");
+    expect(within(group).queryByRole("status")).not.toBeInTheDocument();
+    for (const name of ["settingsPage.developer.performanceAria", "settingsPage.developer.sensitiveWordFilterAria"]) {
+      const childSwitch = screen.getByRole("switch", { name });
+      expect(childSwitch).toBeEnabled();
+      expect(childSwitch).toBeChecked();
+      expect(childSwitch).not.toHaveAttribute("aria-describedby");
+      expect(childSwitch.closest(".settings-detail-row")).not.toHaveClass("is-master-paused");
+      expect(childSwitch.closest(".settings-detail-row")).toHaveAttribute("aria-disabled", "false");
+    }
   });
 
   it("keeps developer mode and its child controls off when enabling is canceled", async () => {
@@ -133,22 +152,35 @@ describe("SettingsPage developer preferences", () => {
     expect(screen.getByRole("switch", { name: "settingsPage.developer.performanceAria" })).toBeDisabled();
   });
 
-  it("shows performance stats beside sensitive-word filtering before developer mode is enabled", async () => {
+  it("grays and disables saved developer options without showing an explanatory notice", async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      developer_mode_active: false,
+      performance_stats_enabled: true,
+      sensitive_word_filter_enabled: true,
+    });
     render(
       <MemoryRouter initialEntries={["/settings?section=developer"]}>
         <SettingsPage />
       </MemoryRouter>,
     );
 
-    const sensitiveSwitch = await screen.findByRole("switch", {
-      name: "settingsPage.developer.sensitiveWordFilterAria",
-    });
-    const performanceSwitch = screen.getByRole("switch", {
+    const performanceSwitch = await screen.findByRole("switch", {
       name: "settingsPage.developer.performanceAria",
     });
-
-    expect(sensitiveSwitch).toBeDisabled();
-    expect(performanceSwitch).toBeDisabled();
+    expect(screen.getByText("settingsPage.developer.description")).toBeInTheDocument();
+    expect(screen.queryByText("settingsPage.fallbackDetail")).not.toBeInTheDocument();
+    const group = screen.getByRole("group", { name: "settingsPage.developer.optionsGroupAria" });
+    expect(group).toHaveAttribute("aria-disabled", "true");
+    expect(group).toHaveClass("is-master-paused");
+    expect(within(group).queryByRole("status")).not.toBeInTheDocument();
+    expect(within(group).queryByText("settingsPage.developer.inactiveNotice")).not.toBeInTheDocument();
+    for (const childSwitch of [performanceSwitch, screen.getByRole("switch", { name: "settingsPage.developer.sensitiveWordFilterAria" })]) {
+      expect(childSwitch).toBeChecked();
+      expect(childSwitch).toBeDisabled();
+      expect(childSwitch).not.toHaveAttribute("aria-describedby");
+      expect(childSwitch.closest(".settings-detail-row")).not.toHaveClass("is-master-paused");
+      expect(childSwitch.closest(".settings-detail-row")).toHaveAttribute("aria-disabled", "true");
+    }
   });
 
   it("places environment variables immediately after MCP in Capabilities", async () => {

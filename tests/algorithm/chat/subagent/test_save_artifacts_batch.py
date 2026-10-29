@@ -41,6 +41,26 @@ def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context):
     assert ctx.list_pending_drafts() == []
 
 
+def test_workflow_without_outputs_rejects_artifacts_before_emission(batch_context):
+    ctx, events = batch_context
+    ctx.output_slots = []
+    with pytest.raises(ToolExecutionError, match='not declared for this step'):
+        tools.save_artifacts([{'key': 'project_md', 'value': 'invented memory write'}])
+    assert events == []
+    assert ctx.local_artifacts() == []
+    assert ctx.read_draft('project_md') is None
+    assert ctx.next_artifact_seq('project_md') == 1
+
+
+def test_ordinary_agent_without_output_contract_can_save_artifacts(batch_context):
+    ctx, events = batch_context
+    ctx.agent_type = 'general'
+    ctx.output_slots = []
+    result = tools.save_artifacts([{'key': 'report', 'value': 'ordinary deliverable'}])
+    assert result['saved_count'] == 1
+    assert events[0]['slot'] == 'report'
+
+
 @pytest.mark.parametrize('invalid', [
     {'key': 'summary', 'content': 'wrong field'},
     {'key': 'undeclared', 'value': 'not allowed'},
