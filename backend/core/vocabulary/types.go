@@ -75,9 +75,9 @@ type SourceRef struct {
 	OwnerID          string    `json:"-" gorm:"column:owner_id"`
 	WordID           string    `json:"word_id" gorm:"column:word_id"`
 	ExampleID        string    `json:"example_id" gorm:"column:example_id"`
-	DatasetID        string    `json:"dataset_id" gorm:"column:dataset_id"`
-	DocumentID       string    `json:"document_id" gorm:"column:document_id"`
-	SegmentID        string    `json:"segment_id" gorm:"column:segment_id"`
+	DatasetID        string    `json:"dataset_id" gorm:"column:dataset_id;type:varchar(255)"`
+	DocumentID       string    `json:"document_id" gorm:"column:document_id;type:varchar(128)"`
+	SegmentID        string    `json:"segment_id" gorm:"column:segment_id;type:varchar(255)"`
 	Page             *int      `json:"page,omitempty" gorm:"column:page"`
 	BBoxJSON         string    `json:"bbox_json,omitempty" gorm:"column:bbox_json"`
 	SelectedText     string    `json:"selected_text" gorm:"column:selected_text"`
