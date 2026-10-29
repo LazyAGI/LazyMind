@@ -54,6 +54,8 @@
     min-width: 0;
   }
 
+  .model-defaults-basic > .model-defaults-rows { margin-inline: 17px; }
+
   .model-defaults-rows {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -102,6 +104,8 @@
     max-width: 480px;
   }
   .model-provider-default-title { min-width: 0; flex: 0 1 auto; color: var(--defaults-text); font-size: 13px; font-weight: 500; line-height: 1.6; }
+  .model-provider-default-title { position: relative; overflow: visible; }
+  .model-provider-default-title > .is-required { position: absolute; inset-inline-start: -10px; }
   .model-provider-default-title-text { overflow-wrap: anywhere; }
   .model-provider-default-help { flex-shrink: 0; }
   .model-provider-select-suffix { display: flex; align-items: center; gap: 8px; }
@@ -216,10 +220,10 @@
   .model-defaults-group-count.has-configured { color: var(--defaults-accent); }
   .model-defaults-group-caret { flex-shrink: 0; color: var(--defaults-muted); font-size: 10px; transition: transform 150ms ease; }
   .is-expanded .model-defaults-group-caret { transform: rotate(180deg); }
-  .model-defaults-group > section > .model-defaults-rows { margin: 0 16px 0 50px; border-top: 1px solid var(--defaults-line); }
+  .model-defaults-group > section > .model-defaults-rows { margin: 0 16px; border-top: 1px solid var(--defaults-line); }
 
   .model-defaults-group .model-provider-default-row {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 200px minmax(0, 1fr);
   }
 
   > .ant-alert { margin-bottom: 16px; }
