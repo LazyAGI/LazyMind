@@ -659,6 +659,8 @@ const zhCN = {
       "back": "返回设置",
       "addSupplier": "添加供应商",
       "editSupplier": "编辑供应商",
+      credentialsRecognized: "密钥已识别",
+      arkCredentialsRecognized: "密钥已识别，请手动添加模型；额度及实际推理能力尚未验证。",
       manualModelNotice: "此供应商需要手动添加模型，请填写已开通的模型 ID 或推理接入点 ID。",
       resetSupplier: "清除此供应商的所有配置",
       resetSupplierHint: "清除该供应商的密钥、已添加模型与请求设置，并恢复默认地址。已被知识库使用的向量模型需先解除关联。",

@@ -1085,7 +1085,7 @@ export default function ModelProviderPage({
       if (isVerified) {
         setVerificationEvent(current => ({ providerId, account: verificationAccount, sequence: (current?.sequence || 0) + 1 }));
         await loadModelProviders();
-        if (isCurrent()) message.success(t("modelProvider.message.groupVerified"));
+        if (isCurrent()) message.success(t(checkResult?.reason === "credentials_recognized" ? "modelProvider.workspace.arkCredentialsRecognized" : "modelProvider.message.groupVerified"));
         void onConfigurationChanged?.();
         return true;
       }

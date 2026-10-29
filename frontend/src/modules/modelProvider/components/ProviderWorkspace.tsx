@@ -803,7 +803,7 @@ export function ProviderWorkspace(props: Props) {
                       ) : (
                         <span className="provider-workspace-status-dot" />
                       )}
-                      {label(supplierStatus)}
+                      {label(verifiedSelection && getSupplierBrandKey(provider) === "Doubao" ? "credentialsRecognized" : supplierStatus)}
                     </span>
                   </div>
                 </div>

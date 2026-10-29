@@ -661,6 +661,8 @@ const enUS = {
       "back": "Back to settings",
       "addSupplier": "Add supplier",
       "editSupplier": "Edit supplier",
+      credentialsRecognized: "Key recognized",
+      arkCredentialsRecognized: "Key recognized. Add a model manually; quota and inference have not been verified.",
       manualModelNotice: "Add models manually for this provider using an enabled model ID or inference endpoint ID.",
       resetSupplier: "Clear all configuration for this supplier",
       resetSupplierHint: "Clear this supplier's keys, added models and request settings, and restore its default endpoint. Remove associated knowledge bases first if embedding models are in use.",
