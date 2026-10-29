@@ -1,7 +1,7 @@
 import { getLocalizedErrorMessage } from "@/components/request";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
-import { Alert, Button, Empty, Input, Skeleton, Space, Switch, Tabs, Tag, message } from "antd";
+import { Alert, Button, Empty, Input, Skeleton, Switch, Tabs, Tag, message } from "antd";
 import {
   ApiOutlined,
   ApartmentOutlined,
@@ -108,7 +108,16 @@ type SectionID =
   | "recovery"
   | "developer";
 type MasterSetting = "task_center_enabled" | "schedules_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled" | "document_directories_enabled";
+type DefaultServiceCategory = "parsing" | "search" | "academic" | "translation";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+function defaultServiceCategory(value: string | null): DefaultServiceCategory | null {
+  if (value === "parsing" || value === "search" || value === "academic" || value === "translation") return value;
+  if (value === "document-parsing") return "parsing";
+  if (value === "web-search") return "search";
+  if (value === "academic-search") return "academic";
+  return null;
+}
 
 interface NavigationItem {
   id: SectionID;
@@ -234,13 +243,15 @@ function SettingsPageContent() {
   const navigationItems = useMemo(() => navigationGroups.flatMap((group) => group.items), [navigationGroups]);
   const controls = useMemo(() => controlCopy(t), [t, i18n.language]);
   const candidate = searchParams.get("section");
+  const legacyServiceCategory = candidate === "knowledge" ? defaultServiceCategory(searchParams.get("tool")) : null;
   const legacyModelDefaults = candidate === "models" && (searchParams.get("view") === "defaults" || (searchParams.has("target") && searchParams.get("view") !== "providers"));
-  const section: SectionID = candidate === "defaults"
+  const section: SectionID = legacyServiceCategory ? "model_defaults" : candidate === "defaults"
     ? "tasks"
     : legacyModelDefaults ? "model_defaults"
     : navigationItems.some((item) => item.id === candidate)
       ? candidate as SectionID
       : "overview";
+  const focusedServiceCategory = defaultServiceCategory(searchParams.get("service")) || legacyServiceCategory || undefined;
   const knowledgeToolCandidate = searchParams.get("tool");
   const knowledgeToolView = section === "knowledge" && isKnowledgeToolView(knowledgeToolCandidate)
     ? knowledgeToolCandidate
@@ -266,6 +277,17 @@ function SettingsPageContent() {
     dependencyMessage: hasLocalDependencies ? t("settingsPage.diagnostics.readingDeps") : t("settingsPage.diagnostics.cloudDeps"),
   });
   const [keyword, setKeyword] = useState("");
+
+  useEffect(() => {
+    if (!legacyServiceCategory) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("section", "model_defaults");
+      next.set("service", legacyServiceCategory);
+      next.delete("tool");
+      return next;
+    }, { replace: true });
+  }, [legacyServiceCategory, setSearchParams]);
   const modelTarget = settingsModelTarget(searchParams.get("target"));
   const modelProviderTarget = searchParams.get("provider_id") || undefined;
   const returnTo = settingsReturnTo(searchParams.get("return_to"));
@@ -496,12 +518,9 @@ function SettingsPageContent() {
         ])}
         {dashboardCard("model_defaults", <RobotOutlined />, t("settingsPage.sections.defaultModels"), t("settingsPage.overview.modelsDesc"), [
           <QuickModelSettings canConfigureEmbedding={isAdmin} key="quick-models" onSaved={syncOverview} />,
+          dashboardRow(t("settingsPage.sections.defaultModels"), t("settingsPage.controls.documentParsing.title"), t("settingsPage.overview.documentParsingDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => setSearchParams(settingsRouteParams(searchParams, { section: "model_defaults", service: "parsing" }))}>{t("settingsPage.quickConfig")}</Button>),
         ])}
         {dashboardCard("knowledge", <DatabaseOutlined />, t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeDesc"), [
-          dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.controls.documentParsing.title"), t("settingsPage.overview.documentParsingDesc"), <Space size={8}>
-            <Button className="settings-dashboard-quick-action" size="small" aria-label={t("settingsPage.goToDetailAria", { title: t("settingsPage.controls.documentParsing.title") })} onClick={() => setSearchParams(settingsRouteParams(searchParams, { section: "knowledge", tool: "document-parsing" }))}>{t("settingsPage.quickConfig")}</Button>
-            {switchControl("document_parsing_enabled")}
-          </Space>),
           dashboardRow(t("settingsPage.sections.knowledge"), t("settingsPage.overview.knowledgeRetrieval"), t("settingsPage.overview.knowledgeRetrievalDesc"), <Button className="settings-dashboard-quick-action" size="small" aria-label={t("settingsPage.goToDetailAria", { title: t("settingsPage.overview.knowledgeRetrieval") })} onClick={() => selectSection("knowledge")}>{t("settingsPage.quickConfig")}</Button>),
         ])}
         {dashboardCard("memory", <ExperimentOutlined />, t("settingsPage.sections.memory"), t("settingsPage.overview.memoryDesc"),
@@ -729,6 +748,11 @@ function SettingsPageContent() {
         <header className="provider-workspace-topbar"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1></header>
         {integratedSurface(<DefaultServicesPage
           onModelSelectionChanged={syncOverview}
+          focusServiceCategory={focusedServiceCategory}
+          documentParsingEnabled={Boolean(overview?.controls.document_parsing_enabled)}
+          documentParsingSaving={saving === "document_parsing_enabled"}
+          controlsDisabled={saving !== null}
+          onDocumentParsingChange={(enabled) => requestMasterChange("document_parsing_enabled", enabled)}
           highlightTarget={modelTarget}
           onHighlightResolved={() => setSearchParams((current) => {
             const next = new URLSearchParams(current);
@@ -737,7 +761,10 @@ function SettingsPageContent() {
             next.delete("target");
             return next;
           }, {replace: true})}
-          onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {section: "knowledge", tool: service === "cloudParsing" ? "document-parsing" : "web-search"}))}
+          onConfigureCloudService={(service) => setSearchParams(settingsRouteParams(searchParams, {
+            section: "model_defaults",
+            service: service === "cloudParsing" ? "parsing" : "search",
+          }))}
           onConfigureProviders={() => selectSection("models")}
         />, "is-default-models")}
       </div>;
@@ -798,10 +825,7 @@ function SettingsPageContent() {
           documentDirectoriesEnabled={overview?.controls.document_directories_enabled ?? false}
           documentDirectoriesSaving={saving === "document_directories_enabled"}
           onDocumentDirectoriesChange={(enabled) => requestMasterChange("document_directories_enabled", enabled)}
-          documentParsingEnabled={Boolean(overview?.controls.document_parsing_enabled)}
-          documentParsingSaving={saving === "document_parsing_enabled"}
           headingRef={headingRef}
-          onDocumentParsingChange={(enabled) => requestMasterChange("document_parsing_enabled", enabled)}
         />
       );
     } else if (section === "memory") {
@@ -953,7 +977,7 @@ function SettingsPageContent() {
       </>;
     }
 
-    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "model_defaults" ? " settings-model-defaults-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
+    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "model_defaults" ? " settings-model-defaults-page" : section === "tasks" ? " is-tasks-page" : section === "knowledge" ? " is-knowledge-page" : section === "memory" ? " is-memory-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
       {content}
       <div className="settings-screenreader-status" role="status" aria-live="polite">
         {saving ? t("settingsPage.savingStatus") : checking ? t("settingsPage.checkingStatus") : ""}

@@ -102,6 +102,21 @@ describe("document preview selection questions", () => {
     expect(onTranslate).toHaveBeenCalledWith({ text: "capabilities", page: 1 });
   });
 
+  it("offers the vocabulary action when a phrase is selected", async () => {
+    const onAddVocabularySelection = vi.fn();
+    render(<FileViewer file="https://example.test/source.txt" fileName="source.txt" onPdfTranslateSelection={vi.fn()} onAddVocabularySelection={onAddVocabularySelection} translationConfigured />);
+    const paragraph = await screen.findByText("Use capabilities to describe provider behavior.");
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild!, 4);
+    range.setEnd(paragraph.firstChild!, 29);
+    window.getSelection()?.addRange(range);
+    fireEvent.mouseUp(paragraph, { clientX: 200, clientY: 100 });
+    const vocabularyButton = screen.getByRole("button", { name: "加入生词" });
+    fireEvent.click(vocabularyButton);
+    expect(onAddVocabularySelection).toHaveBeenCalledOnce();
+    expect(onAddVocabularySelection.mock.calls[0][0].text).toContain("capabilities to describe");
+  });
+
   it("does not offer a question for a selection extending outside the document preview", async () => {
     render(<><FileViewer file="https://example.test/source.md" fileName="source.md" onPdfSelection={vi.fn()} /><p>Outside preview</p></>);
     const paragraph = await screen.findByText("Use capabilities to describe provider behavior.");

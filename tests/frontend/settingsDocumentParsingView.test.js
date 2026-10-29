@@ -7,17 +7,15 @@ const readFrontendSource = (relativePath) => readFileSync(
 );
 
 describe('settings document parsing view', () => {
-  it('embeds document parsing configuration in the knowledge settings page', () => {
+  it('configures document parsing from the default models page', () => {
     const knowledgeSettings = readFrontendSource('modules/settings/KnowledgeDataSettings.tsx');
+    const defaultServices = readFrontendSource('modules/modelProvider/pages/DefaultServicesPage.tsx');
 
-    expect(knowledgeSettings).toContain('className="settings-knowledge-parser-controls"');
-    expect(knowledgeSettings).toContain('className="settings-knowledge-parser-services"');
-    expect(knowledgeSettings).toContain('<ExternalServicesPage');
-    expect(knowledgeSettings).toContain('visibleCategories={["parsing"]}');
-    expect(knowledgeSettings).not.toContain(
-      'navigate("/settings?section=knowledge&tool=document-parsing")',
-    );
-    expect(knowledgeSettings).not.toContain('navigate("/model-providers/tools")');
+    expect(defaultServices).toContain('activeFocusCategory === "parsing"');
+    expect(defaultServices).toContain('visibleCategories={[activeFocusCategory]}');
+    expect(defaultServices).toContain('parsingControl={activeFocusCategory === "parsing" ? parsingControl : undefined}');
+    expect(knowledgeSettings).not.toContain('settings-knowledge-parser-controls');
+    expect(knowledgeSettings).not.toContain('<ExternalServicesPage');
   });
 
   it('shows only the document parsing service category', () => {

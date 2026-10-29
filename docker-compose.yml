@@ -48,7 +48,7 @@ x-core-env: &core-env
   # production deployments should leave this unset/false.
   MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY: ${MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY:-true}
   LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS: ${LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS:-5000}
-  LAZYMIND_VOCABULARY_ENABLED: ${LAZYMIND_VOCABULARY_ENABLED:-false}
+  LAZYMIND_VOCABULARY_ENABLED: ${LAZYMIND_VOCABULARY_ENABLED:-true}
   LAZYMIND_ANKI_CONNECT_URL: ${LAZYMIND_ANKI_CONNECT_URL:-http://host.docker.internal:8765}
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
@@ -620,7 +620,7 @@ services:
       dockerfile: Dockerfile
       args:
         <<: *mirror-args
-        VITE_VOCABULARY_ENABLED: ${LAZYMIND_VOCABULARY_ENABLED:-false}
+        VITE_VOCABULARY_ENABLED: ${LAZYMIND_VOCABULARY_ENABLED:-true}
     ports:
       - "${LAZYMIND_FRONTEND_PORT:-8090}:80"
     expose:

@@ -1,0 +1,12 @@
+Translation service favicons, retrieved 2026-10-28 from Google's favicon proxy
+for each service's own domain. Brand marks belong to their respective owners.
+
+bing.png      bing.com
+deepl.png     deepl.com
+sogou.png     fanyi.sogou.com
+tencent.png   fanyi.qq.com
+baidu.png     fanyi.baidu.com
+aliyun.png    aliyun.com
+niutrans.png  niutrans.com
+
+Google Translate Web uses the existing provider-icons/google.svg.

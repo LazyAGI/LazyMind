@@ -2071,5 +2071,11 @@
   "2004935": { "en-US": "The attachment checksum changed; reload Zotero metadata and select the matching file", "zh-CN": "附件校验值已变更，请重新读取 Zotero 题录并选择对应文件" },
   "2004936": { "en-US": "Local Zotero access requires the authenticated owner of a local desktop runtime", "zh-CN": "仅本地桌面运行时的已认证所有者可以访问本地 Zotero" },
   "2004937": { "en-US": "Local Zotero owner authentication is unavailable", "zh-CN": "本地 Zotero 所有者认证暂不可用" },
-  "2005148": {"en-US": "Save the document before queuing processing", "zh-CN": "请先保存文档，再提交处理任务"}
+  "2005148": {"en-US": "Save the document before queuing processing", "zh-CN": "请先保存文档，再提交处理任务"},
+  "2005200": {"en-US": "Translation configuration is unavailable or changed", "zh-CN": "翻译配置不可用或已发生变化"},
+  "2005201": {"en-US": "Translation provider credentials or endpoint are invalid", "zh-CN": "翻译服务凭据或接口地址无效"},
+  "2005202": {"en-US": "The translation request is not supported", "zh-CN": "当前翻译请求不受支持"},
+  "2005203": {"en-US": "Translation provider request failed", "zh-CN": "翻译服务请求失败"},
+  "2005204": {"en-US": "Translation service initialization failed", "zh-CN": "翻译服务初始化失败"},
+  "2005205": {"en-US": "The selected translation provider does not support documents", "zh-CN": "所选翻译服务不支持文档翻译"}
 }
