@@ -660,7 +660,7 @@ const zhCN = {
       "addSupplier": "添加供应商",
       "editSupplier": "编辑供应商",
       manualModelNotice: "此供应商需要手动添加模型，请填写已开通的模型 ID 或推理接入点 ID。",
-      resetSupplier: "重置供应商",
+      resetSupplier: "清除此供应商的所有配置",
       resetSupplierHint: "清除该供应商的密钥、已添加模型与请求设置，并恢复默认地址。已被知识库使用的向量模型需先解除关联。",
       supplierReset: "供应商已恢复默认配置",
       "deleteSupplier": "删除供应商",

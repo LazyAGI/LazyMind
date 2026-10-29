@@ -662,7 +662,7 @@ const enUS = {
       "addSupplier": "Add supplier",
       "editSupplier": "Edit supplier",
       manualModelNotice: "Add models manually for this provider using an enabled model ID or inference endpoint ID.",
-      resetSupplier: "Reset supplier",
+      resetSupplier: "Clear all configuration for this supplier",
       resetSupplierHint: "Clear this supplier's keys, added models and request settings, and restore its default endpoint. Remove associated knowledge bases first if embedding models are in use.",
       supplierReset: "Supplier reset to defaults",
       "deleteSupplier": "Delete supplier",
