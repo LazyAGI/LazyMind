@@ -4,6 +4,19 @@ import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
   vocabularyCloud: {
+    connectionIntro: "Once connected, newly saved English words sync to the selected wordbook.",
+    verify: "Verify connection",
+    saveAndEnable: "Save and enable",
+    savedEnabled: "Connection saved. Automatic sync is enabled.",
+    savedPaused: "Connection saved. Automatic sync is paused.",
+    connectedEnabled: "Connected · Sync enabled",
+    connectedPaused: "Connected · Sync paused",
+    incomplete: "Finish connecting",
+    changeToken: "Replace or verify token",
+    createTarget: "Create a new wordbook",
+    noBooks: "No wordbooks found. Create one before saving and enabling sync.",
+    advanced: "Advanced settings",
+    autoSync: "Automatically sync new words",
     manage: "Manage connection",
     providerDescription: "Sync English words saved while reading; meanings and examples stay local",
     unavailable: "Status unavailable",

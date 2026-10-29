@@ -4,6 +4,19 @@ import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
   vocabularyCloud: {
+    connectionIntro: "连接后，新收藏的英文生词会同步到所选词本。",
+    verify: "验证连接",
+    saveAndEnable: "保存并启用",
+    savedEnabled: "连接已保存，自动同步已启用。",
+    savedPaused: "连接已保存，自动同步已暂停。",
+    connectedEnabled: "已连接 · 同步已启用",
+    connectedPaused: "已连接 · 同步暂停",
+    incomplete: "待完成连接",
+    changeToken: "更换或重新验证 Token",
+    createTarget: "创建新词本",
+    noBooks: "未找到词本，请创建词本后保存并启用。",
+    advanced: "高级设置",
+    autoSync: "自动同步新生词",
     manage: "管理连接",
     providerDescription: "同步阅读时保存的英文生词，释义与例句保留在本地",
     unavailable: "状态不可用",
