@@ -153,6 +153,15 @@
     overflow-wrap: anywhere;
   }
 
+  .writer-markdown-editor--chat .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+    // Retain the block-control gutter without the full document's double inset.
+    padding: 12px 12px 12px 44px;
+  }
+
+  .writer-markdown-editor--chat .writer-markdown-editor__content {
+    padding: 0;
+  }
+
   .chat-bot .ant-alert {
     display: grid;
     grid-template-columns: 20px minmax(0, 1fr);
