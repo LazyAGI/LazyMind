@@ -135,6 +135,7 @@ export default function PdfTemporaryChat({
     if (preparedSelectionRef.current === selection) return;
     let attempts = 0;
     const sendWhenReady = () => {
+      if (preparedSelectionRef.current === selection) return;
       if (!chatRef.current && attempts < 10) {
         attempts += 1;
         timer = window.setTimeout(sendWhenReady, 50);
@@ -259,7 +260,9 @@ export default function PdfTemporaryChat({
         citeMessage: request.selection.text,
         clearInput: true,
       });
-      if (sent) {
+      if (sent && conversationIdRef.current === request.conversationId) {
+        // Mark the selection consumed so a pending preparation cannot restore it.
+        preparedSelectionRef.current = request.selection;
         chatRef.current?.prepareMessage({ text: "", citeMessages: [] });
       }
     }, 0);
