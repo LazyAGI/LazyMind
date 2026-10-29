@@ -690,3 +690,22 @@ func TestOrdinaryModelFallbackSwitchCommitRetryKeepsOriginalWireIdempotent(t *te
 		t.Fatalf("retried switch/original-wire duplicate changed outcome: attempts=%d posts=%d err=%v status=%s text=%d think=%d tools=%d switches=%d published=%d viewErr=%v rows=%s", attempts, posts, err, task.Status, bText, bThink, tools, switches, published, viewErr, raw)
 	}
 }
+
+func TestTaskFallbackDeploymentSwitch(t *testing.T) {
+	t.Setenv("LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED", "false")
+	db := orm.MigrateAllModelsForTest(t).DB
+	seedTaskModel(t, db, "actor", "a", false)
+	seedTaskModel(t, db, "actor", "b", false)
+	task := &orm.SubAgentTask{CreateUserID: "actor"}
+	req := &RunRequest{}
+	if err := prepareTaskModelInput(t.Context(), db, task, req); err != nil {
+		t.Fatal(err)
+	}
+	if req.ModelFallbackCurrentID != "own:a" || len(req.ModelFallbackCandidates) != 1 || req.ModelFallbackInitialSwitch != nil {
+		t.Fatal("disabled task fallback authorized another model")
+	}
+	req.InheritedModelOrigin = &InheritedModelOrigin{Identity: common.ModelSwitchIdentity{CandidateID: "own:missing", ModelID: "missing", Source: "own"}}
+	if err := prepareTaskModelInput(t.Context(), db, task, req); !errors.Is(err, errTaskModelsExhausted) {
+		t.Fatalf("missing inherited model must fail without switching: %v", err)
+	}
+}

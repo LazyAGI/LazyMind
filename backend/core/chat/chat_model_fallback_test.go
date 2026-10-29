@@ -805,3 +805,30 @@ func TestChatFallbackCandidateCredentialHeaderSafety(t *testing.T) {
 		})
 	}
 }
+
+func TestChatFallbackDeploymentSwitch(t *testing.T) {
+	for _, mode := range []string{"fixed", "auto"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED", "false")
+			db, conversation, body := fallbackTestBody(t, mode)
+			state := body[chatModelFallbackBodyKey].(*chatFallbackState)
+			if len(state.candidates) != 1 || state.candidates[0].CandidateID != state.currentID || state.initialSwitch != nil {
+				t.Fatal("disabled fallback authorized an alternative model")
+			}
+			event := fallbackSwitchEvent(body, "run-fallback")
+			var ext json.RawMessage
+			if _, err := acceptChatFallbackEvent(body, event, "run-fallback", &ext); err == nil {
+				t.Fatal("disabled fallback accepted an alternate-model switch")
+			}
+			if mode == "fixed" {
+				if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-a").Update("deleted_at", time.Now().UTC()).Error; err != nil {
+					t.Fatal(err)
+				}
+				fresh := map[string]any{"conversation_id": conversation.ID, "user_id": "user-1"}
+				if err := applyConversationChatModelConfig(t.Context(), db, "user-1", fresh); !errors.Is(err, errChatModelUnavailable) {
+					t.Fatalf("missing fixed model must fail without switching: %v", err)
+				}
+			}
+		})
+	}
+}

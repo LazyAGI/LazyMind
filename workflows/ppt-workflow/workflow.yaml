@@ -11,6 +11,9 @@ when_to_use: >
   when the user wants to create, plan, draft, or revise a multi-slide
   presentation/deck/PPT. Use it for requests such as "make a PPT", "generate a
   presentation", "帮我做一个路演 PPT", or "做一份汇报幻灯片".
+  A paper-library handoff (kind=ppt) is an academic presentation with its sources
+  already supplied. Bind the complete handoff JSON as task_context; never ask
+  the user to re-upload those papers or type internal IDs.
   Uploaded source materials are optional: text-only requests must start from
   the user's prompt. The startup card may offer the declared optional PPTX
   template choice; show its upload control only after the user selects upload,
@@ -36,7 +39,16 @@ when_to_use: >
   PowerPoint file.
 
 runtime:
+  trigger_inputs: [task_context, template_pptx, uploaded_materials]
+  paper_attachments:
+    accept: [.pdf, .doc, .docx, .txt, .md]
+    satisfies: [academic_materials]
+  paper_handoff:
+    kind: ppt
+    input: task_context
+    satisfies: [academic_materials]
   publisher_owned_slots:
+    - reflection_markdown
     - deck_outline
     - slide_outline
     - background_prompts
@@ -176,6 +188,8 @@ runtime:
         Only for research reports, paper reviews, thesis defenses or reading-note
         presentations when no relevant source attachments, substantive research
         text or reading notes have already been supplied in this conversation.
+        A paper-library handoff with selected papers also counts as supplied
+        research material; never ask to upload it again.
         Reuse existing materials without asking again. A PPTX visual template
         is not a research source. Do not ask this question for general PPT tasks.
       question: 请提供科研材料，可上传单篇或多篇论文，也可以直接输入研究内容或阅读心得。
@@ -275,7 +289,7 @@ runtime:
         - 不启用｜使用纯色、渐变和矢量装饰
     - id: generation_mode
       label: 生成方式
-      question: 请选择生成方式。两种方式都会自动执行到最终 PPT，不需要分步确认。
+      question: 请选择生成方式。两种方式能力相同，都会自动执行到最终 PPT；快速生成隐藏中间步骤展示，完整生成展示过程，均不需要分步确认。
       type: single
       choice_policy: fixed
       allow_other: false
@@ -296,6 +310,9 @@ tool_scripts:
       - ppt_generate_background_images
       - check_ppt_workflow_capabilities
       - ppt_analyze_template
+      - ppt_paper_handoff_context
+      - ppt_publish_paper_reflection
+      - ppt_cache_library_papers
       - ppt_cache_academic_sources
       - ppt_read_academic_source
       - ppt_attach_material_images
@@ -340,6 +357,8 @@ steps:
     label: Collect Materials
   - id: analyze_academic_sources
     label: Analyze Academic Sources
+  - id: prepare_paper_reflection
+    label: Prepare Reading Reflection
   - id: plan_background_prompts
     label: Plan Background Prompts
   - id: generate_backgrounds
@@ -352,6 +371,25 @@ steps:
     label: Generate PPT
 
 slots:
+  - id: task_context
+    label: Paper Task Context
+    type: text
+    cardinality: single
+    external: true
+    required: false
+    user_visible: false
+    exposed: false
+  - id: reflection_markdown
+    label: 阅读心得
+    type: text
+    cardinality: single
+    user_visible: true
+  - id: skip_paper_reflection
+    label: Skip Reading Reflection
+    type: text
+    cardinality: single
+    user_visible: false
+    exposed: false
   - id: native_pptx
     user_visible: true
     label: PPTX 文件
@@ -397,6 +435,13 @@ slots:
     cardinality: single
     exposed: false
     summary_max_chars: 40
+
+  - id: compact_presentation
+    user_visible: false
+    exposed: false
+    label: Compact Presentation
+    type: text
+    cardinality: single
 
   - id: generation_mode
     user_visible: false
@@ -564,6 +609,7 @@ ui:
 
   tabs:
     - id: analysis
+      presentation_hide_when_material: compact_presentation
       step_id: analyze_requirements
       label: Analysis
       layout: list
@@ -572,15 +618,18 @@ ui:
         - id: template_content_brief
 
     - id: materials
+      presentation_hide_when_material: compact_presentation
       step_id: collect_materials
-      status_step_ids: [collect_materials, analyze_academic_sources]
+      status_step_ids: [collect_materials, analyze_academic_sources, prepare_paper_reflection]
       label: Materials
       hide_when_material: skip_material_collection
       layout: list
       slots:
         - id: material_summary
+        - id: reflection_markdown
 
     - id: background_prompts
+      presentation_hide_when_material: compact_presentation
       step_id: plan_background_prompts
       label: Background Prompts
       hide_when_material: skip_background_images
@@ -599,6 +648,7 @@ ui:
         empty_column_scope: selected
 
     - id: background_images
+      presentation_hide_when_material: compact_presentation
       step_id: generate_backgrounds
       label: Background Images
       hide_when_material: skip_background_images
@@ -617,6 +667,7 @@ ui:
         empty_column_scope: selected
 
     - id: outline
+      presentation_hide_when_material: compact_presentation
       step_id: build_outline
       label: Outline
       layout: list
@@ -624,6 +675,7 @@ ui:
         - id: deck_outline
 
     - id: page_prompts
+      presentation_hide_when_material: compact_presentation
       step_id: plan_page_prompts
       label: Page Prompts
       layout: composite

@@ -34,6 +34,7 @@ import (
 	"lazymind/core/taskcenter"
 	"lazymind/core/tasktiming"
 	"lazymind/core/workflow"
+	"lazymind/core/workflow/displaystate"
 )
 
 var (
@@ -253,6 +254,11 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	// conversation should display only the user's task request. Keep those two
 	// representations separate: query remains the model input and display_query
 	// is used only for persisted/rendered chat history.
+	// Preserve the complete user text before any display/resource rewriting.
+	continueQuery := query
+	if len(fusionInput) > 1 || raw["artifact_refs"] != nil || raw["user_files"] != nil {
+		continueQuery = "" // New material needs the normal LLM interpretation path.
+	}
 	displayQuery := query
 	if v, ok := raw["display_query"].(string); ok && strings.TrimSpace(v) != "" {
 		displayQuery = strings.TrimSpace(v)
@@ -733,6 +739,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 
 		if activeSess, err := workflow.GetLatestSession(r.Context(), db, convID); err == nil &&
 			workflowSessionAvailableForRequest(activeSess, raw) {
+			// Exact plain-text consent uses the same admission/CAS path as the
+			// Continue button. All other text remains available to the Chat LLM.
+			if workflowControl == nil && workflowEnabled && stream && !dualReply && !basicChatOnly &&
+				!target.IsRegeneration && workflow.IsWorkflowUserControlRequest(r) &&
+				!isExternalChatProvider(conversationRecord.ChatExecutor) &&
+				activeSess.CreateUserID == userID && isExactWorkflowContinue(continueQuery) {
+				if view, viewErr := displaystate.Read(db, *activeSess); viewErr == nil {
+					workflowControl = exactWorkflowContinueCommand(continueQuery, *activeSess, view)
+				}
+			}
 			// A Workflow's execution mode is selected when its Session is created.
 			// Conversation settings may change later, but cannot mutate an existing run.
 			workflowMode = "dynamic"

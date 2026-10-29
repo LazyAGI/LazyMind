@@ -398,7 +398,7 @@ class StyleFlowCombinationTest(unittest.TestCase):
             self.assertEqual(result['published_count'], 1)
             self.assertEqual(publish.call_args.kwargs['value'], prompt)
 
-    def test_complete_prompts_skip_structure_generation_but_quick_mode_keeps_it(self):
+    def test_complete_prompts_skip_structure_generation_but_legacy_sessions_keep_it(self):
         for complete in (True, False):
             with self.subTest(complete=complete), tempfile.TemporaryDirectory() as temp:
                 deck = Path(temp)

@@ -2,7 +2,7 @@
 
 面向接入综述、阅读心得和科研 PPT 的同事。对应 [PR #863](https://github.com/LazyAGI/LazyMind/pull/863)。
 
-本 PR 已提供论文选择、真实 arXiv 拓展、版本化材料交接和全文读取。**综述、心得、PPT 目前接 Mock，只返回材料接收结果，正式生成能力由下游 Workflow 接入。**
+本 PR 已提供论文选择、真实 arXiv 拓展、版本化材料交接和全文读取。**论文库 PPT 已接正式 `ppt-workflow`，支持单篇或多篇论文及先心得再 PPT。综述与独立心得仍接 Mock，只返回材料接收结果。**
 
 ## 1. 接入流程
 
@@ -16,8 +16,9 @@ PPT 选择先写心得 → 保存心得正文 → 携原论文清单进入 PPT �
 | --- | --- | --- |
 | 论文拓展 | `paper_expansion` | `expansion_id` |
 | 综述 | `paper_workflow_mock` | `ReviewWorkflowInput` |
-| 独立心得 / 直接 PPT | `paper_workflow_mock` | `PaperTaskInput` |
-| 心得接续 PPT | `paper_ppt_with_reflection_mock` | `PaperTaskInput`，后续追加已保存的 `reflection_markdown` |
+| 独立心得 | `paper_workflow_mock` | `PaperTaskInput` |
+| 直接 PPT | `ppt-workflow` | `PaperTaskInput` |
+| 心得接续 PPT | `ppt-workflow` 内的阅读心得阶段 | `PaperTaskInput`，后续追加已保存的 `reflection_markdown` |
 
 业务启动统一使用 `POST /api/core/academic/workflow-launches`，`kind` 为 `expansion / review / reflection / ppt`，`request_key` 为同次请求的稳定幂等键。从论文集启动时传 `dataset_id`、`document_ids` 和 `user_instruction`；PPT 可传 `reflection_first: true`。
 
@@ -146,9 +147,11 @@ HTTP 200 也可能处于 `processing`，应同时检查 `status`。读取正文�
 
 ## 4. 接正式生成能力时改哪里
 
-- **启动路由**：[workflows.go](../../backend/core/academic/workflows.go) 的 `createPaperHandoff` 目前选择两个 Mock Workflow；接入正式 Workflow 时同步调整这里。
+- **正式 PPT**：`kind=ppt` 的直接和先心得入口均启动 `ppt-workflow`。Host 按当前 Chat 鉴权读取完整交接，自动绑定隐藏 `task_context` 并取消重复科研附件上传问题；不能由模型替换原论文身份。`ppt_cache_library_papers` 按每篇 `next_cursor` 读取全文到结束，再由共用缓存读取器支持分析、公式/图表及逐页生成。`processing / failed / unavailable`、权限失败、版本变化或游标不前进会阻止完整素材交付，不用摘要冒充全文。
+- **先心得再 PPT**：目前没有独立正式心得 Workflow；正式 PPT 内按需生成实质性 `reflection_markdown`，保留原论文清单与用户笔记，并将已保存正文传递给大纲和逐页规划。心得失败停在该阶段重试，不传空稿。独立心得和综述开发边界保持不变，旧 Mock 包仍保留给历史任务。
+- **启动路由**：[workflows.go](../../backend/core/academic/workflows.go) 的 `createPaperHandoff` 对 PPT 选择正式 Workflow，其他任务保留现有路由。
 - **下游步骤**：参考 [通用交接包](../../workflows/paper_workflow_mock) 和 [心得接续 PPT 包](../../workflows/paper_ppt_with_reflection_mock)，保留输入绑定与上述读取工具，替换 Mock 步骤的生成逻辑。
 - **输出**：正式成果沿用现有 Workflow artifact 发布机制。当前 `academic_handoff_submit()` 只确认冻结输入并发布 `handoff_receipt / ppt_request`，返回 `awaiting_downstream`，不代表正式成果完成。
-- **心得接续 PPT**：读取已保存的 `reflection_markdown` 和原论文清单；当前 Mock 的心得正文也是占位内容，正式接入时需一并替换。
+- **历史 Mock 心得接续 PPT**：旧包仍只返回占位内容，不代表正式生成；新发起的 PPT 使用上述正式入口。
 
 完整接口定义见 [academic OpenAPI](../../backend/core/openapi_academic_workflows.go)，通用 Workflow 写法见 [格式规范](../workflow-format.md)。

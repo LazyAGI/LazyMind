@@ -1368,6 +1368,9 @@ def test_trigger_routes_ppt_clarification_answers_to_analysis_context(selected):
     import yaml
     workflow_path = Path(__file__).parents[3] / 'workflows/ppt-workflow/workflow.yaml'
     runtime = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))['runtime']
+    # This fixture exposes an extra external topic input; declare it alongside
+    # the package's real hidden paper/attachment inputs.
+    runtime = {**runtime, 'trigger_inputs': [*runtime['trigger_inputs'], 'topic']}
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {'session_id': 'session-1', 'ready_steps': ['analyze_requirements']}
     with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
@@ -1444,3 +1447,111 @@ def test_parallel_workflow_triggers_keep_conversation_sessions_separate():
             results = list(executor.map(run, ['chat-a', 'chat-b']))
     assert results == [('session-chat-a', 'session-chat-a', 'chat-a'),
                        ('session-chat-b', 'session-chat-b', 'chat-b')]
+
+
+@pytest.mark.parametrize('task_kind', ['ppt', 'reflection', 'missing'])
+def test_paper_handoff_auto_binds_frozen_sources_and_blocks_reupload(task_kind):
+    runtime = {
+        'trigger_inputs': ['task_context'],
+        'paper_handoff': {'kind': 'ppt', 'input': 'task_context', 'satisfies': ['academic_materials']},
+        'clarification_fields': [{
+            'id': 'academic_materials', 'question': '请提供科研材料', 'type': 'single',
+            'choices': ['上传论文'],
+            'attachment': {'when_choice': '上传论文', 'material_id': 'uploaded_materials',
+                           'max_files': -1, 'accept': ['.pdf'], 'required': True},
+        }],
+    }
+    frozen = {'kind': task_kind, 'handoff_id': 'owned', 'reflection_first': True,
+              'input': {'papers': [{'paper_id': 'a'}, {'paper_id': 'b'}], 'user_instruction': '8页组会'}}
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {'session_id': 's', 'ready_steps': ['analyze_requirements']}
+    with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ), patch('lazymind.chat.workflow.workflow_manager._import_text_binding', side_effect=lambda key, value: value):
+        client = factory.return_value
+        client.transport.request.return_value.status_code = 404 if task_kind == 'missing' else 200
+        client.transport.request.return_value.json.return_value = frozen
+        client.get_workflow.return_value.result = {
+            'workflow_id': 'ppt-workflow', 'runtime': runtime,
+            'compiled_graph': {'material_types': {'task_context': 'text'},
+                               'material_producers': {'task_context': {'kind': 'external'}}},
+        }
+        client.get_state.return_value = {'session_id': 's', 'projection': {'ready': ['analyze_requirements']}}
+        contribution = resolve_workflow_injection(
+            None, conversation_id='owned-chat', current_query='生成8页组会PPT',
+            workflow_catalog=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                               'runtime': runtime}],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                                   'tool_name': 'trigger_ppt_workflow'}],
+        )
+        question = {'id': 'academic_materials', 'text': '请提供科研材料', 'choices': ['上传论文']}
+        if task_kind == 'ppt':
+            with pytest.raises(WorkflowClientError, match='already bound'):
+                enforce_startup_clarification_policy([question], contribution.runtime_policy)
+            other = {'id': 'slide_count', 'text': '多少页？'}
+            assert enforce_startup_clarification_policy([question, other], contribution.runtime_policy) == [other]
+        result = _tool(contribution, 'trigger_ppt_workflow')(input_bindings={'task_context': 'model invented IDs'})
+        if task_kind == 'ppt':
+            assert json.loads(result['input_bindings']['task_context']) == frozen
+        else:
+            assert result['input_bindings'] == {}
+        assert '8页' in result['request_context']
+        assert toolkit.prepare_workflow.call_args.kwargs['input_bindings'] == result['input_bindings']
+
+
+@pytest.mark.parametrize('policy', [None, '', 'invalid', [], 42])
+def test_startup_guidance_accepts_absent_or_invalid_policy(policy):
+    from lazymind.chat.workflow.workflow_manager import _startup_clarification_guidance
+    assert _startup_clarification_guidance(policy) == ''
+
+
+@pytest.mark.parametrize('paper_count', [1, 2])
+def test_direct_chat_papers_and_description_launch_without_library_handoff(tmp_path, paper_count):
+    runtime = {
+        'trigger_inputs': ['task_context'],
+        'paper_handoff': {'kind': 'ppt', 'input': 'task_context', 'satisfies': ['academic_materials']},
+        'paper_attachments': {'accept': ['.pdf'], 'satisfies': ['academic_materials']},
+        'clarification_fields': [{'id': 'academic_materials', 'question': '请上传论文', 'type': 'single',
+                                  'choices': ['上传论文'], 'choice_policy': 'fixed'}],
+    }
+    files = []
+    for index in range(paper_count):
+        path = tmp_path / f'paper-{index}.pdf'
+        path.write_text(f'paper {index}')
+        files.append(str(path))
+    lazyllm.globals['agentic_config'] = {
+        'enable_workflow': True, 'files': files, 'history_files_per_turn': {'1': files},
+    }
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {'session_id': 's', 'ready_steps': ['analyze_requirements']}
+    request = '请把附件做成8页学生组会汇报，比较方法与实验局限'
+    with patch('lazymind.chat.workflow.workflow_manager._client') as factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ):
+        client = factory.return_value
+        client.transport.request.return_value.status_code = 404
+        client.get_workflow.return_value.result = {
+            'workflow_id': 'ppt-workflow', 'runtime': runtime,
+            'compiled_graph': {'material_types': {'task_context': 'text'},
+                               'material_producers': {'task_context': {'kind': 'external'}}},
+        }
+        client.get_state.return_value = {'session_id': 's', 'projection': {'ready': ['analyze_requirements']}}
+        contribution = resolve_workflow_injection(
+            None, conversation_id='direct-upload-chat', current_query=request,
+            workflow_catalog=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                               'runtime': runtime}],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{'workflow_ref': 'builtin:ppt-workflow', 'workflow_id': 'ppt-workflow',
+                                   'tool_name': 'trigger_ppt_workflow'}],
+        )
+        assert contribution.runtime_policy['_host_satisfied_fields'] == ['academic_materials']
+        question = {'id': 'academic_materials', 'text': '请上传论文', 'choices': ['上传论文']}
+        other = {'id': 'slide_count', 'text': '多少页？'}
+        assert enforce_startup_clarification_policy([question, other], contribution.runtime_policy) == [other]
+        result = _tool(contribution, 'trigger_ppt_workflow')()
+        assert result['input_bindings'] == {}
+        assert request in result['request_context']
+        for index in range(paper_count):
+            assert f'paper-{index}.pdf' in result['request_context']
+        assert '"turn": 1' in result['request_context']

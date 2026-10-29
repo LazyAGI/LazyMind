@@ -24,7 +24,8 @@ type approvalPreferenceRequest struct {
 }
 
 // NativeControlCommand travels with the Chat request that actually continues
-// execution. Ordinary chat text never grants approval or resume permission.
+// execution. Only explicit UI controls or the Host's exact continuation allowlist
+// grant approval/resume permission; other chat text stays on the LLM path.
 type NativeControlCommand struct {
 	SessionID            string `json:"session_id"`
 	Kind                 string `json:"kind"`

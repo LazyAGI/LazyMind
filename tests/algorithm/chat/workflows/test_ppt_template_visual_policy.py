@@ -28,7 +28,7 @@ def test_template_is_read_before_material_collection():
     assert 'read_template' not in state['transitions']
     assert 'read_template' not in state['steps']
     read = state['steps']['analyze_requirements']
-    assert read['tools'] == ['pptx_analyzer']
+    assert read['tools'] == ['pptx_analyzer', 'ppt_paper_handoff_context']
     assert 'following next_page until null' in read['prompt']
     assert {'material': 'template_content_brief', 'required': False} in read['outputs']
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
@@ -67,7 +67,7 @@ def test_material_stage_only_displays_summary():
     root = Path(__file__).resolve().parents[4]
     workflow = yaml.safe_load((root / 'workflows/ppt-workflow/workflow.yaml').read_text(encoding='utf-8'))
     tab = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'materials')
-    assert tab['slots'] == [{'id': 'material_summary'}]
+    assert tab['slots'] == [{'id': 'material_summary'}, {'id': 'reflection_markdown'}]
     slots = {slot['id']: slot for slot in workflow['slots']}
     for name in ('template_pptx', 'uploaded_materials', 'material_images'):
         assert slots[name]['exposed'] is False

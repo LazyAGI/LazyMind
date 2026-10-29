@@ -109,14 +109,19 @@ Use ECharts only when no such diagram image is available for the data on this pa
 
 ## 内容元素稳定 id（硬性）
 
-科研内容约束：公式优先使用可编辑 HTML（sub/sup）或 MathML，并给公式最外层添加
-`data-el="formula-N" data-academic-kind="formula"`。长公式在等号、加号等有数学意义的
+通用图表、图标和公式能力（适用于全部 PPT，包括述职、业务报告和科研汇报）：
+公式优先使用可编辑 HTML（sub/sup）或 MathML，并给公式最外层添加
+`data-el="formula-N" data-ppt-kind="formula"`。长公式在等号、加号等有数学意义的
 位置分行，必要时安排专页并解释变量，保持原始符号、上下标、单位和含义，禁止为了
-塞入页面过度缩小文字或裁切。根据当前模型能力完成排版，不承诺自动数学证明。
-科研图优先用可局部编辑的内联 SVG，根节点添加 `data-el="chart-N" data-academic-kind="chart"`，
-保留有依据的数据、坐标轴、图例、单位和来源。交互编辑支持被选中 SVG/HTML/MathML 元素。
-不要将这些可编辑图表做成 canvas 截图或把业务数据藏在外部 JavaScript 中。
-论文原图使用独立带 data-el 的 img，并显示来源；不得通过 AI 重绘捏造实验结果。
+塞入页面过度缩小文字或裁切。不承诺自动数学证明。
+数据图表遵守上方 ECharts 原生导出协议；占比图用 pie/doughnut 或 100% 堆叠柱状图。
+只使用有依据的数值，写清分母、统计口径、时间、单位、图例与来源；缺数时明确标记，
+不要凭空编百分比或将不可比较的指标强行归一化。示意图/流程图用可局部编辑的内联
+SVG，根节点添加 `data-el="chart-N" data-ppt-kind="chart"`。图标用独立内联 SVG，
+添加 `data-el="icon-N" data-ppt-kind="icon"`，图标不得代替数值证据。
+交互编辑支持被选中 SVG/HTML/MathML 元素。不要把可编辑图表做成 canvas 截图。
+来源原图使用独立带 data-el 的 img，并显示来源；不得通过 AI 重绘捏造结果。
+多论文汇报保留每项结论、公式、图表对应的论文与页/图/表编号，跨论文比较注明不同实验口径。
 用户模板继续遵守现有 style_spec，不额外选择科研模板。
 
 每个**面向读者的内容元素**都要带 `data-el` 属性，命名按类型 + 出现序号（1 开始），全 deck 统一：

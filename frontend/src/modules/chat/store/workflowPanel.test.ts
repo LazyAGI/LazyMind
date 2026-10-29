@@ -86,6 +86,22 @@ describe('hydrateWorkflowUI', () => {
 });
 
 describe('filterWorkflowTabs', () => {
+  it('quick PPT hides executed intermediate tabs without removing their artifacts or final output', () => {
+    const spec = load(readFileSync(resolve(process.cwd(), '../workflows/ppt-workflow/workflow.yaml'), 'utf8'));
+    const ui = hydrateWorkflowUI(spec);
+    const slots = [
+      { slot: 'compact_presentation', selected: true },
+      { slot: 'ppt_capability_requirements', selected: true },
+      { slot: 'deck_outline', selected: true },
+    ] as SlotRevision[];
+    const runtime = { projection: { past: ['analyze_requirements', 'collect_materials', 'build_outline', 'plan_page_prompts'] } };
+    expect(filterWorkflowTabs(ui.tabs, slots, ui.tab_visibility_ready_material, runtime).map(tab => tab.id))
+      .toEqual(['composite_preview']);
+    expect(filterWorkflowTabs(ui.tabs, slots.slice(1), ui.tab_visibility_ready_material, runtime).map(tab => tab.id))
+      .toContain('page_prompts');
+    expect(slots.some(slot => slot.slot === 'deck_outline')).toBe(true);
+  });
+
   it('shows executed collection or academic analysis in the shared materials tab', () => {
     const tabs = [{ id: 'materials', label: 'Materials', step_id: 'collect_materials',
       status_step_ids: ['collect_materials', 'analyze_academic_sources'], slots: [],

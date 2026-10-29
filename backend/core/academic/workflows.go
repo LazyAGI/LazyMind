@@ -417,8 +417,8 @@ func createPaperHandoff(ctx context.Context, tx *gorm.DB, user, dataset, record 
 		query += "\n先生成阅读心得，再携带心得和原论文清单生成汇报 PPT。"
 	}
 	workflowID := "paper_workflow_mock"
-	if kind == "ppt" && reflectionFirst {
-		workflowID = "paper_ppt_with_reflection_mock"
+	if kind == "ppt" {
+		workflowID = "ppt-workflow"
 	}
 	return handoff, enqueueAcademicChat(ctx, tx, user, conv, workflowID, query, key)
 }
@@ -1091,7 +1091,11 @@ func academicChatContext(ctx context.Context, db *gorm.DB, user, conversation st
 	}
 	var handoff orm.AcademicHandoff
 	if db.WithContext(ctx).Where("user_id=? AND conversation_id=?", user, conversation).Take(&handoff).Error == nil {
-		return "论文任务交接上下文：\n" + string(marshal(map[string]any{"handoff_id": handoff.ID, "dataset_id": handoff.DatasetID, "kind": handoff.Kind, "input": json.RawMessage(handoff.InputJSON)})) + "\n读取完整交接后原样提交。材料已接收，生成能力待对接；不声称已生成正式文稿或 PPT。"
+		context := "论文任务交接上下文：\n" + string(marshal(map[string]any{"handoff_id": handoff.ID, "dataset_id": handoff.DatasetID, "kind": handoff.Kind, "reflection_first": handoff.ReflectionFirst, "input": json.RawMessage(handoff.InputJSON)}))
+		if handoff.Kind == "ppt" {
+			return context + "\n使用 ppt-workflow，将完整交接 JSON 绑定隐藏输入 task_context。所选单篇或多篇论文已提供，无需重新上传或手填 ID。使用当前 Chat 的权威交接和全文读取工具生成学术 PPT；先心得任务须保存 reflection_markdown 并保留原论文清单。"
+		}
+		return context + "\n读取完整交接后原样提交。材料已接收，生成能力待对接；不声称已生成正式文稿或 PPT。"
 	}
 	return ""
 }
@@ -1182,7 +1186,7 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		common.ReplyJSON(w, map[string]any{"handoff_id": handoff.ID, "input": json.RawMessage(handoff.InputJSON), "contents": json.RawMessage(handoff.ContentsJSON), "kind": handoff.Kind, "expansion_id": handoff.ExpansionID, "dataset_id": dataset, "version": handoff.Version, "source_conversation_id": source, "source_available": available, "status": "awaiting_downstream"})
+		common.ReplyJSON(w, map[string]any{"handoff_id": handoff.ID, "reflection_first": handoff.ReflectionFirst, "input": json.RawMessage(handoff.InputJSON), "contents": json.RawMessage(handoff.ContentsJSON), "kind": handoff.Kind, "expansion_id": handoff.ExpansionID, "dataset_id": dataset, "version": handoff.Version, "source_conversation_id": source, "source_available": available, "status": "awaiting_downstream"})
 		return
 	}
 	replyError(w, 404, "NOT_FOUND", "paper task not found")

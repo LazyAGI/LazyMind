@@ -1091,11 +1091,13 @@ func validateUI(
 		))
 	}
 	for i, tab := range tabs {
-		if materialID := scalar(tab["hide_when_material"]); materialID != "" && !known[materialID] {
-			out = append(out, materialDiag(
-				"E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].hide_when_material", i),
-				materialID, "tab visibility references an unknown material",
-			))
+		for _, key := range []string{"hide_when_material", "presentation_hide_when_material"} {
+			if materialID := scalar(tab[key]); materialID != "" && !known[materialID] {
+				out = append(out, materialDiag(
+					"E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].%s", i, key),
+					materialID, "tab visibility references an unknown material",
+				))
+			}
 		}
 		refs := parseMaterialRefs(tab["slots"])
 		tabMaterials := map[string]bool{}

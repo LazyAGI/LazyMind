@@ -30,7 +30,7 @@ final generation revalidates and fills the original PPTX, not HTML.
 1. `analyze_requirements` — goal, audience, length, visual style, constraints,
    and the user's explicit AI-background choice. A deterministic post-step gate
    checks the configured `image_generator` only when that choice is enabled.
-2. `collect_materials` — always runs after analysis; uses supplied KB first and
+2. `collect_materials` — runs when source material or research is needed; uses supplied KB first and
    calls web tools only for a concrete remaining gap; collects facts and may
    optionally register images (`ppt_search_web_images` +
    `ppt_register_material_images`, or `ppt_generate_material_images` only when
@@ -39,21 +39,27 @@ final generation revalidates and fills the original PPTX, not HTML.
 3. `plan_background_prompts` — when AI backgrounds are enabled, create N
    connected but page-specific prompts automatically.
 4. `generate_backgrounds` — generate N images strictly from the approved
-   prompts and stop for human image approval. A request such as “重新生成底图
+   prompts automatically. A request such as “重新生成底图
    1、2” overwrites only those positions.
 5. `build_outline` — reuse the deck prepared above and call
    `ppt_build_outline` → one `deck_outline` Markdown artifact. This stage is automatic.
-6. `plan_page_prompts` — publish `slide_outline[page1..]` and stop for human
-   approval so prompts can be reviewed.
+6. `plan_page_prompts` — publish `slide_outline[page1..]` in both generation modes.
 7. `generate_ppt` — one call: `ppt_generate_pages`; no outline rewrite. The
-   generated slide results also stop for human approval.
+   generated slides are the final result.
 
 Steps 3 and 4 are skipped together when AI backgrounds are disabled.
+Quick and full generation execute the same applicable stages automatically.
+Quick hides intermediate tabs through a presentation-only marker; it does not
+skip material analysis or page prompt planning. Charts (including proportions),
+icons and formulas use the shared HTML renderer in every scenario. Native
+PPTX template filling retains its existing visual-editing limitations.
 
 Academic scenarios always collect materials, then run the automatic
 `analyze_academic_sources` branch before rejoining style/background/outline
 planning. Its `academic_brief` preserves per-paper attribution, formulas,
-figures, findings and limitations. General self-contained quick decks may
+figures, findings and limitations. Multiple attachments are parsed independently
+to EOF and retain source IDs through comparison, synthesis and page prompts.
+General self-contained decks in either mode may
 skip material collection according to the declared state transitions.
 The collection step must use
 a supplied/selected KB before any web tool and must skip web retrieval when the
@@ -95,19 +101,19 @@ After materials are ready and AI backgrounds are enabled, call:
 advance_step_and_hand_off(step_id="plan_background_prompts")
 ```
 
-After prompt approval, call:
+After prompt generation, call:
 
 ```text
 advance_step_and_hand_off(step_id="generate_backgrounds")
 ```
 
-After background approval, call:
+After background generation, call:
 
 ```text
 advance_step_and_hand_off(step_id="build_outline")
 ```
 
-After the automatic outline, advance to the page-prompt checkpoint; after page-prompt approval, call:
+After the automatic outline, advance to page-prompt planning; after prompts are published, call:
 
 ```text
 advance_step_and_hand_off(step_id="generate_ppt")

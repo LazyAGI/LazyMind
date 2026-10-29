@@ -156,8 +156,9 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         self.assertNotIn('style', {tab['id'] for tab in workflow['ui']['tabs']})
         materials = next(tab for tab in workflow['ui']['tabs'] if tab['id'] == 'materials')
         self.assertEqual(materials['hide_when_material'], 'skip_material_collection')
-        self.assertEqual(materials['status_step_ids'], ['collect_materials', 'analyze_academic_sources'])
-        self.assertEqual([slot['id'] for slot in materials['slots']], ['material_summary'])
+        self.assertEqual(materials['status_step_ids'],
+                         ['collect_materials', 'analyze_academic_sources', 'prepare_paper_reflection'])
+        self.assertEqual([slot['id'] for slot in materials['slots']], ['material_summary', 'reflection_markdown'])
         self.assertNotIn('choose_style', {step['id'] for step in workflow['steps']})
         self.assertEqual(slots['background_prompts']['cardinality'], 'list')
         self.assertIn('background_prompts', workflow['runtime']['publisher_owned_slots'])
@@ -165,10 +166,10 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             [edge['to'] for edge in state['transitions']['collect_materials']],
             ['analyze_academic_sources', 'plan_background_prompts', 'build_outline'],
         )
-        self.assertEqual(
-            [edge['to'] for edge in state['transitions']['analyze_academic_sources']],
-            ['plan_background_prompts', 'build_outline'],
-        )
+        self.assertEqual(state['transitions']['analyze_academic_sources'], [{'to': 'prepare_paper_reflection'}])
+        self.assertEqual(state['steps']['prepare_paper_reflection']['skip_if'], {'material': 'skip_paper_reflection'})
+        self.assertEqual([edge['to'] for edge in state['transitions']['prepare_paper_reflection']],
+                         ['plan_background_prompts', 'build_outline'])
         self.assertEqual(state['steps']['analyze_requirements']['route'], 'choice')
         self.assertEqual(state['steps']['collect_materials']['route'], 'choice')
         self.assertNotIn('skip_if', state['steps']['collect_materials'])
@@ -180,9 +181,7 @@ class StyleRenderingRecipeTest(unittest.TestCase):
             state['transitions']['generate_backgrounds'],
             [{'to': 'build_outline'}],
         )
-        self.assertEqual([edge['to'] for edge in state['transitions']['build_outline']],
-                         ['generate_ppt', 'plan_page_prompts'])
-        self.assertIn('quick', state['transitions']['build_outline'][0]['when'])
+        self.assertEqual(state['transitions']['build_outline'], [{'to': 'plan_page_prompts'}])
         generate_inputs = {i['material']: i for i in state['steps']['generate_ppt']['inputs']}
         self.assertFalse(generate_inputs['slide_outline']['required'])
         self.assertIn('deck_outline', generate_inputs)
@@ -363,6 +362,13 @@ class PagePromptModeTest(unittest.TestCase):
                  patch.object(run_stage, '_load_deck_style') as style:
                 self.assertEqual(run_stage.cmd_page_html_from_brief(deck, 1, prompt), 0)
             self.assertEqual(model.call_args.args[1], prompt)
+            # Both workflow modes now use this complete-prompt boundary. The
+            # common system contract retains charts, formulas and icons even
+            # when the user-authored prompt is passed through verbatim.
+            system = model.call_args.args[0]
+            self.assertIn('pie/doughnut', system)
+            self.assertIn('data-ppt-kind="formula"', system)
+            self.assertIn('data-ppt-kind="icon"', system)
             self.assertEqual(model.call_count, 1)
             rewrite.assert_not_called()
             style.assert_not_called()

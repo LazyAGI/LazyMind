@@ -32,6 +32,9 @@ transitions:
         AI_BACKGROUND_IMAGES: disabled.
 
   analyze_academic_sources:
+    - to: prepare_paper_reflection
+
+  prepare_paper_reflection:
     - to: plan_background_prompts
       when: >
         ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
@@ -46,10 +49,7 @@ transitions:
     - to: build_outline
 
   build_outline:
-    - to: generate_ppt
-      when: generation_mode is exactly quick and template_mode is none.
     - to: plan_page_prompts
-      when: generation_mode is not quick or template_mode is upload.
 
   plan_page_prompts:
     - to: generate_ppt
@@ -123,6 +123,27 @@ steps:
         and do not confuse the number of source files with the requested slide
         count.
 
+      Paper-library handoff (when task_context or the server Chat context provides one):
+      {{task_context}}
+      Call ppt_paper_handoff_context before interpreting its papers. Its authorized
+      server response is authoritative; preserve all selected PaperRef identities
+      and user_instruction. These are supplied sources, not missing attachments.
+      Set presentation_scenario=research_report (or the explicitly requested
+      academic scenario); never skip collection or ask for re-upload/internal IDs.
+      If reflection_first is true, do not save skip_paper_reflection. Otherwise,
+      including ordinary attachment/text decks, save skip_paper_reflection='skip'.
+      Record existing reflection_markdown from the tool as saved user material;
+      do not overwrite it or substitute it for the original papers.
+
+      Direct paper uploads plus a written request are an equally valid academic
+      entry, including a single paper or multiple papers for a student group
+      meeting. When the user asks to present/review the attached papers, classify
+      as research_report/paper_review as appropriate; a library handoff is NOT
+      required. Preserve the complete written requirements and every selected
+      attachment filename/turn from launch context. Do not call library tools
+      when task_context is absent; use the attachment cache in collect_materials.
+      A PDF extension alone does not make an ordinary business report academic.
+
       Uploaded source reading:
       - For academic tasks, record source filenames and user-provided notes here;
         defer paper parsing to collect_materials and its cached reader tool.
@@ -176,7 +197,9 @@ steps:
       - Style flow is always auto. Keep the outline pipeline's deck-wide style
         preparation; do not generate or display alternative style previews.
       - Generation mode: record exactly quick for 快速生成, or full for
-        完整生成，耗时较长.
+        完整生成，耗时较长. Both modes execute the same applicable stages and
+        preserve all capabilities. Quick changes intermediate UI visibility only.
+        For quick only, save_artifact(key='compact_presentation', content_type='text', value='hide').
       - Template mode: record exactly none when no template is used, or upload
         when the user selected and attached a PPTX template.
 
@@ -220,7 +243,6 @@ steps:
             key='skip_material_collection', content_type='text', value='skip',
           )
         when ALL of these are true:
-        - generation_mode is quick; full mode intentionally runs material collection;
         - the request is self-contained and uses common, stable knowledge;
         - there is no uploaded source, selected/mentioned knowledge base, or
           pasted source material that needs processing;
@@ -264,10 +286,15 @@ steps:
       limitation if they differ; do not invent expansion support.
     tools:
       - pptx_analyzer
+      - ppt_paper_handoff_context
     inputs:
+      - material: task_context
+        required: false
       - material: template_pptx
         required: false
     outputs:
+      - material: skip_paper_reflection
+        required: false
       - material: template_content_brief
         required: false
       - material: presentation_scenario
@@ -276,6 +303,8 @@ steps:
       - material: requirement_analysis
       - material: ppt_capability_requirements
       - material: style_flow
+      - material: compact_presentation
+        required: false
       - material: generation_mode
       - material: template_mode
       - material: generate_background_images
@@ -412,10 +441,27 @@ steps:
       Use the conversation, uploaded files, requirement analysis, and KB/web
       retrieval subject to the KB-first gate below.
 
+      Paper-library sources (task_context):
+      {{task_context}}
+      If a paper-library handoff exists, call ppt_cache_library_papers once. It
+      reads every selected paper through the authorized fulltext API and follows
+      all next_cursor pages. Keep each PaperRef, source_id, content_hash and
+      source_version in material_summary. Read cached chunks with
+      ppt_read_academic_source as needed. Never treat abstracts as full text or
+      search for replacement papers. No attachment upload is needed.
+      If complete=false, report each processing/failed/unavailable/error source
+      and STOP without publishing material_summary or advancing. Processing may
+      be retried later; authorization/version failures require refreshed context.
+      Never concatenate different versions or generate a reduced paper selection.
+      For additional actual attachments, use the separate attachment reader below.
+
       Uploaded file parsing:
       - For academic scenarios, call ppt_cache_academic_sources with ALL relevant
         exact attachment filenames from the original request, conversation and
-        uploaded_materials. This tool parses each file to EOF and persists reader
+        uploaded_materials. When the launch source manifest is provided, pass its
+        turns (including null for files-only uploads) in the same order as filenames; keep repeated filenames across different
+        turns. Intra-turn duplicates use the resolver's aliases (paper-1.pdf).
+        This tool parses each file to EOF and persists reader
         chunks by content hash. Use ppt_read_academic_source for needed chunks.
         Do not separately call read_user_attachment for those papers. Preserve
         each filename/source_id in material_summary, list every failure, and
@@ -433,6 +479,9 @@ steps:
         in analyze_requirements; use template_content_brief, not sample claims as facts.
 
       Retrieval policy (do this before writing the summary):
+      The frozen paper-library selection is read by ppt_cache_library_papers,
+      not generic KB semantic search. Apply the following retrieval gate only to
+      additional KB material explicitly requested beyond those selected papers.
       1. KB-first gate (mandatory): if the user supplied, selected, or mentioned
          a knowledge base / selected documents, or the topic looks internal,
          call kb semantic search BEFORE calling any web tool. Do not call
@@ -555,6 +604,7 @@ steps:
 
       Stop after saving.
     tools:
+      - ppt_cache_library_papers
       - ppt_source_connections
       - ppt_collect_github_prs
       - ppt_read_pr_description
@@ -569,6 +619,8 @@ steps:
       - ppt_register_material_images
       - ppt_generate_material_images
     inputs:
+      - material: task_context
+        required: false
       - material: presentation_scenario
         required: true
       - material: requirement_analysis
@@ -609,8 +661,9 @@ steps:
 
       Reuse collected source_ids via ppt_read_academic_source; continue reading
       chunks needed for each claim. Never infer a full paper from its excerpt.
-      If a source is absent from material_summary, use ppt_cache_academic_sources
-      with its exact attachment filename first. Distinguish the user's own paper, one paper, multiple
+      If a source is absent from material_summary, use ppt_cache_library_papers
+      for a paper-library task, or ppt_cache_academic_sources with its exact
+      attachment filename for a conversation upload. Never use paper_id as a filename. Distinguish the user's own paper, one paper, multiple
       papers, and reading notes. Reading notes alone are valid input: never
       invent a paper or force an upload. Keep each paper's title, authors,
       filename/URL, and available page/figure/table references with its claims.
@@ -629,9 +682,12 @@ steps:
       Save the full analysis as academic_brief using save_artifact and stop.
       Continue automatically without requesting step confirmation.
     tools:
+      - ppt_cache_library_papers
       - ppt_cache_academic_sources
       - ppt_read_academic_source
     inputs:
+      - material: task_context
+        required: false
       - material: presentation_scenario
         required: true
       - material: requirement_analysis
@@ -646,6 +702,52 @@ steps:
       academic_brief identifies source attribution, findings, uncertainties,
       formulas/figures when present, and an appropriate academic narrative.
       Missing evidence is explicit; no fabricated claims or forced uploads.
+
+  prepare_paper_reflection:
+    label: 阅读心得
+    mode: auto
+    tools_only: true
+    terminal_tools: [ppt_publish_paper_reflection]
+    skip_if: {material: skip_paper_reflection}
+    route: choice
+    prompt: |
+      {{runtime_instruction}}
+      Prepare the reading reflection requested BEFORE the PPT in this paper task.
+      Frozen task: {{task_context}}
+      Collected fulltext sources: {{material_summary}}
+      Academic analysis: {{academic_brief}}
+      Call ppt_paper_handoff_context and keep its original paper list unchanged.
+      If it returns an existing nonempty reflection_markdown, reuse that saved
+      text verbatim unless the user explicitly asked to revise it. Do not replace
+      a saved reflection with a summary or a placeholder.
+      Otherwise use academic_brief and read relevant cached fulltext chunks with
+      ppt_read_academic_source to write a substantive reflection in the user's
+      language: research questions, methods, evidence, contributions, limitations,
+      cross-paper comparison where comparable, and clearly labeled reader insights.
+      Incorporate supplied notes with attribution; do not invent the student's
+      personal experiences or confuse their views with the authors' findings.
+      Cite every paper and relevant page numbers. Save the complete actual prose
+      as reflection_markdown using ppt_publish_paper_reflection(markdown=...).
+      Only its successful artifact publication completes this step; never call
+      save_artifact directly. Never save a receipt, empty draft
+      or "generation pending" placeholder. If reading or writing fails, stop at
+      this step and allow retry; do not proceed to PPT with an empty reflection.
+    tools:
+      - ppt_publish_paper_reflection
+      - ppt_paper_handoff_context
+      - ppt_read_academic_source
+    inputs:
+      - material: task_context
+        required: false
+      - material: material_summary
+        required: true
+      - material: academic_brief
+        required: true
+    outputs:
+      - material: reflection_markdown
+    acceptance_criteria: |
+      Nonempty, substantive saved reflection based on the full original paper
+      selection, with citations and separated reader insights. No mock receipt.
 
   build_outline:
     label: Build Outline
@@ -671,6 +773,10 @@ steps:
 
       Academic analysis (optional):
       {{academic_brief}}
+
+      Saved reading reflection (when requested):
+      {{reflection_markdown}}
+      Preserve the saved reflection alongside the original paper evidence.
       When present, carry its source attribution, formulas, figure references,
       evidence and limitations into outline_markdown. Use the requested academic
       narrative. Keep long formulas on dedicated slides or split at meaningful
@@ -765,6 +871,8 @@ steps:
       - ppt_publish_deck_outline
       - ppt_build_outline
     inputs:
+      - material: reflection_markdown
+        required: false
       - material: requirement_analysis
         required: true
       - material: material_summary
@@ -802,6 +910,16 @@ steps:
       Material summary (optional):
       {{material_summary}}
 
+      Academic analysis (optional):
+      {{academic_brief}}
+
+      Saved reading reflection (when requested):
+      {{reflection_markdown}}
+      Preserve the saved reflection alongside the original paper evidence.
+      When present, preserve each paper's source_id, citations, formulas and limitations. For
+      group meetings with multiple papers, include a sourced comparison and
+      synthesis; never merge distinct experiments or authors into one study.
+
       Original user request:
       {{user_input}}
       A bare continue/继续 is approval to proceed. Use launch_user_input from the
@@ -817,6 +935,12 @@ steps:
       - composition: placement, grouping, hierarchy and whitespace;
       - actual visual elements: subject-specific icons/illustrations or supplied
         images, and a chart type/axes only when supported by real source data;
+      - charts, icons and formulas are shared by ALL presentation scenarios,
+        including work reviews. For proportions use a pie/doughnut or 100%
+        stacked bar with the supplied values, denominator, units and period.
+        Do not invent missing values or normalize unrelated metrics to 100%.
+        Preserve formula notation and variable meanings; use editable HTML,
+        MathML or SVG and follow the shared page_html rendering contract;
       - typography, emphasis and colors consistent with the user's style;
       - 16:9 HTML rendering and relevant restrictions, including no AI background
         image when disabled. Preserve supplied image references; invent no data.
@@ -854,6 +978,10 @@ steps:
     tools:
       - ppt_publish_outline
     inputs:
+      - material: reflection_markdown
+        required: false
+      - material: academic_brief
+        required: false
       - material: deck_outline
         required: true
       - material: requirement_analysis
@@ -1051,7 +1179,7 @@ steps:
       Existing editable AI-background prompts, if any:
       {{background_prompts}}
 
-      Approved deck outline (used when quick mode bypasses page-prompt planning):
+      Approved deck outline:
       {{deck_outline}}
 
       Per-page generation prompts, when already published (possibly edited by the user):
@@ -1136,6 +1264,14 @@ steps:
       output path. Preserve existing visual assets; explicitly report unsupported
       requested image changes instead of launching an HTML/background pipeline.
 
+      A request for PPT/PPTX or a work review with charts does not by itself
+      request the text-only native tool. Use the HTML generation and UI PPTX
+      export path for charts, icons and formulas in every scenario and mode.
+      If the user explicitly insists on direct/native output with unsupported
+      visuals, report that limitation and the HTML/export option, then stop without
+      publishing a simplified native deck; never replace the requested chart or
+      formula with bullets.
+
       When no template is uploaded and the user explicitly requests direct/native
       PPTX output, generate a native file instead of preview_html. Convert the approved slide_outline into ordered
       slides [{title, bullets: [plain text], notes?}], preserving the requested
@@ -1145,8 +1281,8 @@ steps:
       exposes download and an unsupported-web-preview notice instead of HTML components.
       Supported: editable title/body text and notes in a new default presentation.
       Slide-specific decorations, native charts and equations are not synthesized
-      by this tool. If the brief requires unsupported visuals, report that limit
-      before calling the tool; do not silently discard evidence or claim fidelity.
+      by this tool. If the brief requires unsupported visuals, do not call this
+      tool; follow the unsupported-native-output rule above.
       Existing native PPTX edits must use the direct PPTX editing capability;
       never create a parallel HTML deck for a native file.
 
@@ -1266,7 +1402,7 @@ steps:
       Never regenerate content for these edits. HTML sizes with pt remain pt.
 
       ### F) Full deck HTML generation (default)
-      Page prompts may exist from plan_page_prompts; quick mode can skip that step.
+      Both quick and full generation use complete prompts from plan_page_prompts.
       Do NOT call ppt_init_deck,
       stage=style, or stage=outline again.
 
@@ -1279,7 +1415,7 @@ steps:
             slide_outline directly to the HTML model, including user edits.
             Do not write, rewrite, expand or regenerate prompts in generate_ppt;
             do not rerun content-outline or style generation for this path.
-          — If quick mode skipped prompt planning, preserve the existing
+          — For legacy sessions without complete prompts, preserve the existing
             outline/style/prompt preparation path before rendering HTML.
             The tool detects this from persisted complete-prompt metadata.
           — Both paths auto-publish preview_html + notes.

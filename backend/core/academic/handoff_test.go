@@ -2,6 +2,7 @@ package academic
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -142,5 +143,72 @@ func TestHandoffFullTextIsScopedAndPinnedWithoutAnExpansion(t *testing.T) {
 	ReadPaperContent(w, paperRequest(body))
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "VERSION_CHANGED") {
 		t.Fatal("reader silently switched the frozen content version", w.Code, w.Body.String())
+	}
+}
+
+func TestPPTLibraryLaunchUsesRealWorkflowAndFrozenSelection(t *testing.T) {
+	db := paperFixture(t)
+	for _, ids := range [][]string{{"a"}, {"a", "b"}} {
+		for _, reflection := range []bool{false, true} {
+			key := fmt.Sprintf("ppt-%d-%t", len(ids), reflection)
+			body := string(marshal(map[string]any{"kind": "ppt", "dataset_id": "papers", "document_ids": ids,
+				"request_key": key, "reflection_first": reflection, "user_instruction": "学生组会，比较方法，8页"}))
+			for retry := 0; retry < 2; retry++ {
+				w := httptest.NewRecorder()
+				LaunchPaperWorkflow(w, paperRequest(body))
+				if w.Code != 200 {
+					t.Fatal(w.Code, w.Body.String())
+				}
+			}
+			var handoff orm.AcademicHandoff
+			if err := db.Where("request_key=?", key).Take(&handoff).Error; err != nil {
+				t.Fatal(err)
+			}
+			var input PaperTaskInput
+			if err := json.Unmarshal(handoff.InputJSON, &input); err != nil {
+				t.Fatal(err)
+			}
+			if len(input.Papers) != len(ids) || input.UserInstruction != "学生组会，比较方法，8页" {
+				t.Fatalf("lost selection: %+v", input)
+			}
+			for i, id := range ids {
+				if input.Papers[i].PaperID != id {
+					t.Fatalf("lost identity: %+v", input)
+				}
+			}
+			var jobs []orm.AsyncJob
+			if err := db.Where("resource_id=? AND job_type=?", handoff.ConversationID, ChatLaunchJobType).Find(&jobs).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(jobs) != 1 {
+				t.Fatalf("duplicate launches: %d", len(jobs))
+			}
+			var payload map[string]string
+			_ = json.Unmarshal(jobs[0].PayloadJSON, &payload)
+			if payload["workflow_id"] != "ppt-workflow" {
+				t.Fatalf("still mock: %+v", payload)
+			}
+			if strings.Contains(academicChatContext(t.Context(), db.DB, "u", handoff.ConversationID), "生成能力待对接") {
+				t.Fatal("PPT still has mock instruction")
+			}
+			w := httptest.NewRecorder()
+			r := paperRequest("")
+			r.URL.RawQuery = "conversation_id=" + handoff.ConversationID
+			AcademicChatContext(w, r)
+			var returned struct {
+				ReflectionFirst bool           `json:"reflection_first"`
+				Input           PaperTaskInput `json:"input"`
+			}
+			_ = json.Unmarshal(w.Body.Bytes(), &returned)
+			if w.Code != 200 || returned.ReflectionFirst != reflection || len(returned.Input.Papers) != len(ids) {
+				t.Fatal(w.Code, w.Body.String())
+			}
+			w = httptest.NewRecorder()
+			r.Header.Set("X-User-Id", "another-user")
+			AcademicChatContext(w, r)
+			if w.Code != 404 {
+				t.Fatalf("handoff ownership bypass: %d", w.Code)
+			}
+		}
 	}
 }

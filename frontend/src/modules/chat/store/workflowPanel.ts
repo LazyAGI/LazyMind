@@ -490,6 +490,8 @@ export interface TabDef {
   composite_behavior?: CompositeBehavior;
   /** Hide this tab once the named material has a selected revision. */
   hide_when_material?: string;
+  /** Presentation-only suppression, even when the underlying step executes. */
+  presentation_hide_when_material?: string;
   /** Explicitly enable or disable artifact downloads for this tab. */
   allow_download?: boolean;
   /** Actions are rendered through provider modules; the composite stays domain-neutral. */
@@ -526,6 +528,7 @@ export function filterWorkflowTabs(
   );
   const visibilityReady = !readyMaterial || present.has(readyMaterial);
   return tabs.filter((tab) => {
+    if (tab.presentation_hide_when_material && present.has(tab.presentation_hide_when_material)) return false;
     if (!tab.hide_when_material) return true;
     const stepIds = new Set([tab.step_id ?? tab.id, ...(tab.status_step_ids ?? [])]);
     const effective = (id: string) => runtime?.projection?.nodes?.[id]?.validity !== 'stale'

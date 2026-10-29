@@ -1799,7 +1799,8 @@ def pptx_analyzer(filename: str, page: int = 1, turn: Optional[int] = None) -> D
 def edit_presentation(
     filename: str,
     action: Literal[
-        'inspect', 'replace_fonts', 'replace_palette', 'inspect_content', 'edit_content', 'prepare_font', 'format_text'
+        'inspect', 'replace_fonts', 'replace_palette', 'apply_template',
+        'inspect_content', 'edit_content', 'prepare_font', 'format_text'
     ],
     source_font: Optional[str] = None,
     target_font: Optional[str] = None,
@@ -1815,6 +1816,8 @@ def edit_presentation(
     slot_ids: Optional[List[str]] = None,
     allow_font_download: bool = False,
     style_edits: Optional[List[Dict[str, Any]]] = None,
+    template_filename: Optional[str] = None,
+    template_turn: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Inspect or directly edit an uploaded PPTX without starting a Workflow.
 
@@ -1843,6 +1846,10 @@ def edit_presentation(
     bold, italic, underline (true/false), text_color (#RRGGBB), allow_download.
     Example: [{"pages":[1],"text_scope":"titles","font_size_pt":28,"bold":true}].
     Omit properties to preserve them. Multiple scopes publish atomically once.
+    apply_template accepts a second uploaded `.pptx` in template_filename and
+    applies its theme, fonts, palette, safe backgrounds, and compatible title/body
+    placeholder geometry to the source PPTX. Both inputs must be native PPTX files;
+    the operation stays in main Chat and never starts a Workflow.
     """
     if action == 'prepare_font':
         from lazymind.chat.engine.tools.file_resources.font_library import ensure_font
@@ -1879,6 +1886,36 @@ def edit_presentation(
     if native_artifact is not None:
         effective = matched  # The selected immutable revision is authoritative.
     normalized_action = str(action or '').strip().lower()
+    if normalized_action == 'apply_template':
+        if native_artifact is not None:
+            raise ToolExecutionError('apply_template supports uploaded PPTX files in main Chat only')
+        if not template_filename:
+            raise ToolExecutionError('template_filename is required for apply_template')
+        template_path, err = _resolve_attachment(template_filename, template_turn)
+        if err:
+            raise ToolExecutionError(f'Template attachment not found: {err}')
+        template_path = _materialize_local_path(template_path)
+        from pathlib import Path
+        if (not os.path.isfile(template_path) or Path(template_path).suffix.lower() != '.pptx'
+                or Path(effective).suffix.lower() != '.pptx'):
+            raise ToolExecutionError('apply_template only supports PPTX source and PPTX template files')
+        os.makedirs(draft.root, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='template-', dir=draft.root) as temporary:
+            candidate = Path(temporary) / draft.filename
+            try:
+                from lazymind.chat.engine.tools.file_resources.pptx_template_apply import apply_pptx_template
+                stats = apply_pptx_template(Path(effective), Path(template_path), candidate)
+            except (OSError, ValueError) as exc:
+                raise ToolExecutionError(str(exc)) from exc
+            os.replace(candidate, draft.draft_path)
+        artifact = _publish_attachment_edit(draft, source_tool='edit_presentation')
+        return {
+            'status': 'ok', 'action': normalized_action,
+            'source_filename': os.path.basename(matched),
+            'template_filename': os.path.basename(template_path),
+            **stats, **artifact,
+            'message': 'Applied the PPTX template and published a new editable copy in main Chat.',
+        }
     if normalized_action in ('inspect_content', 'edit_content', 'format_text') or (
             normalized_action == 'replace_fonts' and (native_artifact is not None or slot_ids is not None)):
         from pathlib import Path

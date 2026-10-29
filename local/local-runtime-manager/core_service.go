@@ -220,6 +220,7 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_PDF_FONT_CATALOG=" + filepath.Join(paths.ResourcesRoot, "config", "pdf-font.json"),
 		"LAZYMIND_UPLOAD_ROOT=" + paths.UploadRoot,
 		"LAZYMIND_SHARED_UPLOAD_DIR=" + paths.UploadRoot,
+		"LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED=" + envText("LAZYMIND_CHAT_MODEL_FALLBACK_ENABLED", "true"),
 		"LAZYMIND_HISTORY_INJECTION_ENABLED=" + envText("LAZYMIND_HISTORY_INJECTION_ENABLED", "true"),
 		"LAZYMIND_HISTORY_INJECTION_ROOT=" + paths.HistoryInjectionRoot,
 		"LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=" + envText("LAZYMIND_BOOTSTRAP_ADMIN_USERNAME", "admin"),

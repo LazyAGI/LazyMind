@@ -846,7 +846,8 @@ func TestValidateUITabVisibilityAndHTMLPreview(t *testing.T) {
 		},
 		"tabs": []map[string]any{{
 			"id": "prototype", "hide_when_material": "skip_prototype",
-			"slots": []map[string]any{{"id": "prototype"}},
+			"presentation_hide_when_material": "skip_prototype",
+			"slots":                           []map[string]any{{"id": "prototype"}},
 		}},
 	}
 
@@ -856,6 +857,7 @@ func TestValidateUITabVisibilityAndHTMLPreview(t *testing.T) {
 
 	ui["tab_visibility_ready_material"] = "missing_plan"
 	ui["tabs"].([]map[string]any)[0]["hide_when_material"] = "missing_skip"
+	ui["tabs"].([]map[string]any)[0]["presentation_hide_when_material"] = "missing_compact"
 	diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish)
 	unknownCount := 0
 	for _, diagnostic := range diagnostics {
@@ -863,8 +865,8 @@ func TestValidateUITabVisibilityAndHTMLPreview(t *testing.T) {
 			unknownCount++
 		}
 	}
-	if unknownCount != 2 {
-		t.Fatalf("expected both unknown visibility materials to be rejected: %#v", diagnostics)
+	if unknownCount != 3 {
+		t.Fatalf("expected all unknown visibility materials to be rejected: %#v", diagnostics)
 	}
 }
 
