@@ -10,44 +10,28 @@ transitions:
         template_mode is upload, or skip_material_collection was not saved because uploaded sources,
         knowledge-base/web research, citations, current facts, real photos,
         product evidence, cases, data, or reference images are still needed.
-    - to: choose_style
-      when: >
-        template_mode is none and skip_material_collection was saved and style_flow is exactly
-        preview_choice.
     - to: plan_background_prompts
       when: >
-        template_mode is none and skip_material_collection was saved, style_flow is exactly auto, and
+        template_mode is none and skip_material_collection was saved, and
         ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
     - to: build_outline
       when: >
-        template_mode is none and skip_material_collection was saved, style_flow is exactly auto, and
+        template_mode is none and skip_material_collection was saved, and
         ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: disabled.
 
   collect_materials:
     - to: analyze_academic_sources
       when: presentation_scenario is research_report, paper_review, thesis_defense, or reading_notes.
-    - to: choose_style
-      when: presentation_scenario is general or absent, and style_flow is exactly preview_choice.
     - to: plan_background_prompts
       when: >
-        presentation_scenario is general or absent, and style_flow is exactly auto and ppt_capability_requirements is exactly
+        presentation_scenario is general or absent, and ppt_capability_requirements is exactly
         AI_BACKGROUND_IMAGES: enabled.
     - to: build_outline
       when: >
-        presentation_scenario is general or absent, and style_flow is exactly auto and ppt_capability_requirements is exactly
+        presentation_scenario is general or absent, and ppt_capability_requirements is exactly
         AI_BACKGROUND_IMAGES: disabled.
 
   analyze_academic_sources:
-    - to: choose_style
-      when: style_flow is exactly preview_choice.
-    - to: plan_background_prompts
-      when: >
-        style_flow is exactly auto and ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
-    - to: build_outline
-      when: >
-        style_flow is exactly auto and ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: disabled.
-
-  choose_style:
     - to: plan_background_prompts
       when: >
         ppt_capability_requirements is exactly AI_BACKGROUND_IMAGES: enabled.
@@ -112,8 +96,7 @@ steps:
       - Uploaded PPTX templates take precedence over visual-style and AI
         background answers. When template_mode=upload, use style_flow=auto,
         generate_background_images=disabled, and capability marker
-        AI_BACKGROUND_IMAGES: disabled. Save both skip_style_choices and
-        skip_background_images. This also applies to full generation: keep
+        AI_BACKGROUND_IMAGES: disabled. Save skip_background_images. This also applies to full generation: keep
         generation_mode=full for content collection, but skip style candidates,
         background prompts and background generation. The template is analyzed
         in generate_ppt as before. Do not require an image model for this path.
@@ -163,6 +146,11 @@ steps:
         paper_review, thesis_defense, or reading_notes according to the user's
         intent. Academic scenarios MUST enter collect_materials even in quick
         mode; never save skip_material_collection for these scenarios.
+        Educational introductions for children, holidays, culture and everyday
+        topics are general unless the user explicitly requests academic research.
+        When presentation_scenario is general, also save
+        save_artifact(key='skip_academic_sources', content_type='text', value='skip').
+        Never save skip_academic_sources for the four academic scenarios.
       - Requests to summarize personal contributions, GitHub PRs, connected Feishu
         work records or knowledge-base internship evidence MUST enter collect_materials,
         including quick mode. Never save skip_material_collection for these requests.
@@ -185,11 +173,8 @@ steps:
         (default: no — do not invent this need)
       - AI background generation: record exactly enabled or disabled from the
         startup answer. This is independent from foreground material images.
-      - Style flow is an internal route, not a user confirmation mode: record
-        auto when the user declines previews (e.g. 不需要看风格 / 跳过风格),
-        for uploaded templates, or for 快速生成. This explicit opt-out overrides
-        完整生成. Otherwise use preview_choice for 完整生成 so the full path creates
-        three candidates and automatically continues with the recommended one.
+      - Style flow is always auto. Keep the outline pipeline's deck-wide style
+        preparation; do not generate or display alternative style previews.
       - Generation mode: record exactly quick for 快速生成, or full for
         完整生成，耗时较长.
       - Template mode: record exactly none when no template is used, or upload
@@ -211,8 +196,7 @@ steps:
         )
         save_artifact(
           key='style_flow', content_type='text',
-          value='auto' when previews are declined, for 快速生成, or for an uploaded template;
-                otherwise 'preview_choice',
+          value='auto',
         )
         save_artifact(
           key='generation_mode', content_type='text',
@@ -226,8 +210,6 @@ steps:
           key='generate_background_images', content_type='text',
           value='enabled' only if no template is used and AI backgrounds are enabled, otherwise 'disabled',
         )
-        Whenever style_flow is auto (including explicit preview opt-out), save:
-          save_artifact(key='skip_style_choices', content_type='text', value='skip')
         When and only when AI background generation is disabled, also save:
           save_artifact(
             key='skip_background_images', content_type='text', value='skip',
@@ -289,14 +271,14 @@ steps:
       - material: template_content_brief
         required: false
       - material: presentation_scenario
+      - material: skip_academic_sources
+        required: false
       - material: requirement_analysis
       - material: ppt_capability_requirements
       - material: style_flow
       - material: generation_mode
       - material: template_mode
       - material: generate_background_images
-      - material: skip_style_choices
-        required: false
       - material: skip_background_images
         required: false
       - material: skip_material_collection
@@ -306,13 +288,11 @@ steps:
       topic, exact slide count, target customer/audience, communication tone,
       explicit visual constraints, structure, constraints, and assumptions.
       ppt_capability_requirements must be exactly AI_BACKGROUND_IMAGES: enabled
-      or AI_BACKGROUND_IMAGES: disabled. style_flow must be auto for quick mode
-      or explicit preview opt-out, even in full mode. Only full mode without a template
-      or preview opt-out uses preview_choice. Uploaded templates always use auto.
+      or AI_BACKGROUND_IMAGES: disabled. style_flow must always be auto.
       generation_mode must be exactly quick or full, and template_mode must be
       exactly none or upload.
-      Uploaded templates require style_flow=auto, disabled backgrounds and both
-      skip markers, regardless of generation_mode or earlier background answers.
+      Uploaded templates require style_flow=auto, disabled backgrounds and the
+      skip_background_images marker, regardless of generation_mode or earlier background answers.
       When a template is uploaded, template_content_brief must cover every original
       page, source hash, required evidence and missing inputs before this step passes.
       Executor must run the configured
@@ -335,6 +315,13 @@ steps:
 
       Template mode:
       {{template_mode}}
+
+      Presentation scenario (authoritative routing input):
+      {{presentation_scenario}}
+      For general, do not enter analyze_academic_sources. Continue to
+      plan_background_prompts when AI backgrounds are enabled, otherwise build_outline.
+      Only research_report, paper_review, thesis_defense and reading_notes require
+      analyze_academic_sources. Material collection alone does not imply research.
 
       Template content requirements (when uploaded):
       {{template_content_brief}}
@@ -582,6 +569,8 @@ steps:
       - ppt_register_material_images
       - ppt_generate_material_images
     inputs:
+      - material: presentation_scenario
+        required: true
       - material: requirement_analysis
         required: true
       - material: uploaded_materials
@@ -608,6 +597,7 @@ steps:
   analyze_academic_sources:
     label: 科研内容分析
     mode: auto
+    skip_if: {material: skip_academic_sources}
     route: choice
     prompt: |
       Analyze the supplied academic sources for this presentation.
@@ -657,72 +647,6 @@ steps:
       formulas/figures when present, and an appropriate academic narrative.
       Missing evidence is explicit; no fabricated claims or forced uploads.
 
-  choose_style:
-    label: Choose Style
-    mode: auto
-    skip_if: {material: skip_style_choices}
-    prompt: |
-      Generate exactly three deck-wide visual style previews, publish them for
-      comparison, keep the tool's recommended candidate in style_selection, and
-      continue automatically. Do not build the outline,
-      generate AI backgrounds, or render final slides in this step.
-
-      Requirement analysis:
-      {{requirement_analysis}}
-
-      Material summary (may be empty):
-      {{material_summary}}
-
-      Style flow (must be preview_choice in this step):
-      {{style_flow}}
-
-      AI backgrounds:
-      {{generate_background_images}}
-
-      Original user request:
-      {{user_input}}
-      A bare continue/继续 is approval to proceed. Use launch_user_input from the
-      execution context and bound prior artifacts to retain the existing requirements.
-
-      {{runtime_instruction}}
-
-      Call ppt_prepare_style_choices exactly once. Pass the merged request,
-      positive page count, audience/scene, only the user's explicit style
-      direction as style_hint, generate_background_images=true only when the
-      hidden value is enabled, and omit unused optional arguments. The tool
-      creates exactly three distinct but request-compatible previews, publishes
-      one read-only comparison, and initializes editable style_selection to the
-      recommended candidate A.
-
-      On a retry after previews were already generated, first call ppt_find_deck
-      and pass its deck_dir so the tool reuses the same three previews. Never
-      create another deck merely because the step was resumed.
-
-      Do not wait for a user confirmation and do not ask the user to edit JSON.
-      Stop immediately after ppt_prepare_style_choices succeeds; Runtime advances
-      with the recommended style_selection.
-    tools:
-      - ppt_find_deck
-      - ppt_prepare_style_choices
-    inputs:
-      - material: requirement_analysis
-        required: true
-      - material: material_summary
-        required: false
-      - material: style_flow
-        required: true
-      - material: generate_background_images
-        required: true
-    outputs:
-      - material: style_previews
-        required: true
-      - material: style_selection
-        required: true
-    acceptance_criteria: |
-      Exactly three preview choices A, B, and C are visible. style_selection is
-      one editable, non-empty recommended A/B/C value and the step does not wait
-      for human approval.
-
   build_outline:
     label: Build Outline
     mode: auto
@@ -760,9 +684,6 @@ steps:
       Style flow:
       {{style_flow}}
 
-      Selected preview (A/B/C when applicable):
-      {{style_selection}}
-
       {{runtime_instruction}}
 
       ## Incremental whole-slide insertion
@@ -789,7 +710,7 @@ steps:
       Call ppt_find_deck at most once. If no deck exists, omit deck_dir and let
       ppt_build_outline initialize it and use auto styling without previews.
       Never repeatedly search for a deck that has not been created.
-      When AI backgrounds were enabled OR style_flow is preview_choice, first
+      When AI backgrounds were enabled, first
       call ppt_find_deck to locate the already prepared deck. Then call ppt_build_outline
       once with its deck_dir:
 
@@ -800,8 +721,7 @@ steps:
            topic=<short topic>,
            role / audience / scene=<from analysis>,
            style_hint=<ONLY visual constraints explicitly stated by the user>,
-           style_flow=<exact hidden auto or preview_choice value>,
-           style_selection=<exact A/B/C value only for preview_choice>,
+           style_flow=auto,
            generate_background_images=<true only when startup answer enabled it>,
            key_points_json='["point1","point2"]'  (JSON string, or omit)
            outline_markdown=<REQUIRED: your concise content outline, one ## heading
@@ -825,8 +745,7 @@ steps:
       user-visible content; keep page headings clear and content concise.
       This step never generates AI backgrounds; the dedicated stages before it
       already published prompts and images. When AI backgrounds were
-      disabled and those steps were skipped, style_flow determines deck reuse:
-      preview_choice reuses the preview deck; auto calls ppt_build_outline without
+      disabled and those steps were skipped, call ppt_build_outline without
       deck_dir so it initializes the deck and creates one unique style first.
 
       This is an atomic step. If ppt_build_outline fails, report that exact tool
@@ -860,8 +779,6 @@ steps:
         required: true
       - material: style_flow
         required: true
-      - material: style_selection
-        required: false
     outputs:
       - material: deck_outline
     acceptance_criteria: |
@@ -977,9 +894,6 @@ steps:
       Style flow:
       {{style_flow}}
 
-      Selected preview (A/B/C when applicable):
-      {{style_selection}}
-
       Original/current user request:
       {{user_input}}
       A bare continue/继续 is approval to proceed. Use launch_user_input from the
@@ -992,12 +906,9 @@ steps:
         page_count, audience, scene, the user's style_hint, style_flow=auto, and
         generate_background_images=true. This only initializes metadata and
         reuses an already bound deck on retry; no style-generation call is needed.
-      - For preview_choice, call ppt_find_deck, then ppt_prepare_style with its
-        deck_dir, style_flow=preview_choice, and the selected A/B/C style_selection.
-        Reuse that saved preview's style_spec; do not create another style.
       - For a targeted revision, call ppt_find_deck and keep the existing deck.
 
-      Use the user's existing style and colors (or the selected preview). Write
+      Use the user's existing style and colors. Write
       a simple scene relevant to each page, leave a calm area for slide text,
       and keep the backgrounds visually consistent. If layout is unknown, leave
       the left side calm and put decoration on the right. Backgrounds contain no
@@ -1034,7 +945,6 @@ steps:
     tools:
       - ppt_init_deck
       - ppt_find_deck
-      - ppt_prepare_style
       - ppt_read_page_outline
       - ppt_publish_background_prompts
     inputs:
@@ -1044,8 +954,6 @@ steps:
         required: false
       - material: style_flow
         required: true
-      - material: style_selection
-        required: false
     outputs:
       - material: background_prompts
         required: true

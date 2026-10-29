@@ -30,6 +30,28 @@ func seedChatRuntimeModel(t *testing.T, db *gorm.DB, owner, id string, verified,
 		}
 	}
 }
+func TestChatRuntimeKeepsKeylessDefaultCandidate(t *testing.T) {
+	db := orm.MigrateAllModelsForTest(t).DB
+	seedChatRuntimeModel(t, db, "user", "qwen", false, false)
+	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-qwen").Update("api_key", "").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.UserSelectedModel{UserID: "user", ModelKey: "llm", UserModelProviderGroupModelID: "qwen"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	result, err := LoadChatModelCandidates(t.Context(), db, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Candidates) != 1 || result.Candidates[0].CandidateID != "own:qwen" {
+		t.Fatal("keyless default model was excluded from chat candidates")
+	}
+	config := result.Candidates[0].LLMConfig["llm"].(map[string]any)
+	if config["skip_auth"] != true || config["api_key"] != "" {
+		t.Fatal("keyless chat candidate did not preserve unauthenticated access")
+	}
+}
+
 func TestChatRuntimeCandidatesRespectOwnerSharingAndRevocation(t *testing.T) {
 	db := orm.MigrateAllModelsForTest(t).DB
 	seedChatRuntimeModel(t, db, "user", "own", true, false)

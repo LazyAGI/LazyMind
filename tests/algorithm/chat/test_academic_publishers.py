@@ -20,14 +20,10 @@ def publisher(tmp_path, monkeypatch):
     class Module:
         """Replace HTTP in the actual loaded namespace."""
 
-        @property
-        def namespace(self):
-            return namespace
-
-        def __getattr__(self, name):
-            return namespace[name]
-
     module = Module()
+    # Keep attributes in the real namespace so monkeypatch can inspect and
+    # restore them, including pytest versions that use static attribute lookup.
+    module.__dict__ = namespace
     body = {'user_instruction': 'read actual evidence', 'candidate_directions': ['agents'],
             'selected_directions': ['agents'], 'papers': [
                 {'paper': {'paper_id': 'a', 'title': 'model title'}, 'is_seed': False, 'is_important': False}]}
@@ -41,7 +37,7 @@ def publisher(tmp_path, monkeypatch):
     resolved = {'papers': [{'paper': {'paper_id': 'a', 'title': 'server title', 'source_version': 'v2'},
                            'is_seed': True, 'is_important': True}],
                 'contents': [{'paper_id': 'a', 'status': 'ready'}]}
-    monkeypatch.setitem(namespace, '_resolve', lambda ids: copy.deepcopy(resolved))
+    monkeypatch.setattr(module, '_resolve', lambda ids: copy.deepcopy(resolved))
     return module, ctx, events, resolved
 
 
@@ -108,11 +104,9 @@ def test_direction_entry_accepts_no_seeds_and_seed_entry_cannot_drop_them(publis
     module, ctx, _, resolved = publisher
     ctx.params['step_id'] = 'prepare_seed_set'
     body = ctx.params['remote_inputs']['expanded_papers']
-    monkeypatch.setitem(
-        module.namespace, 'academic_expansion_context', lambda _: {'record': {'result': {'papers': None}}},
-    )
+    monkeypatch.setattr(module, 'academic_expansion_context', lambda _: {'record': {'result': {'papers': None}}})
     assert module.academic_validate_stage(body)['status'] == 'valid'
-    monkeypatch.setitem(module.namespace, 'academic_expansion_context', lambda _: {
+    monkeypatch.setattr(module, 'academic_expansion_context', lambda _: {
         'record': {'result': {'papers': [{'paper': {'paper_id': 'seed'}, 'is_seed': True}]}}})
     with pytest.raises(ToolExecutionError, match='all selected seed'):
         module.academic_validate_stage(body)

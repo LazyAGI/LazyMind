@@ -20,6 +20,7 @@ import (
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/connectorconfig"
+	"lazymind/agentconnector/internal/integrationstate"
 )
 
 //go:embed assets/connector.mjs assets/presentation.html
@@ -38,8 +39,7 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 	var stop context.CancelFunc
 	var done chan error
 	var fingerprint string
-	var startupFingerprint string
-	startupChecked := false
+	startupMigrationChecked := false
 	cleanup := func() {
 		if stop != nil {
 			stop()
@@ -64,29 +64,21 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 		}
 		definition, _ := json.Marshal(connection)
 		current := config.Node + "|" + config.PairingFile + "|" + strconv.Itoa(config.CDPPort) + "|" + scope + "|" + pair.Token + "|" + string(definition)
-		if scopeErr != nil || configErr != nil || !pair.Enabled {
+		if scopeErr != nil || configErr != nil || !pair.Enabled || !integrationstate.Allowed(home, "workbuddy") {
 			if worker != nil {
 				cleanup()
 			}
-			if !startupChecked || startupFingerprint != "" {
-				if err := configureDesktopStartup(ctx, home, 0, false); err != nil {
-					log.Printf("WorkBuddy startup cleanup: %v", err)
-				} else {
-					startupChecked = true
-					startupFingerprint = ""
+		} else {
+			if !startupMigrationChecked {
+				// Retry a failed migration on the next Bridge startup, not every
+				// supervisor tick. Temporary account failures never reach this path.
+				startupMigrationChecked = true
+				if err := migrateDesktopStartup(ctx, home, scope); err != nil {
+					log.Printf("WorkBuddy startup migration: %v", err)
 				}
 			}
-		} else {
 			if worker != nil && current != fingerprint {
 				cleanup()
-			}
-			if !startupChecked || startupFingerprint != current {
-				if err := configureDesktopStartup(ctx, home, config.CDPPort, true); err != nil {
-					log.Printf("WorkBuddy startup configuration: %v", err)
-				} else {
-					startupChecked = true
-					startupFingerprint = current
-				}
 			}
 			if worker == nil {
 				var node string

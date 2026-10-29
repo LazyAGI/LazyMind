@@ -493,3 +493,14 @@ API 依据：[GitHub PR 列表接口](https://docs.github.com/en/rest/pulls/pull
 - 风格：真实模型复杂约束遵循率、留白变化幅度和整套配色视觉回归；当前无变化检测仅比较 HTML，不等价于像素差异或语义验收。原生 PPTX 不走新增 HTML restyle 工具，图片内色彩不会由 CSS 调色自动改变。
 - 版本：刷新异常的复现和根因修复；刷新/重进/断线、单页重试、整套重生成的产品级回归；原生 PPTX 并发修订校验及发布失败草稿恢复。
 - 验收：三个 PRD 的完整产品验收、全量前端类型检查及真实 PowerPoint 打开/编辑/导出验证仍未完成。局部测试通过不等于完整验收。
+
+## 2026-10-28：部分生成恢复、诊断与调用预算
+
+- 页面失败不再阻塞后续成功页发布。缺页在原位置显示“未生成”卡片，HTML 和讲稿保持相同位置；占位卡不计入成功数，也不写成生成成功的 HTML 文件。重试成功后覆盖对应位置，已有成功页按输入/输出哈希复用。
+- `failed_detail` 和页面重试记录增加 `diagnostics`，保留底层可用的错误类别、HTTP 状态、诊断 ID、模型调用 ID、请求次数、耗时、provider 和模型名。不保存 API Key、请求头、供应商原始响应体；传输断开没有 HTTP 状态时不虚构状态码。
+- 费用防护只按调用次数控制，**不新增或覆盖输出 token 上限**。`LAZYMIND_PPT_MAX_MODEL_CALLS` 默认“本批页数 + 3”，包含初次生成、内部修正和页面重试；每次模型调用关闭隐藏的传输层自动重试，统一计入预算。`retry_count` 仍表示页面级重试记录数，`model_calls` 才是本批实际获准发出的模型请求次数。
+- `LAZYMIND_PPT_MAX_CONSECUTIVE_FAILURES` 默认 3；连续失败或认证/权限/额度错误会熔断，不再发送后续模型请求。原有 `LAZYMIND_PPT_PAGE_RETRIES` 默认 1、范围 0–3；超时页不自动重试。同一次失败 Attempt 仍禁止 Agent 自行重新启动整批生成，新 Attempt 重新分配预算。
+- `LAZYMIND_PPT_PAGE_TIMEOUT` 默认 360 秒、`LAZYMIND_PPT_BATCH_TIMEOUT` 默认 1800 秒，限制页面及本批 HTML 生成累计时间。流式读取时检查 deadline，超出后关闭当前请求；完全没有新网络数据时由 read timeout 退出，实际停止可能晚于 deadline，最多再等待一次读超时。已有成功页保留并正常发布。预算及停止原因随批次结果返回。
+- 素材注册前对本地/下载图片进行完整解码、尺寸和像素检查：最大 12 MiB、3600 万像素；最短边至少 48 像素、面积至少 16384 像素；拒绝损坏/截断、全透明或纯色图片。小于 1 KiB 的有效压缩图片仍可通过；下载响应无论成功失败均关闭。
+- 边界：请求次数不是供应商金额保证，超时/断连后的供应商计费和已消耗 token 无法回滚。图片校验可识别坏文件、跟踪像素和明显空白占位图，但不能确定所有可正常解码的错误提示图片或内容不相关图片。未更改 LazyLLM 子模块；未重启服务，未执行收费模型验收。
+- CI 回归入口：`tests/algorithm/chat/workflows/test_ppt_generation_resilience.py`；原有发布/重试回归在 `workflows/ppt-workflow/scripts/tests/test_partial_edit.py`。

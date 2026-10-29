@@ -86,6 +86,22 @@ describe('hydrateWorkflowUI', () => {
 });
 
 describe('filterWorkflowTabs', () => {
+  it('shows executed collection or academic analysis in the shared materials tab', () => {
+    const tabs = [{ id: 'materials', label: 'Materials', step_id: 'collect_materials',
+      status_step_ids: ['collect_materials', 'analyze_academic_sources'], slots: [],
+      hide_when_material: 'skip_material_collection' }];
+    const slots = [{ slot: 'skip_material_collection', selected: true }] as SlotRevision[];
+    expect(filterWorkflowTabs(tabs, slots)).toEqual([]);
+    for (const step_id of tabs[0].status_step_ids) {
+      expect(filterWorkflowTabs(tabs, slots, undefined, {
+        projection: { past: [step_id] },
+      })).toEqual(tabs);
+      expect(filterWorkflowTabs(tabs, slots, undefined, {
+        projection: { past: [step_id], stale: [step_id] },
+      })).toEqual([]);
+    }
+  });
+
   it('defers conditional tabs until the declared planning material is ready', () => {
     const tabs = [
       { id: 'planning', label: 'Planning', slots: [] },

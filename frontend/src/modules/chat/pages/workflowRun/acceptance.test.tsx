@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import i18n from '@/i18n';
 import WorkflowRunPage from './index';
+import type { WorkflowPanelControlAdapter } from '@/modules/chat/components/WorkflowPanel';
 
 // Exercise the real run-page command/receipt/error path, without dispatching a
 // live Agent. Panel controls themselves are covered by WorkflowPanel.layout.
@@ -18,8 +19,8 @@ vi.mock('./loadRun', () => ({
   watchWorkflowRun: (_id: string, reload: () => void) => { fixture.reload = reload; return () => {}; },
 }));
 vi.mock('@/modules/chat/components/WorkflowPanel/external/useExecutionActivity', () => ({ useExecutionActivity: () => ({}) }));
-vi.mock('@/modules/chat/components/WorkflowPanel', () => ({ WorkflowPanel: ({ controlAdapter }: any) =>
-  <button onClick={() => controlAdapter.execute({ kind: 'confirm', review: fixture.review })}>确认测试审核</button>,
+vi.mock('@/modules/chat/components/WorkflowPanel', () => ({ WorkflowPanel: ({ controlAdapter }: { controlAdapter: WorkflowPanelControlAdapter }) =>
+  <button onClick={() => controlAdapter.execute({ kind: 'approve', stepId: 'analyze' })}>确认测试审核</button>,
 }));
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -42,11 +43,24 @@ it('refreshes after the matching receipt without adding a routine confirmation b
   render(<WorkflowRunPage embedded />);
   fireEvent.click(await screen.findByRole('button', { name: '确认测试审核' }));
   await waitFor(() => expect(fixture.control).toHaveBeenCalledOnce());
-  expect(fixture.control.mock.calls[0][1]).toMatchObject({ kind: 'confirm', expected_state_version: 1, review_id: 'review', review_version: 1, manifest_hash: 'test-hash' });
+  expect(fixture.control.mock.calls[0][1]).toMatchObject({ kind: 'confirm_and_continue', step_id: 'analyze', expected_state_version: 1, review_id: 'review', review_version: 1, manifest_hash: 'test-hash' });
   expect(fixture.load).toHaveBeenCalledTimes(2);
   act(() => acknowledge());
   await waitFor(() => expect(fixture.load).toHaveBeenCalledTimes(3));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+it.each(['missing', 'changed'])('keeps the approval unsubmitted when the displayed review is %s', async scenario => {
+  const baseline = await fixture.load();
+  fixture.load.mockClear();
+  const fresh = structuredClone(baseline);
+  if (scenario === 'missing') baseline.control.reviews = [];
+  else fresh.control.reviews[0] = { ...fixture.review, version: 2, manifest_hash: 'changed' };
+  fixture.load.mockResolvedValueOnce(baseline).mockResolvedValue(fresh);
+  render(<WorkflowRunPage embedded />);
+  fireEvent.click(await screen.findByRole('button', { name: '确认测试审核' }));
+  expect(await screen.findByText('内容已保存或发生变化。请检查更新后的内容，再确认当前步骤。')).toBeVisible();
+  expect(fixture.control).not.toHaveBeenCalled();
 });
 
 it.each(['STATE_VERSION_CONFLICT', 'REVIEW_VERSION_CONFLICT'])(

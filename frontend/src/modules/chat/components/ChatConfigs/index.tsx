@@ -124,7 +124,7 @@ const ChatConfigs = (props: Props) => {
           allowClear
           placeholder={t("chat.knowledgeBaseName")}
           optionFilterProp="label"
-          onChange={(value) => {
+          onChange={(value: string[]) => {
             if (value.length === knowledgeBaseList.length) {
               setIsAllSelected(true);
             } else {

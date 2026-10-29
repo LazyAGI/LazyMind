@@ -22,6 +22,7 @@ import {
   PaperClipOutlined,
   PlusOutlined,
   SettingOutlined,
+  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { debounce } from "lodash";
 import SkillRecordingPanel from "../SkillRecording";
@@ -1598,12 +1599,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         setAddMenuOpen(open);
                       }}
                       placement="topLeft"
-                      styles={{ body: { height: menuHeight } }}
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div id={addMenuId} className="chat-add-resource-menu">
                           <button type="button" onClick={() => { setAddMenuOpen(false); setRecordingOpen(true); }}>
-                            <span aria-hidden="true">◉</span>{t("recording.title")}
+                            <VideoCameraOutlined className="chat-add-resource-menu-icon" />{t("recording.title")}
                           </button>
                             <button
                               type="button"
@@ -1619,7 +1619,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                 setAddMenuOpen(false);
                               }}
                             >
-                              <PaperClipOutlined />
+                              <PaperClipOutlined className="chat-add-resource-menu-icon" />
                               {t("chat.addAttachment")}
                             </button>
                           {showSkillDeposit && isChatContent && (
@@ -1631,7 +1631,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                   aria-disabled={isSkillDepositDisabled}
                                   onClick={handleSkillDeposit}
                                 >
-                                  <BulbOutlined />
+                                  <BulbOutlined className="chat-add-resource-menu-icon" />
                                   {t("chat.skillDeposit")}
                                 </button>
                               </span>
@@ -1652,7 +1652,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                     }, 0);
                                   }}
                                 >
-                                  <BookOutlined />
+                                  <BookOutlined className="chat-add-resource-menu-icon" />
                                   {t("chat.knowledgeBase")}
                                 </button>
                               </span>
@@ -1665,7 +1665,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               promptRef.current?.onOpen();
                             }}
                           >
-                            <CommentOutlined />
+                            <CommentOutlined className="chat-add-resource-menu-icon" />
                             {t("chat.promptTemplate")}
                           </button>
                         </div>

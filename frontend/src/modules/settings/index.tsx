@@ -870,7 +870,7 @@ function SettingsPageContent() {
       content = renderDiagnostics();
     } else {
       content = <>
-        {integratedHeader(t("settingsPage.sections.developer"), selectedSection.detail)}
+        {integratedHeader(t("settingsPage.sections.developer"), t("settingsPage.developer.description"))}
         <div className="settings-detail-group">
           <div className="settings-detail-row">
             <div>
@@ -888,59 +888,66 @@ function SettingsPageContent() {
               aria-label={t("settingsPage.developer.modeAria")}
             />
           </div>
-          <div className="settings-detail-row">
-            <div>
-              <strong>{t("settingsPage.developer.sensitiveWordFilter")}</strong>
-              <p>{t("settingsPage.developer.sensitiveWordFilterDesc")}</p>
+          <div
+            className={`settings-developer-options${developerActive ? "" : " is-master-paused"}`}
+            role="group"
+            aria-label={t("settingsPage.developer.optionsGroupAria")}
+            aria-disabled={!developerActive}
+          >
+            <div className="settings-detail-row" aria-disabled={!developerActive}>
+              <div>
+                <strong>{t("settingsPage.developer.sensitiveWordFilter")}</strong>
+                <p>{t("settingsPage.developer.sensitiveWordFilterDesc")}</p>
+              </div>
+              <Switch
+                className="settings-ref-switch"
+                checked={sensitiveWordFilterEnabled}
+                loading={saving === "sensitive_word_filter"}
+                disabled={!developerActive || saving !== null}
+                onChange={async (enabled) => {
+                  setSaving("sensitive_word_filter");
+                  try {
+                    await patchUserUiPreferences({ sensitive_word_filter_enabled: enabled });
+                    setSensitiveWordFilterEnabled(enabled);
+                    await refresh();
+                    message.success(t("settingsPage.saved"));
+                  } catch (error) {
+                    message.error(getLocalizedErrorMessage(error));
+                  } finally {
+                    setSaving(null);
+                  }
+                }}
+                aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
+              />
             </div>
-            <Switch
-              className="settings-ref-switch"
-              checked={sensitiveWordFilterEnabled}
-              loading={saving === "sensitive_word_filter"}
-              disabled={!developerActive || saving !== null}
-              onChange={async (enabled) => {
-                setSaving("sensitive_word_filter");
-                try {
-                  await patchUserUiPreferences({ sensitive_word_filter_enabled: enabled });
-                  setSensitiveWordFilterEnabled(enabled);
-                  await refresh();
-                  message.success(t("settingsPage.saved"));
-                } catch (error) {
-                  message.error(getLocalizedErrorMessage(error));
-                } finally {
-                  setSaving(null);
-                }
-              }}
-              aria-label={t("settingsPage.developer.sensitiveWordFilterAria")}
-            />
-          </div>
-          <div className="settings-detail-row">
-            <div>
-              <strong>{t("settingsPage.developer.performanceTitle")}</strong>
-              <p>{t("settingsPage.developer.performanceDesc")}</p>
+            <div className="settings-detail-row" aria-disabled={!developerActive}>
+              <div>
+                <strong>{t("settingsPage.developer.performanceTitle")}</strong>
+                <p>{t("settingsPage.developer.performanceDesc")}</p>
+              </div>
+              <Switch
+                className="settings-ref-switch"
+                checked={performanceStatsEnabled}
+                loading={saving === "performance_stats"}
+                disabled={!developerActive || saving !== null}
+                onChange={async (enabled) => {
+                  setPerformanceStatsEnabled(enabled);
+                  setSaving("performance_stats");
+                  try {
+                    await patchUserUiPreferences({ performance_stats_enabled: enabled });
+                    cachePerformanceStatsEnabled(enabled);
+                    message.success(t("settingsPage.saved"));
+                  } catch {
+                    setPerformanceStatsEnabled(!enabled);
+                    cachePerformanceStatsEnabled(!enabled);
+                    message.error(t("settingsPage.saveFailed"));
+                  } finally {
+                    setSaving(null);
+                  }
+                }}
+                aria-label={t("settingsPage.developer.performanceAria")}
+              />
             </div>
-            <Switch
-              className="settings-ref-switch"
-              checked={performanceStatsEnabled}
-              loading={saving === "performance_stats"}
-              disabled={!developerActive || saving !== null}
-              onChange={async (enabled) => {
-                setPerformanceStatsEnabled(enabled);
-                setSaving("performance_stats");
-                try {
-                  await patchUserUiPreferences({ performance_stats_enabled: enabled });
-                  cachePerformanceStatsEnabled(enabled);
-                  message.success(t("settingsPage.saved"));
-                } catch {
-                  setPerformanceStatsEnabled(!enabled);
-                  cachePerformanceStatsEnabled(!enabled);
-                  message.error(t("settingsPage.saveFailed"));
-                } finally {
-                  setSaving(null);
-                }
-              }}
-              aria-label={t("settingsPage.developer.performanceAria")}
-            />
           </div>
         </div>
       </>;

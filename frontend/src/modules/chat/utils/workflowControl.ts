@@ -1,4 +1,5 @@
 import type { Snapshot, WorkflowControlCommand, WorkflowHostAction, WorkflowReviewCheckpoint } from '@/api/generated/core-client/api';
+import type { WorkflowSession } from '@/modules/chat/store/workflowPanel';
 
 export type WorkflowActionKind = 'save' | 'confirm' | 'confirm_and_continue' | 'continue' | 'retry' | 'rewind' | 'stop' | 'resume';
 
@@ -18,6 +19,33 @@ export interface WorkflowActionIntent {
   completedStepId?: string;
   review?: Pick<WorkflowReview, 'id' | 'version' | 'manifest_hash'>;
   preferenceScope?: 'step' | 'following';
+}
+
+/** User intent from the shared panel, independent of the host protocol. */
+export interface WorkflowPanelActionIntent extends Omit<WorkflowActionIntent, 'kind' | 'review'> {
+  kind: 'approve' | 'continue' | 'retry' | 'rewind' | 'stop' | 'resume';
+}
+
+/** Translate the shared action using the snapshot the user saw when clicking. */
+export function externalPanelAction(
+  intent: WorkflowPanelActionIntent,
+  session: WorkflowSession,
+  control: WorkflowControlView,
+): WorkflowActionIntent {
+  if (intent.kind === 'approve') {
+    const review = control.reviews.find(item => item.status === 'pending' && item.step_id === intent.stepId);
+    if (!review) throw new ReviewRefreshRequired('Review is no longer available');
+    return { ...intent, kind: 'confirm_and_continue', review };
+  }
+  if (intent.kind === 'retry') {
+    // Browsing another tab never changes which failed execution is retried.
+    const failedStep = session.projection?.current?.find(id => {
+      const node = session.projection?.nodes?.[id];
+      return node?.validity !== 'stale' && node?.execution === 'failed';
+    }) ?? session.steps?.find(step => step.validity !== 'stale' && step.status === 'failed')?.step_id;
+    return { ...intent, kind: 'retry', stepId: failedStep ?? session.current_step_id };
+  }
+  return { ...intent, kind: intent.kind };
 }
 
 export interface WorkflowControlRequest extends Pick<WorkflowControlCommand, 'command_id' | 'expected_state_version' | 'step_id' | 'review_id' | 'review_version' | 'manifest_hash'> {
@@ -46,13 +74,6 @@ export function deliveryBanner(delivery: WorkflowControlView['delivery'] | null 
 export function overlayInfoBanner(noticeKey: string, delivery: WorkflowControlView['delivery'] | null | undefined, binding?: WorkflowControlView['binding']): OverlayInfoBanner | undefined {
   if (noticeKey === REVIEW_CHANGED_NOTICE) return { key: noticeKey, tone: 'info' };
   return deliveryBanner(delivery, binding);
-}
-
-export function deliveryPending(control: WorkflowControlView): boolean {
-  const delivery = control.delivery;
-  if (!delivery || delivery.consumed_at) return false;
-  if (delivery.status === 'accepted' && delivery.execution_id && !control.active_execution_ids.includes(delivery.execution_id)) return false;
-  return ['pending', 'dispatching', 'unknown'].includes(delivery.status) || delivery.status === 'accepted' && delivery.kind === 'continue';
 }
 
 /** One user operation retains its exact command after uncertain delivery. */
