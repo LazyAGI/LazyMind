@@ -818,3 +818,25 @@ describe("ChatInput optional reranking", () => {
     expect(info).not.toHaveBeenCalled();
   });
 });
+
+describe('paper composer scope',()=>{
+ it('keeps model selection and send while removing toolbar extras only in paper mode',()=>{
+  const props={value:'Read this paper',onChange:vi.fn(),isChatContent:true,showConversationConfig:false,showPromptSuggestions:false};
+  const view=render(<ChatInput {...props} composerVariant="paper"/>);
+  expect(screen.getByRole('button',{name:'begin model save'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'chat.send'})).toBeInTheDocument();
+  expect(screen.queryByRole('button',{name:'chat.addResource'})).toBeNull();
+  expect(view.container.querySelector('.chat-core-actions .chat-add-resource-trigger')).toBeNull();
+  expect(view.container.querySelector('.chat-featured-capability')).toBeNull();
+  view.rerender(<ChatInput {...props}/>);
+  expect(screen.getByRole('button',{name:'chat.addResource'})).toBeInTheDocument();
+ });
+});
+
+it('paper draft uses its isolated model selection on the first send',async()=>{
+ const selected={mode:'fixed' as const,model_id:'paper-model',source:'own' as const,version:0};
+ useModelSelectionStore.getState().setSelection('pdf-draft',selected);
+ const send=vi.fn();render(<ChatInput composerVariant="paper" modelSelectionDraft sessionId="pdf-draft" value="Explain this paper" onChange={vi.fn()} onSend={send} isChatContent showConversationConfig={false}/>);
+ fireEvent.click(screen.getByRole('button',{name:'chat.send'}));
+ await waitFor(()=>expect(send).toHaveBeenCalledWith(expect.objectContaining({initial_model_selection:{mode:'fixed',model_id:'paper-model',source:'own'}})));
+});

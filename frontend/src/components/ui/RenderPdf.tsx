@@ -1,3 +1,9 @@
+import {PdfPaperGuide} from "./PdfPaperGuide";
+import {PdfBilingualReader} from "./PdfBilingualReader";
+import {PdfVisualStudy} from "./PdfVisualStudy";
+import {PdfFigureLayer} from "./PdfFigureLayer";
+import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
+import "./PdfPaperReader.css";
 import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -10,9 +16,11 @@ import { isLearningActionCompatible, type LearningSelectionAction } from "./lear
 import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
 import { usePdfStudyLayout } from "./usePdfStudyLayout";
 import { PdfFormulaStudy } from "./PdfFormulaStudy";
+import { PdfTableStudy } from "./PdfTableStudy";
+import { PdfTableLayer, hasTableGeometry } from "./PdfTableLayer";
 import { formulaNumberMap, formulaReferenceForClick } from "./pdfFormulaReferences";
 import type { FormulaEvidence } from "@/modules/knowledge/api/formulaExplanation";
-import type { PdfIRBlock } from "@/modules/knowledge/api/pdfIR";
+import type { PdfIRBlock, PdfIRDocument } from "@/modules/knowledge/api/pdfIR";
 import { PdfFormulaLayer, hasFormulaGeometry } from "./PdfFormulaLayer";
 import { usePdfIR, usablePdfIR, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
 import pdfWorkerUrl from "@react-pdf-worker/pdf.worker.min.mjs?url";
@@ -22,6 +30,8 @@ export type { PdfReferenceAction } from "./pdfReferenceGeometry";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface RenderPdfProps {
+  onPdfIRDocumentChange?: (document: PdfIRDocument | undefined) => void;
+  pdfNavigateTo?: {id: string; requestId: number};
   pdfIRTarget?: PdfIRTarget;
   pdfSourceHash?: string;
   onPreviewError?: () => void;
@@ -92,6 +102,8 @@ function hasUsablePdfText(value: string): boolean {
 
 export default function RenderPdf({
   onPreviewError,
+  onPdfIRDocumentChange,
+  pdfNavigateTo,
   pdfIRTarget,
   pdfSourceHash,
   fileData,
@@ -123,12 +135,28 @@ export default function RenderPdf({
   onViewPositionChange,
 }: RenderPdfProps) {
   const { t } = useTranslation();
+  const {label:readerLabel}=usePaperReaderLabels();
+  const [readerMode,setReaderMode]=useState<"original"|"bilingual"|"insight">("original");
+  const [navigationOrigin,setNavigationOrigin]=useState<"bilingual"|"insight">();
+  const [visualSelection,setVisualSelection]=useState<PdfIRBlock>();
+  const lastRequestedNavigation=useRef("");
   const pdfIR = usePdfIR(pdfIRTarget);
   const [formulasEnabled, setFormulasEnabled] = useState(true);
   const formulaDocument = usablePdfIR(pdfIR.state, pdfSourceHash);
+  useEffect(()=>{onPdfIRDocumentChange?.(formulaDocument);return()=>onPdfIRDocumentChange?.(undefined);},[formulaDocument,onPdfIRDocumentChange]);
+  const imageBlocks=useMemo(()=>(formulaDocument?.blocks || []).filter(block=>block.type==="image"),[formulaDocument]);
   const studyReaderRef = useRef<HTMLDivElement>(null);
   const studyLayout = usePdfStudyLayout(studyReaderRef);
   const [studyOpen, setStudyOpen] = useState(false);
+  const [tablesEnabled, setTablesEnabled] = useState(true);
+  const [tableStudyOpen, setTableStudyOpen] = useState(false);
+  const [tableSelection, setTableSelection] = useState<PdfIRBlock>();
+  const tableBlocks = useMemo(() => (formulaDocument?.blocks || []).filter(block => block.type === "table" && block.table), [formulaDocument]);
+  const tablePages = useMemo(() => {
+    const pages = new Map<number, PdfIRBlock[]>();
+    for (const block of tableBlocks) if (hasTableGeometry(block)) pages.set(block.page, [...(pages.get(block.page) || []), block]);
+    return pages;
+  }, [tableBlocks]);
   const [studySelection, setStudySelection] = useState<{block: PdfIRBlock; explain: boolean}>();
   const [studyHighlight, setStudyHighlight] = useState<FormulaEvidence>();
   const [studyReturn, setStudyReturn] = useState<PdfViewPosition>();
@@ -136,11 +164,12 @@ export default function RenderPdf({
   const studyPointer = useRef<{x:number;y:number}>();
   const studyBlocks = useMemo(() => (formulaDocument?.blocks || []).filter(block => block.type === "formula" && !!block.latex?.trim()), [formulaDocument]);
   const numberedFormulas = useMemo(() => formulaNumberMap(studyBlocks), [studyBlocks]);
-  const studySourceKey = formulaDocument ? `${formulaDocument.source_sha256}:${formulaDocument.version}:${formulaDocument.parser.name}:${formulaDocument.parser.model}` : "";
+  const studySourceKey = formulaDocument ? `${formulaDocument.source_sha256}:${formulaDocument.version}:${formulaDocument.projection_version || 0}:${formulaDocument.parser.name}:${formulaDocument.parser.model}` : "";
   useEffect(() => {
-    setStudyOpen(false); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); setPendingStudyNavigation(undefined);
+    setReaderMode("original");setNavigationOrigin(undefined);setVisualSelection(undefined);
+    setStudyOpen(false); setTableStudyOpen(false); setTableSelection(undefined); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); setPendingStudyNavigation(undefined);
   }, [studySourceKey]);
-  const explainFormula = (block: PdfIRBlock) => { setStudySelection({block,explain:true}); setStudyOpen(true); };
+  const explainFormula = (block: PdfIRBlock) => { setVisualSelection(undefined);setTableStudyOpen(false); setStudySelection({block,explain:true}); setStudyOpen(true); };
   const formulaPages = useMemo(() => {
     const pages = new Map<number, import("@/modules/knowledge/api/pdfIR").PdfIRBlock[]>();
     for (const block of formulaDocument?.blocks || []) {
@@ -234,8 +263,12 @@ export default function RenderPdf({
       if (!containerRef.current) {
         return;
       }
-      setViewportHeight(containerRef.current.clientHeight);
-      setContainerWidth(containerRef.current.clientWidth);
+      const {clientWidth,clientHeight}=containerRef.current;
+      // Hidden reading modes report zero; retain the rendered viewport so PDF.js
+      // does not resize/cancel canvases and evict virtual pages while invisible.
+      if(clientWidth<=0 || clientHeight<=0)return;
+      setViewportHeight(clientHeight);
+      setContainerWidth(clientWidth);
     };
     updateViewport();
     const resizeObserver = typeof ResizeObserver === "undefined"
@@ -694,6 +727,13 @@ export default function RenderPdf({
     }, 100);
     return () => window.clearTimeout(timer);
   }, [pendingStudyNavigation,pageTops,pageHeightsPx,pageSizesMap]);
+  const openTableStudy = (block: PdfIRBlock) => {
+    setVisualSelection(undefined);setStudyOpen(false); setTableStudyOpen(true); setTableSelection(block);
+    navigateStudyEvidence({id:block.id,text:block.table?.captions.join("\n") || "",page:block.page,bbox:block.bbox});
+  };
+  const closeStudy = () => {
+    setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(false);setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);
+  };
   const returnFromStudy = () => {
     if (!studyReturn) return;
     const page=studyReturn.page-1;
@@ -701,6 +741,32 @@ export default function RenderPdf({
     containerRef.current?.scrollTo({top,behavior:"auto"}); setScrollTop(top);
     setStudyHighlight(undefined); setPendingStudyNavigation(undefined); setStudyReturn(undefined);
   };
+
+  const navigateSourceBlock = (id:string) => {
+    const block=formulaDocument?.blocks.find(item=>item.id===id);if(!block)return;
+    if(readerMode!=="original")setNavigationOrigin(readerMode);
+    setReaderMode("original");
+    navigateStudyEvidence({id:block.id,text:block.text || block.latex || "",page:block.page,bbox:block.bbox});
+  };
+  const openVisualStudy = (block:PdfIRBlock) => {
+    setStudyOpen(false);setTableStudyOpen(false);setVisualSelection(block);navigateSourceBlock(block.id);
+  };
+  const openRelatedStudy = (block:PdfIRBlock) => {
+    if(block.type==="formula"){navigateSourceBlock(block.id);explainFormula(block);}
+    else openVisualStudy(block);
+  };
+  const returnReaderMode = () => {
+    if(navigationOrigin){setReaderMode(navigationOrigin);setNavigationOrigin(undefined);closeStudy();}
+    else returnFromStudy();
+  };
+  useEffect(()=>{
+    if(!pdfNavigateTo || !pdfLoaded || !formulaDocument)return;
+    const request=`${pdfNavigateTo.requestId}:${pdfNavigateTo.id}`;
+    if(lastRequestedNavigation.current===request || !formulaDocument.blocks.some(block=>block.id===pdfNavigateTo.id))return;
+    lastRequestedNavigation.current=request;navigateSourceBlock(pdfNavigateTo.id);
+  // Navigation events are keyed by request ID; source/readiness may arrive later.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[pdfNavigateTo?.id,pdfNavigateTo?.requestId,pdfLoaded,formulaDocument]);
 
   const renderVirtualPage = (index: number) => {
     const { width, height } = pageSizesMap[index] || {
@@ -721,7 +787,7 @@ export default function RenderPdf({
           const block=formulaReferenceForClick(event.currentTarget,numberedFormulas,event.target as Element,studyPointer.current,event.clientX,event.clientY,window.getSelection()?.toString() || "");
           if (block) {
             event.preventDefault(); event.stopPropagation();
-            setStudyOpen(true);setStudySelection({block,explain:false});
+            setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);setStudySelection({block,explain:false});
             navigateStudyEvidence({id:block.id,page:block.page,text:block.latex || "",bbox:block.bbox});
           }
         }}
@@ -765,6 +831,8 @@ export default function RenderPdf({
           return valid ? {left:`${box[0]*100}%`,top:`${box[1]*100}%`,width:`${(box[2]-box[0])*100}%`,height:`${(box[3]-box[1])*100}%`} : {inset:3,background:"transparent"};
         })()} />}
         {formulasEnabled && formulaDocument && formulaPages.has(index) && <PdfFormulaLayer key={`${formulaDocument.source_sha256}:${formulaDocument.version}`} blocks={formulaPages.get(index)!} onExplain={explainFormula} />}
+        {formulaDocument && <PdfFigureLayer blocks={imageBlocks.filter(block=>block.page===index)} allBlocks={formulaDocument.blocks} onSelect={openVisualStudy}/> }
+        {tablesEnabled && formulaDocument && tablePages.has(index) && <PdfTableLayer key={`tables:${studySourceKey}`} blocks={tablePages.get(index)!} onSelect={openTableStudy} />}
         <div
           style={{
             position: "absolute",
@@ -800,7 +868,12 @@ export default function RenderPdf({
 
   const translationUnavailable=translateSelectionDisabled&&!isSingleEnglishWord(selectionAction?.selection.text||"");
   return (
-    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
+    <div className="pdf-reader-workspace" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
+    {pdfIRTarget&&<nav className="pdf-reader-modebar" aria-label={readerLabel("reading")}><div role="tablist"><button role="tab" aria-selected={readerMode!=="insight"} onClick={()=>setReaderMode("original")}>{readerLabel("reading")}</button><button role="tab" aria-selected={readerMode==="insight"} onClick={()=>setReaderMode("insight")}>{readerLabel("insight")}</button></div>{readerMode!=="insight"&&<div className="pdf-reader-view-toggle"><button aria-pressed={readerMode==="original"} onClick={()=>setReaderMode("original")}>{readerLabel("original")}</button><button aria-pressed={readerMode==="bilingual"} onClick={()=>setReaderMode("bilingual")}>{readerLabel("bilingual")}</button></div>}{navigationOrigin&&<button onClick={returnReaderMode}>{readerLabel(navigationOrigin==="insight"?"returnGuide":"returnBilingual")}</button>}</nav>}
+    <div className="pdf-reader-stage">
+    {pdfIRTarget&&formulaDocument&&<><div className="pdf-reader-reflow" hidden={readerMode!=="insight"}><PdfPaperGuide target={pdfIRTarget} document={formulaDocument} active={readerMode==="insight"} onNavigate={navigateSourceBlock} onStudy={openRelatedStudy}/></div><div className="pdf-reader-reflow" hidden={readerMode!=="bilingual"}><PdfBilingualReader target={pdfIRTarget} document={formulaDocument} active={readerMode==="bilingual"} onNavigate={navigateSourceBlock} onStudy={openRelatedStudy}/></div></>}
+    {pdfIRTarget&&!formulaDocument&&readerMode!=="original"&&<div className="pdf-reader-empty">{readerLabel("needsIR")}<button onClick={()=>setReaderMode("original")}>{readerLabel("original")}</button></div>}
+    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:"100%",width:"100%",display:readerMode==="original"?"flex":"none"}}>
     <div
       className={className}
       ref={containerRef}
@@ -823,9 +896,15 @@ export default function RenderPdf({
     >
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
         <span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
-        {formulaDocument && studyBlocks.length > 0 && <button onClick={() => setStudyOpen(true)}>{t("pdfFormula.openCatalog")}</button>}
+        {formulaDocument && studyBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}>{t("pdfFormula.openCatalog")}</button>}
+        {tableBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
+        {imageBlocks.length>0&&<select aria-label={readerLabel("visuals")} value="" onChange={event=>{const block=imageBlocks.find(item=>item.id===event.target.value);if(block)openVisualStudy(block);}}><option value="" disabled>{readerLabel("imageRegion")} ({imageBlocks.length})</option>{imageBlocks.filter(block=>block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}{imageBlocks.some(block=>!block.image?.number)&&<optgroup label={readerLabel("imageRegion")}>{imageBlocks.filter(block=>!block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}</optgroup>}</select>}
+        {tableStudyOpen&&tableSelection&&<button onClick={()=>openVisualStudy(tableSelection)}>{readerLabel("explainVisual")}</button>}
+        <details className="pdf-reader-display-settings"><summary>{readerLabel("displaySettings")}</summary><div>
         {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
+        {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}
         {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
+        </div></details>
       </div>}
       {selectionHighlights.map((highlight, index) => (
         <div
@@ -1049,7 +1128,11 @@ export default function RenderPdf({
         </div>
       </Document>
     </div>
-    {studyOpen && formulaDocument && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} onSelect={block=>{setStudySelection({block,explain:false});navigateStudyEvidence({id:block.id,text:block.latex || "",page:block.page,bbox:block.bbox});}} onNavigate={navigateStudyEvidence} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={()=>{setStudyOpen(false);setStudyHighlight(undefined);setPendingStudyNavigation(undefined);setStudyReturn(undefined);}} />}
+    {studyOpen && formulaDocument && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} onSelect={block=>{setStudySelection({block,explain:false});navigateStudyEvidence({id:block.id,text:block.latex || "",page:block.page,bbox:block.bbox});}} onNavigate={navigateStudyEvidence} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
+    {tableStudyOpen && formulaDocument && <PdfTableStudy key={`tables:${studySourceKey}`} sourceKey={studySourceKey} blocks={tableBlocks} allBlocks={formulaDocument.blocks} selected={tableSelection} onSelect={openTableStudy} onNavigate={navigateStudyEvidence} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
+    {visualSelection&&formulaDocument&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} onNavigate={navigateSourceBlock} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnReaderMode} canReturn={!!navigationOrigin || !!studyReturn}/>}
+    </div>
+    </div>
     </div>
   );
 }

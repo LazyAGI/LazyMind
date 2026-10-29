@@ -3,9 +3,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { axiosInstance, BASE_URL } from '@/components/request';
 
 export interface PdfIRTarget { dataset: string; document: string; canWrite?: boolean }
-export interface PdfIRBlock { id: string; type: string; page: number; bbox?: [number, number, number, number]; latex?: string; text?: string }
+export interface PdfIRTableCell { text: string; row_span: number; col_span: number; header?: boolean }
+export interface PdfIRTable {
+  rows: Array<{cells: PdfIRTableCell[]}>;
+  captions: string[];
+  footnotes: string[];
+  number?: string;
+  related_blocks: Array<{block_id: string; relation: 'caption' | 'mention'}>;
+  warnings?: string[];
+}
+export interface PdfIRImage {captions:string[];footnotes:string[];number?:string;related_blocks:Array<{block_id:string;relation:"caption"|"mention"}>;warnings?:string[]}
+export interface PdfIRBlock { id: string; type: string; page: number; bbox?: [number, number, number, number]; latex?: string; text?: string; table?: PdfIRTable; image?: PdfIRImage }
 export interface PdfIRDocument {
-  version: 1; source_sha256: string;
+  version: 1; projection_version?: number; source_sha256: string;
   parser: { name: string; model: string };
   coordinate_space: 'normalized_top_left';
   pages: Array<{index: number; width?: number; height?: number}>;

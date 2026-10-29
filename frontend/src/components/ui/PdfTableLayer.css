@@ -1,0 +1,6 @@
+.pdf-table-layer{position:absolute;inset:0;pointer-events:none;z-index:8;}
+.pdf-table-region{position:absolute;pointer-events:none;box-sizing:border-box;border:1px solid transparent;border-radius:3px;}
+.pdf-table-region.is-hovered,.pdf-table-region:focus-within{border-color:#3c8c83;background:#489c9210;}
+.pdf-table-marker{position:absolute;right:0;top:0;display:flex;align-items:center;gap:5px;pointer-events:auto;min-height:28px;padding:4px 7px;background:#eef9f7;color:#216b62;border:1px solid #9bc9c2;border-radius:5px;font:12px/1.4 system-ui,sans-serif;cursor:pointer;box-shadow:0 1px 5px #234c4520;}
+.pdf-table-marker:hover,.pdf-table-marker:focus-visible{background:#ddf2ee;outline:2px solid #338e80;outline-offset:2px;}
+@media(pointer:coarse){.pdf-table-marker{min-height:44px;min-width:44px;}}

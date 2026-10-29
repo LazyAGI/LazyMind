@@ -54,6 +54,7 @@ export default function PdfTemporaryChat({
   onClose,
 }: PdfTemporaryChatProps) {
   const { t } = useTranslation();
+  const isPaper = /\.pdf$/i.test(fileName);
   const chatRef = useRef<ChatImperativeProps>(null);
   const initialConversationIdRef = useRef(newPreviewConversationId());
   const conversationIdRef = useRef(initialConversationIdRef.current);
@@ -168,6 +169,7 @@ export default function PdfTemporaryChat({
     },
     timeout: 1800000,
     payload: JSON.stringify({
+      ...extras,
       action,
       conversation_id: conversationId,
       conversation: {
@@ -178,7 +180,6 @@ export default function PdfTemporaryChat({
       surface: "knowledge_document_preview",
       stream: true,
       input,
-      ...extras,
       thinking_depth: "low",
       mode: "auto",
       basic_chat_only: true,
@@ -289,7 +290,7 @@ export default function PdfTemporaryChat({
 
   return (
     <aside
-      className="pdf-temporary-chat"
+      className={`pdf-temporary-chat${isPaper ? " pdf-temporary-chat--paper" : ""}`}
       aria-label={t("knowledge.pdfChatPanelLabel")}
       onPointerDown={() => touchCachedPdfChat(documentId, conversationIdRef.current)}
       onKeyDown={() => touchCachedPdfChat(documentId, conversationIdRef.current)}
@@ -304,7 +305,7 @@ export default function PdfTemporaryChat({
         </div>
         <Button type="text" icon={<CloseOutlined />} aria-label={t("common.close")} onClick={onClose} />
       </header>
-      <div className="pdf-temporary-chat__actions">
+      {!isPaper && <div className="pdf-temporary-chat__actions">
         <Button size="small" icon={<PlusOutlined />} onClick={() => void startNewConversation()}>
           {t("knowledge.pdfChatNew")}
         </Button>
@@ -318,7 +319,7 @@ export default function PdfTemporaryChat({
         >
           {t("knowledge.pdfChatSave")}
         </Button>
-      </div>
+      </div>}
       <div className="pdf-temporary-chat__body">
         {parseState === "parsing" ? (
           <Alert className="pdf-temporary-chat__parse-status" type="info" showIcon message={t("knowledge.pdfChatParsing")} description={t("knowledge.pdfChatParsingHint")} />
@@ -367,7 +368,9 @@ export default function PdfTemporaryChat({
           showThinkingDepth={false}
           showSkillDeposit={false}
           showConversationConfig={false}
-          showModelSelector={false}
+          showModelSelector
+          composerVariant="paper"
+          modelSelectionDraft={!conversationCreated}
           allowLocalWorkspace={false}
           fixedThinkingDepth="low"
         />

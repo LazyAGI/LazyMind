@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import FileViewer from "./index";
@@ -11,8 +11,9 @@ vi.mock("@/components/auth", () => ({
 }));
 vi.mock("@/components/request", () => ({ localizeErrorCode: (code: string) => code }));
 vi.mock("@/modules/knowledge/utils/request", () => ({ normalizeProxyableUrl: (url: string) => url }));
+const pdfProps = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 vi.mock("@/components/ui", () => ({
-  RenderPdf: () => null,
+  RenderPdf: (props: Record<string,unknown>) => { pdfProps.current=props; return null; },
   exportPdfAsImagePdf: vi.fn(),
   isLearningActionCompatible: () => false,
 }));
@@ -113,4 +114,13 @@ describe("document preview selection questions", () => {
     fireEvent.mouseUp(paragraph);
     expect(screen.queryByRole("button", { name: "knowledge.askPdfSelection" })).not.toBeInTheDocument();
   });
+});
+
+
+it("forwards source outline callbacks and repeated navigation requests to the PDF reader",async()=>{
+ const onChange=vi.fn();const props={file:"https://example.test/source.pdf",fileName:"source.pdf",onPdfIRDocumentChange:onChange};
+ const {rerender}=render(<FileViewer {...props} pdfNavigateTo={{id:"source-block",requestId:1}}/>);
+ await waitFor(()=>expect(pdfProps.current).toMatchObject({onPdfIRDocumentChange:onChange,pdfNavigateTo:{id:"source-block",requestId:1}}));
+ rerender(<FileViewer {...props} pdfNavigateTo={{id:"source-block",requestId:2}}/>);
+ await waitFor(()=>expect(pdfProps.current.pdfNavigateTo).toEqual({id:"source-block",requestId:2}));
 });

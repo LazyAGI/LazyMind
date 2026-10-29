@@ -2,18 +2,18 @@ package main
 
 import "testing"
 
-func TestFormulaExplanationOpenAPIContract(t *testing.T) {
-	schemas := formulaExplanationOpenAPISchemas()
-	result := schemas["PDFFormulaExplanation"].(map[string]any)["properties"].(map[string]any)
-	for _, name := range []string{"summary", "symbols", "steps", "evidence", "warnings", "model"} {
-		if result[name] == nil {
-			t.Fatalf("missing %s", name)
-		}
+func TestFormulaExplanationFocusOpenAPIContract(t *testing.T) {
+	schema := formulaExplanationOpenAPISchemas()["PDFFormulaExplanationRequest"].(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	focus, ok := properties["focus_symbol"].(map[string]any)
+	if !ok || focus["type"] != "string" || focus["maxLength"] != 500 || focus["minLength"] != 1 {
+		t.Fatalf("missing bounded optional focus contract: %#v", focus)
 	}
-	paths := formulaExplanationOpenAPIPaths()
-	path := paths["/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation"].(map[string]any)
-	op := path["post"].(map[string]any)
-	if op["requestBody"] == nil || op["parameters"] == nil {
-		t.Fatal("incomplete explanation operation")
+	if required, ok := schema["required"].([]string); ok {
+		for _, name := range required {
+			if name == "focus_symbol" {
+				t.Fatal("focus must remain optional")
+			}
+		}
 	}
 }

@@ -47,6 +47,8 @@ export interface FileViewerRef {
 }
 
 interface FileViewerProps {
+  onPdfIRDocumentChange?: (document: import("@/modules/knowledge/api/pdfIR").PdfIRDocument | undefined) => void;
+  pdfNavigateTo?: {id: string; requestId: number};
   pdfIRTarget?: import("@/modules/knowledge/api/pdfIR").PdfIRTarget;
   renderMarkdown?: (markdown: string) => ReactNode;
   data?: ArrayBuffer;
@@ -398,6 +400,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
           <RenderPdf
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
             pdfIRTarget={props.pdfIRTarget}
+            onPdfIRDocumentChange={props.onPdfIRDocumentChange}
+            pdfNavigateTo={props.pdfNavigateTo}
             pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
             className="scroll-container"
             style={{
@@ -513,6 +517,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     pdfFingerprint,
     props.pdfIRTarget,
+    props.onPdfIRDocumentChange,
+    props.pdfNavigateTo,
     props.file,
     props.fileName,
     props.renderMarkdown,

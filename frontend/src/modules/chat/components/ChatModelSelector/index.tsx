@@ -46,6 +46,7 @@ interface ChatModelSelectorProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   conversationId?: string;
+  draftSelectionKey?: string;
   disabled?: boolean;
   disabledReason?: string;
   thinkingDepth?: ThinkingDepth;
@@ -129,6 +130,7 @@ const ChatModelSelector = ({
   menuHeight,  open: controlledOpen,
   onOpenChange,
   conversationId,
+  draftSelectionKey,
   disabled = false,
   disabledReason,
   thinkingDepth,
@@ -147,7 +149,7 @@ const ChatModelSelector = ({
   const normalizedConversationId = isRealConversationId(conversationId)
     ? conversationId
     : undefined;
-  const selectionKey = chatModelSelectionKey(normalizedConversationId);
+  const selectionKey = normalizedConversationId ? chatModelSelectionKey(normalizedConversationId) : (draftSelectionKey || chatModelSelectionKey(undefined));
   const setStoredSelection = useModelSelectionStore((state) => state.setSelection);
   const [catalog, setCatalog] = useState<ChatModelCatalog | null>(null);
   const [loadStatus, setLoadStatus] = useState<LoadStatus>("loading");

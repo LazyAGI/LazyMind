@@ -35,6 +35,7 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	changeSource := false
 	modelKey := "one"
 	failModel := false
+	focusedMode := ""
 	handler := formulaExplanationHandler{
 		loadModel: func(context.Context, string) (map[string]any, string, string, error) {
 			if failModel {
@@ -49,6 +50,23 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 			}
 			if changeSource {
 				os.WriteFile(source, []byte("%PDF-changed"), 0600)
+			}
+			var input map[string]any
+			json.Unmarshal([]byte(content), &input)
+			if focus, ok := input["target_symbol"].(string); ok {
+				if !strings.Contains(instruction, "target_symbol") {
+					t.Error("focused instruction missing")
+				}
+				if focusedMode == "missing" {
+					return `{"summary":"Missing","symbols":[],"steps":[]}`, nil
+				}
+				if focusedMode == "multiple" {
+					return `{"summary":"Many","symbols":[{"symbol":"x","meaning":"one"},{"symbol":"y","meaning":"two"}],"steps":[]}`, nil
+				}
+				if focusedMode == "normalized" {
+					focus = "\\mathrm{x}^2"
+				}
+				return string(mustJSON(map[string]any{"summary": "Focused definition", "symbols": []map[string]any{{"symbol": focus, "meaning": "distance", "evidence_ids": []string{"p"}, "inferred": true}}, "steps": []any{}})), nil
 			}
 			return `{"summary":"Distance squared","symbols":[{"symbol":"x","meaning":"distance","evidence_ids":["p"]}],"steps":[]}`, nil
 		},
@@ -93,9 +111,49 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	if w := call("owner", "f", `{"language":"en"}`); w.Code != 200 || calls != 4 {
 		t.Fatal("language cache identity ignored")
 	}
+	for _, focus := range []string{"", "   ", "not-in-formula", strings.Repeat("x", 501)} {
+		body := string(mustJSON(map[string]any{"focus_symbol": focus}))
+		if w := call("owner", "f", body); w.Code != 400 || calls != 4 {
+			t.Fatalf("invalid focus accepted/generated: %q status=%d calls=%d", focus, w.Code, calls)
+		}
+	}
+	if w := call("stranger", "f", `{"focus_symbol":"x"}`); w.Code != 404 || calls != 4 {
+		t.Fatal("focused lookup bypassed ACL")
+	}
+	if w := call("owner", "f", `{"focus_symbol":"x"}`); w.Code != 200 || calls != 5 {
+		t.Fatalf("focused lookup reused general cache: %d %s calls=%d", w.Code, w.Body, calls)
+	}
+	if w := call("owner", "f", `{"focus_symbol":"x"}`); w.Code != 200 || calls != 5 {
+		t.Fatal("focused cache miss")
+	}
+	if w := call("owner", "f", `{"focus_symbol":"x^2"}`); w.Code != 200 || calls != 6 {
+		t.Fatal("different focus cache reused")
+	}
+	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 6 {
+		t.Fatal("focused request replaced general cache")
+	}
 	if w := call("owner", "f", `{"language":"invalid"}`); w.Code != 400 {
 		t.Fatal("invalid language accepted")
 	}
+	for _, mode := range []string{"missing", "multiple"} {
+		focusedMode = mode
+		if w := call("owner", "f", `{"focus_symbol":"x^2","force":true}`); w.Code != 502 {
+			t.Fatalf("ambiguous focused result accepted: %s %d", mode, w.Code)
+		}
+	}
+	focusedMode = "normalized"
+	if w := call("owner", "f", `{"focus_symbol":"x^2","force":true}`); w.Code != 200 {
+		t.Fatalf("normalized symbol failed: %s", w.Body)
+	} else {
+		var response struct {
+			Data formulaExplanation `json:"data"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &response)
+		if len(response.Data.Symbols) != 1 || response.Data.Symbols[0].Symbol != "x^2" || !response.Data.Symbols[0].Inferred {
+			t.Fatal("requested source identity not preserved")
+		}
+	}
+	focusedMode = ""
 	failModel = true
 	if w := call("owner", "f", `{}`); w.Code != 422 || strings.Contains(w.Body.String(), "secret") {
 		t.Fatalf("model failure: %d %s", w.Code, w.Body)

@@ -97,6 +97,7 @@ func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRRespo
 				s.ErrorMessage = "PDF IR artifact is invalid; retry parsing"
 				return s, nil
 			}
+			upgradePDFIRProjection(&d, result)
 			s.Status = "ready"
 			s.Document = &d
 		}

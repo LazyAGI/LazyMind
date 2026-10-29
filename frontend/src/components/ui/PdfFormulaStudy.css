@@ -7,8 +7,8 @@
 .pdf-formula-study button:hover{background:#edf4fc;border-color:#87a8cf;}
 .pdf-formula-study button:focus-visible,.pdf-formula-study select:focus-visible{outline:2px solid #4486c8;outline-offset:2px;}
 .pdf-formula-study .pdf-study-close{border:0;font-size:23px;padding:1px 9px;background:transparent;}
-.pdf-study-navigation{padding:14px 20px;display:grid;gap:10px;border-bottom:1px solid #e4ebf4;}
-.pdf-study-navigation label{font-size:11px;font-weight:600;color:#63768b;}
+.pdf-study-navigation{padding:14px 20px;display:flex;align-items:flex-end;gap:10px;border-bottom:1px solid #e4ebf4;}
+.pdf-study-navigation label{flex:1;min-width:0;font-size:11px;font-weight:600;color:#63768b;}
 .pdf-study-navigation select{display:block;width:100%;margin-top:5px;padding:8px 10px;color:#26374c;background:white;border:1px solid #cad8e8;border-radius:7px;font-size:13px;}
 .pdf-study-body{padding:0 20px 24px;overflow-wrap:anywhere;}
 .pdf-study-body section{padding:18px 0;border-bottom:1px solid #e4ebf4;}
@@ -36,3 +36,26 @@
 
 .pdf-study-inline-math{display:inline-block;max-width:100%;overflow-x:auto;overflow-y:hidden;vertical-align:middle;line-height:normal;padding:4px;}
 .pdf-study-symbols dt{max-width:110px;overflow-wrap:anywhere;}
+
+/* Symbols stay in the complete equation; generated targets do not add padding
+   or borders that would change mathematical spacing or line breaks. */
+.pdf-interactive-equation{padding:8px 4px 12px;}
+.pdf-interactive-symbol{cursor:pointer;border-radius:3px;transition:background-color .12s,box-shadow .12s;}
+.pdf-interactive-symbol:hover{background:#dcecff;box-shadow:0 0 0 2px #dcecff;}
+.pdf-interactive-symbol:focus-visible{outline:2px solid #367dc4;outline-offset:3px;background:#e6f1ff;}
+.pdf-interactive-symbol.is-selected{background:#cce3ff;box-shadow:0 0 0 2px #9fc4ed;}
+.pdf-symbol-hint{color:#617a94;font-size:11px;}
+.pdf-symbol-definition{padding:12px 14px;margin:10px 0 14px;border:1px solid #c7daef;border-radius:10px;background:#f0f6fd;box-shadow:0 3px 12px #1e426b08;}
+.pdf-symbol-definition:focus{outline:none;}.pdf-symbol-definition:focus-visible{outline:2px solid #367dc4;outline-offset:2px;}
+.pdf-symbol-definition-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.pdf-symbol-definition-heading>strong{min-width:0;overflow:auto;}.pdf-symbol-definition-heading button{border:0;background:transparent;padding:2px 6px;}
+.pdf-symbol-definition small{display:block;color:#637b93;margin:6px 0;}
+.pdf-symbol-evidence>div{margin-top:10px;}.pdf-symbol-evidence blockquote{white-space:pre-wrap;font-size:11px;color:#506881;margin:6px 0 0;padding:6px 10px;border-left:2px solid #9dbbdb;background:#ffffffb0;}
+.pdf-symbol-unavailable,.pdf-symbol-unmatched{font-size:11px;color:#78889b;}
+.pdf-symbol-unmatched,.pdf-symbol-raw{margin:10px 0;}.pdf-symbol-unmatched summary,.pdf-symbol-raw summary{cursor:pointer;font-size:11px;color:#496b8e;}
+.pdf-symbol-unmatched>div{display:inline-block;margin:4px 8px 4px 0;}
+.pdf-symbol-raw pre{white-space:pre-wrap;font:11px/1.6 monospace;color:#536d87;background:#f2f5f9;padding:10px;border-radius:6px;}
+.pdf-symbol-raw [role=status]{font-size:11px;margin-left:8px;color:#657b92;}
+@media(prefers-reduced-motion:reduce){.pdf-interactive-symbol{transition:none;}}
+
+.pdf-study-navigation>button{flex:0 0 auto;max-width:45%;}

@@ -32,6 +32,8 @@ type Page struct {
 	Height float64 `json:"height,omitempty"`
 }
 type Block struct {
+	Image *Image    `json:"image,omitempty"`
+	Table *Table    `json:"table,omitempty"`
 	ID    string    `json:"id"`
 	Type  string    `json:"type"`
 	Page  int       `json:"page"`
@@ -40,13 +42,14 @@ type Block struct {
 	Text  string    `json:"text,omitempty"`
 }
 type Document struct {
-	Version         int      `json:"version"`
-	SourceSHA256    string   `json:"source_sha256"`
-	Parser          Parser   `json:"parser"`
-	CoordinateSpace string   `json:"coordinate_space"`
-	Pages           []Page   `json:"pages"`
-	Blocks          []Block  `json:"blocks"`
-	Warnings        []string `json:"warnings,omitempty"`
+	ProjectionVersion int      `json:"projection_version,omitempty"`
+	Version           int      `json:"version"`
+	SourceSHA256      string   `json:"source_sha256"`
+	Parser            Parser   `json:"parser"`
+	CoordinateSpace   string   `json:"coordinate_space"`
+	Pages             []Page   `json:"pages"`
+	Blocks            []Block  `json:"blocks"`
+	Warnings          []string `json:"warnings,omitempty"`
 }
 
 func Digest(v string) string { s := sha256.Sum256([]byte(v)); return hex.EncodeToString(s[:]) }
@@ -82,10 +85,26 @@ func AdaptZIP(raw []byte, hash, model string) (Document, error) {
 	if e != nil {
 		return d, e
 	}
-	var content []byte
+	var content, layout []byte
+	layoutCount := 0
 	for _, f := range z.File {
 		if path.IsAbs(f.Name) || strings.Contains(f.Name, "\\") || strings.Contains("/"+f.Name, "/../") {
 			return d, errors.New("unsafe archive member")
+		}
+		if path.Base(f.Name) == "layout.json" || strings.HasSuffix(f.Name, "_middle.json") {
+			layoutCount++
+			if layoutCount == 1 {
+				r, err := f.Open()
+				if err == nil {
+					layout, err = bounded(r, maxJSONBytes)
+					if err != nil {
+						layout = nil
+					}
+					r.Close()
+				}
+			} else {
+				layout = nil
+			}
 		}
 		if strings.HasSuffix(f.Name, "_content_list.json") {
 			if content != nil {
@@ -105,13 +124,8 @@ func AdaptZIP(raw []byte, hash, model string) (Document, error) {
 	if content == nil {
 		return d, errors.New("missing content list")
 	}
-	var items []struct {
-		Type  string    `json:"type"`
-		Page  *int      `json:"page_idx"`
-		BBox  []float64 `json:"bbox"`
-		Text  string    `json:"text"`
-		Latex string    `json:"latex"`
-	}
+	var items []contentItem
+
 	if e = json.Unmarshal(content, &items); e != nil {
 		return d, e
 	}
@@ -153,5 +167,7 @@ func AdaptZIP(raw []byte, hash, model string) (Document, error) {
 		d.Pages = append(d.Pages, Page{Index: p})
 	}
 	sort.Slice(d.Pages, func(i, j int) bool { return d.Pages[i].Index < d.Pages[j].Index })
+	projectTables(&d, items, layout)
+	projectImages(&d, items, layout)
 	return d, nil
 }

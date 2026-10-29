@@ -72,3 +72,120 @@
 .pdf-temporary-chat__parse-status {
   margin: 8px 12px 0;
 }
+
+.pdf-temporary-chat .paper-chat-composer .input-bottom-actions-left{flex:1;min-width:0;}
+.pdf-temporary-chat .paper-chat-composer .input-bottom-actions-right{flex:none;}
+.pdf-temporary-chat .paper-chat-composer .input-bottom-actions{justify-content:space-between;}
+.pdf-temporary-chat .paper-chat-composer .chat-add-resource-trigger{display:none;}
+
+// The paper assistant is a narrow panel even on a wide desktop viewport.
+.pdf-temporary-chat--paper .chat-chat-container .chat-box {
+  .chat-main-column,
+  .message-container,
+  .chat-item {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .chat-item {
+    --chat-gap: 8px;
+    gap: 12px;
+  }
+
+  .user-message-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .chat-time {
+    margin: 0;
+    padding: 0;
+    align-self: flex-end;
+  }
+
+  .user-wrap,
+  .chat-user-bubble-row {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .chat-item .user-wrap .chat-user {
+    max-width: calc(100% - 36px);
+    padding: 8px 10px;
+  }
+
+  .chat-assistant-msg-single-answer-wrap,
+  .chat-assistant-msg-multi-answer-wrap {
+    min-width: 0;
+    gap: 8px;
+
+    > .chat-avatar {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+    }
+
+    .chat-bot-box-single,
+    .chat-bot-box-multi {
+      flex: 1 1 0;
+      min-width: 0;
+      padding-right: 0;
+    }
+
+    .chat-bot {
+      width: 100%;
+      min-width: 0;
+      margin: 0;
+      padding: 10px;
+    }
+  }
+
+  .chat-user-mention-text,
+  .rag-markdown,
+  .ant-alert-message,
+  .ant-alert-description {
+    min-width: 0;
+    max-width: 100%;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .chat-bot .ant-alert {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: start;
+    column-gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 10px;
+    box-sizing: border-box;
+
+    > .ant-alert-icon {
+      grid-column: 1;
+      margin: 2px 0 0;
+      font-size: 18px;
+    }
+
+    > .ant-alert-content {
+      grid-column: 2;
+      display: block;
+      min-width: 0;
+    }
+
+    > .ant-alert-action {
+      grid-column: 2;
+      min-width: 0;
+      max-width: 100%;
+      margin: 8px 0 0;
+    }
+
+    .chat-run-status-card__actions {
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      max-width: 100%;
+    }
+  }
+}

@@ -7,7 +7,7 @@ export function usePdfStudyLayout(reader:RefObject<HTMLElement>) {
   useEffect(()=>{
     const element=reader.current;
     if(!element)return;
-    const update=()=>setLayout(element.clientWidth<720?'stacked':'split');
+    const update=()=>{if(element.clientWidth>0)setLayout(element.clientWidth<920?'stacked':'split');};
     update();
     const observer=typeof ResizeObserver==='undefined'?undefined:new ResizeObserver(update);
     observer?.observe(element);

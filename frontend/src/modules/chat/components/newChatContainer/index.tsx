@@ -152,6 +152,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       showSkillDeposit = true,
       showConversationConfig = true,
       showModelSelector = true,
+      composerVariant = "default",
+      modelSelectionDraft = false,
       fixedThinkingDepth,
       concurrentStream = false,
       thinkingDepth,
@@ -688,6 +690,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               showSkillDeposit={showSkillDeposit}
               showConversationConfig={showConversationConfig}
               showModelSelector={showModelSelector}
+              composerVariant={composerVariant}
+              modelSelectionDraft={modelSelectionDraft}
               modelSelectorBusy={conversation.runtimeWaiting}
               onModelSelectionSavingChange={handleModelSelectionSavingChange}
               onWorkspacePermissionSavingChange={handleWorkspacePermissionSavingChange}

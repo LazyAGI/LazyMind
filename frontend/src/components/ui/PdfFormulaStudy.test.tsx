@@ -74,3 +74,15 @@ describe('source evidence selection',()=>{
  expect(view.container.querySelector('blockquote .katex')).toBeNull();
  });
 });
+
+
+it('requests the exact clicked source occurrence as a separate focused explanation',async()=>{
+ mocks.post.mockReset().mockResolvedValue({data:{data:{...explanation,symbols:[{symbol:'x^2',meaning:'Squared variable',evidence_ids:['e'],inferred:true}]}}});
+ render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="focus-api" blocks={[block]} selected={block} onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Symbol: x^2'}));
+ expect(await screen.findByText('Squared variable')).toBeInTheDocument();
+ expect(mocks.post).toHaveBeenCalledTimes(1);
+ expect(mocks.post.mock.calls[0][0]).toContain('/formulas/f/explanation');
+ expect(mocks.post.mock.calls[0][1]).toEqual({force:false,language:'en',focus_symbol:'x^2'});
+ expect(mocks.post.mock.calls[0][2].signal).toBeInstanceOf(AbortSignal);
+});

@@ -15,7 +15,10 @@ describe('reader container layout',()=>{
   const view=renderHook(()=>usePdfStudyLayout(ref));
   expect(view.result.current).toBe('stacked');
   expect(observe).toHaveBeenCalledWith(reader);
-  width=900;
+  width=776;
+  act(()=>notify([],{} as ResizeObserver));
+  expect(view.result.current).toBe('stacked');
+  width=920;
   act(()=>notify([],{} as ResizeObserver));
   expect(view.result.current).toBe('split');
   width=400;

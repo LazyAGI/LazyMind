@@ -1,0 +1,30 @@
+.pdf-table-study{--table-accent:#256f65;}
+.pdf-table-study .pdf-study-eyebrow{color:#467e76;}
+.pdf-table-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}
+.pdf-table-title h3{margin:0;}
+.pdf-table-study .pdf-table-title button{font-size:11px;}
+.pdf-table-caption{font-size:12px;color:#3c5267;}
+.pdf-table-scroll{overflow:auto;max-height:320px;max-width:100%;margin:12px 0;border:1px solid #c8dcd7;border-radius:7px;background:white;scrollbar-gutter:stable;}
+.pdf-table-scroll:focus-visible{outline:2px solid #338e80;outline-offset:2px;}
+.pdf-table-scroll table{border-collapse:separate;border-spacing:0;min-width:100%;width:max-content;font-size:12px;line-height:1.5;}
+.pdf-table-scroll th,.pdf-table-scroll td{padding:0;border-right:1px solid #dce8e4;border-bottom:1px solid #dce8e4;max-width:240px;min-width:64px;vertical-align:middle;}
+.pdf-table-scroll th{background:#eef6f3;font-weight:600;color:#345d53;}
+.pdf-table-scroll td{background:white;color:#33495c;}
+.pdf-table-scroll tr:last-child>*{border-bottom:0;}
+.pdf-table-scroll tr>*:last-child{border-right:0;}
+.pdf-table-study .pdf-table-scroll button{display:block;width:100%;min-height:36px;max-width:240px;border:0;border-radius:0;margin:0;padding:8px 10px;background:transparent;color:inherit;text-align:inherit;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;font:inherit;}
+.pdf-table-study .pdf-table-scroll button:hover{background:#deefe9;}
+.pdf-table-study .pdf-table-scroll button:focus-visible{outline:2px solid #338e80;outline-offset:-2px;}
+.pdf-table-scroll .is-selected{box-shadow:inset 0 0 0 2px #338e80;background:#ddf2eb;}
+.pdf-table-cell-detail{background:#edf6f2;border:1px solid #c9ded6;border-radius:7px;margin:12px 0;padding:12px;}
+.pdf-table-cell-detail h4,.pdf-table-footnotes h4{font-size:12px;margin:0 0 6px;}
+.pdf-table-cell-detail pre{white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.6 system-ui,sans-serif;margin:10px 0;}
+.pdf-table-cell-detail dl{display:grid;grid-template-columns:auto 1fr;gap:5px 10px;font-size:11px;margin:8px 0 0;}
+.pdf-table-cell-detail dt{color:#4b7265;}.pdf-table-cell-detail dd{margin:0;white-space:pre-wrap;}
+.pdf-table-footnotes{font-size:11px;color:#687c86;margin-top:12px;}
+.pdf-table-reference-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px;color:#58796f;}
+.pdf-table-unavailable{padding:12px;background:#f0f4f7;border-radius:6px;color:#64788d;}
+@media(pointer:coarse){.pdf-table-study .pdf-table-scroll button{min-height:44px;}}
+
+.pdf-table-clue-badge{font-size:10px;color:#805d25;background:#fbf1de;padding:2px 6px;border-radius:4px;}
+.pdf-table-data-clues blockquote{border-left-color:#b99a60;}
