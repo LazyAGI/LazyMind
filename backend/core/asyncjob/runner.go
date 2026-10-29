@@ -460,9 +460,16 @@ func (r *Runner) markFailedAttempt(ctx context.Context, row orm.AsyncJob, result
 			"lock_until":         nil,
 			"updated_at":         now,
 		}
-		if !result.Permanent && row.AttemptCount < row.MaxAttempts {
+		deferred := !result.Permanent && result.DeferAttempt && result.RetryAt.After(now)
+		if !result.Permanent && (deferred || row.AttemptCount < row.MaxAttempts) {
 			updates["status"] = string(StatusPending)
 			updates["next_run_at"] = now.Add(backoffForAttempt(row.AttemptCount))
+			if result.RetryAt.After(now) {
+				updates["next_run_at"] = result.RetryAt.UTC()
+			}
+			if deferred {
+				updates["attempt_count"] = gorm.Expr("CASE WHEN attempt_count > 0 THEN attempt_count - 1 ELSE 0 END")
+			}
 			return tx.Model(&orm.AsyncJob{}).
 				Where("id = ? AND status = ? AND attempt_count = ? AND locked_by = ?", row.ID, StatusRunning, row.AttemptCount, row.LockedBy).
 				Updates(updates).Error

@@ -34,29 +34,79 @@
 translation_providers:
   capabilities: [api_key_required]
   suppliers:
-    - name: Tencent Translation
+    - name: Google Translate Web
+      capabilities: [keyless_translation]
       description:
         zh-CN: |
-          腾讯云机器翻译，用于知识库文档预览中的划词翻译。腾讯云暂不提供适用于此场景的用户 OAuth 授权，需要配置 SecretId 和 SecretKey。
-
-          开通和配置：
-
-          1. 访问 https://console.cloud.tencent.com/tmt ，登录并开通机器翻译服务。
-
-          2. 访问 https://console.cloud.tencent.com/cam/capi ，新建或查看 API 密钥。建议为 LazyMind 创建独立的子用户密钥，并只授予机器翻译所需权限。
-
-          3. 将 SecretId 和 SecretKey 填入下方。凭据会加密保存在 LazyMind 后端，不会发送到文档预览页。
+          免密钥网页翻译源，无需注册即可启用。它使用 Google 翻译的网页接口，不属于 Google Cloud Translation 官方开放 API；接口可能限流、变更或不可达。翻译内容会发送给 Google。
         en-US: |
-          Tencent Cloud Machine Translation powers selection translation in knowledge-base document previews. Tencent Cloud does not offer an end-user OAuth flow for this use case, so a SecretId and SecretKey are required.
+          A keyless web translation source that can be enabled without registration. It uses a Google Translate web endpoint rather than the official Google Cloud Translation API. Availability, rate limits, and response formats may change. Text is sent to Google.
+      base_url: "https://translate.googleapis.com/"
+    - name: Bing Translate Web
+      capabilities: [keyless_translation]
+      description:
+        zh-CN: |
+          免密钥必应网页翻译源，无需 Azure 订阅。它使用 Bing 翻译网页的临时会话接口，并非 Microsoft Translator 官方开放 API；接口可能限流、变更或不可达。翻译内容会发送给 Microsoft。
+        en-US: |
+          A keyless Bing web translation source that does not require an Azure subscription. It uses temporary sessions from the Bing Translator website rather than the official Microsoft Translator API. Availability, rate limits, and response formats may change. Text is sent to Microsoft.
+      base_url: "https://www.bing.com/"
+    - name: Sogou Translate Web
+      capabilities: [keyless_translation]
+      description:
+        zh-CN: |
+          免密钥搜狗网页翻译源，无需注册即可启用。它使用搜狗翻译网页，而非有公开接入承诺的开放 API；网页结构、额度和可用性可能随时变化。翻译内容会发送给搜狗。
+        en-US: |
+          A keyless Sogou web translation source that can be enabled without registration. It uses the Sogou Translator website rather than a documented public API. Page structure, limits, and availability may change. Text is sent to Sogou.
+      base_url: "https://fanyi.sogou.com/"
+    - name: DeepL Web
+      capabilities: [keyless_translation]
+      description:
+        zh-CN: |
+          免密钥 DeepL 网页翻译源，无需购买 API 试用额度。它使用 DeepL 网页或浏览器扩展的接口，与需要 API Key 的官方 DeepL API 分开；接口可能限流、变更或不可达。翻译内容会发送给 DeepL。
+        en-US: |
+          A keyless DeepL web translation source, separate from the official DeepL API that requires an API key. It uses a website or browser-extension endpoint and may be rate limited, changed, or unavailable. Text is sent to DeepL.
+      base_url: "https://oneshot-free.www.deepl.com/"
+    - name: Tencent TranSmart Web
+      capabilities: [keyless_translation]
+      description:
+        zh-CN: |
+          免密钥网页翻译源，无需开通腾讯云机器翻译。它使用腾讯翻译君网页接口，并非腾讯云 TMT 官方开放 API；接口可能限流或变更。翻译内容会发送给腾讯。
+        en-US: |
+          A keyless Tencent TranSmart web translation source. It does not require Tencent Cloud TMT credentials and is not the official TMT API. Availability, rate limits, and response formats may change. Text is sent to Tencent.
+      base_url: "https://transmart.qq.com/"
+    - name: Baidu Translation
+      description:
+        zh-CN: |
+          百度通用文本翻译 API。可申请按月更新的免费额度，额度、认证条件和请求频率以百度开放平台当前规则为准。需填写 APP ID 与密钥。
 
-          Setup:
+          开通地址：https://fanyi-api.baidu.com/
+        en-US: |
+          Baidu General Text Translation API. A recurring free allowance may be available subject to the current account and rate-limit rules. Enter your APP ID and secret.
 
-          1. Open https://console.cloud.tencent.com/tmt, sign in, and enable Machine Translation.
+          Setup: https://fanyi-api.baidu.com/
+      base_url: "https://fanyi-api.baidu.com/"
+    - name: Aliyun Translation
+      description:
+        zh-CN: |
+          阿里云机器翻译通用版。可申请按月更新的免费额度，需开通服务并填写 AccessKey ID 与 AccessKey Secret；额度和资格以阿里云控制台为准。
 
-          2. Open https://console.cloud.tencent.com/cam/capi and create or view an API credential. Prefer a dedicated CAM sub-user with only the permissions required for Machine Translation.
+          接入文档：https://help.aliyun.com/zh/machine-translation/developer-reference/api-reference-machine-translation-universal-version-call-guide
+        en-US: |
+          Alibaba Cloud Machine Translation General Edition. A recurring free allowance may be available after activation. Enter your AccessKey ID and AccessKey Secret; check the console for current eligibility and quota.
 
-          3. Enter the SecretId and SecretKey below. LazyMind encrypts them on the server and never sends them to the document preview page.
-      base_url: "https://tmt.tencentcloudapi.com/"
+          API guide: https://help.aliyun.com/zh/machine-translation/developer-reference/api-reference-machine-translation-universal-version-call-guide
+      base_url: "https://mt.cn-hangzhou.aliyuncs.com/"
+    - name: Niutrans
+      description:
+        zh-CN: |
+          小牛翻译开放平台 API。注册账号可获得每日免费额度；填写平台 API Key，具体额度和可用语种以平台为准。
+
+          官方 API 介绍：https://niutrans.com/doc-api
+        en-US: |
+          Niutrans Open Platform API. Registered accounts can receive a daily free allowance. Enter your API key and check the platform for current quota and language coverage.
+
+          Official API overview: https://niutrans.com/doc-api
+      base_url: "https://api.niutrans.com/"
 
 model_providers:
   capabilities: [multi_group, custom_base_url, has_models]

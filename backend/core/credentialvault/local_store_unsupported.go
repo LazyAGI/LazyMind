@@ -6,8 +6,6 @@ import "context"
 
 type unavailableLocalKeyStore struct{}
 
-func newSystemLocalKeyStore(string) LocalKeyStore { return unavailableLocalKeyStore{} }
-
 func (unavailableLocalKeyStore) Load(context.Context, AccountScope, LocalKeyKind) ([]byte, error) {
 	return nil, ErrLocalSecureStoreUnavailable
 }

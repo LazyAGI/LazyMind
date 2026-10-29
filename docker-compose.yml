@@ -39,6 +39,8 @@ x-proxy-env: &proxy-env
   NO_PROXY: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-doc-server,lazyllm-algo,parsing,lazyllm-parse-server,processor-server,ppt-export,mineru,auth-service,office-convert-service,scan-control-plane,feishu-cli-sidecar,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 
 x-core-env: &core-env
+  ACADEMIC_SCIHUB_BASE_URL: ${ACADEMIC_SCIHUB_BASE_URL:-}
+  ACADEMIC_SCIHUB_BASE_URLS: ${ACADEMIC_SCIHUB_BASE_URLS:-}
   ACL_DB_DRIVER: postgres
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
   # Local development may execute a dev migration that is later removed from
@@ -46,7 +48,7 @@ x-core-env: &core-env
   # production deployments should leave this unset/false.
   MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY: ${MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY:-true}
   LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS: ${LAZYMIND_PREFERENCE_CONTEXT_MAX_CHARS:-5000}
-  LAZYMIND_VOCABULARY_ENABLED: ${LAZYMIND_VOCABULARY_ENABLED:-false}
+  LAZYMIND_VOCABULARY_ENABLED: ${LAZYMIND_VOCABULARY_ENABLED:-true}
   LAZYMIND_ANKI_CONNECT_URL: ${LAZYMIND_ANKI_CONNECT_URL:-http://host.docker.internal:8765}
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
@@ -618,7 +620,7 @@ services:
       dockerfile: Dockerfile
       args:
         <<: *mirror-args
-        VITE_VOCABULARY_ENABLED: ${LAZYMIND_VOCABULARY_ENABLED:-false}
+        VITE_VOCABULARY_ENABLED: ${LAZYMIND_VOCABULARY_ENABLED:-true}
     ports:
       - "${LAZYMIND_FRONTEND_PORT:-8090}:80"
     expose:

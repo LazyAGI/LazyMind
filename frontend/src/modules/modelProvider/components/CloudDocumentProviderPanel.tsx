@@ -148,7 +148,7 @@ function ProviderLogo({
   );
 }
 
-export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentProvidersVm }) {
+export default function CloudDocumentProviderPanel({ vm, additionalCards }: { vm: CloudDocumentProvidersVm; additionalCards?: ReactNode }) {
   const [obsidianConfigModalOpen, setObsidianConfigModalOpen] = useState(false);
   const {
     t,
@@ -189,6 +189,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
               <Skeleton active avatar={{ shape: "square", size: 44 }} paragraph={{ rows: 3 }} />
             </div>
           ))}
+        {additionalCards}
       </div>
     );
   }
@@ -391,6 +392,7 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           </button>
         </div>
       </div>
+      {additionalCards}
       </div>
       <Modal
         title={t("modelProvider.cloudDocuments.obsidianTitle")}

@@ -152,6 +152,9 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 	out := make([]listItem, 0, len(rows))
 	for i := range rows {
 		row := rows[i]
+		if row.Category == "translation" && !IsTranslationProviderAvailable(row.Name) {
+			continue
+		}
 		brandKey, serviceKey := ProviderServiceIdentity(row)
 		caps := splitCapabilities(row.Capabilities)
 		if hasSharedProviderEndpoint(row) {
@@ -230,9 +233,13 @@ func buildListItems(ctx context.Context, db *gorm.DB, rows []orm.UserModelProvid
 		}
 		configuredProviderIDs := make(map[string]bool, len(configuredRows))
 		for _, row := range configuredRows {
-			row.APIKey, _ = apiKeyForGroup(db.WithContext(ctx), &row)
-			if strings.TrimSpace(row.APIKey) != "" ||
-				!providerAPIKeyRequiredForBaseURL(ctx, db, providerByID[row.UserModelProviderID], row.BaseURL) {
+			parent := providerByID[row.UserModelProviderID]
+			apiKey, _ := apiKeyForGroup(db.WithContext(ctx), &row)
+			if strings.TrimSpace(apiKey) != "" ||
+				!providerAPIKeyRequiredForBaseURL(ctx, db, parent, row.BaseURL) ||
+				(parent.Category == "translation" &&
+					!isCustomBaseURL(ctx, db, parent.DefaultModelProviderID, row.BaseURL) &&
+					isSelectableProviderGroup(ctx, db, parent.DefaultModelProviderID, row.BaseURL, apiKey)) {
 				configuredProviderIDs[row.UserModelProviderID] = true
 			}
 		}

@@ -1,3 +1,12 @@
+vi.mock("@/modules/vocabulary/cloudApi", () => ({
+  listCloudConnections: vi.fn(async()=>[]), listCloudOperations: vi.fn(async()=>[]),
+}));
+vi.mock("@/runtime/mode", async(importOriginal)=>({
+  ...await importOriginal<typeof import("@/runtime/mode")>(),
+  isVocabularyEnabled: vi.fn(()=>true),
+}));
+import { isVocabularyEnabled } from "@/runtime/mode";
+import { listCloudConnections } from "@/modules/vocabulary/cloudApi";
 import {
   fireEvent,
   render,
@@ -114,7 +123,7 @@ vi.mock("../constants/cloudProviderOptions", () => ({
 }));
 
 vi.mock("../components/CloudDocumentProviderPanel", () => ({
-  default: () => <div>provider-list</div>,
+  default: ({additionalCards}: {additionalCards?: import("react").ReactNode}) => <div>provider-list{additionalCards}</div>,
   CloudDocumentModals: () => null,
 }));
 
@@ -157,6 +166,8 @@ describe("CloudDocumentsPage onboarding", () => {
   });
 
   beforeEach(() => {
+    vi.mocked(isVocabularyEnabled).mockReturnValue(true);
+    vi.mocked(listCloudConnections).mockClear();
     mocks.getConnection.mockReset();
     mocks.authorize.mockReset();
     mocks.enable.mockReset();
@@ -180,6 +191,22 @@ describe("CloudDocumentsPage onboarding", () => {
       handleOpenNotionSetup: vi.fn(),
       handleOpenGitHubSetup: vi.fn(),
     };
+  });
+
+  it("counts enabled vocabulary providers without unlocking document capabilities", async()=>{
+    vi.mocked(listCloudConnections).mockResolvedValueOnce([{provider:"eudic",configured:true,enabled:true,target_id:"book",target_name:"Book",add_to_study:false,pending:0,failed:0,succeeded:0,last_error:""}]);
+    renderPage();
+    expect(await screen.findByText("1 / 9")).toBeInTheDocument();
+    expect(screen.getByText("现在进行")).toBeInTheDocument();
+    expect(screen.getByRole("button",{name:"在对话中引用云文档"})).toBeDisabled();
+  });
+
+  it("does not request vocabulary endpoints when the feature is disabled", async()=>{
+    vi.mocked(isVocabularyEnabled).mockReturnValue(false);
+    renderPage();
+    await screen.findByText("现在进行");
+    expect(listCloudConnections).not.toHaveBeenCalled();
+    expect(screen.queryByText("vocabularyCloud.title")).not.toBeInTheDocument();
   });
 
   it.each(["feishu", "notion", "googledrive"])("reauthorizes the exact %s connection without automatically starting OAuth", async (provider) => {
@@ -292,11 +319,11 @@ describe("CloudDocumentsPage onboarding", () => {
       "seen",
     );
     const { unmount } = renderPage();
-    expect(await screen.findByText("0 / 7")).toBeInTheDocument();
+    expect(await screen.findByText("0 / 9")).toBeInTheDocument();
     unmount();
     mocks.vm.isMailAuthValid = true;
     renderPage();
-    expect(await screen.findByText("1 / 7")).toBeInTheDocument();
+    expect(await screen.findByText("1 / 9")).toBeInTheDocument();
   });
 
   it("includes Obsidian in all environments but counts it ready only after Desktop detection", async () => {
@@ -308,12 +335,12 @@ describe("CloudDocumentsPage onboarding", () => {
     mocks.vm.obsidianConfig = { configured: true, available: true };
 
     const { unmount } = renderPage();
-    expect(await screen.findByText("0 / 6")).toBeInTheDocument();
+    expect(await screen.findByText("0 / 8")).toBeInTheDocument();
     unmount();
 
     mocks.vm.isDesktopRuntime = true;
     renderPage();
-    expect(await screen.findByText("1 / 6")).toBeInTheDocument();
+    expect(await screen.findByText("1 / 8")).toBeInTheDocument();
   });
 
   it("treats Obsidian as a chat-only connected provider in the guide", async () => {

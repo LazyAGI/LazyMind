@@ -58,6 +58,8 @@ export interface ImportPreviewItem {
     coverage_complete: boolean;
   };
   fulltext_candidates: FulltextCandidate[];
+  warnings?: string[];
+  manual_download_urls?: string[];
 }
 
 export interface AcademicImportQueueItem {
@@ -90,7 +92,7 @@ const unwrap = <T>(value: T | Envelope<T>): T =>
 interface ImportPreviewResponse { preview_token?: string; items: ImportPreviewItem[] }
 function previewItems(value: ImportPreviewResponse | Envelope<ImportPreviewResponse>): ImportPreviewItem[] {
   const result = unwrap<ImportPreviewResponse>(value);
-  return (result.items || []).map(item => ({ ...item, preview_token: result.preview_token }));
+  return (result.items || []).map(item => ({ ...item, fulltext_candidates: item.fulltext_candidates || [], preview_token: result.preview_token }));
 }
 export function isImportPreviewExpired(error: unknown): boolean {
   return axios.isAxiosError(error) && ['IMPORT_PREVIEW_EXPIRED', 'IMPORT_PREVIEW_MISMATCH'].includes(error.response?.data?.code);
@@ -188,10 +190,16 @@ export async function getPaperImportStatus(batchId: string): Promise<string> {
   return unwrap<{ batch: { Status: string } }>(response.data).batch.Status;
 }
 
-export async function previewPaperLink(identifier: string, targetDatasetId: string, silentError = false): Promise<ImportPreviewItem> {
-  const response = await axiosInstance.post(`${core}/imports:preview`, { identifier, target_dataset_id: targetDatasetId }, { silentError } as never);
+export async function previewPaperLink(identifier: string, targetDatasetId: string, silentError = false, lookupFulltext = true): Promise<ImportPreviewItem> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, { identifier, target_dataset_id: targetDatasetId, lookup_fulltext: lookupFulltext }, { silentError, timeout: 20000 } as never);
   const item = previewItems(response.data)[0];
   if (!item) throw new Error('没有查询到有效文献');
+  return item;
+}
+export async function previewPaperPDF(workId: string, targetDatasetId: string): Promise<ImportPreviewItem> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, { work_ids: [workId], target_dataset_id: targetDatasetId, lookup_fulltext: true }, { silentError: true, timeout: 8000 } as never);
+  const item = previewItems(response.data)[0];
+  if (!item) throw new Error('未能获取 PDF 来源查询结果');
   return item;
 }
 export async function importPaperLink(targetDatasetId: string, item: ImportPreviewItem, idempotencyKey: string, folderId?: string | null, silentError = false) {

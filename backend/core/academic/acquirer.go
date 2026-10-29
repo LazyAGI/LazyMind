@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"lazymind/core/academic/arxivsource"
 	"lazymind/core/doc"
@@ -68,6 +69,12 @@ func validateArxivPDFRedirect(candidate FulltextCandidate, target string) error 
 }
 
 func acquireCandidateOriginal(ctx context.Context, svc *doc.OriginalService, caller doc.DatasetCatalogCaller, candidate FulltextCandidate) (doc.OriginalRef, error) {
+	// A provider lookup must not turn into an unbounded background download.
+	if strings.EqualFold(candidate.SourceProvider, "scihub") {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+	}
 	urls, err := canonicalPaperURLs(candidate)
 	if err != nil {
 		return doc.OriginalRef{}, err

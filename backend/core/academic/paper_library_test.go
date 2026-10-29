@@ -18,7 +18,7 @@ import (
 func paperLibraryTestDB(t *testing.T, databases ...*gorm.DB) *gorm.DB {
 	t.Helper()
 	db := importErrorDB(t, databases...)
-	if e := db.AutoMigrate(&orm.PaperLibraryEntry{}, &orm.PaperLibraryFolder{}, &orm.PaperLibraryNote{}, &orm.PaperLibraryAttachment{}, &orm.AcademicUserPaperState{}, &orm.Dataset{}, &orm.ACLModel{}, &orm.ACLGroupModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); e != nil {
+	if e := db.AutoMigrate(&orm.PaperLibrary{}, &orm.PaperLibraryLegacyState{}, &orm.PaperLibraryEntry{}, &orm.PaperLibraryFolder{}, &orm.PaperLibraryNote{}, &orm.PaperLibraryAttachment{}, &orm.AcademicUserPaperState{}, &orm.Dataset{}, &orm.ACLModel{}, &orm.ACLGroupModel{}, &orm.UserGroupModel{}, &orm.KBModel{}, &orm.VisibilityModel{}); e != nil {
 		t.Fatal(e)
 	}
 	sqlDB, _ := db.DB()
@@ -238,5 +238,46 @@ func TestLibraryAccessAndForeignFoldersAreRejected(t *testing.T) {
 	}
 	if readLibrary(t, "papers").Data.Papers[0].FolderID != nil {
 		t.Fatal("foreign folder accepted")
+	}
+}
+
+func TestLibraryMovesAndFolderDeletionUpdateSourceMemberships(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	raw := json.RawMessage(`{"folders":[{"id":"root","name":"Root"},{"id":"nested","name":"Nested","parentId":"root"},{"id":"target","name":"Target"}],"collections":[{"id":"root","name":"Root"},{"id":"nested","name":"Nested","parentId":"root"},{"id":"target","name":"Target"}],"papers":[{"id":"zotero-paper","metadata":{"title":"Paper","authors":[],"identifiers":{}},"folderId":"nested","collectionIds":["root","nested"],"source":"zotero"}],"hiddenArxivPapers":[{"id":"hidden","folderId":"nested","collectionIds":["root","nested"]}],"notes":[],"attachments":[],"annotations":[{"id":"annotation","paperId":"zotero-paper","comment":"Keep"}]}`)
+	if err := paperlibrary.ImportSnapshot(t.Context(), db, "papers", "owner", raw); err != nil {
+		t.Fatal(err)
+	}
+	w := libraryRequest(t, "POST", "/library/papers:move", "papers", "owner", map[string]any{"items": []map[string]any{{"id": "zotero-paper", "revision": 1}}, "folder_id": "target"})
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if err := paperlibrary.ImportSnapshot(t.Context(), db, "papers", "owner", raw); err != nil {
+		t.Fatal(err)
+	}
+	view := readLibrary(t, "papers")
+	encoded, _ := json.Marshal(view.Data)
+	var graph map[string]any
+	if err := json.Unmarshal(encoded, &graph); err != nil {
+		t.Fatal(err)
+	}
+	members := graph["papers"].([]any)[0].(map[string]any)["collectionIds"].([]any)
+	if len(members) != 1 || members[0] != "target" {
+		t.Fatal("move retained old source memberships", members)
+	}
+	w = libraryRequest(t, "POST", "/library/folders/root:delete", "papers", "owner", map[string]any{"revision": 1})
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	view = readLibrary(t, "papers")
+	encoded, _ = json.Marshal(view.Data)
+	if err := json.Unmarshal(encoded, &graph); err != nil {
+		t.Fatal(err)
+	}
+	if len(graph["collections"].([]any)) != 1 || len(graph["annotations"].([]any)) != 1 {
+		t.Fatal("folder deletion lost materials or retained deleted sources", graph)
+	}
+	hidden := graph["hiddenArxivPapers"].([]any)[0].(map[string]any)
+	if hidden["folderId"] != nil || len(hidden["collectionIds"].([]any)) != 0 {
+		t.Fatal("historical memberships retained deleted folders", hidden)
 	}
 }

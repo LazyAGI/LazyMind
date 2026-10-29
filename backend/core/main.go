@@ -57,6 +57,7 @@ import (
 	"lazymind/core/systemdeps"
 	"lazymind/core/taskcenter"
 	"lazymind/core/userenv"
+	"lazymind/core/vocabulary"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowstore "lazymind/core/workflow/store"
@@ -790,6 +791,7 @@ func run(ctx context.Context) error {
 	}
 	modelprovider.SetCredentialKeyManager(credentialKeys)
 	userenv.SetCredentialKeyManager(credentialKeys)
+	vocabulary.SetCloudCredentialKeyManager(credentialKeys)
 	if err := migrate.RunUp(); err != nil {
 		return &startupError{msg: "run SQL migrations", err: err}
 	}
@@ -918,7 +920,12 @@ func run(ctx context.Context) error {
 		// History samples have already been downloaded and imported above.
 		backgroundDone = append(backgroundDone, showcase.StartAssetPrefetch(runtimeCtx))
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		excludedJobs := append([]string{documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType}, chat.ConversationTitleJobTypes...)
+		if vocabulary.Enabled() {
+			vocabulary.RegisterCloudSync(store.DB())
+			vocabularyRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{vocabulary.CloudSyncJobType}, SerializeResources: true, Concurrency: 2, PollInterval: 2 * time.Second, LockTTL: 2 * time.Minute})
+			backgroundDone = append(backgroundDone, vocabularyRunner.Done())
+		}
+		excludedJobs := append([]string{vocabulary.CloudSyncJobType, documentdirectory.PlanJob, documentdirectory.OrganizeJob, academic.ChatLaunchJobType}, chat.ConversationTitleJobTypes...)
 		if !systemdeps.PythonComponentActive("rag") {
 			excludedJobs = append(excludedJobs, doc.MarketInstallJobType, doc.MarketUpdateJobType,
 				doc.MarketUpdateAllJobType, "document_pdf_translation")

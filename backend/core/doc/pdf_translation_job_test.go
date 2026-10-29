@@ -2,12 +2,16 @@ package doc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"lazymind/core/modelconfig"
 )
 
 func TestTranslateChunkWithRetryRecoversTransientFailure(t *testing.T) {
@@ -23,6 +27,17 @@ func TestTranslateChunkWithRetryRecoversTransientFailure(t *testing.T) {
 	})
 	if err != nil || value != "translated" || calls.Load() != 3 {
 		t.Fatalf("value=%q calls=%d err=%v", value, calls.Load(), err)
+	}
+}
+
+func TestTranslateChunkWithRetryStopsAfterProviderRevocation(t *testing.T) {
+	var calls int
+	_, err := translateChunkWithRetry(t.Context(), 3, func(context.Context) (string, error) {
+		calls++
+		return "", modelconfig.ErrTranslationProviderReferenceChanged
+	})
+	if calls != 1 || !errors.Is(err, modelconfig.ErrTranslationProviderReferenceChanged) {
+		t.Fatalf("calls=%d err=%v", calls, err)
 	}
 }
 
@@ -70,10 +85,35 @@ func TestTranslateUnitsParallelPreservesOrderAndReportsWeightedProgress(t *testi
 	if maximum.Load() < 2 {
 		t.Fatalf("expected parallel execution, max active=%d", maximum.Load())
 	}
-	if result["a"] != "[123]\n[456]" || result["b"] != "[abc]\n[def]" {
+	if result["a"] != "[123][456]" || result["b"] != "[abc][def]" {
 		t.Fatalf("unexpected ordered result: %#v", result)
 	}
 	if len(progress) != 4 || progress[len(progress)-1] != [2]int64{12, 12} {
 		t.Fatalf("unexpected progress: %#v", progress)
+	}
+}
+
+func TestResolvePDFJobAPIConfigRejectsLegacyAndMismatchedPayloads(t *testing.T) {
+	for _, payload := range []pdfTranslationPayload{
+		{ProviderType: "api", Provider: "Google Translate Web"},
+		{ProviderType: "api", Provider: "Google Translate Web", TranslationConfig: &modelconfig.TranslationConfigSnapshot{ProviderName: "Tencent Translation"}},
+	} {
+		if _, err := resolvePDFJobAPIConfig(t.Context(), nil, "user", payload); err == nil {
+			t.Fatalf("payload unexpectedly accepted: %+v", payload)
+		}
+	}
+}
+
+func TestPDFJobPayloadContainsOnlyProviderReference(t *testing.T) {
+	payload := pdfTranslationPayload{ProviderType: "api", Provider: "Baidu Translation",
+		TranslationConfig: &modelconfig.TranslationConfigSnapshot{GroupID: "group-1", CredentialRevision: 3,
+			ProviderName: "Baidu Translation", BaseURLHash: "endpoint-hash"}}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "api_key") || strings.Contains(string(raw), "ciphertext") ||
+		!strings.Contains(string(raw), "group-1") {
+		t.Fatalf("unsafe or missing provider reference: %s", raw)
 	}
 }

@@ -30,6 +30,9 @@ import {
   type CloudDocumentGuideProvider,
 } from "../utils/cloudDocumentOnboarding";
 
+import { isVocabularyEnabled } from "@/runtime/mode";
+import CloudVocabularyConnections from "@/modules/vocabulary/CloudVocabularyConnections";
+
 const CLOUD_DOCUMENTS_ONBOARDING_KEY =
   "lazymind.cloud-documents.onboarding.v2";
 const CHAT_PATH = "/agent/chat/home";
@@ -137,6 +140,8 @@ function GuideProviderLogo({ type }: { type: CloudProviderType }) {
 export default function CloudDocumentsPage() {
   const { t } = useTranslation();
   const vm = useCloudDocumentProviders();
+  const vocabularyEnabled = isVocabularyEnabled();
+  const [vocabularyReadyCount,setVocabularyReadyCount]=useState(0);
   const [searchParams] = useSearchParams();
   const recoveryConnection = searchParams.get("connection_id") || "";
   const [guideOpen, setGuideOpen] = useState(false);
@@ -149,8 +154,8 @@ export default function CloudDocumentsPage() {
   const providerTotal =
     cloudAuthProviderOptions.length +
     (vm.canCreateLocalSource ? 1 : 0) +
-    2;
-  const providerReadyCount =
+    2 + (vocabularyEnabled ? 2 : 0);
+  const documentReadyCount =
     (vm.canCreateLocalSource && vm.localSourceCount > 0 ? 1 : 0) +
     (vm.isFeishuAuthValid ? 1 : 0) +
     (vm.isNotionAuthValid ? 1 : 0) +
@@ -159,7 +164,8 @@ export default function CloudDocumentsPage() {
     (vm.isWeChatOfficialAccountAuthValid ? 1 : 0) +
     (vm.isMailAuthValid ? 1 : 0) +
     (isObsidianReady ? 1 : 0);
-  const hasConnectedProvider = providerReadyCount > 0;
+  const providerReadyCount = documentReadyCount + (vocabularyEnabled ? vocabularyReadyCount : 0);
+  const hasConnectedProvider = documentReadyCount > 0;
   const hasKnowledgeSyncProvider =
     (vm.canCreateLocalSource && vm.localSourceCount > 0) ||
     vm.isFeishuAuthValid ||
@@ -319,7 +325,7 @@ export default function CloudDocumentsPage() {
         provider={searchParams.get("provider") || ""}
         connectionId={recoveryConnection}
       />}
-      <CloudDocumentProviderPanel vm={vm} />
+      <CloudDocumentProviderPanel vm={vm} additionalCards={vocabularyEnabled ? <CloudVocabularyConnections onReadyCountChange={setVocabularyReadyCount} /> : null} />
 
       <Modal
         className="model-provider-cloud-doc-guide-modal"

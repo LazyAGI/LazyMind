@@ -28,6 +28,14 @@ vi.mock("../FeedbackModal", () => ({
 }));
 vi.mock("@/modules/knowledge/api/translation", () => ({
   getTranslationStatus: vi.fn().mockResolvedValue(false),
+  getTranslationServiceStatus: vi.fn().mockResolvedValue({
+    configured: false,
+    provider: "",
+    document_supported: false,
+    document_providers: [],
+  }),
+  isSingleEnglishWord: (text: string) => /^[A-Za-z]+$/.test(text),
+  translateSelectionText: vi.fn(),
 }));
 
 function mountFeedback(feedBack?: Feedback) {

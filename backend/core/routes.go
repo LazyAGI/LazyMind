@@ -290,6 +290,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
+	handleAPI(r, "POST", "/academic/zotero/preview", []string{"document.write"}, academic.PreviewZoteroLibrary)
+	handleAPI(r, "POST", "/academic/zotero/attachment", []string{"document.write"}, academic.DownloadZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/attachment/store", []string{"document.write"}, academic.StoreZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/attachment/transfer", []string{"document.write"}, academic.TransferZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/import", []string{"document.write"}, academic.ImportZoteroSnapshot)
 	handleAPI(r, "POST", "/academic/mock-handoffs/{handoff_id}:submit", []string{"qa.write"}, academic.SubmitMockHandoff)
 	handleAPI(r, "GET", "/academic/chat-context", []string{"qa.read"}, academic.AcademicChatContext)
 	handleAPI(r, "PATCH", "/academic/documents/{document_id}/identity", []string{"document.write"}, academic.UpdateDocumentIdentity)
@@ -1064,6 +1069,13 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/learning/preanalysis/tasks/{task_id}/drafts", []string{"document.read"}, learning.ListPreanalysisDrafts)
 	handleAPI(r, "POST", "/learning/preanalysis/tasks/{task_id}/drafts:publish", []string{"document.write"}, learning.PublishPreanalysisDrafts)
 	if vocabulary.Enabled() {
+		handleAPI(r, "GET", "/vocabulary/cloud/connections", []string{"document.read"}, vocabulary.ListCloudConnections)
+		handleAPI(r, "PUT", "/vocabulary/cloud/connections/{provider}", []string{"document.write"}, vocabulary.PutCloudConnection)
+		handleAPI(r, "POST", "/vocabulary/cloud/connections/{provider}/test", []string{"document.write"}, vocabulary.TestCloudConnection)
+		handleAPI(r, "POST", "/vocabulary/cloud/connections/{provider}/wordbooks", []string{"document.write"}, vocabulary.CreateCloudWordbook)
+		handleAPI(r, "DELETE", "/vocabulary/cloud/connections/{provider}", []string{"document.write"}, vocabulary.DeleteCloudConnection)
+		handleAPI(r, "POST", "/vocabulary/cloud/connections/{provider}/sync", []string{"document.write"}, vocabulary.SyncCloudConnection)
+		handleAPI(r, "GET", "/vocabulary/cloud/operations", []string{"document.read"}, vocabulary.ListCloudOperations)
 		handleAPI(r, "GET", "/vocabulary/capabilities", []string{"document.read"}, vocabulary.ListCapabilities)
 		handleAPI(r, "GET", "/vocabulary/provider", []string{"document.read"}, vocabulary.GetProvider)
 		handleAPI(r, "PUT", "/vocabulary/provider", []string{"document.write"}, vocabulary.PutProvider)

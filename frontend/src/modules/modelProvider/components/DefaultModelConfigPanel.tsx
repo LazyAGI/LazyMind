@@ -11,10 +11,12 @@ import {
   MinusCircleOutlined,
   QuestionCircleOutlined,
   PictureOutlined,
+  ReadOutlined,
   RightOutlined,
   RocketOutlined,
   ScanOutlined,
   SearchOutlined,
+  TranslationOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
@@ -58,6 +60,8 @@ function getDefaultCapabilityGroup(target?: ModelCapability) {
 }
 
 interface DefaultModelConfigPanelProps extends UseDefaultModelConfigOptions {
+  onConfigureToolService?: (category: "search" | "academic" | "parsing" | "translation") => void;
+  toolServiceSummaries?: Partial<Record<"search" | "academic" | "parsing" | "translation", string>>;
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
   onConfigureProviders: () => void;
   onRetrySetup: () => void;
@@ -199,6 +203,8 @@ function ProviderLogo({
 }
 
 export default function DefaultModelConfigPanel({
+  onConfigureToolService,
+  toolServiceSummaries,
   cloudServiceSetupStates,
   modelProviderSetupState,
   onConfigureCloudService,
@@ -782,7 +788,26 @@ export default function DefaultModelConfigPanel({
     ) };
   });
 
-  const cards = [...modelCards, ...cloudCards];
+  const toolCards = onConfigureToolService ? ([
+    { key: "searchEngine", category: "search", title: "搜索引擎", icon: SearchOutlined },
+    { key: "academicSearch", category: "academic", title: "学术搜索引擎", icon: ReadOutlined },
+    { key: "cloudParsing", category: "parsing", title: "文档解析（OCR）", icon: ScanOutlined },
+    { key: "machineTranslation", category: "translation", title: "机器翻译", icon: TranslationOutlined },
+  ] as const).map((service) => ({
+    key: service.key,
+    configured: Boolean(toolServiceSummaries?.[service.category]),
+    node: <div key={service.key} role="group" aria-label={service.title} className="model-provider-default-row model-provider-cloud-service-row default-services-tool-row">
+      <div className="model-provider-default-meta"><span className="model-provider-default-title">{service.title}</span></div>
+      <div className="model-provider-default-controls">
+        <button type="button" className="default-services-tool-picker" aria-label={t("modelProvider.configureCapability")} onClick={() => onConfigureToolService(service.category)}>
+          <span className="default-services-tool-icon" aria-hidden="true"><service.icon /></span>
+          <span className="default-services-summary" title={toolServiceSummaries?.[service.category] || "尚未配置"}>{toolServiceSummaries?.[service.category] || "尚未配置"}</span>
+          <span className="default-services-tool-action">{t("modelProvider.configureCapability")}<RightOutlined aria-hidden="true" /></span>
+        </button>
+      </div>
+    </div>,
+  })) : cloudCards;
+  const cards = [...modelCards, ...toolCards];
   const basicCards = cards.filter((card) => card.key === "llm" || card.key === "embed_main");
 
   return (
@@ -835,7 +860,9 @@ export default function DefaultModelConfigPanel({
           </div>
           <div className="model-defaults-groups">
             {defaultCapabilityGroups.map(({ key, icon: Icon, capabilities }) => {
-              const groupCards = capabilities.flatMap((capability) => cards.filter((card) => card.key === capability));
+              const groupCards = key === "retrieval" && onConfigureToolService
+                ? [...toolCards, ...modelCards.filter((card) => card.key === "reranker" || card.key === "embed_image")]
+                : capabilities.flatMap((capability) => cards.filter((card) => card.key === capability));
               if (!groupCards.length) return null;
               const expanded = expandedGroups.includes(key);
               const title = t(`modelProvider.defaults.${key}Title`);

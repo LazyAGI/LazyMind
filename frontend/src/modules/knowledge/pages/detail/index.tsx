@@ -474,13 +474,13 @@ const Detail = () => {
 
   return (
     <div
-      className="knowledge-detail-page"
+      className={`knowledge-detail-page${paperLibrary ? " knowledge-detail-page--paper" : ""}`}
       style={{
         width: "100%",
         minWidth: 0,
         display: "flex",
         flexDirection: "column",
-        paddingBottom: "24px",
+        paddingBottom: paperLibrary ? "12px" : "24px",
       }}
     >
       {!paperLibrary && <DetailPageHeader

@@ -48,7 +48,7 @@ type Service struct{ db *gorm.DB }
 
 func LocalAvailable() bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("LAZYMIND_VOCABULARY_ENABLED"))) {
-	case "1", "true", "yes", "on":
+	case "", "1", "true", "yes", "on":
 		return true
 	}
 	return false

@@ -2151,7 +2151,7 @@ CREATE TABLE IF NOT EXISTS vocabulary_words (id VARCHAR(36) PRIMARY KEY, owner_i
 CREATE UNIQUE INDEX IF NOT EXISTS uk_vocabulary_word_owner_provider_term ON vocabulary_words(owner_id, provider, language, normalized_term);
 CREATE TABLE IF NOT EXISTS vocabulary_examples (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, word_id VARCHAR(36) NOT NULL, provider_note_id VARCHAR(64) NOT NULL DEFAULT '', sentence TEXT NOT NULL, translation TEXT NOT NULL DEFAULT '', content_origin VARCHAR(32) NOT NULL DEFAULT 'user', created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_examples_word ON vocabulary_examples(owner_id, word_id);
-CREATE TABLE IF NOT EXISTS vocabulary_source_refs (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, word_id VARCHAR(36) NOT NULL, example_id VARCHAR(36), dataset_id VARCHAR(64) NOT NULL, document_id VARCHAR(64) NOT NULL, segment_id VARCHAR(64) NOT NULL DEFAULT '', page INTEGER, bbox_json TEXT NOT NULL DEFAULT '', selected_text TEXT NOT NULL DEFAULT '', context_sentence TEXT NOT NULL DEFAULT '', created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS vocabulary_source_refs (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, word_id VARCHAR(36) NOT NULL, example_id VARCHAR(36), dataset_id VARCHAR(255) NOT NULL, document_id VARCHAR(128) NOT NULL, segment_id VARCHAR(255) NOT NULL DEFAULT '', page INTEGER, bbox_json TEXT NOT NULL DEFAULT '', selected_text TEXT NOT NULL DEFAULT '', context_sentence TEXT NOT NULL DEFAULT '', created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_vocabulary_source_ref ON vocabulary_source_refs(owner_id, word_id, document_id, segment_id, context_sentence);
 CREATE INDEX IF NOT EXISTS idx_vocabulary_source_document ON vocabulary_source_refs(owner_id, document_id);
 CREATE TABLE IF NOT EXISTS vocabulary_provider_operations (id VARCHAR(36) PRIMARY KEY, owner_id VARCHAR(64) NOT NULL, provider VARCHAR(16) NOT NULL, operation_type VARCHAR(32) NOT NULL, payload_json TEXT NOT NULL, idempotency_key VARCHAR(128) NOT NULL, status VARCHAR(24) NOT NULL DEFAULT 'pending', retry_count INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '', created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -3426,6 +3426,14 @@ CREATE TABLE academic_paper_contents (
 CREATE UNIQUE INDEX uk_academic_content ON academic_paper_contents(user_id, paper_id, parser_version, source_key);
 -- Complete editable paper-library state and optimistic concurrency revision.
 -- +migrate Dialect postgres,sqlite
+-- Immutable pre-normalization paper graph archive.
+CREATE TABLE paper_libraries (
+ dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+ data_json JSON NOT NULL,
+ revision BIGINT NOT NULL DEFAULT 0 CHECK(revision >= 0),
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+
 CREATE TABLE paper_library_folders (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, parent_id VARCHAR(255) NOT NULL DEFAULT '',
  name VARCHAR(255) NOT NULL, name_key VARCHAR(255) NOT NULL, revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0),
@@ -3463,6 +3471,22 @@ CREATE TABLE paper_library_attachments (
 CREATE INDEX idx_library_attachment_paper ON paper_library_attachments(dataset_id,paper_id);
 CREATE INDEX idx_library_attachment_document ON paper_library_attachments(dataset_id,document_id);
 CREATE UNIQUE INDEX uk_library_active_document ON paper_library_attachments(dataset_id,document_id) WHERE document_id<>'' AND detached_at IS NULL;
+
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE paper_library_legacy_states (
+ dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+ extras_json JSON NOT NULL,
+ migrated_at TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL
+);
+
+-- +migrate Dialect postgres
+UPDATE datasets SET scene='academic_papers'
+ WHERE scene='general' AND ext->>'library_kind'='paper';
+
+-- +migrate Dialect sqlite
+UPDATE datasets SET scene='academic_papers'
+ WHERE scene='general' AND CASE WHEN json_valid(ext) THEN json_extract(ext,'$.library_kind') ELSE NULL END='paper';
 
 -- Promote the oldest active connection endpoint once. Keep rollback metadata
 -- without storing API keys; connection/model IDs and ciphertext stay intact.
@@ -3682,3 +3706,39 @@ ALTER TABLE user_model_providers ADD COLUMN logo_data_url TEXT NOT NULL DEFAULT 
 -- Per-model capability declarations and runtime options.
 ALTER TABLE user_model_provider_group_models ADD COLUMN model_settings TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE user_model_provider_group_models ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- Vocabulary cloud connections and durable outbound operations; portable PostgreSQL/SQLite SQL.
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE IF NOT EXISTS vocabulary_cloud_connections (
+    id VARCHAR(64) PRIMARY KEY,
+    owner_id VARCHAR(64) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    token_cipher TEXT NOT NULL,
+    account_key VARCHAR(64) NOT NULL DEFAULT '',
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    target_id TEXT NOT NULL DEFAULT '',
+    target_name TEXT NOT NULL DEFAULT '',
+    add_to_study BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(owner_id, provider)
+);
+
+CREATE TABLE IF NOT EXISTS vocabulary_cloud_operations (
+    id VARCHAR(64) PRIMARY KEY,
+    owner_id VARCHAR(64) NOT NULL,
+    connection_id VARCHAR(64) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    word_id VARCHAR(64) NOT NULL,
+    term TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    add_to_study BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    last_error TEXT NOT NULL DEFAULT '',
+    job_id VARCHAR(64) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(connection_id, word_id, target_id, add_to_study)
+);
+CREATE INDEX IF NOT EXISTS idx_vocabulary_cloud_operations_owner_updated
+    ON vocabulary_cloud_operations(owner_id, updated_at);
