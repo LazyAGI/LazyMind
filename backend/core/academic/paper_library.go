@@ -45,6 +45,17 @@ func libraryAccess(w http.ResponseWriter, r *http.Request, write bool) (string, 
 		replyError(w, 403, "TARGET_DATASET_FORBIDDEN", "没有目标论文库的读取权限")
 		return "", false, false
 	}
+	if err := paperlibrary.EnsureLegacy(r.Context(), store.DB(), dataset); err != nil {
+		replyError(w, 500, "PAPER_LIBRARY_UNAVAILABLE", "既有论文库转换失败，原始数据已保留")
+		return "", false, false
+	}
+	if result.Scene != "academic_papers" {
+		result, err = catalog.GetDatasetAccess(r.Context(), doc.DatasetGetRequest{UserID: user, DatasetID: dataset, Caller: caller(r)})
+		if err != nil {
+			replyError(w, 500, "PAPER_LIBRARY_UNAVAILABLE", "论文库暂时不可用")
+			return "", false, false
+		}
+	}
 	if result.Scene != "academic_papers" {
 		replyError(w, 400, "PAPER_LIBRARY_REQUIRED", "目标知识库不是论文库")
 		return "", false, false

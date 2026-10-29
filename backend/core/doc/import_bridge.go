@@ -14,6 +14,8 @@ import (
 // LocalFileImportRequest is only for trusted Core workers. Public clients must
 // transfer bytes through uploads; their filesystem paths never reach this API.
 type LocalFileImportRequest struct {
+	// DocumentID is a stable identity supplied by a trusted, locked importer.
+	DocumentID                                                                string
 	DatasetID, ParentID, SourcePath, DisplayName, ContentType, DataSourceType string
 	Tags                                                                      []string
 	UserID, UserName                                                          string
@@ -49,7 +51,7 @@ func ImportLocalFile(ctx context.Context, input LocalFileImportRequest) (LocalFi
 	if err != nil {
 		return LocalFileImportResult{}, err
 	}
-	bound, err := svc.ImportOriginal(ctx, caller, ImportOriginalRequest{FileRef: ref.FileRef, DatasetID: input.DatasetID, ParentID: input.ParentID, Tags: input.Tags, DataSourceType: input.DataSourceType})
+	bound, err := svc.ImportOriginal(ctx, caller, ImportOriginalRequest{DocumentID: input.DocumentID, FileRef: ref.FileRef, DatasetID: input.DatasetID, ParentID: input.ParentID, Tags: input.Tags, DataSourceType: input.DataSourceType})
 	if err != nil {
 		return LocalFileImportResult{}, err
 	}

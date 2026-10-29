@@ -12,10 +12,10 @@ function conciseError(error = '', provider?: string) {
   if (/deadline exceeded|timed?\s*out|timeout/i.test(error)) return `${source}请求超时，请稍后重试`;
   return error.length > 140 ? `${error.slice(0, 140)}…` : error || '操作未完成，请查看详情';
 }
-const operationNames: Record<string, string> = { paper_expansion: '扩展导入', paper_link: '链接导入', pdf_upload: '上传 PDF', bibliography: '题录导入' };
+const operationNames: Record<string, string> = { paper_expansion: '扩展导入', single_reference: '引用导入', paper_references: '参考文献导入', collection_references: '文献集合导入', conversation_sources: '对话来源导入', paper_link: '链接导入', pdf_upload: '上传 PDF', bibliography: '题录导入', zotero: 'Zotero 导入', library_backup: '备份恢复' };
 const statusNames: Record<string, string> = { running: '处理中', failed: '失败', partial_failed: '部分失败', skipped: '已存在', metadata_only: '题录已保存', canceled: '已取消', succeeded: '已完成', removed: '已移出论文库', awaiting_association: '待关联' };
 const itemNames: Record<string, string> = { importing: '导入中', processing: '处理中', ready: '已入库', metadata_only: '题录已保存', skipped: '已存在', failed: '导入失败', processing_failed: '处理失败', canceled: '已取消', deleted: '文档已删除', removed: '已移出论文库', awaiting_association: 'PDF 已上传，待关联' };
-const providers: Record<string, string> = { arxiv: 'arXiv', local: '本地 PDF', web: '网页', doi: 'DOI' };
+const providers: Record<string, string> = { arxiv: 'arXiv', local: '本地 PDF', web: '网页', doi: 'DOI', zotero: 'Zotero' };
 function resultSummary(summary: ImportOperation['summary']) {
   const results = [[summary.ready, '已入库'], [summary.metadata_only, '题录已保存'], [summary.skipped, '已存在'], [summary.active, '处理中'], [summary.failed, '失败'], [summary.canceled, '已取消'], [summary.deleted, '文档已删除'], [summary.removed, '已移出论文库']].filter(([count]) => Number(count) > 0);
   return results.length > 1 ? results.map(([count, label]) => `${label} ${count}`).join(' · ') : '';
@@ -172,9 +172,9 @@ export default function PaperImportStatus({ datasetId, page, canWrite, onRetry, 
       <div className="paper-library-import-operation-head">
         <button type="button" className="paper-library-import-operation-toggle" disabled={loading} aria-expanded={selected} aria-controls={selected ? `${panelId}-${shown.id}` : undefined}
           aria-label={`${selected ? '收起' : '展开'}导入记录：${operationTitle(shown)}，${shown.summary.total} 篇`} onClick={() => toggle(operation.id)}>
-          {selected ? <DownOutlined aria-hidden /> : <RightOutlined aria-hidden />}<span title={operationTitle(shown)}>{operationTitle(shown)} · {shown.summary.total} 篇</span>
+          {selected ? <DownOutlined aria-hidden /> : <RightOutlined aria-hidden />}<span title={operationTitle(shown)}>{operationNames[shown.entry_type] || shown.entry_type}{shown.source.format ? ` · ${shown.source.format.toUpperCase()}` : ''} · {shown.summary.total} 篇</span>
         </button>
-        <Badge className="paper-library-import-status" status={shown.summary.needs_action ? 'error' : shown.summary.active ? 'processing' : ['succeeded', 'metadata_only'].includes(shown.status) ? 'success' : 'default'} text={`${statusNames[shown.status] || shown.status}${resolved ? '（已解决）' : ''}`} />
+        <Badge className="paper-library-import-status" status={shown.summary.needs_action ? 'error' : shown.summary.active ? 'processing' : ['succeeded', 'metadata_only'].includes(shown.status) ? 'success' : 'default'} text={`${shown.status === 'succeeded' && shown.summary.active ? '已入库 · 后台解析中' : statusNames[shown.status] || shown.status}${resolved ? '（已解决）' : ''}`} />
       </div>
       {operationMetadata(shown) && <p className="paper-library-import-operation-source">{operationMetadata(shown)}</p>}
       {resultSummary(shown.summary) && <p className="paper-library-import-operation-summary">{resultSummary(shown.summary)}</p>}

@@ -78,8 +78,9 @@ describe('paper relations in the detail drawer', () => {
         fireEvent.click(screen.getByRole('tab', { name: '附件 2' }));
         const attachments = screen.getByRole('tabpanel', { name: '附件 2' });
         fireEvent.change(within(attachments).getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'second-version' } });
-        fireEvent.click(within(attachments).getByRole('button', { name: '阅读 ↗' }));
-        expect(onOpenAttachment).toHaveBeenCalledWith('pdf-v1');
+        fireEvent.click(within(attachments).getByRole('button', { name: '阅读此附件' }));
+        expect(onOpenAttachment).toHaveBeenCalledOnce();
+        expect(within(attachments).getByText('附件预览')).toBeInTheDocument();
         expect(extractAcademicReferences).not.toHaveBeenCalled();
     });
     it('identifies references when needed and presents expansion context separately from citations', async () => {
@@ -152,4 +153,14 @@ describe('paper relations in the detail drawer', () => {
         await act(async () => finish([{ ID: 'obsolete', Title: 'Obsolete reference', RawText: 'Obsolete reference' }]));
         expect(screen.queryByText('Obsolete reference')).not.toBeInTheDocument();
     });
+});
+
+it('shows saved Zotero relationships alongside extracted references', async () => {
+    const data = fixture();
+    data.relations = [{ id: 'zotero-related', fromPaperId: 'current', toPaperId: 'related', kind: 'related' }];
+    const onOpenPaper = vi.fn();
+    show(data, { onOpenPaper });
+    const saved = await screen.findByRole('region', { name: '已保存关系' });
+    fireEvent.click(within(saved).getByRole('button', { name: /Related paper/ }));
+    expect(onOpenPaper).toHaveBeenCalledWith('related');
 });

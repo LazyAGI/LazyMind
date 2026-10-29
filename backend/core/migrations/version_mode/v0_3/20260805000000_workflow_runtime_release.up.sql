@@ -3426,6 +3426,14 @@ CREATE TABLE academic_paper_contents (
 CREATE UNIQUE INDEX uk_academic_content ON academic_paper_contents(user_id, paper_id, parser_version, source_key);
 -- Complete editable paper-library state and optimistic concurrency revision.
 -- +migrate Dialect postgres,sqlite
+-- Immutable pre-normalization paper graph archive.
+CREATE TABLE paper_libraries (
+ dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+ data_json JSON NOT NULL,
+ revision BIGINT NOT NULL DEFAULT 0 CHECK(revision >= 0),
+ created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+);
+
 CREATE TABLE paper_library_folders (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, parent_id VARCHAR(255) NOT NULL DEFAULT '',
  name VARCHAR(255) NOT NULL, name_key VARCHAR(255) NOT NULL, revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0),
@@ -3463,6 +3471,22 @@ CREATE TABLE paper_library_attachments (
 CREATE INDEX idx_library_attachment_paper ON paper_library_attachments(dataset_id,paper_id);
 CREATE INDEX idx_library_attachment_document ON paper_library_attachments(dataset_id,document_id);
 CREATE UNIQUE INDEX uk_library_active_document ON paper_library_attachments(dataset_id,document_id) WHERE document_id<>'' AND detached_at IS NULL;
+
+-- +migrate Dialect postgres,sqlite
+CREATE TABLE paper_library_legacy_states (
+ dataset_id VARCHAR(255) NOT NULL PRIMARY KEY,
+ extras_json JSON NOT NULL,
+ migrated_at TIMESTAMP,
+ updated_at TIMESTAMP NOT NULL
+);
+
+-- +migrate Dialect postgres
+UPDATE datasets SET scene='academic_papers'
+ WHERE scene='general' AND ext->>'library_kind'='paper';
+
+-- +migrate Dialect sqlite
+UPDATE datasets SET scene='academic_papers'
+ WHERE scene='general' AND CASE WHEN json_valid(ext) THEN json_extract(ext,'$.library_kind') ELSE NULL END='paper';
 
 -- Promote the oldest active connection endpoint once. Keep rollback metadata
 -- without storing API keys; connection/model IDs and ciphertext stay intact.
