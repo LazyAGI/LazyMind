@@ -7,6 +7,13 @@ beforeAll(async()=>{await i18n.changeLanguage('en-US');});
 const definitions=[{symbol:String.raw`\hat{\mathbf{x}}_i`,meaning:'Feature vector',evidence_ids:['e'],inferred:true}];
 const evidence=[{id:'e',text:'Exact source definition.',page:2,bbox:[0,0,1,.1] as [number,number,number,number]}];
 describe('symbols inside complete formulas',()=>{
+ it('preserves malformed extracted LaTeX without crashing the reader',()=>{
+ const latex='x\\';
+ const view=render(<InteractiveFormula latex={latex} sourceKey="malformed" definitions={[]} evidence={[]} onNavigate={vi.fn()}/>);
+ expect(Array.from(view.container.querySelectorAll('pre')).some(node=>node.textContent===latex)).toBe(true);
+ expect(screen.getByText('Interactive symbols are unavailable for this formula syntax. The original LaTeX is preserved.')).toBeInTheDocument();
+ expect(screen.queryAllByRole('button',{name:/Symbol:/})).toHaveLength(0);
+ });
  it('selects actual rendered symbols by click or keyboard and exposes exact evidence',()=>{
  const navigate=vi.fn();
  const view=render(<InteractiveFormula latex={String.raw`\hat {\mathbf {x}} _ {i} + y = 1`} sourceKey="source" definitions={definitions} evidence={evidence} onNavigate={navigate}/>);

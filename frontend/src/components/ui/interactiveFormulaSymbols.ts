@@ -92,7 +92,8 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
  for(let i=0;i<latex.length;){
   i=skip(i);if(i>=latex.length)break;
   if(latex[i]==='\\'){
-   const command=latex.slice(i).match(/^\\([a-zA-Z]+|.)/)!;
+   const command=latex.slice(i).match(/^\\([a-zA-Z]+|.)/);
+   if(!command)return empty;
    const name=command[1];
    if(['begin','end','tag','label'].includes(name)){
     let next=skip(i+command[0].length);if(latex[next]==='*')next=skip(next+1);

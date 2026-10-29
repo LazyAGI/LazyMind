@@ -111,3 +111,36 @@ func TestPDFIRWorkerRehydratesNondefaultTenantAndRejectsRevokedIdentity(t *testi
 		}
 	}
 }
+
+func TestPDFIRStatusReportsPermanentArtifactSizeFailure(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.AsyncJob{}); err != nil {
+		t.Fatal(err)
+	}
+	row := orm.Document{ID: "doc", DatasetID: "ds"}
+	job := orm.AsyncJob{ID: "oversized", JobType: pdfIRJobType, ResourceType: "document_pdf_ir", ResourceID: pdfIRResource("ds", "doc"), Status: "failed", ErrorCode: "pdf_ir_too_large", PayloadJSON: mustJSON(pdfIRPayload{Revision: pdfir.Revision, SourceSHA256: "hash"}), CreatedAt: time.Now()}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	state, err := pdfIRStatus(t.Context(), row, "hash")
+	if err != nil || state.Status != "failed" || !strings.Contains(state.ErrorMessage, "smaller PDF") || strings.Contains(state.ErrorMessage, "Retry") {
+		t.Fatalf("size failure must explain recovery rather than suggest identical retry: %+v %v", state, err)
+	}
+	// Older versions may already have recorded a successful oversized artifact.
+	path := filepath.Join(t.TempDir(), "oversized.json")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate((32 << 20) + 1); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := db.Model(&job).Updates(map[string]any{"status": "succeeded", "result_json": mustJSON(pdfIRResult{IRPath: path})}).Error; err != nil {
+		t.Fatal(err)
+	}
+	state, err = pdfIRStatus(t.Context(), row, "hash")
+	if err != nil || state.Status != "failed" || !strings.Contains(state.ErrorMessage, "smaller PDF") {
+		t.Fatalf("legacy oversized artifact must report size failure: %+v %v", state, err)
+	}
+}

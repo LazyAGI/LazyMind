@@ -125,3 +125,34 @@ func TestPDFIRProjectionV2UpgradeKeepsExistingTableCaptionIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestPDFIRProjectionUpgradePreservesLegacyArtifactWhenOverBudget(t *testing.T) {
+	var archive bytes.Buffer
+	z := zip.NewWriter(&archive)
+	f, _ := z.Create("paper_content_list.json")
+	f.Write([]byte(`[{"type":"table","page_idx":0,"bbox":[10,10,900,900],"table_caption":["Table 1: Results"],"table_body":"<table><tr><td>expanded table projection</td></tr></table>"}]`))
+	z.Close()
+	d, err := pdfir.AdaptZIP(archive.Bytes(), "hash", "vlm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.ProjectionVersion = 0
+	d.Blocks[0].Table = nil
+	before := mustJSON(d)
+	dir := t.TempDir()
+	ip, rp := filepath.Join(dir, "ir.json"), filepath.Join(dir, "raw.zip")
+	if err := os.WriteFile(ip, before, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rp, archive.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	upgradePDFIRProjectionWithLimit(&d, pdfIRResult{IRPath: ip, RawPath: rp}, int64(len(before)))
+	after, err := os.ReadFile(ip)
+	if err != nil || !bytes.Equal(before, after) || d.ProjectionVersion != 0 || d.Blocks[0].Table != nil {
+		t.Fatalf("oversized projection replaced legacy artifact: %v", err)
+	}
+	if len(d.Warnings) == 0 {
+		t.Fatal("skipped upgrade must explain the size limit")
+	}
+}

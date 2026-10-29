@@ -1,11 +1,10 @@
 package doc
 
 import (
-	"encoding/json"
+	"errors"
 	"io"
 	"lazymind/core/pdfir"
 	"os"
-	"path/filepath"
 	"reflect"
 )
 
@@ -13,6 +12,10 @@ import (
 // The retained archive belongs to this job; no provider call or new job is needed.
 // A missing/corrupt archive must not make an otherwise usable legacy IR fail.
 func upgradePDFIRProjection(d *pdfir.Document, result pdfIRResult) {
+	upgradePDFIRProjectionWithLimit(d, result, pdfIRMaxArtifactBytes)
+}
+
+func upgradePDFIRProjectionWithLimit(d *pdfir.Document, result pdfIRResult, limit int64) {
 	if d.ProjectionVersion >= pdfir.ProjectionVersion {
 		return
 	}
@@ -47,21 +50,12 @@ func upgradePDFIRProjection(d *pdfir.Document, result pdfIRResult) {
 			return
 		}
 	}
-	file, err := os.CreateTemp(filepath.Dir(result.IRPath), ".pdf-ir-projection-*.json")
-	if err != nil {
-		warn()
-		return
-	}
-	temp := file.Name()
-	defer os.Remove(temp)
-	err = json.NewEncoder(file).Encode(upgraded)
-	closeErr := file.Close()
-	if err != nil || closeErr != nil {
-		warn()
-		return
-	}
-	if os.Rename(temp, result.IRPath) != nil {
-		warn()
+	if err := writePDFIRArtifact(result.IRPath, upgraded, limit); err != nil {
+		if errors.Is(err, errPDFIRTooLarge) {
+			d.Warnings = append(d.Warnings, "Updated PDF reading structure exceeds the size limit; the existing structure is retained. Use a smaller PDF for the updated projection.")
+		} else {
+			warn()
+		}
 		return
 	}
 	*d = upgraded

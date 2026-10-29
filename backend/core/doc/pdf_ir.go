@@ -20,6 +20,11 @@ import (
 )
 
 const pdfIRJobType = "document_pdf_ir"
+const pdfIRMaxArtifactBytes int64 = 32 << 20
+const pdfIRTooLargeCode = "pdf_ir_too_large"
+const pdfIRTooLargeMessage = "PDF reading structure exceeds the 32 MiB limit. Use a smaller PDF or split the original PDF into smaller documents."
+
+var errPDFIRTooLarge = errors.New(pdfIRTooLargeMessage)
 
 type pdfIRPayload struct {
 	Revision     string `json:"revision"`
@@ -78,6 +83,9 @@ func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRRespo
 		case "failed", "canceled":
 			s.Status = "failed"
 			s.ErrorMessage = "PDF parsing failed or was canceled. Retry parsing."
+			if j.ErrorCode == pdfIRTooLargeCode {
+				s.ErrorMessage = pdfIRTooLargeMessage
+			}
 		case "succeeded":
 			var result pdfIRResult
 			var d pdfir.Document
@@ -90,7 +98,13 @@ func pdfIRStatus(ctx context.Context, row orm.Document, hash string) (pdfIRRespo
 				s.ErrorMessage = "PDF IR artifact is missing; retry parsing"
 				return s, nil
 			}
-			e = json.NewDecoder(io.LimitReader(f, 32<<20)).Decode(&d)
+			if info, statErr := f.Stat(); statErr == nil && info.Size() > pdfIRMaxArtifactBytes {
+				f.Close()
+				s.Status = "failed"
+				s.ErrorMessage = pdfIRTooLargeMessage
+				return s, nil
+			}
+			e = json.NewDecoder(io.LimitReader(f, pdfIRMaxArtifactBytes)).Decode(&d)
 			f.Close()
 			if e != nil || d.SourceSHA256 != hash {
 				s.Status = "failed"
@@ -276,8 +290,10 @@ func handlePDFIRJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Rep
 		return fail(runCtx.Err())
 	}
 	irPath := filepath.Join(dir, "document-ir.json")
-	b, _ := json.Marshal(d)
-	if e = os.WriteFile(irPath, b, 0600); e != nil {
+	if e = writePDFIRArtifact(irPath, d, pdfIRMaxArtifactBytes); e != nil {
+		if errors.Is(e, errPDFIRTooLarge) {
+			return asyncjob.Result{Permanent: true, ErrorCode: pdfIRTooLargeCode}, e
+		}
 		return fail(errors.New("save PDF IR failed"))
 	}
 	result, _ := json.Marshal(pdfIRResult{IRPath: irPath, RawPath: rawPath})

@@ -2,6 +2,9 @@ import {describe,it,expect} from 'vitest';
 import {interactiveFormulaSymbols} from './interactiveFormulaSymbols';
 const sps=String.raw`\mathcal {L} (I _ {i}, T _ {i}) = \mathcal {H} (y _ {i}, \mathcal {P} _ {i} ^ {i 2 t}) + \mathcal {H} (y _ {i}, \mathcal {P} _ {i} ^ {t 2 i}),\tag{1}`;
 const cc=String.raw`\begin{array}{c} \mathcal {L} _ {c c} = \sum_ {i = 1} ^ {l} \operatorname{ReLU} \big (C r o s s A t t n (I, T _ {N P _ {i}}) \\ - C r o s s A t t n (I, N P _ {i}) - \epsilon \big) \end{array}`;
+it.each(['x\\', 'x\\\ny'])('rejects malformed command tokens without throwing: %j',latex=>{
+ expect(interactiveFormulaSymbols(latex,[])).toMatchObject({safe:false,occurrences:[]});
+});
 describe('deterministic complete formula symbol matching',()=>{
  it('matches the real SPS spacing/scripts and anchors full function definitions to their observed heads',()=>{
  const result=interactiveFormulaSymbols(sps,[String.raw`\mathcal{L}(I_i,T_i)`,String.raw`\mathcal{H}`,String.raw`y_i`,String.raw`\mathcal{P}_{i}^{i 2 t}`,String.raw`\tau`]);
