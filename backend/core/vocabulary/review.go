@@ -119,6 +119,9 @@ func (s *Service) addLocalWord(ctx context.Context, owner string, req AddWordReq
 			_, _, err = s.ensureCardType(tx, owner, word.ID, example.ID, "sentence_cloze", now)
 		}
 		result = AddWordResult{Word: word, Example: example}
+		if err == nil {
+			result.CloudQueued, err = enqueueCloudConnections(ctx, tx, word)
+		}
 		return err
 	})
 	return result, err

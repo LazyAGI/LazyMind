@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"lazymind/core/common/orm"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ func testService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models := []any{&ProviderSetting{}, &Word{}, &Example{}, &SourceRef{}, &providerOperation{}, &ReviewCard{}, &ReviewLogRow{}, &ReviewSession{}, &ReviewSessionItem{}, &ReviewSessionAnswer{}, &Wordbook{}, &WordbookEntry{}, &Tag{}, &WordTag{}, &ExampleTag{}, &DictionaryEntry{}, &DictionarySense{}, &DictionaryExample{}, &DictionaryImport{}, &FSRSProfile{}}
+	models := []any{&CloudConnection{}, &CloudOperation{}, &orm.AsyncJob{}, &ProviderSetting{}, &Word{}, &Example{}, &SourceRef{}, &providerOperation{}, &ReviewCard{}, &ReviewLogRow{}, &ReviewSession{}, &ReviewSessionItem{}, &ReviewSessionAnswer{}, &Wordbook{}, &WordbookEntry{}, &Tag{}, &WordTag{}, &ExampleTag{}, &DictionaryEntry{}, &DictionarySense{}, &DictionaryExample{}, &DictionaryImport{}, &FSRSProfile{}}
 	if err = db.AutoMigrate(models...); err != nil {
 		t.Fatal(err)
 	}

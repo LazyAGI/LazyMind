@@ -2077,5 +2077,14 @@
   "2005202": {"en-US": "The translation request is not supported", "zh-CN": "当前翻译请求不受支持"},
   "2005203": {"en-US": "Translation provider request failed", "zh-CN": "翻译服务请求失败"},
   "2005204": {"en-US": "Translation service initialization failed", "zh-CN": "翻译服务初始化失败"},
-  "2005205": {"en-US": "The selected translation provider does not support documents", "zh-CN": "所选翻译服务不支持文档翻译"}
+  "2005205": {"en-US": "The selected translation provider does not support documents", "zh-CN": "所选翻译服务不支持文档翻译"},
+  "2005300": {"en-US": "Invalid vocabulary sync configuration", "zh-CN": "生词同步配置无效"},
+  "2005301": {"en-US": "Vocabulary service authorization failed; check the token", "zh-CN": "生词服务授权失败，请检查 Token"},
+  "2005302": {"en-US": "Vocabulary credentials are unavailable on this device", "zh-CN": "当前设备无法读取生词服务凭据"},
+  "2005303": {"en-US": "Vocabulary connection is disabled or missing", "zh-CN": "生词服务连接已停用或不存在"},
+  "2005304": {"en-US": "Vocabulary service rate limit reached; sync will retry later", "zh-CN": "生词服务请求过于频繁，将稍后重试同步"},
+  "2005305": {"en-US": "Vocabulary sync failed; your local word is preserved", "zh-CN": "生词同步失败，本地单词已保留"},
+  "2005306": {"en-US": "The word is unavailable in the remote dictionary", "zh-CN": "远端词典暂不支持此单词"},
+  "2005307": {"en-US": "The word was not added to the study plan; check the remote account quota", "zh-CN": "单词未加入学习计划，请检查远端账号额度"},
+  "2005308": {"en-US": "Vocabulary sync state could not be saved", "zh-CN": "无法保存生词同步状态"}
 }

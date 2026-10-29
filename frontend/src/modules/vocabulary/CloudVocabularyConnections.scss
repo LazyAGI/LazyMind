@@ -1,0 +1,7 @@
+.vocabulary-cloud-section { margin-top: 28px; }
+.vocabulary-cloud-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.vocabulary-cloud-grid .ant-card { height: 100%; }
+.vocabulary-cloud-stats, .vocabulary-cloud-notice, .vocabulary-cloud-operations { margin-top: 16px; }
+.vocabulary-cloud-operations ul { list-style: none; padding: 0; margin: 8px 0 0; max-height: 240px; overflow: auto; }
+.vocabulary-cloud-operations li { padding: 8px 0; border-bottom: 1px solid var(--ant-color-border-secondary, #eee); overflow-wrap: anywhere; }
+@media (max-width: 900px) { .vocabulary-cloud-grid { grid-template-columns: minmax(0, 1fr); } }

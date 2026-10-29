@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import AddVocabularyModal from "./AddVocabularyModal";
 import { getTranslationStatus, translateText } from "@/modules/knowledge/api/translation";
-import { resolveVocabularySelection } from "./api";
+import { addVocabularyWord, resolveVocabularySelection } from "./api";
 
 vi.mock("@/modules/knowledge/api/translation", () => ({ getTranslationStatus: vi.fn(async()=>false), translateText: vi.fn(), isSingleEnglishWord:(text:string)=>/^[A-Za-z]+$/.test(text) }));
 vi.mock("./api", () => ({
@@ -19,6 +19,15 @@ vi.mock("./api", () => ({
 }));
 
 describe("AddVocabularyModal", () => {
+  it("resolves and saves document vocabulary locally even with another default provider", async () => {
+    vi.mocked(resolveVocabularySelection).mockResolvedValueOnce({term:"localword",sentence:"A localword example.",provider:"local",dictionary:[],wordbooks:[{id:"local-book",name:"Local",description:"",capability_key:"",question_types:[]}]});
+    vi.mocked(addVocabularyWord).mockResolvedValueOnce({queued:false,word:{} as never});
+    render(<AddVocabularyModal selection={{text:"localword",page:1}} datasetId="dataset-1" documentId="document-1" onClose={vi.fn()} onAdded={vi.fn()}/>);
+    await screen.findByDisplayValue("localword");
+    expect(resolveVocabularySelection).toHaveBeenLastCalledWith(expect.objectContaining({provider:"local"}));
+    fireEvent.click(screen.getByRole("button",{name:/OK|确 定|确定/}));
+    await waitFor(()=>expect(addVocabularyWord).toHaveBeenCalledWith(expect.objectContaining({provider:"local",wordbook_ids:["local-book"],document_id:"document-1"})));
+  });
   it("handles a selection when dictionary and wordbooks are absent", async () => {
     render(<AddVocabularyModal
       selection={{ text: "workloads", context: "Diverse workloads require flexible compute.", page: 1 }}
@@ -40,7 +49,7 @@ describe("AddVocabularyModal", () => {
   });
   it("shows one selected dictionary and translates the initial sentence when configured", async()=>{
     vi.mocked(getTranslationStatus).mockResolvedValueOnce(true);vi.mocked(translateText).mockResolvedValueOnce({translated_text:"完整技术栈",source:"en",target:"zh"});
-    vi.mocked(resolveVocabularySelection).mockResolvedValueOnce({term:"stack",sentence:"Full stack",provider:"local",dictionary:[{id:"ec",term:"stack",phonetic:"/stæk/",source_name:"ECDICT",source_version:"1",license_id:"MIT",source_locator:"x",senses:[{id:"s1",part_of_speech:"n.",definition:"pile\\nlayer",translation:"n. 堆叠\\nvt. 堆放"}],examples:[]},{id:"fd",term:"stack",phonetic:"/stæk/",source_name:"FreeDict eng-zho",source_version:"1",license_id:"CC",source_locator:"x",senses:[{id:"s2",part_of_speech:"n",definition:"pile",translation:"堆；电池"}],examples:[]}],wordbooks:[{id:"default",name:"默认生词本",description:""}]});
+    vi.mocked(resolveVocabularySelection).mockResolvedValueOnce({term:"stack",sentence:"Full stack",provider:"local",dictionary:[{id:"ec",term:"stack",phonetic:"/stæk/",source_name:"ECDICT",source_version:"1",license_id:"MIT",source_locator:"x",senses:[{id:"s1",part_of_speech:"n.",definition:"pile\\nlayer",translation:"n. 堆叠\\nvt. 堆放"}],examples:[]},{id:"fd",term:"stack",phonetic:"/stæk/",source_name:"FreeDict eng-zho",source_version:"1",license_id:"CC",source_locator:"x",senses:[{id:"s2",part_of_speech:"n",definition:"pile",translation:"堆；电池"}],examples:[]}],wordbooks:[{id:"default",name:"默认生词本",description:"",capability_key:"",question_types:[]}]});
     render(<AddVocabularyModal selection={{text:"stack",context:"Full stack",page:1}} datasetId="dataset-1" documentId="document-1" onClose={vi.fn()} onAdded={vi.fn()}/>);
     expect(await screen.findByText("堆叠")).toBeTruthy();expect(screen.getByText("堆放")).toBeTruthy();expect(screen.queryByText("堆；电池")).toBeNull();
     await waitFor(()=>expect(screen.getByDisplayValue("完整技术栈")).toBeTruthy());expect(screen.queryByRole("button",{name:"翻译原句"})).toBeNull();

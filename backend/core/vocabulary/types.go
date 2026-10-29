@@ -123,9 +123,10 @@ type AddWordRequest struct {
 }
 
 type AddWordResult struct {
-	Word    Word     `json:"word"`
-	Example *Example `json:"example,omitempty"`
-	Queued  bool     `json:"queued"`
+	CloudQueued bool     `json:"cloud_queued"`
+	Word        Word     `json:"word"`
+	Example     *Example `json:"example,omitempty"`
+	Queued      bool     `json:"queued"`
 }
 
 type ProviderStatus struct {

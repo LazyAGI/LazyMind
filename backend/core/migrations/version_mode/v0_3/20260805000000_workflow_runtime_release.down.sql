@@ -946,3 +946,7 @@ DROP TABLE IF EXISTS document_observations;
 DROP TABLE IF EXISTS document_directory_entries;
 DROP TABLE IF EXISTS document_directory_groups;
 DROP TABLE IF EXISTS document_directories;
+
+-- +migrate Dialect postgres,sqlite
+DROP TABLE IF EXISTS vocabulary_cloud_operations;
+DROP TABLE IF EXISTS vocabulary_cloud_connections;

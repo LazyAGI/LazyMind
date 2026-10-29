@@ -11709,6 +11709,244 @@ components:
                 name:
                     type: string
             type: object
+        VocabularyCloudConnection:
+            properties:
+                add_to_study:
+                    type: boolean
+                configured:
+                    type: boolean
+                enabled:
+                    type: boolean
+                failed:
+                    format: int64
+                    type: integer
+                last_error:
+                    type: string
+                pending:
+                    format: int64
+                    type: integer
+                provider:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+                succeeded:
+                    format: int64
+                    type: integer
+                target_id:
+                    type: string
+                target_name:
+                    type: string
+            required:
+                - provider
+                - configured
+                - enabled
+                - target_id
+                - target_name
+                - add_to_study
+                - pending
+                - failed
+                - succeeded
+                - last_error
+            type: object
+        VocabularyCloudConnectionRequest:
+            properties:
+                add_to_study:
+                    type: boolean
+                enabled:
+                    type: boolean
+                target_id:
+                    type: string
+                target_name:
+                    type: string
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            type: object
+        VocabularyCloudConnectionResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/VocabularyCloudConnection'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudConnectionsResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudConnection'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudDisconnectResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        deleted:
+                            type: boolean
+                    required:
+                        - deleted
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudOperation:
+            properties:
+                id:
+                    type: string
+                last_error:
+                    type: string
+                provider:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - failed
+                        - succeeded
+                        - canceled
+                    type: string
+                term:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - id
+                - provider
+                - term
+                - status
+                - last_error
+                - updated_at
+            type: object
+        VocabularyCloudOperationsResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudOperation'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudSyncResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        queued:
+                            type: integer
+                    required:
+                        - queued
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudTokenRequest:
+            properties:
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            type: object
+        VocabularyCloudWordbook:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - id
+                - name
+            type: object
+        VocabularyCloudWordbookRequest:
+            properties:
+                name:
+                    maxLength: 255
+                    minLength: 1
+                    type: string
+                token:
+                    description: Personal provider token. Omit or leave blank to retain the stored token; never returned in responses.
+                    type: string
+                    writeOnly: true
+            required:
+                - name
+            type: object
+        VocabularyCloudWordbookResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/VocabularyCloudWordbook'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        VocabularyCloudWordbooksResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    properties:
+                        items:
+                            items:
+                                $ref: '#/components/schemas/VocabularyCloudWordbook'
+                            type: array
+                    required:
+                        - items
+                    type: object
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         WeChatNotificationTargets:
             properties:
                 items:
@@ -33721,6 +33959,933 @@ paths:
                 "200":
                     description: OK
             summary: POST /v1/internal/provider-connections/feishu-cli:execute
+    /api/core/vocabulary/capabilities:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/capabilities
+    /api/core/vocabulary/cloud/connections:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudConnectionsResponse'
+                    description: List the current user's vocabulary cloud connections and sync counts
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: List the current user's vocabulary cloud connections and sync counts
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}:
+        delete:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudDisconnectResponse'
+                    description: Disconnect vocabulary cloud sync and cancel queued operations
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Disconnect vocabulary cloud sync and cancel queued operations
+            tags:
+                - VocabularyCloud
+        put:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudConnectionResponse'
+                    description: Save vocabulary cloud credentials and target settings
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Save vocabulary cloud credentials and target settings
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/sync:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudSyncResponse'
+                    description: Queue historical local English words and retry unsuccessful sync operations
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Queue historical local English words and retry unsuccessful sync operations
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/test:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudTokenRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudWordbooksResponse'
+                    description: Test supplied or stored credentials and list wordbooks
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Test supplied or stored credentials and list wordbooks
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/connections/{provider}/wordbooks:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    enum:
+                        - eudic
+                        - maimemo
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VocabularyCloudWordbookRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudWordbookResponse'
+                    description: Create a remote vocabulary wordbook
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: Create a remote vocabulary wordbook
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/cloud/operations:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/VocabularyCloudOperationsResponse'
+                    description: List up to 50 recent vocabulary cloud sync operations for the current user
+                "400":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Invalid vocabulary sync configuration or word
+                "401":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Missing identity or invalid provider token
+                "403":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Permission denied
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Connection disabled or missing, or remote study quota unavailable
+                "429":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Provider rate limit reached
+                "500":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary sync state could not be saved
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Remote vocabulary service failed
+                "503":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    description: Vocabulary credentials unavailable on this device
+            summary: List up to 50 recent vocabulary cloud sync operations for the current user
+            tags:
+                - VocabularyCloud
+    /api/core/vocabulary/dictionary:lookup:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/dictionary:lookup
+    /api/core/vocabulary/documents/{document_id}/words:
+        get:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/documents/{document_id}/words
+    /api/core/vocabulary/documents/{document_id}/words/{word_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/documents/{document_id}/words/{word_id}
+    /api/core/vocabulary/documents/{document_id}/words/{word_id}/word:
+        delete:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/documents/{document_id}/words/{word_id}/word
+    /api/core/vocabulary/examples/{id}:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/examples/{id}
+        patch:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /vocabulary/examples/{id}
+    /api/core/vocabulary/fsrs/profile:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/fsrs/profile
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /vocabulary/fsrs/profile
+    /api/core/vocabulary/provider:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/provider
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /vocabulary/provider
+    /api/core/vocabulary/providers/anki/decks:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/providers/anki/decks
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/providers/anki/decks
+    /api/core/vocabulary/providers/anki/decks/{name}:
+        delete:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/providers/anki/decks/{name}
+    /api/core/vocabulary/providers/anki/status:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/providers/anki/status
+    /api/core/vocabulary/providers/anki:initialize:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/providers/anki:initialize
+    /api/core/vocabulary/providers/anki:request-permission:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/providers/anki:request-permission
+    /api/core/vocabulary/providers/anki:sync:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/providers/anki:sync
+    /api/core/vocabulary/review/logs:export:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/logs:export
+    /api/core/vocabulary/review/next:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/next
+    /api/core/vocabulary/review/sessions:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions
+    /api/core/vocabulary/review/sessions/{session_id}/answers:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/{session_id}/answers
+    /api/core/vocabulary/review/sessions/{session_id}/answers:register:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/{session_id}/answers:register
+    /api/core/vocabulary/review/sessions/{session_id}/questions:next:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/sessions/{session_id}/questions:next
+    /api/core/vocabulary/review/sessions/{session_id}/questions:prepare:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/{session_id}/questions:prepare
+    /api/core/vocabulary/review/sessions/{session_id}:complete:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/{session_id}:complete
+    /api/core/vocabulary/review/sessions/active:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/sessions/active
+    /api/core/vocabulary/review/sessions/active/candidates:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/sessions/active/candidates
+    /api/core/vocabulary/review/sessions/active/words:issue:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/active/words:issue
+    /api/core/vocabulary/selection:resolve:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/selection:resolve
+    /api/core/vocabulary/stats:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/stats
+    /api/core/vocabulary/wordbooks:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/wordbooks
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/wordbooks
+    /api/core/vocabulary/wordbooks/{id}:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/wordbooks/{id}
+        patch:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /vocabulary/wordbooks/{id}
+    /api/core/vocabulary/words:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/words
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words
+    /api/core/vocabulary/words/{id}:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/words/{id}
+        patch:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /vocabulary/words/{id}
+    /api/core/vocabulary/words/{id}/examples:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{id}/examples
+    /api/core/vocabulary/words/{id}/review-history:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/words/{id}/review-history
+    /api/core/vocabulary/words/{id}/tags:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{id}/tags
+    /api/core/vocabulary/words/{id}/tags/{tag}:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: tag
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/words/{id}/tags/{tag}
+    /api/core/vocabulary/words/{id}:reset:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{id}:reset
+    /api/core/vocabulary/words/{id}:resume:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{id}:resume
+    /api/core/vocabulary/words/{word_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/words/{word_id}
+    /api/core/vocabulary/words/{word_id}:master:
+        post:
+            parameters:
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{word_id}:master
+    /api/core/vocabulary/words/{word_id}:review:
+        post:
+            parameters:
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{word_id}:review
+    /api/core/vocabulary/words:reset:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words:reset
     /api/core/word_group:
         get:
             parameters:
@@ -34627,6 +35792,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:cancel-generation
+    /api/core/workflow-drafts/{draft_id}:cancel-repair:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:cancel-repair
     /api/core/workflow-drafts/{draft_id}:confirm-workflow:
         post:
             parameters:

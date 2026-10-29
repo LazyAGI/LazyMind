@@ -40,6 +40,13 @@ type Job struct {
 type Result struct {
 	Permanent bool
 
+	// RetryAt overrides retry backoff only when it is in the future.
+	RetryAt time.Time
+	// DeferAttempt refunds this attempt for a non-permanent failure with a
+	// future RetryAt, e.g. an upstream rate limit. Invalid times use the normal
+	// retry budget and backoff, preventing an immediate unbounded retry loop.
+	DeferAttempt bool
+
 	ResultJSON       json.RawMessage
 	ErrorCode        string
 	ErrorDetailsJSON json.RawMessage
