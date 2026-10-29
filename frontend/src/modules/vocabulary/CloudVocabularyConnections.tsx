@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Checkbox, Form, Input, Popconfirm, Select, Skeleton, Space, Switch, Tag, Typography } from "antd";
+import { Alert, Button, Card, Checkbox, Form, Input, Modal, Popconfirm, Select, Skeleton, Space, Switch, Tag, Typography } from "antd";
+import { ArrowRightOutlined, BookOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { createCloudWordbook, disconnectCloudConnection, listCloudConnections, listCloudOperations, saveCloudConnection, syncCloudVocabulary, testCloudConnection, type CloudConnection, type CloudOperation, type CloudVocabularyProvider, type CloudWordbook } from "./cloudApi";
 import "./CloudVocabularyConnections.scss";
@@ -117,13 +118,14 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
     </Card>
   </section>;
 }
-export default function CloudVocabularyConnections() {
+export default function CloudVocabularyConnections({onReadyCountChange}: {onReadyCountChange?: (count:number)=>void}) {
   const {t}=useTranslation();
   const [connections,setConnections]=useState<CloudConnection[]>([]);
   const [operations,setOperations]=useState<CloudOperation[]>([]);
   const [loaded,setLoaded]=useState(false);
   const [error,setError]=useState(false);
   const [reload,setReload]=useState(0);
+  const [selected,setSelected]=useState<CloudVocabularyProvider | null>(null);
   const polling = useRef(false);
   const configRevision = useRef(0);
   useEffect(()=>{
@@ -141,10 +143,30 @@ export default function CloudVocabularyConnections() {
     };
     void poll();return()=>{disposed=true;clearTimeout(timer);};
   },[reload]);
-  return <section className="vocabulary-cloud-section" aria-label={t("vocabularyCloud.title")}>
-    <Typography.Title level={3}>{t("vocabularyCloud.title")}</Typography.Title>
-    <Typography.Paragraph type="secondary">{t("vocabularyCloud.description")}</Typography.Paragraph>
-    {error && <Alert type="warning" message={t("vocabularyCloud.loadFailed")} action={<Button onClick={()=>setReload(value=>value+1)}>{t("vocabularyCloud.refresh")}</Button>}/>}
-    {!loaded ? (!error && <Skeleton active/>) : <div className="vocabulary-cloud-grid">{providers.map(provider=><ConnectionCard key={provider} connection={connections.find(item=>item.provider===provider)||emptyConnection(provider)} operations={operations.filter(item=>item.provider===provider)} onSaved={saved=>{configRevision.current+=1;setConnections(current=>[...current.filter(item=>item.provider!==provider),saved]);}}/>)}</div>}
-  </section>;
+  useEffect(()=>{onReadyCountChange?.(connections.filter(item=>item.configured && item.enabled).length);},[connections,onReadyCountChange]);
+  const selectedConnection=selected ? connections.find(item=>item.provider===selected)||emptyConnection(selected) : null;
+  return <>
+    {providers.map(provider=>{
+      const connection=connections.find(item=>item.provider===provider);
+      const status=error ? "unavailable" : !loaded ? "loading" : connection?.enabled ? "enabled" : "disabled";
+      return <article key={provider} className="model-provider-cloud-doc-resource-row">
+        <span className="model-provider-cloud-doc-resource-logo"><BookOutlined/></span>
+        <div className="model-provider-cloud-doc-resource-copy">
+          <h3>{t(`vocabularyCloud.${provider}`)}</h3>
+          <p>{t("vocabularyCloud.providerDescription")}</p>
+        </div>
+        <Tag className="model-provider-cloud-doc-resource-status" color={error ? "warning" : connection?.enabled ? "success" : "default"}>{t(`vocabularyCloud.${status}`)}</Tag>
+        <div className="model-provider-cloud-doc-resource-controls">
+          <button type="button" className="model-provider-cloud-doc-resource-action" aria-label={`${t(`vocabularyCloud.${provider}`)} ${t("vocabularyCloud.manage")}`} onClick={()=>setSelected(provider)}>
+            {t("vocabularyCloud.manage")}<ArrowRightOutlined/>
+          </button>
+        </div>
+      </article>;
+    })}
+    <Modal open={Boolean(selected)} title={selected ? t(`vocabularyCloud.${selected}`) : ""} onCancel={()=>setSelected(null)} footer={null} width={680} destroyOnHidden styles={{body:{maxHeight:"75vh",overflowY:"auto"}}}>
+      <Typography.Paragraph type="secondary">{t("vocabularyCloud.description")}</Typography.Paragraph>
+      {error && <Alert type="warning" showIcon message={t("vocabularyCloud.loadFailed")} action={<Button onClick={()=>setReload(value=>value+1)}>{t("vocabularyCloud.refresh")}</Button>}/>}
+      {!loaded ? (!error && <Skeleton active/>) : selectedConnection && <ConnectionCard key={selectedConnection.provider} connection={selectedConnection} operations={operations.filter(item=>item.provider===selected)} onSaved={saved=>{configRevision.current+=1;setConnections(current=>[...current.filter(item=>item.provider!==selected),saved]);}}/>}
+    </Modal>
+  </>;
 }

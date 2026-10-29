@@ -4,6 +4,10 @@ import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
   vocabularyCloud: {
+    manage: "Manage connection",
+    providerDescription: "Sync English words saved while reading; meanings and examples stay local",
+    unavailable: "Status unavailable",
+    loading: "Loading",
     eudicTokenLink: "Get a token from the Eudic authorization page",
     maimemoTokenHelp: "In the MaiMemo app: My → More settings → Experimental features → Open API.",
     maimemoDocs: "Official API guide",

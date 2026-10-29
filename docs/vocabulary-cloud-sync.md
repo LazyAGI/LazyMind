@@ -1,6 +1,6 @@
 # 生词同步到欧路词典与墨墨背单词
 
-在「云文档 → 生词同步」中分别配置两家的个人 Token，可以只启用一家，也可以同时启用。
+在「云文档」中找到与其他服务并列的「欧路词典」和「墨墨背单词」卡片，点击配置入口填写各自的个人 Token。可以只启用一家，也可以同时启用。
 
 1. 欧路：登录 https://my.eudic.net/OpenAPI/Authorization 获取个人授权信息。墨墨：App「我的 → 更多设置 → 实验功能 → 开放 API」获取 Token。
 2. 粘贴 Token，点击「测试连接并读取词本」，选择已有词本，或创建 `LazyMind 生词本`。
@@ -20,6 +20,24 @@
 - 同一远端账号的任务串行执行，墨墨追加时读取并保留现有内容。墨墨没有公开的条件更新接口，因此外部客户端同时编辑同一词本仍可能发生覆盖；建议使用独立的 LazyMind 词本。
 
 ## 运行与验证
+
+Core 需要设置 `LAZYMIND_VOCABULARY_ENABLED=true` 才会注册生词及云同步接口；前端构建也需启用对应的 `VITE_VOCABULARY_ENABLED`。仓库 Compose 默认开启，但旧 `.env` 或旧容器可能仍为 `false`，修改后需重建相应服务；仅替换前端不能更新后端接口。
+
+Linux Docker 部署需显式配置 `LAZYMIND_CREDENTIAL_KEY_DIR`，否则凭据库默认拒绝保存 Token。本地 8090 环境使用以下 Core override：
+
+```yaml
+services:
+  core:
+    environment:
+      LAZYMIND_VOCABULARY_ENABLED: "true"
+      LAZYMIND_CREDENTIAL_KEY_DIR: /var/lib/lazymind/credential-vault/keys
+    volumes:
+      - ./data/core/credential-vault:/var/lib/lazymind/credential-vault
+```
+
+让 Core 在持久化挂载目录中创建 `keys` 子目录；该目录必须由容器进程用户拥有，权限为 `0700`，密钥文件权限为 `0600`。密钥不会保存在数据库内，也不能放进镜像或仓库。备份与迁移部署时，应将此目录和数据库一起保全；丢失密钥会使已有加密 Token 无法解密。macOS/Windows 默认仍使用系统安全存储。
+
+已有数据库的升级应先做备份，保留已应用迁移文件，只补齐缺失的增量迁移；不要用仓库的新聚合 SQL 覆盖旧运行目录。更新 Core 后检查 `/api/core/vocabulary/cloud/connections` 返回连接列表而非 404，再在产品中输入个人 Token 完成远端授权验证。
 
 同步由 Core 的后台任务执行；关闭后台任务时本地收藏与队列仍保留，重新启动任务后继续。未配置外部服务时，知识库收藏仍能独立保存本地生词。现有 Anki 生词入口保持原有行为。
 
