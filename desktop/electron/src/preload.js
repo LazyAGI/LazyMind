@@ -62,6 +62,7 @@ function createDesktopBridge(ipcRenderer) {
     openCloudLogin: (url) => ipcRenderer.invoke("lazymind:openCloudLogin", url),
     openManagedProviderAuthorization: (url) => ipcRenderer.invoke("lazymind:openManagedProviderAuthorization", url),
     openFeishuCLIAuthorization: (url) => ipcRenderer.invoke("lazymind:openFeishuCLIAuthorization", url),
+    openGitHubCLIAuthorization: (url) => ipcRenderer.invoke("lazymind:openGitHubCLIAuthorization", url),
     openCloudRegister: () => ipcRenderer.invoke("lazymind:openCloudRegister"),
     openCloudTokenPlan: (url) => ipcRenderer.invoke("lazymind:openCloudTokenPlan", url),
     onStartupDiagnosticsUpdate: (handler) => {

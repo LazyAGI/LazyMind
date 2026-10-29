@@ -22,6 +22,7 @@ from api.user import router as user_router
 from core.errors import AppException, ErrorCodes, app_exception_from_exception, error_payload_from_exception
 from core.state_errors import StateBackendAuthenticationError, StateBackendError
 from services import cloud_oauth_health
+from services.github_cli_auth import github_cli_auth_service
 
 
 # Ensure logs are visible (uvicorn log_config may set default level to WARNING and disable existing loggers)
@@ -258,6 +259,8 @@ def _handle_validation_error(request: Request, exc: RequestValidationError):
             'code': code,
             'message': message,
             'ex_mesage': ('Invalid MCP OAuth request' if request.url.path.startswith(_API_PREFIX + '/v1/mcp-oauth')
+                          else 'Invalid GitHub authorization request'
+                          if request.url.path.startswith(_API_PREFIX + '/v1/cloud/github/cli/sessions')
                           else json.dumps(exc.errors(), ensure_ascii=False)),
         },
     )
@@ -319,11 +322,13 @@ async def _start_cloud_oauth_health_check():
         from services.mcp_oauth import _callback_url
         _callback_url()
     cloud_oauth_health.start()
+    github_cli_auth_service.start_recovery()
 
 
 @app.on_event('shutdown')
 async def _stop_cloud_oauth_health_check():
     await cloud_oauth_health.stop()
+    github_cli_auth_service.shutdown()
 
 
 _export_openapi_artifacts()

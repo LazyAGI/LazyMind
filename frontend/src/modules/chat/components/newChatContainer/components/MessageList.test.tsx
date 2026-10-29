@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RoleTypes } from "@/modules/chat/constants/common";
@@ -23,6 +23,16 @@ vi.mock("@/modules/chat/store/workflowPanel", () => ({
 
 vi.mock("@/modules/chat/components/WorkflowPanel", () => ({
   WorkflowPanel: (props: any) => { workflowFixture.props = props; return null; },
+}));
+
+// Configuration polling is covered by ToolConfigurationCard's own tests.
+vi.mock("@/modules/chat/components/ToolConfigurationCard", () => ({
+  default: () => null,
+}));
+
+vi.mock("@/modules/knowledge/api/translation", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/modules/knowledge/api/translation")>(),
+  getTranslationStatus: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock("@/modules/identityAvatar", () => ({
@@ -222,7 +232,7 @@ describe("MessageList side chat selection", () => {
     expect(screen.getAllByText("chat.runStatus.failed")).toHaveLength(1);
   });
 
-  it("hides retried failures restored from history while preserving attachments and the latest reply", () => {
+  it("hides retried failures restored from history while preserving attachments and the latest reply", async () => {
     const onOpenSideChat = vi.fn();
     const onCiteMessage = vi.fn();
     const messageList = buildChatMessageListFromHistory([
@@ -276,7 +286,7 @@ describe("MessageList side chat selection", () => {
     expect(document.querySelector('[data-chat-history-id="history-1:failed:failed-run-1"]')).toBeNull();
     expect(onOpenSideChat).not.toHaveBeenCalled();
 
-    selectMessageText("latest answer");
+    await act(async () => { selectMessageText("latest answer"); });
     fireEvent.click(
       screen.getByRole("button", { name: "chat.sideChat.askFromSelection" }),
     );

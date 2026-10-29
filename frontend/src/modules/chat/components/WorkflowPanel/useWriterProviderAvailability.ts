@@ -31,7 +31,7 @@ export function useWriterProviderAvailability(providers: string[]) {
           const meta = connection.provider_account_meta ?? {};
           return (options.chat_enabled ?? options.chatEnabled ?? meta.chat_enabled ?? meta.chatEnabled) === false;
         });
-        return [id, ready ? 'ready' : id === 'feishu' && chatDisabled ? 'chat-disabled' : 'authorize'] as const;
+        return [id, ready ? 'ready' : (id === 'feishu' || id === 'github') && chatDisabled ? 'chat-disabled' : 'authorize'] as const;
       } catch { return [id, 'failed'] as const; }
     }));
     if (request === generation.current) setStates(current => ({ ...current, ...Object.fromEntries(results) }));

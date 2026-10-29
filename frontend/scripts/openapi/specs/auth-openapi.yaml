@@ -1617,6 +1617,143 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/github/cli/sessions:
+    post:
+      tags:
+      - cloud-oauth
+      summary: Start Github Cli Session
+      operationId: start_github_cli_session_api_authservice_v1_cloud_github_cli_sessions_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GitHubCLISessionCreateBody'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubCLISessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+  /api/authservice/v1/cloud/github/cli/sessions/{session_id}:
+    get:
+      tags:
+      - cloud-oauth
+      summary: Get Github Cli Session
+      operationId: get_github_cli_session_api_authservice_v1_cloud_github_cli_sessions__session_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubCLISessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - cloud-oauth
+      summary: Cancel Github Cli Session
+      operationId: cancel_github_cli_session_api_authservice_v1_cloud_github_cli_sessions__session_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubCLISessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/authservice/v1/cloud/github/cli/attempts/{attempt_id}:
+    get:
+      tags:
+      - cloud-oauth
+      summary: Get Github Cli Attempt
+      operationId: get_github_cli_attempt_api_authservice_v1_cloud_github_cli_attempts__attempt_id__get
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubCLISessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - cloud-oauth
+      summary: Cancel Github Cli Attempt
+      operationId: cancel_github_cli_attempt_api_authservice_v1_cloud_github_cli_attempts__attempt_id__delete
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Attempt Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GitHubCLISessionResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
     AuthorizeBody:
@@ -1877,6 +2014,11 @@ components:
             format: date-time
           - type: 'null'
           title: Updated At
+        token_source:
+          type: string
+          title: Token Source
+          default: ''
+          readOnly: true
       type: object
       required:
       - connection_id
@@ -3183,6 +3325,65 @@ components:
       - msg
       - type
       title: ValidationError
+    GitHubCLISessionCreateBody:
+      properties:
+        attempt_id:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Attempt Id
+        reauthorize_connection_id:
+          type: string
+          maxLength: 64
+          title: Reauthorize Connection Id
+          default: ''
+        force_web:
+          type: boolean
+          title: Force Web
+          default: false
+      type: object
+      required:
+      - attempt_id
+      title: GitHubCLISessionCreateBody
+    GitHubCLISessionResponse:
+      properties:
+        session_id:
+          type: string
+          title: Session Id
+        status:
+          type: string
+          title: Status
+        expires_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Expires At
+        verification_uri:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Verification Uri
+        user_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Code
+        connection_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Connection Id
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error Code
+      type: object
+      required:
+      - session_id
+      - status
+      title: GitHubCLISessionResponse
   securitySchemes:
     HTTPBearer:
       type: http

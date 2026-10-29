@@ -1,11 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { Alert, Button, Form, Input, Modal, Skeleton, Spin, Tag } from "antd";
+import { Button, Modal, Skeleton, Spin, Tag } from "antd";
 import {
   ArrowRightOutlined,
   FolderOpenOutlined,
   MailOutlined,
 } from "@ant-design/icons";
-import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import { formatValidFeishuAccountNames } from "@/modules/dataSource/utils/feishuAccount";
 import {
   cloudAuthProviderOptions,
@@ -13,12 +12,11 @@ import {
   type CloudProviderType,
 } from "../constants/cloudProviderOptions";
 import {
-  CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
-  CLOUD_DOCUMENTS_NOTION_SETUP_PATH,
-  CLOUD_DOCUMENTS_GITHUB_SETUP_PATH,
   CLOUD_DOCUMENTS_OBSIDIAN_SETUP_PATH,
 } from "../utils/cloudDocumentUrls";
 import type { CloudDocumentProvidersVm } from "../hooks/useCloudDocumentProviders";
+import GitHubConnectionSection from "./GitHubConnectionSection";
+import CloudDocumentCredentialForm from "./CloudDocumentCredentialForm";
 
 const OBSIDIAN_LOGO_URL = "https://obsidian.md/images/obsidian-logo-gradient.svg";
 
@@ -270,6 +268,10 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
       {cloudAuthProviderOptions.map((item) => {
         const isFeishu = item.type === "feishu";
         const isGitHub = item.type === "github";
+        if (isGitHub && vm.github) {
+          return <GitHubConnectionSection key={item.type} vm={vm}
+            logo={<ProviderLogo type={item.type} icon={item.icon} logoUrl={item.logoUrl} />} />;
+        }
         const isNotion = item.type === "notion";
         const isGoogleDrive = item.type === "googledrive";
         const isWeChatOfficialAccount = item.type === "wechat";
@@ -457,7 +459,6 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
 export function CloudDocumentModals({ vm }: { vm: CloudDocumentProvidersVm }) {
   const {
     t,
-    feishuSetupForm,
     cloudSetupProvider,
     feishuSetupModalOpen,
     setFeishuSetupModalOpen,
@@ -466,14 +467,14 @@ export function CloudDocumentModals({ vm }: { vm: CloudDocumentProvidersVm }) {
     handleSaveFeishuSetup,
   } = vm;
 
+  if (cloudSetupProvider === "github") return null;
+
   return (
     <Modal
       title={
         cloudSetupProvider === "feishu"
           ? t("modelProvider.cloudDocuments.feishuCredentialModalTitle")
-          : cloudSetupProvider === "github"
-            ? t("modelProvider.cloudDocuments.githubCredentialModalTitle")
-            : t("modelProvider.cloudDocuments.notionCredentialModalTitle")
+          : t("modelProvider.cloudDocuments.notionCredentialModalTitle")
       }
       open={feishuSetupModalOpen}
       destroyOnHidden
@@ -492,71 +493,7 @@ export function CloudDocumentModals({ vm }: { vm: CloudDocumentProvidersVm }) {
       cancelButtonProps={{ disabled: feishuSetupSubmitting }}
       cancelText={t("common.cancel")}
     >
-      <Form form={feishuSetupForm} layout="vertical">
-        <Form.Item label={t("modelProvider.cloudDocuments.feishuAccountName")} name="name">
-          <Input placeholder={t("modelProvider.cloudDocuments.feishuAccountNamePlaceholder")} />
-        </Form.Item>
-        <Form.Item
-          label={t("modelProvider.cloudDocuments.appId")}
-          name="appId"
-          rules={[{ required: true, message: t("modelProvider.cloudDocuments.appIdRequired") }]}
-        >
-          <Input
-            placeholder={t(
-              cloudSetupProvider === "notion"
-                ? "modelProvider.cloudDocuments.notionAppIdPlaceholder"
-                : cloudSetupProvider === "github"
-                  ? "modelProvider.cloudDocuments.githubAppIdPlaceholder"
-                  : "modelProvider.cloudDocuments.appIdPlaceholder",
-            )}
-          />
-        </Form.Item>
-        <Form.Item
-          label={t("modelProvider.cloudDocuments.appSecret")}
-          name="appSecret"
-          rules={[
-            { required: true, message: t("modelProvider.cloudDocuments.appSecretRequired") },
-          ]}
-        >
-          <Input.Password placeholder={t("modelProvider.cloudDocuments.appSecretPlaceholder")} />
-        </Form.Item>
-        {cloudSetupProvider === "feishu" ? (
-          <FeishuCredentialHintAlertFromForm form={feishuSetupForm} />
-        ) : cloudSetupProvider === "github" ? (
-          <Alert
-            showIcon
-            type="info"
-            message={t("modelProvider.cloudDocuments.githubCredentialHint")}
-          />
-        ) : (
-          <Alert showIcon type="info" message={t("modelProvider.cloudDocuments.notionCredentialHint")} />
-        )}
-        {cloudSetupProvider === "github" ? (
-          <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <a href={CLOUD_DOCUMENTS_GITHUB_SETUP_PATH} target="_blank" rel="noreferrer">
-              {t("modelProvider.cloudDocuments.githubSetupGuideAction")}
-            </a>
-            {t("modelProvider.cloudDocuments.githubSetupGuideHint")}
-          </p>
-        ) : cloudSetupProvider !== "feishu" ? (
-          <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <a
-              href={`${CLOUD_DOCUMENTS_NOTION_SETUP_PATH}?from=cloud-documents`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t("modelProvider.cloudDocuments.notionSetupGuideAction")}
-            </a>
-            {t("modelProvider.cloudDocuments.notionSetupGuideHint")}
-          </p>
-        ) : (
-          <p style={{ marginTop: 12, marginBottom: 0 }}>
-            <a href={CLOUD_DOCUMENTS_FEISHU_SETUP_PATH} target="_blank" rel="noreferrer">
-              {t("modelProvider.cloudDocuments.feishuSetupGuideAction")}
-            </a>
-          </p>
-        )}
-      </Form>
+      <CloudDocumentCredentialForm vm={vm} />
     </Modal>
   );
 }

@@ -25,6 +25,7 @@ SIGNING_MODE="${LAZYMIND_DESKTOP_SIGNING_MODE:-adhoc}"
 LAZYLLM_VERSION="${LAZYMIND_LAZYLLM_VERSION:-$(tr -d '[:space:]' < "${ROOT}/LAZYLLM_VERSION")}"
 RELEASE_BUILD="${LAZYMIND_RELEASE_BUILD:-false}"
 FEISHU_CLI_RELEASE="${ROOT}/backend/core/providerconnection/feishu-cli-release.json"
+GITHUB_CLI_RELEASE="${ROOT}/backend/auth-service/github-cli-release.json"
 
 GO_BIN="${GO:-go}"
 # Go 1.26.0/1.26.1 can panic in arm64.gensymlate when linking the CGO Core.
@@ -80,6 +81,28 @@ remove_generated_path() {
     chmod -R u+w "${target}" 2>/dev/null || true
     rm -rf "${target}"
   fi
+}
+
+install_github_cli() {
+  local release_values version archive_sha256 archive unpacked package
+  release_values="$(node -e 'const r = require(process.argv[1]); console.log([r.version, r.archive_sha256[process.argv[2]]].join("\t"))' "${GITHUB_CLI_RELEASE}" "darwin-${GO_ARCH}")"
+  IFS=$'\t' read -r version archive_sha256 <<< "${release_values}"
+  archive="${BUILD_ROOT}/gh_${version}_macOS_${GO_ARCH}.zip"
+  unpacked="$(mktemp -d "${BUILD_ROOT}/gh.XXXXXX")"
+  curl --fail --location --retry 3 \
+    "https://github.com/cli/cli/releases/download/v${version}/gh_${version}_macOS_${GO_ARCH}.zip" \
+    --output "${archive}"
+  echo "${archive_sha256}  ${archive}" | shasum -a 256 --check
+  unzip -q "${archive}" -d "${unpacked}"
+  package="${unpacked}/gh_${version}_macOS_${GO_ARCH}"
+  if ! file -b "${package}/bin/gh" | grep -q "${HOST_ARCH}"; then
+    echo "GitHub CLI does not match ${HOST_ARCH}" >&2; exit 1
+  fi
+  install -m 0755 "${package}/bin/gh" "${RUNTIME_ROOT}/bin/gh"
+  shasum -a 256 "${RUNTIME_ROOT}/bin/gh" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/gh.sha256"
+  mkdir -p "${RUNTIME_ROOT}/licenses/gh"
+  install -m 0644 "${package}/LICENSE" "${RUNTIME_ROOT}/licenses/gh/LICENSE"
+  rm -rf "${unpacked}"
 }
 
 install_feishu_cli() {
@@ -245,6 +268,7 @@ mkdir -p \
   "${ELECTRON_BUILDER_CACHE}"
 
 install_feishu_cli
+install_github_cli
 
 echo "==> Building WorkBuddy Workflow resources"
 (cd "${ROOT}/integrations/workbuddy-workflow/connector" && "${PNPM_BIN}" install --frozen-lockfile && "${PNPM_BIN}" run build)
@@ -464,6 +488,8 @@ if [[ -d "${APP_PATH}" ]]; then
   if [[ "${SIGNING_MODE}" == "adhoc" ]]; then
     echo "==> Applying local ad-hoc signature"
     codesign --force --deep --sign - "${APP_PATH}"
+    shasum -a 256 "${APP_PATH}/Contents/Resources/runtime/bin/gh" | awk '{print $1}' > "${APP_PATH}/Contents/Resources/runtime/bin/gh.sha256"
+    codesign --force --sign - "${APP_PATH}"
   fi
   if [[ "${SIGNING_MODE}" != "none" ]]; then
     codesign --verify --deep --strict --verbose=2 "${APP_PATH}"

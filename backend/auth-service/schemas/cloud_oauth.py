@@ -75,6 +75,7 @@ class CloudConnectionResponse(BaseModel):
     provider: str
     auth_mode: str
     connection_method: str = 'legacy_byo'
+    token_source: str = Field(default='', json_schema_extra={'readOnly': True})
     credential_location: str = 'local'
     profile_ref: str = ''
     cloud_connection_id: str = ''
@@ -97,6 +98,22 @@ class CloudConnectionResponse(BaseModel):
     last_error: str = ''
     created_at: datetime
     updated_at: datetime | None = None
+
+
+class GitHubCLISessionCreateBody(BaseModel):
+    attempt_id: str = Field(min_length=1, max_length=128)
+    reauthorize_connection_id: str = Field(default='', max_length=64)
+    force_web: bool = False
+
+
+class GitHubCLISessionResponse(BaseModel):
+    session_id: str
+    status: str
+    expires_at: datetime | None = None
+    verification_uri: str | None = None
+    user_code: str | None = None
+    connection_id: str | None = None
+    error_code: str | None = None
 
 
 class CloudConnectionTokenResponse(BaseModel):
