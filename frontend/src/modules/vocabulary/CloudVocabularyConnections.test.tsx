@@ -3,140 +3,84 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import CloudVocabularyConnections from "./CloudVocabularyConnections";
 import * as api from "./cloudApi";
 vi.mock("react-i18next", () => ({useTranslation:()=>({t:(key:string)=>key.replace("vocabularyCloud.","")})}));
-vi.mock("./cloudApi",()=>({listCloudConnections:vi.fn(),listCloudOperations:vi.fn(async()=>[]),saveCloudConnection:vi.fn(),testCloudConnection:vi.fn(async()=>[{id:"target",name:"LazyMind 生词本"}]),createCloudWordbook:vi.fn(),disconnectCloudConnection:vi.fn(),syncCloudVocabulary:vi.fn()}));
-const connection={provider:"eudic" as const,configured:true,enabled:false,target_id:"target",target_name:"LazyMind 生词本",add_to_study:false,pending:0,failed:0,succeeded:0,last_error:""};
+vi.mock("./cloudApi",()=>({listCloudConnections:vi.fn(),listCloudOperations:vi.fn(),saveCloudConnection:vi.fn(),testCloudConnection:vi.fn(),createCloudWordbook:vi.fn(),disconnectCloudConnection:vi.fn(),syncCloudVocabulary:vi.fn()}));
+const connection={provider:"maimemo" as const,configured:true,enabled:false,target_id:"target",target_name:"My book",add_to_study:false,pending:0,failed:0,succeeded:0,last_error:""};
+async function open(){fireEvent.click(await screen.findByRole("button",{name:"maimemo manage"}));return await screen.findByRole("region",{name:"maimemo"});}
 describe("cloud vocabulary connections",()=>{
-  beforeEach(()=>{vi.clearAllMocks();vi.mocked(api.listCloudConnections).mockResolvedValue([connection]);vi.mocked(api.saveCloudConnection).mockImplementation(async(provider,body)=>({...connection,...body,provider,configured:true}));});
-  it("keeps both management entries visible on initial load failure without exposing an unsafe form",async()=>{
-    vi.mocked(api.listCloudConnections).mockRejectedValueOnce(new Error("unavailable"));
-    render(<CloudVocabularyConnections/>);
-    const manage=await screen.findByRole("button",{name:"eudic manage"});
-    expect(screen.getByRole("button",{name:"maimemo manage"})).toBeEnabled();
-    fireEvent.click(manage);
-    const dialog=await screen.findByRole("dialog");
-    expect(await within(dialog).findByText("loadFailed")).toBeInTheDocument();
-    expect(within(dialog).queryByLabelText("token")).not.toBeInTheDocument();
-    expect(within(dialog).queryByRole("button",{name:"save"})).not.toBeInTheDocument();
-  });
-  it("retains stored credentials when saving a blank token and prevents backfill while disabled",async()=>{
-    render(<CloudVocabularyConnections/>);
-    fireEvent.click(await screen.findByRole("button",{name:"eudic manage"}));
-    const card=await screen.findByRole("region",{name:"eudic"});
-    await waitFor(()=>expect(within(card).getByRole("button",{name:"save"})).toBeEnabled());
-    expect(within(card).getByRole("button",{name:"sync"})).toBeDisabled();
-    fireEvent.click(within(card).getByRole("button",{name:"save"}));
-    await waitFor(()=>expect(api.saveCloudConnection).toHaveBeenCalledWith("eudic",{enabled:false,target_id:"target",target_name:"LazyMind 生词本",add_to_study:false}));
-  });
-  it("requires credentials and a target before enabling a new connection",async()=>{
-    vi.mocked(api.listCloudConnections).mockResolvedValue([]);
-    render(<CloudVocabularyConnections/>);
+  beforeEach(()=>{vi.clearAllMocks();vi.mocked(api.listCloudConnections).mockResolvedValue([connection]);vi.mocked(api.listCloudOperations).mockResolvedValue([]);vi.mocked(api.testCloudConnection).mockResolvedValue([{id:"target",name:"My book"}]);vi.mocked(api.saveCloudConnection).mockImplementation(async(provider,body)=>({...connection,...body,provider,configured:true}));});
+  it("keeps both entries on load failure and never exposes an unknown configuration",async()=>{
+    vi.mocked(api.listCloudConnections).mockRejectedValueOnce(new Error("unavailable"));render(<CloudVocabularyConnections/>);
     fireEvent.click(await screen.findByRole("button",{name:"maimemo manage"}));
-    const card=await screen.findByRole("region",{name:"maimemo"});
-    expect(within(card).getByRole("switch")).toBeDisabled();
-    expect(within(card).getByRole("button",{name:"test"})).toBeDisabled();
+    const dialog=await screen.findByRole("dialog");expect(await within(dialog).findByText("loadFailed")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("token")).toBeNull();expect(api.saveCloudConnection).not.toHaveBeenCalled();
+    expect(screen.getByRole("button",{name:"eudic manage"})).toBeEnabled();
+  });
+  it("loads saved credentials automatically and selects the only wordbook without writing",async()=>{
+    vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,target_id:"",target_name:""}]);render(<CloudVocabularyConnections/>);const card=await open();
+    await waitFor(()=>expect(within(card).getByRole("button",{name:"saveAndEnable"})).toBeEnabled());
+    expect(api.testCloudConnection).toHaveBeenCalledWith("maimemo",undefined);
+    expect(within(card).getByText("My book")).toBeInTheDocument();
+    expect(api.saveCloudConnection).not.toHaveBeenCalled();expect(api.createCloudWordbook).not.toHaveBeenCalled();expect(api.syncCloudVocabulary).not.toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole("button",{name:"saveAndEnable"}));
+    await waitFor(()=>expect(api.saveCloudConnection).toHaveBeenCalledWith("maimemo",{enabled:true,target_id:"target",target_name:"My book",add_to_study:false}));
+    expect(await within(card).findByText("savedEnabled")).toBeInTheDocument();
+  });
+  it("requires verified credentials and a target before saving a new connection",async()=>{
+    vi.mocked(api.listCloudConnections).mockResolvedValue([]);vi.mocked(api.testCloudConnection).mockResolvedValueOnce([]);
+    render(<CloudVocabularyConnections/>);const card=await open();
     fireEvent.change(within(card).getByLabelText("token"),{target:{value:"secret"}});
-    fireEvent.click(within(card).getByRole("button",{name:"test"}));
-    await waitFor(()=>expect(within(card).getByRole("switch")).toBeEnabled());
-    expect(within(card).getByRole("checkbox")).not.toBeChecked();
+    expect(within(card).queryByRole("button",{name:"saveAndEnable"})).toBeNull();
+    fireEvent.click(within(card).getByRole("button",{name:"verify"}));
+    await within(card).findByText("noBooks");
+    expect(within(card).getByRole("button",{name:"saveAndEnable"})).toBeDisabled();
+    expect(api.saveCloudConnection).not.toHaveBeenCalled();expect(api.createCloudWordbook).not.toHaveBeenCalled();
+  });
+  it("verifies a new token, saves enabled, clears credentials and defaults study off",async()=>{
+    vi.mocked(api.listCloudConnections).mockResolvedValue([]);render(<CloudVocabularyConnections/>);const card=await open();
+    fireEvent.change(within(card).getByLabelText("token"),{target:{value:"secret"}});fireEvent.click(within(card).getByRole("button",{name:"verify"}));
+    await waitFor(()=>expect(within(card).getByRole("button",{name:"saveAndEnable"})).toBeEnabled());
+    fireEvent.click(within(card).getByRole("button",{name:"saveAndEnable"}));
+    await waitFor(()=>expect(api.saveCloudConnection).toHaveBeenCalledWith("maimemo",{token:"secret",enabled:true,target_id:"target",target_name:"My book",add_to_study:false}));
+    expect(await within(card).findByText("savedEnabled")).toBeInTheDocument();expect(within(card).queryByDisplayValue("secret")).toBeNull();
+  });
+  it("persists the sync switch immediately and keeps the saved state on failure",async()=>{
+    vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,enabled:true}]);vi.mocked(api.saveCloudConnection).mockRejectedValueOnce(new Error("secret upstream"));
+    render(<CloudVocabularyConnections/>);const card=await open();await waitFor(()=>expect(within(card).getByRole("switch")).toBeEnabled());
     fireEvent.click(within(card).getByRole("switch"));
-    fireEvent.click(within(card).getByRole("button",{name:"save"}));
-    await waitFor(()=>expect(api.saveCloudConnection).toHaveBeenCalledWith("maimemo",{token:"secret",enabled:true,target_id:"target",target_name:"LazyMind 生词本",add_to_study:false}));
-    await waitFor(()=>expect(within(card).getByLabelText("token")).toHaveValue(""));
+    expect(await within(card).findByText("actionFailed")).toBeInTheDocument();expect(within(card).getByRole("switch")).toBeChecked();expect(screen.queryByText(/secret upstream/)).toBeNull();
+    fireEvent.click(within(card).getByRole("switch"));
+    expect(await within(card).findByText("savedPaused")).toBeInTheDocument();expect(within(card).getByRole("switch")).not.toBeChecked();
   });
-  it("surfaces connection failures without echoing credentials",async()=>{
-    vi.mocked(api.testCloudConnection).mockRejectedValueOnce(new Error("secret-token upstream"));
-    render(<CloudVocabularyConnections/>);
-    fireEvent.click(await screen.findByRole("button",{name:"eudic manage"}));
-    const card=await screen.findByRole("region",{name:"eudic"});
-    fireEvent.click(within(card).getByRole("button",{name:"test"}));
-    expect(await within(card).findByText("actionFailed")).toBeInTheDocument();
-    expect(screen.queryByText(/secret-token/)).not.toBeInTheDocument();
-    expect(within(card).getByRole("button",{name:"save"})).toBeEnabled();
+  it("does not persist token drafts through the sync switch",async()=>{
+    render(<CloudVocabularyConnections/>);const card=await open();await waitFor(()=>expect(within(card).getByRole("switch")).toBeEnabled());
+    fireEvent.click(within(card).getByRole("switch"));
+    await waitFor(()=>expect(api.saveCloudConnection).toHaveBeenCalledWith("maimemo",{enabled:true,target_id:"target",target_name:"My book",add_to_study:false}));
+    fireEvent.click(within(card).getByText("advanced"));fireEvent.click(within(card).getByText("changeToken"));fireEvent.change(within(card).getByLabelText("token"),{target:{value:"draft-secret"}});
+    expect(within(card).queryByRole("switch")).toBeNull();expect(api.saveCloudConnection).toHaveBeenCalledTimes(1);
   });
-  it("does not overlap polling requests and stops scheduling after unmount",async()=>{
-    vi.useFakeTimers();
-    let finish!: (value:typeof connection[])=>void;
-    vi.mocked(api.listCloudConnections).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
-    const view=render(<CloudVocabularyConnections/>);
-    try {
-      await act(async()=>{await vi.advanceTimersByTimeAsync(30000);});
-      expect(api.listCloudConnections).toHaveBeenCalledTimes(1);
-      await act(async()=>{finish([connection]);});
-      view.unmount();
-      await act(async()=>{await vi.advanceTimersByTimeAsync(30000);});
-      expect(api.listCloudConnections).toHaveBeenCalledTimes(1);
-    } finally {view.unmount();vi.useRealTimers();}
-  });
-
-  it("translates known status errors and hides unknown upstream messages", async()=>{
-    vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,last_error:"cloud vocabulary: invalid_token"}]);
-    vi.mocked(api.listCloudOperations).mockResolvedValueOnce([
-      {id:"1",provider:"eudic",term:"word",status:"failed",last_error:"vocabulary cloud credentials unavailable",updated_at:"2026-10-29T00:00:00Z"},
-      {id:"2",provider:"eudic",term:"word2",status:"failed",last_error:"secret upstream details",updated_at:"2026-10-29T00:00:00Z"},
-    ]);
-    render(<CloudVocabularyConnections/>);
-    fireEvent.click(await screen.findByRole("button",{name:"eudic manage"}));
-    expect(await screen.findByText("errors.invalid_token")).toBeInTheDocument();
-    expect(screen.getByText("errors.credentials_unavailable")).toBeInTheDocument();
-    expect(screen.getByText("errors.sync_failed")).toBeInTheDocument();
-    expect(screen.queryByText("secret upstream details")).not.toBeInTheDocument();
-  });
-
-  it("keeps unsaved form edits while polling refreshes sync counts", async()=>{
-    vi.useFakeTimers();
-    vi.mocked(api.listCloudConnections).mockResolvedValueOnce([connection]).mockResolvedValue([{...connection,pending:4}]);
-    const view=render(<CloudVocabularyConnections/>);
-    try {
-      await act(async()=>{});
-      fireEvent.click(screen.getByRole("button",{name:"eudic manage"}));
-      const card=screen.getByRole("region",{name:"eudic"});
-      fireEvent.click(within(card).getByRole("switch"));
-      fireEvent.change(within(card).getByLabelText("newTarget"),{target:{value:"My edited wordbook"}});
+  it("reflects remotely changed clean configuration without saving stale consent",async()=>{
+    vi.useFakeTimers();const view=render(<CloudVocabularyConnections/>);
+    try{await act(async()=>{});fireEvent.click(screen.getByRole("button",{name:"maimemo manage"}));await act(async()=>{});const card=screen.getByRole("region",{name:"maimemo"});
+      vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,enabled:true,target_id:"remote",target_name:"Remote book",add_to_study:true}]);
       await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
-      expect(within(card).getByRole("switch")).toBeChecked();
-      expect(within(card).getByLabelText("newTarget")).toHaveValue("My edited wordbook");
-      expect(within(card).getByText("pending: 4")).toBeInTheDocument();
-      expect(api.saveCloudConnection).not.toHaveBeenCalled();
-    } finally {view.unmount();vi.useRealTimers();}
+      expect(within(card).getByRole("switch")).toBeChecked();expect(within(card).getByText("Remote book")).toBeInTheDocument();expect(within(card).queryByText("configConflict")).toBeNull();expect(api.saveCloudConnection).not.toHaveBeenCalled();
+    }finally{view.unmount();vi.useRealTimers();}
   });
-
-  it("refreshes a clean form when another tab changes persisted settings",async()=>{
-    vi.useFakeTimers();
-    vi.mocked(api.listCloudConnections).mockResolvedValueOnce([{...connection,enabled:true}]).mockResolvedValue([{...connection,target_id:"other",target_name:"Other"}]);
-    const view=render(<CloudVocabularyConnections/>);
-    try {
-      await act(async()=>{});
-      fireEvent.click(screen.getByRole("button",{name:"eudic manage"}));
-      const card=screen.getByRole("region",{name:"eudic"});
-      expect(within(card).getByRole("switch")).toBeChecked();
-      await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
-      expect(within(card).getByRole("switch")).not.toBeChecked();
-      expect(within(card).getByText("Other")).toBeInTheDocument();
-      fireEvent.click(within(card).getByRole("button",{name:"save"}));
-      await act(async()=>{});
-      expect(api.saveCloudConnection).toHaveBeenCalledWith("eudic",{enabled:false,target_id:"other",target_name:"Other",add_to_study:false});
-    } finally {view.unmount();vi.useRealTimers();}
+  it("translates persisted errors without exposing unknown text",async()=>{
+    vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,last_error:"cloud vocabulary: invalid_token"}]);vi.mocked(api.listCloudOperations).mockResolvedValue([{id:"1",provider:"maimemo",term:"word",status:"failed",last_error:"secret upstream",updated_at:"2026-10-29T00:00:00Z"}]);
+    render(<CloudVocabularyConnections/>);const card=await open();expect(await within(card).findByText("errors.invalid_token")).toBeInTheDocument();expect(within(card).getByText("errors.sync_failed")).toBeInTheDocument();expect(screen.queryByText("secret upstream")).toBeNull();
   });
-  it("blocks stale dirty drafts until the user discards and reloads remote settings",async()=>{
-    vi.useFakeTimers();
-    vi.mocked(api.listCloudConnections).mockResolvedValueOnce([{...connection,enabled:true}]).mockResolvedValue([{...connection,target_id:"other",target_name:"Other"}]);
-    const view=render(<CloudVocabularyConnections/>);
-    try {
-      await act(async()=>{});
-      fireEvent.click(screen.getByRole("button",{name:"eudic manage"}));
-      const card=screen.getByRole("region",{name:"eudic"});
-      fireEvent.change(within(card).getByLabelText("newTarget"),{target:{value:"Unsaved name"}});
-      await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
-      expect(within(card).getByText("configConflict")).toBeInTheDocument();
-      expect(within(card).getByRole("button",{name:"save"})).toBeDisabled();
-      expect(within(card).getByLabelText("newTarget")).toHaveValue("Unsaved name");
-      expect(api.saveCloudConnection).not.toHaveBeenCalled();
-      fireEvent.click(within(card).getByRole("button",{name:"reloadSettings"}));
-      expect(within(card).getByRole("switch")).not.toBeChecked();
-      expect(within(card).getByText("Other")).toBeInTheDocument();
-      expect(within(card).getByRole("button",{name:"save"})).toBeEnabled();
-      expect(within(card).queryByText("configConflict")).not.toBeInTheDocument();
-    } finally {view.unmount();vi.useRealTimers();}
+  it("does not overlap polling or continue scheduling after unmount",async()=>{
+    vi.useFakeTimers();let finish!:(value:typeof connection[])=>void;vi.mocked(api.listCloudConnections).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));const view=render(<CloudVocabularyConnections/>);
+    try{await act(async()=>{await vi.advanceTimersByTimeAsync(30000);});expect(api.listCloudConnections).toHaveBeenCalledTimes(1);await act(async()=>{finish([connection]);});view.unmount();await act(async()=>{await vi.advanceTimersByTimeAsync(30000);});expect(api.listCloudConnections).toHaveBeenCalledTimes(1);}finally{view.unmount();vi.useRealTimers();}
   });
-
+  it("preserves edits on stats refresh but blocks remote configuration conflicts until reload",async()=>{
+    vi.useFakeTimers();const view=render(<CloudVocabularyConnections/>);
+    try{await act(async()=>{});fireEvent.click(screen.getByRole("button",{name:"maimemo manage"}));await act(async()=>{});const card=screen.getByRole("region",{name:"maimemo"});
+      fireEvent.click(within(card).getByText("advanced"));fireEvent.click(within(card).getByText("changeToken"));fireEvent.change(within(card).getByLabelText("token"),{target:{value:"draft-secret"}});
+      vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,pending:4}]);await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});expect(within(card).getByLabelText("token")).toHaveValue("draft-secret");expect(within(card).queryByText("configConflict")).toBeNull();
+      vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,enabled:true}]);await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});expect(within(card).getByText("configConflict")).toBeInTheDocument();expect(api.saveCloudConnection).not.toHaveBeenCalled();
+      fireEvent.click(within(card).getByRole("button",{name:"reloadSettings"}));expect(within(card).queryByDisplayValue("draft-secret")).toBeNull();expect(within(card).getByRole("switch")).toBeChecked();
+    }finally{view.unmount();vi.useRealTimers();}
+  });
 });
