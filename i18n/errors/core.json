@@ -2049,6 +2049,7 @@
   "2005143": {"en-US": "An imported attachment must reference a document in this library", "zh-CN": "导入的附件必须引用当前论文库中的文档"},
   "2005144": {"en-US": "A legacy document belongs to multiple papers; resolve its memberships before retrying", "zh-CN": "旧文档关联了多篇论文，请先明确归属再重试"},
   "2005145": {"en-US": "Failed to preserve the legacy paper library", "zh-CN": "保留旧论文库失败"},
+  "2005147": {"en-US": "Unable to find an available paper PDF source", "zh-CN": "未能找到可用的论文 PDF 来源"},
   "2005146": {"en-US": "A paper folder with this name already exists", "zh-CN": "同一位置已有同名论文文件夹"},
   "2004930": { "en-US": "Invalid paper folder hierarchy", "zh-CN": "论文文件夹层级无效" },
   "2004931": { "en-US": "The Zotero paper or attachment changed; reload the library", "zh-CN": "Zotero 文献或附件已变更，请重新读取论文库" },

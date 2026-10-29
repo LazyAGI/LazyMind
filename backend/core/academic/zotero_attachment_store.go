@@ -302,6 +302,13 @@ func bindZoteroAttachment(ctx context.Context, tx *gorm.DB, entry *orm.PaperLibr
 	if err := paperlibrary.SaveEntry(tx, entry); err != nil {
 		return err
 	}
+	// Link the persisted import receipt to the saved document; parsing is a
+	// separate state observed by the notification center.
+	if err := tx.Model(&orm.PaperImportItem{}).Where("library_paper_id=? AND batch_id IN (?)", entry.ID,
+		tx.Model(&orm.PaperImportBatch{}).Select("id").Where("target_dataset_id=? AND entry_type IN ?", entry.DatasetID, []string{"zotero", "library_backup"})).
+		Updates(map[string]any{"document_id": document.ID, "result_kind": "fulltext", "updated_at": now}).Error; err != nil {
+		return err
+	}
 	return paperlibrary.MergeEntityExtras(ctx, tx, entry.DatasetID, "attachments", member.ID, map[string]any{"size": size, "mimeType": "application/pdf", "source": "zotero"})
 }
 

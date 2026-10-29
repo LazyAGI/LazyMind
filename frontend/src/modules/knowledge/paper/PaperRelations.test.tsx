@@ -79,7 +79,7 @@ describe('paper relations in the detail drawer', () => {
         const attachments = screen.getByRole('tabpanel', { name: '附件 2' });
         fireEvent.change(within(attachments).getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'second-version' } });
         fireEvent.click(within(attachments).getByRole('button', { name: '阅读此附件' }));
-        expect(onOpenAttachment).not.toHaveBeenCalled();
+        expect(onOpenAttachment).toHaveBeenCalledOnce();
         expect(within(attachments).getByText('附件预览')).toBeInTheDocument();
         expect(extractAcademicReferences).not.toHaveBeenCalled();
     });

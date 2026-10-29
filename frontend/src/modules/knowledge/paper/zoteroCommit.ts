@@ -21,11 +21,13 @@ interface ConfirmedImport {
 export async function executeZoteroImport(input: ConfirmedImport): Promise<ZoteroImportResult> {
   const { datasetId, preview, config, options, getLibrary, saveLibrary, storeAttachment } = input;
   const plan = buildZoteroImport(preview, getLibrary(), options.targetFolderId);
+  options.onProgress?.(`正在保存 ${plan.counts.papers} 篇文献`);
   await saveLibrary(plan.library);
   const failures: string[] = [];
   let attachments = 0;
   if (options.includeAttachments) {
-    for (const candidate of plan.attachments) {
+    for (const [index, candidate] of plan.attachments.entries()) {
+      options.onProgress?.(`正在保存附件 ${index + 1}/${plan.attachments.length}`);
       // The caller also checks that the same library is still mounted before each write.
       const authoritative = getLibrary().attachments.find(attachment => attachment.id === candidate.id);
       const target = authoritative ? { ...candidate, paperId: authoritative.paperId } : candidate;
@@ -66,8 +68,8 @@ export async function storeZoteroAttachment(datasetId: string, file: File, candi
 }
 
 /** The server atomically merges stable Zotero identities into authoritative entities. */
-export async function importZoteroSnapshot(datasetId: string, data: PaperLibraryData, sourceId: string, idempotencyKey: string): Promise<PersistedPaperLibrary> {
-  const response = await axiosInstance.post(`${BASE_URL}/api/core/academic/zotero/import`, { data, source_id: sourceId, idempotency_key: idempotencyKey }, {
+export async function importZoteroSnapshot(datasetId: string, data: PaperLibraryData, sourceId: string, idempotencyKey: string, sourceKeys?: string[]): Promise<PersistedPaperLibrary> {
+  const response = await axiosInstance.post(`${BASE_URL}/api/core/academic/zotero/import`, { data, source_id: sourceId, idempotency_key: idempotencyKey, source_keys: sourceKeys }, {
     params: { target_dataset_id: datasetId }, timeout: 120_000, ...{ silentError: true },
   });
   return decodePersistedLibrary(response.data);

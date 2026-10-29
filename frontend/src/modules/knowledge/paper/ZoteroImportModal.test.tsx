@@ -180,3 +180,68 @@ it('prevents source changes and closing while import is running', async () => {
   await act(async () => finish({ imported: 1, attachments: 0 }));
   await waitFor(() => expect(onCancel).toHaveBeenCalledOnce());
 });
+
+it('expands selection beside vertical sources and explains the read-only mounted path', async () => {
+  vi.mocked(previewZotero).mockResolvedValue({ ...preview, database: { path: '/var/lib/lazymind/zotero/zotero.sqlite', library_type: 'users', library_id: '0', libraries: [{ type: 'users', id: '0', name: '我的文献库' }] } });
+  mount(); await load();
+  expect(screen.getByText('本机 Zotero 数据目录 · 只读访问')).toBeInTheDocument();
+  const workspace = document.querySelector('.zotero-import-workspace')!;
+  expect(workspace.querySelector('aside .zotero-source-picker')).toBeInTheDocument();
+  expect(workspace.querySelector(':scope > .zotero-selection')).toBeInTheDocument();
+  expect(document.querySelector('.zotero-import-modal.is-expanded')).toBeInTheDocument();
+});
+
+it('keeps a large bibliography paginated and retains selections across pages', async () => {
+  vi.mocked(previewZotero).mockResolvedValue({ ...preview, items: Array.from({length: 1237}, (_, i) => ({key:`P${i}`,data:{key:`P${i}`,itemType:'journalArticle',title:`Paper ${i}`}})) });
+  mount(); fireEvent.click(screen.getByRole('button', {name:'读取本地数据库'})); await screen.findByText('Paper 0');
+  expect(screen.getAllByRole('listitem').filter(node => node.classList.contains('zotero-paper-row'))).toHaveLength(50);
+  fireEvent.click(screen.getByRole('checkbox', {name:'选择 Paper 0'}));
+  const list = screen.getByRole('list', {name:'可导入文献'}); list.scrollTop = 500;
+  fireEvent.click(document.querySelector('.ant-pagination-item-2')!);
+  expect(screen.getByRole('checkbox', {name:'选择 Paper 50'})).not.toBeChecked();
+  expect(list.scrollTop).toBe(0);
+  expect(screen.getByText('已选择 1 / 1237 篇')).toBeInTheDocument();
+});
+
+
+it('keeps persisted imports checked and submits only newly selected papers', async () => {
+  render(<ZoteroImportModal open datasetId="dataset" canWrite persistedPapers={[{zoteroSources:['users:42:PAPER001']}]} onCancel={onCancel} onImport={onImport} />);
+  await load();
+  expect(screen.getByRole('checkbox', {name:'选择 Real paper'})).toBeChecked();
+  expect(screen.getByRole('checkbox', {name:'选择 Real paper'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('checkbox', {name:'选择 Other paper'}));
+  fireEvent.click(screen.getByRole('button', {name:'清空选择'}));
+  expect(screen.getByRole('checkbox', {name:'选择 Real paper'})).toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox', {name:'选择 Other paper'}));
+  fireEvent.click(screen.getByRole('button', {name:/确认导入 1/}));
+  await waitFor(() => expect(onImport).toHaveBeenCalledOnce());
+  expect(onImport.mock.calls[0][0].items.map((item:{key:string}) => item.key)).toEqual(['PAPER002']);
+});
+
+it('filters by folder ancestors while retaining selections when switching folders', async () => {
+  vi.mocked(previewZotero).mockResolvedValue({...preview,
+    collections:[{key:'ROOT',data:{key:'ROOT',name:'Research'}},{key:'CHILD',data:{key:'CHILD',name:'Nested',parentCollection:'ROOT'}}],
+    items:preview.items.map(item => item.key==='PAPER001' ? {...item,data:{...item.data,collections:['CHILD']}} : item)
+  });
+  mount(); await load();
+  fireEvent.click(screen.getByText('Research'));
+  expect(screen.getByText('Real paper')).toBeInTheDocument();
+  expect(screen.queryByText('Other paper')).not.toBeInTheDocument();
+  selectPaper();
+  fireEvent.click(screen.getByRole('button', {name:/全部文献/}));
+  expect(screen.getByText('Other paper')).toBeInTheDocument();
+  expect(screen.getByRole('checkbox', {name:'选择 Real paper'})).toBeChecked();
+});
+
+it('retries partial attachments even after the backend mapping appears', async () => {
+  const props = {open:true, datasetId:'dataset', canWrite:true, onCancel, onImport};
+  const view = render(<ConfigProvider theme={{token:{motion:false}}}><ZoteroImportModal {...props} persistedPapers={[]} /></ConfigProvider>);
+  await load(); selectPaper();
+  onImport.mockResolvedValue({imported:1, attachments:0, failures:['PDF unavailable']});
+  fireEvent.click(screen.getByRole('button', {name:/确认导入 1/}));
+  await screen.findByText(/PDF unavailable/);
+  view.rerender(<ConfigProvider theme={{token:{motion:false}}}><ZoteroImportModal {...props} persistedPapers={[{zoteroSources:['users:42:PAPER001']}]} /></ConfigProvider>);
+  fireEvent.click(await screen.findByRole('button', {name:'重试未完成的导入'}));
+  await waitFor(() => expect(onImport).toHaveBeenCalledTimes(2));
+  expect(onImport.mock.calls[1][0].items.map((item:{key:string}) => item.key)).toEqual(['PAPER001','PDF00001']);
+});

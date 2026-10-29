@@ -393,6 +393,10 @@ components:
                                 items:
                                     $ref: '#/components/schemas/AcademicImportCandidate'
                                 type: array
+                            manual_download_urls:
+                                items:
+                                    type: string
+                                type: array
                             paper:
                                 $ref: '#/components/schemas/AcademicPaperRef'
                             presence:
@@ -403,6 +407,10 @@ components:
                                 type: array
                             title:
                                 type: string
+                            warnings:
+                                items:
+                                    type: string
+                                type: array
                             work_id:
                                 type: string
                         type: object
@@ -17932,6 +17940,8 @@ paths:
                                     type: string
                                 identifier:
                                     type: string
+                                lookup_fulltext:
+                                    type: boolean
                                 papers:
                                     items:
                                         $ref: '#/components/schemas/PaperLibraryPaper'

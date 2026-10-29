@@ -116,6 +116,7 @@ func init() {
 			"legacy document has multiple memberships; original archive retained for explicit resolution",
 		}},
 		{2005145, http.StatusInternalServerError, "Failed to preserve the legacy paper library", []string{"preserve legacy library %s"}},
+		{2005147, http.StatusBadGateway, "Unable to find an available paper PDF source", []string{"pdf 来源查询失败", "PDF 来源查询失败: %s", "一次只能查找一篇文献的 PDF 来源"}},
 		{2005146, http.StatusConflict, "A paper folder with this name already exists", []string{"folder name already exists"}},
 	} {
 		for _, source := range group.sources {

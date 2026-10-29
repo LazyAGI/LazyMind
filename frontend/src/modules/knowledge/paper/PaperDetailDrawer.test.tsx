@@ -18,18 +18,19 @@ describe('durable paper notes', () => {
         fireEvent.change(screen.getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'older-pdf' } });
         expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
         fireEvent.click(screen.getByRole('button', { name: '阅读此附件' }));
-        expect(open).not.toHaveBeenCalled();
+        expect(open).toHaveBeenCalledWith('older-document');
+        open.mockClear();
         expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
         fireEvent.click(screen.getByRole('button', { name: '阅读 PDF' }));
-        expect(open).not.toHaveBeenCalled();
-        expect(screen.getByLabelText('附件预览')).toHaveTextContent(data.attachments[0].name);
+        expect(open).toHaveBeenCalledWith('main-document');
+        expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
         fireEvent.change(screen.getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'older-pdf' } });
         fireEvent.click(screen.getByRole('button', { name: '设为主附件' }));
         await waitFor(() => expect(setPrimary).toHaveBeenCalledWith(data.attachments[1]));
         const updated = { ...data, attachments: [{ ...data.attachments[0], isPrimary: false }, { ...data.attachments[1], isPrimary: true }] };
         view.rerender(<PaperDetailDrawer {...props} data={updated} />);
         fireEvent.click(screen.getByRole('button', { name: '阅读 PDF' }));
-        expect(open).not.toHaveBeenCalled();
+        expect(open).toHaveBeenLastCalledWith('older-document');
         expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
         expect(screen.queryByRole('button', { name: '设为主附件' })).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('tab', { name: '笔记 0' }));
@@ -81,4 +82,13 @@ describe('durable paper notes', () => {
         await waitFor(() => expect(screen.getByRole('button', { name: '重试自动识别' })).toBeEnabled());
         expect(data.papers[0].metadata.title).toBe('A study');
     });
+});
+
+it('opens the selected stored attachment in the current tab without waiting for parsing', () => {
+ const data=fixture();
+ data.attachments[0].contentRef='saved-document';
+ render(<PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} initialTab="attachments" onClose={vi.fn()} onAddNote={vi.fn()} />);
+ const link=screen.getByRole('link',{name:'阅读此附件'});
+ expect(link).toHaveAttribute('href','/lib/knowledge/knowledge/library/saved-document');
+ expect(link).not.toHaveAttribute('target','_blank');
 });

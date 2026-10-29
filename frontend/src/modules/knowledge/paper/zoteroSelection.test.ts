@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ZoteroPreview } from './zoteroImport';
-import { filterZoteroPreview, listZoteroPapers } from './zoteroSelection';
+import { filterZoteroPreview, listZoteroPapers, zoteroBrowserIndex, importedZoteroKeys } from './zoteroSelection';
 
 const item = (key: string, itemType: string, data: Record<string, unknown> = {}) => ({ key, data: { key, itemType, ...data } });
 const collection = (key: string, name: string, parentCollection: string | false = false) => ({ key, data: { key, name, parentCollection } });
@@ -29,7 +29,7 @@ const keys = (values: unknown[]) => values.map(value => String((value as { key: 
 describe('Zotero paper selection', () => {
   it('lists papers and standalone PDFs with searchable metadata and owned material counts', () => {
     expect(listZoteroPapers(fixture())).toEqual([
-      { key: 'PAPER1', title: 'Understanding attention', authors: ['Ada Lovelace'], year: '2024', pdfCount: 1, unavailablePdfCount: 0, noteCount: 1, annotationCount: 1, collections: ['Models'], searchText: 'understanding attention ada lovelace 2024' },
+      { key: 'PAPER1', title: 'Understanding attention', authors: ['Ada Lovelace'], year: '2024', pdfCount: 1, unavailablePdfCount: 0, noteCount: 1, annotationCount: 1, collections: ['Research / Models'], searchText: 'understanding attention ada lovelace 2024' },
       { key: 'PAPER2', title: 'Unselected paper', authors: [], year: '', pdfCount: 1, unavailablePdfCount: 0, noteCount: 1, annotationCount: 0, collections: ['Other'], searchText: 'unselected paper' },
       { key: 'STANDALONE', title: 'independent.pdf', authors: [], year: '', pdfCount: 1, unavailablePdfCount: 0, noteCount: 0, annotationCount: 1, collections: ['Research'], searchText: 'independent.pdf' },
     ]);
@@ -151,4 +151,21 @@ describe('Zotero paper selection', () => {
     preview.items.push(item('OVER', 'book'));
     expect(() => listZoteroPapers(preview)).toThrow(/上限/);
   }, 3000);
+});
+
+
+it('indexes ancestor folders without duplicating papers and preserves empty folders', () => {
+  const index = zoteroBrowserIndex(fixture());
+  expect(index.memberships.get('PAPER1')).toEqual(new Set(['MODELS', 'ROOT']));
+  expect(index.memberships.get('PAPER2')).toEqual(new Set(['OTHER']));
+  expect(index.folders.find(folder => folder.key === 'ROOT')?.children.map(folder => folder.key)).toEqual(['MODELS', 'EMPTY']);
+  expect(index.folders.find(folder => folder.key === 'ROOT')?.children.find(folder => folder.key === 'EMPTY')?.count).toBe(0);
+});
+
+it('restores only mappings persisted for this source and this library', () => {
+  const papers = listZoteroPapers(fixture());
+  const persisted = [{zoteroSources:['users:42:PAPER1', 'users:99:PAPER2']}];
+  expect([...importedZoteroKeys('users:42', papers, persisted)]).toEqual(['PAPER1']);
+  expect([...importedZoteroKeys('users:99', papers, persisted)]).toEqual(['PAPER2']);
+  expect(importedZoteroKeys('users:42', papers, []).size).toBe(0);
 });

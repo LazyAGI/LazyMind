@@ -32,7 +32,7 @@ describe('paper import operations', () => {
     const batch = operation('batch');
     vi.mocked(getAcademicImportBatch).mockResolvedValue({ operation: batch, items: [paper('flash'), paper('qlora', { status: 'succeeded', result_kind: 'imported', current_state: 'ready' })], next_cursor: '' });
     render(<Notice canWrite onRetry={vi.fn()} page={{ ...emptyImportBatchPage(), items: [batch] }} />); openNotice();
-    expect(screen.getByText('研究方向 · 2 篇')).toBeInTheDocument(); expect(screen.queryByText('Paper flash')).not.toBeInTheDocument();
+    expect(screen.getByText('扩展导入 · 2 篇')).toBeInTheDocument(); expect(screen.queryByText('Paper flash')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
     expect(await screen.findByRole('link', { name: 'Paper flash' })).toHaveAttribute('href', '/lib/knowledge/knowledge/papers/flash');
     expect(screen.getByText('本次跳过，复用已有 PDF')).toBeInTheDocument();
@@ -111,13 +111,13 @@ describe('paper import operations', () => {
     vi.mocked(listAcademicImportBatches).mockResolvedValue({ ...emptyImportBatchPage(), items: [operation('second', { entry_type: 'pdf_upload', source: { file_name: 'study.pdf' } })] });
     vi.mocked(getAcademicImportBatch).mockResolvedValueOnce({ operation: batch, items: [paper('first')], next_cursor: 'papers-next' }).mockResolvedValueOnce({ operation: batch, items: [paper('second')], next_cursor: '' });
     render(<Notice canWrite onRetry={vi.fn()} page={{ ...emptyImportBatchPage(), items: [batch], next_cursor: 'batches-next' }} />); openNotice();
-    fireEvent.click(screen.getByRole('button', { name: '加载更多记录' })); expect(await screen.findByText('study.pdf · 2 篇')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '加载更多记录' })); expect(await screen.findByText('上传 PDF · 2 篇')).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByRole('button', { name: /^展开导入记录/ })[0]).not.toBeDisabled());
     fireEvent.click(screen.getAllByRole('button', { name: /^展开导入记录/ })[0]);
     await screen.findByRole('link', { name: 'Paper first' });
     expect(getAcademicImportBatch).toHaveBeenCalledTimes(1);
     fireEvent.click(await screen.findByRole('button', { name: '加载更多论文' }));
-    expect(await screen.findByRole('link', { name: 'Paper second' })).toBeInTheDocument(); expect(screen.getByText('研究方向 · 205 篇')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Paper second' })).toBeInTheDocument(); expect(screen.getByText('扩展导入 · 205 篇')).toBeInTheDocument();
     expect(getAcademicImportBatch).toHaveBeenLastCalledWith('batch', 'papers-next');
   });
 });

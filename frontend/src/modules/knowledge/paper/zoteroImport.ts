@@ -19,7 +19,7 @@ export interface ZoteroDatabaseInfo {
   library_id: string;
 }
 export interface ZoteroPreview { items: unknown[]; collections: unknown[]; source_id: string; warnings: string[]; database?: ZoteroDatabaseInfo }
-export interface ZoteroImportOptions { includeAttachments: boolean; localFiles: File[]; targetFolderId?: string | null }
+export interface ZoteroImportOptions { includeAttachments: boolean; localFiles: File[]; targetFolderId?: string | null; onProgress?: (stage: string) => void }
 export interface ZoteroImportResult { imported: number; attachments: number; failures?: string[] }
 export interface ZoteroAttachmentCandidate { id: string; paperId: string; key: string; name: string; md5?: string; localPath?: string }
 export interface ZoteroPaperRecord extends PaperRecord { zoteroSources?: string[] }

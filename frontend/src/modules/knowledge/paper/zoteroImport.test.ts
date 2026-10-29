@@ -211,3 +211,18 @@ describe('Zotero import graph', () => {
     await expect(previewZotero('dataset', config)).rejects.toThrow('Provider rejected request');
   });
 });
+
+it('retains selected folder ancestry and duplicate names in different branches', () => {
+ const p = sample();
+ p.collections.push({key:'LEAF0001',data:{key:'LEAF0001',name:'Results',parentCollection:'CHILD001'}}, {key:'OTHER001',data:{key:'OTHER001',name:'Models',parentCollection:false}});
+ const paper = p.items[0] as {data:Record<string,unknown>}; paper.data.collections=['LEAF0001','OTHER001'];
+ const plan = buildZoteroImport(filterZoteroPreview(p,['PAPER001']),emptyLibrary());
+ const folders = plan.library.folders;
+ const root = folders.find(f=>f.name==='Research')!;
+ const child = folders.find(f=>f.name==='Models' && f.parentId===root.id)!;
+ const leaf = folders.find(f=>f.name==='Results')!;
+ const other = folders.find(f=>f.name==='Models' && !f.parentId)!;
+ expect(leaf.parentId).toBe(child.id);
+ expect(other.id).not.toBe(child.id);
+ expect(plan.library.papers[0].collectionIds).toEqual(expect.arrayContaining([leaf.id,other.id]));
+});

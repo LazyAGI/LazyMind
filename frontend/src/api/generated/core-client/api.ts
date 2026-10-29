@@ -262,10 +262,12 @@ export interface AcademicImportPreview {
 export interface AcademicImportPreviewItemsInner {
     'disposition'?: string;
     'fulltext_candidates'?: Array<AcademicImportCandidate>;
+    'manual_download_urls'?: Array<string>;
     'paper'?: AcademicPaperRef;
     'presence'?: AcademicPresence;
     'reference_ids'?: Array<string>;
     'title'?: string;
+    'warnings'?: Array<string>;
     'work_id'?: string;
 }
 export interface AcademicImportQueueItem {
@@ -877,6 +879,7 @@ export interface ApiCoreAcademicImportsPost200ResponseOneOf {
 export interface ApiCoreAcademicImportsPreviewPostRequest {
     'expansion_id'?: string;
     'identifier'?: string;
+    'lookup_fulltext'?: boolean;
     'papers'?: Array<PaperLibraryPaper>;
     'reference_ids'?: Array<string>;
     'resolve_external'?: boolean;

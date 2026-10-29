@@ -112,6 +112,14 @@ function indexPreview(preview: ZoteroPreview): SelectionGraph {
 /** Build the visible list without creating a library or hashing every imported record. */
 export function listZoteroPapers(preview: ZoteroPreview): ZoteroSelectablePaper[] {
   const graph = indexPreview(preview);
+  const paths = new Map<string, string>();
+  const collectionPath = (key: string) => {
+    if (paths.has(key)) return paths.get(key)!;
+    const parts: string[] = [];
+    let current = key;
+    while (current) { const node = graph.collections.get(current)!; parts.unshift(text(node.data.name)); current = node.parent; }
+    const path = parts.join(' / '); paths.set(key, path); return path;
+  };
   const papers = new Map<string, ZoteroSelectablePaper>();
   for (const key of graph.roots) {
     const node = graph.items.get(key)!; const data = node.data;
@@ -121,7 +129,7 @@ export function listZoteroPapers(preview: ZoteroPreview): ZoteroSelectablePaper[
     const title = text(data.title) || text(data.filename) || text(data.path).replace(/\\/g, '/').split('/').pop() || '未命名文献';
     const year = text(data.date).match(/\b(\d{4})\b/)?.[1] || '';
     papers.set(key, { key, title, authors, year, pdfCount: 0, unavailablePdfCount: 0, noteCount: 0, annotationCount: 0,
-      collections: node.memberships.map(key => text(graph.collections.get(key)!.data.name)),
+      collections: node.memberships.map(collectionPath),
       searchText: [title, ...authors, year].filter(Boolean).join(' ').toLocaleLowerCase(),
     });
   }
@@ -200,4 +208,31 @@ export function filterZoteroPreview(preview: ZoteroPreview, selectedKeys: Readon
     collections.push({ key, data });
   }
   return { ...preview, items, collections, warnings: [...preview.warnings] };
+}
+
+export interface ZoteroFolderNode { key: string; title: string; count: number; children: ZoteroFolderNode[] }
+/** Build ancestry memberships once so folder changes never rebuild the import graph. */
+export function zoteroBrowserIndex(preview: ZoteroPreview) {
+  const graph = indexPreview(preview);
+  const nodes = new Map<string, ZoteroFolderNode>();
+  for (const [key, node] of graph.collections) nodes.set(key, { key, title: text(node.data.name), count: 0, children: [] });
+  const folders: ZoteroFolderNode[] = [];
+  for (const [key, node] of graph.collections) (node.parent ? nodes.get(node.parent)!.children : folders).push(nodes.get(key)!);
+  const memberships = new Map<string, Set<string>>();
+  for (const key of graph.roots) {
+    const ancestors = new Set<string>();
+    for (const membership of graph.items.get(key)!.memberships) {
+      let current = membership;
+      while (current && !ancestors.has(current)) { ancestors.add(current); current = graph.collections.get(current)!.parent; }
+    }
+    for (const folder of ancestors) nodes.get(folder)!.count++;
+    memberships.set(key, ancestors);
+  }
+  return { folders, memberships };
+}
+
+/** Matches only persisted identities for this source in the current paper library. */
+export function importedZoteroKeys(sourceId: string, papers: ZoteroSelectablePaper[], persisted: readonly { zoteroSources?: string[] }[]) {
+  const sources = new Set(persisted.flatMap(paper => paper.zoteroSources || []));
+  return new Set(papers.filter(paper => sources.has(`${sourceId}:${paper.key}`)).map(paper => paper.key));
 }

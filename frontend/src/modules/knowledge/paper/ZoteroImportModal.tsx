@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from 'react';
-import { Alert, Button, Checkbox, Input, Modal, Pagination, Radio, Select, Tooltip } from 'antd';
-import { ApiOutlined, CheckCircleOutlined, DatabaseOutlined, FilePdfOutlined, FolderOpenOutlined, InfoCircleOutlined, LockOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from 'react';
+import { Alert, Button, Checkbox, Input, Modal, Pagination, Radio, Select, Tooltip, Tree } from 'antd';
+import { ApiOutlined,  DatabaseOutlined, FilePdfOutlined, FolderOpenOutlined, FolderOutlined, DownOutlined, InfoCircleOutlined, LockOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
 import { parseZoteroJSON, previewZotero, readBlobText, zoteroImportError, type ZoteroDatabaseInfo, type ZoteroImportConfig, type ZoteroImportOptions, type ZoteroImportResult, type ZoteroPreview } from './zoteroImport';
-import { filterZoteroPreview, listZoteroPapers, zoteroSelectionWarnings, type ZoteroSelectablePaper } from './zoteroSelection';
+import { filterZoteroPreview, importedZoteroKeys, zoteroBrowserIndex, listZoteroPapers, zoteroSelectionWarnings, type ZoteroSelectablePaper } from './zoteroSelection';
 import './ZoteroImportModal.scss';
 
 export interface ZoteroImportModalProps {
@@ -10,12 +10,14 @@ export interface ZoteroImportModalProps {
   datasetId: string;
   canWrite: boolean;
   initialFolderId?: string | null;
+  persistedPapers?: readonly { zoteroSources?: string[] }[];
   onCancel: () => void;
   onImport: (preview: ZoteroPreview, config: ZoteroImportConfig, options: ZoteroImportOptions) => Promise<ZoteroImportResult>;
 }
 const initialConfig = (source: ZoteroImportConfig['source'] = 'database'): ZoteroImportConfig => ({ source, library_type: 'users', library_id: source === 'local' || source === 'database' ? '0' : '', ...(source === 'local' ? { local_url: 'http://host.docker.internal:23119/api' } : {}), ...(source === 'remote' || source === 'webdav' ? { api_key: '' } : {}), ...(source === 'webdav' ? { webdav: { url: '', username: '', password: '' } } : {}) });
 const directoryInput = { webkitdirectory: '', directory: '' } as InputHTMLAttributes<HTMLInputElement>;
 const pageSize = 50;
+const noPersistedPapers: readonly { zoteroSources?: string[] }[] = [];
 
 function validateConfig(config: ZoteroImportConfig) {
   if (!/^\d+$/.test(config.library_id) || (!['local', 'database'].includes(config.source) && Number(config.library_id) <= 0)) throw new Error('请填写有效的 Zotero 文献库 ID（数字）');
@@ -33,7 +35,19 @@ function validateConfig(config: ZoteroImportConfig) {
   }
 }
 
-export default function ZoteroImportModal({ open, datasetId, canWrite, initialFolderId, onCancel, onImport }: ZoteroImportModalProps) {
+
+// Stable rows avoid rerendering every checkbox and tooltip on each selection.
+const ZoteroPaperRow = memo(function ZoteroPaperRow({ paper, checked, disabled, imported, onToggle }: {
+  paper: ZoteroSelectablePaper; checked: boolean; disabled: boolean; imported: boolean; onToggle: (key: string, checked: boolean) => void;
+}) {
+ return <div role="listitem" className={`zotero-paper-row${checked ? ' is-selected' : ''}`}>
+          <Checkbox aria-label={`选择 ${paper.title}`} checked={checked} disabled={disabled || imported} onChange={event => onToggle(paper.key, event.target.checked)} />
+          <div className="zotero-paper-details"><label className="zotero-paper-title" onClick={() => { if (!disabled && !imported) onToggle(paper.key, !checked); }}>{paper.title}</label><div className="zotero-paper-meta"><span>{paper.authors.join(', ') || '作者未记录'}</span><span>{paper.year || '年份未记录'}</span></div>{!!paper.collections.length && <div className="zotero-paper-collections"><FolderOpenOutlined aria-hidden />{paper.collections.join('；')}</div>}</div>
+          <div className="zotero-paper-materials">{imported && <span className="zotero-imported-badge">已导入</span>}{!!paper.pdfCount && <span><FilePdfOutlined aria-hidden />{paper.pdfCount} PDF</span>}{!!paper.unavailablePdfCount && <Tooltip title="本机无法读取这些 PDF。请修复 Zotero 附件路径后重试，或取消勾选 PDF 附件以导入题录。"><span className="zotero-pdf-unavailable">{paper.unavailablePdfCount} 个 PDF 不可用</span></Tooltip>}{!!(paper.noteCount + paper.annotationCount) && <span>{paper.noteCount + paper.annotationCount} 条笔记与批注</span>}</div>
+        </div>;
+});
+
+export default function ZoteroImportModal({ open, datasetId, canWrite, initialFolderId, persistedPapers = noPersistedPapers, onCancel, onImport }: ZoteroImportModalProps) {
   const [config, setConfig] = useState<ZoteroImportConfig>(() => initialConfig());
   const [localMode, setLocalMode] = useState<'connect' | 'file'>('connect');
   const [localFiles, setLocalFiles] = useState<File[]>([]);
@@ -44,26 +58,37 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
   const [papers, setPapers] = useState<ZoteroSelectablePaper[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState('');
+  const [sourceFolder, setSourceFolder] = useState<string | null>(null);
+  const [completeImported, setCompleteImported] = useState(false);
+  const retryKeys = useRef<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [showSettings, setShowSettings] = useState(false);
   const [busy, setBusy] = useState<'preview' | 'import' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [partial, setPartial] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
   const request = useRef<AbortController | null>(null);
   const generation = useRef(0);
   const jsonPicker = useRef<HTMLInputElement>(null);
   const folderPicker = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (listRef.current) listRef.current.scrollTop = 0; }, [page, query, sourceFolder]);
   const disabled = !!busy || !canWrite;
   const isDatabase = config.source === 'database';
   const isFile = config.source === 'local' && localMode === 'file';
+  const browserIndex = useMemo(() => preview ? zoteroBrowserIndex(preview) : null, [preview]);
+  const imported = useMemo(() => preview ? importedZoteroKeys(preview.source_id, papers, persistedPapers) : new Set<string>(), [preview, papers, persistedPapers]);
+  const effectiveSelected = useMemo(() => new Set([...selected, ...imported]), [selected, imported]);
+  const newSelectedCount = [...selected].filter(key => !imported.has(key)).length;
   const visiblePapers = useMemo(() => {
     const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    return terms.length ? papers.filter(paper => terms.every(term => paper.searchText.includes(term))) : papers;
-  }, [papers, query]);
+    return papers.filter(paper => (!sourceFolder || browserIndex?.memberships.get(paper.key)?.has(sourceFolder)) && terms.every(term => paper.searchText.includes(term)));
+  }, [papers, query, sourceFolder, browserIndex]);
+  const selectSourceFolder = (key: string | null) => { setSourceFolder(key); setPage(1); };
   const selectedCounts = useMemo(() => papers.reduce((counts, paper) => selected.has(paper.key) ? { pdfs: counts.pdfs + paper.pdfCount, unavailable: counts.unavailable + paper.unavailablePdfCount, notes: counts.notes + paper.noteCount + paper.annotationCount } : counts, { pdfs: 0, unavailable: 0, notes: 0 }), [papers, selected]);
 
   const resetPreview = () => {
-    setPreview(null); setPapers([]); setSelected(new Set()); setQuery(''); setPage(1); setError(null); setPartial(false); setShowSettings(false);
+    setPreview(null); setPapers([]); setSelected(new Set()); setQuery(''); setPage(1); setError(null); setPartial(false); setShowSettings(false); setSourceFolder(null); setCompleteImported(false); retryKeys.current = new Set();
   };
   useEffect(() => {
     generation.current++; request.current?.abort();
@@ -110,12 +135,15 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
     finally { if (scope === generation.current) setBusy(null); }
   };
   const commit = async () => {
-    if (disabled || !preview || !selected.size) return;
+    if (disabled || !preview) return;
+    const commitKeys = partial ? retryKeys.current : new Set([...effectiveSelected].filter(key => !imported.has(key) || completeImported));
+    if (!commitKeys.size) return;
+    retryKeys.current = new Set(commitKeys);
     const scope = generation.current;
-    setBusy('import'); setError(null);
+    setBusy('import'); setImportProgress(`正在导入 ${commitKeys.size} 篇`); setError(null);
     try {
-      const chosenPreview = filterZoteroPreview(preview, selected);
-      const result = await onImport(chosenPreview, config, { includeAttachments, localFiles, targetFolderId: initialFolderId });
+      const chosenPreview = filterZoteroPreview(preview, commitKeys);
+      const result = await onImport(chosenPreview, config, { includeAttachments, localFiles, targetFolderId: initialFolderId, onProgress: stage => { if (scope === generation.current) setImportProgress(stage); } });
       if (scope !== generation.current) return;
       if (!result || !Number.isSafeInteger(result.imported) || !Number.isSafeInteger(result.attachments) || result.imported < 0 || result.attachments < 0) throw new Error('导入结果无效，请重新加载论文库后检查');
       if (result.failures?.length) {
@@ -126,17 +154,19 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
       if (scope === generation.current) { setPartial(true); setError(zoteroImportError(cause, config)); }
     } finally { if (scope === generation.current) setBusy(null); }
   };
-  const togglePaper = (key: string, checked: boolean) => {
+  const togglePaper = useCallback((key: string, checked: boolean) => {
     setSelected(current => { const next = new Set(current); if (checked) next.add(key); else next.delete(key); return next; });
-  };
+  }, []);
 
   const footer = <div className="zotero-import-footer"><span className="zotero-private-hint"><LockOutlined />{isDatabase ? '确认选择后才会写入论文库' : '密钥和密码仅用于本次导入'}</span><Button disabled={busy === 'import'} onClick={cancel}>取消</Button>
-      {preview ? <Button type="primary" disabled={disabled || !selected.size} loading={busy === 'import'} onClick={commit}>{partial ? '重试未完成的导入' : `确认导入 ${selected.size} 篇`}</Button> : <Button type="primary" disabled={disabled || (isFile && !jsonFile)} loading={busy === 'preview'} onClick={load}>{isDatabase ? '读取本地数据库' : isFile ? '读取并预览' : '连接并预览'}</Button>}
+      {preview ? <Button type="primary" disabled={disabled || (!newSelectedCount && !(completeImported && imported.size) && !partial)} loading={busy === 'import'} onClick={commit}>{busy === 'import' ? importProgress : partial ? '重试未完成的导入' : newSelectedCount ? `确认导入 ${newSelectedCount} 篇` : completeImported && imported.size ? '补全已导入附件' : '确认导入 0 篇'}</Button> : <Button type="primary" disabled={disabled || (isFile && !jsonFile)} loading={busy === 'preview'} onClick={load}>{isDatabase ? '读取本地数据库' : isFile ? '读取并预览' : '连接并预览'}</Button>}
     </div>;
 
-  return <Modal open={open} title="从 Zotero 导入" className="zotero-import-modal" width={760} centered destroyOnHidden footer={footer}
+  return <Modal open={open} title={null} aria-labelledby="zotero-import-title" className={`zotero-import-modal${preview ? " is-expanded" : ""}`} width={preview ? 1440 : 760} centered destroyOnHidden footer={null}
     onCancel={cancel} closable={busy !== 'import'} maskClosable={busy !== 'import'} keyboard={busy !== 'import'}>
-    <p className="zotero-import-description">读取文献库后选择论文，一并保留所选文献的文件夹、笔记与批注。</p>
+    <div className="zotero-import-workspace"><aside className="zotero-import-settings">
+    <h2 id="zotero-import-title" className="zotero-compact-title">从 Zotero 导入</h2>
+    <details className="zotero-source-settings" open={!preview}><summary>来源设置 · {isDatabase ? '本地数据库' : 'API'}</summary>
     <div role="radiogroup" aria-label="导入来源"><Radio.Group className="zotero-source-picker" value={isDatabase ? 'database' : 'api'} disabled={disabled} onChange={event => changeSource(event.target.value === 'database' ? 'database' : 'local')}>
       <Radio.Button value="database"><span className="zotero-source-name"><DatabaseOutlined aria-hidden />本地数据库</span><span className="zotero-source-subtitle">直接读取 Zotero 文献与附件</span></Radio.Button>
       <Radio.Button value="api"><span className="zotero-source-name"><ApiOutlined aria-hidden />API</span><span className="zotero-source-subtitle">通过客户端、远端或 WebDAV 连接</span></Radio.Button>
@@ -145,7 +175,7 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
       {!preview && <p>自动查找本机的 zotero.sqlite，无需启动 Zotero、开启 API 或填写密钥。</p>}
       {databaseInfo && <>
         <div className="zotero-field"><label htmlFor="zotero-database-library">本地文献库</label><Select id="zotero-database-library" value={`${config.library_type}:${config.library_id}`} disabled={disabled} options={databaseInfo.libraries.map(library => ({ value: `${library.type}:${library.id}`, label: library.name }))} onChange={value => { const [library_type, library_id] = value.split(':'); changeConfig({ library_type: library_type as 'users' | 'groups', library_id }); }} /></div>
-        <span className="zotero-database-path" title={databaseInfo.path}>{databaseInfo.path}</span>
+        <div className="zotero-database-location"><span>本机 Zotero 数据目录 · 只读访问</span><details><summary>路径详情</summary><code>{databaseInfo.path}</code><p>容器部署时显示挂载路径，直接读取原数据库，不会复制数据库。</p></details></div>
       </>}
     </div> : <>
       <div className="zotero-api-heading"><div role="radiogroup" aria-label="API 连接方式"><Radio.Group value={config.source} size="small" disabled={disabled} onChange={event => changeSource(event.target.value)}>
@@ -166,26 +196,29 @@ export default function ZoteroImportModal({ open, datasetId, canWrite, initialFo
         </>}
       </div>}
     </>}
+    </details>
+    <div className="zotero-options"><Checkbox checked={includeAttachments} disabled={disabled} onChange={event => { setIncludeAttachments(event.target.checked); if (!event.target.checked) setCompleteImported(false); }}>同时导入 PDF 附件</Checkbox>{preview && <span className="zotero-selection-materials">本次选择包含 {selectedCounts.pdfs} 个 PDF、{selectedCounts.notes} 条笔记与批注{selectedCounts.unavailable > 0 && <span className="zotero-pdf-unavailable">（其中 {selectedCounts.unavailable} 个 PDF 当前不可用）</span>}</span>}
+      {config.source === 'local' && includeAttachments && <><div className="zotero-file-picker"><Button size="small" icon={<FolderOpenOutlined />} disabled={disabled} onClick={() => folderPicker.current?.click()}>选择本地附件文件夹</Button><span>{localFiles.length ? `已选择 ${localFiles.length} 个文件` : '选择 Zotero storage 或导出附件目录'}</span></div><input {...directoryInput} ref={folderPicker} type="file" multiple hidden aria-label="本地 Zotero 附件目录" disabled={disabled} onChange={event => { setLocalFiles(Array.from(event.target.files || [])); setError(null); }} /><p className="zotero-field-hint">在 Zotero「设置 → 高级 → 文件和文件夹 → 打开数据文件夹」中找到 storage 文件夹。系统按附件标识匹配 PDF。</p></>}
+    </div>
+    {!!imported.size && <div className="zotero-mapping-summary"><span>{imported.size} 篇已关联到当前论文库</span><Checkbox checked={completeImported} disabled={disabled || !includeAttachments} onChange={event => setCompleteImported(event.target.checked)}>补全已导入文献的附件</Checkbox></div>}
+    {preview && <nav className="zotero-folder-browser" aria-label="Zotero 文件夹"><div className="zotero-folder-caption">文献库</div><Button type="text" className={!sourceFolder ? 'is-active' : ''} onClick={() => selectSourceFolder(null)}>全部文献 <span>{papers.length}</span></Button><Tree aria-label="Zotero 文件夹目录" showIcon blockNode switcherIcon={<DownOutlined />} treeData={browserIndex?.folders} selectedKeys={sourceFolder ? [sourceFolder] : []} onSelect={keys => selectSourceFolder(keys.length ? String(keys[0]) : null)} titleRender={node => <span className="zotero-folder-title"><FolderOutlined /><span>{node.title}</span><small>{node.count}</small></span>} /></nav>}
+    {!!preview?.warnings.length && <details className="zotero-warning-details"><summary>导入提示（{preview.warnings.length}）</summary><Alert className="zotero-import-alert" type="warning" showIcon message={preview.warnings.join('\n')} /></details>}
+    {error && <Alert className="zotero-import-alert" type="error" showIcon message={error} />}
+    {!canWrite && <Alert className="zotero-import-alert" type="warning" showIcon message="需要论文库编辑权限才能导入" />}    {!preview && footer}
+    </aside>
     {preview && <section className="zotero-selection" aria-label="选择导入文献">
-      <div className="zotero-selection-heading"><div><CheckCircleOutlined />文献库已读取<strong>选择要导入的文献</strong></div><span>{papers.length} 篇文献</span></div>
+      <div className="zotero-selection-heading"><strong>{sourceFolder ? "选择文件夹内的文献" : "选择要导入的文献"}</strong><span>{visiblePapers.length} 篇文献</span></div>
       <Input aria-label="搜索文献" className="zotero-search" prefix={<SearchOutlined aria-hidden />} placeholder="搜索标题、作者或年份" allowClear value={query} disabled={disabled} onChange={event => { setQuery(event.target.value); setPage(1); }} />
-      <div className="zotero-selection-toolbar"><span role="status">已选择 {selected.size} / {papers.length} 篇</span><div><Button size="small" type="text" disabled={disabled || !visiblePapers.length} onClick={() => setSelected(current => new Set([...current, ...visiblePapers.map(paper => paper.key)]))}>{query.trim() ? '选择搜索结果' : '全选'}</Button><Button size="small" type="text" disabled={disabled || !selected.size} onClick={() => setSelected(new Set())}>清空选择</Button></div></div>
-      <div className="zotero-paper-list" role="list" aria-label="可导入文献">
-        {visiblePapers.slice((page - 1) * pageSize, page * pageSize).map(paper => <div key={paper.key} role="listitem" className={`zotero-paper-row${selected.has(paper.key) ? ' is-selected' : ''}`}>
-          <Checkbox aria-label={`选择 ${paper.title}`} checked={selected.has(paper.key)} disabled={disabled} onChange={event => togglePaper(paper.key, event.target.checked)} />
-          <div className="zotero-paper-details"><label className="zotero-paper-title" onClick={() => { if (!disabled) togglePaper(paper.key, !selected.has(paper.key)); }}>{paper.title}</label><div className="zotero-paper-meta"><span>{paper.authors.join(', ') || '作者未记录'}</span><span>{paper.year || '年份未记录'}</span></div>{!!paper.collections.length && <div className="zotero-paper-collections"><FolderOpenOutlined aria-hidden />{paper.collections.join(' / ')}</div>}</div>
-          <div className="zotero-paper-materials">{!!paper.pdfCount && <span><FilePdfOutlined aria-hidden />{paper.pdfCount} PDF</span>}{!!paper.unavailablePdfCount && <Tooltip title="本机无法读取这些 PDF。请修复 Zotero 附件路径后重试，或取消勾选 PDF 附件以导入题录。"><span className="zotero-pdf-unavailable">{paper.unavailablePdfCount} 个 PDF 不可用</span></Tooltip>}{!!(paper.noteCount + paper.annotationCount) && <span>{paper.noteCount + paper.annotationCount} 条笔记与批注</span>}</div>
-        </div>)}
+      <div className="zotero-selection-toolbar"><span role="status">已选择 {effectiveSelected.size} / {papers.length} 篇{imported.size > 0 && <small> · 已导入 {imported.size} · 新选择 {newSelectedCount}</small>}</span><div><Button size="small" type="text" disabled={disabled || !visiblePapers.length} onClick={() => setSelected(current => new Set([...current, ...visiblePapers.map(paper => paper.key)]))}>{query.trim() ? '选择搜索结果' : sourceFolder ? '选择此文件夹' : '全选'}</Button><Button size="small" type="text" disabled={disabled || !selected.size} onClick={() => setSelected(new Set())}>清空选择</Button></div></div>
+      <div ref={listRef} className="zotero-paper-list" role="list" aria-label="可导入文献">
+        {visiblePapers.slice((page - 1) * pageSize, page * pageSize).map(paper => <ZoteroPaperRow key={paper.key} paper={paper} checked={effectiveSelected.has(paper.key)} imported={imported.has(paper.key)} disabled={disabled} onToggle={togglePaper} />)}
         {!visiblePapers.length && <div className="zotero-list-empty">{papers.length ? '没有匹配的文献，请调整搜索词。' : '此文献库中没有可导入的论文或独立 PDF。'}</div>}
       </div>
       {visiblePapers.length > pageSize && <Pagination className="zotero-list-pagination" size="small" current={page} pageSize={pageSize} total={visiblePapers.length} showSizeChanger={false} disabled={disabled} onChange={setPage} />}
+    <div className="zotero-selection-actions">{footer}</div>
     </section>}
-    <div className="zotero-options"><Checkbox checked={includeAttachments} disabled={disabled} onChange={event => setIncludeAttachments(event.target.checked)}>同时导入 PDF 附件</Checkbox>{preview && <span className="zotero-selection-materials">所选文献包含 {selectedCounts.pdfs} 个 PDF、{selectedCounts.notes} 条笔记与批注{selectedCounts.unavailable > 0 && <span className="zotero-pdf-unavailable">（其中 {selectedCounts.unavailable} 个 PDF 当前不可用）</span>}</span>}
-      {config.source === 'local' && includeAttachments && <><div className="zotero-file-picker"><Button size="small" icon={<FolderOpenOutlined />} disabled={disabled} onClick={() => folderPicker.current?.click()}>选择本地附件文件夹</Button><span>{localFiles.length ? `已选择 ${localFiles.length} 个文件` : '选择 Zotero storage 或导出附件目录'}</span></div><input {...directoryInput} ref={folderPicker} type="file" multiple hidden aria-label="本地 Zotero 附件目录" disabled={disabled} onChange={event => { setLocalFiles(Array.from(event.target.files || [])); setError(null); }} /><p className="zotero-field-hint">在 Zotero「设置 → 高级 → 文件和文件夹 → 打开数据文件夹」中找到 storage 文件夹。系统按附件标识匹配 PDF。</p></>}
     </div>
-    {!!preview?.warnings.length && <Alert className="zotero-import-alert" type="warning" showIcon message={preview.warnings.join('\n')} />}
-    {error && <Alert className="zotero-import-alert" type="error" showIcon message={error} />}
-    {!canWrite && <Alert className="zotero-import-alert" type="warning" showIcon message="需要论文库编辑权限才能导入" />}
+
 
   </Modal>;
 }

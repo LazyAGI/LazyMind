@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -291,6 +292,22 @@ func (c *zoteroClient) previewDatabase(ctx context.Context) (zoteroPreview, erro
 		visible[id] = ok
 		return ok, nil
 	}
+	// Bound I/O concurrency on mounted directories and reuse confined root handles.
+	// Only active PDF attachments are checked; original files are never copied.
+	toCheck := map[int64]*zoteroDatabaseAttachment{}
+	for _, id := range order {
+		ok, err := active(id, 0)
+		if err != nil {
+			return result, err
+		}
+		if a := items[id].Attachment; ok && a != nil && a.ContentType == "application/pdf" {
+			toCheck[id] = a
+		}
+	}
+	availability := c.databaseAttachmentAvailability(ctx, toCheck)
+	if ctx.Err() != nil {
+		return result, zoteroDatabaseReadError(ctx.Err())
+	}
 	missing, papers, bytes := 0, 0, 0
 	for _, id := range order {
 		item := items[id]
@@ -304,26 +321,10 @@ func (c *zoteroClient) previewDatabase(ctx context.Context) (zoteroPreview, erro
 		if item.Parent != 0 {
 			item.Data["parentItem"] = items[item.Parent].Key
 		}
-		if item.Attachment != nil {
-			a := item.Attachment
-			if a.ContentType == "application/pdf" {
-				root, relative, pathErr := c.databaseAttachmentPath(*a)
-				if pathErr == nil {
-					f, e := openZoteroRootedFile(root, relative)
-					if e == nil {
-						info, e := f.Stat()
-						_ = f.Close()
-						if e != nil || !info.Mode().IsRegular() || info.Size() > zoteroMaxPDFBytes {
-							pathErr = zoteroLocalAttachmentUnavailable()
-						}
-					} else {
-						pathErr = e
-					}
-				}
-				item.Data["localFileAvailable"] = pathErr == nil
-				if pathErr != nil {
-					missing++
-				}
+		if available, checked := availability[id]; checked {
+			item.Data["localFileAvailable"] = available
+			if !available {
+				missing++
 			}
 		}
 		if item.Kind != "attachment" && item.Kind != "note" && item.Kind != "annotation" {
@@ -352,6 +353,59 @@ func (c *zoteroClient) previewDatabase(ctx context.Context) (zoteroPreview, erro
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%d 个 PDF 附件在本机不可读取（未下载、路径来自其他电脑或未配置关联文件目录）；题录、笔记和批注仍可导入。", missing))
 	}
 	return result, nil
+}
+
+// Roots remain open only for this preview. os.Root retains symlink confinement;
+// the actual import still reopens and validates the PDF, since files may change.
+func (c *zoteroClient) databaseAttachmentAvailability(ctx context.Context, attachments map[int64]*zoteroDatabaseAttachment) map[int64]bool {
+	roots := map[string]*os.Root{}
+	for _, path := range []string{c.database.Dir, c.database.LinkedDir} {
+		if path != "" && roots[path] == nil {
+			root, err := os.OpenRoot(path)
+			if err == nil {
+				roots[path] = root
+				defer root.Close()
+			}
+		}
+	}
+	type check struct {
+		id         int64
+		attachment *zoteroDatabaseAttachment
+	}
+	jobs := make(chan check, len(attachments))
+	for id, attachment := range attachments {
+		jobs <- check{id, attachment}
+	}
+	close(jobs)
+	result := make(map[int64]bool, len(attachments))
+	var mu sync.Mutex
+	var workers sync.WaitGroup
+	for i := 0; i < 4 && i < len(attachments); i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for job := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				root, relative, err := c.databaseAttachmentPath(*job.attachment)
+				available := false
+				if err == nil && roots[root] != nil {
+					f, openErr := roots[root].Open(relative)
+					if openErr == nil {
+						info, statErr := f.Stat()
+						available = statErr == nil && info.Mode().IsRegular() && info.Size() <= zoteroMaxPDFBytes
+						_ = f.Close()
+					}
+				}
+				mu.Lock()
+				result[job.id] = available
+				mu.Unlock()
+			}
+		}()
+	}
+	workers.Wait()
+	return result
 }
 
 func readZoteroDatabaseCollections(ctx context.Context, tx *sql.Tx, s zoteroDatabaseSchema, library int64) (map[int64]string, []json.RawMessage, error) {

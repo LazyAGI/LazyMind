@@ -53,7 +53,7 @@ function sourceName(attachment?: Attachment) {
         return new URL(url).hostname;
     return attachment.sourceProvider && attachment.sourceProvider !== 'manual' ? attachment.sourceProvider : '未记录';
 }
-export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, onAddPdf, onDetachAttachment, onNotification, onNotificationResolved, disabled = false }: Props) {
+export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenAttachment, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, onAddPdf, onDetachAttachment, onNotification, onNotificationResolved, disabled = false }: Props) {
     const [tab, setTab] = useState(initialTab);
     const [editing, setEditing] = useState(initialEditing);
     const [note, setNote] = useState('');
@@ -74,7 +74,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
     const method = primary?.importMethod || current.importMethod;
     const sourceUrl = safePaperUrl(primary?.sourceUrl);
     const identifyStatus = academic?.state.manual ? '已手动确认' : ({ pending: '待识别', processing: '识别中', succeeded: '识别成功', failed: '识别失败' }[academic?.state.status || ''] || '未记录');
-    const readButton = <Tooltip title={!primaryPdf ? '请先在附件中添加 PDF' : undefined}><Button type="primary" aria-label="阅读 PDF" icon={<ReadOutlined aria-hidden />} disabled={!primaryPdf} onClick={() => { setSelectedAttachmentId(primaryPdf!.id); setTab('attachments'); }}>阅读 PDF</Button></Tooltip>;
+    const readButton = <Tooltip title={!primaryPdf ? '请先在附件中添加 PDF' : undefined}><Button type="primary" aria-label="阅读 PDF" icon={<ReadOutlined aria-hidden />} disabled={!primaryPdf} href={primaryPdf?.contentRef && !onOpenAttachment ? `/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(primaryPdf.contentRef)}` : undefined} onClick={primaryPdf?.contentRef && onOpenAttachment ? () => onOpenAttachment(primaryPdf.contentRef!) : undefined}>阅读 PDF</Button></Tooltip>;
     const run = async (action: () => Promise<void>, fallback: string) => {
         if (disabled || savingRef.current)
             return;
@@ -164,7 +164,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
                   <span className="paper-attachment-meta">{[sourceName(selectedAttachment), !selectedAttachment.sourceVersion ? '版本未标注' : '', selectedAttachment.size ? `${(selectedAttachment.size / 1024 / 1024).toFixed(1)} MB` : ''].filter(Boolean).join(' · ')}</span>
                 </div></div>
                 <div className="paper-attachment-controls">
-                  {selectedAttachment.contentRef ? <Button onClick={() => setTab('attachments')}>阅读此附件</Button> : safePaperUrl(selectedAttachment.sourceUrl) ? <Button href={safePaperUrl(selectedAttachment.sourceUrl)} target="_blank" rel="noopener noreferrer">打开原文 ↗</Button> : null}
+                  {selectedAttachment.contentRef ? <Button href={onOpenAttachment ? undefined : `/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(selectedAttachment.contentRef)}`} onClick={onOpenAttachment ? () => onOpenAttachment(selectedAttachment.contentRef!) : undefined}>阅读此附件</Button> : safePaperUrl(selectedAttachment.sourceUrl) ? <Button href={safePaperUrl(selectedAttachment.sourceUrl)} target="_blank" rel="noopener noreferrer">打开原文 ↗</Button> : null}
                   {onSetPrimaryAttachment && isStoredPdfAttachment(selectedAttachment) && selectedAttachment.id !== primaryPdf?.id && <Button type="text" aria-label="设为主附件" icon={<PushpinOutlined aria-hidden />} disabled={disabled || saving || editing} onClick={() => void run(() => onSetPrimaryAttachment(selectedAttachment), '主附件设置失败，请重试')}>设为主附件</Button>}
                   {(onAddPdf || onDetachAttachment) && <Dropdown trigger={['click']} menu={{ items: [
                     ...(onAddPdf ? [{ key: 'add', label: '添加 PDF', icon: <PlusOutlined aria-hidden />, disabled: disabled || saving || editing, onClick: onAddPdf }] : []),
