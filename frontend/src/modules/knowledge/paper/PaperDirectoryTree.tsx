@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Tree, Tooltip, type TreeDataNode } from 'antd';
 import { DatabaseOutlined, DeleteOutlined, DownOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons';
 import { useDroppable } from '@dnd-kit/core';
-import { descendantFolderIds, paperBelongsToFolders, type PaperLibraryData } from './model';
+import type { PaperLibraryData } from './model';
+import { indexFolderCounts } from './libraryIndex';
 export const PAPER_LIBRARY_ROOT = 'paper-library-root';
 interface DirectoryNode extends TreeDataNode {
     key: string;
@@ -58,22 +59,30 @@ export default function PaperDirectoryTree(props: Props) {
         setExpanded(current => [...new Set([...current, ...parents])]);
     }, [active, folderId, data.folders]);
     const nodes = useMemo(() => {
-        const build = (id: string | null, label: string): DirectoryNode => {
-            const descendants = id ? descendantFolderIds(data.folders, id) : null;
-            return {
-                key: id || PAPER_LIBRARY_ROOT, label, folderId: id,
-                icon: id ? <FolderOutlined /> : <DatabaseOutlined />,
-                count: descendants ? data.papers.filter(paper => paperBelongsToFolders(paper, descendants)).length : data.papers.length,
-                children: data.folders.filter(folder => (folder.parentId || null) === id).map(folder => build(folder.id, folder.name)),
-            };
-        };
+        const { counts } = indexFolderCounts(data);
+        const children = new Map<string | null, typeof data.folders>();
+        for (const folder of data.folders) {
+            const parent = folder.parentId || null;
+            const siblings = children.get(parent) || [];
+            siblings.push(folder); children.set(parent, siblings);
+        }
+        const build = (id: string | null, label: string): DirectoryNode => ({
+            key: id || PAPER_LIBRARY_ROOT, label, folderId: id,
+            icon: id ? <FolderOutlined /> : <DatabaseOutlined />,
+            count: id ? counts.get(id) || 0 : data.papers.length,
+            children: (children.get(id) || []).map(folder => build(folder.id, folder.name)),
+        });
         return [build(null, title)];
-    }, [data, title]);
+    }, [data.papers, data.folders, title]);
+    const draggedPapers = useMemo(() => {
+        const ids = new Set(draggedIds);
+        return data.papers.filter(paper => ids.has(paper.id));
+    }, [data.papers, draggedIds]);
     return <Tree<DirectoryNode> className="paper-directory-tree" aria-label="论文目录" showIcon blockNode switcherIcon={<DownOutlined />} treeData={nodes} expandedKeys={expanded} selectedKeys={active ? [folderId || PAPER_LIBRARY_ROOT] : []} onExpand={keys => setExpanded(keys.map(String))} onSelect={(_, info) => {
             onSelectFolder(info.node.folderId || null);
         }} titleRender={node => {
             const target = node.folderId || 'none';
-            const acceptsDrop = !disabled && data.papers.some(paper => draggedIds.includes(paper.id) && (paper.folderId !== (node.folderId || null) || paper.collectionIds?.some(id => id !== node.folderId)));
+            const acceptsDrop = !disabled && draggedPapers.some(paper => (paper.folderId !== (node.folderId || null) || paper.collectionIds?.some(id => id !== node.folderId)));
             return <FolderTitle node={node} acceptsDrop={acceptsDrop} dropTarget={dropFolderId === target} disabled={disabled} onCreateFolder={onCreateFolder} onDeleteFolder={onDeleteFolder}/>;
         }}/>;
 }

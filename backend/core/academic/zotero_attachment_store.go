@@ -111,6 +111,10 @@ func zoteroView(ctx context.Context, db *gorm.DB, dataset, user string) (paperli
 }
 
 func storeZoteroFile(ctx context.Context, db *gorm.DB, datasetID, paperID, attachmentID, path, name, userID, userName string) (paperlibrary.View, error) {
+	return storeZoteroFileResult(ctx, db, datasetID, paperID, attachmentID, path, name, userID, userName, false)
+}
+
+func storeZoteroFileResult(ctx context.Context, db *gorm.DB, datasetID, paperID, attachmentID, path, name, userID, userName string, compact bool) (paperlibrary.View, error) {
 	var empty paperlibrary.View
 	file, err := os.Open(path)
 	if err != nil {
@@ -135,18 +139,22 @@ func storeZoteroFile(ctx context.Context, db *gorm.DB, datasetID, paperID, attac
 		return empty, err
 	}
 	// Source membership is checked before acquisition, and again under the commit lock.
-	view, err := paperlibrary.Load(ctx, db, datasetID, userID, []string{paperID}, false)
-	if err != nil {
-		return empty, err
-	}
-	valid := false
-	for _, a := range view.Data.Attachments {
-		if a.ID == attachmentID && a.PaperID == paperID && a.Source == "zotero" {
-			valid = true
+	// Compact transfers already checked the source before acquiring bytes. The
+	// target is still checked below and again under the commit lock.
+	if !compact {
+		view, err := paperlibrary.Load(ctx, db, datasetID, userID, []string{paperID}, false)
+		if err != nil {
+			return empty, err
 		}
-	}
-	if !valid {
-		return empty, errors.New("Zotero 文献或附件已移除，请重新读取论文库")
+		valid := false
+		for _, a := range view.Data.Attachments {
+			if a.ID == attachmentID && a.PaperID == paperID && a.Source == "zotero" {
+				valid = true
+			}
+		}
+		if !valid {
+			return empty, errors.New("Zotero 文献或附件已移除，请重新读取论文库")
+		}
 	}
 	_, member, err := zoteroTarget(db.WithContext(ctx), datasetID, paperID, attachmentID)
 	if err != nil {
@@ -266,6 +274,10 @@ func storeZoteroFile(ctx context.Context, db *gorm.DB, datasetID, paperID, attac
 	if importErr == nil && imported.Start.Status != "STARTED" {
 		importErr = errors.New("PDF 已保存，但处理任务未能启动，请重试")
 	}
+	// The new binding already clears stale errors; avoid a second whole-graph rewrite.
+	if compact && importErr == nil {
+		return empty, nil
+	}
 	// Keep the saved PDF and report task rejection, never turn it into false success.
 	fields := map[string]any{"processingError": nil}
 	if importErr != nil {
@@ -278,6 +290,9 @@ func storeZoteroFile(ctx context.Context, db *gorm.DB, datasetID, paperID, attac
 		return paperlibrary.MergeEntityExtras(ctx, tx, datasetID, "attachments", attachmentID, fields)
 	}); err != nil {
 		return empty, err
+	}
+	if compact {
+		return empty, importErr
 	}
 	result, err := zoteroView(ctx, db, datasetID, userID)
 	if err != nil {
@@ -309,7 +324,7 @@ func bindZoteroAttachment(ctx context.Context, tx *gorm.DB, entry *orm.PaperLibr
 		Updates(map[string]any{"document_id": document.ID, "result_kind": "fulltext", "updated_at": now}).Error; err != nil {
 		return err
 	}
-	return paperlibrary.MergeEntityExtras(ctx, tx, entry.DatasetID, "attachments", member.ID, map[string]any{"size": size, "mimeType": "application/pdf", "source": "zotero"})
+	return paperlibrary.MergeEntityExtras(ctx, tx, entry.DatasetID, "attachments", member.ID, map[string]any{"size": size, "mimeType": "application/pdf", "source": "zotero", "processingError": nil})
 }
 
 func lockZoteroDataset(tx *gorm.DB, dataset string) error {

@@ -126,17 +126,40 @@ func recordZoteroImport(ctx context.Context, db *gorm.DB, dataset, user, source,
 	if err = db.Create(&batch).Error; err != nil {
 		return err
 	}
-	for _, id := range ids {
-		var entry orm.PaperLibraryEntry
-		if err = db.Where("dataset_id=? AND id=? AND removed_at IS NULL", dataset, id).Take(&entry).Error; err != nil {
+	// Resolve titles in bounded batches, rather than two queries and one insert per paper.
+	for offset := 0; offset < len(ids); offset += 200 {
+		chunk := ids[offset:min(offset+200, len(ids))]
+		var entries []orm.PaperLibraryEntry
+		if err = db.Where("dataset_id=? AND id IN ? AND removed_at IS NULL", dataset, chunk).Find(&entries).Error; err != nil {
 			return err
 		}
-		var work orm.AcademicWork
-		if err = db.Where("id=?", entry.AcademicWorkID).Take(&work).Error; err != nil {
+		byID := make(map[string]orm.PaperLibraryEntry, len(entries))
+		workIDs := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			byID[entry.ID] = entry
+			workIDs = append(workIDs, entry.AcademicWorkID)
+		}
+		var works []orm.AcademicWork
+		if err = db.Where("id IN ?", workIDs).Find(&works).Error; err != nil {
 			return err
 		}
-		item := orm.PaperImportItem{TitleSnapshot: work.CanonicalTitle, ID: uuid.NewString(), BatchID: batch.ID, AcademicWorkID: entry.AcademicWorkID, LibraryPaperID: id, Status: "succeeded", Stage: "done", ResultKind: "metadata_only", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now}
-		if err = db.Create(&item).Error; err != nil {
+		byWork := make(map[string]orm.AcademicWork, len(works))
+		for _, work := range works {
+			byWork[work.ID] = work
+		}
+		items := make([]orm.PaperImportItem, 0, len(chunk))
+		for _, id := range chunk {
+			entry, exists := byID[id]
+			if !exists {
+				return gorm.ErrRecordNotFound
+			}
+			work, exists := byWork[entry.AcademicWorkID]
+			if !exists {
+				return gorm.ErrRecordNotFound
+			}
+			items = append(items, orm.PaperImportItem{TitleSnapshot: work.CanonicalTitle, ID: uuid.NewString(), BatchID: batch.ID, AcademicWorkID: entry.AcademicWorkID, LibraryPaperID: id, Status: "succeeded", Stage: "done", ResultKind: "metadata_only", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
+		}
+		if err = db.CreateInBatches(items, 200).Error; err != nil {
 			return err
 		}
 	}

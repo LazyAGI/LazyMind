@@ -109,17 +109,39 @@ it('uses the authoritative paper identity returned after a concurrent metadata m
   expect(uploaded).toEqual(['existing']);
 });
 
-it('streams database PDFs without a manual folder and saves them on their confirmed paper', async () => {
+it('transfers database PDFs on the server without downloading or uploading browser blobs', async () => {
   vi.mocked(axiosInstance.post).mockReset();
-  vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: new Blob(['%PDF-1.7 database file'], { type: 'application/pdf' }) });
+  vi.mocked(axiosInstance.post).mockImplementation(async (_url, body: any) => ({ data: { attachment_id: body.attachment_id, document_id: 'saved-pdf' } }));
   let current = emptyLibrary();
-  const savedFiles: Array<{ name: string; paperId: string }> = [];
+  const storeAttachment = vi.fn();
   const result = await executeZoteroImport({ datasetId: 'ds', preview, config: { source: 'database', library_type: 'users', library_id: '0' },
     options: { includeAttachments: true, localFiles: [] }, getLibrary: () => current,
-    saveLibrary: async data => { current = data; },
-    storeAttachment: async (file, candidate) => { savedFiles.push({ name: file.name, paperId: candidate.paperId }); },
+    saveLibrary: async data => { current = data; }, storeAttachment,
   });
   expect(result).toMatchObject({ imported: 1, attachments: 1, failures: [] });
-  expect(savedFiles).toEqual([{ name: 'article.pdf', paperId: current.papers[0].id }]);
-  expect(axiosInstance.post).toHaveBeenCalledWith('/api/core/academic/zotero/attachment', { source: 'database', library_type: 'users', library_id: '0', item_key: 'FILE1234' }, expect.objectContaining({ responseType: 'blob' }));
+  expect(storeAttachment).not.toHaveBeenCalled();
+  expect(axiosInstance.post).toHaveBeenCalledOnce();
+  expect(axiosInstance.post).toHaveBeenCalledWith('/api/core/academic/zotero/attachment/transfer', expect.objectContaining({ source: 'database', item_key: 'FILE1234', paper_id: current.papers[0].id }), expect.not.objectContaining({ responseType: 'blob' }));
+});
+
+it('bounds concurrent transfers to three, drains failures and reports actual completions', async () => {
+  vi.mocked(axiosInstance.post).mockReset();
+  let active = 0, peak = 0;
+  vi.mocked(axiosInstance.post).mockImplementation(async (_url, body: any) => {
+    active++; peak = Math.max(peak, active);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    active--;
+    if (body.item_key === 'FILE0002') throw new Error('source missing');
+    return { data: { attachment_id: body.attachment_id, document_id: body.item_key } };
+  });
+  const many = { ...preview, items: [preview.items[0], ...Array.from({ length: 8 }, (_, i) => ({ key: `FILE000${i}`, data: { key: `FILE000${i}`, itemType: 'attachment', parentItem: 'PAPER123', contentType: 'application/pdf', filename: `article-${i}.pdf` } }))] };
+  let current = emptyLibrary();
+  const progress = vi.fn();
+  const result = await executeZoteroImport({ datasetId: 'ds', preview: many, config: { source: 'database', library_type: 'users', library_id: '0' },
+    options: { includeAttachments: true, localFiles: [], onProgress: progress }, getLibrary: () => current,
+    saveLibrary: async data => { current = data; }, storeAttachment: vi.fn(),
+  });
+  expect(peak).toBe(3); expect(active).toBe(0);
+  expect(result.attachments).toBe(7); expect(result.failures).toEqual(['article-2.pdf：source missing']);
+  expect(progress).toHaveBeenLastCalledWith('正在保存附件 8/8');
 });

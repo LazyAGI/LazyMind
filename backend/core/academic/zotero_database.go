@@ -1,6 +1,7 @@
 package academic
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"crypto/sha256"
@@ -805,24 +806,24 @@ func zoteroLocalAttachmentUnavailable() *zoteroError {
 	return zoteroFailure(404, "ZOTERO_DATABASE_ATTACHMENT_UNAVAILABLE", "此 PDF 在本机不可读取，请在 Zotero 中下载附件；关联文件需位于受信任的数据目录或已配置的关联文件目录")
 }
 
-func (c *zoteroClient) attachmentDatabase(ctx context.Context, key string) (zoteroFile, error) {
+func (c *zoteroClient) copyDatabaseAttachment(ctx context.Context, key string, destination io.Writer) (string, error) {
 	if !zoteroItemKey.MatchString(key) {
-		return zoteroFile{}, zoteroFailure(400, "INVALID_ZOTERO_ITEM_KEY", "Zotero 附件编号无效")
+		return "", zoteroFailure(400, "INVALID_ZOTERO_ITEM_KEY", "Zotero 附件编号无效")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	tx, closeDB, err := openZoteroReadTransaction(ctx, c.database)
 	if err != nil {
-		return zoteroFile{}, err
+		return "", err
 	}
 	defer closeDB()
 	s, err := readZoteroDatabaseSchema(ctx, tx)
 	if err != nil {
-		return zoteroFile{}, err
+		return "", err
 	}
 	lib, _, _, err := c.databaseLibrary(ctx, tx, s)
 	if err != nil {
-		return zoteroFile{}, zoteroDatabaseReadError(err)
+		return "", zoteroDatabaseReadError(err)
 	}
 	hash := "''"
 	if s.has("itemAttachments", "storageHash") {
@@ -832,52 +833,75 @@ func (c *zoteroClient) attachmentDatabase(ctx context.Context, key string) (zote
 	var itemID, parent int64
 	err = tx.QueryRowContext(ctx, "SELECT i.itemID,COALESCE(a.parentItemID,0),COALESCE(a.linkMode,3),COALESCE(a.contentType,''),COALESCE(a.path,''),"+hash+" FROM items i JOIN itemAttachments a ON a.itemID=i.itemID WHERE i.libraryID=? AND i.key=? AND NOT EXISTS(SELECT 1 FROM deletedItems d WHERE d.itemID=i.itemID)", lib.internalID, key).Scan(&itemID, &parent, &a.Mode, &a.ContentType, &a.Path, &a.Hash)
 	if errors.Is(err, sql.ErrNoRows) {
-		return zoteroFile{}, zoteroLocalAttachmentUnavailable()
+		return "", zoteroLocalAttachmentUnavailable()
 	}
 	if err != nil {
-		return zoteroFile{}, zoteroDatabaseReadError(err)
+		return "", zoteroDatabaseReadError(err)
 	}
 	if parent != 0 {
 		var active int
 		err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM items i WHERE i.itemID=? AND i.libraryID=? AND NOT EXISTS(SELECT 1 FROM deletedItems d WHERE d.itemID=i.itemID)", parent, lib.internalID).Scan(&active)
 		if err != nil {
-			return zoteroFile{}, zoteroDatabaseReadError(err)
+			return "", zoteroDatabaseReadError(err)
 		}
 		if active != 1 {
-			return zoteroFile{}, zoteroLocalAttachmentUnavailable()
+			return "", zoteroLocalAttachmentUnavailable()
 		}
 	}
 	root, relative, err := c.databaseAttachmentPath(a)
 	if err != nil {
-		return zoteroFile{}, err
+		return "", err
 	}
 	f, err := openZoteroRootedFile(root, relative)
 	if err != nil {
-		return zoteroFile{}, zoteroLocalAttachmentUnavailable()
+		return "", zoteroLocalAttachmentUnavailable()
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil || !info.Mode().IsRegular() {
-		return zoteroFile{}, zoteroLocalAttachmentUnavailable()
+		return "", zoteroLocalAttachmentUnavailable()
 	}
 	if info.Size() > zoteroMaxPDFBytes {
-		return zoteroFile{}, zoteroFailure(413, "ZOTERO_RESPONSE_TOO_LARGE", "PDF 附件超过 128 MiB 导入上限")
+		return "", zoteroFailure(413, "ZOTERO_RESPONSE_TOO_LARGE", "PDF 附件超过 128 MiB 导入上限")
 	}
-	data, err := io.ReadAll(io.LimitReader(f, zoteroMaxPDFBytes+1))
+	header := make([]byte, 5)
+	if _, err := io.ReadFull(f, header); err != nil || string(header) != "%PDF-" {
+		return "", zoteroFailure(422, "ZOTERO_INVALID_PDF", "Zotero 本地附件不是有效 PDF")
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	checksum := md5.New()
+	written, err := io.Copy(io.MultiWriter(destination, checksum), io.LimitReader(&zoteroContextReader{ctx: ctx, reader: f}, zoteroMaxPDFBytes+1))
 	if err != nil {
-		return zoteroFile{}, zoteroLocalAttachmentUnavailable()
+		return "", err
 	}
-	if len(data) > zoteroMaxPDFBytes {
-		return zoteroFile{}, zoteroFailure(413, "ZOTERO_RESPONSE_TOO_LARGE", "PDF 附件超过 128 MiB 导入上限")
+	if written > zoteroMaxPDFBytes {
+		return "", zoteroFailure(413, "ZOTERO_RESPONSE_TOO_LARGE", "PDF 附件超过 128 MiB 导入上限")
 	}
-	if len(data) < 5 || string(data[:5]) != "%PDF-" {
-		return zoteroFile{}, zoteroFailure(422, "ZOTERO_INVALID_PDF", "Zotero 本地附件不是有效 PDF")
+	if zoteroMD5.MatchString(a.Hash) && !strings.EqualFold(a.Hash, hex.EncodeToString(checksum.Sum(nil))) {
+		return "", zoteroFailure(409, "ZOTERO_ATTACHMENT_CHANGED", "附件与 Zotero 记录的校验值不一致，请完成同步后重试")
 	}
-	if zoteroMD5.MatchString(a.Hash) {
-		sum := md5.Sum(data)
-		if !strings.EqualFold(a.Hash, hex.EncodeToString(sum[:])) {
-			return zoteroFile{}, zoteroFailure(409, "ZOTERO_ATTACHMENT_CHANGED", "附件与 Zotero 记录的校验值不一致，请完成同步后重试")
-		}
+	return zoteroDatabaseFilename(a.Path), nil
+}
+
+type zoteroContextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r *zoteroContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
 	}
-	return zoteroFile{Name: zoteroDatabaseFilename(a.Path), Data: data}, nil
+	return r.reader.Read(p)
+}
+
+func (c *zoteroClient) attachmentDatabase(ctx context.Context, key string) (zoteroFile, error) {
+	var data bytes.Buffer
+	name, err := c.copyDatabaseAttachment(ctx, key, &data)
+	if err != nil {
+		return zoteroFile{}, err
+	}
+	return zoteroFile{Name: name, Data: data.Bytes()}, nil
 }

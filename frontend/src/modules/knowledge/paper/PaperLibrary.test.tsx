@@ -753,3 +753,19 @@ describe('DOI import workflow', () => {
         expect(importPaperLink).not.toHaveBeenCalled();
     });
 });
+
+it('bounds mounted paper rows and preserves selections when paging', async () => {
+    const data = readLibrary(datasetId);
+    data.attachments = [];
+    data.papers = Array.from({ length: 52 }, (_, i) => makePaper(`paged-${i}`, `Paged ${String(i).padStart(2, '0')}`, null, false));
+    writeLibrary(datasetId, data);
+    await renderLibrary();
+    const table = screen.getByRole('table', { name: '论文列表' });
+    expect(within(table).getAllByRole('row')).toHaveLength(51);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择 Paged 00' }));
+    fireEvent.click(document.querySelector('.paper-library-pagination .ant-pagination-next')!);
+    expect(within(table).getAllByRole('row')).toHaveLength(3);
+    expect(screen.getByRole('heading', { name: 'Paged 51' })).toBeInTheDocument();
+    fireEvent.click(document.querySelector('.paper-library-pagination .ant-pagination-prev')!);
+    expect(screen.getByRole('checkbox', { name: '选择 Paged 00' })).toBeChecked();
+});

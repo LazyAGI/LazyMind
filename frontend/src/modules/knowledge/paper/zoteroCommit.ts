@@ -2,7 +2,7 @@ import { axiosInstance, BASE_URL } from '@/components/request';
 import type { PaperLibraryData } from './model';
 import { decodePersistedLibrary, type PersistedPaperLibrary } from './store';
 import {
-  buildZoteroImport, downloadZoteroAttachment, matchLocalZoteroFile, zoteroImportError,
+  buildZoteroImport, matchLocalZoteroFile, zoteroImportError,
   type ZoteroAttachmentCandidate, type ZoteroImportConfig, type ZoteroImportOptions,
   type ZoteroImportResult, type ZoteroPreview,
 } from './zoteroImport';
@@ -26,21 +26,47 @@ export async function executeZoteroImport(input: ConfirmedImport): Promise<Zoter
   const failures: string[] = [];
   let attachments = 0;
   if (options.includeAttachments) {
-    for (const [index, candidate] of plan.attachments.entries()) {
-      options.onProgress?.(`正在保存附件 ${index + 1}/${plan.attachments.length}`);
-      // The caller also checks that the same library is still mounted before each write.
-      const authoritative = getLibrary().attachments.find(attachment => attachment.id === candidate.id);
-      const target = authoritative ? { ...candidate, paperId: authoritative.paperId } : candidate;
-      try {
-        const localFile = matchLocalZoteroFile(candidate, options.localFiles);
-        if (!localFile && config.source === 'local') throw new Error('未找到对应的本地 PDF，请选择 Zotero storage 或导出文件所在目录后重试');
-        const file = localFile || await downloadZoteroAttachment(datasetId, config, candidate);
-        await storeAttachment(file, target);
-        attachments++;
-      } catch (error) {
-        failures.push(`${candidate.name}：${zoteroImportError(error, config)}`);
-      }
+    const filesByName = new Map<string, File[]>();
+    for (const file of options.localFiles) {
+      const group = filesByName.get(file.name);
+      if (group) group.push(file); else filesByName.set(file.name, [file]);
     }
+    let indexedLibrary: PaperLibraryData | undefined;
+    let attachmentsById = new Map<string, PaperLibraryData['attachments'][number]>();
+    const concurrency = config.source !== 'local' && !options.localFiles.length ? 3 : 1;
+    let next = 0, completed = 0;
+    const outcomes: string[] = [];
+    const worker = async () => {
+      for (;;) {
+        const index = next++;
+        if (index >= plan.attachments.length) return;
+        const candidate = plan.attachments[index];
+        const currentLibrary = getLibrary();
+        if (currentLibrary !== indexedLibrary) {
+          attachmentsById = new Map(currentLibrary.attachments.map(attachment => [attachment.id, attachment]));
+          indexedLibrary = currentLibrary;
+        }
+        const authoritative = attachmentsById.get(candidate.id);
+        const target = authoritative ? { ...candidate, paperId: authoritative.paperId } : candidate;
+        try {
+          const localFile = matchLocalZoteroFile(candidate, filesByName.get(candidate.name) || []);
+          if (localFile) await storeAttachment(localFile, target);
+          else if (config.source === 'local') throw new Error('未找到对应的本地 PDF，请选择 Zotero storage 或导出文件所在目录后重试');
+          else await transferZoteroAttachment(datasetId, config, target);
+          attachments++;
+        } catch (error) {
+          outcomes[index] = `${candidate.name}：${zoteroImportError(error, config)}`;
+        } finally {
+          completed++;
+          options.onProgress?.(`正在保存附件 ${completed}/${plan.attachments.length}`);
+        }
+      }
+    };
+    // Drain in-flight work even if another worker notices an unmounted library.
+    const settled = await Promise.allSettled(Array.from({ length: Math.min(concurrency, plan.attachments.length) }, worker));
+    const rejected = settled.find(result => result.status === 'rejected');
+    if (rejected?.status === 'rejected') throw rejected.reason;
+    failures.push(...outcomes.filter(Boolean));
   }
   return { imported: plan.counts.papers, attachments, failures };
 }
@@ -73,4 +99,17 @@ export async function importZoteroSnapshot(datasetId: string, data: PaperLibrary
     params: { target_dataset_id: datasetId }, timeout: 120_000, ...{ silentError: true },
   });
   return decodePersistedLibrary(response.data);
+}
+
+/** PDF bytes never travel through the browser for server-accessible sources. */
+export async function transferZoteroAttachment(datasetId: string, config: ZoteroImportConfig, candidate: ZoteroAttachmentCandidate): Promise<string> {
+  const response = await axiosInstance.post(`${BASE_URL}/api/core/academic/zotero/attachment/transfer`, {
+    ...config, item_key: candidate.key, paper_id: candidate.paperId, attachment_id: candidate.id,
+    ...(candidate.md5 ? { expected_md5: candidate.md5 } : {}),
+  }, { params: { target_dataset_id: datasetId }, timeout: 125_000, ...{ silentError: true } });
+  const result = response.data;
+  if (result?.attachment_id !== candidate.id || typeof result?.document_id !== 'string' || !result.document_id.trim()) {
+    throw new Error('附件搬运未返回有效保存结果，请刷新论文库后重试');
+  }
+  return result.document_id;
 }

@@ -1,6 +1,8 @@
 package academic
 
 import (
+	"fmt"
+	"gorm.io/gorm"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -102,5 +104,39 @@ func TestBackupReceiptExcludesUnrelatedExistingPapers(t *testing.T) {
 	db.Where("batch_id=?", batch.ID).Take(&item)
 	if item.LibraryPaperID != "restored" {
 		t.Fatal(item.LibraryPaperID)
+	}
+}
+
+func TestBackupReceiptBatchesLargeImports(t *testing.T) {
+	db, _ := zoteroStorageFixture(t)
+	incoming := paperlibrary.EmptyData()
+	for i := 0; i < 401; i++ {
+		incoming.Papers = append(incoming.Papers, *libraryDraft(fmt.Sprintf("batch-%d", i), fmt.Sprintf("Title %d", i), ""))
+	}
+	raw := marshal(incoming)
+	if err := paperlibrary.ImportSnapshot(t.Context(), db, "papers", "owner", raw); err != nil {
+		t.Fatal(err)
+	}
+	queries := 0
+	if err := db.Callback().Query().After("gorm:query").Register("test:receipt_queries", func(*gorm.DB) { queries++ }); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordZoteroImport(t.Context(), db, "papers", "owner", "library-backup", "batch-receipt", nil, raw); err != nil {
+		t.Fatal(err)
+	}
+	if queries > 30 {
+		t.Fatalf("receipt used %d queries for 401 papers", queries)
+	}
+	var items []orm.PaperImportItem
+	if err := db.Order("title_snapshot").Find(&items).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 401 {
+		t.Fatalf("got %d receipt items", len(items))
+	}
+	for _, item := range items {
+		if item.TitleSnapshot == "" || item.LibraryPaperID == "" {
+			t.Fatal("incomplete receipt", item)
+		}
 	}
 }

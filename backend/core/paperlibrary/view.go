@@ -8,6 +8,7 @@ import (
 	"lazymind/core/common/orm"
 	"os"
 	"strings"
+	"sync"
 )
 
 type Counts struct {
@@ -167,6 +168,10 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 			stateByID[s.DocumentID] = s
 		}
 	}
+	availability, err := originalAvailability(ctx, docByID)
+	if err != nil {
+		return view, err
+	}
 	origins := map[string]orm.PaperImportBatch{}
 	if len(itemIDs) > 0 {
 		var rows []struct {
@@ -220,7 +225,7 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		}
 		link := linkByID[a.DocumentID]
 		document, available := docByID[a.DocumentID]
-		available = available && OriginalAvailable(document)
+		available = available && availability[document.ID]
 		source := defaultText(attachmentSources[a.PaperID][a.ID], defaultText(link.SourceProvider, p.Source))
 		attachment := Attachment{ID: a.ID, PaperID: a.PaperID, Name: a.Name, Kind: a.Kind, ContentRef: a.DocumentID, Source: source, ImportMethod: p.ImportMethod, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, SourceURL: link.SourceLocator, ContentHash: link.ContentSHA256, IsPrimary: a.IsPrimary, Available: a.DocumentID == "" || available, AddedAt: a.CreatedAt}
 		if attachment.SourceURL == "" {
@@ -284,4 +289,40 @@ func OriginalAvailable(document orm.Document) bool {
 	}
 	info, err := os.Lstat(original.StoredPath)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// Bound filesystem probes while keeping availability request-scoped: deleted or
+// replaced originals must never remain readable through a stale process cache.
+func originalAvailability(ctx context.Context, documents map[string]orm.Document) (map[string]bool, error) {
+	result := make(map[string]bool, len(documents))
+	jobs := make(chan orm.Document)
+	var workers sync.WaitGroup
+	var mu sync.Mutex
+	for i := 0; i < min(4, len(documents)); i++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for document := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
+				available := OriginalAvailable(document)
+				mu.Lock()
+				result[document.ID] = available
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, document := range documents {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case jobs <- document:
+		case <-ctx.Done():
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	return result, ctx.Err()
 }

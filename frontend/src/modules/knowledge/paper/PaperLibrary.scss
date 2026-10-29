@@ -508,3 +508,5 @@
 .paper-library-import-paper.is-resolved .paper-library-import-error { color: var(--faint); }
 .paper-library-import-error summary { cursor: pointer; }
 .paper-library-import-error p { margin: 6px 0 0; white-space: pre-wrap; }
+
+.paper-library-pagination { flex-shrink: 0; padding: 10px 16px; border-top: 1px solid var(--line); justify-content: flex-end; }

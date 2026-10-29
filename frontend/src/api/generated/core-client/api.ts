@@ -975,6 +975,43 @@ export interface ApiCoreAcademicWorkflowLaunchesPost200Response {
     'expansion_id'?: string;
     'handoff_id'?: string;
 }
+export interface ApiCoreAcademicZoteroAttachmentTransferPost200Response {
+    'attachment_id': string;
+    'document_id': string;
+}
+export interface ApiCoreAcademicZoteroAttachmentTransferPostRequest {
+    'api_key'?: string;
+    'attachment_id': string;
+    'expected_md5'?: string;
+    'item_key': string;
+    'library_id'?: string;
+    'library_type'?: ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum;
+    'local_url'?: string;
+    'paper_id': string;
+    'source': ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum;
+    'webdav'?: ApiCoreAcademicZoteroAttachmentTransferPostRequestWebdav;
+}
+
+export const ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum = {
+    Users: 'users',
+    Groups: 'groups'
+} as const;
+
+export type ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum = typeof ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum[keyof typeof ApiCoreAcademicZoteroAttachmentTransferPostRequestLibraryTypeEnum];
+export const ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum = {
+    Database: 'database',
+    Remote: 'remote',
+    Webdav: 'webdav',
+    Local: 'local'
+} as const;
+
+export type ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum = typeof ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum[keyof typeof ApiCoreAcademicZoteroAttachmentTransferPostRequestSourceEnum];
+
+export interface ApiCoreAcademicZoteroAttachmentTransferPostRequestWebdav {
+    'password'?: string;
+    'url'?: string;
+    'username'?: string;
+}
 export interface ApiCoreConversationsConversationIdEventsGet200Response {
     'payload'?: object;
     'replayed'?: boolean;
@@ -10037,6 +10074,48 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
                 options: localVarRequestOptions,
             };
         },
+        /**
+         *
+         * @summary Transfer a confirmed Zotero PDF server-side with bounded concurrency
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicZoteroAttachmentTransferPostRequest} apiCoreAcademicZoteroAttachmentTransferPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroAttachmentTransferPost: async (targetDatasetId: string, apiCoreAcademicZoteroAttachmentTransferPostRequest: ApiCoreAcademicZoteroAttachmentTransferPostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'targetDatasetId' is not null or undefined
+            assertParamExists('apiCoreAcademicZoteroAttachmentTransferPost', 'targetDatasetId', targetDatasetId)
+            // verify required parameter 'apiCoreAcademicZoteroAttachmentTransferPostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicZoteroAttachmentTransferPost', 'apiCoreAcademicZoteroAttachmentTransferPostRequest', apiCoreAcademicZoteroAttachmentTransferPostRequest)
+            const localVarPath = `/api/core/academic/zotero/attachment/transfer`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (targetDatasetId !== undefined) {
+                localVarQueryParameter['target_dataset_id'] = targetDatasetId;
+            }
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicZoteroAttachmentTransferPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -10415,6 +10494,20 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicWorkflowLaunchesPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         *
+         * @summary Transfer a confirmed Zotero PDF server-side with bounded concurrency
+         * @param {string} targetDatasetId
+         * @param {ApiCoreAcademicZoteroAttachmentTransferPostRequest} apiCoreAcademicZoteroAttachmentTransferPostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicZoteroAttachmentTransferPost(targetDatasetId: string, apiCoreAcademicZoteroAttachmentTransferPostRequest: ApiCoreAcademicZoteroAttachmentTransferPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicZoteroAttachmentTransferPost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicZoteroAttachmentTransferPost(targetDatasetId, apiCoreAcademicZoteroAttachmentTransferPostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicZoteroAttachmentTransferPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -10684,6 +10777,16 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         apiCoreAcademicWorkflowLaunchesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicWorkflowLaunchesPost200Response> {
             return localVarFp.apiCoreAcademicWorkflowLaunchesPost(requestParameters.academicTaskLaunch, options).then((request) => request(axios, basePath));
         },
+        /**
+         *
+         * @summary Transfer a confirmed Zotero PDF server-side with bounded concurrency
+         * @param {AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicZoteroAttachmentTransferPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicZoteroAttachmentTransferPost200Response> {
+            return localVarFp.apiCoreAcademicZoteroAttachmentTransferPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicZoteroAttachmentTransferPostRequest, options).then((request) => request(axios, basePath));
+        },
     };
 };
 
@@ -10929,6 +11032,15 @@ export interface AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest {
  */
 export interface AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest {
     readonly academicTaskLaunch: AcademicTaskLaunch
+}
+
+/**
+ * Request parameters for apiCoreAcademicZoteroAttachmentTransferPost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest {
+    readonly targetDatasetId: string
+
+    readonly apiCoreAcademicZoteroAttachmentTransferPostRequest: ApiCoreAcademicZoteroAttachmentTransferPostRequest
 }
 
 /**
@@ -11219,6 +11331,17 @@ export class AcademicWorkflowsApi extends BaseAPI {
      */
     public apiCoreAcademicWorkflowLaunchesPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicWorkflowLaunchesPost(requestParameters.academicTaskLaunch, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Transfer a confirmed Zotero PDF server-side with bounded concurrency
+     * @param {AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicZoteroAttachmentTransferPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicZoteroAttachmentTransferPostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicZoteroAttachmentTransferPost(requestParameters.targetDatasetId, requestParameters.apiCoreAcademicZoteroAttachmentTransferPostRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
 
