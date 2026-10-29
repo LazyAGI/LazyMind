@@ -402,7 +402,7 @@ describe('shared workflow compact layout', () => {
     fixture.session.slots = [];
     fixture.ui.tabs![1].slots[0].widget = { widgetType: 'text-markdown' };
     const view = render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('tab', { name: '成稿' });
+    await screen.findByRole('tab', { name: '成稿', selected: true });
     const nativeContent = view.container.querySelector('.workflow-panel__body')!.innerHTML;
     view.rerender(<WorkflowPanel conversationId='layout-test' embedded
       externalPresentation={{ activities: {}, compactEmptyStates: false }} />);
@@ -416,7 +416,7 @@ describe('shared workflow compact layout', () => {
     fixture.session.slots![0].sort_order = 1;
     fixture.ui.tabs![1].slots.push({ id: 'template_content_brief', label: '模板内容要求', type: 'text' });
     const view = render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('tab', { name: '成稿' });
+    await screen.findByRole('tab', { name: '成稿', selected: true });
     expect(screen.getByText('正文 document')).toBeVisible();
     expect(screen.queryByText('模板内容要求')).not.toBeInTheDocument();
     expect(view.container.querySelector('.workflow-panel__slot-placeholder')).toBeNull();
@@ -1164,7 +1164,7 @@ describe('external presentation opt-in', () => {
     fixture.ui.tabs![1].composite_behavior = { hide_empty_columns: false };
     fixture.ui.tabs![1].slots[0].widget = { widgetType: 'text-markdown', collapseWhenEmpty: true };
     const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {}, compactEmptyStates: true }} />);
-    await screen.findByRole('tab', { name: /成稿/ });
+    await screen.findByRole('tab', { name: /成稿/, selected: true });
     const button = () => view.container.querySelector<HTMLButtonElement>('.workflow-panel__slot-collapse')!;
     expect(button()).toHaveAttribute('aria-expanded', 'false');
     fixture.session.slots = [{ slot_id: 'document', slot: 'document', step_id: 'write_document', selected: true, revision: 1, artifact_value: { text: 'arrived' } }] as WorkflowSession['slots'];
@@ -1185,7 +1185,7 @@ it('keeps external streaming previews from replacing an editor with pending chan
   fixture.session.status = 'active';
   fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };
   const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {} }} />);
-  await screen.findByRole('tab', { name: /成稿/ });
+  await screen.findByRole('tab', { name: /成稿/, selected: true });
   fireEvent.doubleClick(screen.getByText('正文 document'));
   view.rerender(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {
     task: { artifacts: [{ slot: 'document', content_type: 'text', seq: 2, value: { text: 'provisional' } }] },

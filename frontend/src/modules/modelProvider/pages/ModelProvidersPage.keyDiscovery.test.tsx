@@ -1,7 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setupAntdStaticCleanup } from "@/test/antdStatic";
 import ModelProviderPage, { type AddedProvider, type ProviderOption } from "./ModelProvidersPage";
+
+setupAntdStaticCleanup();
 
 const mocks = vi.hoisted(() => ({
   providers: vi.fn(), withGroups: vi.fn(), groups: vi.fn(), models: vi.fn(),

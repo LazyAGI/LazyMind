@@ -1,12 +1,15 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { ConfigProvider, message } from "antd";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { ConfigProvider } from "antd";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setupAntdStaticCleanup } from "@/test/antdStatic";
 import ModelProviderPage, {
   type AddedProvider,
   type ProviderConnectionGroup,
   type ProviderModel,
   type ProviderOption,
 } from "./ModelProvidersPage";
+
+setupAntdStaticCleanup();
 
 const mocks = vi.hoisted(() => ({
   language: "zh-CN",
@@ -175,11 +178,6 @@ beforeEach(() => {
     vision: true, max_input_tokens: editedValues.maxInputTokens,
   });
   mocks.deleteModel.mockResolvedValue({ data: {} });
-});
-
-afterEach(() => {
-  cleanup();
-  act(() => { message.destroy(); });
 });
 
 describe("model provider asynchronous state", () => {

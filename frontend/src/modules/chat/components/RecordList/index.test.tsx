@@ -1902,37 +1902,37 @@ describe("RecordList conversation pinning", () => {
     expect(await screen.findByText("命中的子会话")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "主会话的子会话" })).toBeInTheDocument();
   });
-});
 
-it('scopes group pagination and batch selection to the current source and clears old selections', async () => {
-  const { selectChatConversationSources } = await import('../../constants/chat');
-  const group = { id: 'mixed-source', name: 'Mixed sources' } as any;
-  const batchGroups = [group];
-  vi.mocked(getConversationGroup).mockImplementation(async (_id, token, _keyword, assistants) => ({
-    group,
-    conversations: [{ conversation_id: `${assistants}-${token || 'first'}`, display_name: `${assistants}-${token || 'first'}`, membership_revision: 1 }],
-    nextPageToken: token ? '' : 'second',
-  }));
-  mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
-  mocks.selectionSnapshot.mockImplementation(async (_query, { params }) => ({ data: { selection_complete: true,
-    conversations: ['first', 'second'].map(page => ({ conversation_id: `${params.assistants}-${page}` })),
-  } }));
-  selectChatConversationSources(['codex']);
-  render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()}
-    groupSection={(batchSelection, _filters, assistants) => <SidebarGroups key={assistants} assistants={assistants} groups={batchGroups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} />} /></MemoryRouter></ConfigProvider>);
-  await screen.findByText('codex-first');
-  document.querySelector<HTMLElement>('.record-container')!.scrollTo = vi.fn();
-  fireEvent.click(screen.getByText('批量'));
-  fireEvent.click(await screen.findByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup' }));
-  await waitFor(() => expect(document.querySelector('.record-selected-count')).toHaveTextContent('2'));
-  fireEvent.click(screen.getByRole('button', { name: 'conversationOrganizer.showMore' }));
-  await waitFor(() => expect(screen.getByRole('checkbox', { name: 'codex-second' })).toBeChecked());
-  expect(getConversationGroup).toHaveBeenCalledWith('mixed-source', 'second', '', 'codex');
-  act(() => selectChatConversationSources(['workbuddy']));
-  await screen.findByText('workbuddy-first');
-  fireEvent.click(screen.getByText('批量'));
-  await screen.findByRole('checkbox', { name: 'workbuddy-first' });
-  expect(screen.queryByText('codex-first')).not.toBeInTheDocument();
-  expect(screen.getByRole('checkbox', { name: 'workbuddy-first' })).not.toBeChecked();
-  expect(document.querySelector('.record-selected-count')).toBeNull();
+  it('scopes group pagination and batch selection to the current source and clears old selections', async () => {
+    const { selectChatConversationSources } = await import('../../constants/chat');
+    const group = { id: 'mixed-source', name: 'Mixed sources' } as any;
+    const batchGroups = [group];
+    vi.mocked(getConversationGroup).mockImplementation(async (_id, token, _keyword, assistants) => ({
+      group,
+      conversations: [{ conversation_id: `${assistants}-${token || 'first'}`, display_name: `${assistants}-${token || 'first'}`, membership_revision: 1 }],
+      nextPageToken: token ? '' : 'second',
+    }));
+    mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
+    mocks.selectionSnapshot.mockImplementation(async (_query, { params }) => ({ data: { selection_complete: true,
+      conversations: ['first', 'second'].map(page => ({ conversation_id: `${params.assistants}-${page}` })),
+    } }));
+    selectChatConversationSources(['codex']);
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><RecordList compact showBatchActions onSelected={vi.fn()}
+      groupSection={(batchSelection, _filters, assistants) => <SidebarGroups key={assistants} assistants={assistants} groups={batchGroups} batchSelection={batchSelection} onEdit={vi.fn()} onRemove={vi.fn()} />} /></MemoryRouter></ConfigProvider>);
+    await screen.findByText('codex-first');
+    document.querySelector<HTMLElement>('.record-container')!.scrollTo = vi.fn();
+    fireEvent.click(screen.getByText('批量'));
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'conversationOrganizer.selectAllInGroup' }));
+    await waitFor(() => expect(document.querySelector('.record-selected-count')).toHaveTextContent('2'));
+    fireEvent.click(screen.getByRole('button', { name: 'conversationOrganizer.showMore' }));
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'codex-second' })).toBeChecked());
+    expect(getConversationGroup).toHaveBeenCalledWith('mixed-source', 'second', '', 'codex');
+    act(() => selectChatConversationSources(['workbuddy']));
+    await screen.findByText('workbuddy-first');
+    fireEvent.click(screen.getByText('批量'));
+    await screen.findByRole('checkbox', { name: 'workbuddy-first' });
+    expect(screen.queryByText('codex-first')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'workbuddy-first' })).not.toBeChecked();
+    expect(document.querySelector('.record-selected-count')).toBeNull();
+  });
 });
