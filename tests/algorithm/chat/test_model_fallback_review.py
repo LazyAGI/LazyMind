@@ -206,6 +206,31 @@ def test_ordinary_summary_does_not_consume_primary_soft_budget_or_candidates(pro
     assert model.state.failed_candidates == set()
 
 
+def test_default_budget_allows_backup_after_initial_read_timeout(provider, monkeypatch):
+    from types import SimpleNamespace
+    import requests
+    from lazymind.chat.engine.agent_runtime import model_fallback
+
+    now = [0.0]
+    monkeypatch.setattr(model_fallback, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    model = wrapper(candidate(provider, 'model-a'), [candidate(provider, 'model-b')])
+    succeed(provider, 'model-b')
+    post = requests.Session.post
+    attempted = []
+
+    def timeout_initial(session, url, **kwargs):
+        attempted.append(kwargs['json']['model'])
+        if kwargs['json']['model'] == 'model-a':
+            now[0] += 60.0
+            raise requests.ReadTimeout('controlled initial read timeout')
+        return post(session, url, **kwargs)
+
+    monkeypatch.setattr(requests.Session, 'post', timeout_initial)
+    assert model('continue') == 'done:model-b'
+    assert attempted == ['model-a', 'model-b']
+    assert model.state.current.model_id == 'model-b'
+
+
 def test_balance_failure_switches_immediately_without_sdk_retry(provider):
     a = candidate(provider, 'model-a', source='deepseek')
     b = candidate(provider, 'model-b')
@@ -241,7 +266,7 @@ def test_initial_backup_and_auxiliary_calls_receive_the_same_timeout_policy(prov
     monkeypatch.setattr(requests.Session, 'post', record)
     assert model('continue') == 'done:model-b'
     assert model.auxiliary_call('', 'final summary') == 'done:model-b'
-    initial_timeout, backup_timeout = ((0.3, 0.7), (0.4, 0.8)) if overrides else ((3.0, 10.0), (3.0, 10.0))
+    initial_timeout, backup_timeout = ((0.3, 0.7), (0.4, 0.8)) if overrides else ((3.0, 60.0), (3.0, 60.0))
     assert observed == [('model-a', initial_timeout), ('model-b', backup_timeout), ('model-b', backup_timeout)]
 
 
@@ -285,7 +310,7 @@ def test_expired_budget_after_request_validation_does_not_start_http(provider, m
 
     def slow_estimate(request):
         result = estimate(request)
-        now[0] += 31
+        now[0] += 121
         return result
 
     monkeypatch.setattr(model_fallback, 'request_tokens', slow_estimate)

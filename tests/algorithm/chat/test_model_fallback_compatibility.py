@@ -56,9 +56,12 @@ def reasoning_response(request):
 
 
 @pytest.mark.parametrize('as_fallback', [False, True])
-@pytest.mark.parametrize('configured_limit', [None, 128, 16384])
-def test_reasoning_output_limit_is_legal_for_initial_and_fallback_models(provider, as_fallback, configured_limit):
-    target = candidate(provider, 'o3')
+@pytest.mark.parametrize('configured_limit', [None, 128, 65536])
+@pytest.mark.parametrize('window,reserved', [(131072, 32768), (32768, 16384)])
+def test_reasoning_output_limit_is_legal_for_initial_and_fallback_models(
+    provider, as_fallback, configured_limit, window, reserved,
+):
+    target = candidate(provider, 'o3', window=window)
     if configured_limit is not None:
         target.llm_config['llm']['static_params'] = {'max_completion_tokens': configured_limit}
     current = candidate(provider, 'model-a') if as_fallback else target
@@ -70,7 +73,7 @@ def test_reasoning_output_limit_is_legal_for_initial_and_fallback_models(provide
     assert [request['model'] for request in provider.requests] == expected
     request = provider.requests[-1]
     assert 'max_tokens' not in request
-    assert request['max_completion_tokens'] == min(configured_limit or 8192, 8192)
+    assert request['max_completion_tokens'] == min(configured_limit or reserved, reserved)
     assert target.llm_config['llm'].get('static_params', {}) == (
         {'max_completion_tokens': configured_limit} if configured_limit is not None else {}
     )
@@ -130,7 +133,7 @@ def test_dynamic_reasoning_model_uses_its_role_configuration(provider, summary):
         runtime['dynamic_model_configs'], runtime['openai_api_key'] = old_models, old_key
     assert len(provider.requests) == 1
     assert provider.requests[0]['model'] == 'o3'
-    assert provider.requests[0]['max_completion_tokens'] == 8192
+    assert provider.requests[0]['max_completion_tokens'] == 16384
     assert 'max_tokens' not in provider.requests[0]
 
 

@@ -71,6 +71,17 @@ def test_build_context_budget_caps_reserved_on_small_windows() -> None:
     assert budget.trigger_tokens == 2_800
 
 
+@pytest.mark.parametrize('window,reserved,effective', [
+    (131_072, 32_768, 98_304),
+    (32_768, 16_384, 16_384),
+    (8_192, 4_096, 4_096),
+])
+def test_default_output_reservation_preserves_input_budget(window, reserved, effective) -> None:
+    budget = build_context_budget(window)
+    assert budget.reserved_output_tokens == reserved
+    assert budget.effective_input_budget == effective
+
+
 def test_resolve_max_input_tokens_reads_llm_config() -> None:
     assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '32K'}}) == 32_768
 
