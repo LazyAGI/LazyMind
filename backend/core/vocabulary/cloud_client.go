@@ -219,14 +219,16 @@ func (c *cloudClient) ListWordbooks(ctx context.Context) ([]CloudWordbook, error
 		return books, e
 	}
 	books := []CloudWordbook{}
-	for offset := 0; offset < 10000; offset += 100 {
+	// MaiMemo rejects requests with a limit greater than 10.
+	const pageSize = 10
+	for offset := 0; offset < 10000; offset += pageSize {
 		var data struct {
 			Notepads []struct {
 				ID    string `json:"id"`
 				Title string `json:"title"`
 			} `json:"notepads"`
 		}
-		if e := c.request(ctx, "GET", "/notepads?limit=100&offset="+strconv.Itoa(offset), nil, &data); e != nil {
+		if e := c.request(ctx, "GET", "/notepads?limit="+strconv.Itoa(pageSize)+"&offset="+strconv.Itoa(offset), nil, &data); e != nil {
 			return nil, e
 		}
 		if data.Notepads == nil {
@@ -235,7 +237,7 @@ func (c *cloudClient) ListWordbooks(ctx context.Context) ([]CloudWordbook, error
 		for _, n := range data.Notepads {
 			books = append(books, CloudWordbook{n.ID, n.Title})
 		}
-		if len(data.Notepads) < 100 {
+		if len(data.Notepads) < pageSize {
 			return books, nil
 		}
 	}

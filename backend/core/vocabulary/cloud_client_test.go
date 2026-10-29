@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -274,5 +275,38 @@ func TestCloudConcurrentAccountAppendsPreserveBothWords(t *testing.T) {
 	defer mu.Unlock()
 	if !strings.Contains(content, "apple") || !strings.Contains(content, "banana") {
 		t.Fatalf("concurrent append lost: %q", content)
+	}
+}
+
+func TestCloudMaiMemoWordbookPageLimit(t *testing.T) {
+	for _, total := range []int{0, 10, 13} {
+		t.Run(strconv.Itoa(total), func(t *testing.T) {
+			calls := 0
+			c := cloudTestClient(t, "maimemo", func(r *http.Request) (*http.Response, error) {
+				if r.URL.Query().Get("limit") != "10" {
+					t.Fatal("MaiMemo rejects limits above 10")
+				}
+				offset, err := strconv.Atoi(r.URL.Query().Get("offset"))
+				if err != nil || offset != calls*10 {
+					t.Fatal("incorrect pagination offset", offset)
+				}
+				calls++
+				rows := []map[string]string{}
+				for i := offset; i < total && i < offset+10; i++ {
+					rows = append(rows, map[string]string{"id": strconv.Itoa(i), "title": "Book"})
+				}
+				b, _ := json.Marshal(map[string]any{"success": true, "data": map[string]any{"notepads": rows}})
+				return cloudResponse(200, string(b)), nil
+			})
+			books, err := c.ListWordbooks(context.Background())
+			if err != nil || len(books) != total || calls != total/10+1 {
+				t.Fatalf("books=%d calls=%d error=%v", len(books), calls, err)
+			}
+			for i, b := range books {
+				if b.ID != strconv.Itoa(i) {
+					t.Fatal("missing or duplicated wordbook", i)
+				}
+			}
+		})
 	}
 }
