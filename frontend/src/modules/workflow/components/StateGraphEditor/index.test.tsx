@@ -425,6 +425,9 @@ describe('StateGraphEditor workspace navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.validationErrors.E_REPAIR_MODE_CHANGED' }));
     await flushEditorWork();
     expect(canvas.focusNode).toHaveBeenCalledWith('write');
+    const panel = screen.getByRole('alert', { name: 'selfEvolutionRun.workflowRepairCandidateRejected' });
+    expect(within(panel).getByText('selfEvolutionRun.workflowRepairCandidateRejected')).toBeInTheDocument();
+    expect(within(panel).queryByText('selfEvolutionRun.validationPanelErrorCount')).not.toBeInTheDocument();
   });
 
   it('shows complete generation diagnostics in the log even without a skill analysis', async () => {

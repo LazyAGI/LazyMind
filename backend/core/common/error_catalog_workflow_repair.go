@@ -13,4 +13,6 @@ func init() {
 	registerAdditionalErrorPattern("请说明节点 %s 的用途和接入位置，或先配置节点并连接前后步骤", "Specify the step purpose and insertion point, or configure and connect it first", http.StatusBadRequest, 2004917)
 	registerAdditionalError("node integration repair failed", http.StatusUnprocessableEntity, 2004918)
 	registerAdditionalErrorPattern("decode interrupted workflow repair %s", "Failed to read the interrupted workflow repair", http.StatusInternalServerError, 2004919)
+	registerAdditionalError("decode previous repair changes", http.StatusInternalServerError, 2004920)
+	registerAdditionalErrorPattern("invalid workflow input correction for node %s", "Only unknown required input references may be explicitly replaced with existing materials", http.StatusBadRequest, 2004921)
 }

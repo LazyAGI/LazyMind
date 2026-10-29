@@ -868,6 +868,10 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 
 	prevStatus := draft.GenerateStatus
 	beforeDiagnostics := diagnoseWorkflowWithProfile(draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent, graphengine.ProfilePublish)
+	if preserveCurrent {
+		base := workflowRepairSnapshot{WorkflowYAML: draft.WorkflowYAMLContent, StateYAML: draft.StateYAMLContent, ScenarioMD: draft.ScenarioContent, Scripts: scriptsFromDraft(draft.ScriptsContent)}
+		beforeDiagnostics = diagnoseNodeIntegration(base, base)
+	}
 	payload := workflowDraftRepairPayload{
 		DraftID:                 draftID,
 		UserID:                  userID,

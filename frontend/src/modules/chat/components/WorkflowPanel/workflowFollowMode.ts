@@ -25,7 +25,8 @@ export function resolveWorkflowRealTabIndex(
   const latest = (predicate: (step: WorkflowSessionStep) => boolean) => [...(session.steps ?? [])]
     .filter(step => step.validity !== 'stale' && effective(step.step_id) && predicate(step))
     .sort((a, b) => (Date.parse(b.updated_at) || Date.parse(b.created_at) || 0)
-      - (Date.parse(a.updated_at) || Date.parse(a.created_at) || 0) || b.attempt - a.attempt)
+      - (Date.parse(a.updated_at) || Date.parse(a.created_at) || 0) || b.attempt - a.attempt
+      || Number(b.step_id === session.current_step_id) - Number(a.step_id === session.current_step_id))
     .map(step => find(step.step_id)).find(index => index !== -1) ?? -1;
 
   const failed = (projection?.current ?? []).filter(id => projection?.nodes?.[id]?.execution === 'failed')
@@ -36,6 +37,11 @@ export function resolveWorkflowRealTabIndex(
     if (index !== -1) return index;
   }
   const terminal = session.status === 'completed' || session.status === 'stopped' || projection?.completed;
+  const current = find(session.current_step_id);
+  // A resumed producer patch may arrive before the session leaves completed.
+  // Do not hide its process page behind the previous successful output.
+  if (terminal && current !== -1 && (session.steps ?? []).some(step => step.step_id === session.current_step_id
+    && step.validity !== 'stale' && ['pending', 'queued', 'claimed', 'running', 'waiting'].includes(step.status))) return current;
   if (terminal) {
     const index = latest(step => session.status === 'stopped' || step.status === 'succeeded');
     if (index !== -1) return index;
@@ -50,7 +56,6 @@ export function resolveWorkflowRealTabIndex(
     const approval = find(resolvePendingApprovalStep(session, session.status));
     if (approval !== -1) return approval;
   }
-  const current = find(session.current_step_id);
   if (current !== -1 && projection?.nodes?.[session.current_step_id]?.execution !== 'none') return current;
   const last = latest(() => true);
   if (last !== -1) return last;

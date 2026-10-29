@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type { ReactNode, Ref } from 'react';
+import type { WorkflowRepairEditContext } from '../../workflowDraftApi';
 import { Button, Tooltip } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
@@ -62,7 +63,7 @@ function codeFileForTab(tab: ContentTab): CodeFile {
 const AUTO_SAVE_DELAY_MS = 1500;
 
 export type RepairTarget = 'statemachine' | 'node_integration' | 'ui' | 'scenario' | 'scripts' | 'full';
-export interface RepairContext { node_ids: string[] }
+export type RepairContext = WorkflowRepairEditContext;
 
 export interface StateGraphEditorHandle {
   /** Flush code parsing and the latest autosave before a parent action. */
@@ -930,7 +931,13 @@ export default function StateGraphEditor({
               </div>
             </div>
             <ValidationPanel
-              errors={[...displayErrors, ...repairDiagnostics.filter((item) => !displayErrors.some((error) => error.code === item.code && error.nodeId === item.nodeId))]}
+              errors={displayErrors}
+              getTargetNodeId={(error) => validationTargetNode(error, model)}
+              onSelectNode={handleSelectNode}
+            />
+            <ValidationPanel
+              errors={repairDiagnostics}
+              title={t('selfEvolutionRun.workflowRepairCandidateRejected')}
               getTargetNodeId={(error) => validationTargetNode(error, model)}
               onSelectNode={handleSelectNode}
             />

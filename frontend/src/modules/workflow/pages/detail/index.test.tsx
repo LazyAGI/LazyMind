@@ -47,6 +47,43 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe('workflow draft lifecycle', () => {
+  it('shows global blockers and submits only explicitly selected unknown-input corrections', async () => {
+    mocks.preview.mockResolvedValue({ target: 'statemachine', mode: 'workflow_local', draft_version: 3, diagnostics: [], planned_files: [],
+      blocking_diagnostics: [{ code: 'E_UI_TAB_EMPTY', severity: 'error', path: 'workflow.yaml.ui', message: 'UI invalid' }],
+      input_corrections: [{ node_id: 'review', material_id: 'report_typo', choices: ['report'] }],
+    });
+    show({ source_type: 'skill' });
+    await screen.findByRole('region', { name: 'Editor' });
+    await act(async () => { mocks.props.onRepair?.('statemachine', [], { node_ids: ['review'] }); });
+    await waitFor(() => expect(screen.getByText('selfEvolutionRun.workflowRepairGlobalBlockers')).toBeVisible());
+    const select = screen.getByRole('combobox', { name: 'selfEvolutionRun.workflowRepairInputCorrection' });
+    fireEvent.mouseDown(select);
+    fireEvent.click(await screen.findByText('report', { selector: '.ant-select-item-option-content' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith(draft.id, expect.objectContaining({ edit_context: {
+      node_ids: ['review'], input_corrections: [{ node_id: 'review', from: 'report_typo', to: 'report' }],
+    } })));
+    mocks.repair.mockResolvedValue({ ...draft, generate_status: 'repairing' });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailRepairSubmit' }));
+    await waitFor(() => expect(mocks.repair).toHaveBeenCalledWith(draft.id, expect.objectContaining({ edit_context: {
+      node_ids: ['review'], input_corrections: [{ node_id: 'review', from: 'report_typo', to: 'report' }],
+    } })));
+  });
+
+  it('displays rejected candidate differences without changing the draft', async () => {
+    mocks.repairRun.mockResolvedValue({ repair_id: 'failed-run', status: 'failed', target: 'statemachine', diagnostics_after: [],
+      changes: { files: [], attempts: [{ diagnostics: [], changes: [{ path: 'scenario/state.yml', before: 'ORIGINAL YAML', after: 'REJECTED YAML' }] }] },
+    });
+    show({ last_repair_run_id: 'failed-run' });
+    const summary = await screen.findByText('selfEvolutionRun.workflowRepairCandidateDiff');
+    fireEvent.click(summary);
+    fireEvent.click(screen.getByText('scenario/state.yml', { selector: 'summary' }));
+    expect(screen.getByText('ORIGINAL YAML')).toBeVisible();
+    expect(screen.getByText('REJECTED YAML')).toBeVisible();
+    expect(mocks.props.initialStateYaml).toBe(draft.state_yaml_content);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
   it('shows the five repair scopes after Skill conversion and submits full scope without remapping', async () => {
     show({ source_type: 'skill', source_analysis_id: 'original-analysis' });
     await screen.findByRole('region', { name: 'Editor' });
@@ -327,7 +364,7 @@ describe('workflow draft lifecycle', () => {
     fireEvent.click(publish);
     await waitFor(() => expect(mocks.publish).toHaveBeenCalledWith(draft.id));
     expect(await screen.findByText('线上：v1')).toBeVisible();
-    expect(screen.getByRole('button', { name: '发布插件' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: '发布插件' })).toBeDisabled();
   });
 
   it.each(['analyzing', 'generating', 'brief_done', 'skeleton_done', 'state_done', 'repairing', 'needs_confirmation'])('prevents edits during %s', async (generate_status) => {
@@ -381,6 +418,39 @@ describe('workflow draft lifecycle', () => {
     show({ last_repair_run_id: 'repair-1', generate_warning: '[修复失败] Keep human review' });
     await waitFor(() => expect(mocks.props.repairDiagnostics).toEqual([expect.objectContaining({ code: 'E_REPAIR_MODE_CHANGED', nodeId: 'research' })]));
     expect(mocks.props.readonly).toBe(false);
+  });
+
+  it('retains previous repair failure after editing without treating old diagnostics as current validation', async () => {
+    mocks.repairRun.mockResolvedValue({ status: 'failed', target: 'statemachine', diagnostics_after: [{ code: 'E_REPAIR_MODEL_TIMEOUT', severity: 'error', message: 'Timed out' }] });
+    show({ last_repair_run_id: 'repair-1', generate_warning: '[修复失败] Timed out' });
+    await waitFor(() => expect(mocks.props.repairDiagnostics).toHaveLength(1));
+    mocks.save.mockResolvedValue({ ...draft, version: 4, scenario_content: 'Manual correction', last_repair_run_id: 'repair-1', generate_warning: '' });
+    await act(async () => { await mocks.props.onSave?.({ stateYaml: draft.state_yaml_content, workflowYaml: draft.workflow_yaml_content, scenarioContent: 'Manual correction', scriptsContent: '{}', stateLayoutContent: '{}' }); });
+    expect(await screen.findByText('selfEvolutionRun.workflowDetailPreviousRepairFailed')).toBeVisible();
+    expect(screen.getByText('selfEvolutionRun.validationErrors.E_REPAIR_MODEL_TIMEOUT')).toBeVisible();
+    await waitFor(() => expect(mocks.props.repairDiagnostics).toEqual([]));
+    expect(mocks.props.readonly).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'selfEvolutionRun.workflowDetailPreviousRepairRetry' }));
+    await waitFor(() => expect(mocks.preview).toHaveBeenLastCalledWith(draft.id, expect.objectContaining({ target: 'statemachine', draft_version: 4 })));
+    expect(mocks.repair).not.toHaveBeenCalled();
+  });
+
+  it('recovers previous failure history on refresh after a save cleared the warning', async () => {
+    mocks.repairRun.mockResolvedValue({ status: 'failed', target: 'full', diagnostics_after: [{ code: 'E_REPAIR_MODEL_TRANSPORT', severity: 'error', message: 'Connection failed' }] });
+    show({ version: 4, last_repair_run_id: 'repair-1', generate_warning: '' });
+    expect(await screen.findByText('selfEvolutionRun.workflowDetailPreviousRepairFailed')).toBeVisible();
+    expect(mocks.props.repairDiagnostics).toEqual([]);
+    expect(mocks.props.readonly).toBe(false);
+    mocks.publish.mockResolvedValue({ workflow_ref: 'user:owner:research-v2', revision_no: 2 });
+    fireEvent.click(screen.getByRole('button', { name: '发布插件' }));
+    await waitFor(() => expect(mocks.publish).toHaveBeenCalledTimes(1));
+  });
+
+  it.each(['succeeded', 'canceled', 'stale'])('does not show failure history for a %s repair', async (status) => {
+    mocks.repairRun.mockResolvedValue({ status, target: 'statemachine', diagnostics_after: [] });
+    show({ last_repair_run_id: 'repair-2' });
+    await waitFor(() => expect(mocks.repairRun).toHaveBeenCalled());
+    expect(screen.queryByText('selfEvolutionRun.workflowDetailPreviousRepairFailed')).not.toBeInTheDocument();
   });
 
   it('does not adopt a newer version and overwrite it after a repair conflict', async () => {

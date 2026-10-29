@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
+import math
 import re
 import time
 from pathlib import Path, PurePosixPath
@@ -11,6 +13,7 @@ from uuid import uuid4
 import lazyllm
 from json_repair import repair_json
 from lazyllm import AutoModel, LOG
+from lazyllm.module.llms.onlinemodule.base import ModelCallControl, ModelCallError
 from pydantic import BaseModel, Field
 
 from lazymind.model_config import inject_model_config
@@ -73,6 +76,7 @@ class LLMTaskResult(BaseModel):
     error: str | None = None
     error_code: str | None = None
     retryable: bool = False
+    diagnostic_id: str | None = None
 
 
 class LLMTaskError(RuntimeError):
@@ -80,12 +84,14 @@ class LLMTaskError(RuntimeError):
 
 
 class LLMTaskCallError(LLMTaskError):
-    def __init__(self, code: str, retryable: bool = False, calls: int = 0, usage: dict[str, Any] | None = None):
-        super().__init__(code, retryable, calls, usage)
+    def __init__(self, code: str, retryable: bool = False, calls: int = 0, usage: dict[str, Any] | None = None,
+                 diagnostic_id: str | None = None):
+        super().__init__(code, retryable, calls, usage, diagnostic_id)
         self.code = code
         self.retryable = retryable
         self.calls = calls
         self.usage = usage or {}
+        self.diagnostic_id = diagnostic_id
 
     def __str__(self) -> str:
         return self.code
@@ -125,20 +131,22 @@ def run_llm_task(request: LLMTaskRequest, *, validate_output=None) -> LLMTaskRes
     except LLMTaskCallError as exc:
         return LLMTaskResult(status='failed', task_id=task_id, error=str(exc),
                              error_code=exc.code, retryable=exc.retryable,
+                             diagnostic_id=exc.diagnostic_id,
                              usage={**exc.usage, 'model_calls': exc.calls})
     except Exception as exc:
         LOG.exception(f'[LLMTask] failed task_type={request.task_type}: {exc}')
         usage['elapsed_ms'] = round((time.monotonic() - started) * 1000)
         return LLMTaskResult(status='failed', task_id=task_id, error=str(exc), usage=usage,
-                             error_code='invalid_model_output' if validate_output else None,
+                             error_code=('invalid_model_output'
+                                         if validate_output or isinstance(exc, LLMTaskError) else None),
                              retryable=bool(validate_output))
 
 
 def _call_model(request: LLMTaskRequest, prompt: str, *, stream_output: bool = True,
-                default_timeout: int = 600, **options: Any) -> Any:
+                default_timeout: int = 600, deadline: float | None = None, **options: Any) -> Any:
     try:
-        timeout = int(request.options.get('timeout_seconds', default_timeout))
-        if timeout <= 0:
+        timeout = float(request.options.get('timeout_seconds', default_timeout))
+        if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError('timeout must be positive')
     except (TypeError, ValueError) as exc:
         raise LLMTaskCallError('invalid_task_config') from exc
@@ -149,8 +157,37 @@ def _call_model(request: LLMTaskRequest, prompt: str, *, stream_output: bool = T
         raise LLMTaskCallError('model_configuration') from exc
     if request.options.get('temperature') is not None:
         options['temperature'] = request.options['temperature']
-    return model(prompt, stream_output=stream_output,
-                 timeout=timeout, max_retries=int(request.options.get('model_retry_attempts', 5)), **options)
+    if deadline is not None:
+        timeout = min(timeout, deadline - time.monotonic())
+        if timeout <= 0:
+            raise LLMTaskCallError('request_timeout', retryable=True)
+        # Check between streamed frames as well as before/after the request.
+        # A per-read socket timeout alone does not bound a long-lived stream.
+        options['call_control'] = ModelCallControl(cancel_check=lambda: time.monotonic() >= deadline)
+    try:
+        result = model(prompt, stream_output=stream_output, timeout=timeout,
+                       max_retries=1 if deadline is not None else int(request.options.get('model_retry_attempts', 5)),
+                       **options)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise LLMTaskCallError('request_timeout', retryable=True, calls=1)
+        return result
+    except ModelCallError as exc:
+        failure = exc.terminal.failure
+        code = failure.code.value if failure is not None else 'model_call_failed'
+        if deadline is not None and time.monotonic() >= deadline:
+            code = 'request_timeout'
+        raise LLMTaskCallError(
+            code, retryable=code in {
+                'transport_error', 'request_timeout', 'rate_limited', 'concurrency_limited',
+                'provider_overloaded', 'service_unavailable', 'provider_internal_error'},
+            calls=1, usage=exc.usage, diagnostic_id=failure.diagnostic_id if failure else None,
+        ) from exc
+    except TimeoutError as exc:
+        raise LLMTaskCallError('request_timeout', retryable=True, calls=1) from exc
+    except asyncio.CancelledError as exc:
+        if deadline is None or time.monotonic() < deadline:
+            raise
+        raise LLMTaskCallError('request_timeout', retryable=True, calls=1) from exc
 
 
 def _run_task(
@@ -193,12 +230,22 @@ def _call_json(request: LLMTaskRequest, prompt: str, *, validate_output=None, us
     last_error: Exception | None = None
     max_retries = max(1, int(request.options.get('max_retries', 2)))
     attempt_prompt = prompt
+    deadline = None
+    if request.task_type == 'workflow.repair':
+        try:
+            budget = float(request.options.get('total_timeout_seconds', 15 * 60 - 30))
+            if not math.isfinite(budget) or budget <= 0:
+                raise ValueError('timeout must be positive')
+        except (TypeError, ValueError) as exc:
+            raise LLMTaskCallError('invalid_task_config') from exc
+        deadline = time.monotonic() + budget
     for attempt in range(max_retries):
         try:
             if usage is not None:
                 usage['model_calls'] = usage.get('model_calls', 0) + 1
                 usage['attempt_input_chars'] = usage.get('attempt_input_chars', 0) + len(attempt_prompt)
-            raw = _call_model(request, attempt_prompt, response_format={'type': 'json_object'})
+            raw = _call_model(request, attempt_prompt, response_format={'type': 'json_object'},
+                              **({'deadline': deadline, 'default_timeout': budget} if deadline is not None else {}))
             if usage is not None:
                 usage['attempt_output_chars'] = usage.get('attempt_output_chars', 0) + len(str(raw))
             last_raw = raw
@@ -210,7 +257,7 @@ def _call_json(request: LLMTaskRequest, prompt: str, *, validate_output=None, us
             raise ValueError('empty JSON object')
         except LLMTaskCallError:
             raise
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             last_error = exc
             attempt_prompt = (
                 f'{prompt}\n\nThe previous response was invalid JSON for the required schema. '
@@ -328,14 +375,29 @@ def _workflow_prompt(request: LLMTaskRequest) -> str:
             'identified in edit_context.node_ids when present. '
             'The current saved files and user edit intent take precedence over the original Skill design. '
             'Preserve every existing node id, execution mode, required input expression and declared output. '
+            'Only edit_context.input_corrections explicitly authorizes replacing an unknown required '
+            'material reference with the selected existing material, for that exact node. Preserve '
+            'its requiredness; never infer additional replacements or change valid input references. '
             'Never delete or skip a node, make a required input optional, or mark internal materials external '
             'just to pass validation. Repair predecessor/successor edges and material producers/consumers; '
-            'preserve existing branch conditions and destinations, allowing inserted steps on their paths. '
+            'preserve existing branch conditions VERBATIM and destinations, allowing inserted steps on their paths. '
+            'repair_context.protected_transitions describes the original edges, not the rejected candidate. '
+            'Keep each original condition on its source edge. An inserted path must have exactly one '
+            'unconditional successor per inserted step until the original destination; do not add a '
+            'new routing decision or move conditions onto inserted edges. Human approval is preserved '
+            'by mode: human, not by inventing an approval branch. If a genuinely new conditional branch '
+            'is needed but not specified, return needs_input. '
             'Synchronize workflow steps, slots, affected UI references and complete scenario documentation '
             '(purpose, inputs, outputs and executable instructions for each step). '
             'If purpose, insertion point or input source is ambiguous, return needs_input describing exactly '
             'what the user must specify, rather than guessing. Otherwise needs_input must be empty. '
-            'Return final full content for changed files only, with no placeholders.'
+            'Prefer precise local edits against the supplied input.files. Return full content only '
+            'when a local edit cannot express the required change. Never rewrite unrelated fields. '
+            'When repair_context.previous_failure is present, inspect its candidate and diagnostics '
+            'and correct those specific failures instead of repeating the same proposal. All protection '
+            'rules refer to the original workflow. Prior failed candidates are context, not authority; '
+            'the current user request takes precedence. Never apply edits against a previous candidate '
+            'unless it is also the current supplied input file. Do not use placeholders.'
         )
         if request.input.data.get('target') == 'full':
             base.append(
@@ -348,8 +410,10 @@ def _workflow_prompt(request: LLMTaskRequest) -> str:
             base.append(
                 'Scope: execution flow repair. Focus on step order, transitions and input/output dependencies, '
                 'including node integration. Synchronize workflow definitions, documentation, UI references '
-                'and scripts ONLY where needed by these flow changes. Do not independently redesign the '
-                'UI or rewrite unrelated documentation or scripts.'
+                'and scripts ONLY where needed by these flow changes or by explicit global blocking '
+                'diagnostics supplied by the caller. Fix those blockers minimally so the complete '
+                'candidate passes publication validation. Do not independently redesign the UI or '
+                'rewrite unrelated documentation or scripts.'
             )
     if request.instruction:
         base.append(f'Caller instruction:\n{request.instruction}')

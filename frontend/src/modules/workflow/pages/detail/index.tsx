@@ -23,7 +23,7 @@ function displayedRepairTarget(target: RepairTarget): RepairTarget {
 
 function preservesCurrentWorkflow(draft: WorkflowDraftRecord | null, target: RepairTarget, context: RepairContext): boolean {
   return (target === 'statemachine' || target === 'full') &&
-    ((draft?.source_type === 'skill' && draft.generate_status === 'done') || context.node_ids.length > 0);
+    ((draft?.source_type === 'skill' && draft.generate_status === 'done') || context.node_ids.length > 0 || !!context.input_corrections?.length);
 }
 
 function repairRunErrors(run: WorkflowRepairRun): ValidationError[] {
@@ -312,6 +312,7 @@ export default function WorkflowDetailPage() {
   const [repairPreviewAttempt, setRepairPreviewAttempt] = useState(0);
   const [repairFailureDetails, setRepairFailureDetails] = useState<string[]>([]);
   const [repairDiagnostics, setRepairDiagnostics] = useState<ValidationError[]>([]);
+  const [lastRepairFailure, setLastRepairFailure] = useState<WorkflowRepairRun | null>(null);
   const [repairContext, setRepairContext] = useState<RepairContext>({ node_ids: [] });
   const [repairRequestError, setRepairRequestError] = useState('');
   const [repairChanges, setRepairChanges] = useState<string[]>([]);
@@ -803,14 +804,22 @@ export default function WorkflowDetailPage() {
     setRepairModalOpen(true);
   }, []);
 
-  // Repair diagnostics remain actionable after reopening a failed draft.
+  // The run is durable history, independent of a warning invalidated by editing.
+  // Old candidate diagnostics must not block publishing a manually corrected draft.
   useEffect(() => {
-    if (!workflowId || !draft?.last_repair_run_id || !draft.generate_warning?.startsWith('[修复失败]') || draft.generate_status === 'repairing') return;
+    setLastRepairFailure(null);
+    if (!draft?.generate_warning?.startsWith('[修复失败]')) {
+      setRepairDiagnostics([]);
+      setRepairRetryTarget(undefined);
+    }
+    if (!workflowId || !draft?.last_repair_run_id || GENERATING_STATUSES.has(draft.generate_status)) return;
     let active = true;
     getWorkflowRepairRun(workflowId, draft.last_repair_run_id).then((run) => {
       if (!active) return;
-      setRepairRetryTarget(run.target as RepairTarget);
-      setRepairDiagnostics(repairRunErrors(run));
+      const failed = run.status === 'failed';
+      setLastRepairFailure(failed ? run : null);
+      setRepairRetryTarget(failed && draft.generate_warning?.startsWith('[修复失败]') ? run.target as RepairTarget : undefined);
+      setRepairDiagnostics(failed && draft.generate_warning?.startsWith('[修复失败]') ? repairRunErrors(run) : []);
     }).catch(() => {
       // The persisted failure banner still contains the failure reason.
     });
@@ -1251,6 +1260,39 @@ export default function WorkflowDetailPage() {
         </section>
       )}
 
+      {lastRepairFailure && !repairFailed && !isStillGenerating && !repairModalOpen && selectedRevision === 'draft' && (
+        <Alert
+          className="workflow-detail-banner"
+          type="warning"
+          showIcon
+          message={t('selfEvolutionRun.workflowDetailPreviousRepairFailed')}
+          description={<>
+            <p>{t('selfEvolutionRun.workflowDetailPreviousRepairFailedHint')}</p>
+            <ul>{repairRunErrors(lastRepairFailure).map((item, index) => <li key={index}>{getWorkflowDiagnosticMessage(t, item)}</li>)}</ul>
+          </>}
+          action={<Button onClick={() => handleOpenRepair(lastRepairFailure.target as RepairTarget)}>{t('selfEvolutionRun.workflowDetailPreviousRepairRetry')}</Button>}
+        />
+      )}
+
+      {lastRepairFailure && !isStillGenerating && selectedRevision === 'draft' && !!lastRepairFailure.changes?.attempts?.length && (
+        <details className="workflow-detail-banner workflow-repair-candidate-diff">
+          <summary>{t('selfEvolutionRun.workflowRepairCandidateDiff')}</summary>
+          {lastRepairFailure.changes.attempts.map((attempt, index) => (
+            <section key={index}>
+              <h4>{t('selfEvolutionRun.workflowRepairAttempt', { count: index + 1 })}</h4>
+              <ul>{attempt.diagnostics.filter((item) => item.severity === 'error').map((item, i) => <li key={i}>{getWorkflowDiagnosticMessage(t, item)}</li>)}</ul>
+              {attempt.changes.map((change) => <details key={change.path}>
+                <summary>{change.path}</summary>
+                <p>{t('selfEvolutionRun.workflowRepairBefore')}</p>
+                <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 240, overflowY: 'auto' }}>{change.before}</pre>
+                <p>{t('selfEvolutionRun.workflowRepairCandidate')}</p>
+                <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 240, overflowY: 'auto' }}>{change.after}</pre>
+              </details>)}
+            </section>
+          ))}
+        </details>
+      )}
+
       {/* AI generation progress Modal — users may close it to keep work running in the background or stop the job. */}
       <Modal
         open={isStillGenerating && !isRepairing && !generationProgressHidden}
@@ -1540,13 +1582,36 @@ export default function WorkflowDetailPage() {
                         ))}
                       </ul>
                     )}
-                    {(repairPreview.diagnostics ?? []).length === 0 && (
+                    {!!repairPreview.blocking_diagnostics?.length && <>
+                      <p>{t('selfEvolutionRun.workflowRepairGlobalBlockers')}</p>
+                      <ul>{repairPreview.blocking_diagnostics.map((item, i) => <li key={i}>{getWorkflowDiagnosticMessage(t, item)}</li>)}</ul>
+                    </>}
+                    {(repairPreview.diagnostics ?? []).length === 0 && !repairPreview.blocking_diagnostics?.length && (
                       <div>当前没有发现该范围内的阻塞问题，可以根据你的补充说明尝试修复。</div>
                     )}
                   </div>
                 )}
               />
             )}
+            {(repairTarget === 'statemachine' || repairTarget === 'full') && (repairPreview?.input_corrections ?? []).map((correction) => (
+              <div key={`${correction.node_id}:${correction.material_id}`} style={{ margin: '12px 0' }}>
+                <p>{t('selfEvolutionRun.workflowRepairInputCorrection', { node: correction.node_id, material: correction.material_id })}</p>
+                <Select
+                  aria-label={t('selfEvolutionRun.workflowRepairInputCorrection', { node: correction.node_id, material: correction.material_id })}
+                  style={{ width: '100%' }} allowClear
+                  value={repairContext.input_corrections?.find((item) => item.node_id === correction.node_id && item.from === correction.material_id)?.to}
+                  placeholder={t('selfEvolutionRun.workflowRepairInputCorrectionPlaceholder')}
+                  options={correction.choices.map((id) => ({ value: id, label: id }))}
+                  onChange={(to?: string) => setRepairContext((current) => ({
+                    ...current,
+                    input_corrections: [
+                      ...(current.input_corrections ?? []).filter((item) => item.node_id !== correction.node_id || item.from !== correction.material_id),
+                      ...(to ? [{ node_id: correction.node_id, from: correction.material_id, to }] : []),
+                    ],
+                  }))}
+                />
+              </div>
+            ))}
             <p style={{ marginBottom: 8 }}>{t('selfEvolutionRun.workflowDetailRepairHintLabel')}</p>
             <Input.TextArea
               placeholder={repairTarget === 'statemachine' ? t('selfEvolutionRun.workflowNodeIntegrationPlaceholder') : repairTarget === 'scenario' ? t('selfEvolutionRun.workflowDetailRepairScenarioPlaceholder') : t('selfEvolutionRun.workflowDetailRepairStatePlaceholder')}

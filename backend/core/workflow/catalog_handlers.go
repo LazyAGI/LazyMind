@@ -21,12 +21,12 @@ import (
 // Workflow revision in Core, rather than the Python Chat process.
 type workflowCatalogSpec map[string]any
 
-func loadWorkflowCatalogSpec(r *http.Request, refOrID string, includeRawFiles bool) (workflowCatalogSpec, error) {
+func loadWorkflowCatalogSpec(r *http.Request, refOrID, revisionID string, includeRawFiles bool) (workflowCatalogSpec, error) {
 	db := store.DB()
 	if db == nil {
 		return nil, errors.New("store not initialized")
 	}
-	pkg, err := workflowstore.New(db).GetWorkflowPackage(r.Context(), store.UserID(r), refOrID, "")
+	pkg, err := workflowstore.New(db).GetWorkflowPackage(r.Context(), store.UserID(r), refOrID, revisionID)
 	if err != nil {
 		return nil, err
 	}
@@ -125,15 +125,15 @@ func writeWorkflowCatalogJSON(w http.ResponseWriter, value any) {
 	}
 }
 
-// GetWorkflowInfo serves the exact immutable revision that the runtime catalog
-// uses. This keeps panel layout and labels available even when Chat is offline.
+// GetWorkflowInfo serves a session's pinned revision when revision_id is supplied;
+// catalog callers without a revision continue to read the current head.
 func GetWorkflowInfo(w http.ResponseWriter, r *http.Request) {
 	workflowID := strings.TrimSpace(common.PathVar(r, "workflow_id"))
 	if workflowID == "" {
 		common.ReplyErr(w, "workflow_id required", http.StatusBadRequest)
 		return
 	}
-	spec, err := loadWorkflowCatalogSpec(r, workflowID, true)
+	spec, err := loadWorkflowCatalogSpec(r, workflowID, strings.TrimSpace(r.URL.Query().Get("revision_id")), true)
 	if err != nil {
 		if errors.Is(err, workflowstore.ErrNotFound) {
 			common.ReplyErr(w, "workflow not found", http.StatusNotFound)
@@ -165,7 +165,7 @@ func ListWorkflows(w http.ResponseWriter, r *http.Request) {
 	}
 	workflows := make([]workflowCatalogSpec, 0, len(resources))
 	for _, resource := range resources {
-		spec, loadErr := loadWorkflowCatalogSpec(r, resource.WorkflowRef, false)
+		spec, loadErr := loadWorkflowCatalogSpec(r, resource.WorkflowRef, "", false)
 		if loadErr != nil {
 			common.ReplyErr(w, loadErr.Error(), http.StatusInternalServerError)
 			return

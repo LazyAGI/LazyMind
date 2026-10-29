@@ -26,5 +26,13 @@ async def llm_task_run(request: LLMTaskRequest) -> LLMTaskResult:
             result.task_id,
             result.error,
         )
+        if request.task_type == 'workflow.repair':
+            # Preserve structured failure classification without returning provider
+            # bodies, credentials, or the model's generated response text.
+            raise HTTPException(status_code=502, detail={
+                'error_code': result.error_code or 'invalid_model_output',
+                'retryable': result.retryable,
+                'diagnostic_id': result.diagnostic_id,
+            })
         raise HTTPException(status_code=502, detail=result.error or 'llm task failed')
     return result

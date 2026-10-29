@@ -1,8 +1,51 @@
 import { describe, expect, it } from 'vitest';
 import { parseWorkflowYaml } from './workflowParser';
 import { serializeWorkflowModel } from './workflowSerializer';
+import { parseYaml } from './parser';
+import { serializeModel } from './serializer';
 
 describe('workflow UI declarations', () => {
+  it.each(['dictionary', 'array'])('keeps declaration order separate from %s state node storage order', (format) => {
+    const source = `id: smoke
+name: Smoke
+steps: [{id: prepare}, {id: write}, {id: compose_report}]
+slots: []
+ui:
+  tabs: [{id: results, step_id: compose_report, label: Results, layout: vertical, slots: []}]
+`;
+    const state = format === 'dictionary'
+      ? `steps:
+  compose_report: {label: Final report, mode: human}
+  prepare: {mode: human}
+  write: {mode: human}
+  review: {label: Review, mode: human}
+`
+      : `steps: [{id: compose_report, label: Final report, mode: human}, {id: prepare, mode: human}, {id: write, mode: human}, {id: review, label: Review, mode: human}]\n`;
+    const graph = parseYaml(`${state}transitions:
+  __start__: [{to: prepare}]
+  prepare: [{to: write}]
+  write: [{to: review}]
+  review: [{to: compose_report}]
+  compose_report: [{to: __end__}]
+`)!;
+    const originalGraph = structuredClone(graph);
+    const saved = parseWorkflowYaml(serializeWorkflowModel(parseWorkflowYaml(source)!, graph))!;
+    expect(saved.steps.map(step => step.id)).toEqual(['prepare', 'write', 'compose_report', 'review']);
+    expect(saved.steps.find(step => step.id === 'compose_report')?.label).toBe('Final report');
+    expect(saved.ui?.tabs[0]).toMatchObject({ id: 'results', step_id: 'compose_report', label: 'Results' });
+    expect(graph).toEqual(originalGraph);
+    expect(parseYaml(serializeModel(graph))?.nodes.find(node => node.id === 'write')?.transitions).toEqual([{ to: 'review' }]);
+    expect(serializeWorkflowModel(saved, graph)).toBe(serializeWorkflowModel(saved, parseYaml(serializeModel(graph))!));
+  });
+
+  it('removes deleted declarations and appends renamed nodes without reviving old ids', () => {
+    const model = parseWorkflowYaml('id: smoke\nsteps: [{id: prepare}, {id: old_review}, {id: compose_report}]')!;
+    const graph = parseYaml('steps: [{id: compose_report}, {id: new_review}, {id: prepare}]')!;
+    const saved = parseWorkflowYaml(serializeWorkflowModel(model, graph))!;
+    expect(saved.steps.map(step => step.id)).toEqual(['prepare', 'compose_report', 'new_review']);
+    expect(serializeWorkflowModel(saved, graph)).toBe(serializeWorkflowModel(model, graph));
+  });
+
   it('preserves html-slide widgets and exporter actions across an editor round trip', () => {
     const source = `
 id: deck-workflow

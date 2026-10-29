@@ -33,6 +33,7 @@ import { workflowDisplayLabel, type NativeWorkflowControl } from '@/modules/chat
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import StateGraphModal from '@/components/StateGraphModal';
 import {
   WORKFLOW_PANEL_EXPANDED_EVENT,
@@ -1679,8 +1680,10 @@ export function WorkflowPanel({
   const setFocusedSortOrder = useWorkflowStore((s) => s.setFocusedSortOrder);
   const focusedTabByConversation = useWorkflowStore((s) => s.focusedTabByConversation);
   const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
-  const [uiResponse, setUIResponse] = useState<{ workflowId: string; ui: WorkflowUI } | null>(null);
-  const uiReady = uiResponse?.workflowId === session?.workflow_id && Boolean(session);
+  const uiCacheKey = session ? workflowUICacheKey(session.workflow_id, session.pinned_revision_id, i18n.language || '') : '';
+  const uiRequestKey = JSON.stringify([session?.session_id, uiCacheKey]);
+  const [uiResponse, setUIResponse] = useState<{ requestKey: string; ui: WorkflowUI } | null>(null);
+  const uiReady = uiResponse?.requestKey === uiRequestKey && Boolean(session);
   const rawUI = uiReady ? uiResponse!.ui : undefined;
   const [developerMode, setDeveloperMode] = useState(isDeveloperModeActive);
   useEffect(() => {
@@ -1852,13 +1855,14 @@ export function WorkflowPanel({
     if (!session?.workflow_id) return;
     let disposed = false;
     const workflowId = session.workflow_id;
-    const cached = useWorkflowStore.getState().workflowUIByWorkflow[`${workflowId}:${i18n.language || ''}`];
-    if (cached) setUIResponse({ workflowId, ui: cached });
-    void fetchWorkflowUI(workflowId).then(config => {
-      if (!disposed) setUIResponse({ workflowId, ui: config });
+    const pinnedRevisionId = session.pinned_revision_id;
+    const cached = pinnedRevisionId ? useWorkflowStore.getState().workflowUIByWorkflow[uiCacheKey] : undefined;
+    if (cached) setUIResponse({ requestKey: uiRequestKey, ui: cached });
+    void fetchWorkflowUI(workflowId, pinnedRevisionId).then(config => {
+      if (!disposed) setUIResponse({ requestKey: uiRequestKey, ui: config });
     });
     return () => { disposed = true; };
-  }, [session?.workflow_id, fetchWorkflowUI, i18n.language]);
+  }, [session?.workflow_id, session?.pinned_revision_id, fetchWorkflowUI, uiCacheKey, uiRequestKey]);
 
   useEffect(() => {
     if (!uiReady || !session || !tabs.length || previewTarget) return;
@@ -1874,9 +1878,9 @@ export function WorkflowPanel({
     // Unconfigured workflows retain their existing implicit navigation behavior.
     const focused = tabs.find(tab => tab.id === persistedFocusedTab);
     if (focused) { updateView({ tabId: focused.id }); return; }
-    let index = tabs.findIndex(tab => getTabStepId(tab) === session.current_step_id);
-    if (index === -1 && ['completed', 'failed'].includes(session.status)) index = tabs.length - 1;
-    if (index !== -1) updateView({ tabId: tabs[index].id });
+    // Page order is presentation, not execution. The runtime resolver also
+    // handles cleared terminal pointers, stale attempts and grouped result tabs.
+    if (runtimeTabId) updateView({ tabId: runtimeTabId });
   }, [uiReady, session, tabs, previewTarget, followingEnabled, view.mode, runtimeTabId, activeTabId, persistedFocusedTab, updateView]);
 
   const resumeFollowing = async () => {

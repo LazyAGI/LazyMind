@@ -28,7 +28,7 @@ func shouldPreserveCurrentWorkflow(draft orm.WorkflowDraft, target string, edit 
 		return true
 	}
 	return (target == "statemachine" || target == "full") &&
-		((draft.SourceType == "skill" && draft.GenerateStatus == generateStatusDone) || (edit != nil && len(edit.NodeIDs) > 0))
+		((draft.SourceType == "skill" && draft.GenerateStatus == generateStatusDone) || (edit != nil && (len(edit.NodeIDs) > 0 || len(edit.InputCorrections) > 0)))
 }
 
 func isCurrentWorkflowRepair(payload workflowDraftRepairPayload) bool {
@@ -58,6 +58,9 @@ func validateNodeIntegrationContext(draft orm.WorkflowDraft, edit *algo.Workflow
 	if edit == nil {
 		return nil
 	}
+	if err := validateWorkflowInputCorrections(compiled.Graph, edit); err != nil {
+		return err
+	}
 	for _, id := range edit.NodeIDs {
 		node, ok := compiled.Graph.Nodes[id]
 		if !ok {
@@ -83,12 +86,19 @@ func validateNodeIntegrationContext(draft orm.WorkflowDraft, edit *algo.Workflow
 // Validate the complete candidate and the user-owned contracts separately.
 // A structurally valid graph that drops the requested node is not a repair.
 func diagnoseNodeIntegration(base, candidate workflowRepairSnapshot) []repairDiagnostic {
+	return diagnoseAuthorizedNodeIntegration(base, candidate, nil)
+}
+
+func diagnoseAuthorizedNodeIntegration(base, candidate workflowRepairSnapshot, edit *algo.WorkflowEditContext) []repairDiagnostic {
 	scripts, _ := json.Marshal(candidate.Scripts)
 	out := diagnoseWorkflowWithProfile(candidate.WorkflowYAML, candidate.StateYAML, candidate.ScenarioMD, string(scripts), graphengine.ProfilePublish)
 	before := graphengine.Compile(base.WorkflowYAML, base.StateYAML, base.ScenarioMD, graphengine.ProfileEditor).Graph
 	after := graphengine.Compile(candidate.WorkflowYAML, candidate.StateYAML, candidate.ScenarioMD, graphengine.ProfilePublish).Graph
 	if before == nil || after == nil {
 		return out
+	}
+	if err := validateWorkflowInputCorrections(before, edit); err != nil {
+		return append(out, repairDiagnostic{Code: "E_REPAIR_INPUT_CHANGED", Severity: "error", Message: err.Error()})
 	}
 	add := func(code, id, message string) {
 		out = append(out, repairDiagnostic{Code: code, Path: "scenario/state.yml.steps." + id, NodeID: id, Message: message, Severity: "error", Fixable: true})
@@ -108,7 +118,7 @@ func diagnoseNodeIntegration(base, candidate workflowRepairSnapshot) []repairDia
 		if node.Mode != next.Mode {
 			add("E_REPAIR_MODE_CHANGED", id, "修复改变了节点执行方式，请保留用户设置")
 		}
-		if !preservesRequiredInputs(node.Input, next.Input) {
+		if !preservesRequiredInputs(correctedRequiredInput(node.Input, id, edit), next.Input) {
 			add("E_REPAIR_INPUT_CHANGED", id, "修复改变了必填输入约束，请修复输入来源而不是放宽要求")
 		}
 		if !reflect.DeepEqual(node.SkipIf, next.SkipIf) {
@@ -136,7 +146,16 @@ func diagnoseNodeIntegration(base, candidate workflowRepairSnapshot) []repairDia
 		if branchSources[edge.From] && !slices.ContainsFunc(after.ControlEdges, func(next graphengine.CompiledEdge) bool {
 			return next.From == edge.From && next.When == edge.When && preservesBranchDestination(next.To, edge.To, after.ControlEdges, branchTargets)
 		}) {
-			add("E_REPAIR_BRANCH_CHANGED", edge.From, "修复改变了已有分支条件或去向："+edge.When+" → "+edge.To)
+			candidateEdges := []graphengine.CompiledEdge{}
+			for _, next := range after.ControlEdges {
+				if next.From == edge.From {
+					candidateEdges = append(candidateEdges, next)
+				}
+			}
+			out = append(out, repairDiagnostic{Code: "E_REPAIR_BRANCH_CHANGED", Path: "scenario/state.yml.transitions." + edge.From,
+				NodeID: edge.From, EdgeID: edge.ID, Severity: "error", Fixable: true,
+				Message: "修复改变了已有分支条件或去向：" + edge.When + " → " + edge.To,
+				Details: map[string]any{"expected_when": edge.When, "expected_target": edge.To, "candidate_edges": candidateEdges}})
 		}
 	}
 	for id := range before.MaterialTypes {
@@ -219,23 +238,9 @@ func preservesRequiredInputs(before, after *graphengine.Expression) bool {
 
 func handleNodeIntegrationRepair(ctx context.Context, db *gorm.DB, draft orm.WorkflowDraft, payload workflowDraftRepairPayload, llmConfig map[string]any) (asyncjob.Result, error) {
 	base := workflowRepairSnapshot{WorkflowYAML: draft.WorkflowYAMLContent, StateYAML: draft.StateYAMLContent, ScenarioMD: draft.ScenarioContent, Scripts: scriptsFromDraft(draft.ScriptsContent)}
-	resp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{
-		WorkflowYAML: base.WorkflowYAML, StateYAML: base.StateYAML, ScenarioMD: base.ScenarioMD, Scripts: base.Scripts,
-		RepairHint: payload.RepairHint, Diagnostics: payload.Diagnostics, Target: payload.Target, EditContext: payload.EditContext, LLMConfig: llmConfig,
-		PreserveCurrentWorkflow: true,
-	})
-	var diagnostics []repairDiagnostic
-	candidate := base
+	candidate, resp, diagnostics, attempts, callErr := generateCurrentWorkflowCandidate(ctx, db, base, payload, llmConfig)
 	if callErr != nil {
-		diagnostics = []repairDiagnostic{{Code: "E_REPAIR_MODEL_FAILED", Severity: "error", Message: "AI 调用失败，本次没有应用修改。请稍后重新修复。"}}
-	} else if strings.TrimSpace(resp.NeedsInput) != "" {
-		diagnostics = []repairDiagnostic{{Code: "E_REPAIR_NEEDS_INPUT", Severity: "error", Message: resp.NeedsInput}}
-	} else {
-		candidate = mergeWorkflowRepairResponse(base, resp)
-		diagnostics = diagnoseNodeIntegration(base, candidate)
-		for _, issue := range resp.ScriptErrors {
-			diagnostics = append(diagnostics, repairDiagnostic{Code: "E_REPAIR_SCRIPT_INVALID", Path: issue.Path, Message: issue.Message, Severity: "error", Fixable: true})
-		}
+		diagnostics = repairFeedbackError(callErr)
 	}
 	status, errorCode := "succeeded", ""
 	updates := map[string]any{"generate_status": payload.PrevStatus, "updated_at": time.Now().UTC()}
@@ -276,7 +281,14 @@ func handleNodeIntegrationRepair(ctx context.Context, db *gorm.DB, draft orm.Wor
 		}
 		slices.Sort(changes)
 	}
-	changeJSON, _ := json.Marshal(map[string]any{"files": changes})
+	record := workflowRepairChanges{Files: changes, Attempts: attempts}
+	if status == "failed" && len(attempts) > 0 {
+		// A transport failure on the correction request must not discard the
+		// previously validated/rejected candidate needed by a manual retry.
+		last := attempts[len(attempts)-1]
+		record.Feedback = &workflowRepairFeedback{BaseHash: workflowRepairHash(base), Candidate: candidate, Diagnostics: last.Diagnostics}
+	}
+	changeJSON, _ := json.Marshal(record)
 	err := db.Transaction(func(tx *gorm.DB) error {
 		current, owns, err := lockWorkflowRepairOwner(tx, payload)
 		if err != nil {

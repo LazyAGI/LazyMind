@@ -222,6 +222,27 @@ func workflowTaskTools(taskType string) []map[string]any {
 }
 
 func callWorkflowLLMTask(ctx context.Context, taskType, instruction string, data map[string]any, files []llmTaskFile, llmConfig map[string]any) (map[string]any, error) {
+	return callWorkflowLLMTaskWithAttempts(ctx, taskType, instruction, data, files, llmConfig, 2)
+}
+
+func callWorkflowLLMTaskWithAttempts(ctx context.Context, taskType, instruction string, data map[string]any, files []llmTaskFile, llmConfig map[string]any, attempts int) (map[string]any, error) {
+	options := map[string]any{"max_retries": attempts}
+	requestTimeout := generateTimeout
+	if taskType == "workflow.repair" {
+		requestTimeout = WorkflowRepairTimeout
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		deadline, _ := ctx.Deadline()
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, workflowTaskCallError(ctx.Err())
+		}
+		// Leave time for validation, response transport and failure persistence.
+		// All model/JSON attempts share this budget, including shorter caller deadlines.
+		reserve := min(30*time.Second, remaining/10)
+		options["total_timeout_seconds"] = (remaining - reserve).Seconds()
+	}
 	payload := llmTaskRequest{
 		Mode:           "agent",
 		TaskType:       taskType,
@@ -231,14 +252,21 @@ func callWorkflowLLMTask(ctx context.Context, taskType, instruction string, data
 		Tools:          workflowTaskTools(taskType),
 		ResponseFormat: map[string]any{"type": "json_object"},
 		LLMConfig:      ensureLLMConfig(llmConfig),
-		Options:        map[string]any{"max_retries": 2},
+		Options:        options,
 	}
 	var raw map[string]any
-	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &raw, generateTimeout); err != nil {
+	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &raw, requestTimeout); err != nil {
+		if taskType == "workflow.repair" {
+			return nil, workflowTaskCallError(err)
+		}
 		return nil, err
 	}
 	if data, ok := raw["data"].(map[string]any); ok {
 		raw = data
+	}
+	if taskType == "workflow.repair" && raw["status"] == "failed" {
+		body, _ := json.Marshal(map[string]any{"detail": raw})
+		return nil, workflowTaskCallError(&common.HTTPError{Body: body})
 	}
 	if output, ok := raw["output"].(map[string]any); ok {
 		return output, nil
@@ -371,7 +399,16 @@ func GenerateScenarioScripts(ctx context.Context, req GenerateScenarioScriptsReq
 const repairStateMachinePath = "/api/chat/generate_workflow/repair"
 
 type WorkflowEditContext struct {
-	NodeIDs []string `json:"node_ids"`
+	NodeIDs          []string                  `json:"node_ids"`
+	InputCorrections []WorkflowInputCorrection `json:"input_corrections,omitempty"`
+}
+
+// Explicit user authorization to correct an unknown required material reference.
+// It never authorizes changing a valid reference or removing a requirement.
+type WorkflowInputCorrection struct {
+	NodeID string `json:"node_id"`
+	From   string `json:"from"`
+	To     string `json:"to"`
 }
 
 // RepairStateMachineRequest is the request body for the repair endpoint.
@@ -387,6 +424,8 @@ type RepairStateMachineRequest struct {
 	LLMConfig               map[string]any       `json:"llm_config"`
 	EditContext             *WorkflowEditContext `json:"edit_context,omitempty"`
 	PreserveCurrentWorkflow bool                 `json:"preserve_current_workflow,omitempty"`
+	RepairContext           map[string]any       `json:"repair_context,omitempty"`
+	MaxModelCalls           int                  `json:"-"`
 }
 
 // RepairStateMachineResponse is the response body from the repair endpoint.
@@ -418,7 +457,11 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 	for path, content := range req.Scripts {
 		files = append(files, llmTaskFile{Path: path, Content: content, ContentType: "text/x-python"})
 	}
-	raw, err := callWorkflowLLMTask(ctx, "workflow.repair", "Repair only the requested Workflow target. For each changed file return either precise edits or final full content, not both.", map[string]any{
+	attempts := 2
+	if req.MaxModelCalls == 1 {
+		attempts = 1
+	}
+	raw, err := callWorkflowLLMTaskWithAttempts(ctx, "workflow.repair", "Repair only the requested Workflow target. Prefer precise local edits; use final full content only when necessary. Edits must match the supplied input files, not a previous candidate.", map[string]any{
 		"workflow_yaml":             req.WorkflowYAML,
 		"state_yaml":                req.StateYAML,
 		"repair_hint":               req.RepairHint,
@@ -429,7 +472,8 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 		"scripts":                   req.Scripts,
 		"edit_context":              req.EditContext,
 		"preserve_current_workflow": req.PreserveCurrentWorkflow,
-	}, files, req.LLMConfig)
+		"repair_context":            req.RepairContext,
+	}, files, req.LLMConfig, attempts)
 	if err != nil {
 		return nil, err
 	}

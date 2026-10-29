@@ -116,10 +116,10 @@ type workflowDraftRepairPayload struct {
 }
 
 type workflowRepairSnapshot struct {
-	WorkflowYAML string
-	StateYAML    string
-	ScenarioMD   string
-	Scripts      map[string]string
+	WorkflowYAML string            `json:"workflow_yaml"`
+	StateYAML    string            `json:"state_yaml"`
+	ScenarioMD   string            `json:"scenario_md"`
+	Scripts      map[string]string `json:"scripts"`
 }
 
 func mergeWorkflowRepairResponse(base workflowRepairSnapshot, resp *algo.RepairStateMachineResponse) workflowRepairSnapshot {
@@ -828,6 +828,8 @@ func alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML string) (string, 
 	oldTabsYAML, _ := yaml.Marshal(existingTabs)
 	nextTabs := make([]any, 0, len(steps))
 	usedExisting := map[int]bool{}
+	existingStepByIndex := map[int]string{}
+	alignedByStep := map[string]any{}
 	stepIDs := map[string]bool{}
 	for _, step := range steps {
 		stepIDs[step.ID] = true
@@ -847,6 +849,7 @@ func alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML string) (string, 
 			tab = map[string]any{}
 		} else {
 			usedExisting[index] = true
+			existingStepByIndex[index] = step.ID
 		}
 		tab["id"] = step.ID
 		tab["step_id"] = step.ID
@@ -857,7 +860,46 @@ func alignWorkflowUITabsWithStateSteps(workflowYAML, stateYAML string) (string, 
 			tab["layout"] = "vertical"
 		}
 		tab["slots"] = workflowTabSlotDefs(slotIDs, slotDefs)
-		nextTabs = append(nextTabs, tab)
+		alignedByStep[step.ID] = tab
+	}
+	// Explicit UI order is independent of node declarations. Retain the existing
+	// relative order, inserting missing pages before their later flow candidates.
+	// A legacy result-only UI therefore expands to flow order, while an authored
+	// result-first or parallel-branch layout is not silently rearranged at publish.
+	for index := range existingTabs {
+		if id, ok := existingStepByIndex[index]; ok {
+			nextTabs = append(nextTabs, alignedByStep[id])
+		}
+	}
+	for i, step := range steps {
+		tab, exists := alignedByStep[step.ID]
+		if !exists {
+			continue
+		}
+		present := false
+		for _, raw := range nextTabs {
+			if mapValue(raw)["step_id"] == step.ID {
+				present = true
+				break
+			}
+		}
+		if present {
+			continue
+		}
+		later := map[string]bool{}
+		for _, candidate := range steps[i+1:] {
+			later[candidate.ID] = true
+		}
+		at := len(nextTabs)
+		for index, raw := range nextTabs {
+			if later[scalarAny(mapValue(raw)["step_id"])] {
+				at = index
+				break
+			}
+		}
+		nextTabs = append(nextTabs, nil)
+		copy(nextTabs[at+1:], nextTabs[at:])
+		nextTabs[at] = tab
 	}
 	if len(nextTabs) == 0 {
 		return workflowYAML, false, nil
@@ -896,6 +938,28 @@ func workflowStepTabCandidates(workflowDoc map[string]any, stateYAML string) []w
 			ID:      id,
 			Label:   label,
 			Outputs: stateOutputs[id],
+		})
+	}
+	// Use the shared graph compiler for deterministic default presentation order.
+	// It understands both state step formats, branches and virtual terminals.
+	// Nodes missing from a partial order retain declaration order at the end.
+	workflowYAML, err := yaml.Marshal(workflowDoc)
+	if err != nil {
+		return steps
+	}
+	compiled := graphengine.Compile(string(workflowYAML), stateYAML, "", graphengine.ProfileEditor)
+	if compiled.Graph != nil {
+		rank := map[string]int{}
+		for i, id := range compiled.Graph.StaticOrder {
+			rank[id] = i
+		}
+		sort.SliceStable(steps, func(i, j int) bool {
+			left, leftKnown := rank[steps[i].ID]
+			right, rightKnown := rank[steps[j].ID]
+			if leftKnown != rightKnown {
+				return leftKnown
+			}
+			return leftKnown && left < right
 		})
 	}
 	return steps
@@ -1494,6 +1558,8 @@ func generationFailureJSON(phase, code, message string, recoverable bool) string
 }
 
 func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter) (asyncjob.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, algo.WorkflowRepairTimeout)
+	defer cancel()
 	var payload workflowDraftRepairPayload
 	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
 		return asyncjob.Result{ErrorCode: generateErrInvalidPayload}, fmt.Errorf("decode repair payload: %w", err)
@@ -1554,7 +1620,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		log.Printf("[repair_job] llm_config from payload (keys=%d)", len(llmConfig))
 	}
 
-	restoreStatus := func(repairErr string) {
+	restoreStatus := func(repairErr string, diagnostics ...repairDiagnostic) {
 		updates := map[string]any{
 			"generate_status": payload.PrevStatus,
 			"updated_at":      time.Now().UTC(),
@@ -1568,8 +1634,16 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		if result.Error == nil && result.RowsAffected == 1 && payload.RepairRunID != "" {
 			// diagnostics_after_json is written by the validation path with the
 			// structured report. Do not replace it with a generic error string.
-			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(map[string]any{"status": "failed", "updated_at": time.Now().UTC()}).Error
+			runUpdates := map[string]any{"status": "failed", "updated_at": time.Now().UTC()}
+			if len(diagnostics) > 0 {
+				runUpdates["diagnostics_after_json"] = diagnosticsJSON(diagnostics)
+			}
+			_ = db.Model(&orm.WorkflowRepairRun{}).Where("id=? AND status IN ?", payload.RepairRunID, []string{"queued", "repairing"}).Updates(runUpdates).Error
 		}
+	}
+	restoreCallFailure := func(err error) {
+		diagnostic := workflowRepairCallDiagnostic(err)
+		restoreStatus(diagnostic.Message, diagnostic)
 	}
 
 	if isCurrentWorkflowRepair(payload) {
@@ -1586,14 +1660,14 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		if payload.Target == "full" {
 			stateResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: snapshot.WorkflowYAML, StateYAML: snapshot.StateYAML, ScenarioMD: snapshot.ScenarioMD, Scripts: snapshot.Scripts, RepairHint: payload.RepairHint, Warnings: payload.Warnings, Diagnostics: payload.Diagnostics, Target: "statemachine", LLMConfig: llmConfig})
 			if callErr != nil {
-				restoreStatus(callErr.Error())
+				restoreCallFailure(callErr)
 				return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
 			}
 			snapshot = mergeWorkflowRepairResponse(snapshot, stateResp)
 			allWarnings = append(allWarnings, stateResp.RemainingWarnings...)
 			scenarioResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: snapshot.WorkflowYAML, StateYAML: snapshot.StateYAML, ScenarioMD: snapshot.ScenarioMD, Scripts: snapshot.Scripts, RepairHint: payload.RepairHint, Target: "scenario", LLMConfig: llmConfig})
 			if callErr != nil {
-				restoreStatus(callErr.Error())
+				restoreCallFailure(callErr)
 				return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
 			}
 			if scenarioResp.ScenarioMD == "" && scenarioResp.StateYAML != "" {
@@ -1604,7 +1678,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		}
 		scriptResp, callErr := algo.RepairStateMachine(ctx, algo.RepairStateMachineRequest{WorkflowYAML: snapshot.WorkflowYAML, StateYAML: snapshot.StateYAML, ScenarioMD: snapshot.ScenarioMD, Scripts: snapshot.Scripts, RepairHint: payload.RepairHint, Target: "scripts", LLMConfig: llmConfig})
 		if callErr != nil {
-			restoreStatus(callErr.Error())
+			restoreCallFailure(callErr)
 			return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, callErr
 		}
 		snapshot = mergeWorkflowRepairResponse(snapshot, scriptResp)
@@ -1658,7 +1732,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 		})
 		if err != nil {
 			log.Printf("[repair_job/scenario] algo error: %v", err)
-			restoreStatus(err.Error())
+			restoreCallFailure(err)
 			return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("repair scenario: %w", err)
 		}
 		log.Printf("[repair_job/scenario] algo returned scenario_md_len=%d (in state_yaml field)", len(resp.StateYAML))
@@ -1719,7 +1793,7 @@ func handleWorkflowDraftRepairJob(ctx context.Context, job asyncjob.Job, _ async
 	})
 	if err != nil {
 		log.Printf("[repair_job/statemachine] algo error: %v", err)
-		restoreStatus(err.Error())
+		restoreCallFailure(err)
 		return asyncjob.Result{ErrorCode: generateErrAlgoFailed}, fmt.Errorf("repair statemachine: %w", err)
 	}
 	log.Printf("[repair_job/statemachine] algo returned state_yaml_len=%d workflow_yaml_updated=%v remaining_warnings=%v",

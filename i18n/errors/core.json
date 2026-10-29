@@ -1949,6 +1949,8 @@
   "2004917": { "en-US": "Specify the step purpose and insertion point, or configure and connect it first", "zh-CN": "请说明节点用途和接入位置，或先配置节点并连接前后步骤" },
   "2004918": { "en-US": "Workflow node integration repair failed", "zh-CN": "工作流节点接入修复失败" },
   "2004919": { "en-US": "Failed to read the interrupted workflow repair", "zh-CN": "读取已中断的工作流修复任务失败" },
+  "2004920": { "en-US": "Failed to read previous workflow repair changes", "zh-CN": "读取上次工作流修复记录失败" },
+  "2004921": { "en-US": "Only unknown required input references may be explicitly replaced with existing materials", "zh-CN": "仅允许明确将不存在的必填输入引用替换为已有素材，不能改变有效输入或放宽要求" },
   "2005000": {"en-US": "Name must contain 1 to 255 bytes", "zh-CN": "名称长度须为 1 至 255 字节"},
   "2005001": {"en-US": "Source model provider not found", "zh-CN": "找不到来源模型供应商"},
   "2005002": {"en-US": "API address must be an HTTP(S) API root", "zh-CN": "API地址须为 HTTP(S) API 根地址"},
