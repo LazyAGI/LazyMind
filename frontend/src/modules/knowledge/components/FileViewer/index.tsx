@@ -37,6 +37,7 @@ import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { paragraphSelectionsOverlap } from "./paragraphSelection";
 import { extractPdfSelectionContext } from "@/components/ui/pdfSelectionContext";
+import { normalizePdfSelectionText } from "@/components/ui/pdfSelectionText";
 
 import "./index.scss";
 import type { ExcelSelection } from "./renderers/render-excel";
@@ -216,7 +217,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     if (event.target instanceof Node && textSelectionActionRef.current?.contains(event.target)) return;
     if (props.paragraphSelectionMode) {
       const selection=window.getSelection();
-      const text=selection?.toString().trim()||"";
+      const text=normalizePdfSelectionText(selection?.toString()||"");
       if(!selection||selection.isCollapsed||!text)return;
       const anchor=selection.anchorNode instanceof Element?selection.anchorNode:selection.anchorNode?.parentElement;
       const pageElement=anchor?.closest<HTMLElement>("[data-pdf-page-index]");
@@ -397,12 +398,12 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             onRetranslateSelection={props.onPdfRetranslateSelection}
             retranslateSelectionLabel="重译此段"
             onAddVocabularySelection={props.onAddVocabularySelection}
-            addVocabularySelectionLabel={t("learning.addToCollection")}
+            addVocabularySelectionLabel="加入生词"
             translateSelectionLabel={t("knowledge.translateSelection")}
             translateSelectionDisabled={!props.translationConfigured}
             translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
             translateSelectionConfigureLabel={t("knowledge.translationConfigureAction")}
-            translateSelectionConfigureUrl="/settings?section=knowledge&tool=translation"
+            translateSelectionConfigureUrl="/settings?section=model_defaults&service=translation"
             learningSelectionActions={props.learningSelectionActions}
             onLearningSelection={props.onLearningSelection}
             onPdfKindDetected={props.onPdfKindDetected}
@@ -581,7 +582,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             >
               {t("knowledge.translateSelection")}
             </button> : null}
-            {props.onAddVocabularySelection && isSingleEnglishWord(textSelectionAction.text) ? <button
+            {props.onAddVocabularySelection && /[A-Za-z]/.test(textSelectionAction.text) ? <button
               type="button"
               className="file-viewer-selection-translate"
               onMouseDown={(event) => event.preventDefault()}
@@ -594,8 +595,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
                 window.getSelection()?.removeAllRanges();
                 setTextSelectionAction(null);
               }}
-            >{t("learning.addToCollection")}</button> : null}
-            {props.learningSelectionActions?.filter((action) => isLearningActionCompatible(action, textSelectionAction.text)).map((action) => <button
+            >加入生词</button> : null}
+            {props.learningSelectionActions?.filter((action) => isLearningActionCompatible(action, textSelectionAction.text) && !(props.onPdfTranslateSelection && action.key === "translation")).map((action) => <button
               key={action.key}
               type="button"
               className="file-viewer-selection-translate"

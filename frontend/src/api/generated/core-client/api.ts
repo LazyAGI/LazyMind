@@ -8270,7 +8270,13 @@ export interface TransferBinding {
     'target_document_id'?: string;
     'target_lazy_doc_id'?: string;
 }
+export interface TranslationDocumentProviderOpenAPIItem {
+    'group_id': string;
+    'group_name': string;
+    'provider_name': string;
+}
 export interface TranslationOpenAPIRequest {
+    'source'?: string;
     'target'?: string;
     'text': string;
 }
@@ -8281,6 +8287,10 @@ export interface TranslationOpenAPIResponse {
 }
 export interface TranslationStatusOpenAPIResponse {
     'configured': boolean;
+    'document_providers'?: Array<TranslationDocumentProviderOpenAPIItem>;
+    'document_supported': boolean;
+    'provider'?: string;
+    'selected_group_id'?: string;
 }
 export interface UnsetDefaultDatasetRequest {
     'name': string;
@@ -63666,7 +63676,7 @@ export class ToolsApi extends BaseAPI {
 export const TranslationApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * Reports the current user\'s selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
          * @summary Get translation configuration status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -63696,7 +63706,7 @@ export const TranslationApiAxiosParamCreator = function (configuration?: Configu
             };
         },
         /**
-         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -63740,7 +63750,7 @@ export const TranslationApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = TranslationApiAxiosParamCreator(configuration)
     return {
         /**
-         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * Reports the current user\'s selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
          * @summary Get translation configuration status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -63752,7 +63762,7 @@ export const TranslationApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationOpenAPIRequest} translationOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -63774,7 +63784,7 @@ export const TranslationApiFactory = function (configuration?: Configuration, ba
     const localVarFp = TranslationApiFp(configuration)
     return {
         /**
-         * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+         * Reports the current user\'s selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
          * @summary Get translation configuration status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -63783,7 +63793,7 @@ export const TranslationApiFactory = function (configuration?: Configuration, ba
             return localVarFp.apiCoreTranslationStatusGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Translates up to 5000 characters with the current user\'s server-side translation credential.
+         * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
          * @summary Translate selected document text
          * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -63807,7 +63817,7 @@ export interface TranslationApiApiCoreTranslationTranslatePostRequest {
  */
 export class TranslationApi extends BaseAPI {
     /**
-     * Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+     * Reports the current user\'s selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
      * @summary Get translation configuration status
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -63817,7 +63827,7 @@ export class TranslationApi extends BaseAPI {
     }
 
     /**
-     * Translates up to 5000 characters with the current user\'s server-side translation credential.
+     * Translates up to 5000 characters with the current user\'s selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
      * @summary Translate selected document text
      * @param {TranslationApiApiCoreTranslationTranslatePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

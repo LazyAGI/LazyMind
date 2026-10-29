@@ -139,6 +139,29 @@ describe("default capability configuration groups", () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
+  it("shows the four tool services in the requested order and opens their configuration", async () => {
+    const configureTool = vi.fn();
+    render(<DefaultModelConfigPanel
+      cloudServiceSetupStates={{ cloudParsing: "ready", searchEngine: "ready" }}
+      modelProviderSetupState="ready"
+      onConfigureCloudService={mocks.configureService}
+      onConfigureToolService={configureTool}
+      toolServiceSummaries={{ translation: "Google Translate Web" }}
+      onConfigureProviders={mocks.configureProviders}
+      onModelSelectionChanged={mocks.changed}
+      onRetrySetup={vi.fn()}
+    />);
+    const retrieval = await screen.findByRole("region", { name: "modelProvider.defaults.retrievalTitle" });
+    const rows = within(retrieval).getAllByRole("group");
+    expect(rows.slice(0, 4).map((row) => row.getAttribute("aria-label")))
+      .toEqual(["搜索引擎", "学术搜索引擎", "文档解析（OCR）", "机器翻译"]);
+    for (const [index, category] of ["search", "academic", "parsing", "translation"].entries()) {
+      fireEvent.click(within(rows[index]).getByRole("button", { name: "modelProvider.configureCapability" }));
+      expect(configureTool).toHaveBeenLastCalledWith(category);
+    }
+    expect(within(rows[3]).getByText("Google Translate Web")).toBeInTheDocument();
+  });
+
   it("keeps context length inside the selected model control, without a metadata line", async () => {
     mocks.selections.mockResolvedValue({ data: { selections: [{ ...selectedLlm, max_input_tokens: "1000000" }] } });
     renderPanel();

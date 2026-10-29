@@ -2,6 +2,7 @@ package modelconfig
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -747,10 +748,12 @@ func splitOCRAuthKeys(raw string) []string {
 }
 
 type selectedProviderConfig struct {
-	ProviderName     string
-	BaseURL          string
-	APIKey           string
-	APIKeyCiphertext string
+	ProviderName       string
+	BaseURL            string
+	APIKey             string
+	APIKeyCiphertext   string
+	GroupID            string
+	CredentialRevision int64
 }
 
 // TranslationConfig contains the selected translation provider and its decrypted
@@ -761,15 +764,146 @@ type TranslationConfig struct {
 	APIKey       string
 }
 
+// TranslationConfigSnapshot pins a provider group for an asynchronous job.
+// It contains only a revocable database reference, never credential material.
+type TranslationConfigSnapshot struct {
+	GroupID            string `json:"group_id"`
+	CredentialRevision int64  `json:"credential_revision"`
+	ProviderName       string `json:"provider_name"`
+	BaseURLHash        string `json:"base_url_sha256"`
+}
+
+// TranslationProviderGroup exposes the name of a usable connection and a
+// revocable reference for document jobs. Credential material never leaves Core.
+type TranslationProviderGroup struct {
+	GroupID      string
+	GroupName    string
+	ProviderName string
+	Snapshot     TranslationConfigSnapshot
+}
+
+var ErrTranslationProviderReferenceChanged = errors.New("translation provider group was removed or changed; create a new translation job")
+
+// ListTranslationProviderGroups returns only verified translation connections
+// owned by the user with either a stored secret or a known keyless provider.
+func ListTranslationProviderGroups(ctx context.Context, db *gorm.DB, userID string) ([]TranslationProviderGroup, error) {
+	if strings.TrimSpace(userID) == "" {
+		return []TranslationProviderGroup{}, nil
+	}
+	type row struct {
+		GroupID            string
+		GroupName          string
+		ProviderName       string
+		BaseURL            string
+		CredentialRevision int64
+		APIKey             string
+		APIKeyCiphertext   string
+	}
+	var rows []row
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+		Select("g.id AS group_id, g.name AS group_name, p.name AS provider_name, g.base_url, "+
+			"g.credential_revision, g.api_key, g.api_key_ciphertext").
+		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
+		Where("g.create_user_id = ? AND g.deleted_at IS NULL AND g.is_verified = ? AND p.category = ?", userID, true, "translation").
+		Order("p.name ASC, g.name ASC, g.id ASC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]TranslationProviderGroup, 0, len(rows))
+	for _, item := range rows {
+		apiKey, resolveErr := modelprovider.ResolveAPIKey(item.APIKey, item.APIKeyCiphertext)
+		if resolveErr != nil {
+			// A damaged credential makes only this connection unavailable.
+			continue
+		}
+		if strings.TrimSpace(apiKey) == "" && !isKeylessTranslationProvider(item.ProviderName) {
+			continue
+		}
+		groups = append(groups, TranslationProviderGroup{
+			GroupID: item.GroupID, GroupName: item.GroupName, ProviderName: item.ProviderName,
+			Snapshot: TranslationConfigSnapshot{GroupID: item.GroupID, CredentialRevision: item.CredentialRevision,
+				ProviderName: item.ProviderName, BaseURLHash: translationEndpointHash(item.BaseURL)},
+		})
+	}
+	return groups, nil
+}
+
+func LoadTranslationConfigSnapshot(ctx context.Context, db *gorm.DB, userID string) (*TranslationConfigSnapshot, error) {
+	row, err := loadSelectedProviderConfig(ctx, db, strings.TrimSpace(userID), "translation", false)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	if strings.TrimSpace(row.APIKey) == "" && !isKeylessTranslationProvider(row.ProviderName) {
+		return nil, nil
+	}
+	return &TranslationConfigSnapshot{GroupID: row.GroupID, CredentialRevision: row.CredentialRevision,
+		ProviderName: row.ProviderName, BaseURLHash: translationEndpointHash(row.BaseURL)}, nil
+}
+
+func (snapshot TranslationConfigSnapshot) CacheIdentity() string {
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d", snapshot.ProviderName, snapshot.BaseURLHash, snapshot.GroupID, snapshot.CredentialRevision)
+}
+
+func translationEndpointHash(endpoint string) string {
+	sum := sha256.Sum256([]byte(endpoint))
+	return fmt.Sprintf("%x", sum)
+}
+
+// ResolveTranslationConfigSnapshot loads the exact captured group without
+// consulting the user's current selection. Deleted or revised credentials are
+// unusable by queued jobs, even if their old payloads remain in the database.
+func ResolveTranslationConfigSnapshot(ctx context.Context, db *gorm.DB, userID string, snapshot TranslationConfigSnapshot) (TranslationConfig, error) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(snapshot.GroupID) == "" {
+		return TranslationConfig{}, fmt.Errorf("%w: provider reference is incomplete", ErrTranslationProviderReferenceChanged)
+	}
+	var row selectedProviderConfig
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+		Select("p.name AS provider_name, g.base_url, g.id AS group_id, g.credential_revision, g.api_key, g.api_key_ciphertext").
+		Joins("JOIN user_model_providers p ON p.id = g.user_model_provider_id AND p.create_user_id = g.create_user_id AND p.deleted_at IS NULL").
+		Where("g.id = ? AND g.create_user_id = ? AND g.deleted_at IS NULL AND p.category = ?", snapshot.GroupID, userID, "translation").
+		Limit(1).Scan(&row).Error
+	if err != nil {
+		return TranslationConfig{}, err
+	}
+	if row.GroupID == "" || row.ProviderName != snapshot.ProviderName || translationEndpointHash(row.BaseURL) != snapshot.BaseURLHash ||
+		row.CredentialRevision != snapshot.CredentialRevision {
+		return TranslationConfig{}, ErrTranslationProviderReferenceChanged
+	}
+	apiKey, err := modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	if err != nil {
+		return TranslationConfig{}, err
+	}
+	if strings.TrimSpace(apiKey) == "" && !isKeylessTranslationProvider(snapshot.ProviderName) {
+		return TranslationConfig{}, fmt.Errorf("%w: credential is unavailable", ErrTranslationProviderReferenceChanged)
+	}
+	return TranslationConfig{ProviderName: snapshot.ProviderName, BaseURL: row.BaseURL, APIKey: apiKey}, nil
+}
+
 func LoadTranslationConfig(ctx context.Context, db *gorm.DB, userID string) (*TranslationConfig, error) {
 	row, err := loadSelectedProviderConfig(ctx, db, strings.TrimSpace(userID), "translation", false)
 	if err != nil || row == nil {
 		return nil, err
 	}
-	if strings.TrimSpace(row.APIKey) == "" {
+	if strings.TrimSpace(row.APIKey) == "" && !isKeylessTranslationProvider(row.ProviderName) {
 		return nil, nil
 	}
 	return &TranslationConfig{ProviderName: row.ProviderName, BaseURL: row.BaseURL, APIKey: row.APIKey}, nil
+}
+
+// IsTranslationProviderAvailable defines the translators exposed in this release.
+// Paused providers retain their saved credentials and implementations for restoration.
+func IsTranslationProviderAvailable(name string) bool {
+	return modelprovider.IsTranslationProviderAvailable(name)
+}
+
+// Only built-in, fixed-endpoint translators may be selected without a secret.
+func isKeylessTranslationProvider(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "google translate web", "bing translate web", "sogou translate web", "deepl web", "tencent transmart web":
+		return true
+	default:
+		return false
+	}
 }
 
 func loadSelectedProviderConfig(
@@ -783,7 +917,7 @@ func loadSelectedProviderConfig(
 	q := db.WithContext(ctx).Table("user_selected_providers usp").
 		Select(
 			"p.name AS provider_name, "+
-				"g.base_url, "+
+				"g.base_url, g.id AS group_id, g.credential_revision, "+
 				"g.api_key, g.api_key_ciphertext",
 		).
 		Joins("JOIN user_model_provider_groups g ON g.id = usp.user_model_provider_group_id AND g.deleted_at IS NULL").

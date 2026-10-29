@@ -54,17 +54,15 @@ import {
 } from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
 import {
+  getTranslationServiceStatus,
   getTranslationStatus,
   isSingleEnglishWord,
-  translateSelectionText,
   TranslationUnavailableError,
 } from "@/modules/knowledge/api/translation";
-
-let translationStatusRequest: Promise<boolean> | undefined;
+import { usePdfSelectionTranslation } from "@/modules/knowledge/pages/knowledge/translationUiState";
 
 function loadTranslationStatus() {
-  translationStatusRequest ??= getTranslationStatus().catch(() => false);
-  return translationStatusRequest;
+  return getTranslationStatus().catch(() => false);
 }
 
 async function copyTextToClipboard(text: string) {
@@ -374,8 +372,19 @@ const AssistantMessage = (props: any) => {
   const citeSelectionTextRef = useRef("");
   const translationConfiguredRef = useRef(false);
   const [translationSource, setTranslationSource] = useState("");
-  const [translationResult, setTranslationResult] = useState("");
-  const [translationLoading, setTranslationLoading] = useState(false);
+  const onTranslationError = useCallback((error: unknown) => {
+    if (error instanceof TranslationUnavailableError && error.reason === "service_not_configured") {
+      window.location.href = "/settings?section=model_defaults&service=translation";
+    } else {
+      message.error(error instanceof TranslationUnavailableError ? t("knowledge.dictionaryNotFound") : t("knowledge.translationFailed"));
+    }
+  }, [t]);
+  const {
+    result: translationResult,
+    loading: translationLoading,
+    translate: translateSelectedText,
+    clear: clearSelectedTranslation,
+  } = usePdfSelectionTranslation(getTranslationServiceStatus, onTranslationError);
   const onCiteMessageRef = useRef(onCiteMessage);
   onCiteMessageRef.current = onCiteMessage;
   const onOpenSideChatRef = useRef(onOpenSideChat);
@@ -461,24 +470,14 @@ const AssistantMessage = (props: any) => {
   const handleOpenSideChatRef = useRef(handleOpenSideChat);
   handleOpenSideChatRef.current = handleOpenSideChat;
 
-  const handleTranslateSelectedText = useCallback(async () => {
+  const handleTranslateSelectedText = useCallback(() => {
     const selectedText = citeSelectionTextRef.current.trim();
     if (!selectedText) return;
     setTranslationSource(selectedText);
-    setTranslationResult("");
-    setTranslationLoading(true);
     window.getSelection()?.removeAllRanges();
     hideCiteButton();
-    try {
-      const result = await translateSelectionText(selectedText);
-      setTranslationResult(result.translated_text);
-    } catch (error) {
-      if(error instanceof TranslationUnavailableError&&error.reason==="service_not_configured")window.location.href="/settings?section=knowledge&tool=translation";
-      else message.error(error instanceof TranslationUnavailableError?t("knowledge.dictionaryNotFound"):t("knowledge.translationFailed"));
-    } finally {
-      setTranslationLoading(false);
-    }
-  }, [hideCiteButton, t]);
+    void translateSelectedText(selectedText);
+  }, [hideCiteButton, translateSelectedText]);
 
   const handleTranslateSelectedTextRef = useRef(handleTranslateSelectedText);
   handleTranslateSelectedTextRef.current = handleTranslateSelectedText;
@@ -666,7 +665,7 @@ const AssistantMessage = (props: any) => {
       onCancel={() => {
         if (!translationLoading) {
           setTranslationSource("");
-          setTranslationResult("");
+          clearSelectedTranslation();
         }
       }}
     >

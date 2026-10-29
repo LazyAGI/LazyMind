@@ -335,7 +335,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		APIKeyCiphertext:    apiKeyCiphertext,
 		CredentialVersion:   legacyModelProviderCredentialVersion,
 		CredentialRevision:  credentialRevision,
-		IsVerified:          checkData != nil,
+		IsVerified:          checkData != nil || translationGroupConfigured(parent, apiKey),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -670,6 +670,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 		updates["is_verified"] = true
 	}
+	if translationGroupConfigured(parent, effectiveAPIKey) {
+		updates["is_verified"] = true
+	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := updateConnectionSafely(tx, &parent, &row, baseURL, updates); err != nil {
 			return err
@@ -711,6 +714,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		IsVerified:          row.IsVerified,
 		Check:               checkData,
 	})
+}
+
+func translationGroupConfigured(parent orm.UserModelProvider, apiKey string) bool {
+	return parent.Category == "translation" &&
+		(strings.TrimSpace(apiKey) != "" || parent.HasCapability("keyless_translation"))
 }
 
 type deleteGroupResponse struct {
