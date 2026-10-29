@@ -3,6 +3,30 @@ import { evolutionControlsEn } from "@/modules/selfEvolution/shared/controlTrans
 import { enUSErrorMessages } from "./error-codes";
 
 const enUS = {
+  pdfFormula: {
+    "view": "View formula {{number}}",
+    "title": "Formula LaTeX",
+    "formula": "Formula",
+    "close": "Close formula",
+    "previewError": "Preview unavailable. You can still copy the original LaTeX.",
+    "raw": "Raw LaTeX",
+    "copy": "Copy LaTeX",
+    "copied": "Copied",
+    "copyError": "Copy failed. Select the text above to copy manually.",
+    "processing": "Parsing formulas…",
+    "insecure": "Use HTTPS or localhost to verify this PDF and preview formulas.",
+    "checking": "Verifying PDF…",
+    "count": "{{count}} formulas · Hover to preview; click ƒ for LaTeX",
+    "empty": "No formulas with reliable positions found",
+    "mismatch": "Formula source or format does not match this PDF. Parse again.",
+    "intro": "Parse formulas in the original PDF to preview and copy LaTeX",
+    "hide": "Hide formulas",
+    "show": "Show formulas",
+    "enable": "Enable formula parsing",
+    "retry": "Parse again",
+    "readError": "Could not read formula parsing status. Please retry.",
+    "startError": "Could not start parsing. Check the parser configuration and retry."
+},
   sourceImports: {
     "operationFailed": "Operation failed. Please try again.",
     "paperTag": "paper",

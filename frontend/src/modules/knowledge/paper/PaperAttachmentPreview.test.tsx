@@ -20,4 +20,10 @@ describe('stored attachment preview', () => {
         await waitFor(() => expect(screen.getByLabelText('原文件预览')).toHaveAttribute('data-file', `${window.location.origin}/api/core/documents/current/file.pdf`));
         expect(getDocument).toHaveBeenLastCalledWith({ dataset: 'library', document: 'current-document' });
     });
+    it('previews the original source when a processed preview is also available', async () => {
+        getDocument.mockResolvedValueOnce({data:{file_url:'/processed.pdf',download_file_url:'/source.pdf'}});
+        render(<PaperAttachmentPreview datasetId="library" attachment={{...libraryFixture().attachments[0],contentRef:'document',name:'source.pdf'}} onPositionChange={vi.fn()} />);
+        expect(await screen.findByLabelText('原文件预览')).toHaveAttribute('data-file', `${window.location.origin}/api/core/source.pdf`);
+    });
+
 });

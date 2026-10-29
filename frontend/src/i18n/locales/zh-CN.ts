@@ -3,6 +3,30 @@ import { evolutionControlsZh } from "@/modules/selfEvolution/shared/controlTrans
 import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
+  pdfFormula: {
+    "view": "查看公式 {{number}}",
+    "title": "公式 LaTeX",
+    "formula": "公式",
+    "close": "关闭公式",
+    "previewError": "此公式无法预览，仍可复制原始 LaTeX。",
+    "raw": "原始 LaTeX",
+    "copy": "复制 LaTeX",
+    "copied": "已复制",
+    "copyError": "复制失败，请选择上方文本手动复制。",
+    "processing": "正在解析公式…",
+    "insecure": "当前连接无法校验 PDF，请使用 HTTPS 或 localhost 启用公式预览",
+    "checking": "正在校验 PDF 文件…",
+    "count": "{{count}} 个公式 · 悬停预览，点击 ƒ 查看 LaTeX",
+    "empty": "未发现可定位的公式",
+    "mismatch": "公式与当前文件不匹配或格式不受支持，请重新解析",
+    "intro": "解析原 PDF 的公式以预览和复制 LaTeX",
+    "hide": "隐藏公式",
+    "show": "显示公式",
+    "enable": "启用公式解析",
+    "retry": "重新解析",
+    "readError": "无法读取公式解析状态，请重试。",
+    "startError": "无法启动公式解析，请检查解析服务配置后重试。"
+},
   sourceImports: {
     "operationFailed": "操作失败，请重试",
     "paperTag": "论文",

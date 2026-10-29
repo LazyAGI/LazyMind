@@ -884,6 +884,7 @@ func run(ctx context.Context) error {
 	resourceupdate.DirectoryIdleHandler = documentdirectory.QueueIdle
 	knowledge_market.RegisterAsyncJobs()
 	doc.RegisterPDFTranslationJobs()
+	doc.RegisterPDFIRJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflow.RegisterExternalWorkflowTaskJob()
 	workflow.RegisterDocumentPublicationJob()

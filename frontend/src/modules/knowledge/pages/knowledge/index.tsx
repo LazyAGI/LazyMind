@@ -503,14 +503,16 @@ const KnowledgeDocumentContent = () => {
   }, [group, segmentId, getSegmentDetail]);
 
   const originalPreviewFile = useMemo(() => {
-    const filePath = knowledgeDetail?.file_url;
+    const filePath = /\.pdf$/i.test(knowledgeDetail?.display_name || "")
+      ? knowledgeDetail?.download_file_url || knowledgeDetail?.file_url
+      : knowledgeDetail?.file_url;
     if (!filePath) {
       return "";
     }
 
     const fileUrl = `${window.location.origin}/api/core${filePath}`;
     return normalizeProxyableUrl(fileUrl);
-  }, [knowledgeDetail?.download_file_url, knowledgeDetail?.file_url]);
+  }, [knowledgeDetail?.display_name, knowledgeDetail?.download_file_url, knowledgeDetail?.file_url]);
 
   const previewFile = useMemo(() => {
     if (pdfSourceView !== "original" && pdfSourceView !== "comparison" && selectedPdfArtifact) {
@@ -1090,6 +1092,7 @@ const KnowledgeDocumentContent = () => {
           ) : (
             <FileViewer
               ref={fileViewerRef}
+              pdfIRTarget={pdfSourceView === "original" ? {dataset: knowledgeBaseId, document: knowledgeId, canWrite: hasWritePermission} : undefined}
               file={previewFile}
               fileName={knowledgeDetail?.display_name || ""}
               segment={segmentDetail}

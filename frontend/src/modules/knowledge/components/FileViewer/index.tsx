@@ -47,6 +47,7 @@ export interface FileViewerRef {
 }
 
 interface FileViewerProps {
+  pdfIRTarget?: import("@/modules/knowledge/api/pdfIR").PdfIRTarget;
   renderMarkdown?: (markdown: string) => ReactNode;
   data?: ArrayBuffer;
   onPreviewError?: () => void;
@@ -369,6 +370,18 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     }
   }, [fileData, fileType]);
 
+  const [pdfFingerprint, setPdfFingerprint] = useState<{data: ArrayBuffer; hash: string}>();
+  useEffect(() => {
+    let cancelled = false;
+    if (props.pdfIRTarget && fileType === "pdf" && fileData && globalThis.crypto?.subtle) {
+      const source = fileData;
+      void crypto.subtle.digest("SHA-256", source.slice(0)).then(digest => {
+        if (!cancelled) setPdfFingerprint({data: source, hash: Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")});
+      }).catch(() => { if (!cancelled) setPdfFingerprint(undefined); });
+    }
+    return () => { cancelled = true; };
+  }, [fileData, fileType, props.pdfIRTarget?.dataset, props.pdfIRTarget?.document]);
+
   const renderFile = useMemo(() => {
     if (!fileData) {
       return null;
@@ -383,6 +396,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "pdf":
         return pdfPreviewData ? (
           <RenderPdf
+            key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
+            pdfIRTarget={props.pdfIRTarget}
+            pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
             className="scroll-container"
             style={{
               height: "100%",
@@ -495,6 +511,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     mediaObjectUrl,
     meta,
     pdfPreviewData,
+    pdfFingerprint,
+    props.pdfIRTarget,
+    props.file,
     props.fileName,
     props.renderMarkdown,
     props.onPreviewError,

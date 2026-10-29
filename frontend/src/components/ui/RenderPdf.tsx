@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { Tooltip } from "antd";
@@ -7,12 +8,17 @@ import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { extractPdfSelectionContext } from "./pdfSelectionContext";
 import { isLearningActionCompatible, type LearningSelectionAction } from "./learningSelection";
 import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
+import { PdfFormulaLayer, hasFormulaGeometry } from "./PdfFormulaLayer";
+import { usePdfIR, usablePdfIR, type PdfIRTarget } from "@/modules/knowledge/api/pdfIR";
+import pdfWorkerUrl from "@react-pdf-worker/pdf.worker.min.mjs?url";
 export type { LearningSelectionAction } from "./learningSelection";
 export type { PdfReferenceAction } from "./pdfReferenceGeometry";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface RenderPdfProps {
+  pdfIRTarget?: PdfIRTarget;
+  pdfSourceHash?: string;
   onPreviewError?: () => void;
   fileData: string | ArrayBuffer | File | null;
   metadata?: Record<string, unknown> | null;
@@ -81,6 +87,8 @@ function hasUsablePdfText(value: string): boolean {
 
 export default function RenderPdf({
   onPreviewError,
+  pdfIRTarget,
+  pdfSourceHash,
   fileData,
   metadata,
   defaultPageWidth,
@@ -109,6 +117,20 @@ export default function RenderPdf({
   viewPosition,
   onViewPositionChange,
 }: RenderPdfProps) {
+  const { t } = useTranslation();
+  const pdfIR = usePdfIR(pdfIRTarget);
+  const [formulasEnabled, setFormulasEnabled] = useState(true);
+  const formulaDocument = usablePdfIR(pdfIR.state, pdfSourceHash);
+  const formulaPages = useMemo(() => {
+    const pages = new Map<number, import("@/modules/knowledge/api/pdfIR").PdfIRBlock[]>();
+    for (const block of formulaDocument?.blocks || []) {
+      if (!hasFormulaGeometry(block)) continue;
+      pages.set(block.page, [...(pages.get(block.page) || []), block]);
+    }
+    return pages;
+  }, [formulaDocument]);
+  const formulaCount = Array.from(formulaPages.values()).reduce((count, blocks) => count + blocks.length, 0);
+  const formulaBusy = pdfIR.starting || pdfIR.state.status === "queued" || pdfIR.state.status === "running";
   const [numPages, setNumPages] = useState(1);
   const [pdfLoaded, setPdfLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -658,7 +680,7 @@ export default function RenderPdf({
         <Page
           pageNumber={index + 1}
           width={pageWidthPx}
-          renderTextLayer={Boolean(onAskSelection || onTranslateSelection || onImportReferenceSelection)}
+          renderTextLayer={Boolean(pdfIRTarget || onAskSelection || onTranslateSelection || onImportReferenceSelection)}
           renderAnnotationLayer
           onRenderSuccess={() => {
             tryHighlightAfterRender(index);
@@ -676,6 +698,7 @@ export default function RenderPdf({
             }));
           }}
         />
+        {formulasEnabled && formulaDocument && formulaPages.has(index) && <PdfFormulaLayer key={`${formulaDocument.source_sha256}:${formulaDocument.version}`} blocks={formulaPages.get(index)!} />}
         <div
           style={{
             position: "absolute",
@@ -731,6 +754,11 @@ export default function RenderPdf({
         ...style,
       }}
     >
+      {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
+        <span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
+        {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
+        {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
+      </div>}
       {selectionHighlights.map((highlight, index) => (
         <div
           key={`${highlight.left}-${highlight.top}-${index}`}
