@@ -5,7 +5,7 @@ import * as api from "./cloudApi";
 vi.mock("react-i18next", () => ({useTranslation:()=>({t:(key:string)=>key.replace("vocabularyCloud.","")})}));
 vi.mock("./cloudApi",()=>({listCloudConnections:vi.fn(),listCloudOperations:vi.fn(),saveCloudConnection:vi.fn(),testCloudConnection:vi.fn(),createCloudWordbook:vi.fn(),disconnectCloudConnection:vi.fn(),syncCloudVocabulary:vi.fn()}));
 const connection={provider:"maimemo" as const,configured:true,enabled:false,target_id:"target",target_name:"My book",add_to_study:false,pending:0,failed:0,succeeded:0,last_error:""};
-async function open(){fireEvent.click(await screen.findByRole("button",{name:"maimemo manage"}));return await screen.findByRole("region",{name:"maimemo"});}
+async function open(provider="maimemo"){fireEvent.click(await screen.findByRole("button",{name:`${provider} manage`}));return await screen.findByRole("region",{name:provider});}
 describe("cloud vocabulary connections",()=>{
   beforeEach(()=>{vi.clearAllMocks();vi.mocked(api.listCloudConnections).mockResolvedValue([connection]);vi.mocked(api.listCloudOperations).mockResolvedValue([]);vi.mocked(api.testCloudConnection).mockResolvedValue([{id:"target",name:"My book"}]);vi.mocked(api.saveCloudConnection).mockImplementation(async(provider,body)=>({...connection,...body,provider,configured:true}));});
   it("keeps both entries on load failure and never exposes an unknown configuration",async()=>{
@@ -69,6 +69,30 @@ describe("cloud vocabulary connections",()=>{
   it("translates persisted errors without exposing unknown text",async()=>{
     vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,last_error:"cloud vocabulary: invalid_token"}]);vi.mocked(api.listCloudOperations).mockResolvedValue([{id:"1",provider:"maimemo",term:"word",status:"failed",last_error:"secret upstream",updated_at:"2026-10-29T00:00:00Z"}]);
     render(<CloudVocabularyConnections/>);const card=await open();expect(await within(card).findByText("errors.invalid_token")).toBeInTheDocument();expect(within(card).getByText("errors.sync_failed")).toBeInTheDocument();expect(screen.queryByText("secret upstream")).toBeNull();
+  });
+  it("guides Eudic authorization, translates rejection, and opens creation for an empty English list",async()=>{
+    vi.mocked(api.listCloudConnections).mockResolvedValue([]);
+    vi.mocked(api.testCloudConnection).mockRejectedValueOnce({response:{data:{code:2005301,message:"sensitive"}}}).mockResolvedValueOnce([]);
+    render(<CloudVocabularyConnections/>);const card=await open("eudic");
+    expect(within(card).getByRole("link",{name:"eudicTokenLink"})).toHaveAttribute("href","https://my.eudic.net/OpenAPI/Authorization");
+    expect(within(card).getByText("eudicTokenHelp")).toBeInTheDocument();
+    fireEvent.change(within(card).getByLabelText("token"),{target:{value:"NIS complete-token"}});fireEvent.click(within(card).getByRole("button",{name:"verify"}));
+    expect(await within(card).findByText("errors.invalid_token")).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole("button",{name:"verify"}));await within(card).findByText("noBooks");
+    expect(within(card).getByText("createTarget").closest("details")).toHaveAttribute("open");
+    expect(api.testCloudConnection).toHaveBeenLastCalledWith("eudic","NIS complete-token");expect(api.createCloudWordbook).not.toHaveBeenCalled();
+  });
+  it("offers visible stored-credential retry and searches English wordbook names",async()=>{
+    vi.mocked(api.listCloudConnections).mockResolvedValue([{...connection,provider:"eudic",target_id:"",target_name:""}]);
+    vi.mocked(api.testCloudConnection).mockRejectedValueOnce({response:{data:{code:2005304}}}).mockResolvedValueOnce([{id:"a",name:"Travel"},{id:"b",name:"Science"}]);
+    render(<CloudVocabularyConnections/>);const card=await open("eudic");
+    expect(await within(card).findByText("errors.rate_limited")).toBeInTheDocument();
+    fireEvent.click(within(card).getByRole("button",{name:"refreshBooks"}));
+    await waitFor(()=>expect(within(card).getByRole("button",{name:"refreshBooks"})).toBeEnabled());
+    expect(within(card).getByText("eudicEnglishHelp")).toBeInTheDocument();
+    const picker=within(card).getByRole("combobox");fireEvent.mouseDown(picker);fireEvent.change(picker,{target:{value:"Science"}});
+    await waitFor(()=>expect(screen.getAllByText("Science").length).toBeGreaterThan(0));expect(screen.queryByText("Travel")).toBeNull();
+    expect(api.saveCloudConnection).not.toHaveBeenCalled();
   });
   it("does not overlap polling or continue scheduling after unmount",async()=>{
     vi.useFakeTimers();let finish!:(value:typeof connection[])=>void;vi.mocked(api.listCloudConnections).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));const view=render(<CloudVocabularyConnections/>);

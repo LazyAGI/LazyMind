@@ -80,7 +80,9 @@ func newCloudClient(provider, token string) (*cloudClient, error) {
 	if (provider != "eudic" && provider != "maimemo") || token == "" || strings.ContainsAny(token, "\r\n") {
 		return nil, cloudError("invalid_configuration", false)
 	}
-	interval := 2100 * time.Millisecond
+	// Eudic caps both 30 requests/minute and 500 requests/30 minutes.
+	// A 3.7s interval respects both, including sustained historical backfills.
+	interval := 3700 * time.Millisecond
 	if provider == "maimemo" {
 		interval = 1600 * time.Millisecond
 	}
@@ -179,8 +181,10 @@ func (c *cloudClient) request(ctx context.Context, method, path string, payload 
 		}
 		return e
 	}
-	if c.provider == "eudic" && method == "POST" && res.StatusCode != http.StatusCreated {
-		return cloudError("invalid_response", false)
+	if c.provider == "eudic" {
+		if (method == "POST" && res.StatusCode != http.StatusCreated) || (method == "GET" && res.StatusCode != http.StatusOK) {
+			return cloudError("invalid_response", false)
+		}
 	}
 	b, err := io.ReadAll(io.LimitReader(res.Body, 2*1024*1024+1))
 	if err != nil {
@@ -212,11 +216,26 @@ func (c *cloudClient) request(ctx context.Context, method, path string, payload 
 	}
 	return nil
 }
+func validEudicWordbook(book CloudWordbook) bool {
+	return strings.TrimSpace(book.ID) != "" && strings.TrimSpace(book.Name) != ""
+}
 func (c *cloudClient) ListWordbooks(ctx context.Context) ([]CloudWordbook, error) {
 	if c.provider == "eudic" {
 		var books []CloudWordbook
-		e := c.request(ctx, "GET", "/category?language=en", nil, &books)
-		return books, e
+		if e := c.request(ctx, "GET", "/category?language=en", nil, &books); e != nil {
+			return nil, e
+		}
+		if books == nil {
+			return nil, cloudError("invalid_response", false)
+		}
+		seen := make(map[string]bool, len(books))
+		for _, book := range books {
+			if !validEudicWordbook(book) || seen[book.ID] {
+				return nil, cloudError("invalid_response", false)
+			}
+			seen[book.ID] = true
+		}
+		return books, nil
 	}
 	books := []CloudWordbook{}
 	// MaiMemo rejects requests with a limit greater than 10.
@@ -253,6 +272,9 @@ func (c *cloudClient) CreateWordbook(ctx context.Context, name string) (CloudWor
 		e := c.request(ctx, "POST", "/category", map[string]any{"language": "en", "name": name}, &book)
 		if e != nil {
 			return book, e
+		}
+		if !validEudicWordbook(book) {
+			return CloudWordbook{}, cloudError("invalid_response", false)
 		}
 	} else {
 		var data struct {

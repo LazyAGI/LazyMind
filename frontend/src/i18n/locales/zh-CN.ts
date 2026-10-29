@@ -4,6 +4,9 @@ import { zhCNErrorMessages } from "./error-codes";
 
 const zhCN = {
   vocabularyCloud: {
+    eudicTokenHelp: "请粘贴欧路个人授权页面提供的完整授权信息（含前缀，如有）。",
+    eudicEnglishHelp: "这里仅列出英语词本，请选择保存英文生词的目标；可输入名称搜索。",
+    refreshBooks: "刷新词本 / 重试",
     connectionIntro: "连接后，新收藏的英文生词会同步到所选词本。",
     verify: "验证连接",
     saveAndEnable: "保存并启用",
@@ -28,6 +31,9 @@ const zhCN = {
     configConflict: "连接设置已在其他页面更改。请放弃当前编辑并重新加载，再保存设置。",
     reloadSettings: "放弃编辑并重新加载",
     errors: {
+        service_unavailable: "平台请求未完成，请检查网络或稍后重试。",
+        connection_unavailable: "连接不可用，请重新验证 Token 并完成连接。",
+        storage_failed: "设置未能保存，请稍后重试。",
     "invalid_configuration": "请检查 Token 和连接设置。",
     "invalid_name": "请输入有效的词本名称。",
     "invalid_request": "无法准备同步请求，请重试。",
