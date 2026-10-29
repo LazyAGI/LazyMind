@@ -7,6 +7,7 @@ func TestAdvancedRequestErrorsUseSpecificSafeMessages(t *testing.T) {
 		source       string
 		status, code int
 	}{
+		{"embedding model is in use; remove indexed knowledge bases before removing the model", 409, 2005081},
 		{"invalid advanced request configuration", 400, 2005050},
 		{"invalid request configuration", 400, 2005050},
 		{"authentication, protocol and transport headers are managed by LazyMind", 400, 2005051},

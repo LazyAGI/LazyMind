@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderModelCatalogDrawer } from "./ProviderModelCatalogDrawer";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 
-const mocks = vi.hoisted(() => ({ remote: vi.fn(), lookup: vi.fn() }));
+const mocks = vi.hoisted(() => ({ remote: vi.fn(), lookup: vi.fn(), builtIn: vi.fn() }));
 vi.mock("../api", () => ({ listRemoteGroupModels: mocks.remote }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -23,6 +23,7 @@ vi.mock("@/components/request", () => ({
   getLocalizedErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
 }));
+vi.mock("../builtInCatalog", () => ({ builtInCatalog: mocks.builtIn }));
 vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: mocks.lookup }));
 
 const selected: ProviderModel[] = [
@@ -85,6 +86,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.remote.mockResolvedValue({ models: remote });
   mocks.lookup.mockReturnValue(undefined);
+  mocks.builtIn.mockReturnValue([]);
 });
 
 describe("provider model catalog drawer", () => {
@@ -460,6 +462,7 @@ describe("provider model catalog drawer", () => {
   });
 
   it("shows built-in Doubao suggestions with a visible failed-fetch status", async () => {
+    mocks.builtIn.mockReturnValue([{ id: "doubao-seed-1-6-251015", name: "doubao-seed-1-6-251015", model_type: "llm", added: false }]);
     mocks.remote.mockRejectedValue(new Error("models endpoint unsupported"));
     draw({ ...fixture([]), providerName: "Doubao", protocolName: "Doubao" });
     expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
