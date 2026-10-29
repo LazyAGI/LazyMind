@@ -179,7 +179,7 @@ func TestModelOutputRollbackPersistsOnlyCommittedProjection(t *testing.T) {
 			if err := db.Where("id = ?", target.HistoryID).Take(&history).Error; err != nil {
 				t.Fatal(err)
 			}
-			if history.RunStatus != "completed" || strings.Contains(history.Result, "BAD") || !strings.Contains(history.Result, "kept \n") || !strings.Contains(history.Result, "<trp>done</trp>\ngood") || extractThinkContent(history.Result) != "prior-think" || len(retrievalSources(history.RetrievalResult)) != 0 || len(chatExportsFromExt(history.Ext)) != 0 {
+			if history.ToolCallTurns != 1 || history.RunStatus != "completed" || strings.Contains(history.Result, "BAD") || !strings.Contains(history.Result, "kept \n") || !strings.Contains(history.Result, "<trp>done</trp>\ngood") || extractThinkContent(history.Result) != "prior-think" || len(retrievalSources(history.RetrievalResult)) != 0 || len(chatExportsFromExt(history.Ext)) != 0 {
 				t.Fatalf("failed call survived or committed content disappeared: status=%s result=%q retrieval=%s ext=%s", history.RunStatus, history.Result, history.RetrievalResult, history.Ext)
 			}
 			cursor := modelOutputFromExt(history.Ext)
@@ -193,6 +193,8 @@ func TestModelOutputRollbackPersistsOnlyCommittedProjection(t *testing.T) {
 					cachedChunks[i] = &chunks[i]
 				}
 				merged := mergeChunksToFirstChunk(cachedChunks)
+				requireTerminalToolCallTurns(t, chunks, history.ID, 1)
+				requireToolCallTurns(t, merged, 1)
 				if strings.Contains(merged.Delta, "BAD") || merged.ReasoningContent != "prior-think" || merged.ModelOutput == nil || merged.ModelOutput.CallIndex != 3 || len(merged.Sources) != 0 || !strings.HasSuffix(merged.Delta, "</trp>\ngood") {
 					t.Fatalf("cache merge differs from committed output: %+v", merged)
 				}
@@ -209,6 +211,7 @@ func TestModelOutputRollbackPersistsOnlyCommittedProjection(t *testing.T) {
 				resume := httptest.NewRecorder()
 				resumeSingleAnswerChat(t.Context(), stateStore, conversation.ID, history.ID, resume, resume)
 				cached := decodeChatChunkSSE(t, resume.Body.String())[0]
+				requireToolCallTurns(t, &cached, 1)
 				if cached.Delta != merged.Delta || cached.ReasoningContent != merged.ReasoningContent || cached.ModelOutput.CallIndex != 3 {
 					t.Fatalf("cache resume changed projection: %+v", cached)
 				}
@@ -216,6 +219,7 @@ func TestModelOutputRollbackPersistsOnlyCommittedProjection(t *testing.T) {
 			cold := httptest.NewRecorder()
 			resumeFromDBOnly(t.Context(), db, "user-1", conversation.ID, cold, cold)
 			restored := decodeChatChunkSSE(t, cold.Body.String())[0]
+			requireToolCallTurns(t, &restored, 1)
 			if strings.Contains(restored.Delta, "BAD") || restored.ReasoningContent != "prior-think" || restored.ModelOutput == nil || restored.ModelOutput.CallIndex != 3 || len(restored.Sources) != 0 || restored.Exports == nil || len(*restored.Exports) != 0 {
 				t.Fatalf("cold resume lost absolute projection: %+v", restored)
 			}
@@ -309,6 +313,7 @@ func TestModelOutputOpenCallClosesBeforeTerminal(t *testing.T) {
 								}
 							}
 							if chunk.RuntimeEvent != nil && chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+								requireToolCallTurns(t, &chunk, history.ToolCallTurns)
 								if !replaced {
 									t.Fatal("terminal preceded rollback")
 								}
