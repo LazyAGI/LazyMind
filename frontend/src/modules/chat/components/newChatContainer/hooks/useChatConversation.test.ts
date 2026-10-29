@@ -2419,3 +2419,11 @@ describe("useChatConversation regeneration recovery", () => {
     unmount();
   });
 });
+
+it('forwards an explicit initial paper model binding to its stream request',async()=>{
+ const {stream}=createMockStream();
+ const onOpenSSE=vi.fn(()=>stream);const {result}=renderConversation({onOpenSSE});
+ const selection={mode:'fixed' as const,model_id:'paper-model',source:'own' as const};
+ await act(async()=>{await result.current.sendMessage({text:'Explain the paper',initial_model_selection:selection});});
+ expect(onOpenSSE).toHaveBeenCalledWith(expect.any(Array),expect.anything(),{},expect.objectContaining({initial_model_selection:selection}));
+});

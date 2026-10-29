@@ -2028,6 +2028,7 @@ export function useChatConversation({
       inputs,
       ChatConversationsRequestActionEnum.ChatActionNext,
       {
+        ...(params.initial_model_selection ? { initial_model_selection: params.initial_model_selection } : {}),
         ...(params.workflow_control ? { workflow_control: params.workflow_control } : {}),
         ...(params.run_in_background ? { run_in_background: true } : {}),
         ...(params.workspace_id ? { workspace_id: params.workspace_id, workspace_permission_mode: params.workspace_permission_mode, project_name: params.project_name } : {}),

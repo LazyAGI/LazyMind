@@ -31,9 +31,10 @@ type EnsureDocumentParsedRequest struct {
 }
 
 type EnsureDocumentParsedResult struct {
-	Error  *ProcessingDiagnostic `json:"error,omitempty"`
-	Status string                `json:"status"`
-	TaskID string                `json:"task_id,omitempty"`
+	currentTaskSucceeded bool                  // Internal evidence; never part of the API response.
+	Error                *ProcessingDiagnostic `json:"error,omitempty"`
+	Status               string                `json:"status"`
+	TaskID               string                `json:"task_id,omitempty"`
 }
 
 func isRetryableParseObservation(uploadStatus, taskStatus string) bool {
@@ -105,9 +106,22 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	} else if artifact != nil {
 		return EnsureDocumentParsedResult{Status: "parsed"}, nil
 	}
+	var currentResult *EnsureDocumentParsedResult
 	if rec.lazy != nil {
 		status := strings.ToUpper(strings.TrimSpace(rec.lazy.UploadStatus))
-		if status == "SUCCESS" || status == "SUCCEEDED" {
+		canReadRoots := status == "SUCCESS" || status == "SUCCEEDED"
+		if !canReadRoots {
+			// DOC_REPARSE leaves the original upload status unchanged. Only a
+			// successful current task may supersede that historical failure;
+			// roots from a working reparse have no source-generation proof.
+			result, queryErr := s.parseResultWithoutRoots(r.Context(), rec)
+			if queryErr != nil {
+				return EnsureDocumentParsedResult{}, queryErr
+			}
+			currentResult = &result
+			canReadRoots = result.currentTaskSucceeded
+		}
+		if canReadRoots {
 			// Check current service artifacts before historical Core task states:
 			// a retry can succeed while an older task still says FAILED or WORKING.
 			roots, rootsErr := s.ListDocumentChunks(r.Context(), DocumentChunksRequest{
@@ -117,6 +131,9 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 			if rootsErr != nil || len(roots.Chunks) == 0 {
 				// UploadStatus is not updated by DOC_REPARSE. Missing roots may
 				// mean a failed current task, not merely delayed visibility.
+				if currentResult != nil {
+					return *currentResult, nil
+				}
 				return s.parseResultWithoutRoots(r.Context(), rec)
 			}
 			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "succeeded", "", "")
@@ -129,7 +146,20 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	if rec.processing.ParseStatus == "running" {
 		var active orm.Task
 		_ = s.db.WithContext(r.Context()).Where("dataset_id = ? AND doc_id = ? AND deleted_at IS NULL", req.DatasetID, req.DocumentID).Order("created_at DESC, id DESC").Take(&active).Error
-		return EnsureDocumentParsedResult{Status: "parsing", TaskID: active.ID}, nil
+		// The local latch only prevents duplicate submission; it is not proof
+		// that the remote worker is still running. Its current task snapshot
+		// can already be terminal while task projections are catching up.
+		var result EnsureDocumentParsedResult
+		var err error
+		if currentResult != nil {
+			result = *currentResult
+		} else {
+			result, err = s.parseResultWithoutRoots(r.Context(), rec)
+		}
+		if result.TaskID == "" {
+			result.TaskID = active.ID
+		}
+		return result, err
 	}
 	if rec.lazy != nil {
 		status := strings.ToUpper(strings.TrimSpace(rec.lazy.UploadStatus))
@@ -272,8 +302,11 @@ func (s *DocumentService) parseResultWithoutRoots(ctx context.Context, rec docum
 			message = *current.LastErrorMsg
 		}
 		return failedDocumentParseResult(&ProcessingDiagnostic{Stage: "parse", Code: code, Message: SafeProcessingMessage(message), TaskID: taskID, Recovery: "请明确发起重新解析。"}), nil
-	case "SUCCESS", "WORKING", "WAITING":
-		// A successful task may publish its status before roots are visible.
+	case "SUCCESS":
+		// Success permits a roots check, but is not itself proof that readable
+		// roots have reached storage yet.
+		return EnsureDocumentParsedResult{Status: "parsing", TaskID: taskID, currentTaskSucceeded: true}, nil
+	case "WORKING", "WAITING":
 		return EnsureDocumentParsedResult{Status: "parsing", TaskID: taskID}, nil
 	default:
 		return EnsureDocumentParsedResult{Status: "unknown", TaskID: taskID}, nil

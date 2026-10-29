@@ -729,6 +729,17 @@ def _workflow_startup_clarification_available(
     )
 
 
+def _has_document_preview_input(request: ChatRequest) -> bool:
+    # Preview papers are supplied through an authorized document read, not an
+    # uploaded attachment. Their availability must not become a missing-file
+    # blocker before the agent can perform that read.
+    context = request.document_context or {}
+    return request.conversation.surface == 'knowledge_document_preview' and all(
+        isinstance(context.get(key), str) and bool(context[key].strip())
+        for key in ('dataset_id', 'document_id')
+    )
+
+
 def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
     query, _ = _normalize_cite_message_query_for_agent(request.message.query)
     user_input, _ = _normalize_cite_message_query_for_agent(request.message.user_query or query)
@@ -757,7 +768,7 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
             ),
         ),
         'intent': request.conversation.intent_context,
-        'has_attachments': bool(request.message.files),
+        'has_attachments': bool(request.message.files) or _has_document_preview_input(request),
         'explicit_resources': explicit_resources,
         'thinking_depth': thinking_depth,
     }
@@ -1366,7 +1377,7 @@ async def _handle_chat_impl(
                 classifier=None,
                 enable_llm_fallback=False,
                 thinking_depth=thinking_depth,
-                has_attachments=bool(files_map),
+                has_attachments=bool(files_map) or _has_document_preview_input(request),
                 explicit_resources=explicit_resource_payload,
             )
         profile_latency_ms = int((time.monotonic() - profile_started) * 1000)
@@ -1986,10 +1997,16 @@ async def _handle_chat_impl(
             f'Its knowledge_base_id is {document_context.get("dataset_id")!r} and its '
             f'document_id is {document_context.get("document_id")!r}. Treat references such as '
             '“this document”, “this paper”, or “it” as that exact document. For questions that '
-            'need document content, call KBToolkit.read_document with these exact IDs. This read '
+            'need document content, call KBToolkit_read_document with these exact IDs before answering. This read '
             'also starts on-demand parsing and works without semantic chunks or a vector index. '
             'Do not ask the user to paste or identify the document merely because kb_search '
-            'returns no results.'
+            'returns no results. If the read result is spilled to a workspace file, inspect that '
+            'file using search_file_resource and read_file_resource. Search in the paper’s source '
+            'language: for example, a Chinese question about 表1 may refer to Table 1 in an English '
+            'paper. Also search the requested method/model name and metric, then read the matching '
+            'passage or table window. One absent literal phrase in the question’s language does '
+            'not establish that the paper lacks the requested content. Support the answer with '
+            'the actual source passage or table values, and page/table labels when available.'
         ),
         'backend.document_preview', priority=38, authoritative=True,
         content_kind='instruction', skip_if=lambda: not is_document_preview_chat,

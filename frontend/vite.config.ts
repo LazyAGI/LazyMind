@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { defineConfig, loadEnv, Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import svgr from "vite-plugin-svgr";
@@ -34,6 +35,7 @@ export default defineConfig(({ mode }) => {
       // Keep application imports independent of the current file location.
       alias: {
         "@": path.resolve(__dirname, "src"),
+        "@react-pdf-worker": path.dirname(createRequire(import.meta.url).resolve("pdfjs-dist/build/pdf.worker.min.mjs", { paths: [path.dirname(createRequire(import.meta.url).resolve("react-pdf/package.json"))] })),
       },
     },
     css: {

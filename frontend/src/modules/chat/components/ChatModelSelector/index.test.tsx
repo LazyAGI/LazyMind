@@ -921,3 +921,10 @@ describe("ChatModelSelector", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+it('loads a paper draft catalog without a nonexistent conversation and isolates its selection',async()=>{
+ fetchCatalogMock.mockResolvedValue(catalog());
+ render(<ChatModelSelector draftSelectionKey="pdf-reading-draft"/>);
+ await waitFor(()=>expect(fetchCatalogMock).toHaveBeenCalledWith(undefined,expect.any(AbortSignal)));
+ await waitFor(()=>expect(useModelSelectionStore.getState().selections['pdf-reading-draft']?.model_id).toBe('deepseek-v3'));
+});

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PdfTemporaryChat from "./index";
+import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
 
 const requests = vi.hoisted(() => ({ options: [] as Array<{ payload: string }> }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -22,7 +23,9 @@ vi.mock("@/modules/chat/utils/sse", () => ({
   SSE: class { constructor(_url: string, options: { payload: string }) { requests.options.push(options); } },
 }));
 const chatActions = vi.hoisted(() => ({
+  openSSE: undefined as undefined | ((...args: any[]) => unknown),
   allowLocalWorkspace: undefined as boolean | undefined,
+  composer: {} as Record<string, unknown>,
   createNewChat: vi.fn(),
   sendMessage: vi.fn().mockResolvedValue(true),
   prepareMessage: vi.fn(),
@@ -30,8 +33,10 @@ const chatActions = vi.hoisted(() => ({
 vi.mock("@/modules/chat/components/newChatContainer", async () => {
   const React = await import("react");
   return {
-    default: React.forwardRef(({ onOpenSSE, allowLocalWorkspace }: any, ref) => {
+    default: React.forwardRef(({ onOpenSSE, allowLocalWorkspace, ...composer }: any, ref) => {
+      chatActions.openSSE = onOpenSSE;
       chatActions.allowLocalWorkspace = allowLocalWorkspace;
+      chatActions.composer = composer;
       React.useImperativeHandle(ref, () => ({
         createNewChat: chatActions.createNewChat,
         sendMessage: chatActions.sendMessage,
@@ -96,6 +101,39 @@ describe("document question context", () => {
     expect(retryDocumentParsed).toHaveBeenCalledWith("dataset-a", "broken-pdf");
     expect(screen.getByText("knowledge.pdfChatParsing")).toBeInTheDocument();
     expect(screen.queryByText("Reader could not decode the PDF")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes chat text readiness from formula parsing", async () => {
+    ensureDocumentParsed.mockResolvedValueOnce({ status: "parsed" });
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="ready-pdf" fileName="ready.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("knowledge.pdfChatParsed")).toBeInTheDocument();
+    expect(screen.queryByText("knowledge.pdfChatParsing")).not.toBeInTheDocument();
+  });
+
+  it("replaces a running indicator with the terminal parser failure and stops polling", async () => {
+    vi.useFakeTimers();
+    ensureDocumentParsed.mockResolvedValueOnce({ status: "parsing" }).mockResolvedValueOnce({ status: "failed", error: { message: "Root storage unavailable" } });
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="stalled-pdf" fileName="stalled.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("knowledge.pdfChatParsingHint")).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByText("Root storage unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("knowledge.pdfChatParsing")).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(ensureDocumentParsed).toHaveBeenCalledTimes(2);
+    expect(retryDocumentParsed).not.toHaveBeenCalled();
+  });
+
+  it("refreshes an unknown status without requesting a new parse attempt", async () => {
+    ensureDocumentParsed.mockRejectedValueOnce(new Error("Status service unavailable")).mockResolvedValueOnce({ status: "parsed" });
+    render(<PdfTemporaryChat datasetId="dataset-a" documentId="unknown-pdf" fileName="unknown.pdf" onClose={() => {}} />);
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(screen.getByRole("button", { name: "knowledge.pdfChatRefreshStatus" }));
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText("knowledge.pdfChatParsed")).toBeInTheDocument();
+    expect(screen.queryByText("Status service unavailable")).not.toBeInTheDocument();
+    expect(retryDocumentParsed).not.toHaveBeenCalled();
   });
 
   it("does not turn a failed status lookup into parsing", async () => {
@@ -233,7 +271,7 @@ describe("document question context", () => {
     render(<PdfTemporaryChat
       datasetId="dataset-a"
       documentId="document-pdf"
-      fileName="source.pdf"
+      fileName="source.md"
       selection={selection}
       translationRequest={{ id: 1, selection }}
       onClose={() => {}}
@@ -249,4 +287,39 @@ describe("document question context", () => {
     expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
     expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "Workloads", appendCitations: true });
   });
+});
+
+
+it("uses the paper composer and a draft model catalog without disabling keyboard invocations",()=>{
+ render(<PdfTemporaryChat datasetId="d" documentId="draft-paper-test" fileName="paper.pdf" onClose={vi.fn()}/>);
+ expect(chatActions.composer).toMatchObject({composerVariant:"paper",showModelSelector:true,modelSelectionDraft:true});
+ expect(chatActions.composer.allowMentions).not.toBe(false);
+});
+
+
+it('removes the fixed new/save action row only from paper chat',()=>{
+ const props={datasetId:'d',documentId:'paper-actions-test',onClose:vi.fn()};
+ const {rerender,container}=render(<PdfTemporaryChat {...props} fileName="paper.pdf"/>);
+ expect(container.querySelector(".pdf-temporary-chat--paper")).not.toBeNull();
+ expect(screen.queryByRole('button',{name:/knowledge.pdfChatNew/})).not.toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:/knowledge.pdfChatSave/})).not.toBeInTheDocument();
+ rerender(<PdfTemporaryChat {...props} fileName="notes.md"/>);
+ expect(container.querySelector(".pdf-temporary-chat--paper")).toBeNull();
+ expect(screen.getByRole('button',{name:/knowledge.pdfChatNew/})).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:/knowledge.pdfChatSave/})).toBeInTheDocument();
+});
+
+
+it.each([ChatConversationsRequestActionEnum.ChatActionNext,ChatConversationsRequestActionEnum.ChatActionRegeneration])('keeps current paper scope on %s without an attached file or selected text',action=>{
+ render(<PdfTemporaryChat datasetId="paper-dataset" documentId="current-paper" fileName="current.pdf" onClose={vi.fn()}/>);
+ chatActions.openSSE?.([{query:'Explain the core contribution of this paper.'}],action,{}, {
+  document_context:{dataset_id:'stale-dataset',document_id:'stale-paper'},
+  conversation:{search_config:{dataset_list:[]}},
+ });
+ const payload=JSON.parse(requests.options[0].payload);
+ expect(payload.action).toBe(action);
+ expect(payload.surface).toBe('knowledge_document_preview');
+ expect(payload.document_context).toEqual({dataset_id:'paper-dataset',document_id:'current-paper',file_name:'current.pdf'});
+ expect(payload.conversation.search_config.dataset_list).toEqual([{id:'paper-dataset'}]);
+ expect(payload.input).toEqual([{query:'Explain the core contribution of this paper.'}]);
 });

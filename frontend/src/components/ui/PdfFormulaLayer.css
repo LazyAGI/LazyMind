@@ -1,0 +1,14 @@
+.pdf-formula-layer { position:absolute; inset:0; pointer-events:none; z-index:8; }
+.pdf-formula-trigger { position:absolute; pointer-events:auto; width:24px; height:24px; border:1px solid #b4c7df; border-radius:6px; color:#174b86; background:#edf5ff; cursor:pointer; font:italic 16px Georgia,serif; opacity:.75; }
+.pdf-formula-trigger:hover,.pdf-formula-trigger:focus-visible { opacity:1; outline:2px solid #377dcc; outline-offset:2px; }
+.pdf-formula-card { position:fixed; z-index:1500; width:min(360px,calc(100vw - 16px)); max-height:calc(100vh - 16px); overflow:auto; padding:14px; background:white; color:#243247; border:1px solid #d6e0ed; border-radius:12px; box-shadow:0 10px 36px #18365930; font:13px/1.5 system-ui,sans-serif; }
+.pdf-formula-heading,.pdf-formula-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.pdf-formula-card button { background:#f0f5fc; border:1px solid #bfd0e5; border-radius:6px; color:#174b86; padding:6px 10px; cursor:pointer; flex-shrink:0; }
+.pdf-formula-card button:focus-visible { outline:2px solid #377dcc; outline-offset:2px; }
+.pdf-formula-preview { overflow:auto; max-height:140px; }
+.pdf-formula-card textarea { display:block; box-sizing:border-box; margin:6px 0 12px; width:100%; min-height:64px; max-height:140px; padding:8px; resize:vertical; border:1px solid #d6e0ed; border-radius:6px; font:12px/1.5 monospace; color:#243247; background:#f8fafc; }
+.pdf-formula-footer [role=status] { font-size:12px; }
+.pdf-formula-controls { position:sticky; top:0; z-index:30; display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:6px 12px; min-height:34px; background:#f8fafcf5; border-bottom:1px solid #d6e0ed; color:#33455c; font-size:12px; }
+.pdf-formula-controls button { border:1px solid #bfd0e5; border-radius:6px; padding:4px 10px; background:white; color:#174b86; cursor:pointer; }
+
+.pdf-formula-footer { flex-wrap:wrap; }

@@ -50,7 +50,7 @@ def wrapped(current, alternatives, *, vision=False):
 
 def reasoning_response(request):
     if request['model'] == 'o3':
-        if 'max_tokens' in request or 'max_completion_tokens' not in request:
+        if 'max_tokens' in request:
             return {'error': 'unsupported_parameter', 'status': 400, 'type': 'invalid_request_error'}
         return {'message': {'role': 'assistant', 'content': 'reasoning completed'}}
 
@@ -73,10 +73,38 @@ def test_reasoning_output_limit_is_legal_for_initial_and_fallback_models(
     assert [request['model'] for request in provider.requests] == expected
     request = provider.requests[-1]
     assert 'max_tokens' not in request
-    assert request['max_completion_tokens'] == min(configured_limit or reserved, reserved)
+    if configured_limit is None:
+        assert 'max_completion_tokens' not in request
+    else:
+        assert request['max_completion_tokens'] == min(configured_limit, reserved)
     assert target.llm_config['llm'].get('static_params', {}) == (
         {'max_completion_tokens': configured_limit} if configured_limit is not None else {}
     )
+
+
+@pytest.mark.parametrize('as_fallback', [False, True])
+@pytest.mark.parametrize('summary', [False, True])
+def test_unconfigured_output_limit_keeps_provider_default(provider, as_fallback, summary):
+    target = candidate(provider, 'gpt-4o', window=131072)
+    current = candidate(provider, 'model-a') if as_fallback else target
+    fail(provider, 'model-a')
+
+    def respond(request):
+        if request['model'] == 'gpt-4o':
+            # This model accepts defaults but rejects the internal 32768 reserve.
+            if 'max_tokens' in request or 'max_completion_tokens' in request:
+                return {'error': 'invalid_value', 'status': 400}
+            return {'message': {'role': 'assistant', 'content': 'completed'}}
+
+    provider.on_request = respond
+    if summary:
+        assert _call_summarizer_llm(raw_model(target), 'Summarize.', 'Short history.',
+                                   candidate_budget=build_context_budget(131072)) == 'completed'
+    else:
+        assert wrapped(current, [target] if as_fallback else [])('Complete.') == 'completed'
+    assert provider.requests[-1]['model'] == 'gpt-4o'
+    assert 'max_tokens' not in provider.requests[-1]
+    assert 'max_completion_tokens' not in provider.requests[-1]
 
 
 def test_explicit_completion_limit_wins_without_mutating_the_original_model(provider):
@@ -133,7 +161,7 @@ def test_dynamic_reasoning_model_uses_its_role_configuration(provider, summary):
         runtime['dynamic_model_configs'], runtime['openai_api_key'] = old_models, old_key
     assert len(provider.requests) == 1
     assert provider.requests[0]['model'] == 'o3'
-    assert provider.requests[0]['max_completion_tokens'] == 16384
+    assert 'max_completion_tokens' not in provider.requests[0]
     assert 'max_tokens' not in provider.requests[0]
 
 
