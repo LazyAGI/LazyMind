@@ -832,6 +832,10 @@ export function ProviderWorkspace(props: Props) {
                 </div>
               </header>
               <div className="provider-workspace-scroll">
+                {getSupplierBrandKey(provider) === "Doubao" ? <Alert
+                  className="provider-workspace-service-scope" type="info" showIcon
+                  message={label("manualModelNotice")}
+                /> : null}
                 {hasProgrammingScopeNotice(provider) ? <Alert
                   className="provider-workspace-service-scope" type="info" showIcon
                   message={<span>{label(getSupplierBrandKey(provider) === "GLM" ? "serviceScopeGlm" : getSupplierBrandKey(provider) === "Qwen" ? "serviceScopeQwen" : "serviceScopeGeneric")} {" "}

@@ -454,7 +454,7 @@ describe("provider model catalog drawer", () => {
     await screen.findByText("deepseek-v3");
     mocks.remote.mockRejectedValueOnce(new Error("rate limited"));
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.refresh" }));
-    expect(await screen.findByText("rate limited")).toBeInTheDocument();
+    expect(await screen.findByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
     expect(screen.getByText("deepseek-v3")).toBeInTheDocument();
     expect(screen.getByText("BAAI/bge-large")).toBeInTheDocument();
   });
@@ -464,14 +464,14 @@ describe("provider model catalog drawer", () => {
     draw({ ...fixture([]), providerName: "Doubao", protocolName: "Doubao" });
     expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
     expect(await screen.findByText("doubao-seed-1-6-251015")).toBeInTheDocument();
-    expect(screen.getByText("modelProvider.catalog.builtInFallback")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText("modelProvider.catalog.missingRemote")).not.toBeInTheDocument();
   });
 
   it("allows removing saved models without mislabeling them when discovery fails", async () => {
     mocks.remote.mockRejectedValue(new Error("discovery offline"));
     draw(fixture());
-    expect(await screen.findByText("discovery offline")).toBeInTheDocument();
+    expect(await screen.findByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
     expect(
       screen.queryByText("modelProvider.catalog.missingRemote"),
     ).not.toBeInTheDocument();
