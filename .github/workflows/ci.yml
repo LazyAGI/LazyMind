@@ -191,7 +191,7 @@ jobs:
         run: pnpm typecheck
       - name: Test frontend including model settings and workflow boundaries
         working-directory: frontend
-        run: pnpm test --shard=${{ matrix.shard }}/4 --maxWorkers=1 --minWorkers=1 --no-file-parallelism
+        run: pnpm test --shard=${{ matrix.shard }}/4 --maxWorkers=2 --minWorkers=1
 
   test-workflow-panel:
     needs: [test-frontend-shards]
