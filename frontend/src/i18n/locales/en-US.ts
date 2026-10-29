@@ -207,6 +207,10 @@ const enUS = {
     "startError": "Could not start parsing. Check the parser configuration and retry."
 },
   vocabularyCloud: {
+    manage: "Manage connection",
+    providerDescription: "Sync English words saved while reading; meanings and examples stay local",
+    unavailable: "Status unavailable",
+    loading: "Loading",
     eudicTokenLink: "Get a token from the Eudic authorization page",
     maimemoTokenHelp: "In the MaiMemo app: My → More settings → Experimental features → Open API.",
     maimemoDocs: "Official API guide",

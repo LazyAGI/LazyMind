@@ -207,6 +207,10 @@ const zhCN = {
     "startError": "无法启动公式解析，请检查解析服务配置后重试。"
 },
   vocabularyCloud: {
+    manage: "管理连接",
+    providerDescription: "同步阅读时保存的英文生词，释义与例句保留在本地",
+    unavailable: "状态不可用",
+    loading: "加载中",
     eudicTokenLink: "前往欧路授权页面获取 Token",
     maimemoTokenHelp: "墨墨 App：我的 → 更多设置 → 实验功能 → 开放 API。",
     maimemoDocs: "官方 API 文档",

@@ -55,6 +55,10 @@ function createVm(overrides: Record<string, unknown> = {}) {
 }
 
 describe("CloudDocumentProviderPanel", () => {
+  it.each([false,true])("keeps extra provider entries in the same grid while loading=%s",(loading)=>{
+    render(<CloudDocumentProviderPanel vm={createVm({loading})} additionalCards={<button>Vocabulary provider</button>}/>);
+    expect(screen.getByRole("button",{name:"Vocabulary provider"}).parentElement).toHaveClass("model-provider-cloud-doc-grid");
+  });
   it("does not show the local document directory count", () => {
     render(
       <CloudDocumentProviderPanel

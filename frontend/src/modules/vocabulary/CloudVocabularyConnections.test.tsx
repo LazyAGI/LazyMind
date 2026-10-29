@@ -7,8 +7,20 @@ vi.mock("./cloudApi",()=>({listCloudConnections:vi.fn(),listCloudOperations:vi.f
 const connection={provider:"eudic" as const,configured:true,enabled:false,target_id:"target",target_name:"LazyMind 生词本",add_to_study:false,pending:0,failed:0,succeeded:0,last_error:""};
 describe("cloud vocabulary connections",()=>{
   beforeEach(()=>{vi.clearAllMocks();vi.mocked(api.listCloudConnections).mockResolvedValue([connection]);vi.mocked(api.saveCloudConnection).mockImplementation(async(provider,body)=>({...connection,...body,provider,configured:true}));});
+  it("keeps both management entries visible on initial load failure without exposing an unsafe form",async()=>{
+    vi.mocked(api.listCloudConnections).mockRejectedValueOnce(new Error("unavailable"));
+    render(<CloudVocabularyConnections/>);
+    const manage=await screen.findByRole("button",{name:"eudic manage"});
+    expect(screen.getByRole("button",{name:"maimemo manage"})).toBeEnabled();
+    fireEvent.click(manage);
+    const dialog=await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("loadFailed")).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText("token")).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button",{name:"save"})).not.toBeInTheDocument();
+  });
   it("retains stored credentials when saving a blank token and prevents backfill while disabled",async()=>{
     render(<CloudVocabularyConnections/>);
+    fireEvent.click(await screen.findByRole("button",{name:"eudic manage"}));
     const card=await screen.findByRole("region",{name:"eudic"});
     await waitFor(()=>expect(within(card).getByRole("button",{name:"save"})).toBeEnabled());
     expect(within(card).getByRole("button",{name:"sync"})).toBeDisabled();
@@ -18,6 +30,7 @@ describe("cloud vocabulary connections",()=>{
   it("requires credentials and a target before enabling a new connection",async()=>{
     vi.mocked(api.listCloudConnections).mockResolvedValue([]);
     render(<CloudVocabularyConnections/>);
+    fireEvent.click(await screen.findByRole("button",{name:"maimemo manage"}));
     const card=await screen.findByRole("region",{name:"maimemo"});
     expect(within(card).getByRole("switch")).toBeDisabled();
     expect(within(card).getByRole("button",{name:"test"})).toBeDisabled();
@@ -33,6 +46,7 @@ describe("cloud vocabulary connections",()=>{
   it("surfaces connection failures without echoing credentials",async()=>{
     vi.mocked(api.testCloudConnection).mockRejectedValueOnce(new Error("secret-token upstream"));
     render(<CloudVocabularyConnections/>);
+    fireEvent.click(await screen.findByRole("button",{name:"eudic manage"}));
     const card=await screen.findByRole("region",{name:"eudic"});
     fireEvent.click(within(card).getByRole("button",{name:"test"}));
     expect(await within(card).findByText("actionFailed")).toBeInTheDocument();
@@ -61,6 +75,7 @@ describe("cloud vocabulary connections",()=>{
       {id:"2",provider:"eudic",term:"word2",status:"failed",last_error:"secret upstream details",updated_at:"2026-10-29T00:00:00Z"},
     ]);
     render(<CloudVocabularyConnections/>);
+    fireEvent.click(await screen.findByRole("button",{name:"eudic manage"}));
     expect(await screen.findByText("errors.invalid_token")).toBeInTheDocument();
     expect(screen.getByText("errors.credentials_unavailable")).toBeInTheDocument();
     expect(screen.getByText("errors.sync_failed")).toBeInTheDocument();
@@ -73,6 +88,7 @@ describe("cloud vocabulary connections",()=>{
     const view=render(<CloudVocabularyConnections/>);
     try {
       await act(async()=>{});
+      fireEvent.click(screen.getByRole("button",{name:"eudic manage"}));
       const card=screen.getByRole("region",{name:"eudic"});
       fireEvent.click(within(card).getByRole("switch"));
       fireEvent.change(within(card).getByLabelText("newTarget"),{target:{value:"My edited wordbook"}});
@@ -90,6 +106,7 @@ describe("cloud vocabulary connections",()=>{
     const view=render(<CloudVocabularyConnections/>);
     try {
       await act(async()=>{});
+      fireEvent.click(screen.getByRole("button",{name:"eudic manage"}));
       const card=screen.getByRole("region",{name:"eudic"});
       expect(within(card).getByRole("switch")).toBeChecked();
       await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
@@ -106,6 +123,7 @@ describe("cloud vocabulary connections",()=>{
     const view=render(<CloudVocabularyConnections/>);
     try {
       await act(async()=>{});
+      fireEvent.click(screen.getByRole("button",{name:"eudic manage"}));
       const card=screen.getByRole("region",{name:"eudic"});
       fireEvent.change(within(card).getByLabelText("newTarget"),{target:{value:"Unsaved name"}});
       await act(async()=>{await vi.advanceTimersByTimeAsync(10000);});
