@@ -1161,7 +1161,7 @@ const enUS = {
     defaults: {
       intro: "Choose your everyday models first. Set up other capabilities as you need them.",
       basicTitle: "Core models",
-      autoSave: "Changes save automatically",
+      addModels: "Add models",
       extensionsTitle: "More capabilities",
       extensionsDescription: "Expand a category to choose its models or services.",
       visualTitle: "Images & video",

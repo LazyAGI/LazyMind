@@ -1141,7 +1141,7 @@ const zhCN = {
     defaults: {
       intro: "先选好日常使用的模型，其他能力按需配置。",
       basicTitle: "基础模型",
-      autoSave: "更改自动保存",
+      addModels: "去添加模型",
       extensionsTitle: "按需扩展",
       extensionsDescription: "展开需要的能力，选择对应模型或服务。",
       visualTitle: "图像与视频",

@@ -714,7 +714,10 @@ function SettingsPageContent() {
       </>;
     } else if (section === "model_defaults") {
       content = <div className="provider-workspace model-defaults-workspace">
-        <header className="provider-workspace-topbar"><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1></header>
+        <header className="provider-workspace-topbar">
+          <h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.sections.defaultModels")}</h1>
+          <Button onClick={() => selectSection("models")}>{t("modelProvider.defaults.addModels")}</Button>
+        </header>
         {integratedSurface(<DefaultServicesPage
           onModelSelectionChanged={syncOverview}
           highlightTarget={modelTarget}
