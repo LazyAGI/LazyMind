@@ -310,3 +310,91 @@ func TestCloudMaiMemoWordbookPageLimit(t *testing.T) {
 		})
 	}
 }
+
+func TestCloudEudicRejectsMalformedWordbooks(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		create     bool
+	}{
+		{"null_list", `{"data":null}`, false},
+		{"null_entry", `{"data":[null]}`, false},
+		{"missing_id", `{"data":[{"name":"Mine"}]}`, false},
+		{"blank_id", `{"data":[{"id":" ","name":"Mine"}]}`, false},
+		{"missing_name", `{"data":[{"id":"42"}]}`, false},
+		{"duplicate_id", `{"data":[{"id":"42","name":"One"},{"id":"42","name":"Two"}]}`, false},
+		{"blank_created_id", `{"data":{"id":" ","name":"Mine"}}`, true},
+		{"missing_created_name", `{"data":{"id":"42"}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := cloudTestClient(t, "eudic", func(*http.Request) (*http.Response, error) {
+				status := 200
+				if tc.create {
+					status = 201
+				}
+				return cloudResponse(status, tc.body), nil
+			})
+			var err error
+			if tc.create {
+				_, err = c.CreateWordbook(context.Background(), "Mine")
+			} else {
+				_, err = c.ListWordbooks(context.Background())
+			}
+			var safe *CloudClientError
+			if !errors.As(err, &safe) || safe.Code != "invalid_response" {
+				t.Fatalf("accepted malformed response: %v", err)
+			}
+		})
+	}
+}
+func TestCloudEudicListRequiresGETSuccessStatus(t *testing.T) {
+	c := cloudTestClient(t, "eudic", func(*http.Request) (*http.Response, error) { return cloudResponse(201, `{"data":[]}`), nil })
+	if _, e := c.ListWordbooks(context.Background()); e == nil {
+		t.Fatal("unexpected GET status accepted")
+	}
+}
+func TestCloudEudicOfficialAuthAndDefaultWordbook(t *testing.T) {
+	c, _ := newCloudClient("eudic", "NIS complete-token")
+	c.limiter = nil
+	c.httpClient.Transport = cloudRoundTrip(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") != "NIS complete-token" || r.URL.Query().Get("language") != "en" {
+			t.Fatal("authorization or language modified")
+		}
+		return cloudResponse(200, `{"data":[{"id":"0","language":"en","name":"我的生词本"}],"message":""}`), nil
+	})
+	books, e := c.ListWordbooks(context.Background())
+	if e != nil || len(books) != 1 || books[0].ID != "0" {
+		t.Fatal(books, e)
+	}
+}
+func TestCloudEudicAuthAndRateErrors(t *testing.T) {
+	for _, status := range []int{401, 403} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			c := cloudTestClient(t, "eudic", func(*http.Request) (*http.Response, error) {
+				return cloudResponse(status, `{"message":"private upstream details"}`), nil
+			})
+			_, e := c.ListWordbooks(context.Background())
+			var safe *CloudClientError
+			if !errors.As(e, &safe) {
+				t.Fatal(e)
+			}
+			if status == 401 && (safe.Code != "invalid_token" || safe.Retryable) {
+				t.Fatal(safe)
+			}
+			if status == 403 && (safe.Code != "rate_limited" || !safe.Retryable || safe.RetryAfter < time.Hour) {
+				t.Fatal(safe)
+			}
+		})
+	}
+}
+func TestCloudEudicThrottleRespectsBothPublishedWindows(t *testing.T) {
+	c, _ := newCloudClient("eudic", "published-rate-window-test")
+	for _, window := range []struct {
+		duration time.Duration
+		max      int
+	}{{time.Minute, 30}, {30 * time.Minute, 500}} {
+		possible := int(window.duration/c.limiter.interval) + 1
+		if possible > window.max {
+			t.Fatalf("allows %d requests in %v (limit %d)", possible, window.duration, window.max)
+		}
+	}
+}

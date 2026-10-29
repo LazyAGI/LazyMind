@@ -4,7 +4,7 @@ import { ArrowRightOutlined, BookOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { createCloudWordbook, disconnectCloudConnection, listCloudConnections, listCloudOperations, saveCloudConnection, syncCloudVocabulary, testCloudConnection, type CloudConnection, type CloudOperation, type CloudVocabularyProvider, type CloudWordbook } from "./cloudApi";
 import "./CloudVocabularyConnections.scss";
-import { cloudErrorMessage } from "./cloudErrorMessage";
+import { cloudActionErrorMessage, cloudErrorMessage } from "./cloudErrorMessage";
 const providers: CloudVocabularyProvider[] = ["eudic", "maimemo"];
 const emptyConnection = (provider: CloudVocabularyProvider): CloudConnection => ({provider, configured:false, enabled:false, target_id:"", target_name:"", add_to_study:false, pending:0, failed:0, succeeded:0, last_error:""});
 
@@ -24,6 +24,8 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
   const [books,setBooks]=useState<CloudWordbook[]>(target ? [target] : []);
   const [name,setName]=useState("LazyMind 生词本");
   const [busy,setBusy]=useState(false);
+  const [createOpen,setCreateOpen]=useState(false);
+  const [booksLoaded,setBooksLoaded]=useState(false);
   const [conflict,setConflict]=useState(false);
   const [notice,setNotice]=useState("");
   const [error,setError]=useState(false);
@@ -41,7 +43,7 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
     setToken("");setVerifiedToken(next.configured ? "" : null);setStudy(next.add_to_study);
     const selected=next.target_id ? {id:next.target_id,name:next.target_name} : null;
     setTarget(selected);setBooks(current=>selected ? [...current.filter(item=>item.id!==selected.id),selected] : current);
-    setName("LazyMind 生词本");setConflict(false);
+    setName("LazyMind 生词本");setCreateOpen(false);setConflict(false);
   },[]);
   useEffect(()=>{
     if(conflict || configSignature(connection)===configSignature(baseline.current))return;
@@ -51,14 +53,14 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
   const run=async(action:()=>Promise<void>)=>{
     if(locked.current || conflict)return;
     locked.current=true;setBusy(true);setNotice("");setError(false);
-    try{await action();}catch{if(mounted.current){setError(true);setNotice(label("actionFailed"));}}
+    try{await action();}catch(cause){if(mounted.current){setError(true);setNotice(cloudActionErrorMessage(cause,t));}}
     finally{locked.current=false;if(mounted.current)setBusy(false);}
   };
   const loadBooks=useCallback(async(provider:CloudVocabularyProvider,credential:string,selectedId:string)=>{
     const generation=++requestSequence.current;
     const items=await testCloudConnection(provider,credential || undefined);
     if(!mounted.current || generation!==requestSequence.current)return;
-    setBooks(items);setVerifiedToken(credential);
+    setBooks(items);setBooksLoaded(true);setVerifiedToken(credential);setCreateOpen(items.length===0);
     setTarget(items.find(item=>item.id===selectedId) || (items.length===1 ? items[0] : null));
   },[]);
   // Opening saved credentials only reads wordbooks; it never writes a connection or creates a target.
@@ -67,7 +69,7 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
     let cancelled=false;
     locked.current=true;setBusy(true);
     void loadBooks(baseline.current.provider,"",baseline.current.target_id)
-      .catch(()=>{if(!cancelled && mounted.current){setError(true);setNotice(translateRef.current("vocabularyCloud.actionFailed"));}})
+      .catch(cause=>{if(!cancelled && mounted.current){setError(true);setNotice(cloudActionErrorMessage(cause,translateRef.current));}})
       .finally(()=>{if(cancelled)return;locked.current=false;if(mounted.current)setBusy(false);});
     return()=>{cancelled=true;requestSequence.current+=1;};
   },[loadBooks]);
@@ -79,8 +81,9 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
   });
   const tokenForm=<>
     <Typography.Paragraph type="secondary">{connection.provider==="eudic" ? <a href="https://my.eudic.net/OpenAPI/Authorization" target="_blank" rel="noopener noreferrer">{label("eudicTokenLink")}</a> : <>{label("maimemoTokenHelp")} <a href="https://open.maimemo.com/" target="_blank" rel="noopener noreferrer">{label("maimemoDocs")}</a></>}</Typography.Paragraph>
+    {connection.provider==="eudic" && <Typography.Paragraph type="secondary">{label("eudicTokenHelp")}</Typography.Paragraph>}
     <Form.Item label={label("token")}>
-      <Input.Password aria-label={label("token")} autoComplete="new-password" value={token} onChange={e=>{setToken(e.target.value);setVerifiedToken(null);setTarget(null);setBooks([]);}}/>
+      <Input.Password aria-label={label("token")} autoComplete="new-password" value={token} onChange={e=>{setToken(e.target.value);setVerifiedToken(null);setTarget(null);setBooks([]);setBooksLoaded(false);setCreateOpen(false);}}/>
     </Form.Item>
     <Button type={verified?"default":"primary"} disabled={busy || conflict || (!connection.configured && !token.trim())} onClick={()=>void run(()=>loadBooks(connection.provider,token.trim(),target?.id || ""))}>{label("verify")}</Button>
   </>;
@@ -92,12 +95,12 @@ function ConnectionCard({ connection, operations, onSaved }: {connection: CloudC
       {!connection.configured && tokenForm}
       {busy && <Typography.Paragraph type="secondary">{label("loading")}</Typography.Paragraph>}
       {verified && <>
-        <Form.Item label={label("target")}>
-          <Select aria-label={label("target")} value={target?.id} placeholder={label("selectTarget")} options={books.map(item=>({value:item.id,label:item.name}))} onChange={id=>setTarget(books.find(item=>item.id===id)||null)}/>
+        <Form.Item label={<Space>{label("target")}{connection.configured && <Button aria-label={label("refreshBooks")} type="link" size="small" disabled={busy || conflict || dirty} onClick={()=>void run(()=>loadBooks(connection.provider,"",target?.id || connection.target_id))}>{label("refreshBooks")}</Button>}</Space>} help={connection.provider==="eudic" ? label("eudicEnglishHelp") : undefined}>
+          <Select showSearch optionFilterProp="label" aria-label={label("target")} value={target?.id} placeholder={label("selectTarget")} options={books.map(item=>({value:item.id,label:item.name}))} onChange={id=>setTarget(books.find(item=>item.id===id)||null)}/>
         </Form.Item>
         {connected && <Form.Item style={{marginTop:16}}><Space><Switch aria-label={label("autoSync")} checked={connection.enabled} disabled={busy || conflict || dirty || !target || !verified} onChange={value=>void persist(value,connection.add_to_study,true)}/><span>{label("autoSync")}</span></Space></Form.Item>}
-        {!books.length && !busy && <Typography.Paragraph type="secondary">{label("noBooks")}</Typography.Paragraph>}
-        <details className="vocabulary-cloud-details"><summary>{label("createTarget")}</summary>
+        {booksLoaded && !books.length && !busy && <Typography.Paragraph type="secondary">{label("noBooks")}</Typography.Paragraph>}
+        <details className="vocabulary-cloud-details" open={createOpen} onToggle={event=>setCreateOpen(event.currentTarget.open)}><summary>{label("createTarget")}</summary>
           <Space.Compact style={{width:"100%"}}><Input aria-label={label("newTarget")} value={name} onChange={e=>setName(e.target.value)}/><Button disabled={busy || conflict || !name.trim()} onClick={()=>void run(async()=>{
             const book=await createCloudWordbook(connection.provider,name.trim(),token.trim()||undefined);if(!mounted.current)return;
             setBooks(current=>[...current.filter(item=>item.id!==book.id),book]);setTarget(book);setName("LazyMind 生词本");

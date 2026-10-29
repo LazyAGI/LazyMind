@@ -207,6 +207,9 @@ const enUS = {
     "startError": "Could not start parsing. Check the parser configuration and retry."
 },
   vocabularyCloud: {
+    eudicTokenHelp: "Paste the complete personal authorization value from Eudic, including any prefix.",
+    eudicEnglishHelp: "Only English wordbooks are listed. Choose where to save English words, or search by name.",
+    refreshBooks: "Refresh wordbooks / retry",
     connectionIntro: "Once connected, newly saved English words sync to the selected wordbook.",
     verify: "Verify connection",
     saveAndEnable: "Save and enable",
@@ -231,6 +234,9 @@ const enUS = {
     configConflict: "Connection settings changed elsewhere. Reload and discard your edits before saving.",
     reloadSettings: "Discard edits and reload",
     errors: {
+        service_unavailable: "The platform request did not complete. Check your connection or try again later.",
+        connection_unavailable: "The connection is unavailable. Verify your token and complete setup.",
+        storage_failed: "Settings could not be saved. Please try again later.",
     "invalid_configuration": "Check the token and connection settings.",
     "invalid_name": "Enter a valid wordbook name.",
     "invalid_request": "The sync request could not be prepared. Try again.",
