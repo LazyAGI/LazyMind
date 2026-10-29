@@ -528,3 +528,48 @@ func verifyRealZoteroPaperPersistence(t *testing.T, key string, item map[string]
 		}
 	}
 }
+
+func TestZoteroDatabasePreviewNullableCreatorNames(t *testing.T) {
+	for _, tc := range []struct {
+		name                          string
+		first, last                   any
+		mode                          int
+		wantFirst, wantLast, wantName string
+	}{
+		{name: "institution", last: "Example Institute", mode: 1, wantName: "Example Institute"},
+		{name: "null first", last: "Lovelace", wantLast: "Lovelace"},
+		{name: "null last", first: "Ada", wantFirst: "Ada"},
+		{name: "both null"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db := zoteroDatabaseFixture(t)
+			if _, err := db.Exec("UPDATE creators SET firstName=?,lastName=?,fieldMode=? WHERE creatorID=1", tc.first, tc.last, tc.mode); err != nil {
+				t.Fatal(err)
+			}
+			preview := databasePreviewForTest(t, zoteroConfig{})
+			items := previewDataForTest(t, preview.Items)
+			if len(items) != 4 {
+				t.Fatalf("lost unrelated items: %d", len(items))
+			}
+			creators := items["PAPER001"]["creators"].([]any)
+			if len(creators) != 2 {
+				t.Fatalf("lost creators: %v", creators)
+			}
+			got := creators[0].(map[string]any)
+			if tc.mode == 1 {
+				if got["name"] != tc.wantName {
+					t.Fatalf("institution: %v", got)
+				}
+			} else if got["firstName"] != tc.wantFirst || got["lastName"] != tc.wantLast {
+				t.Fatalf("person: %v", got)
+			}
+			var first, last sql.NullString
+			if err := db.QueryRow("SELECT firstName,lastName FROM creators WHERE creatorID=1").Scan(&first, &last); err != nil {
+				t.Fatal(err)
+			}
+			if first.Valid != (tc.first != nil) || last.Valid != (tc.last != nil) {
+				t.Fatal("preview modified source NULL values")
+			}
+		})
+	}
+}

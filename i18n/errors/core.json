@@ -2058,5 +2058,6 @@
   "2004934": { "en-US": "The library changed; the PDF is saved, retry linking it", "zh-CN": "论文库已发生变更，PDF 已保存，请重试关联" },
   "2004935": { "en-US": "The attachment checksum changed; reload Zotero metadata and select the matching file", "zh-CN": "附件校验值已变更，请重新读取 Zotero 题录并选择对应文件" },
   "2004936": { "en-US": "Local Zotero access requires the authenticated owner of a local desktop runtime", "zh-CN": "仅本地桌面运行时的已认证所有者可以访问本地 Zotero" },
-  "2004937": { "en-US": "Local Zotero owner authentication is unavailable", "zh-CN": "本地 Zotero 所有者认证暂不可用" }
+  "2004937": { "en-US": "Local Zotero owner authentication is unavailable", "zh-CN": "本地 Zotero 所有者认证暂不可用" },
+  "2005148": {"en-US": "Save the document before queuing processing", "zh-CN": "请先保存文档，再提交处理任务"}
 }

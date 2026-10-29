@@ -567,7 +567,7 @@ func readZoteroDatabaseItems(ctx context.Context, tx *sql.Tx, s zoteroDatabaseSc
 	if err != nil {
 		return nil, nil, err
 	}
-	err = zoteroDatabaseEach(ctx, tx, "SELECT ic.itemID,c.firstName,c.lastName,c.fieldMode,t.creatorType FROM itemCreators ic JOIN items i ON i.itemID=ic.itemID JOIN creators c ON c.creatorID=ic.creatorID JOIN creatorTypes t ON t.creatorTypeID=ic.creatorTypeID WHERE i.libraryID=? ORDER BY ic.itemID,ic.orderIndex", []any{library}, func(rows *sql.Rows) error {
+	err = zoteroDatabaseEach(ctx, tx, "SELECT ic.itemID,COALESCE(c.firstName,''),COALESCE(c.lastName,''),c.fieldMode,t.creatorType FROM itemCreators ic JOIN items i ON i.itemID=ic.itemID JOIN creators c ON c.creatorID=ic.creatorID JOIN creatorTypes t ON t.creatorTypeID=ic.creatorTypeID WHERE i.libraryID=? ORDER BY ic.itemID,ic.orderIndex", []any{library}, func(rows *sql.Rows) error {
 		var id int64
 		var first, last, kind string
 		var mode int

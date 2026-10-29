@@ -35,6 +35,7 @@ func init() {
 		}},
 		{2005111, http.StatusInternalServerError, "Paper processing did not start or failed; retry in document tasks", []string{
 			"文献处理任务未能启动",
+			"processing submission failed",
 			"pdf 已保存，但处理任务未能启动，请重试",
 			"pdf 已保存，但处理未成功，请在文档任务中重试：%w",
 			"pdf 已保存，但处理未成功，请在文档任务中重试：%s",
@@ -117,6 +118,7 @@ func init() {
 		}},
 		{2005145, http.StatusInternalServerError, "Failed to preserve the legacy paper library", []string{"preserve legacy library %s"}},
 		{2005147, http.StatusBadGateway, "Unable to find an available paper PDF source", []string{"pdf 来源查询失败", "PDF 来源查询失败: %s", "一次只能查找一篇文献的 PDF 来源"}},
+		{2005148, http.StatusConflict, "Save the document before queuing processing", []string{"document must be saved before processing is queued"}},
 		{2005146, http.StatusConflict, "A paper folder with this name already exists", []string{"folder name already exists"}},
 	} {
 		for _, source := range group.sources {
