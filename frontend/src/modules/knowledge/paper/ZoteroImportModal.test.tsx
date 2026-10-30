@@ -132,12 +132,13 @@ it('keeps provider and partial-import errors visible and retries the same select
 
 it('keeps API modes available and clears credentials and selection when changing sources', async () => {
   mount(); await load(); selectPaper();
-  fireEvent.click(screen.getByRole('radio', { name: /API 通过/ }));
+  fireEvent.click(screen.getByRole('radio', { name: 'API' }));
   expect(screen.queryByText('Real paper')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('radio', { name: '远端 Zotero' }));
   fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'secret-key' } });
   fireEvent.click(screen.getByRole('radio', { name: 'WebDAV' }));
   expect(screen.getByLabelText('API Key')).toHaveValue('');
+  fireEvent.click(screen.getByRole('button', { name: '接入指引' }));
   expect(screen.getByText(/WebDAV 只提供附件/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('radio', { name: /本地数据库/ }));
   expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
@@ -159,7 +160,7 @@ it.each([
   ['本地客户端', 'local'], ['远端 Zotero', 'remote'], ['WebDAV', 'webdav'],
 ])('keeps %s API previews available without writing before selection', async (label, source) => {
   mount();
-  fireEvent.click(screen.getByRole('radio', { name: /API 通过/ }));
+  fireEvent.click(screen.getByRole('radio', { name: 'API' }));
   fireEvent.click(screen.getByRole('radio', { name: label }));
   if (source !== 'local') fireEvent.change(screen.getByLabelText(/^用户 ID/), { target: { value: '42' } });
   if (source === 'webdav') fireEvent.change(screen.getByLabelText('WebDAV 地址'), { target: { value: 'https://dav.example.com/zotero' } });
@@ -175,7 +176,7 @@ it('prevents source changes and closing while import is running', async () => {
   onImport.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
   mount(); await load(); selectPaper();
   fireEvent.click(screen.getByRole('button', { name: /确认导入/ }));
-  await waitFor(() => expect(screen.getByRole('radio', { name: /API 通过/ })).toBeDisabled());
+  await waitFor(() => expect(screen.getByRole('radio', { name: 'API' })).toBeDisabled());
   expect(within(screen.getByRole('dialog')).getByRole('button', { name: /取\s*消/ })).toBeDisabled();
   await act(async () => finish({ imported: 1, attachments: 0 }));
   await waitFor(() => expect(onCancel).toHaveBeenCalledOnce());

@@ -1,6 +1,7 @@
 .zotero-import-modal {
   .ant-modal-content { padding: 0; border-radius: 14px; overflow: hidden; max-height: calc(100dvh - 32px); }
-  .ant-modal-body { min-height: 0; }
+  .ant-modal-body { min-height: 0; max-height: calc(100dvh - 112px); overflow-y: auto; }
+  .ant-modal-footer { margin: 0; padding: 12px 22px; border-top: 1px solid #e8edf3; background: #fff; }
   .ant-modal-close { top: 10px; right: 10px; }
   .zotero-import-workspace { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .zotero-import-settings { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 22px; overflow-y: auto; overscroll-behavior: contain; }
@@ -86,7 +87,7 @@
   .zotero-private-hint { margin-right: auto; color: #8a96a7; font-size: 10px; }
   .zotero-private-hint .anticon { margin-right: 4px; }
   &.is-expanded {
-    .zotero-import-workspace { grid-template-columns: 240px minmax(0, 1fr); height: min(86dvh, 900px); }
+    .zotero-import-workspace { grid-template-columns: 240px minmax(0, 1fr); height: min(calc(100dvh - 112px), 900px); }
     .zotero-import-settings { padding: 18px 14px; background: #fafbfd; gap: 12px; }
   }
 }
@@ -98,11 +99,44 @@
 }
 @media (max-width: 560px) {
   .zotero-import-modal {
-    .ant-modal-body { max-height: calc(100dvh - 32px); overflow-y: auto; }
+    .ant-modal-body { max-height: calc(100dvh - 112px); overflow-y: auto; }
     &.is-expanded .zotero-import-workspace { height: auto; grid-template-columns: 1fr; }
     .zotero-folder-browser { min-height: 80px; max-height: 160px; flex: none; }
     .zotero-selection { height: 65dvh; min-height: 360px; border-left: 0; border-top: 1px solid #e8edf3; }
     .zotero-private-hint { display: none; }
     .zotero-paper-materials { max-width: 65px; white-space: normal; text-align: right; }
   }
+}
+
+.zotero-import-modal {
+  .zotero-settings-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-right: 28px; }
+  .zotero-settings-heading .ant-btn { color: #52719d; font-size: 12px; }
+  .zotero-webdav-address { display: flex; align-items: center; gap: 5px; min-width: 0; }
+  .zotero-webdav-address .ant-select { width: 82px; flex: none; }
+  .zotero-webdav-address .ant-input { flex: 1; min-width: 0; }
+  .zotero-webdav-suffix { white-space: nowrap; color: #6b7c93; font-size: 12px; }
+  &:not(.is-expanded) {
+    .zotero-form { gap: 10px; }
+    .zotero-form .zotero-field { display: grid; grid-template-columns: 108px minmax(0, 1fr); align-items: center; gap: 12px; }
+    .zotero-field > label { text-align: right; }
+    .zotero-field-label-row { grid-column: 1 / -1; flex-direction: row; align-items: center; justify-content: space-between; }
+    .zotero-field-label-row + .ant-input { grid-column: 1 / -1; }
+    .zotero-source-subtitle { display: none; }
+    .zotero-import-settings { gap: 10px; }
+  }
+  &.is-expanded .zotero-settings-heading { align-items: flex-start; flex-direction: column; padding-right: 0; gap: 4px; }
+  &.is-expanded .zotero-webdav-address { flex-wrap: wrap; }
+}
+.zotero-connection-guide {
+  .ant-drawer-body { padding: 22px; font-size: 13px; line-height: 1.85; color: #53647b; }
+  section + section { border-top: 1px solid #e8edf3; margin-top: 24px; padding-top: 18px; }
+  h3 { color: #273b58; font-size: 14px; margin: 0 0 10px; }
+  ol { padding-left: 20px; } li + li { margin-top: 10px; }
+  code { overflow-wrap: anywhere; font-size: 12px; color: #395b89; }
+  .zotero-guide-links { margin-top: 24px; font-size: 12px; }
+}
+@media (max-width: 560px) {
+  .zotero-import-modal:not(.is-expanded) .zotero-form .zotero-field { grid-template-columns: 82px minmax(0, 1fr); gap: 8px; }
+  .zotero-import-modal .zotero-webdav-address { flex-wrap: wrap; }
+  .zotero-import-modal .zotero-webdav-address .ant-select { width: 76px; }
 }
