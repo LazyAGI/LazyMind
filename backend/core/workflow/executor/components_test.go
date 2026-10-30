@@ -917,7 +917,11 @@ func TestWriterDeliverySurvivesAuxiliaryFailureAndReplay(t *testing.T) {
 			if err := db.Where("slot_id = ?", "draft_blocks").First(&order).Error; err != nil {
 				t.Fatal(err)
 			}
-			if string(order.OrderList) != "[0,1]" {
+			var indices []int
+			if err := json.Unmarshal(order.OrderList, &indices); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(indices, []int{0, 1}) {
 				t.Fatalf("replay appended list items: %s", order.OrderList)
 			}
 			var after orm.WorkflowSlotRevision
