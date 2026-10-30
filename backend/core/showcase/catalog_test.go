@@ -209,7 +209,7 @@ func TestLoadSourceDirectoryRejectsUnknownFieldsAndInvalidAssets(t *testing.T) {
 		body := strings.Replace(validFeaturedYAML("demo", false), "type: chat", "type: agent", 1)
 		writeFeaturedSource(t, root, "demo", body)
 		_, err := LoadSourceDirectory(root)
-		if err == nil || !strings.Contains(err.Error(), "type must be chat, work, or workflow") {
+		if err == nil || !strings.Contains(err.Error(), "type must be chat, work, workflow, or page") {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -258,6 +258,36 @@ func TestCompileCatalogBuildsWorkflowCapabilityWithoutSkillBinding(t *testing.T)
 	}
 	if cases[0].BuiltinSkillUID != "" || cases[0].SourceURL != "" {
 		t.Fatalf("Workflow capability unexpectedly contains a Skill binding: %#v", cases[0])
+	}
+}
+
+func TestCompileCatalogBuildsSharedPaperReadingPage(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("paper-reading", false), "type: chat", "type: page\npage_action: open_paper_library", 1)
+	body = strings.Replace(body, "skill:\n  source_url: https://example.test/paper-reading.zip\n", "", 1)
+	body = strings.Split(body, "tasks:\n")[0]
+	writeFeaturedSource(t, root, "paper-reading", body)
+	definitions, err := LoadSourceDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := CompileCatalog(definitions, filepath.Join(t.TempDir(), "featured-skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := catalog.ShowcaseCases("zh-CN")
+	if len(cases) != 1 || cases[0].Type != TypePage || cases[0].PageAction != PageActionOpenPaperLibrary || len(cases[0].Tasks) != 0 || cases[0].BuiltinSkillUID != "" || cases[0].WorkflowRef != "" {
+		t.Fatalf("page cases = %#v", cases)
+	}
+	for _, invalid := range []string{
+		strings.Replace(body, "open_paper_library", "https://example.test", 1),
+		body + "skill:\n  source_url: https://example.test/skill.zip\n",
+		body + "tasks:\n" + validTaskYAML("read"),
+	} {
+		writeFeaturedSource(t, root, "paper-reading", invalid)
+		if _, err := LoadSourceDirectory(root); err == nil {
+			t.Fatal("page accepted an unsupported action or an executable binding")
+		}
 	}
 }
 

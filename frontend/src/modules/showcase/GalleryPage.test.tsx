@@ -14,18 +14,16 @@ vi.mock("react-i18next", () => ({
 vi.mock("./api", () => ({
   listShowcaseCases: vi.fn(),
 }));
-vi.mock("./classification", () => ({
-  showcaseEntryType: (type: string) => type === "chat" ? "chat" : "work",
-  showcaseTechnologyType: (type: string) => type === "workflow" ? "workflow" : "skill",
-}));
 vi.mock("./CaseCard", () => ({
   default: ({
     item,
     primaryAction,
+    entryType,
   }: {
     item: { title: string };
     primaryAction?: string;
-  }) => <div data-primary-action={primaryAction}>{item.title}</div>,
+    entryType?: string;
+  }) => <div data-primary-action={primaryAction} data-entry-type={entryType}>{item.title}</div>,
 }));
 
 const listShowcaseCasesMock = vi.mocked(listShowcaseCases);
@@ -37,6 +35,7 @@ describe("GalleryPage", () => {
         { id: "chat-skill", title: "Chat skill", type: "chat", category: "内容创作", gallery: true, tasks: [] },
         { id: "work-skill", title: "Work skill", type: "work", category: "信息分析", gallery: true, tasks: [] },
         { id: "workflow", title: "Workflow", type: "workflow", category: "内容创作", gallery: true, tasks: [] },
+        { id: "paper-reading", title: "论文阅读", type: "page", category: "信息分析", gallery: true, tasks: [], featured_order: 0 },
       ],
       categories: ["全部", "内容创作", "信息分析"],
       total: 3,
@@ -87,5 +86,22 @@ describe("GalleryPage", () => {
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.technologyType" }));
     fireEvent.click(await screen.findByText("showcase.filters.technology.workflow"));
     expect(screen.getByText("showcase.noMatches")).toBeInTheDocument();
+  });
+
+  it("finds paper reading under both entry filters and the page form", async () => {
+    render(<MemoryRouter initialEntries={["/agent/chat/cases?showcase_entry=work"]}><GalleryPage /></MemoryRouter>);
+    await screen.findByText("论文阅读");
+    for (const mode of ["chat", "work"]) {
+      fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.capabilityType" }));
+      fireEvent.click(await screen.findByText(`showcase.filters.capability.${mode}`));
+      expect(screen.getByText("论文阅读")).toBeInTheDocument();
+      expect(screen.getByText("论文阅读")).toHaveAttribute("data-entry-type", "work");
+    }
+    fireEvent.change(screen.getByRole("textbox", { name: "showcase.searchLabel" }), { target: { value: "论文阅读" } });
+    expect(screen.getByText("论文阅读")).toBeInTheDocument();
+    expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.technologyType" }));
+    fireEvent.click(await screen.findByText("showcase.filters.technology.page"));
+    expect(screen.getByText("论文阅读")).toBeInTheDocument();
   });
 });

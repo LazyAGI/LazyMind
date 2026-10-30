@@ -1,0 +1,17 @@
+locale: en-US
+classification:
+  category: Information analysis
+  tags:
+    - Paper reading
+    - Paper collections
+presentation:
+  card:
+    title: Paper reading
+    description: Choose an existing paper collection and open a paper to read
+    output_type: document
+    output_label: Paper collections and full text
+    cover_asset: cover
+    result_summary: Open papers from your existing collections
+  detail:
+    title: Paper reading
+    description: Choose an accessible paper collection, then open a paper in the existing reader.

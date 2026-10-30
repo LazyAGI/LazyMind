@@ -5,7 +5,7 @@ import type { ShowcaseCase } from "./api";
 
 type FeaturedCapabilityBinding = Pick<
   ShowcaseCase,
-  "type" | "title" | "builtin_skill_uid" | "workflow_ref"
+  "type" | "title" | "builtin_skill_uid" | "workflow_ref" | "page_action"
 >;
 type FeaturedCapabilityStatus = "idle" | "preparing" | "ready" | "failed";
 
@@ -19,6 +19,7 @@ export function useFeaturedCapabilityBinding(
   const capabilityTitle = capability?.title;
   const builtinSkillUID = capability?.builtin_skill_uid;
   const workflowRef = capability?.workflow_ref;
+  const pageAction = capability?.page_action;
 
   useEffect(() => {
     let active = true;
@@ -26,6 +27,11 @@ export function useFeaturedCapabilityBinding(
 
     if (!capabilityType) {
       setStatus("idle");
+      return () => { active = false; };
+    }
+
+    if (capabilityType === "page") {
+      setStatus(pageAction === "open_paper_library" ? "ready" : "failed");
       return () => { active = false; };
     }
 
@@ -72,7 +78,7 @@ export function useFeaturedCapabilityBinding(
       });
 
     return () => { active = false; };
-  }, [attempt, builtinSkillUID, capabilityTitle, capabilityType, workflowRef]);
+  }, [attempt, builtinSkillUID, capabilityTitle, capabilityType, workflowRef, pageAction]);
 
   const retry = useCallback(() => setAttempt((current) => current + 1), []);
   return { mentions, retry, status };

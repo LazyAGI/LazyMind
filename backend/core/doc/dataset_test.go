@@ -191,6 +191,54 @@ func TestListDatasetsFiltersScanDeniedSourceDatasets(t *testing.T) {
 	}
 }
 
+func TestListDatasetsPaperReadingFiltersBeforePaginationAndChecksAccess(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.PaperLibraryEntry{}, &orm.PaperLibraryAttachment{}); err != nil {
+		t.Fatal(err)
+	}
+	installDatasetCatalogScanTransport(t)
+	for _, row := range []struct{ id, owner, scene string }{
+		{"paper-1", "user-1", "academic_papers"},
+		{"paper-2", "user-1", "academic_papers"},
+		{"private-paper", "other-user", "academic_papers"},
+		{"general", "user-1", "general"},
+	} {
+		seedDocumentListDataset(t, db, row.id, row.owner)
+		if err := db.Model(&orm.Dataset{}).Where("id = ?", row.id).Update("scene", row.scene).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[string]bool{}
+	for token := ""; ; {
+		req := httptest.NewRequest(http.MethodGet, "/api/core/datasets?scene=academic_papers&page_size=1&page_token="+token, nil)
+		req.Header.Set("X-User-Id", "user-1")
+		rec := httptest.NewRecorder()
+		ListDatasets(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+		}
+		var response ListDatasetsResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if response.TotalSize != 2 || len(response.Datasets) != 1 {
+			t.Fatalf("paper page = %s", rec.Body.String())
+		}
+		id := response.Datasets[0].DatasetID
+		if (id != "paper-1" && id != "paper-2") || seen[id] {
+			t.Fatalf("unexpected or repeated paper collection %q", id)
+		}
+		seen[id] = true
+		token = response.NextPageToken
+		if token == "" {
+			break
+		}
+	}
+	if len(seen) != 2 {
+		t.Fatalf("paper collections = %#v", seen)
+	}
+}
+
 func TestGetDatasetRejectsScanDeniedSourceDataset(t *testing.T) {
 	db := newDocumentTestDB(t)
 	seedDocumentListDataset(t, db, "ds-local", "user-1")

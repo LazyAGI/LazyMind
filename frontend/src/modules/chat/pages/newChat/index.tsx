@@ -47,6 +47,7 @@ import {
   parseShowcaseEntryType,
   showcaseEntryType as resolveShowcaseEntryType,
   SHOWCASE_ENTRY_QUERY_PARAM,
+  showcasePagePath,
   type ShowcaseEntryType,
 } from "@/modules/showcase/classification";
 import { useFeaturedCapabilityBinding } from "@/modules/showcase/useFeaturedCapabilityBinding";
@@ -377,7 +378,12 @@ const NewChatPage = () => {
       setSearchParams({}, { replace: true });
       return;
     }
-    const resolvedEntryType = resolveShowcaseEntryType(showcaseCase.type);
+    const resolvedEntryType = resolveShowcaseEntryType(showcaseCase.type, requestedShowcaseEntry ?? (entryModeRef.current ? "work" : "chat"));
+    const pagePath = showcasePagePath(showcaseCase.page_action, resolvedEntryType);
+    if (pagePath) {
+      navigate(pagePath, { replace: true });
+      return;
+    }
     applyShowcaseEntryMode(resolvedEntryType);
     if (requestedShowcaseEntry !== resolvedEntryType
       || (showcaseTaskId && !selectedShowcaseTask)) {
@@ -393,6 +399,7 @@ const NewChatPage = () => {
     setInputValue(selectedShowcasePrompt);
   }, [
     applyShowcaseEntryMode,
+    navigate,
     officialKnowledgeId,
     requestedShowcaseEntry,
     selectedShowcaseTask,
@@ -429,6 +436,11 @@ const NewChatPage = () => {
   }, [locale, officialKnowledgeId, showcaseCaseId, t]);
 
   const selectShowcaseTask = (item: ShowcaseCase, taskId?: string | null) => {
+    const pagePath = showcasePagePath(item.page_action, activeShowcaseEntryType);
+    if (pagePath) {
+      navigate(pagePath);
+      return;
+    }
     const task = taskId && taskId !== FULL_CAPABILITY_TASK_VALUE
       ? item.tasks.find((candidate) => candidate.id === taskId)
       : undefined;
@@ -622,13 +634,14 @@ const NewChatPage = () => {
         value: item.id,
         label: item.title,
         description: `${item.category}${t("showcase.capabilitySeparator")}${item.output_label}`,
+        pageAction: item.page_action,
       })),
       ariaLabel: t("showcase.selectedSkill"),
       placeholder: t("showcase.chooseSkill"),
       heading: t("showcase.quickSelectTitle"),
       subheading: t("showcase.quickSelectDescription"),
       moreLabel: t("showcase.exploreMoreCapabilities"),
-      onMore: () => navigate("/agent/chat/cases"),
+      onMore: () => navigate(`/agent/chat/cases?showcase_entry=${activeShowcaseEntryType}`),
       disabled: showcaseCasesLoading || availableShowcaseCases.length === 0,
       onChange: (skillId) => {
         const item = availableShowcaseCases.find((candidate) => candidate.id === skillId);

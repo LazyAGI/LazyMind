@@ -1196,6 +1196,7 @@ type datasetQueryParams struct {
 	Keyword   string   `query:"keyword"`
 	Tags      []string `query:"tags"`
 	Source    string   `query:"source" enum:"manual,cloud,official_installed" desc:"Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza)."`
+	Scene     string   `query:"scene" desc:"Filter datasets by knowledge scene, for example academic_papers."`
 }
 
 type createDatasetQueryParams struct {

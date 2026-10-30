@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Button, Popover } from "antd";
+import { Alert, Button, Popover } from "antd";
 import { DownOutlined } from "@ant-design/icons";
 import type { TFunction } from "i18next";
 
@@ -17,6 +17,11 @@ interface KnowledgeMineFilterPopoverProps {
   selectedTag: string;
   selectedSort: KnowledgeMineSort;
   selectedCloudSource: KnowledgeMineCloudSource;
+  sceneOptions?: FilterOption<string>[];
+  selectedScene?: string;
+  sceneStatus?: "loading" | "ready" | "error";
+  onSceneChange?: (scene: string) => void;
+  onRetryScenes?: () => void;
   onOpenChange: (open: boolean) => void;
   onTagChange: (tag: string) => void;
   onSortChange: (sort: KnowledgeMineSort) => void;
@@ -49,6 +54,11 @@ export default function KnowledgeMineFilterPopover({
   selectedTag,
   selectedSort,
   selectedCloudSource,
+  sceneOptions,
+  selectedScene = "",
+  sceneStatus = "ready",
+  onSceneChange,
+  onRetryScenes,
   onOpenChange,
   onTagChange,
   onSortChange,
@@ -69,7 +79,7 @@ export default function KnowledgeMineFilterPopover({
   }, [onOpenChange, open]);
 
   const activeCount =
-    Number(selectedSort !== "all") +
+    Number(selectedSort !== "all") + Number(Boolean(sceneOptions && selectedScene)) +
     Number(
       primaryFilter === "tags"
         ? selectedTag !== ALL_TAGS
@@ -125,6 +135,15 @@ export default function KnowledgeMineFilterPopover({
       role="dialog"
       aria-label={t("knowledge.filterAndSortAria")}
     >
+      {sceneOptions && onSceneChange ? (
+        <div className="knowledge-mine-filter-section" role="group" aria-label={t("knowledge.typeLabel")}>
+          <div className="knowledge-mine-filter-section-title">{t("knowledge.typeLabel")}</div>
+          {sceneStatus === "loading" ? <div role="status">{t("common.loading")}</div> : sceneStatus === "error" ? (
+            <Alert type="error" message={t("knowledge.typeLoadFailed")}
+              action={<Button size="small" onClick={onRetryScenes}>{t("common.retry")}</Button>} />
+          ) : renderOptions(sceneOptions, selectedScene, onSceneChange)}
+        </div>
+      ) : null}
       {primaryFilter === "tags" ? (
         <div
           className="knowledge-mine-filter-section"
@@ -190,7 +209,7 @@ export default function KnowledgeMineFilterPopover({
             : t("knowledge.filterAndSortHint")
         }
       >
-        <span>{t("knowledge.filterAndSort")}</span>
+        <span>{activeCount > 0 ? t("knowledge.filterAndSortWithCount", { count: activeCount }) : t("knowledge.filterAndSort")}</span>
         <DownOutlined aria-hidden="true" className="knowledge-mine-filter-arrow" />
       </Button>
     </Popover>

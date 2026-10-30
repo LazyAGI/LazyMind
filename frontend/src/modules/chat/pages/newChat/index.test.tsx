@@ -197,10 +197,6 @@ vi.mock("@/modules/chat/store/chatThink", () => ({
 }));
 vi.mock("@/modules/showcase/api", () => ({
   listShowcaseCases: mocks.listShowcaseCases,
-  matchesShowcaseEntryType: (capabilityType: string, entryType: string) =>
-    entryType === "chat"
-      ? capabilityType === "chat"
-      : capabilityType === "work" || capabilityType === "workflow",
 }));
 vi.mock("@/modules/showcase/useFeaturedCapabilityBinding", () => ({
   useFeaturedCapabilityBinding: () => ({
@@ -697,5 +693,17 @@ describe("NewChatPage featured templates", () => {
     expect(mocks.latestChatInputProps.showcaseSelection.skill.moreLabel).toBe(
       "showcase.exploreMoreCapabilities",
     );
+  });
+
+  it.each(["chat", "work"])("opens the paper collection view from %s quick selection", async (mode) => {
+    mocks.listShowcaseCases.mockResolvedValue({ cases: [{ ...featuredCase, id: "paper-reading", title: "论文阅读", type: "page", page_action: "open_paper_library", tasks: [] }], categories: [] });
+    render(<MemoryRouter initialEntries={[`/agent/chat/home?showcase_entry=${mode}`]}><Routes>
+      <Route path="/agent/chat/home" element={<NewChatPage />} />
+      <Route path="/lib/knowledge/list" element={<span>论文集选择</span>} />
+    </Routes></MemoryRouter>);
+    await waitFor(() => expect(mocks.latestChatInputProps.showcaseSelection.skill.options[0]?.label).toBe("论文阅读"));
+    act(() => mocks.latestChatInputProps.showcaseSelection.skill.onChange("paper-reading"));
+    expect(await screen.findByText("论文集选择")).toBeInTheDocument();
+    expect(mocks.latestChatInputProps.value).not.toContain("论文阅读");
   });
 });

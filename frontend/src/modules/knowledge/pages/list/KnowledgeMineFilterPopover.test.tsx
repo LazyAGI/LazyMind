@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { TFunction } from "i18next";
 
@@ -17,6 +17,7 @@ const labels: Record<string, string> = {
   "knowledge.mineAllTags": "全部标签",
   "knowledge.tags": "标签",
   "knowledge.sortLabel": "排序",
+  "knowledge.typeLabel": "类型",
   "knowledge.cloudSourceLabel": "云端来源",
   "knowledge.mineSort.all": "全部",
   "knowledge.mineSort.recent_used": "最近使用",
@@ -31,6 +32,7 @@ const t = ((key: string, values?: Record<string, unknown>) => {
   if (key === "knowledge.filterAndSortActive") {
     return `已应用 ${values?.count} 个筛选或排序条件`;
   }
+  if (key === "knowledge.filterAndSortWithCount") return `筛选和排序（${values?.count}）`;
   return labels[key] || key;
 }) as TFunction;
 
@@ -59,16 +61,19 @@ interface FilterHarnessProps {
   primaryFilter?: "tags" | "cloudSource";
   initialTag?: string;
   initialCloudSource?: KnowledgeMineCloudSource;
+  initialScene?: string;
 }
 
 function FilterHarness({
   primaryFilter = "tags",
   initialTag = ALL_TAGS,
   initialCloudSource = "all",
+  initialScene,
 }: FilterHarnessProps) {
   const [open, setOpen] = useState(false);
   const [tag, setTag] = useState(initialTag);
   const [sort, setSort] = useState<KnowledgeMineSort>("all");
+  const [scene, setScene] = useState(initialScene || "");
   const [cloudSource, setCloudSource] =
     useState<KnowledgeMineCloudSource>(initialCloudSource);
 
@@ -81,6 +86,13 @@ function FilterHarness({
       selectedTag={tag}
       selectedSort={sort}
       selectedCloudSource={cloudSource}
+      sceneOptions={initialScene === undefined ? undefined : [
+        { value: "", label: "全部类型" },
+        { value: "general", label: "通用阅读" },
+        { value: "academic_papers", label: "论文集" },
+      ]}
+      selectedScene={scene}
+      onSceneChange={setScene}
       onOpenChange={setOpen}
       onTagChange={setTag}
       onSortChange={setSort}
@@ -90,6 +102,18 @@ function FilterHarness({
 }
 
 describe("KnowledgeMineFilterPopover", () => {
+  it("shows the selected paper type, counts it, and lets the user clear it", async () => {
+    render(<FilterHarness initialScene="academic_papers" />);
+    const trigger = screen.getByRole("button", { name: "筛选和排序（1）" });
+    fireEvent.click(trigger);
+    const types = await screen.findByRole("group", { name: "类型" });
+    expect(within(types).getByRole("option", { name: "论文集" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(within(types).getByRole("option", { name: "全部类型" }));
+    expect(within(types).getByRole("option", { name: "全部类型" })).toHaveAttribute("aria-selected", "true");
+    expect(trigger).toHaveTextContent("筛选和排序");
+    expect(trigger).not.toHaveClass("is-active");
+  });
+
   it("shows only tags and sorting in tag mode", async () => {
     render(<FilterHarness initialCloudSource="feishu" />);
 

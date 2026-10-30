@@ -637,6 +637,7 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		Limit:        pageSize,
 		OrderBy:      orderBy,
 		SourceFilter: sourceFilter,
+		Scene:        strings.TrimSpace(q.Get("scene")),
 		Caller:       caller,
 	})
 	if err != nil {

@@ -2,11 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ArrowLeftOutlined, SearchOutlined } from "@ant-design/icons";
 import { Select } from "antd";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { readChatConversationFilters } from "@/modules/chat/constants/chat";
 import CaseCard from "./CaseCard";
 import { listShowcaseCases, type ShowcaseCase } from "./api";
 import {
-  showcaseEntryType,
+  matchesShowcaseEntryType,
+  parseShowcaseEntryType,
+  SHOWCASE_ENTRY_QUERY_PARAM,
   showcaseTechnologyType,
   type ShowcaseEntryType,
   type ShowcaseTechnologyType,
@@ -154,6 +157,9 @@ function ShowcaseSelectFilter<T extends string>({
 export default function GalleryPage() {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
+  const [searchParams] = useSearchParams();
+  const originEntryType = parseShowcaseEntryType(searchParams.get(SHOWCASE_ENTRY_QUERY_PARAM))
+    ?? (readChatConversationFilters().filter === "task" ? "work" : "chat");
   const [items, setItems] = useState<ShowcaseCase[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("");
@@ -202,12 +208,13 @@ export default function GalleryPage() {
     { label: t("showcase.filters.all"), value: "" },
     { label: t("showcase.filters.technology.skill"), value: "skill" },
     { label: t("showcase.filters.technology.workflow"), value: "workflow" },
+    { label: t("showcase.filters.technology.page"), value: "page" },
   ], [t]);
   const filteredItems = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
     return items.filter((item) => {
       const matchesCategory = category === "" || item.category === category;
-      const matchesEntryType = entryType === "" || showcaseEntryType(item.type) === entryType;
+      const matchesEntryType = entryType === "" || matchesShowcaseEntryType(item.type, entryType);
       const matchesTechnologyType = technologyType === ""
         || showcaseTechnologyType(item.type) === technologyType;
       const searchable = [
@@ -226,12 +233,12 @@ export default function GalleryPage() {
         && matchesEntryType
         && matchesTechnologyType
         && (!normalizedKeyword || searchable.includes(normalizedKeyword));
-    });
+    }).sort((left, right) => left.featured_order - right.featured_order);
   }, [category, entryType, items, keyword, technologyType]);
 
   return (
     <main className="showcase-page showcase-gallery-page">
-      <Link className="showcase-back-link" to="/agent/chat/home">
+      <Link className="showcase-back-link" to={`/agent/chat/home?showcase_entry=${originEntryType}`}>
         <ArrowLeftOutlined aria-hidden="true" />
         {t("showcase.backToHome")}
       </Link>
@@ -285,7 +292,7 @@ export default function GalleryPage() {
       ) : (
         <div className="showcase-grid showcase-gallery-grid">
           {filteredItems.map((item) => (
-            <CaseCard key={item.id} item={item} primaryAction="details" />
+            <CaseCard key={item.id} item={item} primaryAction="details" entryType={originEntryType} />
           ))}
         </div>
       )}

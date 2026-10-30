@@ -16,7 +16,8 @@ import {
   type ShowcaseCaseResult,
   type ShowcaseCaseTask,
 } from "./api";
-import { buildShowcaseLaunchPath } from "./classification";
+import { buildShowcaseLaunchPath, parseShowcaseEntryType, showcasePagePath, SHOWCASE_ENTRY_QUERY_PARAM } from "./classification";
+import { readChatConversationFilters } from "@/modules/chat/constants/chat";
 import "./index.scss";
 
 const REPLAY_INITIAL_DELAY_MS = 480;
@@ -185,6 +186,8 @@ export default function DetailPage() {
   const { caseId = "" } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const entryType = parseShowcaseEntryType(new URLSearchParams(location.search).get(SHOWCASE_ENTRY_QUERY_PARAM))
+    ?? (readChatConversationFilters().filter === "task" ? "work" : "chat");
   const taskSectionRef = useRef<HTMLElement>(null);
   const taskListRef = useRef<HTMLDivElement>(null);
   const [item, setItem] = useState<ShowcaseCase | null>(null);
@@ -206,6 +209,11 @@ export default function DetailPage() {
     setHasError(false);
     getShowcaseCase(caseId, { signal: controller.signal })
       .then((nextItem) => {
+        const pagePath = showcasePagePath(nextItem.page_action, entryType);
+        if (pagePath) {
+          navigate(pagePath, { replace: true });
+          return;
+        }
         setItem(nextItem);
         setIsResultExpanded(false);
         setSelectedTaskId(nextItem.tasks?.[0]?.id ?? "");
@@ -221,7 +229,7 @@ export default function DetailPage() {
         }
       });
     return () => controller.abort();
-  }, [caseId, locale]);
+  }, [caseId, locale, entryType, navigate]);
 
   useEffect(() => {
     const controller = new AbortController();

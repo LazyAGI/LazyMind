@@ -7,6 +7,7 @@ export type SourceCategory = "local" | "cloudArchive" | "official";
 export interface KnowledgeListState {
   view: "mine" | "square";
   source: SourceCategory;
+  scene: string;
   keyword: string;
   tag: string;
   officialTag: string;
@@ -21,7 +22,7 @@ export interface KnowledgeListState {
 }
 
 const defaults: KnowledgeListState = {
-  view: "mine", source: "local", keyword: "", tag: ALL_TAGS,
+  view: "mine", source: "local", scene: "", keyword: "", tag: ALL_TAGS,
   officialTag: ALL_TAGS, sort: "all", cloudSource: "all", page: 1,
   pageSize: 10, squareType: "industry", squareDomain: "",
   squareStatus: "all", squareKeyword: "",
@@ -41,6 +42,7 @@ export function readKnowledgeListState(search: string): KnowledgeListState {
   return {
     view: choice(params.get("view"), ["mine", "square"], defaults.view),
     source: choice(params.get("source"), ["local", "cloudArchive", "official"], defaults.source),
+    scene: params.get("scene")?.trim() || "",
     keyword: params.get("keyword") || "",
     tag: params.get("tag") || ALL_TAGS,
     officialTag: params.get("officialTag") || ALL_TAGS,

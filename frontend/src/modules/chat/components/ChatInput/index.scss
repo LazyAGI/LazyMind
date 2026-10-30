@@ -2118,10 +2118,10 @@
 }
 .chat-featured-options {
   flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #d4dce8 transparent;
-  > button {
+  > [role='option'] {
     display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
     border: 1px solid transparent; border-radius: 9px; background: transparent; padding: 6px 8px;
-    margin-bottom: 1px; color: #344158;
+    margin-bottom: 1px; color: #344158; text-decoration: none;
     &:last-child { margin-bottom: 0; }
     &:hover { background: #f5f8fc; }
     &[aria-selected='true'] { background: #eef5ff; border-color: #d8e8ff; }

@@ -506,7 +506,7 @@ interface ChatInputProps {
 interface ShowcaseSelectControl {
   value?: string;
   selectedLabel?: string;
-  options: Array<{ value: string; label: string; description?: string }>;
+  options: Array<{ value: string; label: string; description?: string; pageAction?: string }>;
   ariaLabel: string;
   placeholder?: string;
   heading: string;

@@ -48,6 +48,7 @@ export interface AbortUploadResponse {
 export interface AcademicChatContext {
     'dataset_id': string;
     'expansion_id'?: string;
+    'goal'?: string;
     'handoff_id'?: string;
     'kind': string;
     'next_conversation_id'?: string;
@@ -62,6 +63,7 @@ export interface AcademicChatContext {
 export interface AcademicChatSummary {
     'dataset_id': string;
     'expansion_id'?: string;
+    'goal'?: string;
     'handoff_id'?: string;
     'kind': string;
     'next_conversation_id'?: string;
@@ -525,8 +527,29 @@ export interface AcademicResolvedPapersContentsInner {
 export interface AcademicReviewInput {
     'candidate_directions': Array<string>;
     'papers': Array<AcademicWorkflowPaper>;
+    'review_scope'?: AcademicReviewInputReviewScopeEnum;
     'selected_directions': Array<string>;
     'user_instruction': string;
+}
+
+export const AcademicReviewInputReviewScopeEnum = {
+    Selected: 'selected',
+    DirectReferences: 'direct_references'
+} as const;
+
+export type AcademicReviewInputReviewScopeEnum = typeof AcademicReviewInputReviewScopeEnum[keyof typeof AcademicReviewInputReviewScopeEnum];
+
+export interface AcademicReviewRecord {
+    'conversation_id': string;
+    'created_at': string;
+    'expansion_id': string;
+    'id': string;
+    'paper_count': number;
+    'source_available': boolean;
+    'source_title': string;
+    'title': string;
+    'updated_at': string;
+    'version': number;
 }
 export interface AcademicSourceImportItem {
     'batch_id': string;
@@ -562,6 +585,8 @@ export interface AcademicTaskLaunch {
     'paper_ids'?: Array<string>;
     'reflection_first'?: boolean;
     'request_key': string;
+    'review_scope'?: AcademicTaskLaunchReviewScopeEnum;
+    'skip_expansion'?: boolean;
     'user_instruction'?: string;
 }
 
@@ -580,6 +605,12 @@ export const AcademicTaskLaunchKindEnum = {
 } as const;
 
 export type AcademicTaskLaunchKindEnum = typeof AcademicTaskLaunchKindEnum[keyof typeof AcademicTaskLaunchKindEnum];
+export const AcademicTaskLaunchReviewScopeEnum = {
+    Selected: 'selected',
+    DirectReferences: 'direct_references'
+} as const;
+
+export type AcademicTaskLaunchReviewScopeEnum = typeof AcademicTaskLaunchReviewScopeEnum[keyof typeof AcademicTaskLaunchReviewScopeEnum];
 
 export interface AcademicWorkflowPaper {
     'direction_relation'?: string;
@@ -1036,6 +1067,7 @@ export type ApiCoreAcademicExpansionsExpansionIdPreparationPostRequestActionEnum
 
 export interface ApiCoreAcademicExpansionsGet200Response {
     'items'?: Array<AcademicExpansion>;
+    'reviews'?: Array<AcademicReviewRecord>;
 }
 /**
  * @type ApiCoreAcademicImportsBatchIdGet200Response
@@ -1093,6 +1125,7 @@ export interface ApiCoreAcademicImportsPost200ResponseOneOf {
 }
 export interface ApiCoreAcademicImportsPreviewPostRequest {
     'expansion_id'?: string;
+    'expansion_version'?: number;
     'identifier'?: string;
     'papers'?: Array<PaperLibraryPaper>;
     'reference_ids'?: Array<string>;
@@ -1120,7 +1153,7 @@ export interface ApiCoreAcademicLibraryPapersLibraryPaperIdNotesPostRequest {
 }
 export interface ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest {
     'metadata'?: PaperLibraryMetadata;
-    'revision': number;
+    'revision'?: number;
     'status'?: ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequestStatusEnum;
     'tags'?: Array<string>;
 }
@@ -1155,16 +1188,32 @@ export interface ApiCoreAcademicPaperContentsRetryPostRequest {
 }
 export interface ApiCoreAcademicPaperSelectionsResolvePost200Response {
     'invalid'?: Array<ApiCoreAcademicPaperSelectionsResolvePost200ResponseInvalidInner>;
+    'materials'?: Array<ApiCoreAcademicPaperSelectionsResolvePost200ResponseMaterialsInner>;
     'papers'?: Array<AcademicWorkflowPaper>;
 }
 export interface ApiCoreAcademicPaperSelectionsResolvePost200ResponseInvalidInner {
     'document_id'?: string;
     'reason'?: string;
 }
+export interface ApiCoreAcademicPaperSelectionsResolvePost200ResponseMaterialsInner {
+    'eligible'?: boolean;
+    'paper_id'?: string;
+    'reason'?: string;
+    'status'?: string;
+}
 export interface ApiCoreAcademicPaperSelectionsResolvePostRequest {
     'dataset_id': string;
     'document_ids': Array<string>;
+    'kind'?: ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum;
+    'skip_expansion'?: boolean;
 }
+
+export const ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum = {
+    Review: 'review'
+} as const;
+
+export type ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum = typeof ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum[keyof typeof ApiCoreAcademicPaperSelectionsResolvePostRequestKindEnum];
+
 export interface ApiCoreAcademicPapersPaperIdImportancePut200Response {
     'is_important'?: boolean;
 }
@@ -1173,11 +1222,40 @@ export interface ApiCoreAcademicPapersPaperIdImportancePutRequest {
     'is_important': boolean;
 }
 export interface ApiCoreAcademicPapersSearchPost200Response {
+    'cache_hit'?: boolean;
     'leads'?: Array<object>;
     'mock'?: boolean;
     'papers'?: Array<AcademicPaperRef>;
-    'sources'?: Array<object>;
+    'sources'?: Array<ApiCoreAcademicPapersSearchPost200ResponseSourcesInner>;
 }
+export interface ApiCoreAcademicPapersSearchPost200ResponseSourcesInner {
+    'count'?: number;
+    'elapsed_ms'?: number;
+    'has_more'?: boolean;
+    'lead_count'?: number;
+    'limitation'?: string;
+    'new_paper_count'?: number;
+    'next_cursor'?: string;
+    'paper_count'?: number;
+    'retry_at'?: string;
+    'reused'?: boolean;
+    'source'?: string;
+    'status'?: ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum;
+    'total_count'?: number;
+}
+
+export const ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum = {
+    Ok: 'ok',
+    Empty: 'empty',
+    Failed: 'failed',
+    MissingConfiguration: 'missing_configuration',
+    AuthenticationFailed: 'authentication_failed',
+    RateLimited: 'rate_limited',
+    QuotaExhausted: 'quota_exhausted'
+} as const;
+
+export type ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum = typeof ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum[keyof typeof ApiCoreAcademicPapersSearchPost200ResponseSourcesInnerStatusEnum];
+
 export interface ApiCoreAcademicPapersSearchPostRequest {
     'cursor'?: string;
     'expansion_id': string;
@@ -1205,6 +1283,17 @@ export const ApiCoreAcademicPapersSearchPostRequestSourcesEnum = {
 
 export type ApiCoreAcademicPapersSearchPostRequestSourcesEnum = typeof ApiCoreAcademicPapersSearchPostRequestSourcesEnum[keyof typeof ApiCoreAcademicPapersSearchPostRequestSourcesEnum];
 
+export interface ApiCoreAcademicReviewTopicGeneratePost200Response {
+    'topic'?: string;
+}
+export interface ApiCoreAcademicReviewTopicGeneratePostRequest {
+    'dataset_id'?: string;
+    'document_ids'?: Array<string>;
+    'expansion_id'?: string;
+    'expansion_version'?: number;
+    'paper_ids'?: Array<string>;
+    'user_instruction'?: string;
+}
 export interface ApiCoreAcademicWorkflowLaunchesPost200Response {
     'conversation_id'?: string;
     'expansion_id'?: string;
@@ -7354,6 +7443,7 @@ export interface ShowcaseCase {
     'image_url': string;
     'output_label': string;
     'output_type': string;
+    'page_action'?: string;
     'provider': string;
     'result_summary': string;
     'source_url': string;
@@ -9502,12 +9592,13 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary List current user\'s expansion records
+         * @summary List owned expansion records and optionally review handoffs
          * @param {string} datasetId
+         * @param {boolean} [includeReviews]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAcademicExpansionsGet: async (datasetId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreAcademicExpansionsGet: async (datasetId: string, includeReviews?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'datasetId' is not null or undefined
             assertParamExists('apiCoreAcademicExpansionsGet', 'datasetId', datasetId)
             const localVarPath = `/api/core/academic/expansions`;
@@ -9524,6 +9615,10 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
 
             if (datasetId !== undefined) {
                 localVarQueryParameter['dataset_id'] = datasetId;
+            }
+
+            if (includeReviews !== undefined) {
+                localVarQueryParameter['include_reviews'] = includeReviews;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -10047,7 +10142,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Update one paper with its revision and validate every active attachment
+         * @summary Update personal reading status; shared fields require edit access and revision
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
          * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
@@ -10424,7 +10519,7 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
         },
         /**
          *
-         * @summary Search scholarly providers and configured web search; register papers and preserve web leads
+         * @summary Search scholarly sources; continue one source with its task-bound cursor only
          * @param {ApiCoreAcademicPapersSearchPostRequest} apiCoreAcademicPapersSearchPostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10451,6 +10546,41 @@ export const AcademicWorkflowsApiAxiosParamCreator = function (configuration?: C
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicPapersSearchPostRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Suggest a review topic from accessible paper metadata without starting a workflow
+         * @param {ApiCoreAcademicReviewTopicGeneratePostRequest} apiCoreAcademicReviewTopicGeneratePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicReviewTopicGeneratePost: async (apiCoreAcademicReviewTopicGeneratePostRequest: ApiCoreAcademicReviewTopicGeneratePostRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'apiCoreAcademicReviewTopicGeneratePostRequest' is not null or undefined
+            assertParamExists('apiCoreAcademicReviewTopicGeneratePost', 'apiCoreAcademicReviewTopicGeneratePostRequest', apiCoreAcademicReviewTopicGeneratePostRequest)
+            const localVarPath = `/api/core/academic/review-topic:generate`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(apiCoreAcademicReviewTopicGeneratePostRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -10612,13 +10742,14 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary List current user\'s expansion records
+         * @summary List owned expansion records and optionally review handoffs
          * @param {string} datasetId
+         * @param {boolean} [includeReviews]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAcademicExpansionsGet(datasetId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsGet200Response>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsGet(datasetId, options);
+        async apiCoreAcademicExpansionsGet(datasetId: string, includeReviews?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicExpansionsGet200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicExpansionsGet(datasetId, includeReviews, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicExpansionsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -10792,7 +10923,7 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Update one paper with its revision and validate every active attachment
+         * @summary Update personal reading status; shared fields require edit access and revision
          * @param {string} targetDatasetId
          * @param {string} libraryPaperId
          * @param {ApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} apiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest
@@ -10927,7 +11058,7 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Search scholarly providers and configured web search; register papers and preserve web leads
+         * @summary Search scholarly sources; continue one source with its task-bound cursor only
          * @param {ApiCoreAcademicPapersSearchPostRequest} apiCoreAcademicPapersSearchPostRequest
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10936,6 +11067,19 @@ export const AcademicWorkflowsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicPapersSearchPost(apiCoreAcademicPapersSearchPostRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicPapersSearchPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Suggest a review topic from accessible paper metadata without starting a workflow
+         * @param {ApiCoreAcademicReviewTopicGeneratePostRequest} apiCoreAcademicReviewTopicGeneratePostRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAcademicReviewTopicGeneratePost(apiCoreAcademicReviewTopicGeneratePostRequest: ApiCoreAcademicReviewTopicGeneratePostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreAcademicReviewTopicGeneratePost200Response>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAcademicReviewTopicGeneratePost(apiCoreAcademicReviewTopicGeneratePostRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['AcademicWorkflowsApi.apiCoreAcademicReviewTopicGeneratePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -11041,13 +11185,13 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary List current user\'s expansion records
+         * @summary List owned expansion records and optionally review handoffs
          * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicExpansionsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicExpansionsGet200Response> {
-            return localVarFp.apiCoreAcademicExpansionsGet(requestParameters.datasetId, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreAcademicExpansionsGet(requestParameters.datasetId, requestParameters.includeReviews, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -11161,7 +11305,7 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Update one paper with its revision and validate every active attachment
+         * @summary Update personal reading status; shared fields require edit access and revision
          * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -11260,13 +11404,23 @@ export const AcademicWorkflowsApiFactory = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Search scholarly providers and configured web search; register papers and preserve web leads
+         * @summary Search scholarly sources; continue one source with its task-bound cursor only
          * @param {AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreAcademicPapersSearchPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicPapersSearchPost200Response> {
             return localVarFp.apiCoreAcademicPapersSearchPost(requestParameters.apiCoreAcademicPapersSearchPostRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Suggest a review topic from accessible paper metadata without starting a workflow
+         * @param {AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAcademicReviewTopicGeneratePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreAcademicReviewTopicGeneratePost200Response> {
+            return localVarFp.apiCoreAcademicReviewTopicGeneratePost(requestParameters.apiCoreAcademicReviewTopicGeneratePostRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -11347,6 +11501,8 @@ export interface AcademicWorkflowsApiApiCoreAcademicExpansionsExpansionIdPrepara
  */
 export interface AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest {
     readonly datasetId: string
+
+    readonly includeReviews?: boolean
 }
 
 /**
@@ -11557,6 +11713,13 @@ export interface AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreAcademicReviewTopicGeneratePost operation in AcademicWorkflowsApi.
+ */
+export interface AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest {
+    readonly apiCoreAcademicReviewTopicGeneratePostRequest: ApiCoreAcademicReviewTopicGeneratePostRequest
+}
+
+/**
  * Request parameters for apiCoreAcademicWorkflowLaunchesPost operation in AcademicWorkflowsApi.
  */
 export interface AcademicWorkflowsApiApiCoreAcademicWorkflowLaunchesPostRequest {
@@ -11656,13 +11819,13 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary List current user\'s expansion records
+     * @summary List owned expansion records and optionally review handoffs
      * @param {AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicExpansionsGet(requestParameters: AcademicWorkflowsApiApiCoreAcademicExpansionsGetRequest, options?: RawAxiosRequestConfig) {
-        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsGet(requestParameters.datasetId, options).then((request) => request(this.axios, this.basePath));
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicExpansionsGet(requestParameters.datasetId, requestParameters.includeReviews, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -11788,7 +11951,7 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Update one paper with its revision and validate every active attachment
+     * @summary Update personal reading status; shared fields require edit access and revision
      * @param {AcademicWorkflowsApiApiCoreAcademicLibraryPapersLibraryPaperIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -11897,13 +12060,24 @@ export class AcademicWorkflowsApi extends BaseAPI {
 
     /**
      *
-     * @summary Search scholarly providers and configured web search; register papers and preserve web leads
+     * @summary Search scholarly sources; continue one source with its task-bound cursor only
      * @param {AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreAcademicPapersSearchPost(requestParameters: AcademicWorkflowsApiApiCoreAcademicPapersSearchPostRequest, options?: RawAxiosRequestConfig) {
         return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicPapersSearchPost(requestParameters.apiCoreAcademicPapersSearchPostRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Suggest a review topic from accessible paper metadata without starting a workflow
+     * @param {AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAcademicReviewTopicGeneratePost(requestParameters: AcademicWorkflowsApiApiCoreAcademicReviewTopicGeneratePostRequest, options?: RawAxiosRequestConfig) {
+        return AcademicWorkflowsApiFp(this.configuration).apiCoreAcademicReviewTopicGeneratePost(requestParameters.apiCoreAcademicReviewTopicGeneratePostRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -17899,10 +18073,11 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
          * @param {string} [keyword]
          * @param {Array<string>} [tags]
          * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
+         * @param {string} [scene] Filter datasets by knowledge scene, for example academic_papers.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreDatasetsGet: async (pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreDatasetsGet: async (pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, scene?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/datasets`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -17937,6 +18112,10 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
 
             if (source !== undefined) {
                 localVarQueryParameter['source'] = source;
+            }
+
+            if (scene !== undefined) {
+                localVarQueryParameter['scene'] = scene;
             }
 
             localVarHeaderParameter['Accept'] = 'application/json';
@@ -18104,11 +18283,12 @@ export const DatasetsApiFp = function(configuration?: Configuration) {
          * @param {string} [keyword]
          * @param {Array<string>} [tags]
          * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
+         * @param {string} [scene] Filter datasets by knowledge scene, for example academic_papers.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreDatasetsGet(pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDatasetsResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsGet(pageToken, pageSize, orderBy, keyword, tags, source, options);
+        async apiCoreDatasetsGet(pageToken?: string, pageSize?: number, orderBy?: ApiCoreDatasetsGetOrderByEnum, keyword?: string, tags?: Array<string>, source?: ApiCoreDatasetsGetSourceEnum, scene?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ListDatasetsResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreDatasetsGet(pageToken, pageSize, orderBy, keyword, tags, source, scene, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DatasetsApi.apiCoreDatasetsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -18206,7 +18386,7 @@ export const DatasetsApiFactory = function (configuration?: Configuration, baseP
          * @throws {RequiredError}
          */
         apiCoreDatasetsGet(requestParameters: DatasetsApiApiCoreDatasetsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ListDatasetsResponse> {
-            return localVarFp.apiCoreDatasetsGet(requestParameters.pageToken, requestParameters.pageSize, requestParameters.orderBy, requestParameters.keyword, requestParameters.tags, requestParameters.source, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreDatasetsGet(requestParameters.pageToken, requestParameters.pageSize, requestParameters.orderBy, requestParameters.keyword, requestParameters.tags, requestParameters.source, requestParameters.scene, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -18292,6 +18472,11 @@ export interface DatasetsApiApiCoreDatasetsGetRequest {
      * Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
      */
     readonly source?: ApiCoreDatasetsGetSourceEnum
+
+    /**
+     * Filter datasets by knowledge scene, for example academic_papers.
+     */
+    readonly scene?: string
 }
 
 /**
@@ -18370,7 +18555,7 @@ export class DatasetsApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreDatasetsGet(requestParameters: DatasetsApiApiCoreDatasetsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DatasetsApiFp(this.configuration).apiCoreDatasetsGet(requestParameters.pageToken, requestParameters.pageSize, requestParameters.orderBy, requestParameters.keyword, requestParameters.tags, requestParameters.source, options).then((request) => request(this.axios, this.basePath));
+        return DatasetsApiFp(this.configuration).apiCoreDatasetsGet(requestParameters.pageToken, requestParameters.pageSize, requestParameters.orderBy, requestParameters.keyword, requestParameters.tags, requestParameters.source, requestParameters.scene, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

@@ -109,6 +109,12 @@ describe("CaseCard", () => {
     );
   });
 
+  it.each(["chat", "work"] as const)("opens paper collections directly and preserves %s", (entryType) => {
+    render(<MemoryRouter><CaseCard item={{ ...item, id: "paper-reading", title: "论文阅读", type: "page", page_action: "open_paper_library", tasks: [] }} primaryAction="details" entryType={entryType} /></MemoryRouter>);
+    expect(screen.getByRole("link", { name: /论文阅读/ })).toHaveAttribute("href", `/lib/knowledge/list?scene=academic_papers&showcase_entry=${entryType}`);
+    expect(screen.queryByRole("link", { name: /查看详情/ })).not.toBeInTheDocument();
+  });
+
   it("uses details as the primary action in the capability center", () => {
     render(
       <MemoryRouter>
