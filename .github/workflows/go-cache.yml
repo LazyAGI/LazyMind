@@ -1,0 +1,54 @@
+name: Warm shared Go cache
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      # Include go:embed inputs such as migration SQL, not only Go source files.
+      - 'backend/core/**'
+      - 'backend/scan-control-plane/**'
+      - 'backend/file-watcher/**'
+      - 'local/local-proxy/**'
+      - 'local/local-runtime-manager/**'
+      - 'local/lazymind-cli/**'
+      - 'tests/backend/core/**'
+      - '**/go.mod'
+      - '**/go.sum'
+      - '.github/actions/setup-go-ci/**'
+      - '.github/actions/setup-golangci-lint/**'
+      - '.github/workflows/go-cache.yml'
+      - 'scripts/warm_go_ci_cache.sh'
+  workflow_dispatch:
+
+concurrency:
+  group: go-cache-${{ github.ref }}
+  # Let an in-flight producer finish so frequent pushes cannot starve the cache.
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore shared Go cache
+        id: go
+        uses: ./.github/actions/setup-go-ci
+      - name: Prepare golangci-lint for subsequent CI jobs
+        uses: ./.github/actions/setup-golangci-lint
+      - name: Compile Go packages and test dependencies without running tests
+        if: steps.go.outputs.cache-hit != 'true'
+        run: bash scripts/warm_go_ci_cache.sh
+      # Cache entries are immutable: source snapshots coexist until normal
+      # eviction. Other workflows may still save their own branch-scoped caches.
+      - name: Save main-branch Go snapshot
+        if: steps.go.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.go.outputs.build-cache }}
+            ${{ steps.go.outputs.module-cache }}
+          key: ${{ steps.go.outputs.cache-key }}

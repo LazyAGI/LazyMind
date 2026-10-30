@@ -1,0 +1,45 @@
+name: Set up the pinned golangci-lint binary
+description: Install the checksum-verified official Linux amd64 release used by CI.
+outputs:
+  executable:
+    description: Absolute path passed to make as GOLANGCI_LINT.
+    value: ${{ steps.paths.outputs.directory }}/golangci-lint
+runs:
+  using: composite
+  steps:
+    - name: Locate golangci-lint
+      id: paths
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" != Linux || "$RUNNER_ARCH" != X64 ]]; then
+          echo 'The CI golangci-lint binary is pinned for Linux amd64.' >&2
+          exit 1
+        fi
+        printf 'directory=%s/golangci-lint/2.12.2/linux-amd64\n' "$RUNNER_TOOL_CACHE" >> "$GITHUB_OUTPUT"
+    - name: Restore golangci-lint binary
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.paths.outputs.directory }}
+        key: golangci-lint-v2.12.2-linux-amd64-8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553
+    - name: Install official golangci-lint release
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        INSTALL_DIRECTORY: ${{ steps.paths.outputs.directory }}
+      run: |
+        archive=$(mktemp)
+        trap 'rm -f "$archive"' EXIT
+        curl --fail --silent --show-error --location --retry 3 --connect-timeout 15 --max-time 120 \
+          https://github.com/golangci/golangci-lint/releases/download/v2.12.2/golangci-lint-2.12.2-linux-amd64.tar.gz \
+          --output "$archive"
+        # SHA-256 published for this official release archive.
+        printf '%s  %s\n' '8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553' "$archive" | sha256sum --check --status
+        mkdir -p "$INSTALL_DIRECTORY"
+        tar -xzf "$archive" --strip-components=1 --directory "$INSTALL_DIRECTORY" \
+          golangci-lint-2.12.2-linux-amd64/golangci-lint
+    - name: Check golangci-lint executable
+      shell: bash
+      env:
+        GOLANGCI_LINT: ${{ steps.paths.outputs.directory }}/golangci-lint
+      run: '"$GOLANGCI_LINT" version'

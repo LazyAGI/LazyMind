@@ -1,0 +1,53 @@
+name: Set up Go with a shared build cache
+description: Restore a main-branch Go snapshot without saving a large cache for each PR.
+inputs:
+  go-version:
+    description: Exact Go toolchain used by the cache producer and consumers.
+    default: '1.25.11'
+outputs:
+  cache-key:
+    description: Source snapshot key for the trusted cache producer.
+    value: ${{ steps.paths.outputs.key }}
+  cache-hit:
+    description: Whether the exact source snapshot was restored.
+    value: ${{ steps.restore.outputs.cache-hit }}
+  build-cache:
+    description: Go build cache directory.
+    value: ${{ steps.paths.outputs.build-cache }}
+  module-cache:
+    description: Go module download cache directory.
+    value: ${{ steps.paths.outputs.module-cache }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+        cache: false
+    - name: Identify compatible Go cache
+      id: paths
+      shell: bash
+      env:
+        DEPENDENCY_HASH: ${{ hashFiles('**/go.sum') }}
+      run: |
+        compatibility="go-ci-v1-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}-$(go env GOVERSION)"
+        printf 'build-cache=%s\n' "$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        printf 'module-cache=%s\n' "$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        printf 'key=%s-%s-%s\n' "$compatibility" "$DEPENDENCY_HASH" "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+        printf 'dependency-prefix=%s-%s-\n' "$compatibility" "$DEPENDENCY_HASH" >> "$GITHUB_OUTPUT"
+        printf 'toolchain-prefix=%s-\n' "$compatibility" >> "$GITHUB_OUTPUT"
+    - name: Restore shared Go cache
+      # A new namespace starts cold. Only the trusted main-branch producer fills
+      # it after merge; a PR never uploads a large Go snapshot on a cache miss.
+      id: restore
+      uses: actions/cache/restore@v4
+      env:
+        SEGMENT_DOWNLOAD_TIMEOUT_MINS: '2'
+      with:
+        path: |
+          ${{ steps.paths.outputs.build-cache }}
+          ${{ steps.paths.outputs.module-cache }}
+        key: ${{ steps.paths.outputs.key }}
+        restore-keys: |
+          ${{ steps.paths.outputs.dependency-prefix }}
+          ${{ steps.paths.outputs.toolchain-prefix }}
