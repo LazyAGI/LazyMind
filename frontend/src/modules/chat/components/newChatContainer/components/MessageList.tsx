@@ -13,6 +13,8 @@ import {
 } from "@ant-design/icons";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import AssistantMessage from "../../AssistantMessage";
+import ChatImages from "../../ChatImages";
+import ChatFiles from "../../ChatFiles";
 import type { PreferenceType } from "../../MultiAnswerDisplay";
 import "../index.scss";
 import dayjs from "dayjs";
@@ -534,12 +536,16 @@ const MessageList: React.FC<MessageListProps> = ({
                 </Space>
                 </div>
               ) : Array.isArray(item.mentions) && item.mentions.length > 0 ? (
-                <div className="chat-user-mention-text">
-                  <UserMessageWithMentions
-                    mentions={item.mentions}
-                    text={item.display_delta || item.delta || ""}
-                  />
-                </div>
+                <>
+                  {item.images?.length > 0 && <ChatImages images={item.images} />}
+                  {item.files?.length > 0 && <ChatFiles files={item.files} />}
+                  <div className="chat-user-mention-text">
+                    <UserMessageWithMentions
+                      mentions={item.mentions}
+                      text={item.display_delta || item.delta || ""}
+                    />
+                  </div>
+                </>
               ) : (
                 renderText(item)
               )}
