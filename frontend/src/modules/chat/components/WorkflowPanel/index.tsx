@@ -243,6 +243,7 @@ function AutoSlotGrid({
               <SlotRenderer
                 key={`${rev.slot_id}-${rev.list_index ?? -1}`}
                 slot={rev}
+                workflowSession={session}
                 sessionId={session.session_id}
                 slotId={slotId}
                 revisionCount={rev.revision_count}
@@ -596,6 +597,7 @@ function InnerTabsCell({
             {rev ? (
               <SlotRenderer
                 slot={rev}
+                workflowSession={session}
                 widget={def?.widget}
                 expectedType={def?.type}
                 sessionId={session.session_id}
@@ -945,6 +947,7 @@ function CompositeSlotGrid({
         {rev ? (
           <SlotRenderer
             slot={rev}
+            workflowSession={session}
             widget={def?.widget}
             slideNavigation={paged ? {
               index: rows.indexOf(activePage),
@@ -1341,6 +1344,7 @@ function SortableImageList({
             >
               <SlotRenderer
                 slot={rev}
+                workflowSession={session}
                 cardMode
                 widget={slotDef.widget}
                 expectedType={slotDef.type}
@@ -1460,6 +1464,7 @@ function NamedTabSlot({
         >
           <SlotRenderer
             slot={rev}
+            workflowSession={session}
             widget={slotDef.widget}
             originalFileSlot={
               slotDef.id === 'delivered_markdown'
@@ -1573,7 +1578,10 @@ function TabSlotGrid({
       tasks,
     )));
   };
-  const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session));
+  const paperReportReady = session.workflow_id === 'paper_expansion'
+    && getTabSlotRevisions(session, tab, 'expansion_report').some(revision => revision.selected);
+  const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session))
+    .filter(slot => !paperReportReady || slot.id !== 'expansion_result');
   const documents = visibleSlots.flatMap(slotDef => getTabSlotRevisions(session, tab, slotDef.id)
     .filter(revision => revision.document)
     .map(revision => ({ slotDef, revision })));
@@ -1613,7 +1621,7 @@ function TabSlotGrid({
         primaryDocumentKey={primaryDocumentKey}
         slotDef={slotDef}
         slotStepId={resolveWorkflowTabStepId(tab, session.steps)}
-        hideLabel={visibleSlots.length === 1 && slotDef.widget?.widgetType === 'writer-document'
+        hideLabel={session.workflow_id === 'paper_expansion' || visibleSlots.length === 1 && slotDef.widget?.widgetType === 'writer-document'
           && slotDef.widget?.collapsed === undefined && slotDef.label === tab.label}
         revisions={revisions}
         artifactStream={artifactStream}
@@ -2203,7 +2211,7 @@ export function WorkflowPanel({
       actionPending,
     }}>
     <div
-      className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded && !embedded ? ' workflow-panel--expanded' : ''}${embedded ? ' workflow-panel--embedded' : ''}${externalPresentation ? ' workflow-panel--external-presentation' : ''}`}
+      className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded && !embedded ? ' workflow-panel--expanded' : ''}${embedded ? ' workflow-panel--embedded' : ''}${externalPresentation ? ' workflow-panel--external-presentation' : ''}${session.workflow_id === 'paper_expansion' ? ' workflow-panel--paper-expansion' : ''}`}
       data-session-id={session.session_id}
       aria-label={t('chat.workflowPanelTitle')}
     >

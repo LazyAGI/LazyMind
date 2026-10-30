@@ -1,0 +1,120 @@
+.workflow-slot--paper-expansion {
+  display: flex; flex-direction: column; height: 520px; min-height: 0; min-width: 0;
+  box-sizing: border-box; padding: 16px 20px 0; overflow: hidden;
+  background: var(--color-bg-container); color: var(--color-text);
+  border: 1px solid var(--color-border-secondary); border-radius: 8px;
+  > .workflow-slot__text-meta { flex: none; margin-top: 0; padding: 10px 0; border-top: 1px solid var(--color-border-secondary); }
+  > .workflow-slot__text { flex: 1; min-height: 0; overflow: auto; }
+}
+
+// One scroll owner from panel to artifact, including the embedded workflow page.
+.workflow-panel.workflow-panel--paper-expansion {
+  .workflow-panel__body { height: clamp(320px, 56dvh, 600px); max-height: none; min-height: 0; }
+  &.workflow-panel--expanded, &.workflow-panel--embedded {
+    .workflow-panel__body { height: auto; flex: 1 1 0; overflow: hidden; }
+  }
+  .workflow-panel__body > [role='tabpanel']:not([hidden]),
+  .workflow-panel__tab-content--list,
+  .workflow-panel__named-slot,
+  .workflow-panel__named-slot > div[role='button'] {
+    display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; overflow: hidden;
+  }
+  .workflow-panel__slot-heading { flex: none; }
+  // The shared expanded list keeps multiple documents at natural height. This
+  // workflow has one unified result per stage and must fill the available body.
+  .workflow-panel__tab-content--list > .workflow-panel__named-slot { flex: 1 1 0; }
+  .workflow-slot--paper-expansion { flex: 1 1 0; height: 100%; }
+}
+
+.paper-workflow-result {
+  display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0;
+  font-size: 14px; line-height: 1.75; overflow-wrap: anywhere;
+  p { margin: 6px 0; white-space: pre-wrap; }
+  ul, ol { padding-left: 22px; }
+  li { padding: 6px 0; white-space: pre-wrap; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+}
+.paper-workflow-section { margin: 10px 0 24px; }
+.paper-workflow-heading {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px;
+  h3 { font-size: 14px; font-weight: 500; margin: 0; }
+  > span { font-size: 12px; color: var(--color-text-secondary); }
+}
+.paper-workflow-summary { flex: none; }
+.paper-workflow-muted, .paper-workflow-number { color: var(--color-text-secondary); font-size: 12px; }
+.paper-workflow-tabs {
+  display: flex; flex: none; gap: 6px; border-bottom: 1px solid var(--color-border);
+  > button { flex: 0 0 138px; width: 138px; display: flex; justify-content: center; align-items: center; gap: 8px;
+    border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 12px 4px; font-size: 13px; }
+  > button[aria-selected='true'] { border-bottom-color: var(--color-primary); color: var(--color-primary); }
+  small { font-size: 11px; font-variant-numeric: tabular-nums; }
+}
+.paper-workflow-scroll { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 14px 6px 20px 0; }
+.paper-workflow-back { display: inline-flex; align-items: center; gap: 6px; padding: 4px 0; border: 0; background: transparent; color: var(--color-primary) !important; font-size: 12px !important; }
+.paper-workflow-paper-row {
+  display: flex; align-items: center; width: 100%; text-align: left; gap: 14px; min-height: 52px;
+  padding: 12px 0; border: 0; border-bottom: 1px solid var(--color-border); background: transparent;
+  > span:nth-child(2) { flex: 1; min-width: 0; }
+  > .anticon { flex: none; font-size: 10px; color: var(--color-text-secondary); }
+  &:hover { background: var(--color-fill-quaternary); }
+}
+.paper-workflow-number { font-variant-numeric: tabular-nums; flex: none; }
+.paper-workflow-tag { display: inline-block; flex: none; font-size: 11px; font-weight: 400; line-height: 1.6; padding: 1px 6px; border-radius: 4px; color: var(--color-text-secondary); background: var(--color-fill-tertiary); margin-left: 8px; }
+.paper-workflow-paper-title { font-weight: 500; font-size: 15px; }
+.paper-workflow-paper-title .paper-workflow-muted { font-weight: 400; margin: 6px 0 0; }
+.paper-workflow-more { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; padding: 14px; border: 0; background: transparent; color: var(--color-primary) !important; font-size: 12px !important; }
+.paper-workflow-detail { padding-top: 18px; }
+.paper-workflow-detail > .paper-workflow-paper-title { margin-bottom: 18px; }
+.paper-workflow-detail .paper-workflow-heading h3 { color: var(--color-text-secondary); font-size: 12px; }
+.paper-workflow-reading { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 12px; color: var(--color-text-secondary); margin-bottom: 18px; }
+.paper-workflow-process { flex: none; display: flex; justify-content: space-between; align-items: center; width: 100%; border: 0; border-top: 1px solid var(--color-border); background: transparent; padding: 12px 0; color: var(--color-text-secondary) !important; font-size: 12px !important;
+  small { margin-left: 8px; } }
+.paper-workflow-note { border-left: 2px solid var(--color-warning-border); padding: 0 14px; margin-top: 16px; }
+.paper-workflow-goal { padding: 14px 20px; text-align: center; border: 1px solid var(--color-primary-border); background: var(--color-primary-bg); border-radius: 8px; margin: 12px auto 28px; max-width: 520px;
+  small { font-size: 12px; color: var(--color-text-secondary); } }
+.paper-workflow-branches { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; padding-top: 20px; border-top: 1px solid var(--color-border); }
+.paper-workflow-branch { --paper-tone: #4875c6; position: relative; flex: 1 1 180px; padding: 14px; border-radius: 8px; border-top: 3px solid var(--paper-tone); background: color-mix(in srgb, var(--paper-tone) 8%, var(--color-bg-container));
+  &::before { content: ''; position: absolute; top: -23px; left: 50%; height: 20px; width: 1px; background: var(--color-border); }
+  small { color: var(--paper-tone); font-size: 12px; }
+}
+.paper-workflow-tone-1 { --paper-tone: #218576; }.paper-workflow-tone-2 { --paper-tone: #8864b6; }
+.paper-workflow-tone-3 { --paper-tone: #b17a2c; }.paper-workflow-tone-4 { --paper-tone: #b05e80; }
+.paper-workflow-reading-order { list-style: none; padding: 0 !important; margin: 18px 0 !important;
+  > li { position: relative; display: flex; align-items: flex-start; gap: 16px; padding: 0 0 24px !important; }
+  > li:not(:last-child)::before { content: ''; position: absolute; top: 28px; left: 14px; bottom: 0; width: 1px; background: var(--color-primary-border); }
+  button { display: flex; align-items: center; gap: 12px; flex: 1; text-align: left; min-width: 0; padding: 0 0 14px; border: 0; border-bottom: 1px solid var(--color-border-secondary); background: transparent;
+    .paper-workflow-paper-title { flex: 1; min-width: 0; }
+    > .anticon { font-size: 10px; color: var(--color-primary); }
+  }
+}
+.paper-workflow-route-number { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: 50%; background: var(--color-primary-bg); color: var(--color-primary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.paper-workflow-graph, .paper-workflow-diagram {
+  .md-mermaid-block { border-color: var(--color-border-secondary); }
+  .md-mermaid-preview { padding: 20px 4px; background: var(--color-bg-container); cursor: default; }
+  .md-mermaid-preview svg { min-width: 650px; }
+  .md-mermaid-preview g.node[role='button'] { cursor: pointer; }
+  .md-mermaid-preview g.node[role='button']:focus { outline: 2px solid var(--color-primary); }
+  .node { --paper-tone: #4875c6; }
+  .node.cyan { --paper-tone: #218576; }.node.purple { --paper-tone: #8864b6; }
+  .node.amber { --paper-tone: #b17a2c; }.node.rose { --paper-tone: #b05e80; }
+  .node.qnode { --paper-tone: var(--color-text-secondary); }
+  .cluster rect { fill: var(--color-bg-container) !important; stroke: var(--color-border-secondary) !important; }
+  .node rect, .node polygon { fill: color-mix(in srgb, var(--paper-tone) 12%, var(--color-bg-container)) !important; stroke: color-mix(in srgb, var(--paper-tone) 60%, var(--color-border)) !important; rx: 8px; }
+  .node .nodeLabel, .node .nodeLabel p { color: color-mix(in srgb, var(--paper-tone) 65%, var(--color-text)) !important; }
+  .edgeLabel, .edgeLabel p, .edgeLabel span { color: var(--color-text) !important; background-color: var(--color-bg-container) !important; }
+  .edgeLabel rect, .labelBkg { fill: var(--color-bg-container) !important; }
+}
+@media (max-width: 600px) {
+  .workflow-slot--paper-expansion { padding: 12px 12px 0; }
+  .paper-workflow-tabs { gap: 0; > button { flex: 1 1 0; width: 0; min-width: 0; font-size: 12px; gap: 4px; } }
+  .paper-workflow-heading { flex-wrap: wrap; gap: 6px; }
+  .paper-workflow-paper-row { gap: 10px; }
+  .paper-workflow-branch { flex-basis: 100%; }
+}
+
+.paper-workflow-legend { display: flex; gap: 10px 22px; flex-wrap: wrap; margin: 8px 0 12px; font-size: 12px; color: var(--color-text-secondary);
+  > span { display: flex; align-items: center; gap: 8px; }
+  i { display: inline-block; width: 22px; height: 0; border-top: 1px solid var(--color-text-secondary); }
+  i.is-comparison { border-top-style: dashed; }
+}

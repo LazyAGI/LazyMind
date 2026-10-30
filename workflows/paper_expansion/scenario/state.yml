@@ -19,7 +19,7 @@ steps:
       先用 academic_expansion_context 读取绑定任务；使用服务端确定的方向、用户要求、种子和已有调研，按 record.budget_mode 与 research_guidance 执行本任务固定调研深度。不得改变主要方向或 ask_user。模型只提交论文
       ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。按研究目标和证据充分程度收尾；达到轮次或工具调用上限时，保存有效成果和缺口，不按耗时承诺完成。
 
-      复用 preparation 的调研、摘要、代表论文及先前成果，不机械重查。多方向分别安排主题、前后向引用与方法检索，写明检索和阅读范围及停止条件。调用 academic_publish_stage(paper_ids,plan,decisions,gaps)
+      复用 preparation 的调研、摘要、代表论文及先前成果，不机械重查。用户种子身份只看服务端 is_seed；准备阶段检索到的代表论文仍是可筛选候选，不因出现在 preparation 或主题中就成为必须保留的种子。篇数上限约束最终保留集合，可在上限内按相关性和证据质量替换非种子候选，不把准备阶段候选数误当成不可替换的配额。多方向分别安排主题、前后向引用与方法检索，写明检索和阅读范围及停止条件。调用 academic_publish_stage(paper_ids,plan,decisions,gaps)
       保存 expansion_plan，保留全部用户种子。'
     tools:
     - academic_expansion_context
@@ -42,9 +42,9 @@ steps:
       先用 academic_expansion_context 读取绑定任务；使用服务端确定的方向、用户要求、种子和已有调研，按 record.budget_mode 与 research_guidance 执行本任务固定调研深度。不得改变主要方向或 ask_user。模型只提交论文
       ID 和分析，题录和标记由发布工具填充。只使用实际登记材料；区分全文可用与已经阅读。按研究目标和证据充分程度收尾；达到轮次或工具调用上限时，保存有效成果和缺口，不按耗时承诺完成。
 
-      按各已选方向分别检索，再跨方向去重。academic_search_papers 的 sources 可选 openalex/arxiv/sciverse/web，mode
-      可选 keyword/references/citations（引用查询用 openalex 和 paper_id）。Sciverse 有配置时正常参与适合的查询；通用搜索补查遗漏和公开副本，网页线索不能冒充论文。正常零结果、缺
-      Key、鉴权/额度失败分别处理，不重复无效调用。按相关性筛选，可移除非种子；用户要求不新增时只保留种子。用 academic_publish_stage
+      按各已选方向分别检索：先不指定 sources 做可用学术来源联合检索，再按结果定向补查和跨方向去重。只保留服务端 is_seed 标记的用户种子，其余准备候选与新发现论文统一比较，可筛除或替换。academic_search_papers 每次 max_results 为1..20，sources 可选 openalex/arxiv/sciverse/web，mode
+      可选 keyword/references/citations（引用查询只用 openalex 和 paper_id）。每个来源分别返回 next_cursor；续查仅传 expansion_id 和该游标，查询和来源由服务端恢复。根据新增相关候选决定是否继续翻页，翻页计入现有调用预算。Sciverse 有配置时正常参与适合的查询；通用搜索补查遗漏和公开副本，网页线索不能冒充论文。正常零结果、缺
+      Key、鉴权/额度失败分别处理，遵守 retry_at，不重复请求冷却中的来源。实际覆盖以来源成功状态和新增去重候选为准，网页线索不计作论文覆盖。按相关性筛选，可移除非种子；用户要求不新增时只保留种子。用 academic_publish_stage
       保存完整 candidate_set 和筛选理由、覆盖缺口。'
     tools:
     - academic_expansion_context
@@ -72,7 +72,7 @@ steps:
       先按原始摘要初筛，对关键论文按问题调用 academic_read_paper(keywords=[...]) 或指定 page_start/page_end。检查完整命中页、相邻页、表格标题、实验条件及运行前提；必要时扩大或完整阅读，不要求所有论文把
       cursor 读到底。内容 processing/failed/needs_review 时保留论文并限制分析。调用 academic_submit_relations(analyses,claims)：analyses
       精确覆盖 candidate_set 全部 ID，只提交 paper_id 及纯文本 seed_relation、direction_relation、key_contribution。claims
-      是需要独立核验的方法继承、效果改善、关键数字、适用条件。每项仅包含 paper_id、field、positions；field 必须是 seed_relation、direction_relation、key_contribution 之一，和 analyses 的字段名完全一致，不能填 method、result、condition。每个论文的每个分析字段合并为一条核验，程序直接取该字段完整文本，不要重复抄写分析。positions 合并支持该字段的真实读取返回的0起始块位置（1..5个）。每字段2~4句，保持简洁，先补齐上下文，再统一提交一次核验；无法取正文时不作具体强结论。复核不支持或未提交证据的项由程序降为不确定，不反复重提。'
+      是需要独立核验的方法继承、效果改善、关键数字、适用条件。每项仅包含 paper_id、field、positions；field 必须是 seed_relation、direction_relation、key_contribution 之一，和 analyses 的字段名完全一致，不能填 method、result、condition。每个论文的每个分析字段合并为一条核验，程序直接取该字段完整文本，不要重复抄写分析；核验数量以实际论文和字段为准，不只覆盖前若干篇。positions 合并支持该字段的真实读取返回的0起始块位置（1..5个）。每字段聚焦一项核心结论（1~2句），保留结论成立的关键条件，不把多个证据范围不同的断言混写到一个字段。论文间关系明确指出基线、改动者和具体维度，分清直接改动、实验对照、引用和报告推断；引用或时间先后不能证明继承。种子身份以服务端标记为准，主题中提及的方法可称研究锚点，不能自行改成用户种子。方向归属与阅读定位是报告分析，应解释其与研究问题的关系，不写成论文作者宣称的分类。只核验实际阅读能支持的结论，摘要层面的线索和不可用正文写为限制。先补齐上下文，再统一提交一次核验；复核不支持或未提交证据的项由程序降为不确定，不反复重提。'
     tools:
     - academic_expansion_context
     - academic_read_paper
@@ -89,7 +89,7 @@ steps:
       required: true
     acceptance_criteria: 保持已确认范围、全部用户种子和实际来源；证据对应真实内容版本及读取范围；异常保留，局部成果可用；不得自动入库。
   compose_result:
-    label: 研究脉络与阅读建议
+    label: 研究报告与阅读导图
     prompt: '{{runtime_instruction}}
 
       先用 academic_expansion_context 读取绑定任务；使用服务端确定的方向、用户要求、种子和已有调研，按 record.budget_mode 与 research_guidance 执行本任务固定调研深度。不得改变主要方向或 ask_user。模型只提交论文
@@ -97,7 +97,21 @@ steps:
 
       读取 relation_analysis 的 input、claims、reading，按方向整理研究问题、前序基础、相关路线、后续变化及阅读建议。具体主张必须遵循复核结论；不把引用当继承，不把方法改变当效果改善。调用
       academic_publish_expansion_result(narrative,reading_order,limitations)，narrative
-      为可读 Markdown，reading_order 为选中论文 ID 顺序，limitations 包含实际覆盖及材料限制。程序同时发布四字段 expansion_result
+      为可读 Markdown，reading_order 为选中论文 ID 顺序，limitations 包含实际覆盖及材料限制。
+
+      narrative 先给出独立二级标题“阅读导图”“论文关系图”，每节各放一个 mermaid 代码块，再以独立二级标题“研究报告”撰写正文。只生成这两张图：阅读导图统一组织研究问题、主题分支、全部结果论文与建议阅读顺序；论文关系图表达有证据的论文间关系。研究脉络、路线差异、方法比较与阅读建议写在报告正文中，不再另画研究脉络图或重复的主题概览图。分支由实际研究问题和材料决定，不固定分类或数量，不为凑数拆分。
+
+      论文关系图用 flowchart LR，只画本轮有明确连线依据的论文，不设代表论文数量或边数上限；已确认的关系尽量完整呈现，不机械挑前几篇。没有关系依据的论文留在完整论文列表和阅读导图中，不作为孤立节点塞入主图，也不为连通或凑边制造关系。只有已读正文及复核支持的直接方法改动可用 -->，方向固定为“被改动的基线方法 --> 改动后的方法”，标签只写具体改动。逐边核对具体的方法名和改动，不能把“A式”“类似A”或某个方法家族面临的共同问题，扩大成“B直接改动了论文A”；复核支持某项宽泛分析不等于支持从中另造的具体边。引用、同主题、时间先后、共享基座、仅把方法用作组件或实现引擎、在实验中对照或相似机制都不能证明直接方法改动。组件复用、具体实验对照、机制差异用无箭头虚线 -.-，标签写明关系维度及必要条件；报告归纳的关系必须标“报告推断”，同样用无箭头虚线。未提交证据、unsupported、uncertain 的主张不能用图绕过复核。图后给出逐边依据表，列起点论文、终点论文、关系类型、支持该关系的论文与已读材料范围及限制，尤其区分“论文明确改动”和“报告比较”；节点无边不表示论文无关，只表示本轮未确认直接关系。不要给摘要、局部阅读或未完成复核伪造完整正文依据。
+
+      reading_order 必须包含全部结果论文且不重复，先给阅读入口，再按问题和理解负担安排分支内顺序，不照搬检索顺序或发表年份。阅读导图用 flowchart LR，每张图必须只有一个概括总研究问题的根节点，形成“总问题根节点 --- 主要主题分支 --- 论文叶节点”的横向树。确有理解层次时可在主题下增加必要的子主题；主题及子主题均用 route_ 节点，不另起独立的研究问题树。每篇只属于一个主要主题，每篇恰好一个叶节点，不使用 subgraph，不把分支内论文串成链。所有分组连线均用 ---，阅读先后由论文标签中的 reading_order 序号和正文建议说明，不用图中的树层级暗示方法继承或普遍前置依赖。共同基础只有证据充分时才单列为一个主题；不默认所有种子或最早论文都是所有路线的基础，也不强行让某篇应用方法成为其他路线的必读前置。交叉方法选择与研究目标最相关的主要位置，正文解释其他联系，不复制节点。初始分支优先围绕主要研究问题和阅读目的归并；能共享同一阅读目的的细分机制放在同一分支，由论文标签和正文区分，不把每个技术细节或每篇论文都拆成一个分支。只有独立阅读目的明确时才单列小分支，不固定分支数量。分支划分应有可区分的问题或机制，采用一致或解释清楚的划分维度，不把不同维度无说明地混为一类。分支名称需要覆盖每个成员的核心机制，不合适时调整名称、粒度或归属，不为维持分支数量强塞论文。论文内容不可用时仍保留节点并说明阅读限制。
+
+      两图均使用 ASCII 节点ID。论文节点ID固定为 p_ 后拼接完整 paper_id（保留连字符），显示简短论文名；阅读图的论文标签以 reading_order 中从1起的序号开头，不显示ID。主题节点用 route_ 前缀，研究问题节点用 q_ 前缀。用圆角矩形和带引号的短标签，按实际分支使用 class blue、cyan、purple、amber、rose，研究问题用 qnode，由界面统一配色。不写 classDef/style/linkStyle、init 指令、HTML、click 或外链。输出前自查：阅读图的论文ID集合与结果全集、reading_order 完全相同；关系图只包含结果集中的真实论文ID，每个节点均参与有依据的连线；阅读图每篇恰好归入一个分支且没有论文间连线；关系箭头方向和逐边依据一致；复核统计按实际全部 claims 的 status 统计，不只统计提交时的部分。正文准确说明实际读取范围，不把关键词命中页写成完整阅读，也不笼统声称每篇读取相同页数。先完成完整、简洁、有效的图和报告，不穷举无用的两两比较。
+
+      读取范围只统计结果集合中的论文，不把已筛除或重复候选的阅读记录计入覆盖。正文可用状态看 contents，实际阅读范围看 reading，复核证据看 claims，三者不可互相代替：没有阅读登记不等于正文不可用，未完成复核不等于没有阅读。正文块位置不等于 PDF 页码；pages 中的0表示没有可靠分页，不能写成“第0页”或“只读了一页”，一个完整正文块可包含整篇论文。页码不连续时据实列举，不能补成连续范围；只能说明已读材料支持的内容。
+
+      narrative 和 limitations 都面向研究用户，不展示内部字段名、状态枚举、claims 编号、工具名、论文ID、实验复放过程、节点数量规则或配色实现；复核统计用“获支持、证据不足、与材料不符”等易懂表述。依据用论文名、实际材料范围及限制说明。
+
+      程序同时发布四字段 expansion_result
       和独立 expansion_report，不重新抄写题录或摘要。'
     tools:
     - academic_expansion_context

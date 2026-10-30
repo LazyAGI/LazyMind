@@ -5,7 +5,8 @@ export { WriterProviderChoice } from "./DocumentProviderChoice";
 import { DocumentArtifactEditor } from "./DocumentArtifactEditor";
 import { useState, useCallback, useLayoutEffect, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
-import type { SlotRevision, SlotVersionEntry, SlotWidgetConfig } from "@/modules/chat/store/workflowPanel";
+import type { SlotRevision, SlotVersionEntry, SlotWidgetConfig, WorkflowSession } from "@/modules/chat/store/workflowPanel";
+import { PaperExpansionArtifactView, canDisplayPaperExpansion, isPaperExpansionSlot, parsePaperExpansionArtifact } from './PaperExpansionArtifactView';
 import { useWorkflowStore, draftStore } from "@/modules/chat/store/workflowPanel";
 import {
   resolveCoreAssetUrl,
@@ -5378,6 +5379,66 @@ function SlotHtmlFilePreview({
   );
 }
 
+function usePaperArtifactSource(slot?: SlotRevision) {
+  // Session updates recreate JSON objects even when the immutable artifact is
+  // unchanged. Keep its identity stable so refreshes do not unmount the view.
+  const valueKey = JSON.stringify(slot?.artifact_value);
+  const value = useMemo<unknown>(() => valueKey === undefined ? undefined : JSON.parse(valueKey), [valueKey]);
+  const revision = slot?.revision;
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState<{ value: unknown; revision?: number; source: string; failed: boolean }>();
+  useEffect(() => {
+    if (value == null) return;
+    let cancelled = false;
+    void resolveSnapshotDiffText(value).then(source => {
+      if (!cancelled) setLoaded({ value, revision, source, failed: false });
+    }).catch(() => {
+      if (!cancelled) setLoaded({ value, revision, source: '', failed: true });
+    });
+    return () => { cancelled = true; };
+  }, [value, revision, attempt]);
+  const current = loaded?.value === value && loaded?.revision === revision ? loaded : undefined;
+  return { source: current?.source, failed: current?.failed, pending: value != null && !current,
+    retry: () => { setLoaded(undefined); setAttempt(count => count + 1); } };
+}
+
+function SlotPaperExpansion({ slot, session, slotId, revisionCount, onRefresh, readOnly }: {
+  slot: SlotRevision; session: WorkflowSession; slotId: string;
+  revisionCount?: number; onRefresh?: () => void; readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
+  const artifact = usePaperArtifactSource(slot);
+  // Only use titles from this session's selected result. Never borrow another run's papers.
+  const resultSlot = slotId === 'expansion_report'
+    ? session.slots?.find(item => item.slot === 'expansion_result' && item.selected && (item.list_index ?? -1) === -1)
+    : undefined;
+  const result = usePaperArtifactSource(resultSlot);
+  const reportSlot = slotId === 'relation_analysis' ? session.slots?.find(item => item.slot === 'expansion_report' && item.selected) : undefined;
+  const report = usePaperArtifactSource(reportSlot);
+  const reportData = useMemo(() => parsePaperExpansionArtifact(report.source), [report.source]);
+  const data = useMemo(() => parsePaperExpansionArtifact(artifact.source), [artifact.source]);
+  const resultData = useMemo(() => parsePaperExpansionArtifact(result.source), [result.source]);
+  if (artifact.pending) return <SlotPending type='text' />;
+  if (artifact.failed) return <div className='workflow-slot workflow-slot--paper-expansion' role='alert'>
+    {t('chat.slots.contentLoadFailed')} <button type='button' onClick={artifact.retry}>{t('common.retry')}</button>
+  </div>;
+  return <div className='workflow-slot workflow-slot--paper-expansion'>
+    {data && canDisplayPaperExpansion(slotId, data)
+      ? <PaperExpansionArtifactView key={`${slotId}:${slot.revision}`} slotId={slotId} data={data} result={resultData} report={reportData} resultUnavailable={Boolean(result.failed)} />
+      : <pre className='workflow-slot__text'>{artifact.source}</pre>}
+    {result.failed && <button type='button' onClick={result.retry}>{t('paperTasks.workflowResult.retryTitles')}</button>}
+    <div className='workflow-slot__text-meta'>
+      <ArtifactSourceButton value={artifact.source} />
+      {revisionCount !== undefined && revisionCount > 0 && <SlotVersionPopover
+        sessionId={session.session_id} slotId={slotId} listIndex={slot.list_index ?? -1}
+        revisionCount={revisionCount} currentRevision={slot.revision} currentVersionNumber={slot.version_number}
+        currentValue={slot.artifact_value} currentChangeSource={slot.change_source}
+        contentType={slot.content_type ?? 'json'} readOnly={readOnly} onRollbackDone={onRefresh}
+      />}
+    </div>
+  </div>;
+}
+
 /**
  * SlotRenderer dispatches to the correct slot component based on the artifact
  * content_type returned by the backend.
@@ -5399,8 +5460,10 @@ export function SlotRenderer({
   readOnly,
   hideImageMutationActions,
   slideNavigation,
+  workflowSession,
 }: {
   slot: SlotRevision;
+  workflowSession?: WorkflowSession;
   slideNavigation?: SlideNavigation;
   widget?: SlotWidgetConfig;
   originalFileSlot?: SlotRevision;
@@ -5426,6 +5489,10 @@ export function SlotRenderer({
   }
   const effectiveReadOnly = readOnly || widget?.readOnly;
   const resolvedWidgetSlotId = slotId ?? slot.slot;
+  if (workflowSession?.workflow_id === 'paper_expansion' && isPaperExpansionSlot(resolvedWidgetSlotId)) {
+    return <SlotPaperExpansion slot={slot} session={workflowSession} slotId={resolvedWidgetSlotId}
+      revisionCount={revisionCount} onRefresh={onRefresh} readOnly={effectiveReadOnly} />;
+  }
   if (
     sessionId
     && (slot.list_index ?? -1) === -1

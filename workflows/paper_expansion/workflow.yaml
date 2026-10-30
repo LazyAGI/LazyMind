@@ -67,7 +67,7 @@ steps:
 - id: analyze_relations
   label: 分析论文关系
 - id: compose_result
-  label: 研究脉络与阅读建议
+  label: 研究报告与阅读导图
 slots:
 - id: expansion_id
   label: 任务定位
@@ -96,7 +96,7 @@ slots:
   cardinality: single
   exposed: true
 - id: expansion_report
-  label: 研究脉络、证据与阅读路线
+  label: 研究报告与阅读导图
   type: json
   cardinality: single
   exposed: true
@@ -138,7 +138,7 @@ ui:
     - id: relation_analysis
   - id: compose_result
     step_id: compose_result
-    label: 研究脉络与阅读建议
+    label: 研究报告与阅读导图
     layout: list
     slots:
     - id: expansion_report

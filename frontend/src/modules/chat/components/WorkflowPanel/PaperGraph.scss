@@ -1,0 +1,75 @@
+.paper-graph {
+  border: 1px solid var(--color-border-secondary); border-radius: 8px; overflow: hidden;
+  background: var(--color-bg-container); color: var(--color-text); margin-top: 12px;
+  p { padding: 0 12px; }
+}
+.paper-graph-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-secondary); font-size: 12px; flex-wrap: wrap;
+  > span { color: var(--color-text-secondary); }
+  > div { display: flex; align-items: center; gap: 12px; }
+  button { border: 0; background: transparent; padding: 2px; color: var(--color-primary); cursor: pointer; }
+}
+.paper-graph-canvas { height: clamp(320px, 50dvh, 520px); width: 100%; }
+.paper-graph--fullscreen .paper-graph-canvas { height: 72dvh; }
+.paper-workflow-scroll--graph {
+  display: flex; flex-direction: column; overflow: hidden;
+  > p, > .ant-segmented, > .paper-workflow-legend { flex: none; }
+  > .paper-graph { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .paper-graph-toolbar { flex: none; }
+  .paper-graph-canvas { flex: 1; height: auto; min-height: 140px; }
+}
+.paper-graph .react-flow {
+  --xy-background-color-default: var(--color-bg-container);
+  --xy-edge-stroke-default: var(--color-text-secondary);
+  --xy-edge-label-color-default: var(--color-text);
+  --xy-edge-label-background-color-default: var(--color-bg-container);
+  --xy-controls-button-background-color-default: var(--color-bg-container);
+  --xy-controls-button-background-color-hover-default: var(--color-fill-tertiary);
+  --xy-controls-button-color-default: var(--color-text);
+  --xy-controls-button-border-color-default: var(--color-border-secondary);
+  .react-flow__edge-text { font-size: 11px; }
+  .react-flow__handle { opacity: 0; pointer-events: none; }
+}
+.paper-graph-node {
+  --paper-tone: #4875c6; width: 240px; height: 84px; box-sizing: border-box; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--paper-tone) 60%, var(--color-border));
+  border-left: 4px solid var(--paper-tone); padding: 8px 12px;
+  background: color-mix(in srgb, var(--paper-tone) 8%, var(--color-bg-container));
+  color: var(--color-text); font-size: 14px; line-height: 1.5; cursor: grab;
+  display: flex; align-items: center;
+  > span, button > span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 100%;
+    font: inherit; color: inherit; text-align: left; padding: 0; border: 0; background: transparent; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+  small { flex: none; display: flex; align-items: center; gap: 7px; color: var(--paper-tone); font-size: 12px; }
+  &--cyan { --paper-tone: #218576; } &--purple { --paper-tone: #8864b6; }
+  &--amber { --paper-tone: #b17a2c; } &--rose { --paper-tone: #b05e80; }
+  &--qnode { --paper-tone: var(--color-text-secondary); }
+  &--relation { width: 184px; height: 64px; border-left-width: 3px; border-radius: 10px; font-size: 16px; line-height: 1.35;
+    box-shadow: 0 2px 6px rgb(0 0 0 / 4%);
+    button > span { -webkit-line-clamp: 2; }
+  }
+}
+.paper-graph-edge-detail {
+  background: var(--color-bg-container); border: 1px solid var(--color-border-secondary); border-radius: 8px;
+  box-shadow: 0 3px 12px rgb(0 0 0 / 6%); color: var(--color-text); font-size: 12px;
+  button { font: inherit; cursor: pointer; }
+}
+.paper-graph-unlinked-toggle { display: inline-flex; align-items: center; gap: 6px; }
+.paper-graph-unlinked-list {
+  width: 260px; max-height: min(260px, 50dvh); overflow: auto; color: var(--color-text); font-size: 12px;
+  p { margin: 8px 0; padding: 0; color: var(--color-text-secondary); font-size: 11px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { margin: 0; padding: 0; }
+  li button { width: 100%; text-align: left; color: var(--color-text); background: transparent;
+    font: inherit; cursor: pointer; border: 0; border-bottom: 1px solid var(--color-border-secondary); padding: 8px 0; line-height: 1.5; }
+  li button:hover { color: var(--color-primary); }
+}
+.paper-graph-edge-detail {
+  max-width: 280px; padding: 12px; line-height: 1.6;
+  strong { display: block; padding-right: 22px; font-weight: 500; }
+  p { padding: 0; margin: 6px 0; }
+  > button:first-child { position: absolute; top: 6px; right: 6px; border: 0; background: transparent; color: var(--color-text-secondary); }
+  .paper-graph-evidence { border: 0; background: transparent; color: var(--color-primary); padding: 0; }
+}
