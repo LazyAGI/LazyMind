@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setupAntdStaticCleanup } from "@/test/antdStatic";
 import ModelProviderPage, { type AddedProvider, type ProviderConnectionGroup } from "./ModelProvidersPage";
+
+setupAntdStaticCleanup();
 
 const mocks = vi.hoisted(() => ({
   providers: vi.fn(), withGroups: vi.fn(), groups: vi.fn(), models: vi.fn(), remote: vi.fn(), add: vi.fn(), addBatch: vi.fn(), remove: vi.fn(), update: vi.fn(),
@@ -158,12 +161,12 @@ describe("model catalog integration", () => {
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:qwen-plus" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
       { modelProviderId: "supplier", groupId: "store", modelId: "saved-model-id" },
-      undefined,
+      { silentError: true },
     ));
     expect(screen.getByTestId("configured-model-keys").textContent).toBe(keysBeforeDelete);
   });
 
-  it("confirms knowledge-base downgrade before deleting an embedding model", async () => {
+  it("keeps an occupied embedding and reports one failure without extra masks", async () => {
     mocks.remote.mockResolvedValue({ models: [{ id: "bge", name: "BAAI/bge-large", model_type: "embed", added: false }] });
     mocks.add.mockResolvedValue({ data: { id: "saved-vector-id", name: "BAAI/bge-large", model_type: "embed", is_default: false } });
     mocks.remove.mockRejectedValueOnce({
@@ -179,17 +182,13 @@ describe("model catalog integration", () => {
     fireEvent.click(await screen.findByRole("button", { name: "modelProvider.catalog.removeModel:BAAI/bge-large" }));
     await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
       { modelProviderId: "supplier", groupId: "store", modelId: "saved-vector-id" },
-      undefined,
+      { silentError: true },
     ));
     expect(screen.getByTestId("configured-model-keys").textContent).toBe(keysBeforeDelete);
-    expect(await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc")).toBeInTheDocument();
-    const keysBeforeConfirmedDelete = screen.getByTestId("configured-model-keys").textContent;
-    expect(keysBeforeConfirmedDelete).toBe(keysBeforeDelete);
-    fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
-    await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith(
-      { modelProviderId: "supplier", groupId: "store", modelId: "saved-vector-id" },
-      { params: { confirm_indexed_downgrade: true } },
-    ));
-    expect(screen.getByTestId("configured-model-keys").textContent).toBe(keysBeforeConfirmedDelete);
+    expect(await screen.findByText(/modelProvider.embeddingInUse/)).toBeInTheDocument();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(mocks.remove).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("configured-model-keys").textContent).toBe(keysBeforeDelete);
+
   });
 });

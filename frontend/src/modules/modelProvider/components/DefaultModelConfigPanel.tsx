@@ -825,7 +825,6 @@ export default function DefaultModelConfigPanel({
           <section className="model-defaults-basic" aria-label={t("modelProvider.defaults.basicTitle")}>
             <div className="model-defaults-section-heading">
               <h3>{t("modelProvider.defaults.basicTitle")}</h3>
-              <span className="model-defaults-save-note">{t("modelProvider.defaults.autoSave")}</span>
             </div>
             <div className="model-defaults-rows">{basicCards.map((card) => card.node)}</div>
           </section>

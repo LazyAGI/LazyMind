@@ -8,7 +8,6 @@ import lazyllm
 import pytest
 from lazyllm.tools.agent.toolsManager import ModuleTool
 
-from lazymind.chat.workflow.file_adapter import InputResource
 from lazymind.chat.workflow.workflow_manager import (
     enforce_startup_clarification_policy,
     resolve_workflow_injection,
@@ -119,8 +118,12 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
 
 
 @pytest.mark.parametrize('json_encoded', [False, True])
-def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encoded):
-    lazyllm.globals['agentic_config']['files'] = ['/safe/report.pdf']
+@pytest.mark.parametrize('material_type', ['', 'file', 'image'])
+def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encoded, material_type, tmp_path):
+    attachment = tmp_path / ('report.png' if material_type == 'image' else 'report.pdf')
+    mime_type = 'image/png' if material_type == 'image' else 'application/pdf'
+    attachment.write_bytes(b'test attachment')
+    lazyllm.globals['agentic_config']['files'] = [str(attachment)]
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
         'session_id': 'session-1', 'state_version': 1, 'ready_steps': ['prompt'],
@@ -128,16 +131,18 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
     with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
         'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
     ), patch('lazymind.chat.workflow.workflow_manager._resolve_workflow_attachment', return_value=(
-        '/safe/report.pdf', None,
-    )), patch(
-        'lazymind.chat.workflow.file_adapter.LazyMindHostFileAdapter.import_attachment',
-        return_value=InputResource(
-            resource_id='resource-1', revision=1, content_hash='sha256:test',
-            name='report.pdf', mime_type='application/pdf', size=100,
-        ),
-    ):
+        str(attachment), None,
+    )), patch('lazymind.chat.workflow.file_adapter.WorkflowClient.import_input_resource') as import_resource:
+        import_resource.return_value.result = {
+            'resource_id': 'resource-1', 'revision': 1, 'content_hash': 'sha256:test',
+            'name': attachment.name, 'mime_type': mime_type, 'size': 15,
+        }
         client_factory.return_value.get_workflow.return_value.result = {
             'workflow_id': 'image-workflow', 'revision_id': 'revision-1',
+            **({'compiled_graph': {
+                'material_types': {'source': material_type},
+                'material_producers': {'source': {'kind': 'external'}},
+            }} if material_type else {}),
         }
         client_factory.return_value.get_state.return_value = {
             'session_id': 'session-1', 'state_version': 1,
@@ -164,7 +169,7 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
         )
 
         trigger = _tool(contribution, 'trigger_image_workflow')
-        bindings = {'source': 'report.pdf'}
+        bindings = {'source': attachment.name}
         tool = ModuleTool(apply_func=trigger, schema_func=trigger)
         arguments = tool._validate_input({'input_bindings': json.dumps(bindings) if json_encoded else bindings})
         result = trigger(**arguments)
@@ -179,6 +184,7 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
     assert result['revision_id'] == 'revision-1'
     assert result['reachable_steps'] == ['prompt']
     assert result['ready_steps'] == ['prompt']
+    import_resource.assert_called_once_with(attachment.name, mime_type, b'test attachment')
     toolkit.prepare_workflow.assert_called_once_with(
         'image-workflow', input_bindings={
             'source': {'resource_id': 'resource-1', 'revision': 1,
@@ -189,21 +195,23 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing(json_encode
 
 
 @pytest.mark.parametrize('json_encoded', [False, True])
-def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments(json_encoded):
+@pytest.mark.parametrize('material_type,value', [('text', '3000'), ('json', '{"target":3000}')])
+def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments(json_encoded, material_type, value):
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
         'session_id': 'session-1', 'state_version': 1, 'ready_steps': ['draft'],
     }
     with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
         'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
-    ), patch('lazymind.chat.workflow.file_adapter.LazyMindHostFileAdapter.import_text', return_value=InputResource(
-        resource_id='text-resource', revision=1, content_hash='sha256:text',
-        name='target_length.txt', mime_type='text/plain; charset=utf-8', size=4,
-    )) as import_text:
+    ), patch('lazymind.chat.workflow.file_adapter.WorkflowClient.import_input_resource') as import_resource:
+        import_resource.return_value.result = {
+            'resource_id': 'text-resource', 'revision': 1, 'content_hash': 'sha256:text',
+            'name': 'target_length.txt', 'mime_type': 'text/plain; charset=utf-8', 'size': len(value),
+        }
         client_factory.return_value.get_workflow.return_value.result = {
             'workflow_id': 'report', 'revision_id': 'revision-1',
             'compiled_graph': {
-                'material_types': {'target_length': 'text'},
+                'material_types': {'target_length': material_type},
                 'material_producers': {'target_length': {'kind': 'external'}},
             },
         }
@@ -225,12 +233,12 @@ def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments
         )
 
         trigger = _tool(contribution, 'trigger_report_workflow')
-        bindings = {'target_length': '3000'}
+        bindings = {'target_length': value}
         tool = ModuleTool(apply_func=trigger, schema_func=trigger)
         arguments = tool._validate_input({'input_bindings': json.dumps(bindings) if json_encoded else bindings})
         result = trigger(**arguments)
 
-    import_text.assert_called_once_with('target_length.txt', '3000')
+    import_resource.assert_called_once_with('target_length.txt', 'text/plain; charset=utf-8', value.encode('utf-8'))
     assert result['session_id'] == 'session-1'
     toolkit.prepare_workflow.assert_called_once_with(
         'report', input_bindings={

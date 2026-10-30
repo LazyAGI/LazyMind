@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchChatModelCatalog, updateConversationChatModel } from "./api";
+import { fetchChatModelCatalog, updateConversationChatModel, updateDefaultChatModel } from "./api";
 
 const request = vi.hoisted(() => vi.fn());
 vi.mock("@/components/request", () => ({
@@ -11,6 +11,18 @@ const selection = { mode: "fixed", model_id: "model-1", version: 3 };
 
 describe("chat model API", () => {
   beforeEach(() => request.mockReset());
+
+  it("updates only the default llm slot for a new-chat fixed selection", async () => {
+    request.mockResolvedValue({ data: {} });
+    await updateDefaultChatModel({ mode: "fixed", model_id: "owned-1", source: "own" });
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      method: "PUT", url: "/base/api/core/model_providers/selected_models",
+      data: JSON.stringify({ selections: [{ model_key: "llm", model_id: "owned-1", source: "own" }] }),
+    }));
+    request.mockClear();
+    await updateDefaultChatModel({ mode: "auto" });
+    expect(request).not.toHaveBeenCalled();
+  });
 
   it.each([false, true])("loads catalogs with envelope=%s", async (envelope) => {
     const catalog = {

@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setupAntdStaticCleanup } from "@/test/antdStatic";
 import ConversationGroups from "./ConversationGroups";
 import * as api from "./api";
+setupAntdStaticCleanup();
 const tr = (key: string, options?: { current?: number; total?: number; defaultValue?: string }) => key.endsWith("preparationProgress") ? `${key} ${options?.current}/${options?.total}` : key.endsWith("callError.unknown_internal") ? options?.defaultValue || key : key;
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: tr }) }));
 vi.mock("@/components/request", () => ({ getLocalizedErrorMessage: () => "已有同名会话组或目录项目，请更换名称" }));

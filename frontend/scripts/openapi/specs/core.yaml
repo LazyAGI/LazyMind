@@ -29545,6 +29545,25 @@ paths:
             summary: Update supplier request configuration
             tags:
                 - model_providers
+    /api/core/model_providers/{model_provider_id}/reset:
+        post:
+            description: Clears the current user's keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+            parameters:
+                - in: path
+                  name: model_provider_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/deleteCustomModelProviderOpenAPIResponse'
+                    description: Reset supplier
+            summary: Reset a built-in model supplier
+            tags:
+                - model_providers
     /api/core/model_providers/features:
         get:
             description: Returns feature flags derived from the algorithm service runtime_models.yaml. Result is permanently cached after the first successful fetch. image_embed_enabled is true when a cross_modal_embed role is configured.
@@ -34601,6 +34620,18 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:cancel-generation
+    /api/core/workflow-drafts/{draft_id}:cancel-repair:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-drafts/{draft_id}:cancel-repair
     /api/core/workflow-drafts/{draft_id}:confirm-workflow:
         post:
             parameters:

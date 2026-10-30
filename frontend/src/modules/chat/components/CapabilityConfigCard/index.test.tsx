@@ -57,7 +57,7 @@ describe("CapabilityConfigCard", () => {
       screen.getByRole("button", { name: /chat\.configureThisCapability/ }),
     );
     expect(mocks.navigate).toHaveBeenCalledWith(
-      "/settings?section=models&target=image_generator&return_to=%2Fagent%2Fchat%2Fhome%2Fconversation-1",
+      "/settings?section=model_defaults&target=image_generator&return_to=%2Fagent%2Fchat%2Fhome%2Fconversation-1",
     );
     expect(onContinue).not.toHaveBeenCalled();
 

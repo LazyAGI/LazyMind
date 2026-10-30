@@ -1,6 +1,7 @@
 package modelprovider
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -38,4 +39,22 @@ func downgradeIndexedDatasets(tx *gorm.DB, userID string, now time.Time) (int64,
 			"updated_at":          now,
 		})
 	return result.RowsAffected, result.Error
+}
+
+// Embedding configuration is user-wide: existing indexes must be removed before
+// deleting a model. Never silently downgrade knowledge bases during removal.
+var errEmbeddingInUse = errors.New("embedding model is in use; remove indexed knowledge bases before removing the model")
+
+func guardEmbeddingRemoval(tx *gorm.DB, userID string) error {
+	if !tx.Migrator().HasTable(&orm.Dataset{}) {
+		return nil
+	}
+	var count int64
+	if err := tx.Model(&orm.Dataset{}).Where("create_user_id = ? AND processing_level = ? AND deleted_at IS NULL", userID, "indexed").Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errEmbeddingInUse
+	}
+	return nil
 }

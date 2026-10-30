@@ -1,7 +1,10 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { setupAntdStaticCleanup } from "@/test/antdStatic";
 import ModelProviderPage, { type AddedProvider, type ProviderOption } from "./ModelProvidersPage";
+
+setupAntdStaticCleanup();
 
 const mocks = vi.hoisted(() => ({
   providers: vi.fn(), withGroups: vi.fn(), groups: vi.fn(), models: vi.fn(),
@@ -285,7 +288,8 @@ describe("model discovery after verified key save", () => {
     expect(mocks.failed).not.toHaveBeenCalled();
     expect(mocks.add).not.toHaveBeenCalled();
     expect(mocks.remove).not.toHaveBeenCalled();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
   });
 
   it("leaves an empty remote catalog empty without creating placeholder models", async () => {

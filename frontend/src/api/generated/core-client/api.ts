@@ -28608,6 +28608,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-repair
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdCancelRepairPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdCancelRepairPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:cancel-repair`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:confirm-workflow
          * @param {string} draftId
          * @param {*} [options] Override http request option.
@@ -34752,6 +34785,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-repair
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdCancelRepairPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdCancelRepairPost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdCancelRepairPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:confirm-workflow
          * @param {string} draftId
          * @param {*} [options] Override http request option.
@@ -38588,6 +38634,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /workflow-drafts/{draft_id}:cancel-repair
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdCancelRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdCancelRepairPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:confirm-workflow
          * @param {DefaultApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -40895,6 +40951,13 @@ export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest {
  * Request parameters for apiCoreWorkflowDraftsDraftIdCancelGenerationPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdCancelRepairPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest {
     readonly draftId: string
 }
 
@@ -44652,6 +44715,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelGenerationPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdCancelGenerationPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:cancel-repair
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdCancelRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdCancelRepairPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdCancelRepairPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -52210,6 +52284,40 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
+         * Clears the current user\'s keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+         * @summary Reset a built-in model supplier
+         * @param {string} modelProviderId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdResetPost: async (modelProviderId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'modelProviderId' is not null or undefined
+            assertParamExists('apiCoreModelProvidersModelProviderIdResetPost', 'modelProviderId', modelProviderId)
+            const localVarPath = `/api/core/model_providers/{model_provider_id}/reset`
+                .replace(`{${"model_provider_id"}}`, encodeURIComponent(String(modelProviderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -52875,6 +52983,19 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Clears the current user\'s keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+         * @summary Reset a built-in model supplier
+         * @param {string} modelProviderId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreModelProvidersModelProviderIdResetPost(modelProviderId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DeleteCustomModelProviderOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreModelProvidersModelProviderIdResetPost(modelProviderId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['ModelProvidersApi.apiCoreModelProvidersModelProviderIdResetPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {string} [modelType]
@@ -53231,6 +53352,16 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters.modelProviderId, requestParameters.updateProviderRequestConfigOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
+         * Clears the current user\'s keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+         * @summary Reset a built-in model supplier
+         * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreModelProvidersModelProviderIdResetPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DeleteCustomModelProviderOpenAPIResponse> {
+            return localVarFp.apiCoreModelProvidersModelProviderIdResetPost(requestParameters.modelProviderId, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Merges non-deleted models from the current user\'s verified provider groups with the account-visible LazyMind Cloud system catalog. source distinguishes own from cloud; Cloud items are read-only and never expose credentials, endpoints, or upstream configuration. model_type optionally filters by a runtime role.
          * @summary List current user\'s selectable models
          * @param {ModelProvidersApiApiCoreModelProvidersModelsGetRequest} requestParameters Request parameters.
@@ -53549,6 +53680,13 @@ export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestCon
 }
 
 /**
+ * Request parameters for apiCoreModelProvidersModelProviderIdResetPost operation in ModelProvidersApi.
+ */
+export interface ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest {
+    readonly modelProviderId: string
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelsGet operation in ModelProvidersApi.
  */
 export interface ModelProvidersApiApiCoreModelProvidersModelsGetRequest {
@@ -53850,6 +53988,17 @@ export class ModelProvidersApi extends BaseAPI {
      */
     public apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdRequestConfigPutRequest, options?: RawAxiosRequestConfig) {
         return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdRequestConfigPut(requestParameters.modelProviderId, requestParameters.updateProviderRequestConfigOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Clears the current user\'s keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.
+     * @summary Reset a built-in model supplier
+     * @param {ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreModelProvidersModelProviderIdResetPost(requestParameters: ModelProvidersApiApiCoreModelProvidersModelProviderIdResetPostRequest, options?: RawAxiosRequestConfig) {
+        return ModelProvidersApiFp(this.configuration).apiCoreModelProvidersModelProviderIdResetPost(requestParameters.modelProviderId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

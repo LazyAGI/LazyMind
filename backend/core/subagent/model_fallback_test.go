@@ -196,7 +196,7 @@ func TestOrdinaryModelFallbackDefaultUnavailableAndEmptyPoolAreExplicit(t *testi
 	if _, err := CreateTask(t.Context(), db, CreateTaskInput{TaskID: "bootstrap", ConversationID: "conv", AgentType: "research", CreateUserID: "actor", Title: "bootstrap"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-a").Update("api_key", "").Error; err != nil {
+	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-a").Update("api_key_ciphertext", "fixture-invalid-envelope").Error; err != nil {
 		t.Fatal(err)
 	}
 	req := RunRequest{TaskID: "bootstrap"}
@@ -206,7 +206,7 @@ func TestOrdinaryModelFallbackDefaultUnavailableAndEmptyPoolAreExplicit(t *testi
 	if req.ModelFallbackCurrentID != "own:b" || req.ModelFallbackInitialSwitch == nil || req.ModelFallbackInitialSwitch.From.CandidateID != "own:a" || req.ModelFallbackInitialSwitch.FromMaxInputTokens == nil {
 		t.Fatal("unavailable DB default silently became a successful model")
 	}
-	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-b").Update("api_key", "").Error; err != nil {
+	if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ?", "group-b").Update("api_key_ciphertext", "fixture-invalid-envelope").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := Run(t.Context(), db, &mockStateStore{}, RunRequest{TaskID: "bootstrap"}); !errors.Is(err, errTaskModelsExhausted) {

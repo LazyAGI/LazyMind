@@ -20,7 +20,7 @@ it("shows empty state and settings link without inventing a default candidate", 
   render(<MemoryRouter><EvolutionModelSelect catalog={{ models: [], can_select: false }} loading={false} error="" onChange={vi.fn()} /></MemoryRouter>);
   expect(screen.getByRole("combobox")).toBeDisabled();
   expect(screen.getByRole("status")).toHaveTextContent("selfEvolutionControls.noModels");
-  expect(screen.getByRole("link")).toHaveAttribute("href", "/settings?section=models");
+  expect(screen.getByRole("link")).toHaveAttribute("href", "/settings?section=model_defaults");
 });
 
 it.each(["unverified", "passed", "failed"] as const)("keeps a configured model selectable with %s workflow status", validationStatus => {

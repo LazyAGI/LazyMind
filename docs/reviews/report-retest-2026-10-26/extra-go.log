@@ -1,8 +1,0 @@
-=== RUN   TestReportHoistedMetadata
-    report_retest_probe_test.go:8: pnpm virtualStoreDir does not point at frontend runtime node_modules
---- PASS: TestReportHoistedMetadata (0.00s)
-=== RUN   TestReportSQLiteActiveAndIdleTTL
-    report_retest_probe_test.go:17: active transaction survived 800ms with 500ms idle TTL
---- PASS: TestReportSQLiteActiveAndIdleTTL (0.81s)
-PASS
-ok  	github.com/mesotron7x/LazyMind/local/local-runtime-manager	1.370s

@@ -86,12 +86,17 @@ export default function ChatMessageContent({
   const citeMessageList =
     item.role === RoleTypes.USER ? getCiteMessages(item) : [];
   const runStatus = item.run_terminal?.status || item.run_status;
+  const isTerminalStatus =
+    runStatus === "completed" ||
+    runStatus === "failed" ||
+    runStatus === "interrupted" ||
+    runStatus === "cancelled";
   const isStreaming =
-    !runStatus &&
+    !isTerminalStatus &&
     item.finish_reason !==
       ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
   const thinkingTitleKey =
-    runStatus && runStatus !== "completed"
+    isTerminalStatus && runStatus !== "completed"
       ? item.run_terminal
         ? runStatusTitleKey(item.run_terminal)
         : `chat.runStatus.${runStatus}`

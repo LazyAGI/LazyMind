@@ -1,5 +1,0 @@
-?   	github.com/lazyagi/lazymind/local_proxy/cmd/local-proxy	[no test files]
-?   	github.com/lazyagi/lazymind/local_proxy/internal/app	[no test files]
-ok  	github.com/lazyagi/lazymind/local_proxy/internal/auth	1.099s
-ok  	github.com/lazyagi/lazymind/local_proxy/internal/config	1.486s
-ok  	github.com/lazyagi/lazymind/local_proxy/internal/server	1.829s

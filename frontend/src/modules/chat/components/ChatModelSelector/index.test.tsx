@@ -18,6 +18,7 @@ import ChatModelSelector from ".";
 import {
   fetchChatModelCatalog,
   updateConversationChatModel,
+  updateDefaultChatModel,
 } from "./api";
 
 const LAZYMIND_CLOUD_SESSION_CHANGED_EVENT = "lazymind:cloud-session-changed";
@@ -72,6 +73,7 @@ vi.mock("@/runtime/cloud/session", () => ({
 vi.mock("./api", () => ({
   fetchChatModelCatalog: vi.fn(),
   updateConversationChatModel: vi.fn(),
+  updateDefaultChatModel: vi.fn().mockResolvedValue(undefined),
 }));
 
 const fetchCatalogMock = vi.mocked(fetchChatModelCatalog);
@@ -346,6 +348,18 @@ describe("ChatModelSelector", () => {
       }),
     ).toBeInTheDocument();
     expect(fetchCatalogMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("saves a fixed choice as the default only before the conversation exists", async () => {
+    fetchCatalogMock.mockResolvedValue(catalog());
+    render(<ChatModelSelector />);
+    fireEvent.click(await screen.findByRole("button", { name: "当前模型：DeepSeek · DeepSeek-V3" }));
+    const options = screen.getAllByRole("button");
+    const alternative = options.find((button) => button.textContent?.includes("GPT-4o") && button.getAttribute("role") !== "combobox");
+    expect(alternative).toBeDefined();
+    fireEvent.click(alternative!);
+    await waitFor(() => expect(updateDefaultChatModel).toHaveBeenCalled());
+    expect(updateConversationChatModel).not.toHaveBeenCalled();
   });
 
   it("keeps a new-chat Auto choice local for the first request", async () => {

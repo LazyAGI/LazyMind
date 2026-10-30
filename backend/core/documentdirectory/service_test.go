@@ -227,7 +227,9 @@ func TestStaleExecutionCannotCommitAndDeletionCancelsInput(t *testing.T) {
 	e := entryFromCandidate(d.ID, c, time.Now().UTC())
 	input := Input{Entries: []orm.DocumentDirectoryEntry{e}}
 	b, j := batch(t, db, d, input)
-	must(t, db.Model(&orm.AsyncJob{}).Where("id=?", j.ID).Update("lock_until", time.Now().Add(-time.Minute)).Error)
+	// Queue leases are stored in UTC. Keep the expired fixture in the same
+	// representation so SQLite's timestamp comparison is timezone-independent.
+	must(t, db.Model(&orm.AsyncJob{}).Where("id=?", j.ID).Update("lock_until", time.Now().UTC().Add(-time.Minute)).Error)
 	p := Proposal{Assignments: []Assignment{{ResourceKey: e.ResourceKey}}}
 	if err := applyOrganization(ctx, db, j, &b, d.Version, input, p); !errors.Is(err, maintenanceLeaseLost) {
 		t.Fatalf("stale commit: %v", err)

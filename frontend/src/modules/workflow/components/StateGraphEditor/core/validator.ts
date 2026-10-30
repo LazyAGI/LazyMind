@@ -23,13 +23,29 @@ export interface ValidationError {
 
 /** Use compiler/local diagnostic translations without displaying backend prose. */
 export function getWorkflowDiagnosticMessage(t: TFunction, error: Partial<ValidationError & WorkflowDiagnostic>): string {
-  return t(`selfEvolutionRun.validationErrors.${error.code}`, {
+  const message = t(`selfEvolutionRun.validationErrors.${error.code}`, {
     defaultValue: t(`errors.${error.code}`, { defaultValue: t('errors.2000509') }),
     node: error.nodeId ?? error.node_id ?? '',
     edge: error.edgeKey ?? error.edge_id ?? '',
     material: error.materialId ?? error.material_id ?? '',
     producer: String(error.details?.producer_step_id ?? ''),
+    // These are explicit user-action diagnostics, not raw transport errors.
+    reason: error.code === 'E_REPAIR_NEEDS_INPUT' || error.code === 'E_REPAIR_SCENARIO_INCOMPLETE' || error.code === 'E_REPAIR_SCRIPT_INVALID' ? error.message ?? '' : '',
+    path: error.path ?? '',
   });
+  const diagnostic = error.details?.diagnostic_id;
+  if (error.code === 'E_REPAIR_BRANCH_CHANGED' && typeof error.details?.expected_target === 'string') {
+    const edges = Array.isArray(error.details.candidate_edges) ? error.details.candidate_edges : [];
+    const actual = edges.map((raw) => {
+      const edge = raw as { when?: string; to?: string };
+      return `${edge.when || '∅'} → ${edge.to || '∅'}`;
+    }).join('; ') || '∅';
+    return `${message} ${t('selfEvolutionRun.workflowRepairBranchDetails', {
+      expected: `${error.details.expected_when || '∅'} → ${error.details.expected_target}`, actual,
+    })}`;
+  }
+  return typeof diagnostic === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(diagnostic)
+    ? `${message} (${t('selfEvolutionRun.workflowRepairDiagnosticID', { id: diagnostic })})` : message;
 }
 
 /** Cheap, non-authoritative editor checks. Go diagnostics own graph semantics. */

@@ -504,8 +504,8 @@ def test_ordinary_image_summary_has_its_own_timeout_and_does_not_spend_soft_budg
     assert [request['stream'] for request in provider.requests] == ([False] if cancelled else [False, True])
     if not cancelled:
         assert image_data in json.dumps(provider.requests[-1]['messages'])
-    assert sent == ([(0.0, (3.0, 10.0))] if cancelled else [
-        (0.0, (3.0, 10.0)), (0.7, (3.0, 10.0)),
+    assert sent == ([(0.0, (3.0, 60.0))] if cancelled else [
+        (0.0, (3.0, 60.0)), (0.7, (3.0, 60.0)),
     ])
     assert now[0] == pytest.approx(0.7 if cancelled else 0.95)
     assert history == before

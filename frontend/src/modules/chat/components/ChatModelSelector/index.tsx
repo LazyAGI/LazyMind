@@ -36,6 +36,7 @@ import {
 import {
   fetchChatModelCatalog,
   updateConversationChatModel,
+  updateDefaultChatModel,
 } from "./api";
 import "./index.scss";
 
@@ -261,7 +262,7 @@ const ChatModelSelector = ({
   useEffect(() => {
     const refreshSelection = (event: Event) => {
       const detail = (event as CustomEvent<{ conversationId?: string }>).detail;
-      if (normalizedConversationId && detail?.conversationId === normalizedConversationId) void loadCatalog();
+      if (detail?.conversationId === normalizedConversationId) void loadCatalog();
     };
     window.addEventListener(CHAT_MODEL_SELECTION_CHANGED_EVENT, refreshSelection);
     return () => window.removeEventListener(CHAT_MODEL_SELECTION_CHANGED_EVENT, refreshSelection);
@@ -465,7 +466,7 @@ const ChatModelSelector = ({
       }
 
       setSwitchError("");
-      if (!normalizedConversationId) {
+      if (!normalizedConversationId && request.mode === "auto") {
         const nextCatalog = { ...catalog, selection: optimisticSelection };
         setCatalog(nextCatalog);
         commitSelection(optimisticSelection);
@@ -487,12 +488,9 @@ const ChatModelSelector = ({
       onSavingChangeRef.current?.(true);
       setAnnouncement(t("chat.modelSelectorSwitching"));
       try {
-        const savedSelection = await updateConversationChatModel(
-          normalizedConversationId,
-          request,
-          catalog.selection.version,
-          controller.signal,
-        );
+        const savedSelection = normalizedConversationId
+          ? await updateConversationChatModel(normalizedConversationId, request, catalog.selection.version, controller.signal)
+          : await updateDefaultChatModel(request, controller.signal).then(() => optimisticSelection);
         if (controller.signal.aborted || sequence !== saveSequenceRef.current) {
           return;
         }

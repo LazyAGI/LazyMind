@@ -54,7 +54,7 @@ export function EvolutionModelSelect({ catalog, loading, error, value, onChange 
           <InfoCircleOutlined aria-hidden />
           <span id={statusId} role="status">{statusMessage}</span>
           {(!catalog?.models.length || error) && (
-            <Link to="/settings?section=models" className="self-evolution-model-configure">
+            <Link to="/settings?section=model_defaults" className="self-evolution-model-configure">
               {t("selfEvolutionControls.configureModels")}
               <ArrowRightOutlined aria-hidden />
             </Link>

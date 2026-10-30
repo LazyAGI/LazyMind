@@ -7,6 +7,7 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t }) }));
 vi.mock("./api", () => ({ CONVERSATION_GROUPS_CHANGED_EVENT: "groups-changed", getLatestOrganizerState: vi.fn(async () => ({ run: null })), listConversationGroups: vi.fn(), assignConversation: vi.fn(), removeConversation: vi.fn(), emitConversationGroupsChanged: vi.fn() }));
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.getLatestOrganizerState).mockReset().mockResolvedValue({ run: null });
   vi.mocked(api.listConversationGroups).mockResolvedValue(Array.from({ length: 15 }, (_, i) => ({ id: `g${i}`, name: `Group ${i}` })) as api.ConversationGroup[]);
 });
 describe("conversation group picker", () => {

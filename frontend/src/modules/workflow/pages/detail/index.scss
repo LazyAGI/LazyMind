@@ -104,6 +104,13 @@
   border-right: none;
 }
 
+.workflow-repair-candidate-diff {
+  flex-shrink: 0;
+  max-height: min(40vh, 360px);
+  overflow: auto;
+  summary { cursor: pointer; }
+}
+
 .workflow-generation-failure,
 .workflow-generation-notice {
   flex-shrink: 0;

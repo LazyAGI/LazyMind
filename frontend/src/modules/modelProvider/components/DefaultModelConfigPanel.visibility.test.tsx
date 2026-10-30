@@ -90,6 +90,10 @@ function renderPanel(highlightTarget?: "image_generator", onHighlightResolved = 
 
 describe("DefaultModelConfigPanel collaboration visibility", () => {
   beforeEach(() => {
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
     mocks.runtimeFeatures.hideUserGroupSurfaces = true;
     mocks.saveModels.mockReset().mockResolvedValue({ data: { selections: [] } });
     mocks.getProviders.mockReset().mockResolvedValue({ data: { providers: [] } });
@@ -117,10 +121,6 @@ describe("DefaultModelConfigPanel collaboration visibility", () => {
   });
 
   it("highlights the requested model capability", async () => {
-    Object.defineProperty(Element.prototype, "scrollIntoView", {
-      configurable: true,
-      value: vi.fn(),
-    });
     const { container } = renderPanel("image_generator");
 
     await waitFor(() => {

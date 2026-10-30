@@ -317,3 +317,12 @@
     }
   }
 }
+
+.provider-model-catalog-fetch-error { color: var(--ant-color-warning, #d48806); font-size: 12px; }
+@media (max-width: 600px) {
+  .provider-model-catalog-drawer .ant-drawer-header { flex-wrap: wrap; gap: 8px; padding: 12px; }
+  .provider-model-catalog-drawer .ant-drawer-header-title { min-width: 0; }
+  .provider-model-catalog-drawer .ant-drawer-extra { margin-inline-start: 0; width: 100%; }
+  .provider-model-catalog-toolbar { flex-wrap: wrap; justify-content: flex-end; }
+  .provider-model-catalog-drawer .ant-drawer-body { padding: 12px; }
+}

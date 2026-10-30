@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
+import { setupAntdStaticCleanup } from "@/test/antdStatic";
 import * as api from "./api";
 import DocumentLearningPanel, { capabilitySupportsAnalysisText, displayPresetKey, presetDisplayValue } from "./DocumentLearningPanel";
+
+setupAntdStaticCleanup();
 
 vi.mock("./api",async()=>{
   const actual=await vi.importActual<typeof import("./api")>("./api");

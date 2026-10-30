@@ -1068,3 +1068,42 @@ func TestSaveWorkflowDraftRejectsEditsDuringGeneration(t *testing.T) {
 		})
 	}
 }
+
+func TestSaveInvalidatesFailedRepairOnlyWhenContentChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		cleared    bool
+		status     int
+	}{
+		{"scenario correction", `{"version":1,"scenario_content":"Corrected step documentation"}`, true, http.StatusOK},
+		{"state correction", `{"version":1,"state_yaml_content":"steps: {}"}`, true, http.StatusOK},
+		{"rename", `{"version":1,"name":"Renamed"}`, false, http.StatusOK},
+		{"layout", `{"state_layout_content":"{}"}`, false, http.StatusOK},
+		{"stale content", `{"version":0,"scenario_content":"Stale edit"}`, false, http.StatusConflict},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newHandlerTestDB(t)
+			id := "11111111-1111-4111-8111-111111111111"
+			seedWorkflowDraft(t, db, id, "owner")
+			warning := "[修复失败] old candidate has no producer"
+			if err := db.Model(&orm.WorkflowDraft{}).Where("id=?", id).Update("generate_warning", warning).Error; err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(tc.body))
+			req.Header.Set("X-User-Id", "owner")
+			req = mux.SetURLVars(req, map[string]string{"draft_id": id})
+			rec := httptest.NewRecorder()
+			SaveWorkflowDraft(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+			}
+			var saved orm.WorkflowDraft
+			if err := db.First(&saved, "id=?", id).Error; err != nil {
+				t.Fatal(err)
+			}
+			if tc.cleared && saved.GenerateWarning != "" || !tc.cleared && saved.GenerateWarning != warning {
+				t.Fatalf("warning=%q", saved.GenerateWarning)
+			}
+		})
+	}
+}

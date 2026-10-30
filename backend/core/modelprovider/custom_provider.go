@@ -110,6 +110,10 @@ func CreateCustomProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func customProviderForRequest(w http.ResponseWriter, r *http.Request) (*gorm.DB, orm.UserModelProvider, bool) {
+	return mutableProviderForRequest(w, r, false)
+}
+
+func mutableProviderForRequest(w http.ResponseWriter, r *http.Request, reset bool) (*gorm.DB, orm.UserModelProvider, bool) {
 	db := store.DB()
 	var row orm.UserModelProvider
 	user := strings.TrimSpace(store.UserID(r))
@@ -125,7 +129,7 @@ func customProviderForRequest(w http.ResponseWriter, r *http.Request) (*gorm.DB,
 		common.ReplyErr(w, "model provider not found", 404)
 		return db, row, false
 	}
-	if !row.IsCustom || !hasSharedProviderEndpoint(row) {
+	if (!reset && !row.IsCustom) || (reset && row.IsCustom) || !hasSharedProviderEndpoint(row) {
 		common.ReplyErr(w, "only custom model suppliers can be renamed or deleted", 400)
 		return db, row, false
 	}
@@ -216,7 +220,15 @@ func UpdateCustomProvider(w http.ResponseWriter, r *http.Request) {
 }
 
 func DeleteCustomProvider(w http.ResponseWriter, r *http.Request) {
-	db, row, ok := customProviderForRequest(w, r)
+	clearProviderConfiguration(w, r, false)
+}
+
+func ResetProvider(w http.ResponseWriter, r *http.Request) {
+	clearProviderConfiguration(w, r, true)
+}
+
+func clearProviderConfiguration(w http.ResponseWriter, r *http.Request, reset bool) {
+	db, row, ok := mutableProviderForRequest(w, r, reset)
 	if !ok {
 		return
 	}
@@ -236,16 +248,12 @@ func DeleteCustomProvider(w http.ResponseWriter, r *http.Request) {
 			hasEmbedding = hasEmbedding || isTextEmbeddingModelType(model.ModelType)
 			hasImage = hasImage || isMultimodalEmbeddingModelType(model.ModelType)
 		}
-		if hasEmbedding && !indexedDowngradeConfirmed(r) {
-			return errEmbeddingConfirmationRequired
-		}
 		if hasEmbedding {
-			count, err := downgradeIndexedDatasets(tx, row.CreateUserID, now)
-			if err != nil {
+			if err := guardEmbeddingRemoval(tx, row.CreateUserID); err != nil {
 				return err
 			}
-			downgraded = count
 		}
+
 		var groups []orm.UserModelProviderGroup
 		if err := tx.Where("user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, row.CreateUserID).Find(&groups).Error; err != nil {
 			return err
@@ -274,10 +282,22 @@ func DeleteCustomProvider(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		updates["active_key_id"], updates["active_key_group_id"], updates["active_key_initialized"], updates["active_key_revision"] = "", "", true, row.ActiveKeyRevision+1
+		if reset {
+			var template orm.DefaultModelProvider
+			if err := tx.Where("id = ? AND deleted_at IS NULL", row.DefaultModelProviderID).Take(&template).Error; err != nil {
+				return err
+			}
+			delete(updates, "deleted_at")
+			updates["base_url"] = template.BaseURL
+			updates["request_config"] = ""
+			updates["protocol_name"] = ""
+			updates["logo_data_url"] = ""
+			updates["active_key_initialized"] = false
+		}
 		return tx.Model(&row).Updates(updates).Error
 	})
 	if err != nil {
-		if errors.Is(err, errEmbeddingConfirmationRequired) {
+		if errors.Is(err, errEmbeddingConfirmationRequired) || errors.Is(err, errEmbeddingInUse) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
 			return
 		}

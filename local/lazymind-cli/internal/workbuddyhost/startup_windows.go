@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"syscall"
 	"unsafe"
 
@@ -18,6 +19,20 @@ type windowsStartupEnvironment struct {
 	keyPath string
 	name    string
 	notify  func() error
+}
+
+func checkDesktopStartup(ctx context.Context, home string, port int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	value, err := (windowsStartupEnvironment{keyPath: `Environment`, name: desktopDebugPortEnv}).Get()
+	if err != nil {
+		return err
+	}
+	if value != strconv.Itoa(port) {
+		return fmt.Errorf("WorkBuddy startup environment is unavailable")
+	}
+	return nil
 }
 
 func (e windowsStartupEnvironment) Get() (string, error) {

@@ -154,6 +154,13 @@ func doProviderGroupCheck(ctx context.Context, category, providerName, baseURL, 
 			return nil, errors.New("read advanced request configuration failed")
 		}
 	}
+	if category == "model" && model == "" && len(parents) > 0 {
+		brand, _ := ProviderServiceIdentity(parents[0])
+		source := LazyLLMSource(providerName)
+		if brand == "Doubao" && (source == "doubao" || source == "openai" || source == "claude") {
+			return doArkCredentialCheck(ctx, providerName, baseURL, apiKey, advanced)
+		}
+	}
 	return doCheck(ctx, category, providerName, baseURL, apiKey, model, advanced)
 }
 

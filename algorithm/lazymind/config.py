@@ -277,12 +277,12 @@ config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
 config.add('url_fetch_pdf_max_bytes', int, 100 * 1024 * 1024, 'URL_FETCH_PDF_MAX_BYTES',
            description='Maximum PDF download size for url_fetch ingestion.')
-config.add('model_fallback_timeout_seconds', float, 30, 'MODEL_FALLBACK_TIMEOUT_SECONDS',
+config.add('model_fallback_timeout_seconds', float, 120, 'MODEL_FALLBACK_TIMEOUT_SECONDS',
            description='Soft seconds for starting model attempts, including the initial model; '
                        'active generation may finish.')
 config.add('model_fallback_connect_timeout_seconds', float, 3, 'MODEL_FALLBACK_CONNECT_TIMEOUT_SECONDS',
            description='Connection timeout for every fallback-managed model call.')
-config.add('model_fallback_read_timeout_seconds', float, 10, 'MODEL_FALLBACK_READ_TIMEOUT_SECONDS',
+config.add('model_fallback_read_timeout_seconds', float, 60, 'MODEL_FALLBACK_READ_TIMEOUT_SECONDS',
            description='Idle read timeout for every fallback-managed model call; a model timeout may override it.')
 config.add('model_fallback_max_candidates', int, 4, 'MODEL_FALLBACK_MAX_CANDIDATES',
            description='Maximum model candidates per main request, including its initial model.')
@@ -335,7 +335,7 @@ config.add('context_compression_target_ratio', float, 0.45, 'CONTEXT_COMPRESSION
            description='Target fraction of the effective input budget after compression.')
 config.add('context_compression_reserved_output_tokens', int, 8192,
            'CONTEXT_COMPRESSION_RESERVED_OUTPUT_TOKENS',
-           description='Tokens reserved for model output when computing the effective input budget.')
+           description='Tokens reserved when computing the effective input budget; not a model output limit.')
 config.add(
     'context_prune_cache_amortization_calls',
     int,

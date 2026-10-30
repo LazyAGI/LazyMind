@@ -3,6 +3,8 @@ import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatLayout from "./index";
+import type { WorkflowUI } from '@/modules/chat/store/workflowPanel';
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import { readChatConversationFilters, selectChatConversationSources } from "../../constants/chat";
 
 vi.mock("@/modules/chat/components/ArtifactPreview", () => ({ default: () => null }));
@@ -43,6 +45,9 @@ const mocks = vi.hoisted(() => ({
   tasksByConversation: {} as Record<string, Array<{ task_id: string; agent_type?: string }>>,
   taskLoading: {} as Record<string, boolean>,
   workflowSessions: {} as Record<string, any>,
+  workflowUIs: {} as Record<string, WorkflowUI>,
+  fetchWorkflowUI: vi.fn(),
+  taskCenterDisplayCount: vi.fn((tasks: unknown[]) => (Array.isArray(tasks) ? tasks.length : 0)),
   dismissedWorkflowSessions: {} as Record<string, Array<{ session_id: string; workflow_id: string }>>,
   forkBegin: vi.fn(),
 }));
@@ -174,7 +179,7 @@ vi.mock("@/modules/chat/components/ArtifactPanel", () => ({
   },
 }));
 vi.mock("@/modules/chat/components/TaskCenter/taskTimeline", () => ({
-  taskCenterDisplayCount: (tasks: unknown[]) => (Array.isArray(tasks) ? tasks.length : 0),
+  taskCenterDisplayCount: mocks.taskCenterDisplayCount,
 }));
 vi.mock("@/modules/chat/components/ImageUpload", () => ({
   allowedUploadTypes: [],
@@ -239,10 +244,10 @@ vi.mock("@/modules/chat/store/workflowPanel", () => {
     autoRunningByConversation: {},
     sessionByConversation: mocks.workflowSessions,
     dismissedSessionsByConversation: mocks.dismissedWorkflowSessions,
-    workflowUIByWorkflow: {},
+    workflowUIByWorkflow: mocks.workflowUIs,
     focusedTabByConversation: {},
     focusedSortOrderByConversation: {},
-    fetchWorkflowUI: vi.fn(),
+    fetchWorkflowUI: mocks.fetchWorkflowUI,
     syncSessionSearchConfig: vi.fn(),
   };
   return {
@@ -282,6 +287,7 @@ describe("ChatLayout conversation loading", () => {
     mocks.restoredIntent = null;
     mocks.latestSideChatPanelProps = null;
     mocks.locationSearch = "";
+    Object.keys(mocks.workflowUIs).forEach(key => { delete mocks.workflowUIs[key]; });
     Object.keys(mocks.artifactsByConversation).forEach((key) => {
       delete mocks.artifactsByConversation[key];
     });
@@ -1113,6 +1119,21 @@ describe("ChatLayout conversation loading", () => {
 
 
   const sidebarProps = { conversationId: "source", setIsChatContent: vi.fn(), initchatConfig: {}, setChatConfigFn: vi.fn(), canChat: true };
+  it('uses the bound revision for configuration requests and planned step counts when versions change', async () => {
+    mocks.workflowSessions.source = { session_id: 'run-1', workflow_id: 'smoke', pinned_revision_id: 'v1', status: 'active', steps: [] };
+    mocks.workflowUIs[workflowUICacheKey('smoke', 'v1', 'zh-CN')] = { tabs: ['prepare', 'result'].map(id => ({ id, slots: [] })) };
+    mocks.workflowUIs[workflowUICacheKey('smoke', 'v2', 'zh-CN')] = { tabs: ['prepare', 'review', 'result'].map(id => ({ id, slots: [] })) };
+    // A legacy workflow-only entry must never win over either version.
+    mocks.workflowUIs['smoke:zh-CN'] = { tabs: [] };
+    const view = render(<ChatLayout {...sidebarProps} />);
+    await waitFor(() => expect(mocks.fetchWorkflowUI).toHaveBeenLastCalledWith('smoke', 'v1'));
+    expect(mocks.taskCenterDisplayCount).toHaveBeenLastCalledWith([], [], false, 2);
+    mocks.workflowSessions.source = { ...mocks.workflowSessions.source, session_id: 'run-2', pinned_revision_id: 'v2' };
+    view.rerender(<ChatLayout {...sidebarProps} />);
+    await waitFor(() => expect(mocks.fetchWorkflowUI).toHaveBeenLastCalledWith('smoke', 'v2'));
+    expect(mocks.taskCenterDisplayCount).toHaveBeenLastCalledWith([], [], false, 3);
+  });
+
   async function openOverview() {
     fireEvent.click(await screen.findByRole("button", { name: "chat.sidebar.open" }));
   }

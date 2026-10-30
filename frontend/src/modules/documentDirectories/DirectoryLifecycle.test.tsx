@@ -50,8 +50,7 @@ it('acknowledges a successful result after opening its directory', async () => {
  vi.mocked(api.listBatches).mockResolvedValue([{id:'done',directory_id:'A',parent_id:'',status:'succeeded',acknowledged:false,created_at:directory.last_used_at}]);
  view();
  await screen.findByRole('heading',{name:'Directory A'});
- const commands=vi.mocked(api.directoryAction).mock.calls.map(([c])=>c.operation);
- expect(commands).toContain('acknowledge');
+ await waitFor(() => expect(api.directoryAction).toHaveBeenCalledWith({ operation: 'acknowledge', batch_id: 'done' }));
 });
 
 
@@ -78,8 +77,15 @@ it('does not close B editor after A mutation refresh completes', async () => {
  fireEvent.click(await screen.findByRole('menuitem', { name: 'directories.edit' }));
  await screen.findByDisplayValue('Directory B');
  await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible(), { timeout: 10000 });
- await act(async () => { release(viewData('A')); await pending; });
- await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
- expect(screen.getByRole('dialog')).toBeVisible();
- expect(screen.getByDisplayValue('Directory B')).toBeVisible();
+ vi.useFakeTimers();
+ try {
+   await act(async () => { release(viewData('A')); await pending; });
+   // Advance the closing animation so a stale completion cannot hide B's editor later.
+   await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+   expect(screen.getByRole('dialog')).toBeVisible();
+   expect(screen.getByDisplayValue('Directory B')).toBeVisible();
+ } finally {
+   // Unmount under the real clock to clear polling timers created before this scope.
+   vi.useRealTimers();
+ }
 }, 20000);

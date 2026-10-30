@@ -34,10 +34,10 @@ export function buildCapabilitySettingsUrl(
   const url = new URL(capability.settings_url, window.location.origin);
   if (
     url.pathname === "/settings" &&
-    url.searchParams.get("section") === "models" &&
-    !url.searchParams.has("target")
+    ["models", "model_defaults"].includes(url.searchParams.get("section") || "")
   ) {
-    const target = MODEL_CAPABILITY_TARGETS[capability.id];
+    url.searchParams.set("section", "model_defaults");
+    const target = url.searchParams.get("target") || MODEL_CAPABILITY_TARGETS[capability.id];
     if (target) url.searchParams.set("target", target);
   }
   if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) {

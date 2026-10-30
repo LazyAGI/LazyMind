@@ -37,8 +37,6 @@ when_to_use: >
 
 runtime:
   publisher_owned_slots:
-    - style_previews
-    - style_selection
     - deck_outline
     - slide_outline
     - background_prompts
@@ -295,8 +293,6 @@ tool_scripts:
       - ppt_register_material_images
       - ppt_generate_material_images
       - ppt_publish_background_prompts
-      - ppt_prepare_style_choices
-      - ppt_prepare_style
       - ppt_generate_background_images
       - check_ppt_workflow_capabilities
       - ppt_analyze_template
@@ -344,8 +340,6 @@ steps:
     label: Collect Materials
   - id: analyze_academic_sources
     label: Analyze Academic Sources
-  - id: choose_style
-    label: Choose Style
   - id: plan_background_prompts
     label: Plan Background Prompts
   - id: generate_backgrounds
@@ -375,6 +369,12 @@ slots:
     type: text
     cardinality: single
     summary_max_chars: 2000
+  - id: skip_academic_sources
+    user_visible: false
+    exposed: false
+    label: Skip Academic Analysis
+    type: text
+    cardinality: single
   - id: requirement_analysis
     user_visible: true
     label: Requirement Analysis
@@ -447,14 +447,6 @@ slots:
     exposed: false
     summary_max_chars: 40
 
-  - id: skip_style_choices
-    user_visible: false
-    label: Skip Style Choices
-    type: text
-    cardinality: single
-    exposed: false
-    summary_max_chars: 40
-
   - id: skip_background_images
     user_visible: false
     label: Skip AI Backgrounds
@@ -496,20 +488,6 @@ slots:
     type: image
     cardinality: list
     ordered: true
-
-  - id: style_previews
-    user_visible: true
-    label: Style Previews
-    type: text
-    cardinality: single
-    summary_max_chars: 500
-
-  - id: style_selection
-    user_visible: true
-    label: Selected Style
-    type: text
-    cardinality: single
-    summary_max_chars: 80
 
   - id: background_images
     user_visible: false
@@ -566,13 +544,6 @@ ui:
       widgetType: text-markdown
     material_summary:
       widgetType: text-markdown
-    style_previews:
-      widgetType: html-slide
-      maxHeight: 620
-      readOnly: true
-    style_selection:
-      widgetType: text-markdown
-      readOnly: false
     background_prompts:
       widgetType: text-markdown
       maxHeight: 420
@@ -608,15 +579,6 @@ ui:
       layout: list
       slots:
         - id: material_summary
-
-    - id: style
-      step_id: choose_style
-      label: Style
-      hide_when_material: skip_style_choices
-      layout: list
-      slots:
-        - id: style_previews
-        - id: style_selection
 
     - id: background_prompts
       step_id: plan_background_prompts
@@ -719,7 +681,6 @@ i18n:
     steps:
       analyze_requirements: {label: 需求分析}
       collect_materials: {label: 收集素材}
-      choose_style: {label: 选择风格}
       build_outline: {label: 大纲}
       plan_page_prompts: {label: 每页提示词}
       plan_background_prompts: {label: 底图提示词}
@@ -728,7 +689,6 @@ i18n:
     tabs:
       analysis: {label: 分析}
       materials: {label: 素材}
-      style: {label: 风格}
       outline: {label: 大纲}
       page_prompts: {label: 每页提示词}
       background_prompts: {label: 底图提示词}
@@ -738,8 +698,6 @@ i18n:
       requirement_analysis: {label: 需求分析}
       material_summary: {label: 素材摘要}
       material_images: {label: 素材图片}
-      style_previews: {label: 风格预览}
-      style_selection: {label: 已选风格}
       background_prompts: {label: 底图提示词}
       background_images: {label: AI 底图}
       deck_outline: {label: 大纲}

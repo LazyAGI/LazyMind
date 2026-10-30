@@ -110,14 +110,3 @@ Docker: history-injection-init 查询 PostgreSQL → 已存在则跳过；缺少
 ```
 
 注入按 conversation ID 幂等：同一用户已有该对话时仅补齐/校验文件；若相同 ID 已属于其他用户则拒绝覆盖。warmup 失败时安装器本身仍可完成，但 Core 日志会明确报告 bundle；普通首次启动也会再次执行同一流程，因此不是只能依赖安装器 warmup。
-
-
-## 案例后置安装回归（2026-09-20）
-
-- 精简构建：runtime 只有 `history-injection-package.json` 和 manifest 下载描述，不包含 `history-injection.zip`；已有源案例目录/ZIP 的排除规则继续有效。
-- 联网首次 warmup：下载发布的 74,408,904 字节（约 70.96 MiB）案例包，通过 SHA-256 后解压，Core 中出现原有五个案例及产物。
-- 再次启动：不重复下载或导入重复会话；移除下载缓存后离线启动仍可使用已装案例。
-- 首次断网/404/错误大小/坏 SHA：应用能启动，日志提示案例暂不可用；恢复网络重启后补齐，不激活半成品。
-- 升级案例版本：校验成功后替换案例缓存目录，原会话数据不由下载器删除；失败保留旧案例。
-- `defer_history=false`：恢复随安装包携带案例，断网 warmup 仍可注入。
-- Windows 安装器和 macOS 首次启动分别验证；案例内容、Workflow 执行能力和 Skill 内容回归保持原有流程。

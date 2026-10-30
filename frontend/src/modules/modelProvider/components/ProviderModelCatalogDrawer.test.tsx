@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderModelCatalogDrawer } from "./ProviderModelCatalogDrawer";
 import type { ProviderModel } from "../pages/ModelProvidersPage";
 
-const mocks = vi.hoisted(() => ({ remote: vi.fn(), lookup: vi.fn() }));
+const mocks = vi.hoisted(() => ({ remote: vi.fn(), lookup: vi.fn(), builtIn: vi.fn() }));
 vi.mock("../api", () => ({ listRemoteGroupModels: mocks.remote }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -23,6 +23,7 @@ vi.mock("@/components/request", () => ({
   getLocalizedErrorMessage: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
 }));
+vi.mock("../builtInCatalog", () => ({ builtInCatalog: mocks.builtIn }));
 vi.mock("../upstreamCatalog", () => ({ lookupUpstreamModel: mocks.lookup }));
 
 const selected: ProviderModel[] = [
@@ -85,6 +86,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.remote.mockResolvedValue({ models: remote });
   mocks.lookup.mockReturnValue(undefined);
+  mocks.builtIn.mockReturnValue([]);
 });
 
 describe("provider model catalog drawer", () => {
@@ -454,15 +456,25 @@ describe("provider model catalog drawer", () => {
     await screen.findByText("deepseek-v3");
     mocks.remote.mockRejectedValueOnce(new Error("rate limited"));
     fireEvent.click(screen.getByRole("button", { name: "modelProvider.catalog.refresh" }));
-    expect(await screen.findByText("rate limited")).toBeInTheDocument();
+    expect(await screen.findByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
     expect(screen.getByText("deepseek-v3")).toBeInTheDocument();
     expect(screen.getByText("BAAI/bge-large")).toBeInTheDocument();
+  });
+
+  it("shows built-in Doubao suggestions with a visible failed-fetch status", async () => {
+    mocks.builtIn.mockReturnValue([{ id: "doubao-seed-1-6-251015", name: "doubao-seed-1-6-251015", model_type: "llm", added: false }]);
+    mocks.remote.mockRejectedValue(new Error("models endpoint unsupported"));
+    draw({ ...fixture([]), providerName: "Doubao", protocolName: "Doubao" });
+    expect(await screen.findByRole("status")).toHaveTextContent("modelProvider.catalog.discoveryFailed");
+    expect(await screen.findByText("doubao-seed-1-6-251015")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("modelProvider.catalog.missingRemote")).not.toBeInTheDocument();
   });
 
   it("allows removing saved models without mislabeling them when discovery fails", async () => {
     mocks.remote.mockRejectedValue(new Error("discovery offline"));
     draw(fixture());
-    expect(await screen.findByText("discovery offline")).toBeInTheDocument();
+    expect(await screen.findByText("modelProvider.catalog.discoveryFailed")).toBeInTheDocument();
     expect(
       screen.queryByText("modelProvider.catalog.missingRemote"),
     ).not.toBeInTheDocument();

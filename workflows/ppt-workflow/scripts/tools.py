@@ -34,6 +34,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import io
 import json
 import logging
 import os
@@ -47,6 +48,7 @@ import zipfile
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, wait
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from html import escape as _html_escape
 from html import unescape as _html_unescape
 from html.parser import HTMLParser
@@ -236,6 +238,84 @@ def _page_result_timed_out(result: dict[str, Any] | None) -> bool:
     return any(marker in error for marker in (
         'timed out', 'timeout', 'readtimeout', 'connecttimeout',
     ))
+
+
+def _model_failure_details(exc: BaseException) -> dict[str, Any]:
+    """Keep safe structured diagnostics, never provider bodies, URLs or headers."""
+    details: dict[str, Any] = {}
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        saved = getattr(current, 'ppt_diagnostics', None)
+        if isinstance(saved, dict):
+            details.update(saved)
+        terminal = getattr(current, 'terminal', None)
+        failure = getattr(terminal, 'failure', None)
+        for field in ('model_call_id', 'attempt_count', 'duration_ms'):
+            value = getattr(terminal, field, None)
+            if isinstance(value, (str, int)):
+                details[field] = value
+        for field in ('origin', 'code', 'diagnostic_id', 'provider_http_status', 'response_started'):
+            value = getattr(failure, field, None)
+            value = getattr(value, 'value', value)
+            if isinstance(value, (str, int, bool)):
+                details[field] = value
+        if isinstance(current, _PPTGenerationLimit):
+            details['code'] = current.code
+        if isinstance(current, requests.HTTPError) and current.response is not None:
+            details['provider_http_status'] = current.response.status_code
+        current = current.__cause__ or current.__context__
+    if _is_model_timeout_exception(exc):
+        details.setdefault('code', 'request_timeout')
+    return details
+
+
+class _PPTGenerationLimit(TimeoutError):
+    def __init__(self, code: str):
+        super().__init__(f'PPT generation stopped: {code}')
+        self.code = code
+
+
+class _PPTGenerationBudget:
+    """One batch budget shared by initial requests, repairs and page retries."""
+    def __init__(self, pages: int):
+        self.started = time.monotonic()
+        self.seconds = _coerce_int(os.environ.get('LAZYMIND_PPT_BATCH_TIMEOUT'), 1800, lo=1, hi=7200)
+        self.page_seconds = _coerce_int(os.environ.get('LAZYMIND_PPT_PAGE_TIMEOUT'), 360, lo=1, hi=1800)
+        self.max_calls = _coerce_int(os.environ.get('LAZYMIND_PPT_MAX_MODEL_CALLS'), pages + 3, lo=1, hi=500)
+        self.max_failures = _coerce_int(os.environ.get('LAZYMIND_PPT_MAX_CONSECUTIVE_FAILURES'), 3, lo=1, hi=20)
+        self.calls = 0
+        self.failures = 0
+        self.stopped: str | None = None
+
+    def check(self, page_deadline: float | None = None) -> None:
+        if self.stopped:
+            raise _PPTGenerationLimit(self.stopped)
+        now = time.monotonic()
+        if now >= self.started + self.seconds:
+            self.stopped = 'batch_deadline_exceeded'
+            raise _PPTGenerationLimit(self.stopped)
+        if page_deadline is not None and now >= page_deadline:
+            raise _PPTGenerationLimit('page_deadline_exceeded')
+
+    def admit(self, _request: Any, page_deadline: float) -> None:
+        self.check(page_deadline)
+        if self.calls >= self.max_calls:
+            self.stopped = 'model_call_budget_exhausted'
+            raise _PPTGenerationLimit(self.stopped)
+        self.calls += 1
+
+    def record(self, ok: bool, payload: dict) -> None:
+        if self.stopped:
+            return
+        self.failures = 0 if ok else self.failures + 1
+        code = (payload.get('diagnostics') or {}).get('code')
+        if code in {'authentication_failed', 'permission_denied', 'quota_exhausted',
+                    'balance_exhausted', 'usage_limit_exceeded'}:
+            self.stopped = code
+        elif self.failures >= self.max_failures:
+            self.stopped = 'consecutive_failure_limit'
 
 
 def _tool_success(_tool_name: str, result: Any, meta: dict[str, Any] | None = None) -> Any:
@@ -2117,6 +2197,31 @@ def _inline_preview_images(html: str, deck: Path, html_path: Path) -> tuple[str,
     return css_pattern.sub(_replace_css, html), inlined
 
 
+def _reserve_missing_page_positions(through_page: int, orders: dict[str, list[int]]) -> str | None:
+    """Reserve missing display positions without inventing generated HTML files."""
+    for slot, order in orders.items():
+        while len(order) < through_page:
+            number = len(order) + 1
+            message = f'第 {number} 页尚未生成或发布成功，请重试该页。'
+            value = (
+                '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head>'
+                '<body style="margin:0;display:grid;place-items:center;width:1280px;height:720px;'
+                'background:#f5f5f5;color:#555;font:32px sans-serif">'
+                f'<p>{message}</p></body></html>'
+                if slot == 'preview_html' else message
+            )
+            try:
+                saved = _publish_ordered_ppt_artifact(
+                    slot=slot, page_no=number, value=value, content_type='text',
+                    source_tool='ppt_publish_pages', caption=f'第 {number} 页 · 未生成', order_list=order,
+                )
+            except Exception:
+                return f'{slot} missing-page publication failed'
+            if _tool_failed(saved):
+                return f'{slot} missing-page publication failed'
+    return None
+
+
 def _publish_one_page(
     deck: Path,
     page_no: int,
@@ -2149,17 +2254,11 @@ def _publish_one_page(
         slot: _ui_slot_order_list(slot) for slot in ordered_slots
     }
     for slot in ordered_slots:
-        current_count = len(orders.setdefault(slot, []))
-        if page_no > current_count + 1:
-            return {
-                'page': page_no,
-                'ok': False,
-                'deferred': True,
-                'error': (
-                    f'{slot} page {page_no} deferred until pages '
-                    f'1..{page_no - 1} are published (current count={current_count})'
-                ),
-            }
+        orders.setdefault(slot, [])
+    if not insert_before:
+        error = _reserve_missing_page_positions(page_no - 1, orders)
+        if error:
+            return {'page': page_no, 'ok': False, 'error': error}
 
     expected_total = len((_load_outline(deck).get('pages') or []))
     html_order = orders['preview_html']
@@ -4236,7 +4335,7 @@ def _batch_page_html_publish_progressive(
     published: list[dict[str, Any]] = []
     retry_history: list[dict[str, Any]] = []
     ready_ok: dict[int, bool] = {}
-    next_publish_i = 0
+    budget = _PPTGenerationBudget(len(page_nos))
     slot_orders = {
         'preview_html': _ui_slot_order_list('preview_html'),
         'preview_notes': _ui_slot_order_list('preview_notes'),
@@ -4260,20 +4359,23 @@ def _batch_page_html_publish_progressive(
                 return 0, {'status': 'ok', 'page_no': pno, 'reused': True}
         except (OSError, ValueError, AttributeError):
             pass
+        budget.check()
+        page_deadline = time.monotonic() + budget.page_seconds
+        llm_call = partial(_agent_llm_call, _budget=budget, _page_deadline=page_deadline)
         if brief:
             result = rs._capture_cmd(
                 rs.cmd_page_html_from_brief,
                 deck,
                 pno,
                 brief,
-                llm_call=_agent_llm_call,
+                llm_call=llm_call,
             )
         else:
             result = rs._capture_cmd(
                 rs.cmd_page_html,
                 deck,
                 pno,
-                llm_call=_agent_llm_call,
+                llm_call=llm_call,
             )
         if result[0] == 0 and result[1].get('status') == 'ok' and output.is_file():
             temporary = checkpoint.with_name(checkpoint.name + '.' + uuid.uuid4().hex + '.tmp')
@@ -4285,16 +4387,13 @@ def _batch_page_html_publish_progressive(
         return result
 
     def _flush_ready() -> None:
-        nonlocal next_publish_i
-        while next_publish_i < len(page_nos):
-            pno = page_nos[next_publish_i]
-            if pno not in ready_ok:
-                return
+        published_pages = {item['page'] for item in published}
+        for pno in page_nos:
+            if pno not in ready_ok or pno in published_pages:
+                continue
             if not ready_ok[pno]:
-                # Keep the ordered-list cursor on the failed page.  Advancing
-                # it here used to make a later successful retry write the HTML
-                # to disk without ever publishing it to preview_html.
-                return
+                _reserve_missing_page_positions(pno, slot_orders)
+                continue
             try:
                 pub = _publish_one_page(
                     deck,
@@ -4309,13 +4408,10 @@ def _batch_page_html_publish_progressive(
                         'title_hint': pub.get('title_hint'),
                         'bytes': pub.get('bytes'),
                     })
-                    next_publish_i += 1
                 else:
                     results[pno]['publish_error'] = pub.get('error') or 'publish failed'
-                    return
             except Exception as exc:
                 results[pno]['publish_error'] = str(exc)
-                return
 
     def _record_result(fut, pno: int) -> None:
         try:
@@ -4324,6 +4420,7 @@ def _batch_page_html_publish_progressive(
             code, payload = 1, {
                 'status': 'failed',
                 'error': str(exc),
+                'diagnostics': _model_failure_details(exc),
                 'failure_kind': (
                     'timeout' if _is_model_timeout_exception(exc) else 'error'
                 ),
@@ -4338,6 +4435,7 @@ def _batch_page_html_publish_progressive(
             'brief_source': 'slide_outline' if pno in briefs else 'outline.json',
         }
         ready_ok[pno] = ok
+        budget.record(ok, payload)
         message = (f'第 {pno} 页生成完成' if ok else
                    f'第 {pno} 页生成失败：{payload.get("error") or "unknown error"}')
         _ppt_progress(message, 10 + 70 * len(results) // len(page_nos))
@@ -4376,8 +4474,12 @@ def _batch_page_html_publish_progressive(
                 pno for pno in page_nos
                 if not ready_ok.get(pno, False)
                 and not _page_result_timed_out(results.get(pno))
+                and ((results.get(pno, {}).get('payload') or {}).get('diagnostics') or {}).get('code') in {
+                    None, 'transport_error', 'rate_limited', 'concurrency_limited',
+                    'provider_overloaded', 'service_unavailable', 'provider_internal_error',
+                }
             ]
-            if not pending:
+            if not pending or budget.stopped:
                 break
             time.sleep(min(2 ** (retry_no - 1), 4))
             for pno in pending:
@@ -4390,6 +4492,7 @@ def _batch_page_html_publish_progressive(
                     code, payload = 1, {
                         'status': 'failed',
                         'error': str(exc),
+                        'diagnostics': _model_failure_details(exc),
                         'failure_kind': (
                             'timeout' if _is_model_timeout_exception(exc) else 'error'
                         ),
@@ -4405,6 +4508,7 @@ def _batch_page_html_publish_progressive(
                     'ok': ok,
                     'previous_error': previous_payload.get('error') or 'failed',
                     'error': None if ok else payload.get('error') or 'failed',
+                    'diagnostics': payload.get('diagnostics') or {},
                 })
                 results[pno] = {
                     'page': pno,
@@ -4416,11 +4520,12 @@ def _batch_page_html_publish_progressive(
                     'retry': retry_no,
                 }
                 ready_ok[pno] = ok
+                budget.record(ok, payload)
                 _flush_ready()
+                if budget.stopped:
+                    break
 
-        # Retry a transient artifact-save failure once more without another LLM
-        # call.  The cursor is still parked on the first unpublished page, so a
-        # successful save resumes the contiguous suffix in the correct order.
+        # Artifact-save retries never invoke the model or block other pages.
         _flush_ready()
     _generate_pending()
 
@@ -4431,6 +4536,7 @@ def _batch_page_html_publish_progressive(
             failed.append({
                 'page': pno,
                 'error': (result.get('payload') or {}).get('error') or 'failed',
+                'diagnostics': (result.get('payload') or {}).get('diagnostics') or {},
             })
         elif result.get('publish_error'):
             failed.append({'page': pno, 'error': result['publish_error']})
@@ -4452,10 +4558,14 @@ def _batch_page_html_publish_progressive(
         'failed': len(failed),
         'failed_detail': failed or None,
         'published_count': len(published),
-        'published': published,
+        'published': sorted(published, key=lambda item: item['page']),
         'unpublished_pages': unpublished_pages,
         'auto_published': True,
         'retry_count': len(retry_history),
+        'model_calls': budget.calls,
+        'budget': {'max_model_calls': budget.max_calls,
+                   'page_timeout_s': budget.page_seconds, 'batch_timeout_s': budget.seconds,
+                   'stop_reason': budget.stopped},
         'retries': retry_history or None,
         'briefs_used': len(briefs),
         'briefs_missing': [p for p in page_nos if p not in briefs] or None,
@@ -4470,6 +4580,8 @@ def _agent_llm_call(
     timeout: float | None = None,
     retries: int = 0,
     request_name: str = 'llm',
+    _budget: _PPTGenerationBudget | None = None,
+    _page_deadline: float | None = None,
 ) -> str:
     from lazyllm import AutoModel
     from lazyllm.components import ChatPrompter
@@ -4492,13 +4604,47 @@ def _agent_llm_call(
     # adapter. The adapter previously discarded it, so AutoModel fell back to
     # the provider configuration's 120-second timeout. Page HTML commonly
     # needs longer than that; pass the effective timeout into the actual call.
+    call_options: dict[str, Any] = {}
+    if _budget is not None:
+        from lazyllm.module.llms.onlinemodule.base import ModelCallControl
+        deadline = min(_page_deadline or time.monotonic() + _budget.page_seconds,
+                       _budget.started + _budget.seconds)
+        _budget.check(deadline)
+        effective_timeout = min(effective_timeout, max(0.1, deadline - time.monotonic()))
+        call_options = {
+            'call_control': ModelCallControl(
+                cancel_check=lambda: _budget.check(deadline),
+                request_check=partial(_budget.admit, page_deadline=deadline),
+            ),
+        }
     try:
         out = llm(
             prompt_input,
             timeout=effective_timeout,
-            max_retries=max(1, int(retries) + 1),
+            max_retries=1 if _budget else max(1, int(retries) + 1),
+            **call_options,
         )
     except Exception as exc:
+        diagnostics = _model_failure_details(exc)
+        diagnostics['request_name'] = request_name
+        get_bucket = getattr(llm, '_get_dynamic_bucket', None)
+        try:
+            bucket = get_bucket() if callable(get_bucket) else {}
+        except Exception:
+            bucket = {}
+        if isinstance(bucket, dict):
+            for field in ('source', 'model'):
+                if isinstance(bucket.get(field), str):
+                    diagnostics[field] = bucket[field]
+        exc.ppt_diagnostics = diagnostics
+        _LOG.warning('[PPT] model request failed: %s', json.dumps(diagnostics, ensure_ascii=False))
+        if diagnostics.get('code') in {
+            'page_deadline_exceeded', 'batch_deadline_exceeded',
+            'model_call_budget_exhausted', 'consecutive_failure_limit',
+        }:
+            limit = _PPTGenerationLimit(diagnostics['code'])
+            limit.ppt_diagnostics = diagnostics
+            raise limit from exc
         if _is_model_timeout_exception(exc):
             raise _PPTModelTimeoutError(
                 f'LLM timed out after {effective_timeout:g}s without receiving progress '
@@ -4700,7 +4846,8 @@ def _run_stage_inprocess(
         payload.setdefault('status', 'ok' if code == 0 else 'failed')
         return payload
     except Exception as exc:
-        return {'status': 'failed', 'error': f'{stage_name} failed: {exc}', 'stage': stage_name}
+        return {'status': 'failed', 'error': f'{stage_name} failed: {exc}', 'stage': stage_name,
+                'diagnostics': _model_failure_details(exc)}
 
 
 def _stage_tool_result(stage_name: str, payload: dict) -> dict:
@@ -4739,6 +4886,37 @@ _IMAGE_EXTS = ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp')
 _PPT_BACKGROUND_PIXEL_SIZE = (1280, 720)
 _DOWNLOAD_TIMEOUT = 25
 _DOWNLOAD_UA = 'Mozilla/5.0 (compatible; LazyMind-PPT/1.0; material-image)'
+
+
+def _validate_material_image(data: bytes) -> dict[str, Any]:
+    """Decode raster assets before registration; reject tracking/blank placeholders."""
+    from PIL import Image, UnidentifiedImageError
+
+    if not 32 <= len(data) <= 12 * 1024 * 1024:
+        raise ValueError('image payload size is outside the supported range')
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+            if min(width, height) < 48 or width * height < 16384:
+                raise ValueError('image dimensions are too small for a slide material')
+            if width * height > 36_000_000:
+                raise ValueError('image dimensions exceed 36 megapixels')
+            image.verify()
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            rgba = image.convert('RGBA')
+            alpha = rgba.getchannel('A')
+            if alpha.getextrema()[1] == 0:
+                raise ValueError('image is fully transparent')
+            rgb = Image.new('RGB', rgba.size, 'white')
+            rgb.paste(rgba, mask=alpha)
+            if max(high - low for low, high in rgb.getextrema()) <= 2:
+                raise ValueError('image is blank or a solid-color placeholder')
+            return {'width': width, 'height': height, 'format': image.format}
+    except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError) as exc:
+        raise ValueError('image cannot be decoded completely') from exc
+
+
 _IMAGE_URL_KEYS = (
     'contentUrl', 'content_url', 'imageUrl', 'image_url',
     'thumbnailUrl', 'thumbnail_url', 'src', 'url',
@@ -4838,16 +5016,19 @@ def _download_image_bytes(url: str) -> bytes:
         headers={'User-Agent': _DOWNLOAD_UA},
         stream=True,
     )
-    resp.raise_for_status()
-    chunks: list[bytes] = []
-    total = 0
-    for chunk in resp.iter_content(chunk_size=64 * 1024):
-        if not chunk:
-            continue
-        chunks.append(chunk)
-        total += len(chunk)
-        if total > 12 * 1024 * 1024:
-            raise ValueError('image larger than 12MB')
+    try:
+        resp.raise_for_status()
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in resp.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > 12 * 1024 * 1024:
+                raise ValueError('image larger than 12MB')
+    finally:
+        resp.close()
     data = b''.join(chunks)
     if len(data) < 32:
         raise ValueError('image payload too small')
@@ -4855,6 +5036,7 @@ def _download_image_bytes(url: str) -> bytes:
     head = data[:64].lstrip().lower()
     if head.startswith(b'<!doctype') or head.startswith(b'<html'):
         raise ValueError('URL returned HTML, not an image')
+    _validate_material_image(data)
     return data
 
 
@@ -4898,10 +5080,13 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
     if local_hint:
         local = _resolve_local_image_ref(local_hint)
         if local is not None:
+            data = local.read_bytes()
+            metadata = _validate_material_image(data)
             ext = local.suffix.lower() or '.png'
             dest = dest_dir / f'{stem}{ext}'
-            dest.write_bytes(local.read_bytes())
+            dest.write_bytes(data)
             return {
+                **metadata,
                 'path': str(dest.resolve()),
                 'alt': alt,
                 'caption': caption or alt,
@@ -4915,6 +5100,7 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
         raise ValueError('each image needs url or local_path')
 
     data = _download_image_bytes(url)
+    metadata = _validate_material_image(data)
     parsed_ext = Path(urlparse(url).path).suffix.lower()
     if parsed_ext not in _IMAGE_EXTS:
         parsed_ext = ''
@@ -4922,6 +5108,7 @@ def _stage_one_material_image(item: dict, index: int) -> dict:
     dest = dest_dir / f'{stem}{ext}'
     dest.write_bytes(data)
     return {
+        **metadata,
         'path': str(dest.resolve()),
         'alt': alt,
         'caption': caption or alt,
@@ -6629,111 +6816,6 @@ def _persist_deck_style_flow(deck: Path, requested: Any = None) -> tuple[dict, s
         temporary.write_text(json.dumps(pack, ensure_ascii=False, indent=2), encoding='utf-8')
         os.replace(temporary, pack_path)
     return pack, flow
-
-
-def _publish_style_choices(deck: Path) -> dict[str, Any]:
-    preview_path = deck / 'style_samples' / 'style_samples.html'
-    samples_path = deck / 'style_samples.json'
-    if not preview_path.is_file() or not _style_samples_are_ready(deck):
-        return {'ok': False, 'error': 'three style previews are not ready'}
-    samples = json.loads(samples_path.read_text(encoding='utf-8'))['samples']
-    default = _coerce_str(samples[0].get('sample_id'), 'A').upper()
-    saves = {
-        'style_previews': _save_artifact(
-            key='style_previews', content_type='text',
-            value=preview_path.read_text(encoding='utf-8'),
-            source_tool='ppt_prepare_style_choices', internal_publish=True,
-        ),
-        'style_selection': _save_artifact(
-            key='style_selection', content_type='text', value=default,
-            caption=f"{default} · {samples[0].get('label') or '推荐方案'}",
-            source_tool='ppt_prepare_style_choices', internal_publish=True,
-        ),
-    }
-    failed = [key for key, response in saves.items() if _tool_failed(response)]
-    if failed:
-        return {'ok': False, 'error': f"failed to publish: {', '.join(failed)}"}
-    return {
-        'ok': True,
-        'default_selection': default,
-        'choices': [
-            {
-                'sample_id': sample.get('sample_id'),
-                'label': sample.get('label'),
-                'rationale': sample.get('rationale'),
-            }
-            for sample in samples
-        ],
-    }
-
-
-def ppt_prepare_style_choices(
-    user_query: str,
-    page_count: Union[int, str, None] = 4,
-    topic: Optional[str] = None,
-    role: Optional[str] = None,
-    audience: Optional[str] = None,
-    scene: Optional[str] = None,
-    style_hint: Optional[str] = None,
-    key_points_json: Union[str, list, None] = None,
-    generate_background_images: Union[bool, str, None] = False,
-    deck_dir: Optional[str] = None,
-) -> dict:
-    """Create three style previews and publish the recommended default selection."""
-    resolved = _coerce_str(deck_dir)
-    if resolved:
-        try:
-            deck = _resolve_deck_dir(resolved)
-            pack, flow = _persist_deck_style_flow(deck, 'preview_choice')
-        except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
-            return _tool_error('ppt_prepare_style_choices', str(exc))
-        init_payload = {
-            'deck_dir': str(deck.resolve()),
-            'deck_id': pack.get('deck_id') or deck.name,
-            'page_count': (pack.get('params') or {}).get('page_count'),
-            'ppt_mode': pack.get('ppt_mode'),
-            'style_flow': flow,
-        }
-        resolved = str(deck.resolve())
-    else:
-        init = ppt_init_deck(
-            user_query=user_query, page_count=page_count, topic=topic, role=role,
-            audience=audience, scene=scene, style_hint=style_hint,
-            style_flow='preview_choice', key_points_json=key_points_json,
-            generate_background_images=generate_background_images,
-        )
-        if _tool_failed(init):
-            return _tool_error(
-                'ppt_prepare_style_choices', f'init failed: {_tool_fail_reason(init)}',
-            )
-        init_payload = _tool_payload(init)
-        resolved = _coerce_str(init_payload.get('deck_dir'))
-        deck = _resolve_deck_dir(resolved)
-
-    stages: list[dict[str, Any]] = []
-    for stage_name in ('preflight', 'style-samples'):
-        if stage_name == 'style-samples' and _style_samples_are_ready(deck):
-            stages.append({'step': stage_name, 'status': 'reused'})
-            continue
-        result = ppt_run_stage(resolved, stage=stage_name)
-        if _tool_failed(result):
-            return _tool_error(
-                'ppt_prepare_style_choices',
-                f'{stage_name} failed: {_tool_fail_reason(result)}',
-                meta={'deck_dir': resolved, 'failed_stage': stage_name},
-            )
-        stages.append({'step': stage_name, 'status': 'ok'})
-    published = _publish_style_choices(deck)
-    if not published.get('ok'):
-        return _tool_error('ppt_prepare_style_choices', _coerce_str(published.get('error')))
-    return _tool_success('ppt_prepare_style_choices', {
-        **init_payload,
-        'style_flow': 'preview_choice',
-        'default_selection': published.get('default_selection'),
-        'choices': published.get('choices'),
-        'stages': stages,
-        'next_step': 'plan_background_prompts',
-    })
 
 
 def ppt_prepare_style(
