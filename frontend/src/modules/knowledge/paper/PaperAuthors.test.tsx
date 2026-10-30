@@ -14,5 +14,5 @@ it('keeps the first two and last authors visible without dropping the complete a
 it('shows all authors when there are at most three', () => {
   render(<PaperAuthors authors={['Alice', 'Bob', 'Carol']} />);
   expect(screen.getByText('Alice, Bob, Carol')).toBeInTheDocument();
-  expect(screen.queryByText('···')).not.toBeInTheDocument();
+  expect(screen.queryByText('…')).not.toBeInTheDocument();
 });
