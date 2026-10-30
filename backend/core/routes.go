@@ -290,6 +290,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
+	handleAPI(r, "POST", "/academic/zotero/preview", []string{"document.write"}, academic.PreviewZoteroLibrary)
+	handleAPI(r, "POST", "/academic/zotero/attachment", []string{"document.write"}, academic.DownloadZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/attachment/store", []string{"document.write"}, academic.StoreZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/attachment/transfer", []string{"document.write"}, academic.TransferZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/import", []string{"document.write"}, academic.ImportZoteroSnapshot)
 	handleAPI(r, "POST", "/academic/mock-handoffs/{handoff_id}:submit", []string{"qa.write"}, academic.SubmitMockHandoff)
 	handleAPI(r, "GET", "/academic/chat-context", []string{"qa.read"}, academic.AcademicChatContext)
 	handleAPI(r, "PATCH", "/academic/documents/{document_id}/identity", []string{"document.write"}, academic.UpdateDocumentIdentity)

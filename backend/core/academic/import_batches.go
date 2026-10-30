@@ -282,7 +282,7 @@ func loadOperationSummaries(ctx context.Context, db *gorm.DB, user, dataset stri
 			source = marshal(map[string]any{})
 		}
 		s := summaries[b.ID]
-		result = append(result, ImportOperation{ID: b.ID, EntryType: b.EntryType, TargetDatasetID: b.TargetDatasetID, Source: source, Status: operationStatus(s), CreatedAt: b.CreatedAt, Summary: s, Items: []ImportOperationItem{}})
+		result = append(result, ImportOperation{ID: b.ID, EntryType: b.EntryType, TargetDatasetID: b.TargetDatasetID, Source: source, Status: importCompletionStatus(b, s), CreatedAt: b.CreatedAt, Summary: s, Items: []ImportOperationItem{}})
 	}
 	return result, nil
 }
@@ -496,4 +496,12 @@ func loadOperationPage(r *http.Request, db *gorm.DB, batch orm.PaperImportBatch,
 		row.CanRetry = canWrite && !row.ResolvedLater && (row.CurrentState == "failed" || row.CurrentState == "processing_failed")
 	}
 	return result, nil
+}
+
+// A successfully saved batch stays imported while its documents are processed.
+func importCompletionStatus(batch orm.PaperImportBatch, summary ImportOperationSummary) string {
+	if batch.Status == "succeeded" && summary.Active > 0 && summary.Failed == 0 && summary.NeedsAction == 0 {
+		return "succeeded"
+	}
+	return operationStatus(summary)
 }

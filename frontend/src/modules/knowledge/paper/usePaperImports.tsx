@@ -1,15 +1,17 @@
+import PaperAuthors from './PaperAuthors';
 import { useEffect, useRef, useState, type MutableRefObject, type Dispatch, type SetStateAction, type ChangeEvent } from 'react';
 import { Alert, Button, Input, Modal, Radio, Tooltip, Upload, message, type RadioChangeEvent } from 'antd';
 import { InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
 import { assignFolders, classifyIdentifier, parseBibTeX, parseCSV, parseRIS, planImport, type LibraryView, type PaperLibraryData, type PaperRecord } from './model';
 import { mergeLibraryChanges, previewLibraryPapers, confirmLibraryPdf, importLibraryPapers, type LibraryChanges } from './store';
-import { previewPaperLink, importPaperLink, isImportPreviewExpired, type PaperUploadContext, type ImportPreviewItem, type ImportOperationItem } from '../api/academicReferences';
+import { previewPaperLink, previewPaperPDF, importPaperLink, isImportPreviewExpired, type PaperUploadContext, type ImportPreviewItem, type ImportOperationItem } from '../api/academicReferences';
 import { paperFromPdf } from './pdfMeta';
 import { computeFileSha256 } from '../utils/fileHash';
 import { isArxivInput } from './arxivImport';
 import { pdfIdentityMatch, pdfTargetCandidates, type PdfPaper } from './pdfAssociation';
 import PdfImportReview from './PdfImportReview';
+import PaperLinkProgress, { type PaperLinkPhase } from './PaperLinkProgress';
 import type { PaperNotification } from './usePaperNotifications';
 type ImportMethod = 'upload' | 'identifier' | 'bibliography';
 const importTitles: Record<ImportMethod, string> = { upload: '上传文献', identifier: '通过链接导入', bibliography: '导入文献题录' };
@@ -39,10 +41,14 @@ interface ImportOptions {
 }
 export function usePaperImports(options: ImportOptions) {
     const { datasetId, dataState, dataRef, disabled, saving, confirmingImport, busyRef, loadedRef, canWriteRef, syncGeneration, reloadPromiseRef, reload, isCurrentScope, mutate, applySnapshot, setConfirmingImport, setSyncRevision, libraryView, folderId, onUploadPdf, notify, resolve } = options;
+    const [linkPhase, setLinkPhase] = useState<PaperLinkPhase | null>(null);
+    const [pdfWarnings, setPdfWarnings] = useState<string[]>([]);
+    const [linkFailurePhase, setLinkFailurePhase] = useState<PaperLinkPhase>("metadata");
     const [linkPreview, setLinkPreview] = useState<ImportPreviewItem>();
     const pendingImportKey = useRef(uuidv4());
     const bibliographyFile = useRef<string>();
     const linkRequestKey = useRef(uuidv4());
+    const linkGeneration = useRef(0);
     const [pendingArxiv, setPendingArxiv] = useState<PaperRecord | null>(null);
     const [importMethod, setImportMethod] = useState<ImportMethod | null>(null);
     const [importTargetPaperId, setImportTargetPaperId] = useState<string | null>(null);
@@ -69,6 +75,9 @@ export function usePaperImports(options: ImportOptions) {
     const fileRef = useRef<HTMLInputElement>(null);
     useEffect(() => { setImportMethod(null); setImportTargetPaperId(null); setSearching(false); setIdentifier(''); setBibliography(''); clearImportResult(); }, [datasetId]);
     const clearImportResult = () => {
+        ++linkGeneration.current;
+        setLinkPhase(null);
+        setPdfWarnings([]);
         pendingImportKey.current = uuidv4();
         bibliographyFile.current = undefined;
         setImportError(null);
@@ -170,7 +179,7 @@ export function usePaperImports(options: ImportOptions) {
                 busyRef.current = false;
                 submitting = true;
                 await mutate(() => importLibraryPapers(datasetId, papers, folders, pendingImportKey.current, format, bibliographyFile.current), { id: "import-submit", title: "题录导入保存失败" });
-                message.success(`导入已完成，共 ${papers.length} 条；已有论文保留原题录与归档`);
+                message.success(`已入库 ${papers.length} 条题录，正在后台补全元信息和查找 PDF；可在通知中查看进度`);
             }
             if (!isCurrentScope())
                 return;
@@ -248,8 +257,15 @@ export function usePaperImports(options: ImportOptions) {
             return;
         }
         setSearching(true);
+        setLinkPhase('metadata');
+        setLinkFailurePhase('metadata');
+        const generation = ++linkGeneration.current;
+        const active = () => isCurrentScope() && generation === linkGeneration.current;
         try {
-            const result = await previewPaperLink(identifier, datasetId, true);
+            let result = await previewPaperLink(identifier, datasetId, true, false);
+            if (!active()) return;
+            setPdfWarnings(result.warnings || []);
+            setLinkPhase('ready');
             if (!isCurrentScope())
                 return;
             resolve("import-preview");
@@ -270,19 +286,35 @@ export function usePaperImports(options: ImportOptions) {
             linkRequestKey.current = uuidv4();
             setLinkPreview(result);
             setPendingArxiv(item);
+            if (!result.arxiv_id) {
+                setLinkPhase('pdf');
+                setLinkFailurePhase('pdf');
+                try {
+                    result = await previewPaperPDF(result.work_id, datasetId);
+                } catch (error) {
+                    result = { ...result, fulltext_candidates: [], warnings: [error instanceof Error ? error.message : 'PDF 来源查询失败'] };
+                }
+                if (!active()) return;
+                setLinkPreview(result);
+                setPdfWarnings(result.warnings || []);
+                setLinkPhase('ready');
+            }
         }
         catch (error) {
-            if (isCurrentScope()) reportImportError(error, '论文链接查询失败', 'import-preview');
+            if (active()) { setLinkPhase('failed'); reportImportError(error, '论文链接查询失败', 'import-preview'); }
         }
         finally {
-            if (isCurrentScope())
+            if (active())
                 setSearching(false);
         }
     };
     const commitArxiv = async () => {
-        if (disabled || busyRef.current || !pendingArxiv || !linkPreview || searching)
+        if (disabled || busyRef.current || !pendingArxiv || !linkPreview || (searching && linkPhase !== 'pdf'))
             return;
+        ++linkGeneration.current;
         setSearching(true);
+        setLinkPhase('submitting');
+        setLinkFailurePhase('submitting');
         setImportError(null);
         try {
             const result = await importPaperLink(datasetId, linkPreview, linkRequestKey.current, libraryView === 'directory' ? folderId : null, true);
@@ -297,6 +329,7 @@ export function usePaperImports(options: ImportOptions) {
             message.success('已提交导入，可在导入记录中查看进度');
         }
         catch (error) {
+            if (isCurrentScope()) setLinkPhase('failed');
             if (isImportPreviewExpired(error)) {
                 setLinkPreview(undefined);
                 setPendingArxiv(null);
@@ -387,7 +420,7 @@ export function usePaperImports(options: ImportOptions) {
                 setSearching(false);
         }
     };
-    return { openImport, resumeAssociation, importMethod, setImportMethod, clearImportResult, importError, selectedFile, pending, importFile, importTargetPaperId, searching, identifier, setIdentifier, importIdentifier, format, setFormat, fileRef, bibliography, setBibliography, importBibliography, pendingArxiv, linkPreview, commitArxiv, pendingPdf, pdfConflict, pdfRequiresConfirmation, samePdfVersion, pdfConfirmed, setPdfConfirmed, selectPdfTarget, setImportTargetPaperId, pdfReviewComplete, commit };
+    return { linkPhase, linkFailurePhase, pdfWarnings, openImport, resumeAssociation, importMethod, setImportMethod, clearImportResult, importError, selectedFile, pending, importFile, importTargetPaperId, searching, identifier, setIdentifier, importIdentifier, format, setFormat, fileRef, bibliography, setBibliography, importBibliography, pendingArxiv, linkPreview, commitArxiv, pendingPdf, pdfConflict, pdfRequiresConfirmation, samePdfVersion, pdfConfirmed, setPdfConfirmed, selectPdfTarget, setImportTargetPaperId, pdfReviewComplete, commit };
 }
 interface DialogProps {
     imports: ReturnType<typeof usePaperImports>;
@@ -399,7 +432,7 @@ interface DialogProps {
     fileImportDisabled: boolean;
 }
 export function PaperImportDialog({ imports, data, disabled, loading, saving, confirmingImport, fileImportDisabled }: DialogProps) {
-    const { importMethod, setImportMethod, clearImportResult, importError, selectedFile, pending, importFile, importTargetPaperId, searching, identifier, setIdentifier, importIdentifier, format, setFormat, fileRef, bibliography, setBibliography, importBibliography, pendingArxiv, linkPreview, commitArxiv, pendingPdf, pdfConflict, pdfRequiresConfirmation, samePdfVersion, pdfConfirmed, setPdfConfirmed, selectPdfTarget, setImportTargetPaperId, pdfReviewComplete, commit } = imports;
+    const { linkPhase, linkFailurePhase, pdfWarnings, importMethod, setImportMethod, clearImportResult, importError, selectedFile, pending, importFile, importTargetPaperId, searching, identifier, setIdentifier, importIdentifier, format, setFormat, fileRef, bibliography, setBibliography, importBibliography, pendingArxiv, linkPreview, commitArxiv, pendingPdf, pdfConflict, pdfRequiresConfirmation, samePdfVersion, pdfConfirmed, setPdfConfirmed, selectPdfTarget, setImportTargetPaperId, pdfReviewComplete, commit } = imports;
     return <Modal title={importMethod ? importTitles[importMethod] : "导入文献"} open={!!importMethod} onCancel={() => {
             if (!searching && !saving && !confirmingImport) {
                 setImportMethod(null);
@@ -418,8 +451,9 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
           </>}
           {importMethod === "identifier" && <>
             <p>粘贴 arXiv 链接、编号或 DOI，先确认文献信息再导入。</p>
+            {linkPhase && <PaperLinkProgress phase={linkPhase} failurePhase={linkFailurePhase} hasPDF={!!linkPreview?.fulltext_candidates.length} warnings={pdfWarnings} manualURLs={linkPreview?.manual_download_urls} />}
             <label className="paper-library-import-label" htmlFor="paper-import-identifier">链接或标识符
-              <Tooltip title={<div>支持 arXiv 编号、arXiv: 前缀、abs / pdf / html 链接、旧版分类编号，以及 arXiv DOI。系统从输入中提取编号，统一访问官方来源。v3 等版本号会保留；未指定版本时获取最新版。也支持普通 DOI 与 doi.org 链接。</div>}>
+              <Tooltip title={<div>支持 arXiv 编号、arXiv: 前缀、abs / pdf / html 链接、旧版分类编号，以及 arXiv DOI。系统从输入中提取编号，统一访问官方来源。v3 等版本号会保留；未指定版本时获取最新版。也支持普通 DOI 与 doi.org 链接。DOI 元信息最多查询 10 秒，PDF 来源总共最多查询 6 秒：优先开放来源，再查 Sci-Hub；无可用 PDF 时可仅保存题录。</div>}>
                 <button type="button" className="paper-library-info" aria-label="支持的 DOI 与 arXiv 格式说明"><InfoCircleOutlined /></button>
               </Tooltip>
             </label>
@@ -453,10 +487,11 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
           {pendingArxiv && <section className="paper-library-import-confirm" aria-label="链接导入确认">
             <div className="paper-library-arxiv-source"><span>{pendingArxiv.metadata.identifiers.arxiv ? "ARXIV" : "DOI"}</span><code>{pendingArxiv.metadata.identifiers.arxiv || pendingArxiv.metadata.identifiers.doi}{pendingArxiv.arxivVersion}</code></div>
             <h3>{pendingArxiv.metadata.title}</h3>
-            <p className="paper-library-arxiv-authors">{pendingArxiv.metadata.authors.join("、")} · {pendingArxiv.metadata.year}</p>
+            <p className="paper-library-arxiv-authors"><PaperAuthors authors={pendingArxiv.metadata.authors} /> · {pendingArxiv.metadata.year}</p>
             {pendingArxiv.metadata.abstract && <p className="paper-library-arxiv-abstract">{pendingArxiv.metadata.abstract}</p>}
             <p className="paper-library-arxiv-hint">{linkPreview?.fulltext_candidates.length ? "确认后提交下载入库任务，同一论文的不同版本保留为独立附件。" : "仅找到文献信息，可先保存题录，后续补充 PDF。"}</p>
-            <div className="paper-library-modal-actions"><Button type="primary" loading={searching || saving} disabled={disabled} onClick={commitArxiv}>{searching ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : "保存题录"}</Button></div>
+            {linkPhase === 'pdf' && <p role="status">元信息已就绪，可以立即保存题录；等待查找完成后也可连同 PDF 一起导入。</p>}
+            <div className="paper-library-modal-actions"><Button className={linkPhase === 'pdf' || linkPhase === 'ready' ? 'paper-import-unlocked' : undefined} type="primary" loading={linkPhase === 'submitting' || saving} disabled={disabled} onClick={commitArxiv}>{linkPhase === 'submitting' ? "正在提交…" : linkPreview?.fulltext_candidates.length ? "导入文献与 PDF" : linkPhase === 'pdf' ? "立即保存题录" : "保存题录"}</Button></div>
           </section>}
           {pending && <section className="paper-library-import-confirm" aria-label="导入确认">
             <h3>{pending.attachTo ? "为已有文献添加 PDF" : pending.fresh.length ? `可导入 ${pending.fresh.length} 篇文献` : "文献已在库中"}</h3>

@@ -87,6 +87,8 @@ func TestImportOperationsFollowLibraryRemovalAndReimport(t *testing.T) {
 			}
 			draft := libraryDraft("paper", "Paper", "10.1234/removed")
 			paper := importDraft(t, "papers", "metadata", draft).Data.Papers[0]
+			db.Model(&orm.PaperImportBatch{}).Where("idempotency_key=?", "metadata").Updates(map[string]any{"status": "succeeded", "completed_items": 1})
+			db.Model(&orm.PaperImportItem{}).Where("library_paper_id=?", paper.ID).Updates(map[string]any{"status": "succeeded", "stage": "done", "result_kind": "metadata_only"})
 			uploadReceipt(t, db, "papers", "pdf", "upload", paper.ID, "hash")
 			path := filepath.Join(t.TempDir(), "paper.pdf")
 			if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
@@ -107,7 +109,7 @@ func TestImportOperationsFollowLibraryRemovalAndReimport(t *testing.T) {
 				originalStatus[item.ID] = item.Status
 				originalBatches[item.BatchID] = true
 			}
-			check := func(removed bool, operationCount int) {
+			check := func(removed bool, operationCount, active int) {
 				t.Helper()
 				view := readLibrary(t, "papers")
 				wantCount := int64(1)
@@ -125,7 +127,7 @@ func TestImportOperationsFollowLibraryRemovalAndReimport(t *testing.T) {
 						NeedsAction int `json:"needs_action"`
 					} `json:"notification"`
 				}
-				if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != 200 || len(page.Items) != operationCount || page.Notification.Active != 0 || page.Notification.NeedsAction != 0 {
+				if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil || w.Code != 200 || len(page.Items) != operationCount || page.Notification.Active != active || page.Notification.NeedsAction != 0 {
 					t.Fatal(w.Code, w.Body.String())
 				}
 				for _, operation := range page.Items {
@@ -160,15 +162,15 @@ func TestImportOperationsFollowLibraryRemovalAndReimport(t *testing.T) {
 					}
 				}
 			}
-			check(false, 3)
+			check(false, 3, 0)
 			paper = readLibrary(t, "papers").Data.Papers[0]
 			w := libraryRequest(t, "POST", "/library/papers:remove", "papers", "owner", map[string]any{"items": []libraryTarget{{ID: paper.ID, Revision: paper.Revision}}})
 			if w.Code != 200 {
 				t.Fatal(w.Code, w.Body.String())
 			}
-			check(true, 3)
+			check(true, 3, 0)
 			importDraft(t, "papers", "reimport", draft)
-			check(false, 4)
+			check(false, 4, 1)
 		})
 	}
 }
@@ -191,6 +193,8 @@ func TestLibraryAndImportViewsObserveCurrentProcessingTask(t *testing.T) {
 				t.Fatal(err)
 			}
 			paper := importDraft(t, "papers", "bibliography", libraryDraft("paper", "Paper", "10.1234/current")).Data.Papers[0]
+			// This test isolates document processing; finish the new background enrichment.
+			db.Model(&orm.PaperImportItem{}).Where("library_paper_id=?", paper.ID).Updates(map[string]any{"status": "succeeded", "stage": "done", "result_kind": "metadata_only"})
 			path := filepath.Join(t.TempDir(), "paper.pdf")
 			if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
 				t.Fatal(err)

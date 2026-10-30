@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/paperlibrary"
@@ -321,14 +322,32 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 			} else {
 				batch.CompletedItems++
 			}
-			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: "done", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
+			stage := "done"
+			if input.EntryType == "bibliography" && existing == 0 {
+				status, stage = "pending", "metadata"
+				kind = "enrichment"
+				batch.CompletedItems--
+				batch.Status = "pending"
+			}
+			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: stage, ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
 			ids = append(ids, row.ID)
 		}
 		batch.TotalItems = len(items)
 		if e = tx.Create(&batch).Error; e != nil {
 			return e
 		}
-		return tx.Create(&items).Error
+		if e = tx.Create(&items).Error; e != nil {
+			return e
+		}
+		if batch.Status == "pending" {
+			queued, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: paperImportJobType, ResourceType: "paper_import_batch", ResourceID: batch.ID, IdempotencyKey: "paper-import:" + batch.ID, Payload: paperImportPayload{BatchID: batch.ID, UserID: user, UserName: store.UserName(r)}, CreateUserID: user, CreateUserName: store.UserName(r)})
+			if err != nil {
+				return err
+			}
+			batch.AsyncJobID = queued.ID
+			return tx.Model(&batch).Update("async_job_id", queued.ID).Error
+		}
+		return nil
 	})
 	if err != nil {
 		replyLibraryError(w, err)
@@ -351,7 +370,7 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 		libraryChanges
 		BatchID string `json:"batch_id"`
 		Status  string `json:"status"`
-	}{out, batch.ID, "succeeded"})
+	}{out, batch.ID, batch.Status})
 }
 func libraryImportDataset(r *http.Request, dataset string) (orm.Dataset, error) {
 	var row orm.Dataset

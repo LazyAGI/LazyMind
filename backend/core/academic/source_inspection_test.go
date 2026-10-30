@@ -8,6 +8,7 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -162,6 +163,11 @@ func TestSourceJobFenceRejectsLateAttempt(t *testing.T) {
 func TestSourcePresenceIgnoresOtherLibrariesAndDeletedDocuments(t *testing.T) {
 	db := sourceTestDB(t)
 	for _, d := range []orm.Document{{ID: "a", DatasetID: "first"}, {ID: "b", DatasetID: "second"}} {
+		path := filepath.Join(t.TempDir(), d.ID+".pdf")
+		if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		d.Ext = marshal(map[string]string{"stored_path": path})
 		if e := db.Create(&d).Error; e != nil {
 			t.Fatal(e)
 		}

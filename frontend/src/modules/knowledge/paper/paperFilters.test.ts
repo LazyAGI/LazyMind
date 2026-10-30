@@ -63,8 +63,8 @@ describe("paper filters", () => {
         expect(ids(filterPaperRecords(papers, [], { ...DEFAULT_PAPER_FILTERS, star: "unstarred", folder: "unfiled", status: "read" }))).toEqual(["match"]);
     });
     it("derives only known bounds and handles empty or single-year libraries", () => {
-        expect(getFilterBounds([])).toEqual({ years: null });
-        expect(getFilterBounds([paper("one")])).toEqual({ years: [2024, 2024] });
+        expect(getFilterBounds([])).toMatchObject({ years: null });
+        expect(getFilterBounds([paper("one")])).toMatchObject({ years: [2024, 2024] });
         expect(getFilterBounds([paper("old", { metadata: {
                     year: 2018,
                     citationCount: 5
@@ -74,7 +74,7 @@ describe("paper filters", () => {
                 } }), paper("unknown", { metadata: {
                     year: 0,
                     citationCount: -10
-                } })])).toEqual({ years: [2018, 2026] });
+                } })])).toMatchObject({ years: [2018, 2026] });
     });
     it("reports each non-default filter and clears them with the default state", () => {
         expect(hasPaperFilters(DEFAULT_PAPER_FILTERS)).toBe(false);
@@ -82,4 +82,10 @@ describe("paper filters", () => {
             expect(hasPaperFilters({ ...DEFAULT_PAPER_FILTERS, ...change } as Parameters<typeof hasPaperFilters>[0])).toBe(true);
         }
     });
+});
+
+it('preserves citation thresholds and Zotero collection-only filing', () => {
+    const collectionPaper = paper('collection', { collectionIds: ['nested'], metadata: { title: 'Collection paper', authors: [], venue: '', year: 2024, identifiers: {}, citationCount: 42 } });
+    const lowPaper = paper('low', { metadata: { title: 'Low', authors: [], venue: '', year: 2024, identifiers: {}, citationCount: 2 } });
+    expect(filterPaperRecords([collectionPaper, lowPaper], [], { ...DEFAULT_PAPER_FILTERS, folder: 'filed', minCitations: 10 })).toEqual([collectionPaper]);
 });

@@ -151,8 +151,12 @@ func updateKnowledgeConfiguration(ctx context.Context, tx *gorm.DB, user string,
 	if c.ProcessingLevel != nil {
 		level = *c.ProcessingLevel
 	}
-	if err := validateAcademicScenario(ctx, tx, user, nextScene, level); err != nil {
-		return resourceErr("INVALID_ARGUMENT", err.Error())
+	// Metadata-only edits must remain possible on imported storage-only libraries
+	// and while parsing is paused. Validate prerequisites when configuration changes.
+	if nextScene != ds.Scene || effectiveProcessingLevel(level) != effectiveProcessingLevel(ds.ProcessingLevel) {
+		if err := validateAcademicScenario(ctx, tx, user, nextScene, level); err != nil {
+			return resourceErr("INVALID_ARGUMENT", err.Error())
+		}
 	}
 	ext := knowledgeExt(ds.Ext)
 	extChanged := false

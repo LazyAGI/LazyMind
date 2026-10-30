@@ -1,3 +1,4 @@
+import PaperAuthors from './PaperAuthors';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Checkbox, Select, type CheckboxChangeEvent } from 'antd';
 import type { PaperRecord } from './model';
@@ -33,8 +34,8 @@ export default function PdfImportReview(props: Props) {
     return <div className="paper-pdf-review">
     <label className="paper-library-import-label">导入位置<Select aria-label="PDF 关联论文" value={props.target?.id || 'new'} options={options} disabled={props.disabled || props.fixedTarget} showSearch optionFilterProp="label" onChange={(value: string) => props.onTargetChange(value === 'new' ? null : value)}/></label>
     <div className="paper-pdf-comparison">
-      <section><h4>文件识别结果</h4><strong>{props.metadata.metadata.title}</strong><p>{props.metadata.metadata.authors.join('、') || '作者未识别'}</p><p>{props.metadata.metadata.identifiers.arxiv || props.metadata.metadata.identifiers.doi || '未识别出论文编号'} · {props.metadata.arxivVersion || '版本未知'}</p></section>
-      <section><h4>{props.target ? '目标题录' : '将创建论文'}</h4><strong>{props.target?.metadata.title || props.metadata.metadata.title}</strong><p>{props.target?.metadata.authors.join('、') || props.metadata.metadata.authors.join('、') || '作者待补全'}</p><p>{props.target?.metadata.identifiers.arxiv || props.target?.metadata.identifiers.doi || '无论文编号'}{props.target?.arxivVersion ? ` · 题录来源 ${props.target.arxivVersion}` : ''}</p></section>
+      <section><h4>文件识别结果</h4><strong>{props.metadata.metadata.title}</strong><p><PaperAuthors authors={props.metadata.metadata.authors} empty="作者未识别" /></p><p>{props.metadata.metadata.identifiers.arxiv || props.metadata.metadata.identifiers.doi || '未识别出论文编号'} · {props.metadata.arxivVersion || '版本未知'}</p></section>
+      <section><h4>{props.target ? '目标题录' : '将创建论文'}</h4><strong>{props.target?.metadata.title || props.metadata.metadata.title}</strong><p><PaperAuthors authors={props.target?.metadata.authors.length ? props.target.metadata.authors : props.metadata.metadata.authors} empty="作者待补全" /></p><p>{props.target?.metadata.identifiers.arxiv || props.target?.metadata.identifiers.doi || '无论文编号'}{props.target?.arxivVersion ? ` · 题录来源 ${props.target.arxivVersion}` : ''}</p></section>
     </div>
     {props.metadata.identificationError && <Alert type="warning" showIcon message="题录验证暂未完成，请核对 PDF" description={props.metadata.identificationError}/>}
     {props.conflict ? <Alert type="error" showIcon message="PDF 与当前论文身份不一致" description="请更换文件，或将这份 PDF 作为新论文导入。"/> : props.target && <Alert type={props.requiresConfirmation ? 'warning' : 'info'} showIcon message={props.requiresConfirmation ? '无法自动确认归属，请核对两侧题录与 PDF' : '已匹配已有论文，确认后添加附件'}/>}

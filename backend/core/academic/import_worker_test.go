@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,9 +36,13 @@ func TestBothImportEntrypointsResumeTheCommittedOriginal(t *testing.T) {
 			t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", "http://scan.test")
 			batch := orm.PaperImportBatch{ID: "batch", EntryType: entry, AsyncJobID: "job", CreatedBy: "alice", TargetDatasetID: "target", Status: "running", PolicySnapshotJSON: json.RawMessage(`{}`), SourceDocumentIDsJSON: json.RawMessage(`[]`)}
 			item := orm.PaperImportItem{ID: "item", BatchID: batch.ID, DocumentID: "doc", DocumentTaskID: "task", Stage: "processing", Status: "running", ReferenceIDsJSON: json.RawMessage(`[]`), PresenceSnapshotJSON: json.RawMessage(`{}`), ErrorDetailsJSON: json.RawMessage(`{}`), SelectedCandidateJSON: json.RawMessage(`{"url":"must-not-be-downloaded"}`)}
+			path := filepath.Join(t.TempDir(), "original.pdf")
+			if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			for _, value := range []any{
 				&orm.Dataset{ID: "target", ProcessingLevel: doc.ProcessingLevelStored, BaseModel: orm.BaseModel{CreateUserID: "alice"}},
-				&orm.Document{ID: "doc", DatasetID: "target"}, &orm.Task{ID: "task", DatasetID: "target", DocID: "doc"},
+				&orm.Document{ID: "doc", DatasetID: "target", Ext: marshal(map[string]string{"stored_path": path})}, &orm.Task{ID: "task", DatasetID: "target", DocID: "doc", Ext: json.RawMessage(`{}`)},
 				&orm.AsyncJob{ID: "job", AttemptCount: 1, Status: "running", PayloadJSON: json.RawMessage(`{}`)}, &batch, &item,
 			} {
 				if err := db.Create(value).Error; err != nil {
