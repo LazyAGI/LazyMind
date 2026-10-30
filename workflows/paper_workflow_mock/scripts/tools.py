@@ -25,6 +25,12 @@ def academic_handoff_submit():
     lines = ['## 任务交接', '', result['feedback'], '',
              '任务：' + names[result['kind']], '', '### 用户要求', '', _markdown_text(task['user_instruction']), '',
              '### 所选论文', '']
+    if result['kind'] == 'review':
+        scope = task.get('review_scope')
+        scope_text = ('已选论文及其直接参考文献；仅去重和检查全文、解析状态，不递归扩展，不做相关性过滤或排序。'
+                      if scope == 'direct_references' else '仅使用本次确认的论文范围。')
+        lines[6:6] = ['### 文献范围', '', scope_text,
+                      '当前仅完成材料交接，后续阅读与正文生成待接入。', '']
     for item in task['papers']:
         paper = item['paper'] if result['kind'] == 'review' else item
         details = ' · '.join(str(paper[key]) for key in ('year', 'source_provider', 'source_version')

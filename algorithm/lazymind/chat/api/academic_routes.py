@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import email.utils
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -112,6 +114,8 @@ class AcademicSearchRequest(BaseModel):
     source: str = Field(pattern=r'^(sciverse|web)$')
     query: str = Field(min_length=1, max_length=2000)
     limit: int = Field(ge=1, le=20)
+    page: int = Field(default=1, ge=1)
+    cursor: str = Field(default='', max_length=4096)
     tool_config: dict = Field(default_factory=dict)
 
 
@@ -127,7 +131,31 @@ async def academic_search(payload: AcademicSearchRequest,
             raise HTTPException(422, 'missing_configuration') from None
         raise HTTPException(502, 'academic source request failed') from None
     except Exception as exc:
+        from lazyllm.common import AllKeysExhaustedError, KeyAuthError
+        if isinstance(exc, (KeyAuthError, AllKeysExhaustedError)):
+            raise HTTPException(401, {'code': 'authentication_failed'}) from None
         status = getattr(getattr(exc, 'response', None), 'status_code', None)
         if status in (401, 402, 403, 429):
-            raise HTTPException(status, 'academic source request failed') from None
+            code = {401: 'authentication_failed', 403: 'authentication_failed',
+                    402: 'quota_exhausted', 429: 'rate_limited'}[status]
+            detail = {'code': code}
+            response = exc.response
+            if status == 429:
+                try:
+                    upstream = response.json()
+                except ValueError:
+                    upstream = {}
+                if isinstance(upstream, dict) and upstream.get('code') in {
+                    'quota_exhausted', 'insufficient_quota', 'not_enough_credits',
+                }:
+                    detail['code'] = 'quota_exhausted'
+            retry = response.headers.get('Retry-After', '')
+            if retry.isdigit() and int(retry) > 0:
+                detail['retry_at'] = (datetime.now(timezone.utc) + timedelta(seconds=int(retry))).isoformat()
+            elif retry:
+                try:
+                    detail['retry_at'] = email.utils.parsedate_to_datetime(retry).isoformat()
+                except (TypeError, ValueError):
+                    pass
+            raise HTTPException(status, detail) from None
         raise HTTPException(502, 'academic source request failed') from None

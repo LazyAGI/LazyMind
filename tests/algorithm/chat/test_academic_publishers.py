@@ -12,7 +12,8 @@ def publisher(tmp_path, monkeypatch):
     from lazymind.workflow_toolkit import load_workflow_package_tools
     package = {'files': {'scripts/tools.py': path.read_bytes()}}
     functions = load_workflow_package_tools(
-        package, ['academic_submit_relations', 'academic_publish_expansion_result', 'academic_validate_stage'],
+        package, ['academic_submit_relations', 'academic_publish_expansion_result', 'academic_validate_stage',
+                  'academic_publish_stage'],
         'paper_expansion', 'test-revision',
     )
     namespace = functions['academic_submit_relations'].__globals__
@@ -67,6 +68,9 @@ def test_typed_submission_uses_bound_authoritative_metadata_and_publishes_once(p
     assert len(events) == 1
     ctx.params['step_id'] = 'compose_result'
     ctx.params['remote_inputs']['relation_analysis'] = relation
+    with pytest.raises(ToolExecutionError, match='reading_order must cover exactly'):
+        module.academic_publish_expansion_result('Research narrative', [], [])
+    assert len(events) == 1
     module.academic_publish_expansion_result('Research narrative', ['a'], [])
     assert events[-1]['slot'] == 'expansion_report'
     assert set(events[-2]['value']['data']) == module._INPUT_KEYS
@@ -120,6 +124,37 @@ def test_direction_entry_accepts_no_seeds_and_seed_entry_cannot_drop_them(publis
     for invalid in [{'test': True}, {}]:
         with pytest.raises(ToolExecutionError):
             module.academic_validate_stage(invalid)
+
+
+def test_topic_plan_publishes_authoritative_papers_once(publisher, monkeypatch):
+    module, ctx, events, resolved = publisher
+    ctx.params['step_id'] = 'prepare_plan'
+    ctx.output_slots = ['expansion_plan']
+    ctx.params['workflow_runtime']['publisher_owned_slots'].append('expansion_plan')
+    source = copy.deepcopy(ctx.params['remote_inputs']['candidate_set'])
+    source['papers'] = []
+    resolved['papers'][0]['is_seed'] = False
+    monkeypatch.setattr(module, 'academic_expansion_context', lambda _: {'record': {'result': source}})
+
+    args = (['a'], ['Read the evaluation methods.'], ['Keep the registered representative.'], [])
+    assert module.academic_publish_stage(*args)['status'] == 'ok'
+    assert events[0]['slot'] == 'expansion_plan'
+    result = events[0]['value']['data']
+    assert result['papers'] == resolved['papers']
+    assert result['plan'] == args[1]
+    assert module.academic_publish_stage(*args)['already_published'] is True
+    assert len(events) == 1
+
+
+def test_invalid_task_papers_reports_context_error_without_publishing(publisher, monkeypatch):
+    module, ctx, events, _ = publisher
+    ctx.params['step_id'] = 'prepare_plan'
+    source = copy.deepcopy(ctx.params['remote_inputs']['candidate_set'])
+    source['papers'] = None
+    monkeypatch.setattr(module, 'academic_expansion_context', lambda _: {'record': {'result': source}})
+    with pytest.raises(RuntimeError, match='Invalid task context: papers must be an array'):
+        module.academic_publish_stage(['a'], ['Read methods.'], [], [])
+    assert events == []
 
 
 def test_repeated_critical_submission_does_not_repeat_verification(publisher, monkeypatch):
@@ -181,17 +216,19 @@ def test_verification_batches_large_library_blocks_without_losing_context(publis
 
     def verify(request, usage):
         requests.append(request)
-        return {'checks': [{'index': row['index'], 'status': 'supported', 'reason': 'source supports it'}
-                           for row in request.input.data['evidence']]}, None, None
+        paper_id = request.input.data['evidence'][0]['paper_id']
+        return {'checks': [{'index': 0, 'status': 'supported' if paper_id == 'a' else 'unsupported',
+                            'reason': 'independent source check'}]}, None, None
 
     monkeypatch.setattr(llm_task, '_run_task', verify)
     claims = [{'paper_id': paper, 'field': 'key_contribution', 'statement': 'A critical claim.', 'positions': [0]}
               for paper in ['a', 'b']]
     checked = module._verify_claims(claims, ['a', 'b'])
-    assert [row['status'] for row in checked] == ['supported', 'supported']
+    assert [(row['paper_id'], row['status']) for row in checked] == [('a', 'supported'), ('b', 'unsupported')]
     assert len(requests) == 2
-    assert all(next(iter(request.input.data['source_pages_by_paper_and_position'].values()))['text'] == 'complete paper ' * 6000
-               for request in requests)
+    for request in requests:
+        page = next(iter(request.input.data['source_pages_by_paper_and_position'].values()))
+        assert page['text'] == 'complete paper ' * 6000
 
 
 def test_missing_or_budget_exhausted_evidence_publishes_an_uncertain_partial_result(publisher, monkeypatch):
@@ -215,6 +252,36 @@ def test_missing_or_budget_exhausted_evidence_publishes_an_uncertain_partial_res
     assert '25%' not in relation['input']['papers'][0]['key_contribution']
 
 
+def test_ambiguous_verification_checks_stay_uncertain_and_record_diagnostics(publisher, monkeypatch):
+    import json
+    import lazyllm
+    from lazymind.chat.service import llm_task
+
+    module, _, _, _ = publisher
+    monkeypatch.setattr(module, '_expansion_id', lambda: 'exp')
+    monkeypatch.setattr(module, '_call', lambda *args: {
+        'status': 'ready', 'positions': [0], 'pages': [{'page': 1, 'text': 'source evidence'}],
+        'content_hash': 'hash',
+    })
+    diagnostics = []
+    monkeypatch.setattr(lazyllm.LOG, 'warning', diagnostics.append)
+    monkeypatch.setattr(llm_task, '_run_task', lambda *args, **kwargs: ({'checks': [
+        {'index': 0, 'status': 'supported', 'reason': 'one answer'},
+        {'index': 0, 'status': 'unsupported', 'reason': 'contradictory duplicate'},
+        {'index': 7, 'status': 'supported', 'reason': 'unknown claim'},
+    ]}, None, None))
+    claims = [{'paper_id': paper, 'field': 'key_contribution', 'statement': 'A factual claim.', 'positions': [0]}
+              for paper in ['a', 'b']]
+    checked = module._verify_claims(claims, ['a', 'b'])
+    assert [item['status'] for item in checked] == ['uncertain', 'uncertain']
+    logged = next(item for item in diagnostics if item.startswith('[AcademicVerification]'))
+    diagnostic = json.loads(logged.split(': ', 1)[1])
+    assert diagnostic['expansion_id'] == 'exp' and diagnostic['paper_ids'] == ['a', 'b']
+    assert diagnostic['missing_indexes'] == [1]
+    assert diagnostic['extra_indexes'] == [7]
+    assert diagnostic['duplicate_indexes'] == [0]
+
+
 def test_relationship_verification_shares_both_papers_when_evidence_fits(publisher, monkeypatch):
     module, _, _, _ = publisher
     from lazymind.chat.service import llm_task
@@ -232,7 +299,31 @@ def test_relationship_verification_shares_both_papers_when_evidence_fits(publish
                            for row in request.input.data['evidence']]}, None, None
 
     monkeypatch.setattr(llm_task, '_run_task', verify)
-    claims = [{'paper_id': paper, 'field': 'seed_relation', 'statement': 'Relationship across both papers.', 'positions': [0]}
+    claims = [{'paper_id': paper, 'field': 'seed_relation',
+               'statement': 'Relationship across both papers.', 'positions': [0]}
               for paper in ['a', 'b']]
     assert all(row['status'] == 'supported' for row in module._verify_claims(claims, ['a', 'b']))
     assert len(requests) == 1
+
+
+def test_verification_covers_all_analysis_fields_in_larger_paper_sets(publisher, monkeypatch):
+    module, _, _, _ = publisher
+    from lazymind.chat.service import llm_task
+    monkeypatch.setattr(module, '_call', lambda method, path, payload: {
+        'status': 'ready', 'positions': [0], 'pages': [{'page': 1, 'text': payload['paper_id']}],
+        'content_hash': 'hash-' + payload['paper_id'],
+    })
+
+    def verify(request, usage):
+        return {'checks': [{'index': row['index'], 'status': 'supported', 'reason': 'source supports it'}
+                           for row in request.input.data['evidence']]}, None, None
+
+    monkeypatch.setattr(llm_task, '_run_task', verify)
+    papers = [f'paper-{index}' for index in range(24)]
+    claims = [{'paper_id': paper, 'field': field, 'statement': 'A source-grounded conclusion.', 'positions': [0]}
+              for paper in papers for field in ['seed_relation', 'direction_relation', 'key_contribution']]
+    checked = module._verify_claims(claims, papers)
+    assert len(checked) == 72
+    assert all(row['status'] == 'supported' for row in checked)
+    with pytest.raises(ToolExecutionError, match='duplicate paper and analysis field'):
+        module._verify_claims([claims[0], claims[0]], papers)

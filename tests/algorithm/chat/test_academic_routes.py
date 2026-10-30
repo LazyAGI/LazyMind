@@ -114,6 +114,37 @@ def test_expansion_tools_forward_owned_task_and_pinned_candidate_context(monkeyp
     assert requests[-1][2]['headers'] == {'X-User-Id': 'owner'}
 
 
+def test_search_tool_validates_search_contract_before_sending_requests(monkeypatch):
+    import importlib.util
+    from lazyllm.tools.agent import ToolExecutionError, ToolManager
+    from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
+
+    path = Path(__file__).resolve().parents[3] / 'workflows/paper_expansion/scripts/tools.py'
+    spec = importlib.util.spec_from_file_location('paper_expansion_search_modes', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    requests = []
+    monkeypatch.setattr(module, '_call', lambda method, path, payload: requests.append(payload) or {'papers': []})
+    ensure_lazyllm_tool_docs([module.academic_search_papers])
+    tool = ToolManager([module.academic_search_papers]).all_tools[0]
+    for mode in ['keyword', 'references', 'citations']:
+        args = tool._validate_input({'expansion_id': 'exp', 'query': 'agents', 'mode': mode})
+        assert module.academic_search_papers(**args) == {'papers': []}
+        assert requests[-1]['mode'] == mode
+    with pytest.raises(ValueError, match='keyword|references|citations'):
+        tool._validate_input({'expansion_id': 'exp', 'query': 'agents', 'mode': 'search'})
+    assert len(requests) == 3
+    args = tool._validate_input({'expansion_id': 'exp', 'mode': 'citations', 'paper_id': 'paper', 'max_results': 25})
+    with pytest.raises(ToolExecutionError, match='max_results must be 1..20'):
+        module.academic_search_papers(**args)
+    assert len(requests) == 3
+    args = tool._validate_input({'expansion_id': 'exp', 'mode': 'citations', 'paper_id': 'paper', 'max_results': 20})
+    module.academic_search_papers(**args)
+    assert requests[-1]['max_results'] == 20 and requests[-1]['paper_id'] == 'paper'
+    module.academic_search_papers('exp', cursor='saved-source-cursor')
+    assert requests[-1] == {'expansion_id': 'exp', 'cursor': 'saved-source-cursor'}
+
+
 @pytest.mark.parametrize('package,slot,kind', [
     ('paper_workflow_mock', 'handoff_receipt', 'review'),
     ('paper_workflow_mock', 'handoff_receipt', 'reflection'),
@@ -205,6 +236,65 @@ def test_search_bridge_preserves_actionable_source_status(monkeypatch, status):
     assert 'secret' not in exc.value.detail
 
 
+def test_search_registry_preserves_sciverse_pages_and_web_parameters(monkeypatch):
+    from lazymind.chat.service import academic_preparation
+    from lazymind.chat.service.component import tool_registry
+
+    calls = []
+
+    def meta_search(**kwargs):
+        calls.append(kwargs)
+        return {'items': [{'title': 'A paper'}], 'total_count': 3,
+                'page': 1, 'next_cursor': 'next-page'}
+
+    monkeypatch.setattr(tool_registry, '_instance_is_active', lambda _: True)
+    monkeypatch.setattr(tool_registry, '_ACADEMIC_SEARCH_ENGINE_INSTANCES', [
+        SimpleNamespace(source_name='sciverse', meta_search=meta_search),
+    ])
+    payload = {'source': 'sciverse', 'query': 'retrieval', 'limit': 2,
+               'page': 1, 'cursor': 'current-page', 'tool_config': {}}
+    result = academic_preparation.search_registry(payload)
+    assert result['total_count'] == 3 and result['next_cursor'] == 'next-page'
+    assert calls[-1] == {'query': 'retrieval', 'page_size': 2, 'page': 1,
+                         'cursor': 'current-page', 'include_content': False}
+
+    def web_search(query, count=10, date_restrict='m1'):
+        calls.append({'query': query, 'count': count, 'date_restrict': date_restrict})
+        return []
+
+    monkeypatch.setattr(tool_registry, '_WEB_SEARCH_ENGINE_INSTANCES', [SimpleNamespace(search=web_search)])
+    assert academic_preparation.search_registry({**payload, 'source': 'web'}) == {'items': []}
+    assert calls[-1] == {'query': 'retrieval', 'count': 2, 'date_restrict': ''}
+
+
+def test_search_bridge_preserves_cooldown_and_key_pool_failures(monkeypatch):
+    import httpx
+    from lazyllm.common import AllKeysExhaustedError
+    from lazymind.chat.service import academic_preparation
+
+    monkeypatch.setattr(ar, 'require_internal_token', lambda _: None)
+    request = ar.AcademicSearchRequest(source='web', query='paper', limit=2)
+
+    def limited(_):
+        response = httpx.Response(429, headers={'Retry-After': '60'},
+                                  request=httpx.Request('GET', 'https://source.invalid'))
+        raise httpx.HTTPStatusError('private provider detail', request=response.request, response=response)
+
+    monkeypatch.setattr(academic_preparation, 'search_registry', limited)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(ar.academic_search(request, 'token'))
+    assert exc.value.status_code == 429
+    assert exc.value.detail['code'] == 'rate_limited' and exc.value.detail['retry_at']
+
+    def exhausted(_):
+        raise AllKeysExhaustedError('private provider detail')
+
+    monkeypatch.setattr(academic_preparation, 'search_registry', exhausted)
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(ar.academic_search(request, 'token'))
+    assert exc.value.status_code == 401 and exc.value.detail == {'code': 'authentication_failed'}
+
+
 def test_preparation_typed_tools_accept_grounded_direction_schema():
     from lazyllm.tools.agent import ToolManager
     from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
@@ -244,6 +334,9 @@ def test_preparation_tools_execute_with_normal_workspace_authorization(monkeypat
     from lazymind.chat.engine.tools.workspace_context import WorkspaceContext
     from lazyllm.tools.agent import ToolManager
 
+    diagnostics = []
+    monkeypatch.setattr(preparation.lazyllm.LOG, 'warning', diagnostics.append)
+
     class Client:
         base_url = 'http://fixture'
         transport = SimpleNamespace(request=lambda *args, **kwargs: SimpleNamespace(
@@ -268,8 +361,12 @@ def test_preparation_tools_execute_with_normal_workspace_authorization(monkeypat
         ], authorization_policy=policy)
         results = manager.execute_prepared(batch)
         assert 'real-paper' in str(results)
-        plan.tools[-1]('Grounded directions', [{'name': 'retrieval', 'question': 'why', 'reason': 'evidence',
-                                               'difference': 'scope', 'paper_ids': ['real-paper']}])
+        directions = [{'name': 'retrieval', 'question': 'why', 'reason': 'evidence',
+                       'difference': 'scope', 'paper_ids': ['real-paper']}]
+        from lazyllm.tools.agent import ToolExecutionError
+        with pytest.raises(ToolExecutionError, match='selected_directions.*exact names'):
+            plan.tools[-1]('Grounded directions', directions, selected_directions=['RAG'])
+        plan.tools[-1]('Grounded directions', directions, selected_directions=['retrieval'])
 
     monkeypatch.setattr(preparation, 'WorkflowClient', Client)
     monkeypatch.setattr(preparation, 'inject_model_config', lambda _: None)
@@ -281,3 +378,11 @@ def test_preparation_tools_execute_with_normal_workspace_authorization(monkeypat
         'expansion_id': 'exp', 'revision': 1, 'preparation': {'user_instruction': 'RAG'}, 'input': {},
     })
     assert result['directions'][0]['paper_ids'] == ['real-paper']
+    assert result['selected_directions'] == ['retrieval']
+    diagnostics = [entry for entry in diagnostics if entry.startswith('[AcademicPreparation]')]
+    assert len(diagnostics) == 1
+    diagnostic = json.loads(diagnostics[0].split(': ', 1)[1])
+    assert diagnostic['expansion_id'] == 'exp' and diagnostic['preparation_revision'] == 1
+    assert diagnostic['candidate_names'] == ['retrieval']
+    assert diagnostic['selected_directions'] == ['RAG']
+    assert 'selected_directions must contain distinct exact names' in diagnostic['reason']
