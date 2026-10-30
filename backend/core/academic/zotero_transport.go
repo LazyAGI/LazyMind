@@ -155,9 +155,15 @@ func (c *zoteroClient) checkRedirect(req *http.Request, via []*http.Request) err
 }
 
 func readZoteroZIP(data []byte, filename string) ([]byte, error) {
-	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	var output bytes.Buffer
+	err := copyZoteroZIP(bytes.NewReader(data), int64(len(data)), filename, &output)
+	return output.Bytes(), err
+}
+
+func copyZoteroZIP(source io.ReaderAt, size int64, filename string, destination io.Writer) error {
+	r, err := zip.NewReader(source, size)
 	if err != nil || len(r.File) > 1000 {
-		return nil, zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件不是有效的 Zotero ZIP 文件")
+		return zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件不是有效的 Zotero ZIP 文件")
 	}
 	var selected *zip.File
 	var total uint64
@@ -169,39 +175,39 @@ func readZoteroZIP(data []byte, filename string) ([]byte, error) {
 		if strings.HasSuffix(name, "%ZB64") {
 			decoded, err := base64.StdEncoding.DecodeString(strings.TrimSuffix(name, "%ZB64"))
 			if err != nil {
-				return nil, zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件包含不安全的文件路径")
+				return zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件包含不安全的文件路径")
 			}
 			name = string(decoded)
 		}
 		clean := path.Clean(name)
 		if name == "" || strings.ContainsAny(name, "\\\x00") || strings.HasPrefix(clean, "/") || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains("/"+name+"/", "/../") || file.Mode().Type() != 0 && !file.FileInfo().IsDir() {
-			return nil, zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件包含不安全的文件路径")
+			return zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件包含不安全的文件路径")
 		}
 		if file.UncompressedSize64 > zoteroMaxPDFBytes || total > zoteroMaxPDFBytes-file.UncompressedSize64 {
-			return nil, zoteroFailure(413, "ZOTERO_ARCHIVE_TOO_LARGE", "WebDAV 附件解压后超过 128 MiB 上限")
+			return zoteroFailure(413, "ZOTERO_ARCHIVE_TOO_LARGE", "WebDAV 附件解压后超过 128 MiB 上限")
 		}
 		total += file.UncompressedSize64
 		if !file.FileInfo().IsDir() && clean == filename {
 			if selected != nil {
-				return nil, zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件包含重复的 PDF 文件")
+				return zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件包含重复的 PDF 文件")
 			}
 			selected = file
 		}
 	}
 	if selected == nil {
-		return nil, zoteroFailure(404, "ZOTERO_ATTACHMENT_MISSING", "WebDAV 压缩包中没有 Zotero 记录对应的 PDF 附件")
+		return zoteroFailure(404, "ZOTERO_ATTACHMENT_MISSING", "WebDAV 压缩包中没有 Zotero 记录对应的 PDF 附件")
 	}
 	reader, err := selected.Open()
 	if err != nil {
-		return nil, zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "无法打开 WebDAV 附件")
+		return zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "无法打开 WebDAV 附件")
 	}
 	defer reader.Close()
-	pdf, err := io.ReadAll(io.LimitReader(reader, zoteroMaxPDFBytes+1))
+	written, err := io.Copy(destination, io.LimitReader(reader, zoteroMaxPDFBytes+1))
 	if err != nil {
-		return nil, zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件解压失败或校验错误")
+		return zoteroFailure(502, "INVALID_ZOTERO_ARCHIVE", "WebDAV 附件解压失败或校验错误")
 	}
-	if len(pdf) > zoteroMaxPDFBytes {
-		return nil, zoteroFailure(413, "ZOTERO_ARCHIVE_TOO_LARGE", "WebDAV 附件解压后超过 128 MiB 上限")
+	if written > zoteroMaxPDFBytes {
+		return zoteroFailure(413, "ZOTERO_ARCHIVE_TOO_LARGE", "WebDAV 附件解压后超过 128 MiB 上限")
 	}
-	return pdf, nil
+	return nil
 }

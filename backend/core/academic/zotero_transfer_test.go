@@ -1,6 +1,8 @@
 package academic
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +15,43 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestZoteroRemoteTransferStreamsBoundedChunks(t *testing.T) {
+	for _, source := range []string{"remote", "webdav"} {
+		t.Run(source, func(t *testing.T) {
+			pdf := "%PDF-" + strings.Repeat("x", 4<<20)
+			var archive bytes.Buffer
+			zw := zip.NewWriter(&archive)
+			entry, err := zw.Create("paper.pdf")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = io.WriteString(entry, pdf); err != nil {
+				t.Fatal(err)
+			}
+			if err = zw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			client := zoteroTestClient(t, zoteroConfig{Source: source, LibraryID: "123", WebDAV: &zoteroWebDAVConfig{URL: "https://dav.example/zotero"}}, func(r *http.Request) (*http.Response, error) {
+				if strings.HasSuffix(r.URL.Path, ".zip") {
+					return zoteroResponse(r, 200, archive.String()), nil
+				}
+				if strings.HasSuffix(r.URL.Path, "/file") {
+					return zoteroResponse(r, 200, pdf), nil
+				}
+				return zoteroResponse(r, 200, `{"key":"ATTACH01","data":{"itemType":"attachment","contentType":"application/pdf","filename":"paper.pdf"}}`), nil
+			})
+			var sink zoteroChunkCounter
+			name, err := client.copyAttachment(t.Context(), "ATTACH01", &sink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name != "paper.pdf" || sink.total != int64(len(pdf)) || sink.max > 64<<10 {
+				t.Fatalf("unbounded transfer: name=%s total=%d chunk=%d", name, sink.total, sink.max)
+			}
+		})
+	}
+}
 
 type zoteroChunkCounter struct {
 	max   int

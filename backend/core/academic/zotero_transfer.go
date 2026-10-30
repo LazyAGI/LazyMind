@@ -1,7 +1,6 @@
 package academic
 
 import (
-	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -111,12 +110,7 @@ func TransferZoteroAttachment(w http.ResponseWriter, r *http.Request) {
 	if input.Source == "database" {
 		name, err = client.copyDatabaseAttachment(ctx, input.ItemKey, io.MultiWriter(tmp, hash))
 	} else {
-		var file zoteroFile
-		file, err = client.attachment(ctx, input.ItemKey)
-		if err == nil {
-			name = file.Name
-			_, err = io.Copy(io.MultiWriter(tmp, hash), bytes.NewReader(file.Data))
-		}
+		name, err = client.copyAttachment(ctx, input.ItemKey, io.MultiWriter(tmp, hash))
 	}
 	if err == nil && input.ExpectedMD5 != "" && !strings.EqualFold(input.ExpectedMD5, hex.EncodeToString(hash.Sum(nil))) {
 		err = zoteroFailure(409, "ZOTERO_ATTACHMENT_CHANGED", "附件校验值已改变，请重新预览")

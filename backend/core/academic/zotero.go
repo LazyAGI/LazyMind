@@ -4,6 +4,7 @@ package academic
 // preview nor attachment download creates a document or mutates the paper graph.
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -14,6 +15,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"regexp"
 	"strconv"
@@ -251,9 +253,15 @@ func (c *zoteroClient) apiURL(resource string) *url.URL {
 }
 
 func (c *zoteroClient) request(ctx context.Context, target *url.URL, limit int64) ([]byte, http.Header, error) {
+	var data bytes.Buffer
+	headers, err := c.requestTo(ctx, target, limit, &data)
+	return data.Bytes(), headers, err
+}
+
+func (c *zoteroClient) requestTo(ctx context.Context, target *url.URL, limit int64, destination io.Writer) (http.Header, error) {
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
-		return nil, nil, zoteroFailure(400, "INVALID_ZOTERO_REQUEST", "Zotero 请求地址无效")
+		return nil, zoteroFailure(400, "INVALID_ZOTERO_REQUEST", "Zotero 请求地址无效")
 	}
 	r.Header.Set("User-Agent", "LazyMind Zotero Import")
 	if target.Host == c.base.Host && target.Scheme == c.base.Scheme {
@@ -271,12 +279,12 @@ func (c *zoteroClient) request(ctx context.Context, target *url.URL, limit int64
 	if err != nil {
 		var failure *zoteroError
 		if errors.As(err, &failure) {
-			return nil, nil, failure
+			return nil, failure
 		}
 		if ctx.Err() != nil {
-			return nil, nil, zoteroFailure(504, "ZOTERO_REQUEST_TIMEOUT", "Zotero 导入请求已取消或超时，请重试")
+			return nil, zoteroFailure(504, "ZOTERO_REQUEST_TIMEOUT", "Zotero 导入请求已取消或超时，请重试")
 		}
-		return nil, nil, zoteroFailure(502, "ZOTERO_CONNECTION_FAILED", "无法连接文献来源，请检查地址、服务状态及网络设置")
+		return nil, zoteroFailure(502, "ZOTERO_CONNECTION_FAILED", "无法连接文献来源，请检查地址、服务状态及网络设置")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -306,19 +314,19 @@ func (c *zoteroClient) request(ctx context.Context, target *url.URL, limit int64
 		if seconds, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && seconds >= 0 && seconds <= 86400 {
 			failure.RetryAfter = strconv.Itoa(seconds)
 		}
-		return nil, nil, failure
+		return nil, failure
 	}
 	if resp.ContentLength > limit {
-		return nil, nil, zoteroFailure(413, "ZOTERO_RESPONSE_TOO_LARGE", "文献来源响应超过导入大小上限")
+		return nil, zoteroFailure(413, "ZOTERO_RESPONSE_TOO_LARGE", "文献来源响应超过导入大小上限")
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	written, err := io.Copy(destination, io.LimitReader(resp.Body, limit+1))
 	if err != nil {
-		return nil, nil, zoteroFailure(502, "ZOTERO_READ_FAILED", "读取文献来源失败，导入未完成")
+		return nil, zoteroFailure(502, "ZOTERO_READ_FAILED", "读取文献来源失败，导入未完成")
 	}
-	if int64(len(b)) > limit {
-		return nil, nil, zoteroFailure(413, "ZOTERO_RESPONSE_TOO_LARGE", "文献来源响应超过导入大小上限")
+	if written > limit {
+		return nil, zoteroFailure(413, "ZOTERO_RESPONSE_TOO_LARGE", "文献来源响应超过导入大小上限")
 	}
-	return b, resp.Header, nil
+	return resp.Header, nil
 }
 
 func (c *zoteroClient) observeVersion(headers http.Header) error {
@@ -453,16 +461,21 @@ type zoteroFile struct {
 }
 
 func (c *zoteroClient) attachment(ctx context.Context, key string) (zoteroFile, error) {
+	var data bytes.Buffer
+	name, err := c.copyAttachment(ctx, key, &data)
+	return zoteroFile{Name: name, Data: data.Bytes()}, err
+}
+
+func (c *zoteroClient) copyAttachment(ctx context.Context, key string, destination io.Writer) (string, error) {
 	if c.config.Source == "database" {
-		return c.attachmentDatabase(ctx, key)
+		return c.copyDatabaseAttachment(ctx, key, destination)
 	}
-	var file zoteroFile
 	if !zoteroItemKey.MatchString(key) {
-		return file, zoteroFailure(400, "INVALID_ZOTERO_ITEM_KEY", "Zotero 附件编号无效")
+		return "", zoteroFailure(400, "INVALID_ZOTERO_ITEM_KEY", "Zotero 附件编号无效")
 	}
 	body, _, err := c.request(ctx, c.apiURL("items/"+key), 2<<20)
 	if err != nil {
-		return file, err
+		return "", err
 	}
 	var item struct {
 		Key  string `json:"key"`
@@ -474,41 +487,63 @@ func (c *zoteroClient) attachment(ctx context.Context, key string) (zoteroFile, 
 		} `json:"data"`
 	}
 	if json.Unmarshal(body, &item) != nil || item.Key != key || item.Data.ItemType != "attachment" || item.Data.ContentType != "application/pdf" {
-		return file, zoteroFailure(422, "ZOTERO_PDF_REQUIRED", "该 Zotero 条目不是 PDF 附件")
+		return "", zoteroFailure(422, "ZOTERO_PDF_REQUIRED", "该 Zotero 条目不是 PDF 附件")
 	}
 	filename := item.Data.Filename
 	if filename == "" {
 		filename = key + ".pdf"
 	}
 	if path.Base(filename) != filename || strings.ContainsAny(filename, "\\\x00\r\n") || len(filename) > 512 {
-		return file, zoteroFailure(502, "INVALID_ZOTERO_RESPONSE", "Zotero 附件文件名无效")
+		return "", zoteroFailure(502, "INVALID_ZOTERO_RESPONSE", "Zotero 附件文件名无效")
 	}
+	hash := md5.New()
+	checked := &zoteroPDFWriter{destination: io.MultiWriter(destination, hash)}
 	if c.config.Source == "webdav" {
 		u := *c.dav
 		u.Path = path.Join(u.Path, key+".zip")
-		archive, _, err := c.request(ctx, &u, zoteroMaxZIPBytes)
+		archive, err := os.CreateTemp("", "lazymind-zotero-*.zip")
 		if err != nil {
-			return file, err
+			return "", err
 		}
-		file.Data, err = readZoteroZIP(archive, filename)
+		defer os.Remove(archive.Name())
+		defer archive.Close()
+		_, err = c.requestTo(ctx, &u, zoteroMaxZIPBytes, archive)
 		if err != nil {
-			return file, err
+			return "", err
+		}
+		size, err := archive.Seek(0, io.SeekCurrent)
+		if err != nil {
+			return "", err
+		}
+		err = copyZoteroZIP(archive, size, filename, checked)
+		if err != nil {
+			return "", err
 		}
 	} else {
-		file.Data, _, err = c.request(ctx, c.apiURL("items/"+key+"/file"), zoteroMaxPDFBytes)
+		_, err = c.requestTo(ctx, c.apiURL("items/"+key+"/file"), zoteroMaxPDFBytes, checked)
 		if err != nil {
-			return file, err
+			return "", err
 		}
 	}
-	if len(file.Data) < 5 || !strings.HasPrefix(string(file.Data[:min(len(file.Data), 1024)]), "%PDF-") {
-		return zoteroFile{}, zoteroFailure(502, "ZOTERO_INVALID_PDF", "下载的附件不是有效 PDF，可能是登录页或文件损坏")
+	if string(checked.prefix) != "%PDF-" {
+		return "", zoteroFailure(502, "ZOTERO_INVALID_PDF", "下载的附件不是有效 PDF，可能是登录页或文件损坏")
 	}
 	if item.Data.MD5 != "" {
-		hash := md5.Sum(file.Data)
-		if !zoteroMD5.MatchString(item.Data.MD5) || !strings.EqualFold(hex.EncodeToString(hash[:]), item.Data.MD5) {
-			return zoteroFile{}, zoteroFailure(409, "ZOTERO_ATTACHMENT_CHANGED", "附件与 Zotero 记录的校验值不一致，请完成同步后重试")
+		if !zoteroMD5.MatchString(item.Data.MD5) || !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), item.Data.MD5) {
+			return "", zoteroFailure(409, "ZOTERO_ATTACHMENT_CHANGED", "附件与 Zotero 记录的校验值不一致，请完成同步后重试")
 		}
 	}
-	file.Name = filename
-	return file, nil
+	return filename, nil
+}
+
+type zoteroPDFWriter struct {
+	destination io.Writer
+	prefix      []byte
+}
+
+func (w *zoteroPDFWriter) Write(p []byte) (int, error) {
+	if len(w.prefix) < 5 {
+		w.prefix = append(w.prefix, p[:min(len(p), 5-len(w.prefix))]...)
+	}
+	return w.destination.Write(p)
 }
