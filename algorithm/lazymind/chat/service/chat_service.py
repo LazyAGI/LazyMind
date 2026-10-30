@@ -16,6 +16,7 @@ import lazyllm
 from lazymind.chat.engine.tools.workspace_context import (
     ToolResolutionContext, normalize_managed_roots, normalize_managed_files,
 )
+from lazymind.chat.engine.tools.system_resources import user_managed_read_roots
 from lazymind.chat.engine.agent_runtime.conversation_env import ConversationEnvStore
 from lazymind.chat.engine.agent_runtime.env_runtime import inject_runtime_env
 from lazymind.chat.engine.tools.conversation_workspace import chat_agent_workspace
@@ -2211,6 +2212,7 @@ async def _handle_chat_impl(
                     *(value for values in (agentic_config.get('history_files_per_turn') or {}).values()
                       for value in (values or ())),
                 ]),
+                acl_read_roots=normalize_managed_roots(user_managed_read_roots(user_id or '')),
                 citation_state=agentic_config['citation_state'],
             ),
             skills=skill_config,

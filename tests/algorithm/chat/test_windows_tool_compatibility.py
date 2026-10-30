@@ -97,7 +97,7 @@ def test_windows_local_path_is_not_interpreted_as_a_uri(value, monkeypatch):
     from lazymind.chat.engine.tools import host_file_resolution as paths
     seen = []
     monkeypatch.setattr(paths, 'canonical_host_path', lambda raw, **_: seen.append(raw) or '/resolved')
-    monkeypatch.setattr(paths, 'managed_path', lambda _: True)
+    monkeypatch.setattr(paths, 'managed_path', lambda _path, operation='read': operation == 'read')
     assert paths.FileResolution().local(value) == '/resolved'
     assert seen == [value]
 
