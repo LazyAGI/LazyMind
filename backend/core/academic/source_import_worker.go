@@ -49,6 +49,9 @@ func completePresentImport(ctx context.Context, job asyncjob.Job, b orm.PaperImp
 		if e := sourceJobFence(tx, job, b.ID); e != nil {
 			return e
 		}
+		if e := checkEnrichmentMembership(tx, b, item); e != nil {
+			return e
+		}
 		var d orm.Document
 		var work orm.AcademicWork
 		if e := tx.Where("id=? AND dataset_id=? AND deleted_at IS NULL", documentID, b.TargetDatasetID).Take(&d).Error; e != nil {
@@ -63,7 +66,7 @@ func completePresentImport(ctx context.Context, job asyncjob.Job, b orm.PaperImp
 		if e := json.Unmarshal(b.PolicySnapshotJSON, &policy); e != nil {
 			return e
 		}
-		id, e := registerRecognizedLibraryDocument(ctx, tx, d, work, true, policy.FolderID, item.ID, "")
+		id, e := registerRecognizedLibraryDocument(ctx, tx, d, work, b.EntryType != "bibliography", policy.FolderID, item.ID, "")
 		if e != nil {
 			return e
 		}
@@ -276,6 +279,26 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 	if err != nil {
 		return err
 	}
+	if b.EntryType == "bibliography" {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 90*time.Second)
+		defer cancel()
+		if err := checkEnrichmentMembership(store.DB().WithContext(ctx), b, item); err != nil {
+			return err
+		}
+		if item.DocumentID == "" {
+			existing, err := sourcePresentDocument(store.DB().WithContext(ctx), b.TargetDatasetID, item.AcademicWorkID, "")
+			if err == nil {
+				return completePresentImport(ctx, job, b, item, item.AcademicWorkID, existing.ID)
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err := enrichBibliographyItem(ctx, job, b, &item, caller); err != nil {
+				return err
+			}
+		}
+	}
 	if item.Stage == "reparse" {
 		svc, e := doc.NewResourceService(doc.ResourceServiceDeps{DB: store.DB(), LazyDB: store.LazyLLMDB()})
 		if e != nil {
@@ -446,6 +469,9 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 			if e := sourceJobFence(tx, job, b.ID); e != nil {
 				return e
 			}
+			if e := checkEnrichmentMembership(tx, b, item); e != nil {
+				return e
+			}
 			var current orm.PaperImportItem
 			if e := tx.Where("id = ?", item.ID).Take(&current).Error; e != nil {
 				return e
@@ -504,7 +530,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 			if e = json.Unmarshal(b.PolicySnapshotJSON, &policy); e != nil {
 				return e
 			}
-			libraryID, e := registerRecognizedLibraryDocument(ctx, tx, bound.Document, work, true, policy.FolderID, item.ID, "")
+			libraryID, e := registerRecognizedLibraryDocument(ctx, tx, bound.Document, work, b.EntryType != "bibliography", policy.FolderID, item.ID, "")
 			if e != nil {
 				return e
 			}
@@ -529,7 +555,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 	if bound.SubmissionStatus == "failed" {
 		return fmt.Errorf("document processing submission failed: %s", bound.SubmissionError)
 	}
-	return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": "succeeded", "stage": "processing", "error_code": "", "error_details_json": json.RawMessage("{}")})
+	return sourceItemUpdate(ctx, job, b, item.ID, map[string]any{"status": "succeeded", "stage": "processing", "error_code": "", "error_details_json": bibliographyDiagnostics(b, item)})
 }
 
 func presentImportStatus(b orm.PaperImportBatch) string {

@@ -1,3 +1,4 @@
+import PaperAuthors from './PaperAuthors';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from 'react';
 import { Alert, Button, Checkbox, Input, Modal, Pagination, Radio, Select, Tooltip, Tree } from 'antd';
 import { ApiOutlined,  DatabaseOutlined, FilePdfOutlined, FolderOpenOutlined, FolderOutlined, DownOutlined, InfoCircleOutlined, LockOutlined, SearchOutlined, UploadOutlined } from '@ant-design/icons';
@@ -42,7 +43,7 @@ const ZoteroPaperRow = memo(function ZoteroPaperRow({ paper, checked, disabled, 
 }) {
  return <div role="listitem" className={`zotero-paper-row${checked ? ' is-selected' : ''}`}>
           <Checkbox aria-label={`选择 ${paper.title}`} checked={checked} disabled={disabled || imported} onChange={event => onToggle(paper.key, event.target.checked)} />
-          <div className="zotero-paper-details"><label className="zotero-paper-title" onClick={() => { if (!disabled && !imported) onToggle(paper.key, !checked); }}>{paper.title}</label><div className="zotero-paper-meta"><span>{paper.authors.join(', ') || '作者未记录'}</span><span>{paper.year || '年份未记录'}</span></div>{!!paper.collections.length && <div className="zotero-paper-collections"><FolderOpenOutlined aria-hidden />{paper.collections.join('；')}</div>}</div>
+          <div className="zotero-paper-details"><label className="zotero-paper-title" onClick={() => { if (!disabled && !imported) onToggle(paper.key, !checked); }}>{paper.title}</label><div className="zotero-paper-meta"><PaperAuthors authors={paper.authors} />{paper.venue && <span className="zotero-paper-venue" title={paper.venue}>{paper.venue}</span>}<span>{paper.year || '年份未记录'}</span></div>{!!paper.collections.length && <div className="zotero-paper-collections"><FolderOpenOutlined aria-hidden />{paper.collections.join('；')}</div>}</div>
           <div className="zotero-paper-materials">{imported && <span className="zotero-imported-badge">已导入</span>}{!!paper.pdfCount && <span><FilePdfOutlined aria-hidden />{paper.pdfCount} PDF</span>}{!!paper.unavailablePdfCount && <Tooltip title="本机无法读取这些 PDF。请修复 Zotero 附件路径后重试，或取消勾选 PDF 附件以导入题录。"><span className="zotero-pdf-unavailable">{paper.unavailablePdfCount} 个 PDF 不可用</span></Tooltip>}{!!(paper.noteCount + paper.annotationCount) && <span>{paper.noteCount + paper.annotationCount} 条笔记与批注</span>}</div>
         </div>;
 });

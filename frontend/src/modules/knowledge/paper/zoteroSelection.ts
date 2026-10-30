@@ -4,6 +4,7 @@ export interface ZoteroSelectablePaper {
   key: string;
   title: string;
   authors: string[];
+  venue?: string;
   year: string;
   pdfCount: number;
   unavailablePdfCount: number;
@@ -128,9 +129,10 @@ export function listZoteroPapers(preview: ZoteroPreview): ZoteroSelectablePaper[
       .map(creator => text(creator.name) || [text(creator.firstName), text(creator.lastName)].filter(Boolean).join(' ')).filter(Boolean);
     const title = text(data.title) || text(data.filename) || text(data.path).replace(/\\/g, '/').split('/').pop() || '未命名文献';
     const year = text(data.date).match(/\b(\d{4})\b/)?.[1] || '';
-    papers.set(key, { key, title, authors, year, pdfCount: 0, unavailablePdfCount: 0, noteCount: 0, annotationCount: 0,
+    const venue = text(data.publicationTitle) || text(data.proceedingsTitle) || text(data.bookTitle) || text(data.conferenceName) || text(data.publisher);
+    papers.set(key, { key, title, authors, year, ...(venue ? { venue } : {}), pdfCount: 0, unavailablePdfCount: 0, noteCount: 0, annotationCount: 0,
       collections: node.memberships.map(collectionPath),
-      searchText: [title, ...authors, year].filter(Boolean).join(' ').toLocaleLowerCase(),
+      searchText: [title, ...authors, year, venue].filter(Boolean).join(' ').toLocaleLowerCase(),
     });
   }
   for (const [key, owner] of graph.owners) {

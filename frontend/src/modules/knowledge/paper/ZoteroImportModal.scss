@@ -70,6 +70,8 @@
   .zotero-paper-meta { display: flex; align-items: baseline; gap: 12px; margin-top: 3px; color: #7c8a9e; font-size: 11px; line-height: 1.5; }
   .zotero-paper-meta > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .zotero-paper-meta > span:last-child { flex-shrink: 0; }
+  .zotero-paper-meta .paper-authors { flex: 0 1 auto; }
+  .zotero-paper-meta .zotero-paper-venue { min-width: 0; max-width: 36%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #63758e; }
   .zotero-paper-collections { display: flex; gap: 5px; margin-top: 3px; color: #8796ab; font-size: 10px; overflow-wrap: anywhere; }
   .zotero-paper-materials { display: grid; justify-items: end; gap: 4px; padding-top: 2px; color: #7b8ba2; font-size: 10px; white-space: nowrap; }
   .zotero-paper-materials .anticon { margin-right: 3px; }

@@ -1,3 +1,4 @@
+import PaperAuthors from './PaperAuthors';
 import {v4 as uuidv4} from 'uuid';
 import { useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { Alert, Button, Dropdown, Input, Modal, Tabs, Tag, Tooltip } from 'antd';
@@ -112,7 +113,7 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
           </div>
         </div>
         <div className="paper-detail-title"><h2>{current.metadata.title}</h2>{importanceControl}</div>
-        <p>{current.metadata.authors.join('、')} · {current.metadata.venue} {current.metadata.year || ''}</p>
+        <p><PaperAuthors authors={current.metadata.authors} /> · {current.metadata.venue} {current.metadata.year || ''}</p>
         <div className="paper-detail-facts">{readButton}<Button disabled={saving || editing} onClick={() => setTab('notes')}>写笔记</Button>{onStatusChange ? <select aria-label="论文阅读状态" value={current.status} disabled={disabled || saving} onChange={event => void run(() => onStatusChange(event.target.value as PaperRecord['status']), '阅读状态保存失败')}>{Object.entries(statusLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select> : <span>{statusLabel[current.status]}</span>}{onSave && !editing && <Button type="text" disabled={disabled || saving} onClick={() => { onEdit?.(); setEditing(true); }}>编辑题录</Button>}</div>
       </header>
       {!pdfs.length && <p className="paper-detail-read-hint"><InfoCircleOutlined /><span>请先在<button type="button" className="paper-detail-tab-link" disabled={saving || editing} onClick={() => setTab('attachments')}>附件</button>中添加 PDF</span></p>}

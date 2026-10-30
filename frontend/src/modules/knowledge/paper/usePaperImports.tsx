@@ -1,3 +1,4 @@
+import PaperAuthors from './PaperAuthors';
 import { useEffect, useRef, useState, type MutableRefObject, type Dispatch, type SetStateAction, type ChangeEvent } from 'react';
 import { Alert, Button, Input, Modal, Radio, Tooltip, Upload, message, type RadioChangeEvent } from 'antd';
 import { InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
@@ -178,7 +179,7 @@ export function usePaperImports(options: ImportOptions) {
                 busyRef.current = false;
                 submitting = true;
                 await mutate(() => importLibraryPapers(datasetId, papers, folders, pendingImportKey.current, format, bibliographyFile.current), { id: "import-submit", title: "题录导入保存失败" });
-                message.success(`导入已完成，共 ${papers.length} 条；已有论文保留原题录与归档`);
+                message.success(`已入库 ${papers.length} 条题录，正在后台补全元信息和查找 PDF；可在通知中查看进度`);
             }
             if (!isCurrentScope())
                 return;
@@ -486,7 +487,7 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
           {pendingArxiv && <section className="paper-library-import-confirm" aria-label="链接导入确认">
             <div className="paper-library-arxiv-source"><span>{pendingArxiv.metadata.identifiers.arxiv ? "ARXIV" : "DOI"}</span><code>{pendingArxiv.metadata.identifiers.arxiv || pendingArxiv.metadata.identifiers.doi}{pendingArxiv.arxivVersion}</code></div>
             <h3>{pendingArxiv.metadata.title}</h3>
-            <p className="paper-library-arxiv-authors">{pendingArxiv.metadata.authors.join("、")} · {pendingArxiv.metadata.year}</p>
+            <p className="paper-library-arxiv-authors"><PaperAuthors authors={pendingArxiv.metadata.authors} /> · {pendingArxiv.metadata.year}</p>
             {pendingArxiv.metadata.abstract && <p className="paper-library-arxiv-abstract">{pendingArxiv.metadata.abstract}</p>}
             <p className="paper-library-arxiv-hint">{linkPreview?.fulltext_candidates.length ? "确认后提交下载入库任务，同一论文的不同版本保留为独立附件。" : "仅找到文献信息，可先保存题录，后续补充 PDF。"}</p>
             {linkPhase === 'pdf' && <p role="status">元信息已就绪，可以立即保存题录；等待查找完成后也可连同 PDF 一起导入。</p>}

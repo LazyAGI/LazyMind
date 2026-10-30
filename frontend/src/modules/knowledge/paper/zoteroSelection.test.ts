@@ -26,6 +26,16 @@ const fixture = (): ZoteroPreview => ({
 const dataOf = (value: unknown) => (value as { data: Record<string, unknown> }).data;
 const keys = (values: unknown[]) => values.map(value => String((value as { key: string }).key));
 
+it('shows and searches the original Zotero journal or proceedings title', () => {
+  const preview: ZoteroPreview = { source_id: 'users:42', warnings: [], collections: [], items: [
+    item('JOURNAL', 'journalArticle', { title: 'Paper one', publicationTitle: 'Nature Machine Intelligence' }),
+    item('CONFERENCE', 'conferencePaper', { title: 'Paper two', proceedingsTitle: 'NeurIPS' }),
+  ] };
+  const papers = listZoteroPapers(preview);
+  expect(papers.map(p => p.venue)).toEqual(['Nature Machine Intelligence', 'NeurIPS']);
+  expect(papers[0].searchText).toContain('nature machine intelligence');
+});
+
 describe('Zotero paper selection', () => {
   it('lists papers and standalone PDFs with searchable metadata and owned material counts', () => {
     expect(listZoteroPapers(fixture())).toEqual([

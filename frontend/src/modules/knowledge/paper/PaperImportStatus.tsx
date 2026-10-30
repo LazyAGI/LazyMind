@@ -15,6 +15,7 @@ function conciseError(error = '', provider?: string) {
 const operationNames: Record<string, string> = { paper_expansion: '扩展导入', single_reference: '引用导入', paper_references: '参考文献导入', collection_references: '文献集合导入', conversation_sources: '对话来源导入', paper_link: '链接导入', pdf_upload: '上传 PDF', bibliography: '题录导入', zotero: 'Zotero 导入', library_backup: '备份恢复' };
 const statusNames: Record<string, string> = { running: '处理中', failed: '失败', partial_failed: '部分失败', skipped: '已存在', metadata_only: '题录已保存', canceled: '已取消', succeeded: '已完成', removed: '已移出论文库', awaiting_association: '待关联' };
 const itemNames: Record<string, string> = { importing: '导入中', processing: '处理中', ready: '已入库', metadata_only: '题录已保存', skipped: '已存在', failed: '导入失败', processing_failed: '处理失败', canceled: '已取消', deleted: '文档已删除', removed: '已移出论文库', awaiting_association: 'PDF 已上传，待关联' };
+const enrichmentStages: Record<string, string> = { metadata: '补全元信息', pdf_lookup: '查找 PDF', acquire: '准备下载', download: '下载 PDF' };
 const providers: Record<string, string> = { arxiv: 'arXiv', local: '本地 PDF', web: '网页', doi: 'DOI', zotero: 'Zotero' };
 function resultSummary(summary: ImportOperation['summary']) {
   const results = [[summary.ready, '已入库'], [summary.metadata_only, '题录已保存'], [summary.skipped, '已存在'], [summary.active, '处理中'], [summary.failed, '失败'], [summary.canceled, '已取消'], [summary.deleted, '文档已删除'], [summary.removed, '已移出论文库']].filter(([count]) => Number(count) > 0);
@@ -155,13 +156,14 @@ export default function PaperImportStatus({ datasetId, page, canWrite, onRetry, 
           ? <button type="button" className="paper-library-import-title-link" onClick={() => { onOpenChange(false); onOpenPaper(item.library_paper_id!); }}>{content}</button>
           : content}
       <div className="paper-library-import-paper-meta"><span>{[providers[item.source_provider || ''] || item.source_provider, item.source_version].filter(Boolean).join(' · ')}</span>
-        <Badge className="paper-library-import-status" status={failed && !item.resolved_later ? 'error' : ['importing', 'processing'].includes(item.current_state) ? 'processing' : ['ready', 'metadata_only'].includes(item.current_state) ? 'success' : 'default'} text={`${itemNames[item.current_state] || item.current_state}${failed && item.resolved_later ? '（已解决）' : ''}`} />
+        <Badge className="paper-library-import-status" status={failed && !item.resolved_later ? 'error' : ['importing', 'processing'].includes(item.current_state) ? 'processing' : ['ready', 'metadata_only'].includes(item.current_state) ? 'success' : 'default'} text={`${item.result_kind === 'enrichment' && item.current_state === 'importing' ? `题录已保存 · ${enrichmentStages[item.stage] || '后台补全中'}` : item.result_kind === 'enrichment' && failed ? '题录已保存 · 补全失败' : itemNames[item.current_state] || item.current_state}${failed && item.resolved_later ? '（已解决）' : ''}`} />
       </div>
       {item.current_state === 'awaiting_association' && canWrite && onResumeAssociation && <Button size="small" type="link" onClick={() => { onOpenChange(false); onResumeAssociation(item); }}>继续关联</Button>}
       {item.current_state !== 'removed' && (item.resolved_later ? <p className="paper-library-import-note">已通过后续操作入库</p>
         : item.status === 'skipped' ? <p className="paper-library-import-note">{item.current_document ? '本次跳过，复用已有 PDF' : '本次跳过，题录已存在'}</p>
           : item.current_state === 'processing' ? <p className="paper-library-import-note">PDF 已保存 · 正文处理中</p> : null)}
       {failed && message && <details className="paper-library-import-error"><summary>{conciseError(message, item.current_state === 'processing_failed' ? undefined : item.source_provider)}</summary><p>{message}</p></details>}
+      {!failed && item.result_kind === 'enrichment' && message && <details className="paper-library-import-note"><summary>已保存 PDF，部分来源查询有提示</summary><p>{message}</p></details>}
     </li>;
   };
   const renderOperation = (operation: ImportOperation) => {

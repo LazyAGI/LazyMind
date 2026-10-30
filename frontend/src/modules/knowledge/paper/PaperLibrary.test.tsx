@@ -100,6 +100,13 @@ async function closePopover(name: string) {
     await waitFor(() => expect(screen.queryByRole("dialog", { name })).not.toBeInTheDocument());
 }
 describe('paper library behavior', () => {
+    it('does not open a folder menu when clicking the drag handle', async () => {
+        await renderLibrary();
+        const handle = screen.getAllByRole('button', { name: /^拖动 / })[0];
+        fireEvent.click(handle);
+        expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+        expect(screen.queryByRole('dialog', { name: '文献详情' })).not.toBeInTheDocument();
+    });
     it('opens paper details from the right list while the directory contains only folders', async () => {
         await renderLibrary();
         const tree = browse().getByRole('tree', { name: '论文目录' });

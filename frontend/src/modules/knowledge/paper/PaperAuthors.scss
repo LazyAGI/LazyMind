@@ -1,0 +1,12 @@
+.paper-authors {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: bottom;
+  gap: 5px;
+  .paper-authors-leading, .paper-authors-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .paper-authors-last { flex: 0 1 auto; max-width: 40%; }
+  .paper-authors-leading { flex: 0 1 auto; }
+  .paper-authors-omission { flex: none; padding: 0 4px; border-radius: 4px; background: #eef1f6; color: #66768d; letter-spacing: 1px; line-height: 1.2; }
+}

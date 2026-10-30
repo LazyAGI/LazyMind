@@ -1,3 +1,4 @@
+import PaperAuthors from './PaperAuthors';
 import { usePaperImports, PaperImportDialog } from './usePaperImports';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ChangeEvent } from "react";
 import { Alert, Button, Dropdown, Input, Modal, Popover, Pagination, Select, Spin, Tooltip, message } from "antd";
@@ -510,7 +511,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         ...notifications,
     ];
     return (<DndContext sensors={dragSensors} collisionDetection={pointerWithin} accessibility={{
-            screenReaderInstructions: { draggable: "拖到左侧文件夹以移动文献，也可按回车选择目标文件夹。" },
+            screenReaderInstructions: { draggable: "拖到左侧文件夹以移动文献；键盘操作请使用文献操作菜单中的移动到。" },
             announcements: {
                 onDragStart: () => "已开始拖动文献，请移到左侧文件夹。",
                 onDragOver: ({ over }: DragOverEvent) => over ? `目标文件夹：${data.folders.find((folder) => folder.id === over.id)?.name || ""}` : "请移到左侧文件夹。",
@@ -615,7 +616,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
           {!initialLoading && pagePapers.map((item) => (<tr className={`paper-library-row ${selected.includes(item.id) ? "selected" : ""} ${draggedIds.includes(item.id) ? "is-dragging" : ""}`} key={item.id}>
               <td className="paper-library-controls-cell"><div className="paper-library-row-controls">
               <input type="checkbox" className="paper-library-checkbox" aria-label={`选择 ${item.metadata.title}`} checked={selected.includes(item.id)} onChange={(event: ChangeEvent<HTMLInputElement>) => setSelected(event.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))}/>
-              <PaperDragHandle disabled={disabled} item={item} folders={folderOptions} onMove={(folder) => placePapers(selected.includes(item.id) ? selected : [item.id], folder)}/>
+              <PaperDragHandle disabled={disabled} item={item}/>
               </div></td>
               <td className="paper-library-main">
                   <div className="paper-library-title-line"><h2 className="paper-library-title">{(() => {
@@ -628,7 +629,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                     {renderImportance(item)}
 
                   </div>
-                <p className="paper-library-cite">{item.metadata.authors.length ? item.metadata.authors.join("、") : "作者待补全"}</p>
+                <p className="paper-library-cite"><PaperAuthors authors={item.metadata.authors} empty="作者待补全" /></p>
                 {(() => {
                 const identity = libraryIndex.identities.get(item.id);
                 const status = identity?.state.status;
@@ -703,17 +704,12 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     <DragOverlay dropAnimation={null}>{draggedIds.length > 0 && <div className="paper-library-drag-preview"><HolderOutlined /><span><strong>移动 {draggedIds.length} 篇文献</strong><small>{data.papers.find(p => p.id === draggedIds[0])?.metadata.title}</small></span></div>}</DragOverlay>
     </DndContext>);
 }
-function PaperDragHandle({ item, folders, onMove, disabled }: {
+function PaperDragHandle({ item, disabled }: {
     item: PaperRecord;
-    folders: Array<{
-        value: string;
-        label: string;
-    }>;
-    onMove: (folder: string) => void;
     disabled: boolean;
 }) {
     const { attributes, listeners, setNodeRef } = useDraggable({ id: item.id, disabled });
-    return <Dropdown trigger={['click']} menu={{ items: folders.map(f => ({ key: f.value, label: f.label, onClick: () => onMove(f.value) })) }}><button {...attributes} {...listeners} ref={setNodeRef} type="button" className="paper-library-drag-handle" disabled={disabled} aria-label={`拖动 ${item.metadata.title}`} title="拖到左侧文件夹；点击选择目标文件夹"><HolderOutlined /></button></Dropdown>;
+    return <button {...attributes} {...listeners} ref={setNodeRef} type="button" className="paper-library-drag-handle" disabled={disabled} aria-label={`拖动 ${item.metadata.title}`} title="拖到左侧文件夹" onClick={event => event.stopPropagation()}><HolderOutlined /></button>;
 }
 function FolderButton({ name, icon, count, current, onClick }: {
     name: string;
