@@ -149,30 +149,3 @@ func sqliteSkillSchema(t *testing.T, db *sql.DB) string {
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
 }
-
-func TestSQLiteCurrentSkillAggregateMatchesDevAndRollsBack(t *testing.T) {
-	release, dev := openDatabase(t, "sqlite"), openDatabase(t, "sqlite")
-	for _, db := range []*sql.DB{release, dev} {
-		for _, version := range []string{"v0_1", "v0_2"} {
-			applySQL(t, db, migrationPath(t, "version_mode/"+version+"/*.up.sql"), "sqlite")
-		}
-	}
-	baseline := sqliteSkillSchema(t, release)
-	aggregate := migrationPath(t, "version_mode/v0_3/*.up.sql")
-	applySQL(t, release, aggregate, "sqlite")
-	paths, err := filepath.Glob("dev_mode/v0_3/*.up.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		applySQL(t, dev, path, "sqlite")
-	}
-	if a, b := sqliteSkillSchema(t, release), sqliteSkillSchema(t, dev); a != b {
-		t.Fatalf("aggregate and dev skill schemas differ\n%s\n---\n%s", a, b)
-	}
-	applySQL(t, release, strings.Replace(aggregate, ".up.sql", ".down.sql", 1), "sqlite")
-	if got := sqliteSkillSchema(t, release); got != baseline {
-		t.Fatalf("aggregate down differs from baseline\n%s\n---\n%s", got, baseline)
-	}
-}

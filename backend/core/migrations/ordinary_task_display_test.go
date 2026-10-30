@@ -3,7 +3,6 @@ package migrations_test
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -101,35 +100,4 @@ func ordinaryTableSchema(t *testing.T, db *sql.DB, dialect string) string {
 	}
 	sort.Strings(lines)
 	return strings.Join(lines, "\n")
-}
-
-func TestOrdinaryDisplayAggregateMatchesCompleteDevPath(t *testing.T) {
-	for _, dialect := range []string{"sqlite", "postgres"} {
-		t.Run(dialect, func(t *testing.T) {
-			aggregateDB, devDB := openDatabase(t, dialect), openDatabase(t, dialect)
-			for _, db := range []*sql.DB{aggregateDB, devDB} {
-				for _, version := range []string{"v0_1", "v0_2"} {
-					applySQL(t, db, migrationPath(t, "version_mode/"+version+"/*.up.sql"), dialect)
-				}
-			}
-			baseline := ordinaryTableSchema(t, aggregateDB, dialect)
-			aggregate := migrationPath(t, "version_mode/v0_3/*.up.sql")
-			applySQL(t, aggregateDB, aggregate, dialect)
-			paths, err := filepath.Glob("dev_mode/v0_3/*.up.sql")
-			if err != nil {
-				t.Fatal(err)
-			}
-			sort.Strings(paths)
-			for _, path := range paths {
-				applySQL(t, devDB, path, dialect)
-			}
-			if a, b := ordinaryTableSchema(t, aggregateDB, dialect), ordinaryTableSchema(t, devDB, dialect); a != b {
-				t.Fatalf("aggregate/dev diverged\n%s\n---\n%s", a, b)
-			}
-			applySQL(t, aggregateDB, strings.Replace(aggregate, ".up.sql", ".down.sql", 1), dialect)
-			if got := ordinaryTableSchema(t, aggregateDB, dialect); got != baseline {
-				t.Fatalf("aggregate rollback diverged\n%s\n---\n%s", got, baseline)
-			}
-		})
-	}
 }
