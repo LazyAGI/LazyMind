@@ -220,12 +220,7 @@ def _stub_prepare_workspace(monkeypatch, tmp_path, *, user_input, history_files_
             'representation': 'markdown',
         }
 
-    def load_local_document(filename):
-        captured['local_load'] = filename
-        return 'source.md'
-
     monkeypatch.setattr(tools, 'writer_load_document', load_document)
-    monkeypatch.setattr(tools, 'writer_load_local_document', load_local_document)
     monkeypatch.setattr(tools, 'writer_build_writing_task', lambda **_kwargs: 'task.json')
     monkeypatch.setattr(
         tools,
@@ -236,9 +231,23 @@ def _stub_prepare_workspace(monkeypatch, tmp_path, *, user_input, history_files_
             'warnings': [],
         },
     )
-    monkeypatch.setattr(tools, 'writer_profile_resources', lambda **_kwargs: 'resources.json')
-    monkeypatch.setattr(tools, 'writer_create_writing_context', lambda **_kwargs: 'context.json')
-    monkeypatch.setattr(tools, '_save_draft_workspace_artifacts', lambda _result: [])
+
+    def profile_resources(**kwargs):
+        captured['profile_inputs'] = kwargs
+        return 'resources.json'
+
+    monkeypatch.setattr(tools, 'writer_profile_resources', profile_resources)
+
+    def create_context(**kwargs):
+        captured['context_inputs'] = kwargs
+        return 'context.json'
+
+    def save_artifacts(result):
+        captured['published'] = dict(result)
+        return []
+
+    monkeypatch.setattr(tools, 'writer_create_writing_context', create_context)
+    monkeypatch.setattr(tools, '_save_draft_workspace_artifacts', save_artifacts)
     return tools, captured
 
 
@@ -279,7 +288,10 @@ def test_prepare_rejects_real_uploaded_document_alongside_provider_locator(
         )
 
 
-def test_prepare_keeps_local_source_without_provider_locator(monkeypatch, tmp_path):
+@pytest.mark.parametrize('filename', ['note.md', ''])
+def test_prepare_keeps_local_source_without_provider_locator(monkeypatch, tmp_path, filename):
+    original = tmp_path / 'note.md'
+    original.write_text('# Original\n\nKeep this evidence.', encoding='utf-8')
     tools, captured = _stub_prepare_workspace(
         monkeypatch,
         tmp_path,
@@ -289,10 +301,18 @@ def test_prepare_keeps_local_source_without_provider_locator(monkeypatch, tmp_pa
 
     tools.writer_prepare_workspace(
         operation='revise_document',
-        source_filename='note.md',
+        source_filename=filename,
     )
 
-    assert captured['local_load'] == 'note.md'
+    assert captured['profile_inputs']['source_uri'] == str(original)
+    source = captured['published']['source_document']
+    assert source != str(original)
+    assert captured['profile_inputs']['source_document_path'] == source
+    assert captured['context_inputs']['source_document_path'] == source
+    assert tools._read_json_file(source) == tools._DOCUMENT_EXECUTION.normalize_writer_document(original.read_text())
+    assert captured['context_inputs']['resource_profiles_path'] == 'resources.json'
+    assert captured['published']['writing_context'] == 'context.json'
+    assert 'resource_profiles' not in captured['published']
     assert 'provider_load' not in captured
 
 
@@ -322,7 +342,7 @@ def test_write_document_revision_emits_markdown_draft_stream(monkeypatch, tmp_pa
     base_document_path = tmp_path / 'draft.md'
     base_document_path.write_text('# Original\n', encoding='utf-8')
     writing_context_path = tmp_path / 'context.json'
-    writing_context_path.write_text('{}', encoding='utf-8')
+    writing_context_path.write_text('{"context_id":"ctx"}', encoding='utf-8')
     revision_set_path = tmp_path / 'revisions.json'
     revision_set_path.write_text('{}', encoding='utf-8')
 
@@ -373,11 +393,11 @@ def test_markdown_draft_blocks_do_not_pass_resolved_media(monkeypatch, tmp_path)
         document_execution, '_WriterCreateToolkit', FakeWriterCreateToolkit,
     )
     writing_task_path = tmp_path / 'writing_task.json'
-    writing_task_path.write_text('{}', encoding='utf-8')
+    writing_task_path.write_text('{"query":"Write","task_type":"write"}', encoding='utf-8')
     section_instructions_path = tmp_path / 'section_instructions.json'
     section_instructions_path.write_text('{}', encoding='utf-8')
     writing_context_path = tmp_path / 'writing_context.json'
-    writing_context_path.write_text('{}', encoding='utf-8')
+    writing_context_path.write_text('{"context_id":"ctx"}', encoding='utf-8')
     visual_plan_path = tmp_path / 'visual_plan.json'
     visual_plan_path.write_text('{"instructions": []}', encoding='utf-8')
 
@@ -443,7 +463,7 @@ def test_wrapped_idle_timeout_restarts_section_preview_and_retries(monkeypatch):
 
     emitter = writer.DraftMarkdownStreamEventEmitter(emitted.append)
     result = json.loads(writer.WriterWritingCapabilities().stream_draft_blocks_markdown(
-        writing_task_json='{}',
+        writing_task_json='{"query":"Write","task_type":"write"}',
         section_instructions_json=json.dumps({
             'instructions': [{
                 'instruction_id': 'section-1',
@@ -452,7 +472,7 @@ def test_wrapped_idle_timeout_restarts_section_preview_and_retries(monkeypatch):
                 'section_goal': '写作',
             }],
         }),
-        writing_context_json='{}',
+        writing_context_json='{"context_id":"ctx"}',
         on_delta=emitter.feed,
         on_preview_restart=emitter.restart,
     ))
@@ -642,7 +662,7 @@ def test_markdown_revision_fills_resolved_media_placeholder(monkeypatch, tmp_pat
     base_document_path = tmp_path / 'draft.md'
     base_document_path.write_text('# Original\n', encoding='utf-8')
     writing_context_path = tmp_path / 'context.json'
-    writing_context_path.write_text('{}', encoding='utf-8')
+    writing_context_path.write_text('{"context_id":"ctx"}', encoding='utf-8')
     revision_set_path = tmp_path / 'revisions.json'
     revision_set_path.write_text('{}', encoding='utf-8')
     visual_path = tmp_path / 'visual.png'
@@ -706,7 +726,8 @@ def test_markdown_no_image_request_skips_visual_planning(monkeypatch, tmp_path):
     assert result['visual_plan']['instructions'] == []
 
 
-def test_markdown_rewrite_no_image_request_skips_visual_planning(monkeypatch, tmp_path):
+@pytest.mark.parametrize('representation', ['markdown', 'ir'])
+def test_rewrite_no_image_request_skips_visual_planning(monkeypatch, tmp_path, representation):
     from lazymind.document_tools import writing as writer
 
     calls = []
@@ -722,7 +743,7 @@ def test_markdown_rewrite_no_image_request_skips_visual_planning(monkeypatch, tm
                     'instruction_set_id': 'instructions-1',
                     'instructions': [],
                     'meta': {
-                        'representation': 'markdown',
+                        'representation': representation,
                         'document_title': 'Rewritten title',
                     },
                 },
@@ -735,6 +756,11 @@ def test_markdown_rewrite_no_image_request_skips_visual_planning(monkeypatch, tm
 
     monkeypatch.setattr(writer, 'WriterPlanningTools', FakePlanningTools)
     monkeypatch.setattr(writer, 'AutoModel', lambda **_kwargs: object())
+    monkeypatch.setattr(writer, '_temp_root', lambda: tmp_path / 'source')
+    source = '# 原文\n\n正文。\n' if representation == 'markdown' else json.dumps({
+        'document_id': 'source', 'stage': 'draft', 'title': '原文',
+        'blocks': [{'node_id': 'body', 'type': 'paragraph', 'content': '正文。'}],
+    })
 
     result = json.loads(
         writer.WriterWritingCapabilities().generate_rewrite_section_instructions(
@@ -743,7 +769,7 @@ def test_markdown_rewrite_no_image_request_skips_visual_planning(monkeypatch, tm
             'query': '请重写全文，不要图片',
             'task_type': 'write',
         }),
-        source_document_json='# 原文\n\n正文。\n',
+        source_document_json=source,
         writing_context_json=json.dumps({'context_id': 'context-1'}),
         )
     )
@@ -784,7 +810,9 @@ def test_load_local_lmd_removes_cloud_binding(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(runtime, 'require_context', lambda: context)
 
-    loaded = runtime._read_json_file(tools.writer_load_local_document('bound.lmd'))
+    result = tools.writer_load_local_document('bound.lmd')
+    assert result['source_uri'] == str(source)
+    loaded = runtime._read_json_file(result['source_document'])
 
     assert loaded['document_id'] == 'local-doc'
     assert not loaded.get('provider_binding')
@@ -821,9 +849,9 @@ def test_draft_workspace_revise_uses_writing_task_representation(
     })
     writing_task = write_json(
         'writing_task.json',
-        {'output': {'representation': representation}},
+        {'query': instruction, 'task_type': 'revise', 'output': {'representation': representation}},
     )
-    writing_context = write_json('writing_context.json', {})
+    writing_context = write_json('writing_context.json', {'context_id': 'ctx'})
     source_document = write_json('source_document.json', {})
     target_document = write_json('target_document.json', {})
     modify_plan = write_json('modify_plan.json', {'instructions': []})
@@ -869,7 +897,9 @@ def test_draft_workspace_revise_uses_writing_task_representation(
         lambda _fingerprint: (state, tmp_path / 'checkpoint.json'),
     )
     monkeypatch.setattr(runtime, '_persist_draft_workspace_state', lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runtime, '_save_draft_workspace_artifacts', lambda _result: ['draft_document'])
+    monkeypatch.setattr(runtime, '_save_draft_delivery', lambda state, path: (
+        runtime._draft_workspace_completion(state['result'], ['draft_document'])
+    ))
     monkeypatch.setattr(
         runtime,
         'writer_update_writing_context',
@@ -959,9 +989,10 @@ def test_outline_stream_records_timing_trace_without_changing_preview(monkeypatc
 ])
 def test_whole_document_generation_boundary(monkeypatch, tmp_path, target, maximum, whole):
     from lazymind.document_tools import execution
-    task = {'task_type': 'write', 'output': {'representation': 'markdown'},
+    task = {'query': 'Write', 'task_type': 'write', 'output': {'representation': 'markdown'},
             'constraints': {'target_chars': target, 'max_chars': maximum}}
-    monkeypatch.setattr(execution, '_read_json_file', lambda path: task)
+    monkeypatch.setattr(execution, '_read_json_file',
+                        lambda path: {'context_id': 'ctx'} if path == 'context' else task)
     monkeypatch.setattr(execution, '_read_json_string', lambda path: '{}')
     monkeypatch.setattr(execution, '_workspace_root', lambda: tmp_path)
     monkeypatch.setattr(execution, '_run_root', lambda name: tmp_path / name)
@@ -1039,3 +1070,114 @@ def test_resource_profiles_skip_preserved_images_but_keep_reference_material(mon
     ]
     writer.WriterWritingCapabilities().profile_resources('{}', '', json.dumps(resources))
     assert [item.resource_id for item in captured['input_resources']] == ['upload', 'short-reference', 'source']
+
+
+def test_context_fingerprint_uses_effective_content_not_path_or_storage_metadata(tmp_path):
+    tools = _load_tools_module()
+    first = tmp_path / 'context-a.json'
+    second = tmp_path / 'context-b.json'
+    first.write_text(json.dumps({'context_id': 'a', 'doc_id': 'doc-a', 'meta': {'source': 'prepare'}}))
+    second.write_text(json.dumps({'schema': 'context', 'meta': {'created_at': 'later'}, 'data': {
+        'context_id': 'b', 'doc_id': 'doc-b', 'meta': {'context_update_warning': 'diagnostic'},
+    }}))
+    expected = tools._state_workspace_fingerprint(writing_context_path=str(first))
+    assert tools._state_workspace_fingerprint(writing_context_path=str(second)) == expected
+    second.write_text(json.dumps({'context_id': 'b', 'style_profile': {'tone': 'formal'}}))
+    assert tools._state_workspace_fingerprint(writing_context_path=str(second)) != expected
+
+
+def test_task_fingerprint_ignores_tracking_but_preserves_revision_identity(tmp_path):
+    tools = _load_tools_module()
+    first = tmp_path / 'task-a.json'
+    second = tmp_path / 'task-b.json'
+    task = {'query': 'Write a report', 'task_type': 'write', 'task_id': 'a'}
+    first.write_text(json.dumps(task))
+    second.write_text(json.dumps({**task, 'task_id': 'b', 'meta': {'source': 'retry'}, 'constraints': {}}))
+    expected = tools._state_workspace_fingerprint(writing_task_path=str(first))
+    assert tools._state_workspace_fingerprint(writing_task_path=str(second)) == expected
+    second.write_text(json.dumps({**task, 'constraints': {'max_chars': 100}}))
+    assert tools._state_workspace_fingerprint(writing_task_path=str(second)) != expected
+    first.write_text(json.dumps({**task, 'task_type': 'revise'}))
+    second.write_text(json.dumps({**task, 'task_type': 'revise', 'task_id': 'b'}))
+    assert tools._state_workspace_fingerprint(writing_task_path=str(first)) != tools._state_workspace_fingerprint(
+        writing_task_path=str(second))
+
+
+@pytest.mark.parametrize(('source_case', 'bound_resources'), [
+    ('explicit', False), ('explicit', True),
+    ('automatic', False), ('automatic', True),
+    ('changed', False), ('unidentified', False), ('missing_resource', False),
+])
+def test_profile_selected_attachment_once_without_losing_other_materials(
+    monkeypatch, tmp_path, source_case, bound_resources,
+):
+    from lazymind.document_tools import writing as writer
+    from lazyllm.tools.writer.data_models.resource import ResourceProfile
+
+    tools = _load_tools_module()
+    original = tmp_path / 'original.md'
+    original.write_text('# Original\n\nRequired evidence.\n', encoding='utf-8')
+    reference = tmp_path / ('reference.md' if source_case == 'explicit' else 'reference.csv')
+    reference.write_text(original.read_text() if source_case == 'explicit' else 'fact\nOther evidence.\n',
+                         encoding='utf-8')
+    task = tmp_path / 'task.json'
+    task.write_text(json.dumps({'query': 'Revise using both materials', 'task_type': 'write'}))
+    context = SimpleNamespace(workspace_path=str(tmp_path), params={
+        'history_files_per_turn': {'1': [str(original), str(reference)]},
+    })
+    monkeypatch.setattr(tools, 'require_context', lambda: context)
+    loaded = tools.writer_load_local_document(original.name if source_case == 'explicit' else '')
+    source = Path(loaded['source_document'])
+    assert loaded['source_uri'] == str(original)
+    if source_case == 'changed':
+        source.write_text('# Changed\n\nNew evidence.', encoding='utf-8')
+    if source_case == 'missing_resource':
+        context.params['history_files_per_turn'] = {'1': [str(reference)]}
+    monkeypatch.setattr(writer, 'AutoModel', lambda **kwargs: object())
+    calls = []
+
+    def analyze(self, prompt, schema):
+        calls.append(prompt)
+        return ResourceProfile(resource_role='background', summary='Evidence', key_facts=['Keep evidence'])
+
+    monkeypatch.setattr(writer.WriterResourceTools, '_call_llm_structured', analyze)
+    resources = tmp_path / 'resources.json'
+    resources.write_text(json.dumps([
+        {'resource_id': path.name, 'resource_type': 'file', 'uri': str(path)}
+        for path in ([reference] if source_case == 'missing_resource' else [original, reference])
+    ]))
+    result = tools.writer_profile_resources(
+        writing_task_path=str(task), user_input='Revise using both materials',
+        profile_input_resources_path=str(resources) if bound_resources else '',
+        source_document_path=str(source),
+        source_uri=loaded['source_uri'] if source_case != 'unidentified' else '',
+    )
+    profiles = tools._read_json_file(result)
+    expected_ids = [reference.name] if source_case == 'missing_resource' else [original.name, reference.name]
+    if source_case not in {'explicit', 'automatic'}:
+        expected_ids.append('source_document')
+    assert [profile['resource_id'] for profile in profiles] == expected_ids
+    assert len(calls) == len(expected_ids)
+    assert all(profile['key_facts'] == ['Keep evidence'] for profile in profiles)
+    assert original.exists() and source.exists()
+
+
+def test_quality_adapter_keeps_requirements_without_persisting_context_query(tmp_path):
+    from unittest.mock import patch
+    from lazyllm.tools.writer.tools.quality_tools import WriterQualityTools
+    from lazymind.document_tools.writing import WriterWritingCapabilities
+
+    context = {'context_id': 'ctx'}
+    task = {'query': 'CURRENT_REQUEST', 'task_type': 'write'}
+    with patch('lazymind.document_tools.writing._temp_root', return_value=tmp_path), \
+            patch('lazymind.document_tools.writing.AutoModel', return_value=None), \
+            patch.object(WriterQualityTools, '_call_llm_structured', side_effect=RuntimeError('captured')) as model:
+        with pytest.raises(RuntimeError, match='captured'):
+            WriterWritingCapabilities().check_consistency(
+                '# Draft\n\nBody', json.dumps(context), json.dumps(task),
+            )
+    prompt = model.call_args.args[0]
+    assert prompt.count('CURRENT_REQUEST') == 1
+    saved = json.loads((tmp_path / 'writing_context.json').read_text())['data']
+    assert 'query' not in saved
+    assert saved['document_summary'] is None

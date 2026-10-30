@@ -8,6 +8,7 @@ import re
 import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import CancelledError, wait, FIRST_COMPLETED
 from pathlib import Path, PureWindowsPath
 from queue import Empty, Queue
 from threading import Event, RLock
@@ -27,6 +28,7 @@ from lazyllm.tools.writer.data_models import (
     WriterBlock,
     WriterDocument,
     WritingTask,
+    WritingContext,
 )
 from lazyllm.tools.writer.tools import (
     WriterContextTools,
@@ -60,6 +62,7 @@ from .artifacts import (
     _result_data,
     _set_document_editable,
     _temp_root,
+    cleanup_writer_temporary,
     _write_document_input,
     _write_input_artifact,
     writer_schema,
@@ -609,17 +612,62 @@ def stream_whole_document(
     writing_task_path: str, writing_context_path: str, section_instructions_path: str = '',
     *, artifact_store: str, visual_plan_path: str = '', media_assets_path: str = '',
     on_delta: Callable[[str], None] | None = None,
+    defer_media: bool = False,
 ) -> Any:
-    drafting = WriterDraftingTools(llm=AutoModel(model='llm'), artifact_store=artifact_store)
-    with drafting.stream_whole_document(
-        task=writing_task_path, context=writing_context_path,
-        instructions=section_instructions_path or None,
-        visual_plan=visual_plan_path or None, media_assets=media_assets_path or None,
-    ) as stream:
-        for delta in stream:
-            if on_delta is not None:
-                on_delta(str(delta))
-        return _primary_data(stream.result())
+    from lazyllm.tracing import (
+        finish_span, get_trace_context, set_span_attributes, set_span_error, start_span,
+    )
+
+    span = start_span(span_kind='callable', target=stream_whole_document, args=(), kwargs={})
+    trace_context = get_trace_context()
+    started = time.monotonic()
+    stream = None
+    status = 'error'
+    try:
+        drafting = WriterDraftingTools(llm=AutoModel(model='llm'), artifact_store=artifact_store)
+        with drafting.stream_whole_document(
+            task=writing_task_path, context=writing_context_path,
+            instructions=section_instructions_path or None,
+            visual_plan=visual_plan_path or None, media_assets=media_assets_path or None,
+            **({'defer_media': True} if defer_media else {}),
+        ) as stream:
+            for delta in stream:
+                if on_delta is not None:
+                    on_delta(str(delta))
+            result = _primary_data(stream.result())
+        status = 'completed'
+        return result
+    except BaseException as exc:
+        set_span_error(span, exc)
+        raise
+    finally:
+        timings = stream.timings if stream is not None else {}
+
+        def interval(end, begin):
+            values = timings.get(end), timings.get(begin)
+            return round(max(0, values[0] - values[1]), 3) if all(
+                value is not None for value in values
+            ) else None
+
+        record = {
+            'phase': 'whole_document', 'status': status,
+            'trace_id': trace_context.trace_id,
+            **timings,
+            'queue_wait_ms': timings.get('call_started_ms'),
+            'response_wait_ms': interval('first_response_ms', 'call_started_ms'),
+            'response_to_generation_end_ms': interval('generation_finished_ms', 'first_response_ms'),
+            'visible_wait_ms': interval('first_visible_ms', 'call_started_ms'),
+            'last_event_to_generation_end_ms': interval('generation_finished_ms', 'last_event_ms'),
+            'after_generation_ms': interval('observed_elapsed_ms', 'generation_finished_ms'),
+            'total_ms': round((time.monotonic() - started) * 1000, 3),
+        }
+        # This boundary includes stream finalization and source artifact saving;
+        # publication and frontend rendering happen downstream.
+        set_span_attributes(span, {
+            f'writer.whole_document.{key}': value for key, value in record.items() if value is not None
+        })
+        LOG.info('[WriterTiming] ' + json.dumps(record, ensure_ascii=False))
+        finish_span(span)
 
 
 def finalize_short_document(document: Any, resolved_media_assets: Any = None) -> Any:
@@ -821,9 +869,12 @@ def acquire_web_search_resources(request: Mapping[str, Any]) -> list[dict]:
 def acquire_visual_media(
     request: Mapping[str, Any],
     acquirers: Mapping[str, Callable[[Mapping[str, Any]], list[dict]]],
+    *, stop_event: Event | None = None,
 ) -> Iterator[dict]:
     strategies = list(request['strategies'])
     for strategy in strategies:
+        if stop_event is not None and stop_event.is_set():
+            return
         acquirer = acquirers.get(strategy)
         if acquirer is None:
             continue
@@ -895,136 +946,198 @@ def resolve_visual_media(
     media_store: str,
     strict_required: bool = False,
     allowed_strategies: list[str] | None = None,
+    checkpoint_path: str = '',
+    stop_event: Event | None = None,
 ) -> dict[str, Any]:
     """Resolve and materialize visual requirements without Workflow state."""
-    from lazymind.model_config import is_model_role_available
+    from lazymind.chat.engine.agent_runtime.telemetry import writer_stage_timing
 
-    visual_policy = (media_assets.get('meta') or {}).get('visual_policy') or {}
-    allow_generation = visual_policy.get('allow_image_generation') is not False
-    require_visuals = visual_policy.get('require_visuals') is True or visual_policy.get(
-        'require_input_image_reuse'
-    ) is True
-    acquirers: dict[str, Callable[[Mapping[str, Any]], list[dict]]] = {
-        'web_search': acquire_web_search_resources
-    }
-    if allow_generation and is_model_role_available('image_generator'):
-        acquirers['image_generation'] = acquire_generated_image
-    toolkit = WriterWritingCapabilities()
-    visual_plan_json = _json_dumps(visual_plan)
-    media_assets_json = _json_dumps(media_assets)
-    try:
-        matched = _json_loads(
-            toolkit.resolve_visual_needs(
-                visual_plan_json=visual_plan_json,
-                media_assets_json=media_assets_json,
-                allowed_strategies_json=(
-                    _json_dumps(allowed_strategies) if allowed_strategies else ''
-                ),
-            ),
-            {},
-        )
-    except Exception as exc:
-        if strict_required:
-            raise
-        matched = {
-            'media_assets': media_assets,
-            'acquisition_requests': [],
-            'warnings': [
-                f'Visual media resolution failed: {type(exc).__name__}: {exc}'
-            ],
+    with writer_stage_timing('visual_media'):
+        from lazymind.model_config import is_model_role_available
+
+        visual_policy = (media_assets.get('meta') or {}).get('visual_policy') or {}
+        allow_generation = visual_policy.get('allow_image_generation') is not False
+        require_visuals = visual_policy.get('require_visuals') is True or visual_policy.get(
+            'require_input_image_reuse'
+        ) is True
+        acquirers: dict[str, Callable[[Mapping[str, Any]], list[dict]]] = {
+            'web_search': acquire_web_search_resources
         }
-    warnings = list(matched.get('warnings') or [])
-    resolved_library = matched.get('media_assets') or {}
-    acquired_by_purpose: dict[tuple[str, str, tuple[str, ...]], dict] = {}
-    for request in matched.get('acquisition_requests') or []:
-        strategies = list(request.get('strategies') or [])
-        if (
-            allow_generation
-            and not any(strategy in acquirers for strategy in strategies)
-            and 'image_generation' in acquirers
-        ):
-            request = {**request, 'strategies': ['image_generation']}
-        instruction_id = str(request['instruction_id'])
-        key = (
-            str(request.get('visual_type') or ''),
-            ' '.join(str(request.get('purpose') or '').split()).casefold(),
-            tuple(request['strategies']),
-        )
-        cached = acquired_by_purpose.get(key)
-        groups = []
-        if cached is not None:
-            groups.append((True, iter((cached,))))
-        groups.append((False, acquire_visual_media(request, acquirers)))
-        resolved = False
-        for from_cache, candidates in groups:
-            for resource in candidates:
-                try:
-                    outcome = _json_loads(
-                        toolkit.materialize_acquired_media(
-                            visual_plan_json=visual_plan_json,
-                            media_assets_json=_json_dumps(resolved_library),
-                            acquired_resources_json=_json_dumps(
-                                {instruction_id: resource}
-                            ),
-                            media_store=media_store,
-                        ),
-                        {},
-                    )
-                except Exception as exc:
-                    LOG.warning(
-                        '[Writer] Failed to materialize visual instruction %r: %s',
-                        instruction_id,
-                        type(exc).__name__,
-                    )
-                    continue
-                candidate_library = outcome.get('media_assets') or {}
-                assets = candidate_library.get('assets') or {}
-                bindings = candidate_library.get('visual_need_asset_ids') or {}
-                if not any(
-                    asset_id in assets
-                    and Path(str(assets[asset_id].get('local_path') or '')).is_file()
-                    for asset_id in bindings.get(instruction_id, [])
+        if allow_generation and is_model_role_available('image_generator'):
+            acquirers['image_generation'] = acquire_generated_image
+        stop_event = stop_event or Event()
+        checkpoint = Path(checkpoint_path) if checkpoint_path else None
+        if checkpoint is not None and checkpoint.is_file():
+            media_assets = json.loads(checkpoint.read_text(encoding='utf-8'))
+        toolkit = WriterWritingCapabilities()
+        visual_plan_json = _json_dumps(visual_plan)
+        media_assets_json = _json_dumps(media_assets)
+        try:
+            matched = _json_loads(
+                toolkit.resolve_visual_needs(
+                    visual_plan_json=visual_plan_json,
+                    media_assets_json=media_assets_json,
+                    allowed_strategies_json=(
+                        _json_dumps(allowed_strategies) if allowed_strategies else ''
+                    ),
+                ),
+                {},
+            )
+        except Exception as exc:
+            if strict_required:
+                raise
+            matched = {
+                'media_assets': media_assets,
+                'acquisition_requests': [],
+                'warnings': [
+                    f'Visual media resolution failed: {type(exc).__name__}: {exc}'
+                ],
+            }
+        warnings = list(matched.get('warnings') or [])
+        resolved_library = matched.get('media_assets') or {}
+        initial_library = _json_dumps(resolved_library)
+
+        def acquire_group(requests):
+            group_id = hashlib.sha256(_json_dumps(requests[0]).encode('utf-8')).hexdigest()[:16]
+            group_store = str(Path(media_store) / group_id)
+            resolved_library = json.loads(initial_library)
+            acquired_by_purpose = {}
+            warnings = []
+            toolkit = WriterWritingCapabilities()
+            for request in requests:
+                if stop_event.is_set():
+                    raise CancelledError('Writer media acquisition stopped.')
+                strategies = list(request.get('strategies') or [])
+                if (
+                    allow_generation
+                    and not any(strategy in acquirers for strategy in strategies)
+                    and 'image_generation' in acquirers
                 ):
-                    continue
-                resolved_library = candidate_library
-                acquired_by_purpose[key] = resource
-                resolved = True
-                break
-            if resolved:
-                break
-            if from_cache:
-                acquired_by_purpose.pop(key, None)
-        if not resolved:
-            message = (
-                f'Failed to acquire visual instruction {instruction_id!r}: '
-                'no candidate could be materialized'
-            )
-            if (strict_required or require_visuals) and request.get('required') is True:
-                raise RuntimeError(
-                    f"{message}: {request.get('purpose') or 'current visual requirement'}"
+                    request = {**request, 'strategies': ['image_generation']}
+                instruction_id = str(request['instruction_id'])
+                key = (
+                    str(request.get('visual_type') or ''),
+                    ' '.join(str(request.get('purpose') or '').split()).casefold(),
+                    tuple(request['strategies']),
                 )
-            warnings.append(
-                f"{message} (required={request.get('required', False)})."
+                cached = acquired_by_purpose.get(key)
+                groups = []
+                if cached is not None:
+                    groups.append((True, iter((cached,))))
+                groups.append((False, acquire_visual_media(request, acquirers, stop_event=stop_event)))
+                resolved = False
+                for from_cache, candidates in groups:
+                    for resource in candidates:
+                        if stop_event.is_set():
+                            raise CancelledError('Writer media acquisition stopped.')
+                        try:
+                            outcome = _json_loads(
+                                toolkit.materialize_acquired_media(
+                                    visual_plan_json=visual_plan_json,
+                                    media_assets_json=_json_dumps(resolved_library),
+                                    acquired_resources_json=_json_dumps(
+                                        {instruction_id: resource}
+                                    ),
+                                    media_store=group_store,
+                                ),
+                                {},
+                            )
+                        except Exception as exc:
+                            LOG.warning(
+                                '[Writer] Failed to materialize visual instruction %r: %s',
+                                instruction_id,
+                                type(exc).__name__,
+                            )
+                            continue
+                        candidate_library = outcome.get('media_assets') or {}
+                        assets = candidate_library.get('assets') or {}
+                        bindings = candidate_library.get('visual_need_asset_ids') or {}
+                        if not any(
+                            asset_id in assets
+                            and Path(str(assets[asset_id].get('local_path') or '')).is_file()
+                            for asset_id in bindings.get(instruction_id, [])
+                        ):
+                            continue
+                        resolved_library = candidate_library
+                        acquired_by_purpose[key] = resource
+                        resolved = True
+                        break
+                    if resolved:
+                        break
+                    if from_cache:
+                        acquired_by_purpose.pop(key, None)
+                if not resolved:
+                    message = (
+                        f'Failed to acquire visual instruction {instruction_id!r}: '
+                        'no candidate could be materialized'
+                    )
+                    warnings.append(
+                        f"{message} (required={request.get('required', False)})."
+                    )
+            baseline = json.loads(initial_library)
+            # Return only this group's changes; a stale baseline from another worker
+            # must not overwrite a newly downloaded asset with the same content ID.
+            return {
+                key: {name: value for name, value in (resolved_library.get(key) or {}).items()
+                      if value != (baseline.get(key) or {}).get(name)}
+                for key in ('assets', 'visual_need_asset_ids')
+            }, warnings
+
+        groups = {}
+        for request in matched.get('acquisition_requests') or []:
+            key = (
+                str(request.get('visual_type') or ''),
+                ' '.join(str(request.get('purpose') or '').split()).casefold(),
+                tuple(request.get('strategies') or []),
             )
-    plan_data = visual_plan.get('data', visual_plan) if isinstance(visual_plan, dict) else visual_plan
-    assets = resolved_library.get('assets') or {}
-    bindings = resolved_library.get('visual_need_asset_ids') or {}
-    unresolved = [
-        str(instruction.get('need_id'))
-        for instruction in (plan_data.get('instructions') or [])
-        if (strict_required or require_visuals)
-        and instruction.get('required', False) is True
-        and not any(
-            asset_id in assets
-            and Path(str(assets[asset_id].get('local_path') or '')).is_file()
-            for asset_id in bindings.get(str(instruction.get('need_id')), [])
-        )
-    ]
-    if unresolved:
-        raise RuntimeError(
-            'Failed to resolve required visual media for: ' + ', '.join(unresolved)
-        )
-    return {'media_assets': resolved_library, 'warnings': warnings}
+            groups.setdefault(key, []).append(request)
+        workers = max(1, min(3, len(groups)))
+        executor = ThreadPoolExecutor(max_workers=workers)
+        pending = {executor.submit(acquire_group, requests) for requests in groups.values()}
+        try:
+            while pending:
+                if stop_event.is_set():
+                    raise CancelledError('Writer media acquisition stopped.')
+                done, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+                for future in done:
+                    library, group_warnings = future.result()
+                    if stop_event.is_set():
+                        raise CancelledError('Writer media acquisition stopped.')
+                    resolved_library.setdefault('assets', {}).update(library.get('assets') or {})
+                    resolved_library.setdefault('visual_need_asset_ids', {}).update(
+                        library.get('visual_need_asset_ids') or {},
+                    )
+                    warnings.extend(group_warnings)
+                    if checkpoint is not None:
+                        checkpoint.parent.mkdir(parents=True, exist_ok=True)
+                        temporary = checkpoint.with_suffix('.tmp')
+                        temporary.write_text(_json_dumps(resolved_library), encoding='utf-8')
+                        temporary.replace(checkpoint)
+        finally:
+            if pending:
+                stop_event.set()
+            for future in pending:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+        plan_data = visual_plan.get('data', visual_plan) if isinstance(visual_plan, dict) else visual_plan
+        assets = resolved_library.get('assets') or {}
+        bindings = resolved_library.get('visual_need_asset_ids') or {}
+        unresolved = [
+            str(instruction.get('need_id'))
+            for instruction in (plan_data.get('instructions') or [])
+            if (strict_required or require_visuals)
+            and instruction.get('required', False) is True
+            and not any(
+                asset_id in assets
+                and Path(str(assets[asset_id].get('local_path') or '')).is_file()
+                for asset_id in bindings.get(str(instruction.get('need_id')), [])
+            )
+        ]
+        if unresolved:
+            raise RuntimeError(
+                'Failed to resolve required visual media for: ' + ', '.join(unresolved)
+            )
+        return {'media_assets': resolved_library, 'warnings': warnings}
 
 
 def collect_document_media(
@@ -1496,7 +1609,9 @@ class WriterWritingCapabilities:
             resource_profiles=_json_loads(resource_profiles_json, []),
             document=_document_value(writer_document_json) if writer_document_json else None,
         )
-        return _json_dumps(_primary_data(result))
+        payload = _json_dumps(_primary_data(result))
+        cleanup_writer_temporary(root)
+        return payload
 
     def generate_outline(
         self, writing_task_json: str, writing_context_json: str
@@ -1661,9 +1776,7 @@ class WriterWritingCapabilities:
         document_title = str(instructions.meta.get('document_title') or '').strip()
         visual_plan: dict[str, Any] = VisualPlan().model_dump()
         warnings = []
-        if representation == 'markdown' and _markdown_media_is_explicitly_disabled(
-            _json_loads(writing_task_json, {})
-        ):
+        if not require_input_image_reuse and _markdown_media_is_explicitly_disabled(writing_task):
             return _json_dumps(
                 {
                     'section_instructions': instructions.model_dump(
@@ -1853,12 +1966,7 @@ class WriterWritingCapabilities:
         )
         warnings = []
         visual_plan = VisualPlan().model_dump()
-        if not (
-            isinstance(_document_value(outline_json), str)
-            and _markdown_media_is_explicitly_disabled(
-                _json_loads(writing_task_json, {})
-            )
-        ):
+        if require_input_image_reuse or not _markdown_media_is_explicitly_disabled(writing_task):
             try:
                 visual_result = planning.generate_visual_plan(
                     task=task_path,
@@ -1885,39 +1993,41 @@ class WriterWritingCapabilities:
             visual_plan=visual_plan,
             task=task_path,
         )
-        return _json_dumps(
+        payload = _json_dumps(
             {
                 'section_instructions': _primary_data(result),
                 'visual_plan': visual_plan,
                 'warnings': warnings,
             }
         )
+        cleanup_writer_temporary(root)
+        return payload
 
     def execute_writing_subtasks(
         self,
         outline_json: str,
         writing_context_json: str,
         on_progress: Callable[[list[dict[str, Any]]], None] | None = None,
+        writing_task_json: str = '',
     ) -> str:
+        task = _json_loads(writing_task_json, None)
         root = _temp_root()
-        outline_path = _write_document_input(root, 'outline', outline_json)
-        context_path = _write_input_artifact(
-            root,
-            'writing_context.json',
-            _json_loads(writing_context_json, {}),
-            writer_schema('context.WritingContext'),
-        )
+        outline_path = _document_value(outline_json)
+        context_path = _json_loads(writing_context_json, {})
         result = WriterExecutionTools(
             llm=AutoModel(model='llm'),
             artifact_store=str(root),
         ).execute_writing_subtasks(
             outline=outline_path,
+            task=task,
             context=context_path,
             on_progress=on_progress,
             retrieve=_writer_retrieve,
         )
         completed = _primary_data(result)
-        return completed if isinstance(completed, str) else _json_dumps(completed)
+        payload = completed if isinstance(completed, str) else _json_dumps(completed)
+        cleanup_writer_temporary(root)
+        return payload
 
     def generate_draft_section(
         self,
@@ -2089,6 +2199,7 @@ class WriterWritingCapabilities:
         visual_plan_json: str = '',
         media_assets_json: str = '',
         checkpoint_dir: str = '',
+        defer_media: bool = False,
     ) -> str:
         """Generate IR sections while exposing their Markdown preview deltas."""
         return self._stream_draft_blocks(
@@ -2103,6 +2214,7 @@ class WriterWritingCapabilities:
             visual_plan_json=visual_plan_json,
             media_assets_json=media_assets_json,
             checkpoint_dir=checkpoint_dir,
+            defer_media=defer_media,
         )
 
     def _stream_draft_blocks(
@@ -2119,6 +2231,7 @@ class WriterWritingCapabilities:
         visual_plan_json: str = '',
         media_assets_json: str = '',
         checkpoint_dir: str = '',
+        defer_media: bool = False,
     ) -> str:
         instructions_data = _json_loads(section_instructions_json, {})
         instructions = (
@@ -2251,11 +2364,14 @@ class WriterWritingCapabilities:
         def checkpoint_path(index: int, instruction_data: dict[str, Any]) -> Path:
             payload = json.dumps(
                 {
-                    'version': 1,
+                    'version': 2,
                     'representation': representation,
-                    'task': _json_loads(writing_task_json, {}),
+                    **({'defer_media': True} if defer_media else {}),
+                    'task': WritingTask.model_validate(_json_loads(writing_task_json, {})).prompt_data(),
                     'instruction': instruction_data,
-                    'context': _json_loads(writing_context_json, {}),
+                    'context': WritingContext.model_validate(
+                        _json_loads(writing_context_json, {}),
+                    ).prompt_data(),
                     'visual_plan': _json_loads(visual_plan_json, {}),
                     'media_assets': _json_loads(media_assets_json, {}),
                 },
@@ -2396,6 +2512,8 @@ class WriterWritingCapabilities:
                             stream_kwargs['visual_plan'] = visual_plan_path
                         if media_assets_path is not None:
                             stream_kwargs['media_assets'] = media_assets_path
+                        if representation == 'ir' and defer_media:
+                            stream_kwargs['defer_media'] = True
                         stream_kwargs['idle_timeout'] = (
                             first_section_idle_timeout
                             if index == 0 and attempt == 1
@@ -2745,12 +2863,16 @@ class WriterWritingCapabilities:
             artifacts=content_path,
             context=context_path,
         )
-        return _json_dumps(_primary_data(result))
+        payload = _json_dumps(_primary_data(result))
+        cleanup_writer_temporary(root)
+        return payload
 
     def check_consistency(
-        self, draft_document_json: str, writing_context_json: str
+        self, draft_document_json: str, writing_context_json: str,
+        writing_task_json: str = '',
     ) -> str:
         """Validate an IR or Markdown draft document."""
+        task = _json_loads(writing_task_json, None)
         root = _temp_root()
         draft_path = _write_document_input(root, 'draft_document', draft_document_json)
         context_path = _write_input_artifact(
@@ -2762,7 +2884,7 @@ class WriterWritingCapabilities:
         result = WriterQualityTools(
             llm=AutoModel(model='llm'),
             artifact_store=str(root),
-        ).validate_draft_document(draft_document=draft_path, context=context_path)
+        ).validate_draft_document(draft_document=draft_path, context=context_path, task=task)
         return _json_dumps(
             {
                 'review_report': _primary_data(result),

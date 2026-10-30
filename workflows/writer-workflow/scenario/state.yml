@@ -91,8 +91,6 @@ steps:
       - material: writer_command
       - material: writing_task
       - material: media_assets
-      - material: resource_profiles
-        required: false
       - material: writing_context
       - material: source_document
         required: false
@@ -137,8 +135,6 @@ steps:
       - material: writing_context
         required: true
       - material: source_document
-        required: false
-      - material: resource_profiles
         required: false
     outputs:
       - material: outline_document
@@ -193,15 +189,17 @@ steps:
     outputs:
       - material: flat_draft_document
       - material: short_writing_plan
+        required: false
       - material: flat_visual_plan
+        required: false
       - material: flat_resolved_media_assets
         required: false
     acceptance_criteria: |
-      flat_draft_document, short_writing_plan, and
-      flat_visual_plan are present. flat_draft_document is Markdown or a non-outline
-      WriterDocument IR with ui_editable=true. No
-      outline_document, section_instructions, or draft_blocks are produced. When flat_visual_plan is
-      non-empty, flat_resolved_media_assets is also present.
+      flat_draft_document is present and is Markdown or a non-outline WriterDocument IR
+      with ui_editable=true. Required media is saved before the body.
+      No outline_document, section_instructions, or draft_blocks are produced.
+      short_writing_plan and flat_visual_plan are auxiliary publications: a save failure
+      leaves a pending checkpoint entry and does not invalidate delivery or rerun generation.
 
   write_document:
     label: 成稿
@@ -274,11 +272,12 @@ steps:
         required: false
     acceptance_criteria: |
       draft_document is present. Markdown output is a
-      `.md` file or an IR document with ui_editable=true. Generation/rewrite requires
-      section_instructions; per-section generation also requires draft_blocks; IR generation also requires visual_plan and
-      resolved_media_assets. A targeted revision requires document_revision_task,
-      document_locate_result, document_modify_plan, document_revision_set, and a successful
+      `.md` file or an IR document with ui_editable=true. Required media is saved before the body. A targeted revision requires a successful
       document_revision_result. A targeted image-adding revision also requires resolved_media_assets.
+      section_instructions, draft_blocks, visual_plan, document_revision_task,
+      document_locate_result, document_modify_plan, and document_revision_set are auxiliary
+      publications. Their save failures leave pending checkpoint entries without invalidating
+      delivery; recovery retries saving without rerunning generation or provider writes.
       When generation started without draft_document and used a cloud-bound `.lmd` source,
       document_write_result must report success and draft_document must be the
       provider-confirmed document. Every cloud-bound IR full-document rewrite also requires

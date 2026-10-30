@@ -172,7 +172,8 @@ def test_parallel_writer_waits_for_sections_and_stream_children(monkeypatch, tmp
 
     with source_pool(max_workers=1) as pool:
         future = pool.submit(writer.WriterWritingCapabilities().stream_draft_blocks_markdown,
-                             writing_task_json='{}', writing_context_json='{}', on_delta=stop,
+                             writing_task_json='{"query":"test","task_type":"write"}',
+                             writing_context_json='{"context_id":"ctx"}', on_delta=stop,
                              section_instructions_json=json.dumps({'instructions': [
                                  {'section_title': 'Section'}, {'section_title': 'Section 2'}]}))
         try:

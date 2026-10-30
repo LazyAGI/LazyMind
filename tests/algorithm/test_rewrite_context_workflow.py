@@ -32,13 +32,18 @@ def test_short_document_uses_full_document_context():
     assert 'read_only_context' not in request
 
 
-def test_long_document_uses_local_neighbors():
+@pytest.mark.parametrize('summary_mode', ['excerpt', 'summary'])
+def test_long_document_uses_local_neighbors_and_reloaded_summary(summary_mode):
+    from unittest.mock import Mock
+
+    model = (Mock(return_value='{"summary": "The report evaluates the trial."}') if summary_mode == 'summary'
+             else None)
     source = ('# Report\n\n## Alpha\n\nBefore.\n\nTarget.\n\nAfter.\n\n'
               + 'Unrelated appendix. ' * 12000)
     root = Path(__file__).resolve().parents[2] / 'tmp'
     root.mkdir(exist_ok=True)
     with TemporaryDirectory(prefix='rewrite-context-', dir=root) as directory:
-        tools = WriterContextTools(artifact_store=directory)
+        tools = WriterContextTools(llm=model, artifact_store=directory)
         created = tools.create_writing_context(
             task={'query': 'Write a report.', 'task_type': 'write'}, document=source)
         context = load_artifact_json(created['artifact_path'], WritingContext).model_dump()
@@ -57,6 +62,8 @@ def test_long_document_uses_local_neighbors():
     assert summary['summary'] == expected['summary']
     assert summary['kind'] == 'excerpt'
     assert readonly['document_summary']['summary'] == context['document_summary']['summary']
+    assert readonly['document_summary']['kind'] == ('summary' if summary_mode == 'summary' else 'excerpt')
+    assert request['paragraphs'][0]['content'] == 'Target.'
 
 
 def test_large_selection_is_grouped_without_losing_targets():

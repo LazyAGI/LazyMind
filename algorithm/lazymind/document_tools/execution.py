@@ -7,18 +7,25 @@ and event forwarding) through :func:`invoke`.
 
 from __future__ import annotations
 
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextvars import ContextVar
 import hashlib
 import json
 import re
 import uuid
 from pathlib import Path
-from typing import Any, Mapping
+from threading import Event
+from typing import Any, Callable, Mapping
+
+from lazyllm import ThreadPoolExecutor
+from lazyllm.tools.writer.tools import WriterDraftingTools
+from lazyllm.tools.writer.data_models import SectionInstructionList, WritingContext, WritingTask
 
 from .artifacts import (
     WRITER_BLOCK_SCHEMA,
     WRITER_IR_SCHEMA,
     detach_provider_binding,
+    cleanup_writer_temporary,
     markdown_filename,
     markdown_to_writer_document,
     normalize_writer_document,
@@ -128,7 +135,7 @@ def _writer_build_writing_task(query: str, representation: str = 'markdown') -> 
     return _save_json_artifact('writing_task', content, writer_schema('task.WritingTask'))
 
 
-def _writer_load_local_document(filename: str = '') -> str:
+def _writer_load_local_document(filename: str = '') -> dict:
     """Load one supplied Markdown, text, or Writer IR file as the working document."""
     files_by_turn = require_context().params.get('history_files_per_turn') or {}
     candidates = [
@@ -150,11 +157,14 @@ def _writer_load_local_document(filename: str = '') -> str:
         if source.suffix.lower() != '.lmd':
             raise
         raise ValueError(f'Cannot parse LMD file {source.name}: {exc}') from exc
-    return _save_writer_document(
-        'source_document',
-        document,
-        directory=_run_root('load-local-document'),
-    )
+    return {
+        'source_document': _save_writer_document(
+            'source_document',
+            document,
+            directory=_run_root('load-local-document'),
+        ),
+        'source_uri': str(source),
+    }
 
 
 def _writer_load_document(user_input: str, stage: str = 'final') -> dict:
@@ -195,6 +205,7 @@ def _writer_profile_resources(
     source_document_path: str = '',
     knowledge_text: str = '',
     profile_input_resources_path: str = '',
+    source_uri: str = '',
 ) -> str:
     """Profile attachments, a loaded source document, and retrieved KB evidence."""
     if profile_input_resources_path:
@@ -206,13 +217,21 @@ def _writer_profile_resources(
         input_resources = []
     if not file_paths and not input_resources and not source_document_path and not knowledge_text.strip():
         return ''
+    source_document = _read_json_file(source_document_path) if source_document_path else None
+    if source_uri and isinstance(source_document, str):
+        resource_uris = {str(item.get('uri') or '') for item in input_resources}
+        resource_uris.update(str(path) for path in file_paths)
+        source = Path(source_uri)
+        if source_uri in resource_uris and source.suffix.lower() in {'.md', '.markdown', '.txt'}:
+            original = source.read_text(encoding='utf-8')
+            if normalize_writer_document(original) == source_document:
+                # Reuse the loaded attachment's analysis, retaining its ID and full content.
+                source_document = None
     profiles = profile_document_resources(
         _read_json_file(writing_task_path),
         user_input,
         file_paths=file_paths,
-        source_document=(
-            _read_json_file(source_document_path) if source_document_path else None
-        ),
+        source_document=source_document,
         knowledge_text=knowledge_text,
         input_resources=input_resources,
     )
@@ -239,6 +258,18 @@ def _writer_collect_available_media(
             if normalized and normalized not in seen:
                 seen.add(normalized)
                 file_paths.append(normalized)
+
+    task = _read_json_file(writing_task_path)
+    policy = (task.get('constraints') or {}).get('visual_policy') or {}
+    if policy.get('allow_visuals') is False and not policy.get('require_input_image_reuse') and not (
+        file_paths or source_document_path or input_resources_path
+    ):
+        # The workflow declares this output and downstream input as required.
+        path = _save_json_artifact(
+            'media_assets', json.dumps({'library_id': uuid.uuid4().hex, 'assets': {}}),
+            writer_schema('multimodal.MediaAssetLibrary'), directory=_run_root('collect-media'),
+        )
+        return {'media_assets': path, 'profile_input_resources': '', 'warnings': []}
 
     root = _run_root('collect-media')
     media_root = root / 'media'
@@ -403,8 +434,10 @@ def _writer_generate_section_instructions(
     writing_context_path: str,
 ) -> dict:
     """Generate internal section instructions from the selected outline IR."""
+    writing_task_json = _read_json_string(writing_task_path)
+    representation = (_json_loads(writing_task_json, {}).get('output') or {}).get('representation')
     payload = _json_loads(WriterCreateToolkit().generate_section_instructions(
-        writing_task_json=_read_json_string(writing_task_path),
+        writing_task_json=writing_task_json,
         outline_json=_read_json_string(outline_path),
         writing_context_json=_read_json_string(writing_context_path),
     ), {})
@@ -421,7 +454,7 @@ def _writer_generate_section_instructions(
             'visual_plan',
             json.dumps(visual_plan, ensure_ascii=False),
             writer_schema('multimodal.VisualPlan'),
-        ),
+        ) if visual_needs or representation == 'ir' else '',
         'visual_need_count': len(visual_needs),
         'section_count': len(section_instructions.get('instructions') or []),
         'visual_need_ids': [str(need.get('need_id') or '') for need in visual_needs],
@@ -432,10 +465,12 @@ def _writer_generate_section_instructions(
 def _writer_execute_writing_subtasks(
     outline_path: str,
     writing_context_path: str,
+    writing_task_path: str = '',
 ) -> str:
     """Execute outline-owned writing subtasks without adding a workflow step."""
     emit_progress = _HOST.get()['_emit_writer_progress']
     content = WriterCreateToolkit().execute_writing_subtasks(
+        writing_task_json=_read_json_string(writing_task_path) if writing_task_path else '',
         outline_json=_read_json_string(outline_path),
         writing_context_json=_read_json_string(writing_context_path),
         on_progress=lambda subtasks: emit_progress(
@@ -474,6 +509,15 @@ def _writer_generate_short_visual_plan(
     writing_context_path: str,
 ) -> dict:
     """Generate and persist one visual plan for a flat article."""
+    task = _read_json_file(writing_task_path)
+    policy = (task.get('constraints') or {}).get('visual_policy') or {}
+    if policy.get('allow_visuals') is False and not policy.get('require_input_image_reuse'):
+        # flat_visual_plan is a required published output, even without images.
+        path = _save_json_artifact(
+            'visual_plan', json.dumps({'instructions': []}),
+            writer_schema('multimodal.VisualPlan'), directory=_run_root('short-visual-plan'),
+        )
+        return {'visual_plan': path, 'visual_need_count': 0, 'visual_need_ids': [], 'warnings': []}
     result = generate_short_visual_plan(
         writing_task_path,
         short_writing_plan_path,
@@ -600,6 +644,7 @@ def _writer_generate_draft_blocks(
     visual_plan_path: str = '',
     media_assets_path: str = '',
     checkpoint_dir: str = '',
+    defer_media: bool = False,
 ) -> list[str]:
     """Generate and persist all planned draft blocks."""
     context = require_context()
@@ -624,6 +669,7 @@ def _writer_generate_draft_blocks(
             on_progress=emit_progress,
             on_preview_restart=events.restart,
             checkpoint_dir=checkpoint_dir,
+            **({'defer_media': True} if defer_media else {}),
         ), [])
         root = _run_root('draft-blocks')
         paths = []
@@ -767,12 +813,14 @@ def _writer_generate_revision_set(
     writing_context_path: str,
     modify_plan_path: str,
     media_assets_path: str = '',
+    revision_task_path: str = '',
 ) -> str:
     """Generate an IR PatchSet or Markdown StringReplaceSet from a ModifyPlan."""
     result = generate_revision_set(
         _read_json_file(base_document_path),
         _read_json_file(writing_context_path),
         _read_json_file(modify_plan_path),
+        writing_task=_read_json_file(revision_task_path) if revision_task_path else None,
         media_assets=(
             _read_json_file(media_assets_path) if media_assets_path else None
         ),
@@ -991,6 +1039,18 @@ def _read_json_file(path: str) -> Any:
     if isinstance(raw, dict) and 'data' in raw:
         return raw['data']
     return raw
+
+
+def writing_task_prompt_data(path: str, *, execution: bool = False) -> dict[str, Any]:
+    task = WritingTask.model_validate(_read_json_file(path))
+    data = task.prompt_data()
+    if execution and task.task_type == 'revise':
+        data['task_id'] = task.task_id
+    return data
+
+
+def writing_context_prompt_data(path: str) -> dict[str, Any]:
+    return WritingContext.model_validate(_read_json_file(path)).prompt_data()
 
 
 def _action_artifact_data(value: Any) -> Any:
@@ -1263,6 +1323,81 @@ def _writer_generate_draft_document(
     visual_plan_path: str = '',
     resolved_media_assets_path: str = '',
     document_title: str = '',
+    media_assets_path: str = '',
+) -> dict:
+    arguments = dict(
+        writing_task_path=writing_task_path, section_instructions_path=section_instructions_path,
+        writing_context_path=writing_context_path, outline_path=outline_path,
+        visual_plan_path=visual_plan_path, resolved_media_assets_path=resolved_media_assets_path,
+        document_title=document_title,
+    )
+    if not media_assets_path:
+        return _writer_generate_draft_document_body(**arguments)
+    fingerprint = _execution_fingerprint(
+        version=1, task=writing_task_prompt_data(writing_task_path),
+        context=writing_context_prompt_data(writing_context_path),
+        instructions=_read_json_file(section_instructions_path) if section_instructions_path else {},
+        plan=_read_json_file(visual_plan_path), media=_read_json_file(media_assets_path),
+        outline=_read_json_string(outline_path) if outline_path else '', title=document_title,
+    )
+    root = _workspace_root() / 'writer-workflow' / f'parallel-draft-{fingerprint}'
+    root.mkdir(parents=True, exist_ok=True)
+    from lazymind.chat.engine.agent_runtime.cancellation import make_cancel_stop_condition
+    check_cancel = make_cancel_stop_condition()
+    check_cancel(None)
+    stop = Event()
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(
+        resolve_visual_media,
+        _read_json_file(visual_plan_path), _read_json_file(media_assets_path),
+        media_store=str(root / 'media'), strict_required=True,
+        checkpoint_path=str(root / 'media-progress.json'), stop_event=stop,
+    )
+    media_result = {}
+
+    def await_media():
+        check_cancel(None)
+        if media_result:
+            return media_result['path']
+        require_context().emit({'type': 'progress', 'current_phase': '正文已生成，正在完成配图绑定与校验'})
+        while True:
+            try:
+                payload = future.result(timeout=0.2)
+                break
+            except FutureTimeoutError:
+                check_cancel(None)
+                continue
+        check_cancel(None)
+        media_result.update(payload)
+        media_result['path'] = _save_json_artifact(
+            'resolved_media_assets', json.dumps(payload['media_assets'], ensure_ascii=False),
+            writer_schema('multimodal.MediaAssetLibrary'), directory=root,
+        )
+        return media_result['path']
+
+    try:
+        result = _writer_generate_draft_document_body(
+            **arguments, await_media=await_media, checkpoint_root=root,
+        )
+        result['resolved_media_assets'] = await_media()
+        result['warnings'] = media_result.get('warnings') or []
+        return result
+    finally:
+        stop.set()
+        future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _writer_generate_draft_document_body(
+    writing_task_path: str,
+    section_instructions_path: str,
+    writing_context_path: str,
+    outline_path: str = '',
+    visual_plan_path: str = '',
+    resolved_media_assets_path: str = '',
+    document_title: str = '',
+    await_media: Callable[[], str] | None = None,
+    checkpoint_root: Path | None = None,
 ) -> dict:
     """Generate sections concurrently, stream in outline order, and assemble the draft."""
     task = _read_json_file(writing_task_path)
@@ -1274,15 +1409,30 @@ def _writer_generate_draft_document(
         if isinstance(value := (task.get('constraints') or {}).get(key), int)
         and not isinstance(value, bool) and value > 0
     ]
-    if task.get('task_type') == 'write' and limits and limits[0] <= 5000:
-        events = DraftMarkdownStreamEventEmitter(require_context().emit, slot='draft_document')
+    if not section_instructions_path or (task.get('task_type') == 'write' and limits and limits[0] <= 5000):
+        events = DraftMarkdownStreamEventEmitter(
+            require_context().emit, slot='draft_document' if section_instructions_path else 'flat_draft_document',
+        )
+        source_root = _run_root('whole-document-source')
         try:
-            document = stream_whole_document(
-                writing_task_path, writing_context_path, section_instructions_path,
-                artifact_store=str(_run_root('whole-document-source')),
-                visual_plan_path=visual_plan_path, media_assets_path=resolved_media_assets_path,
-                on_delta=events.feed,
-            )
+            raw_path = checkpoint_root / 'body.md' if checkpoint_root else None
+            if raw_path is not None and raw_path.is_file():
+                document = raw_path.read_text(encoding='utf-8')
+                events.feed(document)
+            else:
+                document = stream_whole_document(
+                    writing_task_path, writing_context_path, section_instructions_path,
+                    artifact_store=str(source_root),
+                    visual_plan_path=visual_plan_path, media_assets_path=resolved_media_assets_path,
+                    on_delta=events.feed,
+                    **({'defer_media': True} if await_media is not None else {}),
+                )
+                if raw_path is not None:
+                    temporary = raw_path.with_suffix('.tmp')
+                    temporary.write_text(document, encoding='utf-8')
+                    temporary.replace(raw_path)
+            if await_media is not None:
+                resolved_media_assets_path = await_media()
             document = finalize_short_document(
                 document, _read_json_file(resolved_media_assets_path) if resolved_media_assets_path else None,
             )
@@ -1296,16 +1446,18 @@ def _writer_generate_draft_document(
                 'draft_document', document, expected_stage='draft', editable=True,
                 directory=_run_root('whole-document'),
             )
-        except Exception as exc:
+        except BaseException as exc:
             events.abort(str(exc))
             raise
+        cleanup_writer_temporary(source_root)
         events.end()
         return {'draft_document': path, 'representation': representation, 'generation_mode': 'whole'}
+    instruction_data = json.loads(_read_json_string(section_instructions_path))
     checkpoint_key = _execution_fingerprint(
-        version=1,
-        task=_read_json_string(writing_task_path),
-        instructions=_read_json_string(section_instructions_path),
-        context=_read_json_string(writing_context_path),
+        version=3 if await_media is not None else 2,
+        task=writing_task_prompt_data(writing_task_path),
+        instructions=instruction_data,
+        context=writing_context_prompt_data(writing_context_path),
         outline=_read_json_string(outline_path) if outline_path else '',
         visual_plan=_read_json_string(visual_plan_path) if visual_plan_path else '',
         media_assets=(
@@ -1334,6 +1486,8 @@ def _writer_generate_draft_document(
                 'current_phase': '章节已生成，正在组装文档并校验编号与引用',
             }
         )
+        if await_media is not None:
+            resolved_media_assets_path = await_media()
         draft_document = _assemble_draft_document_markdown(
             draft_sections_anchor_path=draft_blocks[0] if draft_blocks else '',
             writing_context_path=writing_context_path,
@@ -1349,6 +1503,7 @@ def _writer_generate_draft_document(
             visual_plan_path=visual_plan_path,
             media_assets_path=resolved_media_assets_path,
             checkpoint_dir=checkpoint_dir,
+            defer_media=await_media is not None,
         )
         require_context().emit(
             {
@@ -1357,6 +1512,23 @@ def _writer_generate_draft_document(
                 'current_phase': '章节已生成，正在组装文档并校验编号与引用',
             }
         )
+        if await_media is not None:
+            resolved_media_assets_path = await_media()
+            drafting = WriterDraftingTools()
+            instructions = SectionInstructionList.model_validate(instruction_data).instructions
+            library = _read_json_file(resolved_media_assets_path)
+            plan = _read_json_file(visual_plan_path) if visual_plan_path else None
+            bound_root = _run_root('bound-draft-blocks')
+            draft_blocks = [
+                _save_json_artifact(
+                    f'draft_block_{index:04d}',
+                    drafting.finalize_section_media(
+                        _read_json_file(path), instruction, plan, library,
+                    ).model_dump_json(exclude_defaults=True),
+                    WRITER_BLOCK_SCHEMA, directory=bound_root,
+                )
+                for index, (path, instruction) in enumerate(zip(draft_blocks, instructions), 1)
+            ]
         draft_document = _assemble_draft_document_ir(
             draft_blocks_anchor_path=draft_blocks[0] if draft_blocks else '',
             writing_context_path=writing_context_path,

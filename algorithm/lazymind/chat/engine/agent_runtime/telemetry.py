@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import time
+import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -226,3 +229,37 @@ def sid() -> Optional[str]:
         return getattr(lazyllm.globals, '_sid', None)
     except Exception:  # noqa: BLE001
         return None
+
+
+@contextmanager
+def writer_stage_timing(phase: str, *, slot: str = ''):
+    """Observe writer work without changing its result, exceptions or scheduling."""
+    from lazymind.chat.engine.subagent.context import get_context
+
+    ctx = get_context()
+    if ctx is None or (ctx.params or {}).get('workflow_id') != 'writer-workflow':
+        yield
+        return
+    started = time.monotonic()
+    record = {
+        'phase': phase, 'slot': slot, 'call_id': uuid.uuid4().hex,
+        'task_id': ctx.task_id, 'conversation_id': ctx.conversation_id,
+        'workflow_revision': (ctx.params or {}).get('revision_id'),
+        'started_at_unix_ms': time.time() * 1000,
+    }
+
+    def emit(event, **fields):
+        try:
+            lazyllm.LOG.info('[WriterStageTiming] ' + json.dumps({**record, 'event': event, **fields}))
+        except Exception:
+            # Diagnostics must not turn a successful delivery into a failure.
+            pass
+
+    emit('start')
+    status = 'error'
+    try:
+        yield
+        status = 'completed'
+    finally:
+        emit('end', status=status, finished_at_unix_ms=time.time() * 1000,
+             elapsed_ms=round((time.monotonic() - started) * 1000, 3))
