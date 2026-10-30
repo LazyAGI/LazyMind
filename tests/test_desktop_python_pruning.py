@@ -158,6 +158,19 @@ class PrunePythonRuntimeTest(unittest.TestCase):
         self.assertEqual(json.loads(output.read_text()), report)
         self.assertIn('not installer download savings', output.with_suffix('.md').read_text())
 
+    def test_missing_distribution_metadata_does_not_block_pruning(self):
+        class BrokenDistribution:
+            @property
+            def metadata(self):
+                raise RuntimeError('No package metadata was found.')
+
+        self.put('broken-1.0.dist-info/RECORD')
+        with patch.object(pruning.importlib.metadata, 'distributions', return_value=[BrokenDistribution()]):
+            report = pruning.trim_runtime(self.runtime, True)
+        self.assertEqual(report['installed_distributions'], {
+            'deps/python/algorithm/Lib/site-packages': [],
+        })
+
 
 if __name__ == '__main__':
     unittest.main()

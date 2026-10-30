@@ -53,6 +53,19 @@ def bytecode_has_source(path):
     return path.with_suffix('.py').is_file()
 
 
+def installed_distributions(site):
+    result = []
+    for dist in importlib.metadata.distributions(path=[str(site)]):
+        try:
+            name = dist.metadata.get('Name')
+            if name:
+                result.append({'name': name, 'version': dist.version})
+        except Exception:
+            # Broken or partial dist-info must not block runtime pruning.
+            continue
+    return sorted(result, key=lambda item: item['name'].lower())
+
+
 def trim_runtime(runtime, apply):
     runtime = runtime.resolve()
     roots = [runtime / 'runtimes/python', runtime / 'deps/python']
@@ -110,11 +123,7 @@ def trim_runtime(runtime, apply):
         'candidate_removed_files': len(removals),
         'removal_groups': dict(groups),
         'installed_distributions': {
-            str(site.relative_to(runtime)): sorted(
-                [{'name': dist.metadata['Name'], 'version': dist.version}
-                 for dist in importlib.metadata.distributions(path=[str(site)]) if dist.metadata.get('Name')],
-                key=lambda item: item['name'].lower(),
-            ) for site in sites
+            str(site.relative_to(runtime)): installed_distributions(site) for site in sites
         },
         'packages': [{'path': key, 'before_bytes': value,
                       'after_bytes': after[key] if apply else value}
