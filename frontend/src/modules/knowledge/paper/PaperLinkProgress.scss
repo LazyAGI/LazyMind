@@ -1,4 +1,19 @@
 .paper-link-progress { margin: 16px 0; padding: 16px; border: 1px solid #e6e9ef; border-radius: 8px; background: #f8faff; }
+.paper-library-modal-actions .ant-btn-primary.paper-import-unlocked {
+  background: #16734a;
+  border-color: #16734a;
+  animation: paper-import-unlock 900ms ease-out;
+  transition: background 180ms ease, box-shadow 180ms ease;
+  &:hover { background: #105e3b; border-color: #105e3b; }
+}
+@keyframes paper-import-unlock {
+  0% { box-shadow: 0 0 0 0 rgba(22, 115, 74, .4); }
+  70% { box-shadow: 0 0 0 9px rgba(22, 115, 74, 0); }
+  100% { box-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .paper-library-modal-actions .ant-btn-primary.paper-import-unlocked { animation: none; transition: none; }
+}
 .paper-link-progress > ol { display: flex; justify-content: space-between; gap: 8px; list-style: none; padding: 0; margin: 0; }
 .paper-link-progress > ol > li { display: flex; align-items: center; gap: 7px; min-width: 0; color: #8d9aae; font-size: 12px; }
 .paper-link-progress-icon { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: #e9edf4; font-size: 13px; }

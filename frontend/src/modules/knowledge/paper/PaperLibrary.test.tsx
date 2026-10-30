@@ -718,6 +718,24 @@ describe('paper library behavior', () => {
 
 describe('DOI import workflow', () => {
     const metadata: ImportPreviewItem = { work_id: 'doi-work', title: 'DOI preview paper', doi: '10.1234/example', disposition: 'metadata_only', fulltext_candidates: [], preview_token: 'metadata-receipt', presence: { status: 'absent', current_dataset: [], other_datasets: [], importing: false, coverage_complete: true } };
+    it('saves metadata while PDF lookup is pending and ignores its late result', async () => {
+        let finishPDF!: (item: ImportPreviewItem) => void;
+        vi.mocked(previewPaperLink).mockResolvedValue(metadata);
+        vi.mocked(previewPaperPDF).mockReturnValue(new Promise(resolve => { finishPDF = resolve; }));
+        vi.mocked(importPaperLink).mockResolvedValue({ batch_id: 'batch' });
+        await renderLibrary();
+        const dialog = await openImportDialog('链接', '通过链接导入');
+        fireEvent.change(within(dialog).getByRole('textbox', { name: /链接或标识符/ }), { target: { value: '10.1234/example' } });
+        fireEvent.click(within(dialog).getByRole('button', { name: '查找文献' }));
+        const save = await within(dialog).findByRole('button', { name: '立即保存题录' });
+        expect(save).toBeEnabled();
+        fireEvent.click(save);
+        await waitFor(() => expect(importPaperLink).toHaveBeenCalledWith(datasetId, expect.objectContaining({ preview_token: 'metadata-receipt', fulltext_candidates: [] }), expect.any(String), null, true));
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: '通过链接导入' })).not.toBeInTheDocument());
+        await act(async () => { finishPDF({ ...metadata, preview_token: 'late-pdf-receipt' }); });
+        expect(screen.queryByRole('dialog', { name: '通过链接导入' })).not.toBeInTheDocument();
+        expect(importPaperLink).toHaveBeenCalledTimes(1);
+    });
     it('shows actual request stages and retains an explicit metadata-only save after PDF timeout', async () => {
         let resolveMetadata!: (item: ImportPreviewItem) => void;
         let rejectPDF!: (error: Error) => void;
