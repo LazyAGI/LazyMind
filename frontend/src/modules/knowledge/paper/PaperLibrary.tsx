@@ -1,3 +1,5 @@
+import { AgentAppsAuth } from "@/components/auth";
+import { readLibraryViewCache, writeLibraryViewCache } from "./libraryViewCache";
 import PaperAuthors from './PaperAuthors';
 import { usePaperImports, PaperImportDialog } from './usePaperImports';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ChangeEvent } from "react";
@@ -40,6 +42,7 @@ interface Props {
     onUploadPdf?: (file: File, importContext?: PaperUploadContext) => Promise<string | void>;
     title?: string;
     onBack?: () => void;
+    onOpenAttachment?: (documentId: string) => void;
 }
 async function copyText(value: string, label: string) {
     try {
@@ -56,7 +59,10 @@ async function copyText(value: string, label: string) {
     }
     message.success(`已复制${label}`);
 }
-export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文库", onBack, processingLevel = "parsed", parsers, canParse = true }: Props) {
+export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文库", onBack, onOpenAttachment, processingLevel = "parsed", parsers, canParse = true }: Props) {
+    const sessionToken = AgentAppsAuth.getAccessToken();
+    const cachedView = useMemo(() => readLibraryViewCache(sessionToken, datasetId), [sessionToken, datasetId]);
+    const lastRefresh = useRef(0);
     const dragSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
     const datasetScopeRef = useRef({ datasetId, active: true });
     if (datasetScopeRef.current.datasetId !== datasetId)
@@ -64,9 +70,9 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const datasetScope = datasetScopeRef.current;
     const isCurrentScope = () => datasetScopeRef.current === datasetScope && datasetScope.active;
     const { notifications, notify, resolve } = usePaperNotifications(datasetId);
-    const [dataState, setData] = useState<PaperLibraryData>(emptyLibrary);
-    const [snapshotReady, setSnapshotReady] = useState(false);
-    const [libraryActive, setLibraryActive] = useState(false);
+    const [dataState, setData] = useState<PaperLibraryData>(() => cachedView?.data || emptyLibrary());
+    const [snapshotReady, setSnapshotReady] = useState(!!cachedView);
+    const [libraryActive, setLibraryActive] = useState(cachedView?.active || false);
     const refreshPendingRef = useRef(false);
     const [taskActionsContainer, setTaskActionsContainer] = useState<HTMLDivElement | null>(null);
     const data = dataState;
@@ -76,7 +82,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const [zoteroOpen, setZoteroOpen] = useState(false);
     const [backupOpen, setBackupOpen] = useState(false);
     const zoteroKey = useRef({ signature: '', key: '' });
-    const [canWrite, setCanWrite] = useState(false);
+    const [canWrite, setCanWrite] = useState(cachedView?.canWrite || false);
     const [persistenceError, setPersistenceError] = useState<string | null>(null);
     const loadedRef = useRef(false);
     const canWriteRef = useRef(false);
@@ -84,7 +90,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const reloadPromiseRef = useRef<Promise<void> | null>(null);
     const activeDatasetRef = useRef(datasetId);
     activeDatasetRef.current = datasetId;
-    const disabled = loading || saving || confirmingImport || !canWrite;
+    const disabled = !snapshotReady || saving || confirmingImport || !canWrite;
     // Keep an already-open picker usable; check access after the refresh completes.
     const fileImportDisabled = saving || confirmingImport;
     const dataRef = useRef(dataState);
@@ -121,14 +127,17 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
     const applySnapshot = useCallback((next: PaperLibraryData) => {
         dataRef.current = next;
         setData(next);
-    }, []);
+        const cached = readLibraryViewCache(sessionToken, datasetId);
+        if (cached) writeLibraryViewCache(sessionToken, datasetId, { ...cached, data: next });
+    }, [sessionToken, datasetId]);
     const applySaved = useCallback((saved: PersistedPaperLibrary) => {
+        writeLibraryViewCache(sessionToken, datasetId, saved);
         canWriteRef.current = saved.canWrite;
         setCanWrite(saved.canWrite);
         applySnapshot(saved.data);
         setSnapshotReady(true);
         setLibraryActive(saved.active);
-    }, [applySnapshot]);
+    }, [applySnapshot, sessionToken, datasetId]);
     const reload = useCallback(() => {
         if (datasetScopeRef.current !== datasetScope || !datasetScope.active)
             return null;
@@ -137,8 +146,8 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                 refreshPendingRef.current = true;
             return reloadPromiseRef.current;
         }
+        if (reloadPromiseRef.current) return reloadPromiseRef.current;
         refreshPendingRef.current = false;
-        busyRef.current = true;
         const generation = ++syncGeneration.current;
         setLoading(true);
         const current = () => generation === syncGeneration.current && activeDatasetRef.current === datasetId && datasetScope.active;
@@ -151,6 +160,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                 applySaved(saved);
             }).catch(error => {
                 if (current()) {
+                    writeLibraryViewCache(sessionToken, datasetId, null);
                     loadedRef.current = false;
                     canWriteRef.current = false;
                     setCanWrite(false);
@@ -168,15 +178,18 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
             }),
         ]).then(() => {}).finally(() => {
             if (current()) {
-                busyRef.current = false;
+                lastRefresh.current = Date.now();
+            }
+            if (datasetScope.active && activeDatasetRef.current === datasetId) {
                 setLoading(false);
+                if (!current()) setSyncRevision(value => value + 1);
             }
             if (reloadPromiseRef.current === request)
                 reloadPromiseRef.current = null;
         });
         reloadPromiseRef.current = request;
         return request;
-    }, [datasetId, datasetScope, applySaved]);
+    }, [datasetId, datasetScope, applySaved, sessionToken]);
     useEffect(() => {
         datasetScope.active = true;
         syncGeneration.current += 1;
@@ -200,10 +213,12 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         setDetailPaperId(null);
         setFolderId(null);
         setLibraryView("all");
-        applySnapshot(emptyLibrary());
+        const cached = readLibraryViewCache(sessionToken, datasetId);
+        if (cached) { applySaved(cached); loadedRef.current = true; }
+        else applySnapshot(emptyLibrary());
         void reload();
-        const onFocus = () => { void reload(); };
-        const onVisibility = () => { if (document.visibilityState === "visible") void reload(); };
+        const onFocus = () => { if (Date.now() - lastRefresh.current > 15_000) void reload(); };
+        const onVisibility = () => { if (document.visibilityState === "visible") onFocus(); };
         window.addEventListener("focus", onFocus);
         document.addEventListener("visibilitychange", onVisibility);
         return () => {
@@ -212,7 +227,8 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
             window.removeEventListener("focus", onFocus);
             document.removeEventListener("visibilitychange", onVisibility);
         };
-    }, [datasetId, datasetScope, reload, applySnapshot]);
+    }, [datasetId, datasetScope, reload, applySnapshot, applySaved, sessionToken]);
+
     const mutate = useCallback(async (operation: () => Promise<LibraryChanges>, notice: Omit<PaperNotification, "message"> = { id: "library-write", title: "论文保存失败" }) => {
         if (datasetScopeRef.current !== datasetScope || !datasetScope.active)
             throw new Error('文献库已切换，请重新打开后重试');
@@ -494,7 +510,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                     syncGeneration.current += 1;
                     setSyncRevision(value => value + 1);
                 }
-            }} paper={detailPaper} onReparse={() => openReparse(detailPaper)} reparseDisabledReason={reparseDisabledReason(detailPaper)} data={dataState} onNotification={notify} onNotificationResolved={resolve} onClose={() => setDetailPaperId(null)} onAddNote={async (id, content) => { await mutate(() => addLibraryNote(datasetId, detailPaper.id, id, content), { id: `paper-note:${detailPaper.id}`, title: `《${detailPaper.metadata.title}》笔记保存失败`, action: { label: "查看笔记", onClick: () => openDetail(detailPaper.id, "notes") } }); }} disabled={disabled} onStatusChange={status => updatePaper(detailPaper.id, { status })} onSetPrimaryAttachment={async attachment => {
+            }} onOpenAttachment={onOpenAttachment} paper={detailPaper} onReparse={() => openReparse(detailPaper)} reparseDisabledReason={reparseDisabledReason(detailPaper)} data={dataState} onNotification={notify} onNotificationResolved={resolve} onClose={() => setDetailPaperId(null)} onAddNote={async (id, content) => { await mutate(() => addLibraryNote(datasetId, detailPaper.id, id, content), { id: `paper-note:${detailPaper.id}`, title: `《${detailPaper.metadata.title}》笔记保存失败`, action: { label: "查看笔记", onClick: () => openDetail(detailPaper.id, "notes") } }); }} disabled={disabled} onStatusChange={status => updatePaper(detailPaper.id, { status })} onSetPrimaryAttachment={async attachment => {
                 await mutate(() => patchLibraryPaper(datasetId, detailPaper, { primary_attachment_id: attachment.id }), { id: `paper-primary:${detailPaper.id}`, title: '主附件设置失败', action: { label: '查看附件', onClick: () => openDetail(detailPaper.id, 'attachments', detailPresentation) } });
             }} onOpenPaper={id => openDetail(id, 'relations', detailPresentation)} onAddPdf={() => openImport('upload', detailPaper.id)} onDetachAttachment={async (attachment) => { await mutate(() => detachLibraryAttachment(datasetId, detailPaper, attachment.id), { id: `paper-attachment:${attachment.id}`, title: `附件「${attachment.name}」移除关联失败`, action: { label: "查看附件", onClick: () => openDetail(detailPaper.id, "attachments") } }); }}/>);
     const libraryNotices: PaperNotification[] = [
@@ -536,7 +552,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
         <div className="paper-library-heading">
           {onBack && <Button className="paper-library-back" type="text" icon={<ArrowLeftOutlined />} aria-label="返回知识库" onClick={onBack} />}
           <PaperBreadcrumb libraryName={title} onKnowledgeClick={onBack} />
-          {loading && !initialLoading && <span className="paper-library-refreshing" role="status">正在刷新…</span>}
+
         </div>
         <div className="paper-library-tools" role="toolbar" aria-label="文献工具">
           <PaperSearch open={activeTool === "search"} value={keyword} onChange={setKeyword} onOpenChange={setSearchOpen}/>
@@ -623,7 +639,7 @@ export default function PaperLibrary({ datasetId, onUploadPdf, title = "论文�
                       const pdfs = materialByPaper.get(item.id)?.pdfs || [];
                       const primary = pdfs.find(attachment => attachment.isPrimary) || pdfs[0];
                       return primary?.contentRef
-                        ? <a className="paper-library-title-button" href={`/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(primary.contentRef)}`}>{item.metadata.title}</a>
+                        ? <a className="paper-library-title-button" href={`/lib/knowledge/knowledge/${encodeURIComponent(datasetId)}/${encodeURIComponent(primary.contentRef)}`} onClick={event => { if (onOpenAttachment && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); onOpenAttachment(primary.contentRef!); } }}>{item.metadata.title}</a>
                         : <button type="button" className="paper-library-title-button" onClick={() => openDetail(item.id)}>{item.metadata.title}</button>;
                     })()}</h2>
                     {renderImportance(item)}

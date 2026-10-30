@@ -559,6 +559,7 @@ const Detail = () => {
             key={id}
             datasetId={id}
             title={detail.display_name || "论文库"}
+            onOpenAttachment={documentId => navigate(`/lib/knowledge/knowledge/${encodeURIComponent(id)}/${encodeURIComponent(documentId)}`)}
             onBack={() => returnToList()}
             onUploadPdf={uploadPaperPdf}
             processingLevel={effectiveProcessingLevel(detail.processing_level)}
