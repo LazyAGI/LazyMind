@@ -1,7 +1,6 @@
 package workbuddyhost
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"embed"
@@ -9,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html"
 	"log"
 	"os"
 	"os/exec"
@@ -21,9 +19,10 @@ import (
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/integrationstate"
+	"lazymind/agentconnector/internal/workflowpresentation"
 )
 
-//go:embed assets/connector.mjs assets/presentation.html
+//go:embed assets/connector.mjs
 var assets embed.FS
 
 // Supervise belongs to Assistant Bridge, not to any MCP connection. Configuration
@@ -144,8 +143,7 @@ func Supervise(ctx context.Context, home, bridgeURL string, account func() (stri
 }
 
 func PresentationHTML(frontendURL string) []byte {
-	body, _ := assets.ReadFile("assets/presentation.html")
-	return bytes.ReplaceAll(body, []byte("__LAZYMIND_FRONTEND_URL__"), []byte(html.EscapeString(frontendURL)))
+	return workflowpresentation.HTML(frontendURL, "host")
 }
 
 // A stopped Bridge cannot remove an old renderer mount. Disconnect therefore

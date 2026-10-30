@@ -6,15 +6,16 @@ import (
 	"io"
 	"time"
 
+	"lazymind/agentconnector/internal/codexhost"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/workbuddyhost"
 )
 
-// KeepWorkBuddyAvailable runs under Desktop's existing supervised Agent Host.
+// KeepDesktopAgentsAvailable runs under Desktop's existing supervised Agent Host.
 // It restores the Bridge, which already supervises the Connector, only while
-// this account has enabled WorkBuddy. It never launches or restarts WorkBuddy.
-func KeepWorkBuddyAvailable(ctx context.Context, store *credentials.Store, stderr io.Writer) {
+// this account has enabled a CDP host. It never launches or restarts that app.
+func KeepDesktopAgentsAvailable(ctx context.Context, store *credentials.Store, stderr io.Writer) {
 	address, err := connectorconfig.BridgeAddress()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -26,7 +27,11 @@ func KeepWorkBuddyAvailable(ctx context.Context, store *credentials.Store, stder
 			return false
 		}
 		_, pair, err := workbuddyhost.Load(store.Directory(), account)
-		return err == nil && pair.Enabled
+		if err == nil && pair.Enabled {
+			return true
+		}
+		_, codex, err := codexhost.Load(store.Directory(), account)
+		return err == nil && codex.Enabled
 	}, func(ctx context.Context) error {
 		_, err := Start(ctx, address)
 		return err
@@ -44,7 +49,7 @@ func keepWorkBuddyAvailable(ctx context.Context, interval time.Duration, enabled
 			cancel()
 			if err != nil && ctx.Err() == nil {
 				if err.Error() != lastError {
-					fmt.Fprintln(stderr, "WorkBuddy background recovery:", err)
+					fmt.Fprintln(stderr, "Desktop Agent bridge recovery:", err)
 				}
 				lastError = err.Error()
 			} else {

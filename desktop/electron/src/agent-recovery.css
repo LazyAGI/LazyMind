@@ -1,0 +1,32 @@
+:root { color-scheme: light dark; font-family: "Segoe UI", "Microsoft YaHei", -apple-system, sans-serif; color: #202633; background: #fff; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { height: 100vh; padding: 20px 24px 18px; display: flex; flex-direction: column; }
+.brand { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-shrink: 0; }
+.brand img { object-fit: contain; }
+.brand strong { font-weight: 600; letter-spacing: -.2px; }
+.brand span { border-left: 1px solid #e5e7eb; margin-left: 2px; padding-left: 10px; color: #788397; font-size: 12px; }
+h1 { font-size: 19px; line-height: 1.4; margin: 15px 0 7px; font-weight: 600; letter-spacing: -.3px; }
+p { font-size: 12px; line-height: 1.7; margin: 0; color: #657084; }
+#failure { min-height: 0; overflow: auto; padding: 8px 10px; border-radius: 8px; background: #fff7ed; border: 1px solid #ffead4; }
+#error { color: #9a4d16; }
+details { margin-top: 5px; color: #8c6f56; font-size: 11px; }
+summary { cursor: pointer; width: fit-content; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 10px/1.5 Consolas, monospace; margin: 6px 0 0; user-select: text; }
+footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 16px; flex-shrink: 0; }
+button { height: 32px; padding: 0 13px; border: 1px solid #e0e4ec; border-radius: 7px; background: #fff; color: #556176; cursor: pointer; font: inherit; font-size: 12px; transition: background .15s, border-color .15s; }
+button:hover { background: #f7f8fa; border-color: #bcc5d4; }
+button.primary { color: #fff; background: #4476ff; border-color: #4476ff; box-shadow: 0 2px 4px #4476ff1a; }
+button.primary:hover { background: #3465eb; border-color: #3465eb; }
+button:focus-visible, summary:focus-visible { outline: 2px solid #84adff; outline-offset: 3px; }
+button:disabled { opacity: .55; cursor: default; }
+[hidden] { display: none !important; }
+@media (prefers-color-scheme: dark) {
+ :root { color: #edf0f5; background: #20242d; }
+ .brand span { color: #98a2b3; border-color: #3b4352; }
+ p { color: #a9b3c5; }
+ button { background: #292f3a; border-color: #414a5c; color: #e0e6f1; }
+ button:hover { background: #333c4b; }
+ #failure { background: #332b24; border-color: #53402b; }
+ #error, details { color: #e9bd90; }
+}

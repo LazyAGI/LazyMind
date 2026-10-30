@@ -30,7 +30,7 @@ Instead of repeatedly uploading context, tuning prompts, and supervising every a
 | **Use LazyMind directly** | Local knowledge work or shared team workflows | Run the desktop app for a local-first experience, or deploy the service for your team. Create tasks, use knowledge bases, and run Skills and Workflows in the LazyMind workspace. |
 | **Use LazyMind as an agent plugin** | Extending the agent environment you already use | Connect LazyMind from **Settings → Assistants**. Codex and DeepSeek Harness can then use LazyMind knowledge, Skills, and Workflows in their native sessions, including workflow progress, review checkpoints, and artifacts. |
 
-See the [Codex integration](integrations/codex-workflow/README.md) and [DeepSeek Harness integration](integrations/dsh-workflow/README.md) for implementation details.
+See the [DeepSeek Harness integration](integrations/dsh-workflow/README.md) for implementation details.
 
 ---
 

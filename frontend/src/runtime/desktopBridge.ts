@@ -99,7 +99,7 @@ export interface DesktopAgentAction {
 }
 
 export interface DesktopAgentConnectionStatus {
-  runtime_state?: "waiting" | "connected" | "unavailable";
+  runtime_state?: "waiting" | "connection_required" | "connected" | "unavailable";
   mcp_trusted?: boolean;
   mcp_enabled?: boolean;
   mcp_configured: boolean;

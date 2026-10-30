@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/coreapi"
 )
@@ -31,13 +33,28 @@ type Client struct {
 	HostProvider       string
 	RequireHostBinding bool
 	BindController     func(context.Context, string, string) error
-	ResolveDriver      func(context.Context, json.RawMessage) (string, error)
+	ResolveDriver      func(context.Context, *mcp.CallToolRequest, string) (string, error)
+	EnsureHostReady    func(context.Context) error
+}
+
+type executionReadinessKey struct{}
+
+// A check belongs to this execution request, never to a previous run or process.
+// Begin may call Claim internally; propagate its successful check only through
+// that call chain so no state is advanced before the first check succeeds.
+func (c *Client) executionContext(ctx context.Context) (context.Context, error) {
+	if c.EnsureHostReady == nil || ctx.Value(executionReadinessKey{}) == c {
+		return ctx, nil
+	}
+	if err := c.EnsureHostReady(ctx); err != nil {
+		return ctx, err
+	}
+	return context.WithValue(ctx, executionReadinessKey{}, c), nil
 }
 
 type Projection struct {
 	AgentInstruction string         `json:"agent_instruction,omitempty"`
 	Control          map[string]any `json:"control,omitempty"`
-	InteractionURL   string         `json:"interaction_url,omitempty"`
 	SessionID        string         `json:"session_id"`
 	StateVersion     int64          `json:"state_version"`
 	Projection       struct {
@@ -65,9 +82,9 @@ type StartInput struct {
 	WorkflowID      string         `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
 	RequestContext  string         `json:"request_context,omitempty" jsonschema:"The user's task or desired outcome"`
 	InputBindings   map[string]any `json:"input_bindings,omitempty" jsonschema:"Input-resource references keyed by material ID; each value is one {resource_id, revision, content_hash} object or an ordered array of these objects for a list material"`
-	IdempotencyKey  string         `json:"idempotency_key,omitempty" jsonschema:"Stable retry key; WorkBuddy requires an explicit unique key of 16–256 characters, preserved on retries"`
+	IdempotencyKey  string         `json:"idempotency_key,omitempty" jsonschema:"Explicit unique retry key of 16–256 characters; preserve it on retries"`
 	SessionID       string         `json:"session_id,omitempty" jsonschema:"Optional stable session identifier"`
-	DriverSessionID string         `json:"driver_session_id,omitempty" jsonschema:"Codex only: current native thread UUID obtained from host context or current shell CODEX_THREAD_ID. Never invent an ID or use the Workflow session_id. Host request metadata takes precedence."`
+	DriverSessionID string         `json:"driver_session_id,omitempty" jsonschema:"Native conversation ID, only when requested by the host connector. Use the exact host-provided ID; never guess or use the Workflow session_id. Host metadata takes precedence."`
 }
 
 type InputResource struct {
@@ -86,12 +103,11 @@ type InputImportResult struct {
 }
 
 type StartResult struct {
-	InteractionURL string     `json:"interaction_url,omitempty"`
-	PreparationID  string     `json:"preparation_id"`
-	SessionID      string     `json:"session_id"`
-	WorkflowID     string     `json:"workflow_id"`
-	RevisionID     string     `json:"revision_id"`
-	State          Projection `json:"state"`
+	PreparationID string     `json:"preparation_id"`
+	SessionID     string     `json:"session_id"`
+	WorkflowID    string     `json:"workflow_id"`
+	RevisionID    string     `json:"revision_id"`
+	State         Projection `json:"state"`
 }
 
 type SessionSummary struct {
@@ -298,23 +314,13 @@ func (c *Client) State(ctx context.Context, sessionID string) (Projection, error
 	if err != nil {
 		return Projection{}, err
 	}
-	// Only Codex asks the model to open a panel. Other hosts own presentation
-	// outside the model's tool results, including any URL returned by Core.
-	state.InteractionURL = ""
-	if c.HostProvider == "codex" {
-		base, err := c.api.WebURL(ctx)
-		if err != nil {
-			return Projection{}, err
-		}
-		state.InteractionURL = strings.TrimRight(base, "/") + "/workflow-runs/" + url.PathEscape(sessionID) + "/embed"
-	}
 	continuation, _ := state.Control["continuation"].(string)
 	admission, _ := state.Control["admission"].(map[string]any)
 	retries, _ := state.Control["automatic_retry_steps"].([]any)
 	if continuation == "continue" && admission["can_begin"] == true && len(retries) > 0 {
 		steps, _ := json.Marshal(retries)
 		state.AgentInstruction = "A step failed but automatic retry budget remains. Call workflow.step.begin for one step in control.automatic_retry_steps=" + string(steps) + " using the current state version. Keep this run; do not stop it or start a replacement run. Inspect the failure and adjust the retry instruction if needed."
-	} else if c.HostProvider == "codex" || c.HostProvider == "workbuddy" {
+	} else {
 		if continuation, _ := state.Control["continuation"].(string); continuation == "awaiting_user" {
 			state.AgentInstruction = "Human review is required. Tell the user to review in the Workflow panel, then END this turn. Do not approve the review yourself, begin another step, or poll while waiting. Resume only on a new notification or explicit user input, and read workflow.state first."
 		} else if continuation == "awaiting_executor" || continuation == "draining" || continuation == "stopped" || continuation == "completed" || continuation == "binding_required" || continuation == "failed" {
@@ -428,6 +434,11 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 	if input.WorkflowID == "" {
 		return StartResult{}, errors.New("workflow_id is required")
 	}
+	var err error
+	ctx, err = c.executionContext(ctx)
+	if err != nil {
+		return StartResult{}, err
+	}
 	if (c.HostProvider == "codex" || c.HostProvider == "workbuddy") && c.RequireHostBinding {
 		if !codexThreadPattern.MatchString(input.DriverSessionID) {
 			return StartResult{}, errors.New("Native driver session UUID is missing; use verified host identity, never the Workflow session_id")
@@ -516,11 +527,16 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 	}
 	return StartResult{
 		PreparationID: prepared.PreparationID, SessionID: consumed.SessionID, WorkflowID: workflowID,
-		RevisionID: strings.TrimSpace(consumed.RevisionID), InteractionURL: state.InteractionURL, State: state,
+		RevisionID: strings.TrimSpace(consumed.RevisionID), State: state,
 	}, nil
 }
 
 func (c *Client) Begin(ctx context.Context, input BeginInput) (BeginResult, error) {
+	var err error
+	ctx, err = c.executionContext(ctx)
+	if err != nil {
+		return BeginResult{}, err
+	}
 	state, err := c.State(ctx, input.SessionID)
 	if err != nil {
 		return BeginResult{}, err
@@ -587,6 +603,11 @@ func (c *Client) Resume(ctx context.Context, input ResumeInput) (BeginResult, er
 func (c *Client) begin(ctx context.Context, sessionID, executionID string, resume bool) (BeginResult, error) {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(executionID) == "" {
 		return BeginResult{}, errors.New("session_id and execution_id are required")
+	}
+	var err error
+	ctx, err = c.executionContext(ctx)
+	if err != nil {
+		return BeginResult{}, err
 	}
 	action := ":begin"
 	if resume {

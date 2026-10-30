@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 
 	"lazymind/agentconnector/internal/assistantbridge"
-	"lazymind/agentconnector/internal/codexplugin"
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -44,7 +43,7 @@ func runCodexWorkflowPair(args []string, stdout, stderr io.Writer) error {
 	})
 }
 
-// The plugin owns the worker lifetime; stdout remains exclusively MCP JSON-RPC.
+// Assistant Bridge owns the CDP worker; stdout remains exclusively MCP JSON-RPC.
 func runCodexWorkflowMCP(ctx context.Context) error {
 	store, err := credentials.NewStore("", "")
 	if err != nil {
@@ -57,11 +56,6 @@ func runCodexWorkflowMCP(ctx context.Context) error {
 	if _, err := assistantbridge.Start(ctx, address); err != nil {
 		return err
 	}
-	stop, err := codexplugin.StartWorker(ctx, store.Directory())
-	if err != nil {
-		return err
-	}
-	defer stop()
 	bridge, err := mcpbridge.New(store)
 	if err != nil {
 		return err

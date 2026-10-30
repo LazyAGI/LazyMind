@@ -9,6 +9,7 @@ import (
 )
 
 type DesktopApplication struct {
+	PackageNames    []string
 	BindingTarget   BindingTarget
 	ExecutableNames []string
 	Protocols       []string

@@ -23,6 +23,14 @@ func isolateCodexRuntime(t *testing.T) string {
 	t.Setenv("LAZYMIND_RUNTIME_PROFILE", "")
 	t.Setenv("LAZYMIND_DESKTOP_APPLICATION_DIRS", filepath.Join(root, "Applications"))
 	t.Setenv("SHELL", "")
+	if runtime.GOOS == "windows" {
+		// Registry/MSIX discovery is machine-wide; HOME and PATH isolation alone
+		// must not let an installed desktop override these CLI-only fixtures.
+		desktop := writeExecutable(t, root, "desktop/ChatGPT.exe", "fixture")
+		if _, err := agentexec.SetExecutableBinding(agentexec.CodexDesktop, desktop); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return root
 }
 

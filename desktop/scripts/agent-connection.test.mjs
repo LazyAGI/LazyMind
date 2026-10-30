@@ -51,3 +51,26 @@ for (const platform of ['darwin', 'win32']) {
     ]);
   });
 }
+
+for (const platform of ['darwin', 'win32']) {
+  test(`desktop ${platform} cancels recovery before disconnecting Codex`, async () => {
+    const operations = [];
+    let finishStop;
+    const run = vm.runInNewContext(`${timeoutDeclarations}\n${source.slice(start, end)}\nrunAgentConnector`, {
+      agentLogins: new Map(),
+      URL, process: { platform, env: {} },
+      agentRecovery: {
+        start: () => operations.push('listen'),
+        stop: () => new Promise(resolve => { operations.push('stop'); finishStop = resolve; }),
+      },
+      runConnectorJSON: async args => { operations.push(Array.from(args).join(' ')); return { state: 'enabled' }; },
+    });
+    await run('codex', 'connect');
+    assert.deepEqual(operations, ['assistant start', 'internal agent codex connect', 'listen']);
+    operations.length = 0;
+    const pending = run('codex', 'disconnect');
+    assert.deepEqual(operations, ['stop']);
+    finishStop(); await pending;
+    assert.deepEqual(operations, ['stop', 'internal agent codex disconnect']);
+  });
+}

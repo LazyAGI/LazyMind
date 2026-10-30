@@ -14,7 +14,7 @@ var codexThreadPattern = regexp.MustCompile(`(?i)^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-
 // MCP transport session IDs are not native conversation IDs. Only explicit
 // thread fields are recognized. Agent-supplied fallback is a documented
 // queue-integration limitation, not proof of host identity.
-func codexDriver(request *mcp.CallToolRequest, fallback string) (string, error) {
+func CodexDriver(request *mcp.CallToolRequest, fallback string) (string, error) {
 	var identities []string
 	if request != nil && request.Params != nil {
 		meta := request.Params.Meta

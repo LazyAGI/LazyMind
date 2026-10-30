@@ -342,6 +342,7 @@ lint-state-backend-boundary: install-golangci-lint
 	@echo "🔒 Checking state backend Redis boundary..."
 	@set -e; for dir in $(GO_MODULE_DIRS); do \
 		if [ -f "$$dir/go.mod" ]; then \
+			echo "Checking Redis boundary in $$dir..."; \
 			(cd "$$dir" && "$(GOLANGCI_LINT)" run --config "$(CURDIR)/.golangci.yml" --enable-only depguard --tests=false ./...); \
 		fi; \
 	done

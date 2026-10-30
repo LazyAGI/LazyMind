@@ -139,12 +139,6 @@ func Install(ctx context.Context, home, self, binary, profile, hostID string) (I
 	if err != nil {
 		return Installation{}, err
 	}
-	probe, cancel := context.WithTimeout(ctx, 5*time.Second)
-	_, err = agentexec.Run(probe, binary, "queue", "--help")
-	cancel()
-	if err != nil {
-		return Installation{}, fmt.Errorf("desktop Codex does not expose queue: %w", err)
-	}
 	store, err := credentials.NewStore(home, "")
 	if err != nil {
 		return Installation{}, err

@@ -3,10 +3,15 @@
 package agentexec
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
@@ -54,6 +59,7 @@ func platformDesktopApplications(spec DesktopApplication) []string {
 			}
 		}
 	}
+	paths = append(paths, findWindowsPackagedDesktopApplications(spec, queryWindowsAppPackages)...)
 	return uniqueWindowsPaths(paths)
 }
 
@@ -171,4 +177,18 @@ func commandExecutable(command string) string {
 func directoryExists(path string) bool {
 	info, err := os.Stat(strings.TrimSpace(path))
 	return err == nil && info.IsDir()
+}
+
+func queryWindowsAppPackages(names []string) ([]byte, error) {
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	// Use Windows PowerShell's Appx module, not a PATH shim or redirected AppData.
+	command := exec.CommandContext(ctx, filepath.Join(system, "WindowsPowerShell", "v1.0", "powershell.exe"),
+		"-NoProfile", "-NonInteractive", "-Command", windowsAppPackageQuery(names))
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return command.Output()
 }

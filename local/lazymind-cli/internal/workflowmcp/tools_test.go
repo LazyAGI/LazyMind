@@ -17,7 +17,7 @@ import (
 	"lazymind/agentconnector/internal/credentials"
 )
 
-func TestStateExposesPanelURLOnlyForCodex(t *testing.T) {
+func TestStateOmitsPresentationURLsForEveryHost(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/core/workflow-sessions/test-session/projection" {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -41,15 +41,9 @@ func TestStateExposesPanelURLOnlyForCodex(t *testing.T) {
 			t.Setenv("LAZYMIND_WEB_URL", base)
 			client := &Client{api: api, HostProvider: provider}
 			state, err := client.State(context.Background(), "test-session")
-			if base == "" {
-				base = server.URL
-			}
-			want := ""
-			if provider == "codex" {
-				want = strings.TrimRight(base, "/") + "/workflow-runs/test-session/embed"
-			}
-			if err != nil || state.InteractionURL != want {
-				t.Fatalf("provider=%q url=%q want=%q err=%v", provider, state.InteractionURL, want, err)
+			encoded, _ := json.Marshal(state)
+			if err != nil || strings.Contains(string(encoded), "interaction_url") || strings.Contains(string(encoded), "stale.example") {
+				t.Fatalf("provider=%q state=%s err=%v", provider, encoded, err)
 			}
 		}
 	}
@@ -125,8 +119,8 @@ func testWorkflowToolDescriptions(t *testing.T, provider string) {
 	if !containsAll(got["workflow.start"], "workflow.step.begin", "workflow_id", "revision_id") {
 		t.Fatalf("workflow.start description=%q", got["workflow.start"])
 	}
-	for _, hint := range []string{"interaction_url", "open_in_codex", "placement=bottom", "If the host tool is unavailable"} {
-		if strings.Contains(got["workflow.start"], hint) != (provider == "codex") {
+	for _, hint := range []string{"interaction_url", "open_in_codex", "placement=bottom", "Do not open a duplicate browser panel"} {
+		if strings.Contains(got["workflow.start"], hint) {
 			t.Fatalf("incorrect Codex presentation scope for %q: %q", provider, got["workflow.start"])
 		}
 	}

@@ -15,7 +15,8 @@ func TestWorkBuddyStartRequiresNativeEvidenceEvenWithSuppliedDriver(t *testing.T
 	server := mcp.NewServer(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 	called := false
 	Register(server, &Client{HostProvider: "workbuddy", RequireHostBinding: true,
-		ResolveDriver: func(_ context.Context, raw json.RawMessage) (string, error) {
+		ResolveDriver: func(_ context.Context, request *mcp.CallToolRequest, _ string) (string, error) {
+			raw := request.Params.Arguments
 			called = true
 			var args map[string]any
 			if err := json.Unmarshal(raw, &args); err != nil {
