@@ -1700,3 +1700,29 @@
     padding: 10px 20px 0;
   }
 }
+
+// Model configuration must adapt to its available pane, including when the
+// application and settings navigation are both expanded.
+.settings-integrated-surface.is-models > .model-provider-page-content {
+  container: model-workspace / inline-size;
+}
+@container model-workspace (max-width: 700px) {
+  .settings-integrated-surface.is-models .provider-workspace-body { grid-template-columns: minmax(0, 1fr); }
+  .provider-workspace-sidebar { border-right: 0; }
+  .provider-workspace-detail { display: none; }
+  .provider-workspace.is-mobile-detail .provider-workspace-sidebar { display: none; }
+  .provider-workspace.is-mobile-detail .provider-workspace-detail { display: flex; }
+  .provider-workspace .provider-workspace-mobile-back { display: inline-flex; flex-shrink: 0; min-height: 40px; padding-inline: 6px; }
+  .settings-integrated-surface.is-models .provider-workspace-detail { --provider-detail-gutter: 12px; }
+  .settings-integrated-surface.is-models .provider-workspace-supplier-header { min-height: 80px; padding-block: 16px; gap: 6px; }
+  .provider-workspace-supplier-title { gap: 6px; min-width: 0; }
+  .provider-workspace-supplier-identity { min-width: 0; }
+  .provider-workspace-supplier-title h2 { font-size: 16px; }
+  .provider-workspace-supplier-actions { flex-shrink: 0; }
+}
+@media (max-width: 480px) {
+  .settings-reference.is-model-settings-workspace .provider-workspace-topbar { padding-inline: 12px; }
+  .settings-model-defaults-page .settings-integrated-surface.is-default-models { padding-inline: 12px; }
+  .settings-reference.is-model-settings-workspace .settings-reference-content { min-width: 0; }
+  .model-provider-default-controls { min-width: 0; }
+}

@@ -174,6 +174,7 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 		&orm.EvalSet{},
 		&readonlyorm.LazyLLMDocRow{},
 		&readonlyorm.LazyLLMDocServiceTaskRow{},
+		&readonlyorm.LazyLLMDocParseStateRow{},
 	); err != nil {
 		t.Fatalf("auto migrate: %v", err)
 	}

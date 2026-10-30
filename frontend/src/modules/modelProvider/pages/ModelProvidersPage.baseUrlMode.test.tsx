@@ -5,7 +5,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { ConfigProvider } from "antd";
+import { ConfigProvider, message } from "antd";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ModelProviderPage from "./ModelProvidersPage";
@@ -247,6 +247,17 @@ describe("supplier endpoints and direct setup", () => {
       mocks.checkGroup.mock.calls[0][0].checkModelProviderOpenAPIRequest;
     expect(payload.base_url).toBe(openAI.base_url);
     expect(payload).not.toHaveProperty("api_key");
+  });
+
+  it("distinguishes recognized Ark credentials from verified inference", async () => {
+    const success = vi.spyOn(message, "success");
+    mocks.checkGroup.mockResolvedValue({ data: { success: true, reason: "credentials_recognized" } });
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "modelProvider.workspace.checkConnection" }));
+    expect(await screen.findByText("modelProvider.workspace.arkCredentialsRecognized")).toBeInTheDocument();
+    expect(success).toHaveBeenCalledWith("modelProvider.workspace.arkCredentialsRecognized");
+    expect(success).not.toHaveBeenCalledWith("modelProvider.message.groupVerified");
+    success.mockRestore();
   });
 
   it("checks a custom endpoint without requiring a key", async () => {

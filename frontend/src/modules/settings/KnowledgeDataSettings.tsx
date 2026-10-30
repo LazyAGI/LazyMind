@@ -141,7 +141,7 @@ export default function KnowledgeDataSettings({
       title: t("settingsPage.knowledge.groups.recognition.title"),
       description: t("settingsPage.knowledge.groups.recognition.description"),
       icon: <FileSearchOutlined />,
-      destination: "/settings?section=models",
+      destination: "/settings?section=model_defaults",
       tools: [
         { id: "multimodal", name: t("settingsPage.knowledge.groups.recognition.multimodal.name"), description: t("settingsPage.knowledge.groups.recognition.multimodal.description") },
       ],

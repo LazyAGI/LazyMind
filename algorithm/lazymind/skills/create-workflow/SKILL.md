@@ -163,6 +163,46 @@ Every produced material must correspond to a slot in `workflow.yaml`.
 Every non-external slot must be produced by exactly one step.
 Every step must be reachable from `__start__` and able to reach `__end__`.
 
+### Exact Material And Runtime Tool Contract
+
+Declaring a slot or mentioning an output in a prompt does NOT declare its producer.
+Declare producers and consumers in `scenario/state.yml`, for example:
+
+```yaml
+steps:
+  review:
+    mode: human
+    inputs:
+      - material: chapter_text
+        required: true
+      - material: project_summary
+        required: true
+    outputs:
+      - material: review_result
+    prompt: Read both inputs and save review_result using save_artifacts.
+  report:
+    inputs:
+      - material: review_result
+        required: true
+```
+
+Also declare `review_result` as a `json` slot in `workflow.yaml`. Never place
+input/output contracts only in `workflow.yaml.steps` or in prose. Each saved
+artifact key MUST be in the executing step's `outputs[].material`; a step with
+no outputs must not call `save_artifacts`. Downstream steps must explicitly
+declare the materials they read, including any newly added node's output.
+
+A source Skill's tools are NOT automatically available to a Workflow step.
+Filesystem writes, memory updates and other side effects require an actual
+runtime tool: declare its registered name in the step's `tools`, or provide a
+safe implemented script with `workflow.yaml.tool_scripts[].path` and
+`functions` and declare the function in step `tools`. A made-up tool name or a
+promise in a design brief is not an implementation. Do not replace required
+file writes with artifacts or claim persistence without a successful writer.
+If no supported tool or safe implementation can satisfy the requirement,
+report the missing capability (use `needs_input` during repair); do not produce
+a supposedly executable workflow. Preserve user approvals and write scope.
+
 `scenario/scenario.md` must document the actual generated steps and materials.
 It must contain one substantive section for every step id in `scenario/state.yml`.
 Each step section must explain the step purpose, required inputs, produced
@@ -254,7 +294,7 @@ For `workflow.repair`:
   also change.
 - Prefer precise `edits` for small local changes:
   `{"file":"scenario/state.yml","old":"exact old text","new":"replacement"}`.
-- Also include final full content for every repaired core file.
+- For each changed file use either edits or final full content, not both.
 - Leave unrelated files empty or omitted.
 
 For `workflow.polish_info`:

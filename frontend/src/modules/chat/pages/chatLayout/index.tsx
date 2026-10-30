@@ -22,6 +22,7 @@ import ChatContainerComponent, {
 } from "@/modules/chat/components/newChatContainer";
 import "./index.scss";
 import UIUtils from "@/modules/chat/utils/ui";
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import InitialCard from "@/modules/chat/components/InitialCard";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { createChatStream } from "@/modules/chat/utils/chatStream";
@@ -311,14 +312,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const workflowUI = useWorkflowStore((s) => {
     const workflowId = workflowSession?.workflow_id;
     return workflowId
-      ? s.workflowUIByWorkflow[`${workflowId}:${workflowLanguage}`]
+      ? s.workflowUIByWorkflow[workflowUICacheKey(workflowId, workflowSession?.pinned_revision_id, workflowLanguage)]
       : undefined;
   });
   const fetchWorkflowUI = useWorkflowStore((s) => s.fetchWorkflowUI);
   useEffect(() => {
     if (!workflowSession?.workflow_id) return;
-    void fetchWorkflowUI(workflowSession.workflow_id);
-  }, [fetchWorkflowUI, workflowLanguage, workflowSession?.workflow_id]);
+    void fetchWorkflowUI(workflowSession.workflow_id, workflowSession.pinned_revision_id);
+  }, [fetchWorkflowUI, workflowLanguage, workflowSession?.workflow_id, workflowSession?.pinned_revision_id, workflowSession?.session_id]);
   const workflowMilestoneCount = useMemo(() => {
     // Completed sessions may legitimately end on an optional earlier branch;
     // their persisted attempts are then the authoritative final total.

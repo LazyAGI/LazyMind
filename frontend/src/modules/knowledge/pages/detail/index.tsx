@@ -646,7 +646,7 @@ const Detail = () => {
                               "knowledge.multimodalEmbeddingNotReadyBannerAdmin",
                             )}
                         <a
-                          href="/settings?section=models"
+                          href="/settings?section=model_defaults"
                           style={{
                             marginLeft: 8,
                             color: "#fff",
@@ -654,7 +654,7 @@ const Detail = () => {
                           }}
                           onClick={(e: MouseEvent<HTMLAnchorElement>) => {
                             e.preventDefault();
-                            navigate("/settings?section=models");
+                            navigate("/settings?section=model_defaults");
                           }}
                         >
                           {t("knowledge.goToConfig")}

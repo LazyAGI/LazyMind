@@ -66,9 +66,9 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
   const buildKnowledgeDisabledReason = (): ReactNode => {
     const goConfig = (
       <a
-        href="/settings?section=models"
+        href="/settings?section=model_defaults"
         style={{ marginLeft: 6, color: '#fff', textDecoration: 'underline' }}
-        onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/settings?section=models'); }}
+        onClick={(e: MouseEvent<HTMLAnchorElement>) => { e.preventDefault(); navigate('/settings?section=model_defaults'); }}
       >
         {t("knowledge.goToConfig")}
       </a>

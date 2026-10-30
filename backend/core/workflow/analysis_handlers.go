@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"lazymind/core/algo"
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/graphengine"
 )
 
 func GetWorkflowGenerationAnalysis(w http.ResponseWriter, r *http.Request) {
@@ -47,31 +49,63 @@ func PreviewWorkflowRepair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Target string `json:"target"`
-		Mode   string `json:"mode"`
+		Target       string                    `json:"target"`
+		Mode         string                    `json:"mode"`
+		DraftVersion int                       `json:"draft_version"`
+		EditContext  *algo.WorkflowEditContext `json:"edit_context,omitempty"`
 	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.DraftVersion != 0 && body.DraftVersion != draft.Version {
+		common.ReplyErr(w, "repair stale draft", http.StatusConflict)
+		return
+	}
 	if body.Target == "" {
 		body.Target = "statemachine"
 	}
 	if body.Mode == "" {
 		body.Mode = "workflow_local"
 	}
-	diagnostics := diagnosticsForTarget(
-		diagnoseWorkflow(draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent),
-		body.Target,
-	)
+	profile := graphengine.ProfileEditor
+	preserveCurrent := shouldPreserveCurrentWorkflow(draft, body.Target, body.EditContext)
+	if preserveCurrent {
+		body.Mode = "workflow_local"
+		profile = graphengine.ProfilePublish
+	}
+	allDiagnostics := diagnoseWorkflowWithProfile(draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, draft.ScriptsContent, profile)
+	if preserveCurrent {
+		base := workflowRepairSnapshot{WorkflowYAML: draft.WorkflowYAMLContent, StateYAML: draft.StateYAMLContent, ScenarioMD: draft.ScenarioContent, Scripts: scriptsFromDraft(draft.ScriptsContent)}
+		allDiagnostics = diagnoseNodeIntegration(base, base)
+	}
+	diagnostics := diagnosticsForTarget(allDiagnostics, body.Target)
+	blockers := []repairDiagnostic{}
+	for _, diagnostic := range allDiagnostics {
+		if preserveCurrent && diagnostic.Severity == "error" && !diagnosticAppliesToTarget(diagnostic, body.Target) {
+			blockers = append(blockers, diagnostic)
+		}
+	}
 	if diagnostics == nil {
 		diagnostics = []repairDiagnostic{}
 	}
 	files := map[string][]string{
-		"statemachine": {"workflow.yaml.steps", "workflow.yaml.slots", "scenario/state.yml"},
-		"ui":           {"workflow.yaml.ui", "workflow.yaml.slots"},
-		"scenario":     {"scenario/scenario.md"},
-		"scripts":      {"scripts/*", "workflow.yaml.tools", "scenario/state.yml.steps"},
-		"full":         {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"},
+		"statemachine":     {"workflow.yaml.steps", "workflow.yaml.slots", "scenario/state.yml"},
+		"node_integration": {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"},
+		"ui":               {"workflow.yaml.ui", "workflow.yaml.slots"},
+		"scenario":         {"scenario/scenario.md"},
+		"scripts":          {"scripts/*", "workflow.yaml.tools", "scenario/state.yml.steps"},
+		"full":             {"workflow.yaml", "scenario/state.yml", "scenario/scenario.md", "scripts/*"},
 	}
-	common.ReplyOK(w, map[string]any{"target": body.Target, "mode": body.Mode, "draft_version": draft.Version, "diagnostics": diagnostics, "planned_files": files[body.Target]})
+	if body.Target == "statemachine" && preserveCurrent {
+		files["statemachine"] = []string{"scenario/state.yml", "workflow.yaml.steps", "workflow.yaml.slots", "scenario/scenario.md", "workflow.yaml.ui", "scripts/*"}
+	}
+	graph := graphengine.Compile(draft.WorkflowYAMLContent, draft.StateYAMLContent, draft.ScenarioContent, profile).Graph
+	corrections := []workflowInputCorrectionOption{}
+	if preserveCurrent {
+		corrections = workflowInputCorrectionOptions(graph)
+	}
+	common.ReplyOK(w, map[string]any{"target": body.Target, "mode": body.Mode, "draft_version": draft.Version, "diagnostics": diagnostics, "planned_files": files[body.Target], "blocking_diagnostics": blockers, "input_corrections": corrections})
 }
 
 func ConfirmWorkflowWorkflow(w http.ResponseWriter, r *http.Request) {

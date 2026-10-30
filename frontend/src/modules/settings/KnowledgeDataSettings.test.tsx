@@ -80,7 +80,7 @@ describe("KnowledgeDataSettings", () => {
     });
   });
 
-  it("opens multimodal recognition in the Models & Services settings section", async () => {
+  it("opens multimodal recognition in default model settings", async () => {
     render(<KnowledgeDataSettings
       controlsDisabled={false}
       documentDirectoriesEnabled={true}
@@ -94,7 +94,7 @@ describe("KnowledgeDataSettings", () => {
 
     fireEvent.click(await screen.findByRole("link", { name: "打开多模态识别配置" }));
 
-    expect(mocks.navigate).toHaveBeenCalledWith("/settings?section=models");
+    expect(mocks.navigate).toHaveBeenCalledWith("/settings?section=model_defaults");
   });
 
   it("keeps the nested switch independent from row navigation", async () => {

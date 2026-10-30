@@ -290,7 +290,7 @@ func TestAddGroupModelRestoresSoftDeletedCustomModel(t *testing.T) {
 	}
 }
 
-func TestDeleteEmbeddingModelRequiresConfirmationAndDowngradesIndexedDatasets(t *testing.T) {
+func TestDeleteEmbeddingModelBlocksUntilIndexedKnowledgeRemoved(t *testing.T) {
 	db := setupListProviderTestDB(t)
 	if err := db.AutoMigrate(&orm.UserSelectedModel{}, &orm.Dataset{}, &orm.DocumentProcessingState{}); err != nil {
 		t.Fatal(err)
@@ -332,10 +332,20 @@ func TestDeleteEmbeddingModelRequiresConfirmationAndDowngradesIndexedDatasets(t 
 		t.Fatal("model was deleted without confirmation")
 	}
 
-	if rec := deleteRequest(true); rec.Code != http.StatusOK {
-		t.Fatalf("confirmed status = %d, want 200: %s", rec.Code, rec.Body.String())
+	groupRequest := httptest.NewRequest(http.MethodDelete, "/group?confirm_indexed_downgrade=true", nil)
+	groupRequest.Header.Set("X-User-Id", "user-1")
+	groupRequest = mux.SetURLVars(groupRequest, map[string]string{"model_provider_id": provider.ID, "group_id": group.ID})
+	groupRecorder := httptest.NewRecorder()
+	DeleteGroup(groupRecorder, groupRequest)
+	if groupRecorder.Code != http.StatusConflict {
+		t.Fatalf("group delete bypassed guard: %d %s", groupRecorder.Code, groupRecorder.Body.String())
 	}
-	for id, wantLevel := range map[string]string{ownerDataset.ID: "chunked", otherDataset.ID: "indexed"} {
+
+	if rec := deleteRequest(true); rec.Code != http.StatusConflict {
+		t.Fatalf("referenced embedding must remain protected: %d %s", rec.Code, rec.Body.String())
+	}
+
+	for id, wantLevel := range map[string]string{ownerDataset.ID: "indexed", otherDataset.ID: "indexed"} {
 		var dataset orm.Dataset
 		if err := db.Take(&dataset, "id = ?", id).Error; err != nil {
 			t.Fatal(err)
@@ -343,8 +353,8 @@ func TestDeleteEmbeddingModelRequiresConfirmationAndDowngradesIndexedDatasets(t 
 		if dataset.ProcessingLevel != wantLevel {
 			t.Errorf("dataset %s level = %q, want %q", id, dataset.ProcessingLevel, wantLevel)
 		}
-		if id == ownerDataset.ID && dataset.ProcessingRevision != 5 {
-			t.Errorf("revision = %d, want 5", dataset.ProcessingRevision)
+		if id == ownerDataset.ID && dataset.ProcessingRevision != 4 {
+			t.Errorf("revision = %d, want 4", dataset.ProcessingRevision)
 		}
 	}
 	var retained orm.DocumentProcessingState
@@ -354,6 +364,13 @@ func TestDeleteEmbeddingModelRequiresConfirmationAndDowngradesIndexedDatasets(t 
 	if retained.IndexArtifactRef != "vector-index-v1" || retained.IndexStatus != "succeeded" {
 		t.Fatalf("index artifact was changed: %#v", retained)
 	}
+	if err := db.Model(&ownerDataset).Update("deleted_at", now).Error; err != nil {
+		t.Fatal(err)
+	}
+	if rec := deleteRequest(false); rec.Code != http.StatusOK {
+		t.Fatalf("unreferenced embedding removal failed: %d %s", rec.Code, rec.Body.String())
+	}
+
 }
 
 func TestListUserModelsWithoutTypeReturnsAnyVerifiedModel(t *testing.T) {

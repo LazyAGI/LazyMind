@@ -60,13 +60,17 @@ it('shares one account request per provider across the menu and dialog on mount,
   expect(connections).toHaveBeenCalledTimes(2);
   authorized = false;
   fireEvent.focus(window);
-  await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeDisabled());
-  expect(action()?.menu?.[0].disabled).toBe(true);
+  await waitFor(() => {
+    expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeDisabled();
+    expect(action()?.menu?.[0].disabled).toBe(true);
+  });
   expect(connections).toHaveBeenCalledTimes(4);
   authorized = true;
   fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-  await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeEnabled());
-  expect(action()?.menu?.[0].disabled).toBe(false);
+  await waitFor(() => {
+    expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeEnabled();
+    expect(action()?.menu?.[0].disabled).toBe(false);
+  });
   expect(connections).toHaveBeenCalledTimes(6);
 });
 

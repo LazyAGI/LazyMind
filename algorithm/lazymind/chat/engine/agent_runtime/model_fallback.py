@@ -17,7 +17,7 @@ from lazyllm.module.servermodule import LLMBase
 from lazyllm.module.llms.onlinemodule.base.model_outcome import ModelCallError
 
 from .budget import build_context_budget, parse_token_limit
-from .model_calls import ContextCapacityError, UnsupportedModelInput, request_tokens
+from .model_calls import ContextCapacityError, UnsupportedModelInput, request_tokens, configured_output_limit
 from .message_fields import model_facing_history
 from lazyllm.module.llms.onlinemodule.base import ModelCallControl
 from .cancellation import UserCancelledError
@@ -261,7 +261,7 @@ class FallbackLLM(ModuleBase, LLMBase):
             call_kwargs = dict(kwargs)
             call_kwargs['max_retries'] = 1
             call_kwargs['timeout'] = _request_timeout(current)
-            call_kwargs['output_limit'] = budget.reserved_output_tokens
+            call_kwargs['output_limit'] = configured_output_limit(view, kwargs)
 
             def begin_output(output_metadata=output_metadata):
                 nonlocal call_index, call_open
