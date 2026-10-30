@@ -27,6 +27,8 @@ paper, err := arxivsource.NewClient().Lookup(ctx, identifier.ID())
 
 `NewClientWithOptions` 仅用于可信代码的依赖注入和本地 HTTP 测试；不能把请求中的地址传给 `APIBaseURL`。正常业务使用 `NewClient()`。
 
+`Search(ctx, query, limit)` 获取相关性排序的第一页，供题录解析等首屏调用使用。`SearchPage(ctx, query, limit, start)` 通过官方 `start` 参数续查，`start` 从 0 开始；返回 `Items`、上游提供的 `TotalResults` 和可选的 `NextStart`。每页保持 1–20 条，并复用上述请求闸门。论文扩展接口将续查位置封装为绑定任务和来源的游标，初步调研与正式拓展均可使用；单次续查只访问对应来源。
+
 ## 错误语义
 
 所有失败均返回 `*LookupError`，调用方应保留 `code`、`message` 和有效的 `status_code`，不得转换成成功条目。

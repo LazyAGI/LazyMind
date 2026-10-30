@@ -43,7 +43,7 @@ func importedLibraryEntry(ctx context.Context, tx *gorm.DB, dataset string, work
 		return row, err
 	}
 	now := time.Now().UTC()
-	row = orm.PaperLibraryEntry{DatasetID: dataset, ID: "work-" + work.ID, AcademicWorkID: work.ID, FolderID: folder, Status: "unread", TagsJSON: marshal([]string{}), MetadataJSON: marshal(map[string]any{}), Source: "unknown", ImportMethod: method, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	row = orm.PaperLibraryEntry{DatasetID: dataset, ID: "work-" + work.ID, AcademicWorkID: work.ID, FolderID: folder, TagsJSON: marshal([]string{}), MetadataJSON: marshal(map[string]any{}), Source: "unknown", ImportMethod: method, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if draft != nil {
 		if !paperlibrary.ValidID(draft.ID) {
 			return row, invalidLibraryMutation("INVALID_PAPER_LIBRARY", "论文条目 ID 无效")
@@ -321,7 +321,17 @@ func createLibraryImport(w http.ResponseWriter, r *http.Request, user string, in
 			} else {
 				batch.CompletedItems++
 			}
-			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: "done", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: marshal(map[string]any{}), ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
+			snapshot := marshal(map[string]any{})
+			if input.EntryType == "paper_link" {
+				for _, preview := range receipt.Items {
+					if preview.WorkID == work.ID {
+						ref := preview.Paper
+						snapshot = marshal(savedImportCandidate{FulltextCandidate: FulltextCandidate{URL: ref.PDFURL, SourceProvider: ref.SourceProvider, Version: ref.SourceVersion}, VerifiedPaper: &ref})
+						break
+					}
+				}
+			}
+			items = append(items, orm.PaperImportItem{ID: uuid.NewString(), BatchID: batch.ID, LibraryPaperID: row.ID, AcademicWorkID: work.ID, TitleSnapshot: work.CanonicalTitle, ResultKind: kind, Status: status, Stage: "done", ReferenceIDsJSON: marshal([]string{}), PresenceSnapshotJSON: marshal(map[string]any{}), SelectedCandidateJSON: snapshot, ErrorDetailsJSON: marshal(map[string]any{}), CreatedAt: now, UpdatedAt: now})
 			ids = append(ids, row.ID)
 		}
 		batch.TotalItems = len(items)

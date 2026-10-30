@@ -23,6 +23,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
+	"lazymind/core/workflow/displaystate"
 	workflowdocument "lazymind/core/workflow/document"
 	workflowstore "lazymind/core/workflow/store"
 )
@@ -36,6 +37,7 @@ type WorkflowPaper struct {
 	KeyContribution   string   `json:"key_contribution,omitempty"`
 }
 type ReviewWorkflowInput struct {
+	ReviewScope         string          `json:"review_scope,omitempty"`
 	UserInstruction     string          `json:"user_instruction"`
 	CandidateDirections []string        `json:"candidate_directions"`
 	SelectedDirections  []string        `json:"selected_directions"`
@@ -45,6 +47,8 @@ type ReviewWorkflowInput struct {
 const ChatLaunchJobType = "academic.chat_launch"
 
 type paperLaunch struct {
+	SkipExpansion    bool     `json:"skip_expansion"`
+	ReviewScope      string   `json:"review_scope,omitempty"`
 	Kind             string   `json:"kind"`
 	DatasetID        string   `json:"dataset_id"`
 	DocumentIDs      []string `json:"document_ids"`
@@ -168,7 +172,16 @@ func ResolvePaperSelection(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 403, "FORBIDDEN", err.Error())
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"papers": papers, "invalid": invalid})
+	result := map[string]any{"papers": papers, "invalid": invalid}
+	if req.Kind == "review" && req.SkipExpansion {
+		materials, err := reviewSelectionMaterials(r, user, req.DatasetID, papers)
+		if err != nil {
+			replyError(w, 422, "REVIEW_NOT_READY", err.Error())
+			return
+		}
+		result["materials"] = materials
+	}
+	common.ReplyJSON(w, result)
 }
 func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireUser(w, r)
@@ -184,7 +197,19 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "INVALID_KIND", "invalid paper task")
 		return
 	}
-	if req.PaperIDs != nil && (req.Kind != "review" || req.ExpansionID == "") {
+	if req.SkipExpansion && (req.Kind != "review" || req.ExpansionID != "" || strings.TrimSpace(req.Direction) != "" || len(req.DocumentIDs) == 0) {
+		replyError(w, 400, "INVALID_REQUEST", "skip_expansion requires a review of selected library papers")
+		return
+	}
+	if req.ReviewScope != "" && (!req.SkipExpansion || (req.ReviewScope != "selected" && req.ReviewScope != "direct_references")) {
+		replyError(w, 400, "INVALID_REQUEST", "review_scope requires a direct library review")
+		return
+	}
+	if strings.TrimSpace(req.Direction) != "" && len(req.DocumentIDs) > 0 {
+		replyError(w, 400, "INVALID_REQUEST", "choose either a direction or library papers")
+		return
+	}
+	if req.PaperIDs != nil && (req.Kind != "review" || (req.ExpansionID == "" && !req.SkipExpansion)) {
 		replyError(w, 400, "INVALID_REQUEST", "paper_ids requires a review from expansion results")
 		return
 	}
@@ -201,7 +226,7 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 403, "FORBIDDEN", err.Error())
 		return
 	}
-	if len(invalid) > 0 {
+	if len(invalid) > 0 && !req.SkipExpansion {
 		replyError(w, 422, "INVALID_SELECTION", string(marshal(invalid)))
 		return
 	}
@@ -217,6 +242,10 @@ func LaunchPaperWorkflow(w http.ResponseWriter, r *http.Request) {
 		instruction = "围绕所选论文进行研究"
 	}
 	input := ReviewWorkflowInput{UserInstruction: instruction, CandidateDirections: []string{}, SelectedDirections: []string{}, Papers: papers}
+	if req.SkipExpansion {
+		launchSelectedReview(w, r, user, req, input)
+		return
+	}
 	if req.Direction != "" {
 		input.CandidateDirections = []string{req.Direction}
 		input.SelectedDirections = []string{req.Direction}
@@ -439,8 +468,9 @@ func snapshotReview(ctx context.Context, tx *gorm.DB, user, dataset string, inpu
 			return input, nil, err
 		}
 		ref.SourceDocumentID = p.Paper.SourceDocumentID
-		if p.Paper.SourceVersion != "" {
+		if p.Paper.SourceProvider != "" || p.Paper.SourceVersion != "" {
 			ref.SourceVersion, ref.SourceProvider = p.Paper.SourceVersion, p.Paper.SourceProvider
+			ref.PaperURL, ref.PDFURL = p.Paper.PaperURL, p.Paper.PDFURL
 			pinPaperURLs(&ref)
 		}
 		p.Paper = ref
@@ -555,19 +585,8 @@ func launchHistoryReview(w http.ResponseWriter, r *http.Request, user string, re
 		if req.ExpansionVersion != nil {
 			version = *req.ExpansionVersion
 		}
-		if version > record.Version {
-			return errors.New("所选拓展版本尚未完成")
-		}
-		snapshot := record.ResultJSON
-		if version != record.Version {
-			var round orm.AcademicExpansionRound
-			if err := tx.Where("expansion_id=? AND version=? AND status='completed'", record.ID, version).Take(&round).Error; err != nil {
-				return fmt.Errorf("所选拓展版本不可用: %w", err)
-			}
-			snapshot = round.ResultJSON
-		}
-		var input ReviewWorkflowInput
-		if err := json.Unmarshal(snapshot, &input); err != nil {
+		input, err := completedExpansionInput(tx, record, version)
+		if err != nil {
 			return err
 		}
 		if req.UserInstruction != "" {
@@ -714,15 +733,22 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			progress[artifact.Slot] = value
 		}
 	}
-	status := session.Status
-	if status == "active" || status == "waiting" {
-		status = "running"
+	view, err := displaystate.Read(db, session)
+	if err != nil {
+		return asyncjob.Result{}, err
+	}
+	status := view.Status
+	switch status {
+	case "paused":
+		status = "stopped"
+	case "waiting":
+		status = "awaiting_input"
 	}
 	var histories []orm.ChatHistory
 	if e := db.Where("conversation_id=?", record.ConversationID).Order("seq ASC").Find(&histories).Error; e != nil {
 		return asyncjob.Result{}, e
 	}
-	if len(histories) > 0 {
+	if len(histories) > 0 && (status == "running" || status == "awaiting_input") {
 		var ext map[string]any
 		_ = json.Unmarshal(histories[len(histories)-1].Ext, &ext)
 		answered, _ := ext["ask_answered"].(bool)
@@ -730,9 +756,6 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			status = "awaiting_input"
 			progress["interaction"] = marshal(pending)
 		}
-	}
-	if session.LastStoppedAt != nil {
-		status = "stopped"
 	}
 	userUpdates, interactions := paperConversationInputs(histories)
 
@@ -904,7 +927,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 	}
 	processing := false
 	for _, paper := range input.Papers {
-		if latest.Goal != "review" {
+		if latest.Version == 0 {
 			break
 		}
 		source, e := expansionSource(db, latest, paper.Paper.PaperID)
@@ -942,7 +965,7 @@ func projectAcademicResult(ctx context.Context, job asyncjob.Job, _ asyncjob.Rep
 			return asyncjob.Result{}, err
 		}
 	}
-	if processing && session.Status == "completed" {
+	if processing && session.Status == "completed" && latest.Goal == "review" {
 		// A short rescheduled job releases the worker while downloads/parsing run.
 		_, err = asyncjob.Enqueue(ctx, db, asyncjob.EnqueueRequest{JobType: "academic.project", ResourceType: "academic_expansion", ResourceID: record.ID, CreateUserID: record.UserID, IdempotencyKey: uuid.NewString(), Payload: payload, RunAt: time.Now().Add(5 * time.Second), MaxAttempts: 3})
 	}
@@ -963,7 +986,16 @@ func ListExpansions(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"items": rows})
+	response := map[string]any{"items": rows}
+	if r.URL.Query().Get("include_reviews") == "true" {
+		reviews, err := listReviewRecords(store.DB(), user, dataset, rows)
+		if err != nil {
+			replyError(w, 500, "READ_FAILED", err.Error())
+			return
+		}
+		response["reviews"] = reviews
+	}
+	common.ReplyJSON(w, response)
 }
 func GetExpansion(w http.ResponseWriter, r *http.Request) {
 	user, ok := requireUser(w, r)
@@ -1211,7 +1243,7 @@ func AcademicChatContext(w http.ResponseWriter, r *http.Request) {
 				next = handoff.ConversationID
 			}
 		}
-		common.ReplyJSON(w, academicChatSummary{Kind: "expansion", ExpansionID: record.ID, DatasetID: record.DatasetID, Status: record.Status, Version: record.Version, NextConversationID: next, ReadyCount: ready, PaperCount: len(input.Papers)})
+		common.ReplyJSON(w, academicChatSummary{Kind: "expansion", Goal: record.Goal, ExpansionID: record.ID, DatasetID: record.DatasetID, Status: record.Status, Version: record.Version, NextConversationID: next, ReadyCount: ready, PaperCount: len(input.Papers)})
 		return
 	}
 	var handoff orm.AcademicHandoff

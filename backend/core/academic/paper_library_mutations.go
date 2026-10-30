@@ -27,7 +27,7 @@ func validateLibraryMetadata(m *paperlibrary.Metadata) error {
 	if (m.Identifiers.DOI != "" && doiPattern.FindString(m.Identifiers.DOI) != m.Identifiers.DOI) || (rawArxiv != "" && m.Identifiers.Arxiv == "") {
 		return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "DOI 或 arXiv 标识符无效")
 	}
-	if m.Title == "" || len(m.Title) > 4096 || len(m.Abstract) > 2<<20 || len(m.Authors) > 500 || len(m.Venue) > 4096 || m.Year < 0 || m.Year > 10000 || len(m.Identifiers.DOI) > 512 || len(m.Identifiers.Arxiv) > 64 || m.CitationCount != nil && *m.CitationCount < 0 {
+	if m.Title == "" || len(m.Title) > 4096 || len(m.Abstract) > 2<<20 || len(m.Venue) > 4096 || m.Year < 0 || m.Year > 10000 || len(m.Identifiers.DOI) > 512 || len(m.Identifiers.Arxiv) > 64 || m.CitationCount != nil && *m.CitationCount < 0 {
 		return invalidLibraryMutation("INVALID_PAPER_LIBRARY", "论文题录字段无效或过长")
 	}
 	for _, a := range m.Authors {
@@ -70,9 +70,11 @@ func resolveLibraryWork(ctx context.Context, tx *gorm.DB, dataset, id string, m 
 		if len(candidates) == 1 {
 			existing := candidates[0]
 			input.Title, input.Year, input.Venue, input.Abstract = existing.CanonicalTitle, existing.PublicationYear, existing.Venue, existing.Abstract
-			if e := json.Unmarshal(existing.AuthorsJSON, &input.Authors); e != nil {
+			var existingAuthors []string
+			if e := json.Unmarshal(existing.AuthorsJSON, &existingAuthors); e != nil {
 				return existing, e
 			}
+			input.Authors = existingAuthors
 		}
 		work, _, err := findOrCreateWork(ctx, tx, input)
 		if err != nil {
@@ -170,7 +172,7 @@ func applyLibraryMetadata(ctx context.Context, tx *gorm.DB, row *orm.PaperLibrar
 	return nil
 }
 func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
-	dataset, _, ok := libraryAccess(w, r, true)
+	dataset, canWrite, ok := libraryAccess(w, r, false)
 	if !ok {
 		return
 	}
@@ -181,8 +183,17 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 		Tags                *[]string              `json:"tags,omitempty"`
 		PrimaryAttachmentID *string                `json:"primary_attachment_id,omitempty"`
 	}
-	if !parseJSON(r, &input) || input.Revision < 1 || input.Metadata == nil && input.Status == nil && input.Tags == nil && input.PrimaryAttachmentID == nil {
-		replyError(w, 400, "INVALID_REQUEST", "revision 和修改字段不能为空")
+	if !parseJSON(r, &input) || input.Metadata == nil && input.Status == nil && input.Tags == nil && input.PrimaryAttachmentID == nil {
+		replyError(w, 400, "INVALID_REQUEST", "修改字段不能为空")
+		return
+	}
+	shared := input.Metadata != nil || input.Tags != nil || input.PrimaryAttachmentID != nil
+	if shared && !canWrite {
+		replyError(w, 403, "TARGET_DATASET_FORBIDDEN", "没有目标论文库的编辑权限")
+		return
+	}
+	if shared && input.Revision < 1 {
+		replyError(w, 400, "INVALID_REQUEST", "共享字段修改需要 revision")
 		return
 	}
 	if input.PrimaryAttachmentID != nil && !paperlibrary.ValidID(*input.PrimaryAttachmentID) {
@@ -213,9 +224,12 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 	}
 	id := mux.Vars(r)["library_paper_id"]
 	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		row, err := paperlibrary.Entry(tx, dataset, id, input.Revision)
-		if err != nil {
+		var row orm.PaperLibraryEntry
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("dataset_id=? AND id=? AND removed_at IS NULL", dataset, id).Take(&row).Error; err != nil {
 			return err
+		}
+		if shared && row.Revision != input.Revision {
+			return paperlibrary.ErrConflict
 		}
 		if input.Metadata != nil {
 			if err := applyLibraryMetadata(r.Context(), tx, &row, *input.Metadata); err != nil {
@@ -223,7 +237,10 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if input.Status != nil {
-			row.Status = *input.Status
+			state := orm.AcademicUserPaperState{UserID: store.UserID(r), DatasetID: dataset, PaperID: row.AcademicWorkID, ReadingStatus: *input.Status, UpdatedAt: time.Now().UTC()}
+			if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "dataset_id"}, {Name: "paper_id"}}, DoUpdates: clause.AssignmentColumns([]string{"reading_status", "updated_at"})}).Create(&state).Error; err != nil {
+				return err
+			}
 		}
 		if input.Tags != nil {
 			row.TagsJSON = marshal(*input.Tags)
@@ -241,7 +258,10 @@ func PatchLibraryPaper(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return paperlibrary.SaveEntry(tx, &row)
+		if shared {
+			return paperlibrary.SaveEntry(tx, &row)
+		}
+		return nil
 	})
 	replyLibraryChanges(w, r, dataset, []string{id}, err)
 }

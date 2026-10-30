@@ -5,6 +5,7 @@ import (
 	"lazymind/core/common/orm"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type Identifiers struct {
@@ -109,8 +110,38 @@ func WorkMetadata(work orm.AcademicWork) Metadata {
 	}
 	return m
 }
-func EffectiveMetadata(entry orm.PaperLibraryEntry, work orm.AcademicWork) (Metadata, error) {
+func mergeMetadata(entry orm.PaperLibraryEntry, work orm.AcademicWork, source json.RawMessage) (Metadata, error) {
 	m := WorkMetadata(work)
+	if len(source) > 0 {
+		var value struct {
+			Metadata
+			CitationCountSnake *int64 `json:"citation_count"`
+		}
+		if err := json.Unmarshal(source, &value); err != nil {
+			return m, err
+		}
+		if value.Title != "" {
+			m.Title = value.Title
+		}
+		if len(value.Authors) > 0 {
+			m.Authors = TrimAuthors(value.Authors)
+		}
+		if value.Year > 0 {
+			m.Year = value.Year
+		}
+		if value.Venue != "" {
+			m.Venue = value.Venue
+		}
+		if value.Abstract != "" {
+			m.Abstract = value.Abstract
+		}
+		if value.CitationCount != nil {
+			m.CitationCount = value.CitationCount
+		}
+		if value.CitationCountSnake != nil {
+			m.CitationCount = value.CitationCountSnake
+		}
+	}
 	if len(entry.MetadataJSON) > 0 {
 		if err := json.Unmarshal(entry.MetadataJSON, &m); err != nil {
 			return m, err
@@ -142,14 +173,19 @@ func ImportMethod(entryType string) string {
 		return "link"
 	case "paper_expansion":
 		return "expansion"
-	default:
+	case "single_reference", "paper_references", "collection_references":
 		return "references"
+	case "conversation_sources":
+		return "conversation"
+	default:
+		return ""
 	}
 }
 func TrimAuthors(authors []string) []string {
 	out := []string{}
 	for _, a := range authors {
-		if a = strings.TrimSpace(a); a != "" {
+		a = strings.TrimSpace(a)
+		if strings.ContainsFunc(a, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) {
 			out = append(out, a)
 		}
 	}

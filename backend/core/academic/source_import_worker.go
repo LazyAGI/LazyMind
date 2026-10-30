@@ -12,6 +12,7 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 	"os"
 	"path/filepath"
@@ -62,7 +63,14 @@ func completePresentImport(ctx context.Context, job asyncjob.Job, b orm.PaperImp
 		if e := json.Unmarshal(b.PolicySnapshotJSON, &policy); e != nil {
 			return e
 		}
-		id, e := registerRecognizedLibraryDocument(ctx, tx, d, work, true, policy.FolderID, item.ID, "")
+		var selected savedImportCandidate
+		if err := json.Unmarshal(item.SelectedCandidateJSON, &selected); err != nil {
+			return err
+		}
+		if err := bindVerifiedImportMetadata(tx, d, work, item.AcademicWorkID, selected); err != nil {
+			return err
+		}
+		id, e := registerRecognizedLibraryDocument(ctx, tx, d, work, true, policy.FolderID, item.ID, paperlibrary.ImportMethod(b.EntryType))
 		if e != nil {
 			return e
 		}
@@ -308,6 +316,21 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		if err = store.DB().WithContext(ctx).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", item.DocumentTaskID, b.TargetDatasetID).Take(&bound.Task).Error; err != nil {
 			return err
 		}
+		if selected.VerifiedPaper != nil {
+			err = store.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				if err := sourceJobFence(tx, job, b.ID); err != nil {
+					return err
+				}
+				var work orm.AcademicWork
+				if err := tx.Where("id=?", item.AcademicWorkID).Take(&work).Error; err != nil {
+					return err
+				}
+				return bindVerifiedImportMetadata(tx, bound.Document, work, item.AcademicWorkID, selected)
+			})
+			if err != nil {
+				return err
+			}
+		}
 	} else {
 		existing, e := sourcePresentDocument(store.DB().WithContext(ctx), b.TargetDatasetID, item.AcademicWorkID, "", selected.Version, selected.SourceProvider)
 		if e == nil {
@@ -335,7 +358,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		if e = store.DB().WithContext(ctx).Where("id = ?", item.AcademicWorkID).Take(&work).Error; e != nil {
 			return e
 		}
-		title := strings.TrimSpace(work.CanonicalTitle)
+		title := strings.TrimSpace(firstNonEmpty(metadata.Title, work.CanonicalTitle))
 		if candidate.SourceProvider == "arxiv" {
 			title += " (" + work.ArxivIDBase + candidate.Version + ")"
 		} else if candidate.Version != "" {
@@ -418,21 +441,17 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 				return e
 			}
 
-			if selected.VerifiedPaper != nil && !bound.Skipped {
-				if e = bindImportedPaper(tx, bound.Document, work); e != nil {
-					return e
-				}
-				if e = tx.Model(&orm.AcademicDocumentState{}).Where("document_id=? AND manual=?", bound.Document.ID, false).Update("metadata_json", marshal(metadata)).Error; e != nil {
-					return e
-				}
+			if e = bindVerifiedImportMetadata(tx, bound.Document, work, item.AcademicWorkID, selected); e != nil {
+				return e
 			}
+
 			var policy struct {
 				FolderID string `json:"folder_id"`
 			}
 			if e = json.Unmarshal(b.PolicySnapshotJSON, &policy); e != nil {
 				return e
 			}
-			libraryID, e := registerRecognizedLibraryDocument(ctx, tx, bound.Document, work, true, policy.FolderID, item.ID, "")
+			libraryID, e := registerRecognizedLibraryDocument(ctx, tx, bound.Document, work, true, policy.FolderID, item.ID, paperlibrary.ImportMethod(b.EntryType))
 			if e != nil {
 				return e
 			}
@@ -541,4 +560,29 @@ func acquireImportOriginal(ctx context.Context, originals *doc.OriginalService, 
 	}
 	defer file.Close()
 	return originals.AcquireOriginal(ctx, caller, doc.AcquireOriginalRequest{Filename: "paper.pdf", ContentType: "application/pdf", Reader: file, FinalURL: selected.VerifiedPaper.PDFURL})
+}
+
+// All completion paths preserve the selected source snapshot and manual corrections.
+func bindVerifiedImportMetadata(tx *gorm.DB, document orm.Document, work orm.AcademicWork, selectedWorkID string, selected savedImportCandidate) error {
+	if selected.VerifiedPaper == nil {
+		return nil
+	}
+	metadata, err := verifiedImportMetadata(selected, selectedWorkID)
+	if err != nil {
+		return err
+	}
+	if paperlibrary.IdentityConflict(paperlibrary.WorkMetadata(work).Identifiers, paperlibrary.Identifiers{DOI: metadata.DOI, Arxiv: metadata.ArxivID}) {
+		return errors.New("verified paper identity conflict")
+	}
+	var link orm.AcademicWorkDocument
+	if err := tx.Where("dataset_id=? AND document_id=? AND academic_work_id=?", document.DatasetID, document.ID, work.ID).Take(&link).Error; err != nil {
+		return err
+	}
+	if link.SourceProvider != selected.SourceProvider || link.SourceVersion != selected.Version {
+		return errors.New("verified paper source version conflict")
+	}
+	if err := bindImportedPaper(tx, document, work); err != nil {
+		return err
+	}
+	return tx.Model(&orm.AcademicDocumentState{}).Where("document_id=? AND manual=?", document.ID, false).Update("metadata_json", marshal(metadata)).Error
 }

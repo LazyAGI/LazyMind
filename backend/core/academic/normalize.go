@@ -9,10 +9,11 @@ import (
 )
 
 var (
-	doiPattern           = regexp.MustCompile(`(?i)10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
-	arxivPattern         = regexp.MustCompile(`(?i)(?:arxiv\s*:\s*)?((?:\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})(?:v(\d+))?)`)
-	arxivExplicitPattern = regexp.MustCompile(`(?i)(?:arxiv\s*[:.]\s*|arxiv\s*\.\s*org\s*/\s*(?:abs|pdf)\s*/\s*)((?:\d{4}\.\s*\d{4,5}|[a-z-]+/\s*\d{7})(?:v\s*(\d+))?)`)
-	yearPattern          = regexp.MustCompile(`\b(?:19|20)\d{2}\b`)
+	doiPattern            = regexp.MustCompile(`(?i)10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
+	doiPlaceholderPattern = regexp.MustCompile(`(?i)^10\.\d{4,9}/s?x{3,}-y{3,}-z{3,}(?:-\d+)?$`)
+	arxivPattern          = regexp.MustCompile(`(?i)(?:arxiv\s*:\s*)?((?:\d{4}\.\d{4,5}|[a-z][a-z.-]*/\d{7})(?:v(\d+))?)`)
+	arxivExplicitPattern  = regexp.MustCompile(`(?i)(?:arxiv\s*[:.]\s*|arxiv\s*\.\s*org\s*/\s*(?:abs|pdf)\s*/\s*)((?:\d{4}\.\s*\d{4,5}|[a-z-]+/\s*\d{7})(?:v\s*(\d+))?)`)
+	yearPattern           = regexp.MustCompile(`\b((?:19|20)\d{2})[a-z]?\b`)
 )
 
 func NormalizeDOI(value string) string {
@@ -64,8 +65,13 @@ func NormalizeTitle(value string) string {
 func normalizeAuthor(value string) string { return NormalizeTitle(value) }
 
 func extractStrongIDs(raw string) (doi, arxiv, version string) {
-	if match := doiPattern.FindString(raw); match != "" {
-		doi = NormalizeDOI(match)
+	for _, match := range doiPattern.FindAllString(raw, -1) {
+		candidate := NormalizeDOI(match)
+		// Publisher templates can retain an unassigned DOI in a preprint header.
+		if !doiPlaceholderPattern.MatchString(candidate) {
+			doi = candidate
+			break
+		}
 	}
 	if match := arxivExplicitPattern.FindStringSubmatch(raw); len(match) > 1 {
 		arxiv, version = NormalizeArxivID(match[1])
@@ -73,9 +79,18 @@ func extractStrongIDs(raw string) (doi, arxiv, version string) {
 	return
 }
 
+func identifierFreeCitation(raw string) string {
+	raw = arxivExplicitPattern.ReplaceAllString(raw, " ")
+	raw = doiPattern.ReplaceAllString(raw, " ")
+	return regexp.MustCompile(`(?i)https?://\S+`).ReplaceAllString(raw, " ")
+}
+
 func extractYear(raw string) int {
-	v := yearPattern.FindString(raw)
-	year, _ := strconv.Atoi(v)
+	match := yearPattern.FindStringSubmatch(identifierFreeCitation(raw))
+	if len(match) < 2 {
+		return 0
+	}
+	year, _ := strconv.Atoi(match[1])
 	return year
 }
 

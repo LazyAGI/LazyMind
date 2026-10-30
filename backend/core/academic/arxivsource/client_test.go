@@ -37,6 +37,27 @@ func testClient(t *testing.T, handler http.HandlerFunc) *Client {
 	return NewClientWithOptions(Options{HTTPClient: srv.Client(), APIBaseURL: srv.URL + "/api/query", MinInterval: time.Nanosecond, Timeout: time.Second})
 }
 
+func TestSearchPagesUseOffsetsAndStopAtTotal(t *testing.T) {
+	var offsets []string
+	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		offset := r.URL.Query().Get("start")
+		offsets = append(offsets, offset)
+		entry := validEntry
+		if offset == "1" {
+			entry = strings.ReplaceAll(entry, "2404.06654", "2210.03629")
+		}
+		fmt.Fprint(w, feed(`<opensearch:totalResults xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">2</opensearch:totalResults>`+entry))
+	})
+	first, err := client.SearchPage(t.Context(), "all:retrieval", 1, 0)
+	if err != nil || first.TotalResults == nil || *first.TotalResults != 2 || first.NextStart == nil || *first.NextStart != 1 {
+		t.Fatalf("first page: %+v, %v", first, err)
+	}
+	second, err := client.SearchPage(t.Context(), "all:retrieval", 1, *first.NextStart)
+	if err != nil || second.NextStart != nil || second.Items[0].BaseID == first.Items[0].BaseID || strings.Join(offsets, ",") != "0,1" {
+		t.Fatalf("second page: %+v, %v, offsets=%v", second, err, offsets)
+	}
+}
+
 func TestLookupLocksActualVersionAndBuildsOfficialURLs(t *testing.T) {
 	for _, input := range []string{"2404.06654", "arXiv:2404.06654v3", "https://arxiv.org/pdf/2404.06654v3.pdf?x=1", "https://doi.org/10.48550/arXiv.2404.06654v3"} {
 		t.Run(input, func(t *testing.T) {

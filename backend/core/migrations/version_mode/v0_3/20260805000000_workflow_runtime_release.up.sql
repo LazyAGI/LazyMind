@@ -3347,6 +3347,7 @@ CREATE TABLE academic_user_paper_states (
   dataset_id varchar(255) NOT NULL,
   paper_id varchar(36) NOT NULL,
   is_important BOOLEAN NOT NULL DEFAULT false,
+  reading_status VARCHAR(16) NOT NULL DEFAULT 'unread',
   PRIMARY KEY (user_id, dataset_id, paper_id)
 );
 CREATE TABLE academic_expansions (
@@ -3451,7 +3452,7 @@ CREATE TABLE paper_library_folders (
 CREATE INDEX idx_library_folder_parent ON paper_library_folders(dataset_id,parent_id);
 CREATE TABLE paper_library_entries (
  dataset_id VARCHAR(255) NOT NULL, id VARCHAR(255) NOT NULL, academic_work_id VARCHAR(36) NOT NULL,
- folder_id VARCHAR(255) NOT NULL DEFAULT '', status VARCHAR(16) NOT NULL DEFAULT 'unread',
+ folder_id VARCHAR(255) NOT NULL DEFAULT '',
  tags_json JSON NOT NULL, metadata_json JSON NOT NULL, source VARCHAR(32) NOT NULL DEFAULT 'unknown',
  import_method VARCHAR(32) NOT NULL DEFAULT '', source_url TEXT NOT NULL DEFAULT '', arxiv_version VARCHAR(64) NOT NULL DEFAULT '',
  revision BIGINT NOT NULL DEFAULT 1 CHECK(revision>0), removed_at TIMESTAMP,

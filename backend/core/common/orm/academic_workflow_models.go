@@ -23,11 +23,12 @@ type AcademicDocumentState struct {
 func (AcademicDocumentState) TableName() string { return "academic_document_states" }
 
 type AcademicUserPaperState struct {
-	UserID      string `gorm:"primaryKey;type:varchar(255)"`
-	DatasetID   string `gorm:"primaryKey;type:varchar(255)"`
-	PaperID     string `gorm:"primaryKey;type:varchar(36)"`
-	IsImportant bool   `gorm:"not null;default:false"`
-	UpdatedAt   time.Time
+	UserID        string `gorm:"primaryKey;type:varchar(255)"`
+	DatasetID     string `gorm:"primaryKey;type:varchar(255)"`
+	PaperID       string `gorm:"primaryKey;type:varchar(36)"`
+	IsImportant   bool   `gorm:"not null;default:false"`
+	ReadingStatus string `gorm:"type:varchar(16);not null;default:unread"`
+	UpdatedAt     time.Time
 }
 
 func (AcademicUserPaperState) TableName() string { return "academic_user_paper_states" }

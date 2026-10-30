@@ -123,7 +123,7 @@ func TestLibraryMetadataIdentityAndIndependentRevisions(t *testing.T) {
 			}
 		}
 	}
-	w = libraryRequest(t, "PATCH", "/library/papers/a", "papers", "owner", map[string]any{"revision": a.Revision, "status": "read"})
+	w = libraryRequest(t, "PATCH", "/library/papers/a", "papers", "owner", map[string]any{"revision": a.Revision, "tags": []string{"stale"}})
 	if w.Code != 409 {
 		t.Fatal("stale edit replaced newer data", w.Code)
 	}
@@ -207,7 +207,7 @@ func TestLibrarySinglePaperMutationHasBoundedReads(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		id := fmt.Sprintf("bulk-%d", i)
 		works = append(works, orm.AcademicWork{ID: id, CanonicalTitle: id, AuthorsJSON: marshal([]string{}), ExternalIDsJSON: marshal(map[string]string{}), ProvenanceJSON: marshal(map[string]any{})})
-		entries = append(entries, orm.PaperLibraryEntry{DatasetID: "papers", ID: id, AcademicWorkID: id, Status: "unread", TagsJSON: marshal([]string{}), MetadataJSON: marshal(map[string]any{}), Revision: 1})
+		entries = append(entries, orm.PaperLibraryEntry{DatasetID: "papers", ID: id, AcademicWorkID: id, TagsJSON: marshal([]string{}), MetadataJSON: marshal(map[string]any{}), Revision: 1})
 	}
 	if e := db.CreateInBatches(&works, 100).Error; e != nil {
 		t.Fatal(e)

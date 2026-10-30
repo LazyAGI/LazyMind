@@ -12,6 +12,7 @@ import (
 
 	"gorm.io/gorm"
 	"lazymind/core/common/orm"
+	"lazymind/core/store"
 )
 
 func TestExternalDiscoveryReusesOnlyInitiatingCollection(t *testing.T) {
@@ -216,7 +217,7 @@ func TestOpenAlexSearchIdentityAbstractCacheAndSourceFailures(t *testing.T) {
 		t.Fatal("original or unknown abstract was lost")
 	}
 	before := calls
-	if search("papers")["cache_hit"] != true || calls != before {
+	if search("papers")["sources"].([]any)[0].(map[string]any)["reused"] != true || calls != before {
 		t.Fatal("same preparation search was repeated")
 	}
 	if err := db.Where("id=?", record.ID).Take(&record).Error; err != nil {
@@ -231,6 +232,18 @@ func TestOpenAlexSearchIdentityAbstractCacheAndSourceFailures(t *testing.T) {
 	}
 	if search("rate")["sources"].([]any)[0].(map[string]any)["status"] != "rate_limited" {
 		t.Fatal("rate limit was lost")
+	}
+	before = calls
+	if search("while-cooling")["sources"].([]any)[0].(map[string]any)["reused"] != true || calls != before {
+		t.Fatal("rate-limited source was requested again during cooldown")
+	}
+	var sourceRequest paperSearchRequest
+	if err := configureSearchSource(t.Context(), "u", "openalex", &sourceRequest); err != nil {
+		t.Fatal(err)
+	}
+	// Advance to the next independent provider scenario without a wall-clock sleep.
+	if err := store.State().Del(t.Context(), "academic/search/cooldown/"+sourceRequest.scope); err != nil {
+		t.Fatal(err)
 	}
 	if search("empty")["sources"].([]any)[0].(map[string]any)["status"] != "empty" {
 		t.Fatal("empty results were lost")

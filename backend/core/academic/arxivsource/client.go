@@ -39,6 +39,7 @@ type LookupError struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 	StatusCode int    `json:"status_code,omitempty"`
+	RetryAfter string `json:"retry_after,omitempty"`
 	Err        error  `json:"-"`
 }
 
@@ -115,27 +116,46 @@ func (c *Client) Lookup(ctx context.Context, input string) (Metadata, error) {
 // Search discovers candidates only from the official provider; an empty feed is
 // a successful empty result, never an invitation to substitute local papers.
 func (c *Client) Search(ctx context.Context, query string, limit int) ([]Metadata, error) {
+	page, err := c.SearchPage(ctx, query, limit, 0)
+	return page.Items, err
+}
+
+// SearchResult retains the upstream total and the next zero-based result offset.
+type SearchResult struct {
+	Items        []Metadata
+	TotalResults *int
+	NextStart    *int
+}
+
+// SearchPage uses arXiv's zero-based result offset. Lookup and import callers
+// can continue using Search when only the first page is needed.
+func (c *Client) SearchPage(ctx context.Context, query string, limit, start int) (SearchResult, error) {
 	query = strings.TrimSpace(query)
-	if query == "" || len(query) > 2000 || limit < 1 || limit > 20 {
-		return nil, &LookupError{Code: "invalid_input", Message: "invalid search query or result limit"}
+	if query == "" || len(query) > 2000 || limit < 1 || limit > 20 || start < 0 || start+limit > 30000 {
+		return SearchResult{}, &LookupError{Code: "invalid_input", Message: "invalid search query, result limit or offset"}
 	}
-	body, err := c.query(ctx, url.Values{"search_query": {query}, "max_results": {fmt.Sprint(limit)}, "sortBy": {"relevance"}})
+	body, err := c.query(ctx, url.Values{"search_query": {query}, "start": {fmt.Sprint(start)}, "max_results": {fmt.Sprint(limit)}, "sortBy": {"relevance"}, "sortOrder": {"descending"}})
 	if err != nil {
-		return nil, err
+		return SearchResult{}, err
 	}
 	feed, err := decodeFeed(body)
 	if err != nil {
-		return nil, err
+		return SearchResult{}, err
 	}
 	result := make([]Metadata, 0, len(feed.Entries))
 	for _, entry := range feed.Entries {
 		paper, err := metadataForEntry(entry, Identifier{})
 		if err != nil {
-			return nil, err
+			return SearchResult{}, err
 		}
 		result = append(result, paper)
 	}
-	return result, nil
+	page := SearchResult{Items: result, TotalResults: feed.TotalResults}
+	if feed.TotalResults != nil && len(result) > 0 && start+len(result) < *feed.TotalResults && start+limit < 30000 {
+		next := start + len(result)
+		page.NextStart = &next
+	}
+	return page, nil
 }
 
 func (c *Client) query(ctx context.Context, values url.Values) ([]byte, error) {
@@ -162,7 +182,7 @@ func (c *Client) query(ctx context.Context, values url.Values) ([]byte, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, &LookupError{Code: "http_error", Message: fmt.Sprintf("arXiv 元数据服务返回 HTTP %d，查询失败", response.StatusCode), StatusCode: response.StatusCode}
+		return nil, &LookupError{Code: "http_error", Message: fmt.Sprintf("arXiv 元数据服务返回 HTTP %d，查询失败", response.StatusCode), StatusCode: response.StatusCode, RetryAfter: response.Header.Get("Retry-After")}
 	}
 	if strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "html") {
 		return nil, invalidResponse("arXiv 查询返回了 HTML 网页，而非论文元数据；请检查服务或代理配置", nil)
@@ -178,8 +198,9 @@ func (c *Client) query(ctx context.Context, values url.Values) ([]byte, error) {
 }
 
 type atomFeed struct {
-	XMLName xml.Name    `xml:"http://www.w3.org/2005/Atom feed"`
-	Entries []atomEntry `xml:"entry"`
+	XMLName      xml.Name    `xml:"http://www.w3.org/2005/Atom feed"`
+	TotalResults *int        `xml:"http://a9.com/-/spec/opensearch/1.1/ totalResults"`
+	Entries      []atomEntry `xml:"entry"`
 }
 
 type atomEntry struct {

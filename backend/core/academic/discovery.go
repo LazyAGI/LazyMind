@@ -14,7 +14,6 @@ import (
 
 	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common/orm"
-	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 )
 
@@ -27,6 +26,10 @@ type paperSearchRequest struct {
 	PaperID             string   `json:"paper_id"`
 	Cursor              string   `json:"cursor"`
 	PreparationRevision *int64   `json:"preparation_revision"`
+	position            searchPosition
+	apiKey              string
+	toolConfig          map[string]any
+	scope               string
 }
 type discoveredPaper struct {
 	Work       WorkInput
@@ -40,13 +43,32 @@ type discoveryLead struct {
 	Snippet string `json:"snippet"`
 }
 type searchOutcome struct {
-	Source     string `json:"source"`
-	Status     string `json:"status"`
-	Count      int    `json:"count"`
-	ElapsedMS  int64  `json:"elapsed_ms"`
-	NextCursor string `json:"next_cursor,omitempty"`
-	Limitation string `json:"limitation,omitempty"`
-	Reused     bool   `json:"reused,omitempty"`
+	Source        string     `json:"source"`
+	Status        string     `json:"status"`
+	Count         int        `json:"count"`
+	ElapsedMS     int64      `json:"elapsed_ms"`
+	NextCursor    string     `json:"next_cursor,omitempty"`
+	Limitation    string     `json:"limitation,omitempty"`
+	Reused        bool       `json:"reused,omitempty"`
+	PaperCount    int        `json:"paper_count"`
+	LeadCount     int        `json:"lead_count"`
+	NewPaperCount int        `json:"new_paper_count"`
+	TotalCount    *int       `json:"total_count,omitempty"`
+	HasMore       bool       `json:"has_more"`
+	RetryAt       *time.Time `json:"retry_at,omitempty"`
+}
+
+type searchPosition struct {
+	Offset int    `json:"offset,omitempty"`
+	Page   int    `json:"page,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+}
+
+type discoveredPage struct {
+	Papers     []discoveredPaper
+	Leads      []discoveryLead
+	TotalCount *int
+	Next       *searchPosition
 }
 type scholarlyLocation struct {
 	PDFURL     string `json:"pdf_url"`
@@ -79,6 +101,8 @@ type scholarlyWork struct {
 	References []string `json:"referenced_works"`
 }
 
+var errOpenAlexNotFound = errors.New("OpenAlex 未收录该论文")
+
 func openAlexGet(ctx context.Context, path string, params url.Values, key string, out any) error {
 	if key != "" {
 		params.Set("api_key", key)
@@ -93,8 +117,11 @@ func openAlexGet(ctx context.Context, path string, params url.Values, key string
 		return errors.New("OpenAlex 暂时不可用")
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return errOpenAlexNotFound
+	}
 	if response.StatusCode != 200 {
-		return fmt.Errorf("OpenAlex HTTP %d", response.StatusCode)
+		return scholarlyHTTPFailure(response.StatusCode, response.Header, response.Body)
 	}
 	return json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(out)
 }
@@ -158,23 +185,22 @@ func scholarlyPaper(item scholarlyWork) discoveredPaper {
 	}
 	return result
 }
-func searchOpenAlex(ctx context.Context, user string, record orm.AcademicExpansion, request paperSearchRequest) ([]discoveredPaper, string, error) {
-	key, err := modelconfig.LoadOpenAlexAPIKey(ctx, store.DB(), user)
-	if err != nil {
-		return nil, "", err
-	}
-	params := url.Values{"per-page": {fmt.Sprint(request.MaxResults)}, "cursor": {"*"}}
-	if request.Cursor != "" {
-		params.Set("cursor", request.Cursor)
+func searchOpenAlex(ctx context.Context, record orm.AcademicExpansion, request paperSearchRequest) (discoveredPage, error) {
+	key := request.apiKey
+	params := url.Values{"per_page": {fmt.Sprint(request.MaxResults)}}
+	if key != "" {
+		params.Set("cursor", firstNonEmpty(request.position.Cursor, "*"))
+	} else {
+		params.Set("page", fmt.Sprint(request.position.Page+1))
 	}
 	if request.Mode == "references" || request.Mode == "citations" {
 		source, err := expansionSource(store.DB().WithContext(ctx), record, request.PaperID)
 		if err != nil {
-			return nil, "", err
+			return discoveredPage{}, err
 		}
 		var work orm.AcademicWork
 		if err = store.DB().WithContext(ctx).Where("id=?", source.Paper.PaperID).Take(&work).Error; err != nil {
-			return nil, "", err
+			return discoveredPage{}, err
 		}
 		external := map[string]string{}
 		_ = json.Unmarshal(work.ExternalIDsJSON, &external)
@@ -185,13 +211,13 @@ func searchOpenAlex(ctx context.Context, user string, record orm.AcademicExpansi
 				doi = "10.48550/arxiv." + source.Paper.ArxivID
 			}
 			if doi == "" {
-				return nil, "", errors.New("该论文尚无可用的引用索引身份")
+				return discoveredPage{}, errors.New("该论文尚无可用的引用索引身份")
 			}
 			id = "https://doi.org/" + doi
 		}
 		var target scholarlyWork
 		if err = openAlexGet(ctx, "works/"+url.PathEscape(id), url.Values{}, key, &target); err != nil {
-			return nil, "", err
+			return discoveredPage{}, err
 		}
 		if request.Mode == "citations" {
 			params.Set("filter", "cites:"+strings.TrimPrefix(target.ID, "https://openalex.org/"))
@@ -205,10 +231,11 @@ func searchOpenAlex(ctx context.Context, user string, record orm.AcademicExpansi
 		Results []scholarlyWork `json:"results"`
 		Meta    struct {
 			NextCursor string `json:"next_cursor"`
+			Count      *int   `json:"count"`
 		} `json:"meta"`
 	}
-	if err = openAlexGet(ctx, "works", params, key, &response); err != nil {
-		return nil, "", err
+	if err := openAlexGet(ctx, "works", params, key, &response); err != nil {
+		return discoveredPage{}, err
 	}
 	result := []discoveredPaper{}
 	for _, item := range response.Results {
@@ -216,25 +243,32 @@ func searchOpenAlex(ctx context.Context, user string, record orm.AcademicExpansi
 			result = append(result, scholarlyPaper(item))
 		}
 	}
-	return result, response.Meta.NextCursor, nil
+	page := discoveredPage{Papers: result, TotalCount: response.Meta.Count}
+	if len(response.Results) > 0 {
+		if key != "" && response.Meta.NextCursor != "" {
+			page.Next = &searchPosition{Cursor: response.Meta.NextCursor}
+		} else if key == "" && response.Meta.Count != nil && (request.position.Page+1)*request.MaxResults < *response.Meta.Count && (request.position.Page+2)*request.MaxResults <= 10000 {
+			page.Next = &searchPosition{Page: request.position.Page + 1}
+		}
+	}
+	return page, nil
 }
 func externalPaperSearch(ctx context.Context, user, source, query string, limit int) ([]discoveredPaper, []discoveryLead, error) {
-	config, err := modelconfig.LoadToolConfigForCapabilities(ctx, store.DB(), user, []string{"academic_search", "web_search"})
+	request := paperSearchRequest{Query: query, MaxResults: limit, Sources: []string{source}, Mode: "keyword"}
+	if err := configureSearchSource(ctx, user, source, &request); err != nil {
+		return nil, nil, err
+	}
+	page, outcome, err := fetchPaperPage(ctx, orm.AcademicExpansion{}, source, request)
 	if err != nil {
 		return nil, nil, err
 	}
-	if source == "sciverse" && config["sciverse"] == nil {
-		return nil, nil, errors.New("missing_configuration: Sciverse API Key")
+	if outcome.Status != "ok" && outcome.Status != "empty" {
+		return nil, nil, &searchFailure{Status: outcome.Status, RetryAt: outcome.RetryAt}
 	}
-	if source == "web" {
-		web, e := modelconfig.LoadSearchToolConfig(ctx, store.DB(), user)
-		if e != nil {
-			return nil, nil, e
-		}
-		if len(web) == 0 {
-			return nil, nil, errors.New("missing_configuration: 通用搜索服务 Key")
-		}
-	}
+	return page.Papers, page.Leads, nil
+}
+
+func searchExternalPage(ctx context.Context, source string, request paperSearchRequest) (discoveredPage, error) {
 	var response struct {
 		Items []struct {
 			Title   string `json:"title"`
@@ -249,9 +283,13 @@ func externalPaperSearch(ctx context.Context, user, source, query string, limit 
 				Venue    string   `json:"venue"`
 			} `json:"extra"`
 		} `json:"items"`
+		TotalCount *int   `json:"total_count"`
+		TotalPages *int   `json:"total_pages"`
+		Page       int    `json:"page"`
+		NextCursor string `json:"next_cursor"`
 	}
-	if err = internalAcademic(ctx, "search", map[string]any{"source": source, "query": query, "limit": limit, "tool_config": config}, &response); err != nil {
-		return nil, nil, err
+	if err := internalAcademic(ctx, "search", map[string]any{"source": source, "query": request.Query, "limit": request.MaxResults, "page": request.position.Page + 1, "cursor": request.position.Cursor, "tool_config": request.toolConfig}, &response); err != nil {
+		return discoveredPage{}, err
 	}
 	papers := []discoveredPaper{}
 	leads := []discoveryLead{}
@@ -277,79 +315,37 @@ func externalPaperSearch(ctx context.Context, user, source, query string, limit 
 		work := WorkInput{Title: item.Title, Authors: item.Extra.Authors, Year: item.Extra.Year, Venue: item.Extra.Venue, DOI: item.Extra.DOI, Abstract: item.Extra.Abstract, Provider: "sciverse", ProviderWorkID: item.Extra.DocID, Provenance: map[string]any{"paper_url": item.URL}}
 		papers = append(papers, discoveredPaper{Work: work, PaperURL: item.URL})
 	}
-	return papers, leads, nil
-}
-func discoverPapers(ctx context.Context, user string, record orm.AcademicExpansion, request paperSearchRequest) ([]discoveredPaper, []discoveryLead, []searchOutcome) {
-	found := []discoveredPaper{}
-	leads := []discoveryLead{}
-	outcomes := []searchOutcome{}
-	for _, source := range request.Sources {
-		var previous []paperDiscovery
-		_ = json.Unmarshal(record.DiscoveryJSON, &previous)
-		var blocked *searchOutcome
-		for _, query := range previous {
-			if query.PreparationRevision != record.PreparationRevision {
-				continue
-			}
-			for _, outcome := range query.Sources {
-				if outcome.Source == source && (outcome.Status == "missing_configuration" || outcome.Status == "authentication_failed" || outcome.Status == "quota_exhausted") {
-					saved := outcome
-					blocked = &saved
-				}
-			}
+	page := discoveredPage{Papers: papers, Leads: leads, TotalCount: response.TotalCount}
+	if source == "sciverse" && len(response.Items) > 0 {
+		if response.NextCursor != "" {
+			page.Next = &searchPosition{Cursor: response.NextCursor}
+		} else if response.TotalPages != nil && response.Page > 0 && response.Page < *response.TotalPages {
+			page.Next = &searchPosition{Page: response.Page}
 		}
-		if blocked != nil {
-			blocked.Reused = true
-			blocked.ElapsedMS = 0
-			outcomes = append(outcomes, *blocked)
-			continue
-		}
-		start := time.Now()
-		var papers []discoveredPaper
-		var extra []discoveryLead
-		var more string
-		var err error
-		switch source {
-		case "openalex":
-			papers, more, err = searchOpenAlex(ctx, user, record, request)
-		case "arxiv":
-			if request.Mode != "keyword" {
-				err = errors.New("arXiv 不支持引用图查询")
-				break
-			}
-			var metadata []arxivsource.Metadata
-			metadata, err = arxivsource.NewClient().Search(ctx, request.Query, request.MaxResults)
-			for _, m := range metadata {
-				papers = append(papers, discoveredPaper{Work: arxivWorkInput(m), Version: m.Version, PaperURL: "https://arxiv.org/abs/" + m.BaseID})
-			}
-		case "sciverse", "web":
-			papers, extra, err = externalPaperSearch(ctx, user, source, request.Query, request.MaxResults)
-			leads = append(leads, extra...)
-		default:
-			err = errors.New("unsupported_source")
-		}
-		outcome := searchOutcome{Source: source, Status: "ok", Count: len(papers) + len(extra), ElapsedMS: time.Since(start).Milliseconds(), NextCursor: more}
-		if err != nil {
-			outcome.Status = "failed"
-			outcome.Limitation = "来源请求失败，请切换来源或检查配置"
-			message := err.Error()
-			switch {
-			case strings.Contains(message, "missing_configuration"):
-				outcome.Status = "missing_configuration"
-				outcome.Limitation = message
-			case strings.Contains(message, "401"), strings.Contains(message, "403"):
-				outcome.Status = "authentication_failed"
-			case strings.Contains(message, "402"), strings.Contains(message, "quota_exhausted"):
-				outcome.Status = "quota_exhausted"
-			case strings.Contains(message, "429"):
-				outcome.Status = "rate_limited"
-			}
-		}
-		if outcome.Status == "ok" && outcome.Count == 0 {
-			outcome.Status = "empty"
-		}
-		outcomes = append(outcomes, outcome)
-		found = append(found, papers...)
 	}
-	return found, leads, outcomes
+	return page, nil
+}
+
+func discoverPaperPage(ctx context.Context, record orm.AcademicExpansion, source string, request paperSearchRequest) (discoveredPage, error) {
+	switch source {
+	case "openalex":
+		return searchOpenAlex(ctx, record, request)
+	case "arxiv":
+		result, err := arxivsource.NewClient().SearchPage(ctx, request.Query, request.MaxResults, request.position.Offset)
+		if err != nil {
+			return discoveredPage{}, err
+		}
+		page := discoveredPage{TotalCount: result.TotalResults}
+		for _, m := range result.Items {
+			page.Papers = append(page.Papers, discoveredPaper{Work: arxivWorkInput(m), Version: m.Version, PaperURL: "https://arxiv.org/abs/" + m.BaseID})
+		}
+		if result.NextStart != nil {
+			page.Next = &searchPosition{Offset: *result.NextStart}
+		}
+		return page, nil
+	case "sciverse", "web":
+		return searchExternalPage(ctx, source, request)
+	default:
+		return discoveredPage{}, errors.New("unsupported_source")
+	}
 }

@@ -28,7 +28,7 @@ import (
 	"lazymind/core/store"
 )
 
-const extractorVersion = "bibliography-rules-v2-native-regions"
+const extractorVersion = "bibliography-rules-v3-source-metadata"
 
 var numberedReferenceStartPattern = regexp.MustCompile(`(?m)^\s*(?:[-•]\s*)?(?:\[(\d{1,4})\]|(\d{1,4})[.)])\s+`)
 var bulletReferenceStartPattern = regexp.MustCompile(`(?m)^\s*([-•])\s+`)
@@ -276,6 +276,26 @@ func splitReferences(section string) []extractedReference {
 	// continued on the next page). Only fall back to bullets when no numbered
 	// entries exist at all.
 	locs := numberedReferenceStartPattern.FindAllStringSubmatchIndex(section, -1)
+	bracketed := make([][]int, 0, len(locs))
+	for _, loc := range locs {
+		if loc[2] >= 0 {
+			bracketed = append(bracketed, loc)
+		}
+	}
+	if len(bracketed) > 0 {
+		locs = bracketed
+	} else {
+		indices := locs[:0]
+		for _, loc := range locs {
+			number := section[loc[4]:loc[5]]
+			if len(number) == 4 && yearPattern.MatchString(number) {
+				continue
+			}
+			indices = append(indices, loc)
+		}
+		locs = indices
+	}
+
 	// A lone bracket-like line can occur inside an author-year citation. It is
 	// not enough to classify the whole bibliography as numbered.
 	numbered := len(locs) >= 2
@@ -457,7 +477,7 @@ func extractDocumentReferences(ctx context.Context, r *http.Request, userID, dat
 			usedPreviousIDs[old.ID] = true
 		}
 		rows = append(rows, orm.AcademicReference{ID: id, SourceDocumentID: documentID, SourceWorkID: old.SourceWorkID, ReferenceKey: item.Key,
-			RawText: item.Raw, AuthorsJSON: emptyJSON("[]"), PublicationYear: item.Year, DOINormalized: item.DOI, ArxivIDBase: item.Arxiv,
+			RawText: item.Raw, Title: citationTitle(item.Raw), AuthorsJSON: emptyJSON("[]"), PublicationYear: item.Year, DOINormalized: item.DOI, ArxivIDBase: item.Arxiv,
 			ResolvedWorkID: old.ResolvedWorkID, ResolutionStatus: firstNonEmpty(old.ResolutionStatus, "unresolved"), ResolutionMethod: old.ResolutionMethod,
 			ResolutionConfidence: old.ResolutionConfidence, Page: page, BBoxJSON: bbox, SegmentIDsJSON: emptyJSON("[]"), ExtractorName: "builtin_bibliography",
 			ExtractorVersion: extractorVersion, SourceFingerprint: old.SourceFingerprint, CreatedAt: createdAt, UpdatedAt: now})
@@ -653,9 +673,32 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 			return existing, "id", ref.ResolutionStatus, nil
 		}
 	}
-	input := WorkInput{Title: ref.Title, Year: ref.PublicationYear, DOI: ref.DOINormalized, ArxivID: ref.ArxivIDBase}
+	input, err := referenceMetadata(ctx, ref, allowExternal)
+	if err != nil {
+		return orm.AcademicWork{}, "", "", err
+	}
+	return saveReferenceResolution(ctx, tx, ref, input)
+}
+
+func referenceMetadata(ctx context.Context, ref *orm.AcademicReference, allowExternal bool) (WorkInput, error) {
+	input := WorkInput{Title: citationTitle(ref.RawText), Year: extractYear(ref.RawText), DOI: ref.DOINormalized, ArxivID: ref.ArxivIDBase}
+	_ = json.Unmarshal(ref.AuthorsJSON, &input.Authors)
 	if input.Title == "" {
-		input.Title = ref.RawText
+		input.Title = ref.Title
+	}
+	if allowExternal && input.ArxivID != "" {
+		id := input.ArxivID
+		_, base, version := extractStrongIDs(ref.RawText)
+		if base == id {
+			id += version
+		}
+		metadata, err := arxivsource.NewClient().Lookup(ctx, id)
+		if err != nil {
+			return WorkInput{}, err
+		}
+		doi := input.DOI
+		input = arxivWorkInput(metadata)
+		input.DOI = firstNonEmpty(doi, input.DOI)
 	}
 	var providerDiagnostics []string
 	if allowExternal && input.ArxivID == "" {
@@ -687,7 +730,7 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 			candidate.DOI = firstNonEmpty(input.DOI, openAlex.DOI, candidate.DOI)
 			input = candidate
 		} else if err := errors.Join(providerErrors...); err != nil {
-			return orm.AcademicWork{}, "", "", err
+			return WorkInput{}, err
 		} else if openAlexOK {
 			if input.DOI != "" {
 				openAlex.DOI = input.DOI
@@ -698,6 +741,17 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 			providerDiagnostics = append(providerDiagnostics, err.Error())
 		}
 	}
+	if len(providerDiagnostics) > 0 {
+		if input.Provenance == nil {
+			input.Provenance = map[string]any{}
+		}
+		input.Provenance["provider_errors"] = providerDiagnostics
+	}
+	return input, nil
+}
+
+func saveReferenceResolution(ctx context.Context, tx *gorm.DB, ref *orm.AcademicReference, input WorkInput) (orm.AcademicWork, string, string, error) {
+	providerDiagnostics, _ := input.Provenance["provider_errors"].([]string)
 	work, method, err := findOrCreateWork(ctx, tx, input)
 	if err != nil {
 		return work, "", "", err
@@ -714,14 +768,37 @@ func resolveReferenceWithExternal(ctx context.Context, tx *gorm.DB, ref *orm.Aca
 			return work, "", "", err
 		}
 	}
-	status, confidence := "high_confidence", 0.9
-	if method == "doi" || method == "arxiv" {
+	status, confidence := "unresolved", 0.0
+	if input.Provider != "" {
+		status, confidence = "high_confidence", 0.9
+	}
+	if input.Provider != "" && (method == "doi" || method == "arxiv") {
 		status, confidence = "exact", 1
 	}
-	if err := tx.Model(ref).Updates(map[string]any{"resolved_work_id": work.ID, "arxiv_id_base": work.ArxivIDBase, "resolution_status": status, "resolution_method": method, "resolution_confidence": confidence, "updated_at": time.Now().UTC()}).Error; err != nil {
+	if err := tx.Model(ref).Updates(map[string]any{"resolved_work_id": work.ID, "arxiv_id_base": work.ArxivIDBase, "title": input.Title, "authors_json": marshal(input.Authors), "publication_year": input.Year, "resolution_status": status, "resolution_method": method, "resolution_confidence": confidence, "updated_at": time.Now().UTC()}).Error; err != nil {
 		return work, "", "", err
 	}
-	ref.ResolvedWorkID, ref.ResolutionStatus = work.ID, status
+	ref.ResolvedWorkID, ref.ResolutionStatus, ref.ArxivIDBase = work.ID, status, work.ArxivIDBase
+	ref.Title, ref.AuthorsJSON, ref.PublicationYear = input.Title, marshal(input.Authors), input.Year
+	// Return the verified source metadata without overwriting shared identities.
+	if input.Provider != "" {
+		if input.Title != "" {
+			work.CanonicalTitle = input.Title
+		}
+		if len(input.Authors) > 0 {
+			work.AuthorsJSON = marshal(input.Authors)
+		}
+		if input.Year > 0 {
+			work.PublicationYear = input.Year
+		}
+		if input.Venue != "" {
+			work.Venue = input.Venue
+		}
+		if input.Abstract != "" {
+			work.Abstract = input.Abstract
+		}
+		work.ProvenanceJSON = marshal(input.Provenance)
+	}
 	return work, method, status, nil
 }
 
@@ -920,6 +997,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Papers            []paperlibrary.Paper `json:"papers,omitempty"`
 		ExpansionID       string               `json:"expansion_id,omitempty"`
+		ExpansionVersion  *int64               `json:"expansion_version,omitempty"`
 		Identifier        string               `json:"identifier,omitempty"`
 		ReferenceIDs      []string             `json:"reference_ids"`
 		SourceDocumentIDs []string             `json:"source_document_ids"`
@@ -956,6 +1034,11 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		req.Works = append(req.Works, work)
 	}
 	var expansion *orm.AcademicExpansion
+	expansionPapers := map[string]PaperRef{}
+	if req.ExpansionVersion != nil && req.ExpansionID == "" {
+		replyError(w, 400, "INVALID_REQUEST", "expansion_id is required with expansion_version")
+		return
+	}
 	if req.ExpansionID != "" {
 		record, ok := ownedExpansion(w, r, userID, req.ExpansionID)
 		if !ok {
@@ -965,6 +1048,29 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "INVALID_REQUEST", "target must be the expansion collection")
 			return
 		}
+		version := record.Version
+		if req.ExpansionVersion != nil {
+			version = *req.ExpansionVersion
+		}
+		input, err := completedExpansionInput(store.DB().WithContext(r.Context()), record, version)
+		if err != nil {
+			replyError(w, 409, "EXPANSION_VERSION_UNAVAILABLE", "所选扩展版本不可用，请刷新扩展结果")
+			return
+		}
+		for _, item := range input.Papers {
+			expansionPapers[item.Paper.PaperID] = item.Paper
+		}
+		if len(req.WorkIDs) == 0 || len(req.Works)+len(req.Papers)+len(req.ReferenceIDs)+len(req.SourceDocumentIDs) > 0 || req.Identifier != "" {
+			replyError(w, 400, "INVALID_SELECTION", "select papers from the expansion result")
+			return
+		}
+		for _, id := range req.WorkIDs {
+			if _, exists := expansionPapers[id]; !exists {
+				replyError(w, 422, "INVALID_SELECTION", "paper is not in the selected expansion version")
+				return
+			}
+		}
+		record.Version = version
 		expansion = &record
 	}
 	referenceMap := map[string][]string{}
@@ -995,15 +1101,45 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 500, "REFERENCE_QUERY_FAILED", err.Error())
 			return
 		}
+		resolvedInputs := map[string]WorkInput{}
+		explicitVersions := map[string]string{}
 		for index := range refs {
 			ref := &refs[index]
-			if ref.ResolvedWorkID == "" || (resolveExternal && ref.ArxivIDBase == "") {
+			var resolved orm.AcademicWork
+			if ref.ResolvedWorkID == "" || resolveExternal {
+				_, rawArxiv, version := extractStrongIDs(ref.RawText)
+				key := NormalizeTitle(ref.RawText)
+				if ref.ArxivIDBase != "" {
+					key = "arxiv:" + ref.ArxivIDBase + version
+				}
+				input, ok := resolvedInputs[key]
+				if !ok {
+					var err error
+					input, err = referenceMetadata(r.Context(), ref, resolveExternal)
+					if err != nil {
+						replyError(w, 422, "RESOLUTION_FAILED", err.Error())
+						return
+					}
+					resolvedInputs[key] = input
+				}
 				err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-					_, _, _, resolveErr := resolveReferenceWithExternal(r.Context(), tx, ref, resolveExternal)
-					return resolveErr
+					var err error
+					resolved, _, _, err = saveReferenceResolution(r.Context(), tx, ref, input)
+					return err
 				})
 				if err != nil {
-					continue
+					replyError(w, 422, "RESOLUTION_FAILED", err.Error())
+					return
+				}
+				if input.Provider != "" {
+					previewInputs[resolved.ID] = input
+				}
+				if version != "" && rawArxiv == ref.ArxivIDBase {
+					if old := explicitVersions[resolved.ID]; old != "" && old != version {
+						replyError(w, 422, "REFERENCE_VERSION_CONFLICT", "所选参考文献包含同一论文的不同 arXiv 版本，请分别导入")
+						return
+					}
+					explicitVersions[resolved.ID] = version
 				}
 			}
 			if ref.ResolvedWorkID != "" {
@@ -1099,7 +1235,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			work.ProvenanceJSON = marshal(linkInput.Provenance)
 		}
 		candidates := candidatesForWork(work)
-		if work.ArxivIDBase != "" && (expansion == nil || expansion.DiscoveryMode != "external") {
+		if work.ArxivIDBase != "" && expansion == nil {
 			var provenance map[string]any
 			_ = json.Unmarshal(work.ProvenanceJSON, &provenance)
 			version, _ := provenance["pdf_version"].(string)
@@ -1108,7 +1244,9 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 					version = requested
 				}
 			}
-			if work.ID != linkedWorkID && resolveExternal {
+			sourceInput, hasSource := previewInputs[work.ID]
+			verifiedSource := hasSource && sourceInput.Provider == "arxiv"
+			if work.ID != linkedWorkID && resolveExternal && !verifiedSource {
 				metadata, e := arxivsource.NewClient().Lookup(r.Context(), work.ArxivIDBase+version)
 				if e != nil {
 					replyArxivImportError(w, e)
@@ -1129,14 +1267,20 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 				candidates = nil
 			}
 		}
-		if expansion != nil && expansion.DiscoveryMode == "external" {
-			source, e := expansionSource(store.DB(), *expansion, work.ID)
-			if e != nil {
-				replyError(w, 422, "INVALID_SELECTION", e.Error())
-				return
+		if expansion != nil {
+			source := paperSource{Paper: expansionPapers[work.ID], DatasetID: expansion.DatasetID}
+			if expansion.DiscoveryMode == "external" {
+				registered, e := expansionSource(store.DB(), *expansion, work.ID)
+				if e != nil {
+					replyError(w, 422, "INVALID_SELECTION", e.Error())
+					return
+				}
+				source = registered
+				source.Paper = expansionPapers[work.ID]
 			}
 			ref = source.Paper
 			var hash string
+			var e error
 			candidates, hash, e = expansionImportCandidates(r.Context(), userID, source)
 			if e != nil {
 				replyError(w, 500, "IMPORT_PREVIEW_FAILED", e.Error())

@@ -387,7 +387,8 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 		t.Fatal("late invalid event changed publication status", record.Status, err)
 	}
 	previous := string(record.ResultJSON)
-	db.Model(&session).Update("status", "waiting")
+	previousReport := string(record.ReportJSON)
+	db.Model(&session).Update("status", "active")
 	if _, err = projectAcademicResult(ctx, job, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +396,9 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	if record.Status != "running" {
 		t.Fatal("a ready next step must not ask the user for a nonexistent answer")
 	}
-	db.Model(&session).Update("last_stopped_at", time.Now().UTC())
+	if err = workflow.StopActiveWorkflowSession(ctx, db.DB, store.State(), conversation); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = projectAcademicResult(ctx, job, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -403,14 +406,62 @@ func TestExpansionProjectionCommitsOnceAndKeepsPriorSuccess(t *testing.T) {
 	if record.Status != "stopped" || record.Version != 2 || string(record.ResultJSON) != previous {
 		t.Fatal("stopping must retain the completed result")
 	}
+	if err = db.Where("id=?", session.ID).Take(&session).Error; err != nil || session.LastStoppedAt == nil {
+		t.Fatal("stop was not recorded", err)
+	}
+	stoppedAt := *session.LastStoppedAt
+	if _, err = workflow.BeginNativeControlTurn(ctx, db.DB, "u", conversation, workflow.NativeControlCommand{
+		SessionID: session.ID, Kind: "resume", ExpectedStateVersion: session.StateVersion, HistoryID: "resume-turn",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = projectAcademicResult(ctx, job, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Where("id=?", record.ID).Take(&record).Error; err != nil || record.Status != "running" {
+		t.Fatal("historical stop masked the resumed workflow", record.Status, err)
+	}
+	if err = db.Where("id=?", session.ID).Take(&session).Error; err != nil || session.LastStoppedAt == nil || !session.LastStoppedAt.Equal(stoppedAt) {
+		t.Fatal("resume must preserve stop history", err)
+	}
+	older := orm.WorkflowSession{ID: "older-session", ConversationID: conversation, WorkflowID: "paper_expansion", CreateUserID: "u",
+		Status: "waiting", LastStoppedAt: &stoppedAt, CreatedAt: session.CreatedAt.Add(-time.Hour)}
+	if err = db.Create(&older).Error; err != nil {
+		t.Fatal(err)
+	}
+	oldJob := job
+	oldJob.PayloadJSON = marshal(expansionProjectionPayload{SessionID: older.ID})
+	if _, err = projectAcademicResult(ctx, oldJob, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Where("id=?", record.ID).Take(&record).Error; err != nil || record.Status != "running" {
+		t.Fatal("old session event overwrote resumed status", record.Status, err)
+	}
+	var roundCount int64
+	if err = db.Model(&orm.AcademicExpansionRound{}).Where("expansion_id=?", record.ID).Count(&roundCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	db.Model(&session).Update("status", "completed")
+	for i := 0; i < 2; i++ {
+		if _, err = projectAcademicResult(ctx, job, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = db.Where("id=?", record.ID).Take(&record).Error; err != nil || record.Status != "completed" || record.Version != 2 || string(record.ResultJSON) != previous || string(record.ReportJSON) != previousReport {
+		t.Fatal("replayed completion changed saved results or status", record.Status, record.Version, err)
+	}
+	var replayedCount int64
+	if err = db.Model(&orm.AcademicExpansionRound{}).Where("expansion_id=?", record.ID).Count(&replayedCount).Error; err != nil || replayedCount != roundCount {
+		t.Fatal("historical stop created an extra round", replayedCount, roundCount, err)
+	}
 	db.Model(&artifact).Update("validity", "outdated")
 	db.Model(&step).Update("status", "failed")
-	db.Model(&session).Updates(map[string]any{"status": "failed", "last_stopped_at": nil})
+	db.Model(&session).Update("status", "failed")
 	if _, err = projectAcademicResult(ctx, job, nil); err != nil {
 		t.Fatal(err)
 	}
 	db.Where("id=?", record.ID).Take(&record)
-	if record.Version != 2 || string(record.ResultJSON) != previous {
+	if record.Status != "failed" || record.Version != 2 || string(record.ResultJSON) != previous {
 		t.Fatal("failure replaced completed result")
 	}
 }

@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"golang.org/x/net/html"
 	"io"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 	"net/url"
 	"os"
@@ -19,6 +21,7 @@ type contentAttempt struct {
 	URL       string `json:"url"`
 	Status    string `json:"status"`
 	ElapsedMS int64  `json:"elapsed_ms"`
+	Error     string `json:"error,omitempty"`
 }
 type contentAcquisition struct {
 	Candidate      *FulltextCandidate `json:"candidate,omitempty"`
@@ -28,6 +31,40 @@ type contentAcquisition struct {
 	Downloaded     bool               `json:"downloaded"`
 	PDFHash        string             `json:"pdf_hash,omitempty"`
 	Attempts       []contentAttempt   `json:"attempts"`
+	FileRef        string             `json:"file_ref,omitempty"`
+	ExpiresAt      time.Time          `json:"expires_at,omitempty"`
+}
+
+func paperContentAcquisition(data json.RawMessage) contentAcquisition {
+	var quality contentQuality
+	_ = json.Unmarshal(data, &quality)
+	if !quality.Acquisition.StartedAt.IsZero() {
+		return quality.Acquisition
+	}
+	var acquisition contentAcquisition
+	_ = json.Unmarshal(data, &acquisition)
+	return acquisition
+}
+
+func saveContentAcquisition(ctx context.Context, content orm.AcademicPaperContent, acquisition contentAcquisition) error {
+	quality := contentQuality{Acquisition: acquisition, Downloaded: acquisition.Downloaded, Identity: "unconfirmed", Material: "unknown", Text: "suspect"}
+	return store.DB().WithContext(ctx).Model(&content).Update("quality_json", marshal(quality)).Error
+}
+
+func doiFulltextCandidates(ctx context.Context, user, doi string) ([]FulltextCandidate, error) {
+	key, err := modelconfig.LoadOpenAlexAPIKey(ctx, store.DB(), user)
+	if err != nil {
+		return nil, err
+	}
+	var work scholarlyWork
+	err = openAlexGet(ctx, "works/"+url.PathEscape("https://doi.org/"+NormalizeDOI(doi)), url.Values{}, key, &work)
+	if errors.Is(err, errOpenAlexNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return scholarlyPaper(work).Candidates, nil
 }
 
 // Page acquisition uses OriginalService's DNS, IP, redirect and byte validation.
@@ -96,56 +133,57 @@ func publicPagePDFs(ctx context.Context, user, address string) ([]string, error)
 	visit(document)
 	return links, nil
 }
-func readExternalCopies(ctx context.Context, user string, source paperSource, content orm.AcademicPaperContent) ([]ContentPage, string, string, string, error) {
-	acquisition := contentAcquisition{}
-	var previous contentQuality
-	_ = json.Unmarshal(content.QualityJSON, &previous)
-	acquisition = previous.Acquisition
-	if acquisition.StartedAt.IsZero() {
-		_ = json.Unmarshal(content.QualityJSON, &acquisition)
-	}
-	if acquisition.StartedAt.IsZero() {
-		acquisition.StartedAt = time.Now().UTC()
-	}
-	runCtx, cancel := context.WithDeadline(ctx, acquisition.StartedAt.Add(4*time.Minute))
+func readExternalCopies(ctx context.Context, user string, source paperSource, content orm.AcademicPaperContent, originals *doc.OriginalService) ([]ContentPage, string, string, string, error) {
+	acquisition := paperContentAcquisition(content.QualityJSON)
+	acquisition.StartedAt = time.Now().UTC()
+	runCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
 	defer cancel()
-	candidates := append([]FulltextCandidate{}, source.Candidates...)
-	hasPrimary := false
-	for _, candidate := range candidates {
-		if candidate.URL == source.Paper.PDFURL {
-			hasPrimary = true
-		}
-	}
-	if source.Paper.PDFURL != "" && !hasPrimary {
-		candidates = append([]FulltextCandidate{{URL: source.Paper.PDFURL, SourceProvider: source.Paper.SourceProvider, Version: source.Paper.SourceVersion, SourceType: "open_access_pdf"}}, candidates...)
-	}
-	if len(candidates) == 0 && source.Paper.DOI != "" {
-		address, license, version, err := resolveDOIOpenAccess(runCtx, source.Paper.DOI)
-		if err == nil && address != "" {
-			candidates = append(candidates, FulltextCandidate{URL: address, Version: version, License: license, SourceProvider: "unpaywall", SourceType: "open_access_pdf"})
-		}
+	candidates := source.fulltextCandidates()
+	if acquisition.FileRef != "" && acquisition.Candidate != nil {
+		candidates = append([]FulltextCandidate{*acquisition.Candidate}, candidates...)
 	}
 	if source.Paper.PaperURL != "" {
 		candidates = append(candidates, FulltextCandidate{URL: source.Paper.PaperURL, SourceProvider: "web", SourceType: "reference_page"})
 	}
-	save := func() error {
-		return store.DB().WithContext(ctx).Model(&content).Update("quality_json", marshal(acquisition)).Error
-	}
+	save := func() error { return saveContentAcquisition(ctx, content, acquisition) }
 	if err := save(); err != nil {
 		return nil, "", "", "", err
 	}
+	caller := doc.DatasetCatalogCaller{UserID: user}
 	seen := map[string]bool{}
-	webSearched := false
+	doiSearched, webSearched := source.Paper.DOI == "", false
+	var failures []error
 	var rejected []ContentPage
 	var rejectedHash, rejectedVersion string
-	for index := 0; index < len(candidates) || !webSearched; index++ {
+	attempts := 0
+	for index := 0; index < len(candidates) || !doiSearched || !webSearched; index++ {
 		if runCtx.Err() != nil {
 			return nil, "", "", "", errors.New("单篇取文预算已用尽")
 		}
-		if index >= len(candidates) {
+		if index >= len(candidates) && !doiSearched {
+			doiSearched = true
+			started := time.Now()
+			copies, err := doiFulltextCandidates(runCtx, user, source.Paper.DOI)
+			attempt := contentAttempt{URL: "https://doi.org/" + source.Paper.DOI, Status: "doi_lookup", ElapsedMS: time.Since(started).Milliseconds()}
+			if err != nil {
+				attempt.Status, attempt.Error = "lookup_failed", err.Error()
+				failures = append(failures, err)
+			}
+			candidates = append(candidates, copies...)
+			acquisition.Attempts = append(acquisition.Attempts, attempt)
+			if err = save(); err != nil {
+				return nil, "", "", "", err
+			}
+		}
+		if index >= len(candidates) && !webSearched {
 			webSearched = true
-			_, leads, e := externalPaperSearch(runCtx, user, "web", `"`+source.Paper.Title+`" paper PDF`, 5)
-			if e == nil {
+			started := time.Now()
+			_, leads, err := externalPaperSearch(runCtx, user, "web", "\""+source.Paper.Title+"\" paper PDF", 5)
+			attempt := contentAttempt{Status: "web_search", ElapsedMS: time.Since(started).Milliseconds()}
+			if err != nil {
+				attempt.Status, attempt.Error = "search_failed", err.Error()
+				failures = append(failures, err)
+			} else {
 				for _, lead := range leads {
 					kind := "reference_page"
 					if u, err := url.Parse(lead.URL); err == nil && strings.HasSuffix(strings.ToLower(u.Path), ".pdf") {
@@ -154,76 +192,114 @@ func readExternalCopies(ctx context.Context, user string, source paperSource, co
 					candidates = append(candidates, FulltextCandidate{URL: lead.URL, SourceProvider: "web", SourceType: kind})
 				}
 			}
-			if index >= len(candidates) {
-				break
+			acquisition.Attempts = append(acquisition.Attempts, attempt)
+			if err = save(); err != nil {
+				return nil, "", "", "", err
 			}
 		}
+		if index >= len(candidates) {
+			break
+		}
 		candidate := candidates[index]
+		// Landing pages are discovery leads, not verified download candidates.
+		if candidate.SourceType != "reference_page" {
+			var ok bool
+			candidate, ok = source.matchingCandidate(candidate)
+			if !ok {
+				continue
+			}
+		}
 		if candidate.URL == "" || seen[candidate.SourceType+":"+candidate.URL] {
 			continue
 		}
 		seen[candidate.SourceType+":"+candidate.URL] = true
-		if source.Paper.SourceProvider == "arxiv" && source.Paper.SourceVersion != "" {
-			candidate.Version = source.Paper.SourceVersion
-			if officialArxivID(candidate.URL) != source.Paper.ArxivID {
-				continue
-			}
-		}
-		if source.Paper.SourceVersion != "" && candidate.Version != "" && candidate.Version != source.Paper.SourceVersion {
-			continue
-		}
 		started := time.Now()
 		if candidate.SourceType == "reference_page" {
-			links, e := publicPagePDFs(runCtx, user, candidate.URL)
-			status := "no_pdf_link"
-			if e == nil {
-				status = "page_read"
+			links, err := publicPagePDFs(runCtx, user, candidate.URL)
+			attempt := contentAttempt{URL: candidate.URL, Status: "page_read", ElapsedMS: time.Since(started).Milliseconds()}
+			if err != nil {
+				attempt.Status, attempt.Error = "page_failed", err.Error()
+				failures = append(failures, err)
+			} else {
 				for _, link := range links {
-					candidates = append(candidates, FulltextCandidate{URL: link, SourceProvider: "web", SourceType: "open_access_pdf", Version: candidate.Version})
+					candidates = append(candidates, FulltextCandidate{URL: link, SourceProvider: "web", SourceType: "open_access_pdf"})
 				}
 			}
-			acquisition.Attempts = append(acquisition.Attempts, contentAttempt{candidate.URL, status, time.Since(started).Milliseconds()})
-			if e = save(); e != nil {
-				return nil, "", "", "", e
+			acquisition.Attempts = append(acquisition.Attempts, attempt)
+			if err = save(); err != nil {
+				return nil, "", "", "", err
 			}
 			continue
 		}
-		path, _, err := acquirePDF(runCtx, user, candidate)
-		status := "download_failed"
+		file, err := acquireContentOriginal(runCtx, originals, caller, candidate, &acquisition)
+		attempt := contentAttempt{URL: candidate.URL, Status: "download_failed"}
 		if err == nil {
-			pages, hash, e := parsePaperPDF(runCtx, path, "")
-			acquisition.Downloaded = true
-			acquisition.PDFHash = hash
-			acquisition.SourceURL = candidate.URL
-			acquisition.SourceProvider = candidate.SourceProvider
-			_ = os.Remove(path)
-			if e == nil {
+			if err = save(); err != nil {
+				_ = file.Close()
+				return nil, "", "", "", err
+			}
+			pages, hash, parseErr := parsePaperPDF(runCtx, file.Name(), acquisition.PDFHash)
+			_ = file.Close()
+			if parseErr == nil {
 				rejected, rejectedHash, rejectedVersion = pages, hash, candidate.Version
 				q := checkPaperQuality(source.Paper, pages, "external", hash)
-				status = "needs_review"
+				attempt.Status = "needs_review"
 				if q.Eligible {
-					acquisition.Candidate = &candidate
-					acquisition.SourceURL = candidate.URL
-					acquisition.Attempts = append(acquisition.Attempts, contentAttempt{candidate.URL, "ready", time.Since(started).Milliseconds()})
-					if e = save(); e != nil {
-						return nil, "", "", "", e
+					attempt.Status, attempt.ElapsedMS = "ready", time.Since(started).Milliseconds()
+					acquisition.Attempts = append(acquisition.Attempts, attempt)
+					if err = save(); err != nil {
+						return nil, "", "", "", err
 					}
 					return pages, "external", hash, candidate.Version, nil
 				}
+				attempt.Error = q.Reason
 			} else {
-				status = "parse_failed"
+				attempt.Status, attempt.Error = "parse_failed", parseErr.Error()
+				failures = append(failures, fmt.Errorf("PDF 已获取，但解析失败：%w", parseErr))
 			}
+		} else {
+			attempt.Error = err.Error()
+			failures = append(failures, fmt.Errorf("PDF 下载失败：%w", err))
 		}
-		acquisition.Attempts = append(acquisition.Attempts, contentAttempt{candidate.URL, status, time.Since(started).Milliseconds()})
+		attempt.ElapsedMS = time.Since(started).Milliseconds()
+		acquisition.Attempts = append(acquisition.Attempts, attempt)
 		if err = save(); err != nil {
 			return nil, "", "", "", err
 		}
-		if len(acquisition.Attempts) >= 12 {
+		attempts++
+		if attempts >= 12 {
 			break
 		}
 	}
 	if len(rejected) > 0 {
 		return rejected, "external", rejectedHash, rejectedVersion, nil
 	}
+	if len(failures) > 0 {
+		return nil, "external", acquisition.PDFHash, "", errors.Join(failures...)
+	}
 	return nil, "", "", "", errFulltextUnavailable
+}
+
+// Keep external PDFs in OriginalService's existing temporary store.
+// Parsing retries reuse these immutable bytes; the service owns expiry and cleanup.
+func acquireContentOriginal(ctx context.Context, service *doc.OriginalService, caller doc.DatasetCatalogCaller, candidate FulltextCandidate, acquisition *contentAcquisition) (*os.File, error) {
+	if acquisition.FileRef != "" && acquisition.Candidate != nil && acquisition.Candidate.URL == candidate.URL && time.Now().Before(acquisition.ExpiresAt) {
+		file, err := service.OpenOriginal(ctx, caller, acquisition.FileRef)
+		if err == nil {
+			return file, nil
+		}
+		var serviceError *doc.DatasetServiceError
+		if !os.IsNotExist(err) && !(errors.As(err, &serviceError) && (serviceError.Code == doc.DatasetServiceNotFound || serviceError.Code == "SOURCE_EXPIRED")) {
+			return nil, err
+		}
+	}
+	original, err := acquireCandidateOriginal(ctx, service, caller, candidate)
+	if err != nil {
+		return nil, err
+	}
+	acquisition.FileRef, acquisition.ExpiresAt = original.FileRef, original.ExpiresAt
+	acquisition.Downloaded, acquisition.PDFHash = true, original.ContentSHA256
+	acquisition.SourceURL, acquisition.SourceProvider = candidate.URL, candidate.SourceProvider
+	acquisition.Candidate = &candidate
+	return service.OpenOriginal(ctx, caller, original.FileRef)
 }

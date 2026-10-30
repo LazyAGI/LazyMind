@@ -13,18 +13,10 @@ import (
 
 type openAlexResponse struct {
 	Results []struct {
-		ID              string `json:"id"`
-		Title           string `json:"title"`
-		PublicationYear int    `json:"publication_year"`
-		DOI             string `json:"doi"`
-		IDs             struct {
+		scholarlyWork
+		IDs struct {
 			Arxiv string `json:"arxiv"`
 		} `json:"ids"`
-		BestOALocation *struct {
-			PDFURL  string `json:"pdf_url"`
-			License string `json:"license"`
-			Version string `json:"version"`
-		} `json:"best_oa_location"`
 	} `json:"results"`
 }
 
@@ -76,7 +68,7 @@ func resolveWithOpenAlex(ctx context.Context, citation string) (WorkInput, bool,
 		return WorkInput{}, false, nil
 	}
 	u := "https://api.openalex.org/works?filter=title.search:" + url.QueryEscape(`"`+title+`"`) +
-		"&per-page=10&select=id,title,publication_year,doi,ids,best_oa_location&mailto=opensource%40lazyagi.org"
+		"&per-page=10&select=id,title,publication_year,doi,ids,best_oa_location,authorships&mailto=opensource%40lazyagi.org"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return WorkInput{}, false, fmt.Errorf("OpenAlex request failed: %w", err)
@@ -109,7 +101,7 @@ func resolveWithOpenAlex(ctx context.Context, citation string) (WorkInput, bool,
 		if arxivID == "" && strings.HasPrefix(doi, "10.48550/arxiv.") {
 			arxivID, _ = NormalizeArxivID(strings.TrimPrefix(doi, "10.48550/arxiv."))
 		}
-		hasPDF := entry.BestOALocation != nil && strings.TrimSpace(entry.BestOALocation.PDFURL) != ""
+		hasPDF := entry.Best != nil && strings.TrimSpace(entry.Best.PDFURL) != ""
 		rank := score
 		if arxivID != "" || hasPDF {
 			rank += 0.1
@@ -117,14 +109,14 @@ func resolveWithOpenAlex(ctx context.Context, citation string) (WorkInput, bool,
 		if score < 0.8 || rank <= bestScore {
 			continue
 		}
-		if year > 0 && entry.PublicationYear > 0 && (entry.PublicationYear < year-1 || entry.PublicationYear > year+1) {
+		if year > 0 && entry.Year > 0 && (entry.Year < year-1 || entry.Year > year+1) {
 			continue
 		}
 		provenance := map[string]any{"match": "openalex_title", "score": score, "openalex_id": entry.ID}
-		if entry.BestOALocation != nil && strings.TrimSpace(entry.BestOALocation.PDFURL) != "" {
-			provenance["pdf_url"] = entry.BestOALocation.PDFURL
-			provenance["pdf_license"] = entry.BestOALocation.License
-			provenance["pdf_version"] = entry.BestOALocation.Version
+		if entry.Best != nil && strings.TrimSpace(entry.Best.PDFURL) != "" {
+			provenance["pdf_url"] = entry.Best.PDFURL
+			provenance["pdf_license"] = entry.Best.License
+			provenance["pdf_version"] = entry.Best.Version
 		} else {
 			pdfURL, license, version, err := resolveDOIOpenAccess(ctx, doi)
 			if err != nil {
@@ -137,8 +129,8 @@ func resolveWithOpenAlex(ctx context.Context, citation string) (WorkInput, bool,
 			}
 		}
 		bestScore = rank
-		best = WorkInput{TrustedFulltext: true, Title: entry.Title, Year: entry.PublicationYear, DOI: doi, ArxivID: arxivID,
-			Provider: "openalex", ProviderWorkID: strings.TrimPrefix(entry.ID, "https://openalex.org/"), Provenance: provenance}
+		best = scholarlyPaper(entry.scholarlyWork).Work
+		best.ArxivID, best.Provenance = arxivID, provenance
 	}
 	return best, bestScore > 0, errors.Join(providerErrors...)
 }

@@ -28,6 +28,7 @@ type PaperTaskInput struct {
 
 type academicChatSummary struct {
 	Kind                 string `json:"kind"`
+	Goal                 string `json:"goal,omitempty"`
 	DatasetID            string `json:"dataset_id"`
 	Status               string `json:"status"`
 	Version              int64  `json:"version"`

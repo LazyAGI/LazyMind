@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -40,6 +39,9 @@ type paperSource struct {
 type paperDiscovery struct {
 	PreparationRevision int64                          `json:"preparation_revision,omitempty"`
 	CacheKey            string                         `json:"cache_key,omitempty"`
+	MaxResults          int                            `json:"max_results,omitempty"`
+	Position            searchPosition                 `json:"position,omitempty"`
+	Next                *searchPosition                `json:"next,omitempty"`
 	Sources             []searchOutcome                `json:"sources,omitempty"`
 	Leads               []discoveryLead                `json:"leads,omitempty"`
 	Candidates          map[string][]FulltextCandidate `json:"candidates,omitempty"`
@@ -60,6 +62,49 @@ func (s paperSource) key() string {
 	return hex.EncodeToString(hash[:])
 }
 
+// Download locations may change, but a frozen paper revision must not.
+func (s paperSource) matchingCandidate(candidate FulltextCandidate) (FulltextCandidate, bool) {
+	if candidate.URL == "" {
+		return candidate, false
+	}
+	if s.Paper.SourceProvider == "arxiv" && s.Paper.SourceVersion != "" {
+		id, err := arxivsource.Parse(candidate.URL)
+		if err != nil || officialArxivID(candidate.URL) != s.Paper.ArxivID ||
+			(id.Version != "" && id.Version != s.Paper.SourceVersion) ||
+			(candidate.SourceProvider == "arxiv" && candidate.Version != "" && candidate.Version != s.Paper.SourceVersion) {
+			return candidate, false
+		}
+		// An unversioned official URL can be pinned without treating an index's
+		// version label (such as submittedVersion) as an arXiv revision.
+		id.Version = s.Paper.SourceVersion
+		candidate.URL, candidate.Version, candidate.SourceProvider = id.PDFURL(), id.Version, "arxiv"
+		candidate.SourceType, candidate.ExpectedMIME = "official_pdf", "application/pdf"
+		return candidate, true
+	}
+	return candidate, s.Paper.SourceVersion == "" ||
+		(candidate.SourceProvider == s.Paper.SourceProvider && candidate.Version == s.Paper.SourceVersion)
+}
+
+func (s paperSource) fulltextCandidates() []FulltextCandidate {
+	primary := FulltextCandidate{URL: s.Paper.PDFURL, SourceProvider: s.Paper.SourceProvider, Version: s.Paper.SourceVersion, SourceType: "open_access_pdf", ExpectedMIME: "application/pdf"}
+	for _, candidate := range s.Candidates {
+		if candidate.URL == primary.URL && candidate.SourceProvider == primary.SourceProvider && candidate.Version == primary.Version {
+			primary = candidate
+			break
+		}
+	}
+	result := []FulltextCandidate{}
+	seen := map[string]bool{}
+	for _, candidate := range append([]FulltextCandidate{primary}, s.Candidates...) {
+		candidate, ok := s.matchingCandidate(candidate)
+		if ok && !seen[candidate.URL] {
+			result = append(result, candidate)
+			seen[candidate.URL] = true
+		}
+	}
+	return result
+}
+
 func seedSources(db *gorm.DB, dataset string, papers []WorkflowPaper) ([]paperSource, error) {
 	result := make([]paperSource, 0, len(papers))
 	for _, item := range papers {
@@ -72,30 +117,36 @@ func seedSources(db *gorm.DB, dataset string, papers []WorkflowPaper) ([]paperSo
 			return nil, err
 		}
 
-		source := paperSource{Paper: item.Paper, DatasetID: dataset, DocumentID: state.DocumentID, Hash: "", Revision: state.Revision, IsSeed: true}
-		var link orm.AcademicWorkDocument
-		if err := db.Where("dataset_id=? AND document_id=? AND academic_work_id=?", dataset, state.DocumentID, item.Paper.PaperID).Take(&link).Error; err == nil {
-			source.Paper.SourceVersion, source.Paper.SourceProvider = link.SourceVersion, link.SourceProvider
-			if link.ContentSHA256 != "" {
-				source.Hash = link.ContentSHA256
-			}
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		source, err := bindLibraryDocument(db, paperSource{Paper: item.Paper, DatasetID: dataset, IsSeed: true}, state)
+		if err != nil {
 			return nil, err
 		}
-		var document orm.Document
-		if err := db.Where("id=? AND dataset_id=?", state.DocumentID, dataset).Take(&document).Error; err != nil {
-			return nil, err
-		}
-		if hash := documentFileHash(document); hash != "" {
-			source.Hash = hash
-		} else if source.Paper.SourceProvider != "arxiv" {
-			source.Hash = ""
-		}
-
-		pinPaperURLs(&source.Paper)
 		result = append(result, source)
 	}
 	return result, nil
+}
+
+// Seeds and discovered papers must identify the same local PDF and document revision.
+func bindLibraryDocument(db *gorm.DB, source paperSource, state orm.AcademicDocumentState) (paperSource, error) {
+	source.DocumentID, source.Revision = state.DocumentID, state.Revision
+	var link orm.AcademicWorkDocument
+	if err := db.Where("dataset_id=? AND document_id=? AND academic_work_id=?", source.DatasetID, state.DocumentID, source.Paper.PaperID).Take(&link).Error; err == nil {
+		source.Paper.SourceVersion, source.Paper.SourceProvider = link.SourceVersion, link.SourceProvider
+		source.Hash = link.ContentSHA256
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return source, err
+	}
+	var document orm.Document
+	if err := db.Where("id=? AND dataset_id=? AND deleted_at IS NULL", state.DocumentID, source.DatasetID).Take(&document).Error; err != nil {
+		return source, err
+	}
+	if hash := documentFileHash(document); hash != "" {
+		source.Hash = hash
+	} else if source.Paper.SourceProvider != "arxiv" {
+		source.Hash = ""
+	}
+	pinPaperURLs(&source.Paper)
+	return source, nil
 }
 
 func pinPaperURLs(p *PaperRef) {
@@ -104,6 +155,23 @@ func pinPaperURLs(p *PaperRef) {
 			p.PaperURL, p.PDFURL = id.AbsURL(), id.PDFURL()
 		}
 	}
+}
+
+func completedExpansionInput(db *gorm.DB, record orm.AcademicExpansion, version int64) (ReviewWorkflowInput, error) {
+	var input ReviewWorkflowInput
+	if version <= 0 || version > record.Version {
+		return input, errors.New("所选扩展版本尚未完成")
+	}
+	snapshot := record.ResultJSON
+	if version != record.Version {
+		var round orm.AcademicExpansionRound
+		if err := db.Where("expansion_id=? AND version=? AND status='completed'", record.ID, version).Take(&round).Error; err != nil {
+			return input, err
+		}
+		snapshot = round.ResultJSON
+	}
+	err := json.Unmarshal(snapshot, &input)
+	return input, err
 }
 
 func expansionSource(db *gorm.DB, record orm.AcademicExpansion, paperID string) (paperSource, error) {
@@ -199,6 +267,17 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var previous []paperDiscovery
+	if err := json.Unmarshal(record.DiscoveryJSON, &previous); err != nil {
+		replyError(w, 500, "READ_FAILED", err.Error())
+		return
+	}
+	if req.Cursor != "" {
+		if err := resumeSearch(record, &req, previous); err != nil {
+			replyError(w, 400, "INVALID_CURSOR", err.Error())
+			return
+		}
+	}
 	if req.MaxResults == 0 {
 		req.MaxResults = 10
 	}
@@ -206,6 +285,7 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "INVALID_REQUEST", "max_results must be 1..20 and query bounded")
 		return
 	}
+
 	if req.Mode == "" {
 		req.Mode = "keyword"
 	}
@@ -223,7 +303,11 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 		} else {
 			req.Sources = []string{"openalex", "arxiv"}
 			config, e := modelconfig.LoadAcademicSearchToolConfig(r.Context(), store.DB(), user)
-			if e == nil && config["sciverse"] != nil {
+			if e != nil {
+				replyError(w, 500, "CONFIG_UNAVAILABLE", e.Error())
+				return
+			}
+			if config["sciverse"] != nil {
 				req.Sources = append(req.Sources, "sciverse")
 			}
 		}
@@ -236,82 +320,23 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 		}
 		seenSources[source] = true
 	}
-	cacheKey := sourceHash(map[string]any{"query": req.Query, "mode": req.Mode, "paper_id": req.PaperID, "sources": req.Sources, "limit": req.MaxResults, "cursor": req.Cursor, "version": record.Version, "preparation_revision": record.PreparationRevision})
-	var previous []paperDiscovery
-	_ = json.Unmarshal(record.DiscoveryJSON, &previous)
-	for _, saved := range previous {
-		if saved.CacheKey != cacheKey {
-			continue
-		}
-		reusable := true
-		for _, outcome := range saved.Sources {
-			if outcome.Status != "ok" && outcome.Status != "empty" && outcome.Status != "missing_configuration" && outcome.Status != "authentication_failed" && outcome.Status != "quota_exhausted" {
-				reusable = false
-			}
-		}
-		if reusable {
-			common.ReplyJSON(w, map[string]any{"papers": saved.Papers, "leads": saved.Leads, "sources": saved.Sources, "cache_hit": true, "mock": false})
-			return
-		}
+	if req.Mode != "keyword" && (req.PaperID == "" || len(req.Sources) != 1 || req.Sources[0] != "openalex") {
+		replyError(w, 400, "INVALID_REQUEST", "references and citations require paper_id and only the openalex source")
+		return
 	}
-	papers, leads, outcomes := discoverPapers(r.Context(), user, record, req)
-	refs := make([]PaperRef, 0, len(papers))
-	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND user_id=? AND deleted_at IS NULL", record.ID, user).Take(&record).Error; err != nil {
-			return err
-		}
-		if record.DiscoveryMode != "external" {
-			return errors.New("unsupported expansion discovery mode")
-		}
-		if req.PreparationRevision != nil && (record.PreparationRevision != *req.PreparationRevision || record.Status != "preparing") {
-			return errors.New("preparation attempt is no longer current")
-		}
-		var searches []paperDiscovery
-		if err := json.Unmarshal(record.DiscoveryJSON, &searches); err != nil {
-			return err
-		}
-		candidateMap := map[string][]FulltextCandidate{}
-		seen := map[string]bool{}
-		for _, metadata := range papers {
-			work, _, err := findOrCreateWork(r.Context(), tx, metadata.Work)
-			if errors.Is(err, errConflictingPaperIdentifiers) {
-				leads = append(leads, discoveryLead{metadata.Work.Title, metadata.PaperURL, "强标识冲突，需核对后才能归并"})
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			ref := paperRef(work)
-			ref.SourceVersion, ref.SourceProvider = metadata.Version, metadata.Work.Provider
-			ref.PaperURL = metadata.PaperURL
-			if len(metadata.Candidates) > 0 {
-				ref.PDFURL = metadata.Candidates[0].URL
-			}
-			candidateMap[work.ID] = append(candidateMap[work.ID], metadata.Candidates...)
-			pinPaperURLs(&ref)
-			// One task pins one revision per paper across continued rounds.
-			for _, old := range searches {
-				for _, prior := range old.Papers {
-					if prior.PaperID == ref.PaperID {
-						ref = prior
-					}
-				}
-			}
-			if !seen[ref.PaperID] {
-				refs = append(refs, ref)
-				seen[ref.PaperID] = true
-			}
-		}
-		var session orm.WorkflowSession
-		_ = tx.Where("conversation_id=?", record.ConversationID).Order("created_at DESC").Take(&session).Error
-		searches = append(searches, paperDiscovery{PreparationRevision: record.PreparationRevision, CacheKey: cacheKey, SessionID: session.ID, Query: req.Query, CreatedAt: time.Now().UTC(), Papers: refs, Sources: outcomes, Leads: leads, Candidates: candidateMap, Mode: req.Mode, PaperID: req.PaperID})
-		return tx.Model(&record).Update("discovery_json", marshal(searches)).Error
-	})
+	pages, cacheHit, err := fetchSearchPages(r.Context(), user, record, req, previous)
 	if err != nil {
 		replyError(w, 500, "READ_FAILED", err.Error())
 		return
 	}
-	common.ReplyJSON(w, map[string]any{"papers": refs, "sources": outcomes, "leads": leads, "mock": false})
+	result, err := saveSearchPages(r.Context(), user, record, req, pages)
+	if err != nil {
+		replyError(w, 500, "READ_FAILED", err.Error())
+		return
+	}
+	result.CacheHit = cacheHit
+	common.ReplyJSON(w, result)
+
 }
 
 // Resolve only the attachment selected by a server-side source snapshot.
@@ -339,18 +364,25 @@ func sourceDocument(ctx context.Context, db *gorm.DB, source paperSource) (orm.D
 }
 
 func matchingLibrarySource(db *gorm.DB, source paperSource) (paperSource, error) {
+	var link orm.AcademicWorkDocument
+	query := db.Where("academic_work_id=? AND dataset_id=? AND source_version=? AND source_provider=? AND document_id IN (?)", source.Paper.PaperID, source.DatasetID, source.Paper.SourceVersion, source.Paper.SourceProvider,
+		db.Model(&orm.Document{}).Select("id").Where("dataset_id=? AND deleted_at IS NULL", source.DatasetID))
 	if source.Paper.SourceVersion == "" {
+		// An unversioned discovery can reuse only the exact registered location.
+		query = query.Where("source_locator=?", source.Paper.PDFURL)
+	}
+	err := query.Order("is_preferred_version DESC, updated_at DESC").Take(&link).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return source, nil
 	}
-	var link orm.AcademicWorkDocument
-	err := db.Where("academic_work_id=? AND dataset_id=? AND source_version=? AND source_provider=? AND document_id IN (?)", source.Paper.PaperID, source.DatasetID, source.Paper.SourceVersion, source.Paper.SourceProvider,
-		db.Model(&orm.Document{}).Select("id").Where("dataset_id=? AND deleted_at IS NULL", source.DatasetID)).Order("is_preferred_version DESC, updated_at DESC").Take(&link).Error
-	if err == nil {
-		source.DocumentID, source.Hash = link.DocumentID, link.ContentSHA256
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err != nil {
 		return source, err
 	}
-	return source, nil
+	var state orm.AcademicDocumentState
+	if err = db.Where("document_id=? AND dataset_id=? AND paper_id=?", link.DocumentID, source.DatasetID, source.Paper.PaperID).Take(&state).Error; err != nil {
+		return source, err
+	}
+	return bindLibraryDocument(db, source, state)
 }
 
 // Recognition fingerprints hash extracted text. Only bytes (or verified provider

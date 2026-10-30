@@ -127,10 +127,7 @@ func verifiedImportMetadata(selected savedImportCandidate, workID string) (WorkI
 }
 
 func expansionImportCandidates(ctx context.Context, user string, source paperSource) ([]FulltextCandidate, string, error) {
-	candidates := append([]FulltextCandidate{}, source.Candidates...)
-	if len(candidates) == 0 && source.Paper.PDFURL != "" {
-		candidates = append(candidates, FulltextCandidate{URL: source.Paper.PDFURL, SourceProvider: source.Paper.SourceProvider, Version: source.Paper.SourceVersion, SourceType: "open_access_pdf", ExpectedMIME: "application/pdf"})
-	}
+	candidates := source.fulltextCandidates()
 	content, err := findSourceContent(store.DB().WithContext(ctx), user, source)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return candidates, "", nil
@@ -146,14 +143,22 @@ func expansionImportCandidates(ctx context.Context, user string, source paperSou
 		return nil, "", err
 	}
 	if quality.Acquisition.Candidate != nil {
-		preferred := *quality.Acquisition.Candidate
+		preferred, ok := source.matchingCandidate(*quality.Acquisition.Candidate)
+		if !ok {
+			return candidates, "", nil
+		}
+		// A rewritten URL does not prove that its bytes match a previous read.
+		hash := ""
+		if preferred.URL == quality.Acquisition.Candidate.URL {
+			hash = content.SourceHash
+		}
 		result := []FulltextCandidate{preferred}
 		for _, candidate := range candidates {
-			if candidate != preferred {
+			if candidate.URL != preferred.URL {
 				result = append(result, candidate)
 			}
 		}
-		return result, content.SourceHash, nil
+		return result, hash, nil
 	}
 	return candidates, "", nil
 }

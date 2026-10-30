@@ -13,8 +13,60 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
+	"lazymind/core/paperlibrary"
 	"lazymind/core/store"
 )
+
+func TestDownloadImportsRecordFirstMethodAndPreserveItOnRepeat(t *testing.T) {
+	for _, test := range []struct{ entry, method string }{
+		{"paper_link", "link"}, {"paper_expansion", "expansion"},
+		{"single_reference", "references"}, {"paper_references", "references"},
+		{"collection_references", "references"}, {"conversation_sources", "conversation"},
+	} {
+		t.Run(test.entry, func(t *testing.T) {
+			db, batch, item, svc := importPipelineFixture(t)
+			if err := db.AutoMigrate(&orm.PaperLibraryEntry{}, &orm.PaperLibraryFolder{}, &orm.PaperLibraryAttachment{}, &orm.PaperLibraryNote{}, &orm.AcademicUserPaperState{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Model(&orm.Dataset{}).Where("id=?", batch.TargetDatasetID).Update("scene", "academic_papers").Error; err != nil {
+				t.Fatal(err)
+			}
+			batch.EntryType = test.entry
+			if err := db.Save(&batch).Error; err != nil {
+				t.Fatal(err)
+			}
+			seedPipelineCache(t, db, "v2")
+			job := asyncjob.Job{ID: "job", AttemptCount: 1}
+			if err := processImportItem(t.Context(), job, batch, item, sourceImportCaller(batch), svc); err != nil {
+				t.Fatal(err)
+			}
+			view, err := paperlibrary.Load(t.Context(), db, batch.TargetDatasetID, "alice", nil, false)
+			if err != nil || len(view.Data.Papers) != 1 || len(view.Data.Attachments) != 1 {
+				t.Fatalf("missing imported paper or attachment: %+v %v", view, err)
+			}
+			if view.Data.Papers[0].ImportMethod != test.method || view.Data.Attachments[0].ImportMethod != test.method {
+				t.Fatalf("import provenance lost: %+v", view.Data)
+			}
+			batch.ID, batch.EntryType = "repeat-batch", "conversation_sources"
+			if test.entry == "conversation_sources" {
+				batch.EntryType = "paper_link"
+			}
+			item.ID, item.BatchID = "repeat-item", batch.ID
+			for _, row := range []any{&batch, &item} {
+				if err := db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := processImportItem(t.Context(), job, batch, item, sourceImportCaller(batch), svc); err != nil {
+				t.Fatal(err)
+			}
+			view, err = paperlibrary.Load(t.Context(), db, batch.TargetDatasetID, "alice", nil, false)
+			if err != nil || len(view.Data.Papers) != 1 || len(view.Data.Attachments) != 1 || view.Data.Papers[0].ImportMethod != test.method || view.Data.Attachments[0].ImportMethod != test.method {
+				t.Fatalf("repeat changed the first import or duplicated the PDF: %+v %v", view.Data, err)
+			}
+		})
+	}
+}
 
 func TestBothImportEntrypointsResumeTheCommittedOriginal(t *testing.T) {
 	for _, entry := range []string{"conversation_sources", "single_reference"} {

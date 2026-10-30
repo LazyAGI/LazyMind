@@ -139,8 +139,7 @@ func runPaperContent(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 		if e := db.Where("id=?", row.ID).Take(&latest).Error; e != nil {
 			return asyncjob.Result{}, e
 		}
-		var acquisition contentAcquisition
-		_ = json.Unmarshal(latest.QualityJSON, &acquisition)
+		acquisition := paperContentAcquisition(latest.QualityJSON)
 		quality := checkPaperQuality(payload.Source.Paper, nil, kind, hash)
 		quality.Acquisition, quality.Reason = acquisition, err.Error()
 		quality.Downloaded = quality.Downloaded || acquisition.Downloaded
@@ -156,12 +155,11 @@ func runPaperContent(ctx context.Context, job asyncjob.Job, _ asyncjob.Reporter)
 	sum := sha256.Sum256(data)
 	updates := map[string]any{"status": "ready", "pages_json": data, "content_hash": hex.EncodeToString(sum[:]), "source_kind": kind, "source_provider": payload.Source.Paper.SourceProvider, "source_hash": hash, "source_version": version, "error": "", "updated_at": time.Now().UTC()}
 	quality := checkPaperQuality(payload.Source.Paper, pages, kind, hash)
-	var acquisition contentAcquisition
 	var latest orm.AcademicPaperContent
 	if e := db.Where("id=?", row.ID).Take(&latest).Error; e != nil {
 		return asyncjob.Result{}, e
 	}
-	_ = json.Unmarshal(latest.QualityJSON, &acquisition)
+	acquisition := paperContentAcquisition(latest.QualityJSON)
 	quality.Acquisition = acquisition
 	if acquisition.SourceProvider != "" {
 		updates["source_provider"] = acquisition.SourceProvider
@@ -262,9 +260,20 @@ func readKnownPaper(ctx context.Context, userID string, source paperSource, cont
 		})
 	} else {
 		source.Paper = paper
-		return readExternalCopies(ctx, userID, source, content)
+		originals, err := doc.NewOriginalService(doc.OriginalServiceDeps{DB: store.DB()})
+		if err != nil {
+			return nil, "", "", "", err
+		}
+		return readExternalCopies(ctx, userID, source, content, originals)
 	}
 	if err != nil {
+		return nil, "", "", "", err
+	}
+	acquisition := paperContentAcquisition(content.QualityJSON)
+	acquisition.StartedAt, acquisition.Downloaded = time.Now().UTC(), true
+	acquisition.SourceURL, acquisition.SourceProvider = paper.PDFURL, paper.SourceProvider
+	acquisition.Candidate = &FulltextCandidate{URL: paper.PDFURL, SourceProvider: paper.SourceProvider, Version: paper.SourceVersion, SourceType: "official_pdf", ExpectedMIME: "application/pdf"}
+	if err = saveContentAcquisition(ctx, content, acquisition); err != nil {
 		return nil, "", "", "", err
 	}
 	pages, hash, err := parsePaperPDF(ctx, path, "")
@@ -516,10 +525,10 @@ func RetryPaperContent(w http.ResponseWriter, r *http.Request) {
 	}
 	if row.Status == "failed" || row.Status == "unavailable" || row.Status == "needs_review" {
 		err = store.DB().Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&row).Updates(map[string]any{"status": "processing", "error": "", "quality_json": json.RawMessage(`{}`)}).Error; err != nil {
+			if err := tx.Model(&row).Updates(map[string]any{"status": "processing", "error": ""}).Error; err != nil {
 				return err
 			}
-			_, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: user, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3})
+			_, err := asyncjob.EnqueueInTransaction(r.Context(), tx, asyncjob.EnqueueRequest{JobType: "academic.paper_content", ResourceType: "academic_content", ResourceID: row.ID, CreateUserID: user, IdempotencyKey: row.ID, Payload: map[string]any{"source": source}, MaxAttempts: 3, SkipSucceeded: true})
 			return err
 		})
 		if err != nil {
@@ -565,7 +574,7 @@ func datasetPaperRef(db *gorm.DB, dataset string, work orm.AcademicWork) (PaperR
 	paper := paperRef(work)
 	var entry orm.PaperLibraryEntry
 	if e := db.Where("dataset_id=? AND academic_work_id=? AND removed_at IS NULL", dataset, work.ID).Take(&entry).Error; e == nil {
-		m, e := paperlibrary.EffectiveMetadata(entry, work)
+		m, e := paperlibrary.EffectiveMetadata(db, entry, work)
 		if e != nil {
 			return paper, e
 		}

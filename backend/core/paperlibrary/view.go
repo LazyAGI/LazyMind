@@ -87,14 +87,14 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 	for _, w := range works {
 		workByID[w.ID] = w
 	}
-	marks := map[string]bool{}
+	states := map[string]orm.AcademicUserPaperState{}
 	if user != "" {
 		var rows []orm.AcademicUserPaperState
 		if err := db.Where("user_id=? AND dataset_id=? AND paper_id IN ?", user, dataset, workIDs).Find(&rows).Error; err != nil {
 			return view, err
 		}
 		for _, m := range rows {
-			marks[m.PaperID] = m.IsImportant
+			states[m.PaperID] = m
 		}
 	}
 	documents, itemIDs := []string{}, []string{}
@@ -145,6 +145,10 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 			origins[r.ItemID] = r.PaperImportBatch
 		}
 	}
+	metadataSources, err := automaticMetadata(db, dataset, entries)
+	if err != nil {
+		return view, err
+	}
 	paperByID := map[string]*Paper{}
 	primaryByPaper := map[string]int{}
 	for _, e := range entries {
@@ -152,11 +156,14 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		if !exists {
 			return view, fmt.Errorf("paper %s has no scholarly identity", e.ID)
 		}
-		metadata, err := EffectiveMetadata(e, work)
+		metadata, err := mergeMetadata(e, work, metadataSources[e.ID])
 		if err != nil {
 			return view, err
 		}
-		p := Paper{ID: e.ID, AcademicWorkID: e.AcademicWorkID, Revision: e.Revision, Metadata: metadata, FolderID: Pointer(e.FolderID), Status: e.Status, Tags: []string{}, Important: marks[e.AcademicWorkID], Source: e.Source, ImportMethod: e.ImportMethod, SourceURL: e.SourceURL, ArxivVersion: e.ArxivVersion, Parse: "ready", AttachmentIDs: []string{}, NoteIDs: []string{}, Incomplete: metadata.Title == "" || len(metadata.Authors) == 0}
+		p := Paper{ID: e.ID, AcademicWorkID: e.AcademicWorkID, Revision: e.Revision, Metadata: metadata, FolderID: Pointer(e.FolderID), Status: states[e.AcademicWorkID].ReadingStatus, Tags: []string{}, Important: states[e.AcademicWorkID].IsImportant, Source: e.Source, ImportMethod: e.ImportMethod, SourceURL: e.SourceURL, ArxivVersion: e.ArxivVersion, Parse: "ready", AttachmentIDs: []string{}, NoteIDs: []string{}, Incomplete: metadata.Title == "" || len(metadata.Authors) == 0}
+		if p.Status == "" {
+			p.Status = "unread"
+		}
 		if err = json.Unmarshal(e.TagsJSON, &p.Tags); err != nil {
 			return view, err
 		}
@@ -176,7 +183,10 @@ func Load(ctx context.Context, db *gorm.DB, dataset, user string, ids []string, 
 		}
 		link := linkByID[a.DocumentID]
 		_, available := docByID[a.DocumentID]
-		attachment := Attachment{ID: a.ID, PaperID: a.PaperID, Name: a.Name, Kind: a.Kind, ContentRef: a.DocumentID, Source: p.Source, ImportMethod: p.ImportMethod, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, SourceURL: link.SourceLocator, ContentHash: link.ContentSHA256, IsPrimary: a.IsPrimary, Available: a.DocumentID == "" || available, AddedAt: a.CreatedAt}
+		attachment := Attachment{ID: a.ID, PaperID: a.PaperID, Name: a.Name, Kind: a.Kind, ContentRef: a.DocumentID, Source: p.Source, SourceProvider: link.SourceProvider, SourceVersion: link.SourceVersion, SourceURL: link.SourceLocator, ContentHash: link.ContentSHA256, IsPrimary: a.IsPrimary, Available: a.DocumentID == "" || available, AddedAt: a.CreatedAt}
+		if link.SourceProvider == "upload" {
+			attachment.ImportMethod = "upload"
+		}
 		if attachment.SourceURL == "" {
 			attachment.SourceURL = a.SourceURL
 		}

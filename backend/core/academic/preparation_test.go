@@ -45,6 +45,10 @@ func TestPreparationCreatesRecordsWithoutChatsAndConfirmsOnce(t *testing.T) {
 	if record.Status != "preparing" || record.BudgetMode != "fast" || record.PreparationRevision != 1 {
 		t.Fatalf("bad initial state: %+v", record)
 	}
+	var input ReviewWorkflowInput
+	if err := json.Unmarshal(record.ResultJSON, &input); err != nil || input.Papers == nil || len(input.Papers) != 0 {
+		t.Fatalf("topic launch must store an empty paper array: %s (%v)", record.ResultJSON, err)
+	}
 	p := expansionPreparation{UserInstruction: "RAG reliability", Summary: "Retrieved representative work", Directions: []preparationDirection{{Name: "retrieval correction", Question: "How can retrieval be corrected?", Reason: "Distinct correction methods", PaperIDs: []string{"a"}}}}
 	db.Model(&record).Updates(map[string]any{"status": "awaiting_confirmation", "preparation_json": marshal(p), "discovery_json": marshal([]paperDiscovery{{Papers: []PaperRef{{PaperID: "a", Title: "a"}}}})})
 	for _, revision := range []int{0, 1, 1} {
@@ -63,8 +67,10 @@ func TestPreparationCreatesRecordsWithoutChatsAndConfirmsOnce(t *testing.T) {
 	if record.BudgetMode != "fast" || record.Status != "pending" {
 		t.Fatal("confirmation did not preserve the launch depth/state")
 	}
-	var input ReviewWorkflowInput
-	json.Unmarshal(record.ResultJSON, &input)
+	input = ReviewWorkflowInput{}
+	if err := json.Unmarshal(record.ResultJSON, &input); err != nil || input.Papers == nil || len(input.Papers) != 0 {
+		t.Fatalf("confirmation must preserve empty seeds without promoting references: %s (%v)", record.ResultJSON, err)
+	}
 	if len(input.SelectedDirections) != 1 || input.SelectedDirections[0] != "retrieval correction" {
 		t.Fatal("confirmed scope not frozen")
 	}

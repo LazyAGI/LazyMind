@@ -11,6 +11,28 @@ import (
 	"lazymind/core/common/orm"
 )
 
+func TestExpansionChatSummaryPreservesReviewGoal(t *testing.T) {
+	db := paperFixture(t)
+	for _, goal := range []string{"review", "expansion"} {
+		conversation, err := newAcademicConversation(db.DB, "u", "papers", goal, "expansion")
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := orm.AcademicExpansion{ID: goal, UserID: "u", RequestOwner: "u", RequestKey: goal, DatasetID: "papers", ConversationID: conversation, Goal: goal, Status: "running", ResultJSON: marshal(ReviewWorkflowInput{Papers: []WorkflowPaper{}})}
+		if err := db.Create(&record).Error; err != nil {
+			t.Fatal(err)
+		}
+		r := paperRequest("")
+		r.URL.RawQuery = url.Values{"conversation_id": {conversation}, "view": {"summary"}}.Encode()
+		w := httptest.NewRecorder()
+		AcademicChatContext(w, r)
+		var summary academicChatSummary
+		if err := json.Unmarshal(w.Body.Bytes(), &summary); err != nil || w.Code != 200 || summary.Kind != "expansion" || summary.Goal != goal {
+			t.Fatal("summary lost the task goal", w.Code, w.Body.String(), err)
+		}
+	}
+}
+
 func TestHandoffContextSeparatesBusinessInputFromNavigation(t *testing.T) {
 	db := paperFixture(t)
 	input := ReviewWorkflowInput{UserInstruction: "Read the selected paper", Papers: []WorkflowPaper{{Paper: PaperRef{PaperID: "a", Title: "Frozen title", SourceDocumentID: "a"}, IsSeed: true}}}

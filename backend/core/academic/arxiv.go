@@ -15,7 +15,11 @@ func citationTitle(citation string) string {
 	compact := strings.Join(strings.Fields(citation), " ")
 	compact = brokenWordPattern.ReplaceAllString(compact, "$1$2")
 	compact = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(compact, "")
-	match := citationYearTitlePattern.FindStringSubmatch(compact)
+	quoted := regexp.MustCompile(`(?i)(?:^|,)\s*[“"]([^”"]{8,})[”"]\s*[,.:;]?\s*(?:in\b|(?:19|20)\d{2})`).FindStringSubmatch(compact)
+	if len(quoted) > 1 {
+		return strings.Trim(quoted[1], " .,:;")
+	}
+	match := citationYearTitlePattern.FindStringSubmatch(identifierFreeCitation(compact))
 	title := ""
 	if len(match) >= 2 {
 		title = match[1]
