@@ -1137,6 +1137,7 @@ func resumeFromDBOnly(ctx context.Context, db *gorm.DB, userID, convID string, f
 		"thinking_duration_s": last.ThinkingDurationS,
 	}
 	addModelOutputSnapshot(snapshot, last)
+	addSteeringResumeSnapshot(snapshot, last)
 	writeSSEChunk(w, flusher, withHistoryAskState(snapshot, last.Ext))
 	writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 }
@@ -1159,6 +1160,7 @@ func resumeCompletedFromDB(ctx context.Context, db *gorm.DB, userID, convID stri
 			"thinking_duration_s": last.ThinkingDurationS,
 		}
 		addModelOutputSnapshot(snapshot, last)
+		addSteeringResumeSnapshot(snapshot, last)
 		writeSSEChunk(w, flusher, withHistoryAskState(snapshot, last.Ext))
 		writeSSEChunk(w, flusher, storedTerminalChunk(ctx, db, userID, convID, last.ID, last.RunID, last.RunTerminal))
 		return

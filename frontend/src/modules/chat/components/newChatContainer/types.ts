@@ -199,6 +199,7 @@ export interface ChatMessage {
   intent_updated?: {
     scope: "conversation";
     intent_context: Record<string, unknown>;
+    steering_segment_id?: string;
   };
   knowledge_operations?: import("../../utils/knowledgeOperations").KnowledgeOperation[];
   ask_pending?: {

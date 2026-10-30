@@ -38,10 +38,12 @@ export function useConversationFollowUps({
   conversationId,
   isStreaming,
   sendNow,
+  onSteerAccepted,
 }: {
   conversationId: string;
   isStreaming: boolean;
   sendNow: (params: SendMessageParams) => Promise<boolean>;
+  onSteerAccepted?: (item: ConversationFollowUp) => void;
 }) {
   const { t } = useTranslation();
   const [items, setItems] = useState<ConversationFollowUp[]>([]);
@@ -50,6 +52,10 @@ export function useConversationFollowUps({
   const [stateConversationId, setStateConversationId] = useState(conversationId);
   const currentConversationIdRef = useRef(conversationId);
   const latestRefreshRef = useRef(0);
+  const refreshRequestsRef = useRef(new Set<string>());
+  const steeringRequestsRef = useRef(new Map<string, string>());
+  const acceptedRef = useRef(onSteerAccepted);
+  acceptedRef.current = onSteerAccepted;
   const dispatchingConversationsRef = useRef(new Set<string>());
   const enqueueAttemptsRef = useRef(new Map<string, { fingerprint: string; idempotencyKey: string }>());
   const enqueueRequestsRef = useRef(new Map<string, { fingerprint: string; promise: Promise<boolean> }>());
@@ -77,6 +83,9 @@ export function useConversationFollowUps({
   const refresh = useCallback(async () => {
     const requestedConversationId = conversationId;
     if (currentConversationIdRef.current !== requestedConversationId) return;
+    if (refreshRequestsRef.current.has(requestedConversationId)
+      || enqueueRequestsRef.current.has(requestedConversationId)
+      || [...steeringRequestsRef.current.values()].includes(requestedConversationId)) return;
     if (!requestedConversationId || requestedConversationId.startsWith("temp_")) {
       setItems([]);
       setActiveRunId("");
@@ -84,7 +93,13 @@ export function useConversationFollowUps({
       return;
     }
     const refreshID = ++latestRefreshRef.current;
-    const result = await ConversationFollowUpApi.list(requestedConversationId);
+    refreshRequestsRef.current.add(requestedConversationId);
+    let result;
+    try {
+      result = await ConversationFollowUpApi.list(requestedConversationId);
+    } finally {
+      refreshRequestsRef.current.delete(requestedConversationId);
+    }
     if (
       !mountedRef.current
       || currentConversationIdRef.current !== requestedConversationId
@@ -94,6 +109,7 @@ export function useConversationFollowUps({
     setItems(result.items || []);
     setActiveRunId(result.active_run_id || "");
     setSupportsSteering(Boolean(result.supports_steering));
+    result.items?.filter((item) => item.status === "accepted").forEach((item) => acceptedRef.current?.(item));
   }, [conversationId]);
 
   useEffect(() => {
@@ -134,6 +150,17 @@ export function useConversationFollowUps({
       enqueueAttemptsRef.current.set(requestedConversationId, attempt);
     }
     const currentAttempt = attempt;
+    latestRefreshRef.current += 1;
+    const optimisticID = `submitting:${currentAttempt.idempotencyKey}`;
+    if (currentConversationIdRef.current === requestedConversationId) {
+      const now = new Date().toISOString();
+      setItems((current) => [...current, {
+        id: optimisticID, conversation_id: requestedConversationId, content, text: params.text,
+        mode: "queued", status: "dispatching", revision: 0,
+        sort_order: Math.max(0, ...current.map((entry) => entry.sort_order)) + 1024,
+        created_at: now, updated_at: now,
+      }]);
+    }
     const request = (async () => {
       try {
         const item = await ConversationFollowUpApi.create(requestedConversationId, {
@@ -146,11 +173,14 @@ export function useConversationFollowUps({
         }
         if (currentConversationIdRef.current === requestedConversationId) {
           setStateConversationId(requestedConversationId);
-          setItems((current) => [...current.filter((entry) => entry.id !== item.id), item]
+          setItems((current) => [...current.filter((entry) => entry.id !== item.id && entry.id !== optimisticID), item]
             .sort((left, right) => left.sort_order - right.sort_order));
         }
         return true;
       } catch {
+        if (currentConversationIdRef.current === requestedConversationId) {
+          setItems((current) => current.filter((entry) => entry.id !== optimisticID));
+        }
         message.error(t("chat.followUpQueueFailed"));
         return false;
       }
@@ -159,6 +189,7 @@ export function useConversationFollowUps({
     try {
       return await request;
     } finally {
+      latestRefreshRef.current += 1;
       if (enqueueRequestsRef.current.get(requestedConversationId)?.promise === request) {
         enqueueRequestsRef.current.delete(requestedConversationId);
       }
@@ -172,7 +203,10 @@ export function useConversationFollowUps({
       || item.conversation_id !== requestedConversationId
       || item.status === "steering"
       || item.status === "accepted"
+      || steeringRequestsRef.current.has(item.id)
     ) return;
+    steeringRequestsRef.current.set(item.id, requestedConversationId);
+    latestRefreshRef.current += 1;
     setItems((current) => current.map((entry) => entry.id === item.id
       ? { ...entry, mode: "steer", status: "steering" }
       : entry));
@@ -180,12 +214,16 @@ export function useConversationFollowUps({
       const result = await ConversationFollowUpApi.steer(requestedConversationId, item.id, activeRunId);
       if (currentConversationIdRef.current === requestedConversationId) {
         setItems((current) => current.map((entry) => entry.id === item.id ? result.item : entry));
+        if (result.item.status === "accepted") acceptedRef.current?.(result.item);
       }
     } catch {
       if (currentConversationIdRef.current === requestedConversationId) {
-        await refresh().catch(() => undefined);
+        setItems((current) => current.map((entry) => entry.id === item.id ? item : entry));
         message.error(t("chat.followUpSteerFailed"));
       }
+    } finally {
+      steeringRequestsRef.current.delete(item.id);
+      latestRefreshRef.current += 1;
     }
   }, [activeRunId, conversationId, refresh, t]);
 

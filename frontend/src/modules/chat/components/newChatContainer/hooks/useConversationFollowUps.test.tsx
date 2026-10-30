@@ -74,6 +74,55 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("useConversationFollowUps conversation isolation", () => {
+  it("shows a submitting row immediately and ignores a poll started before creation", async () => {
+    const creation = deferred<ConversationFollowUp>();
+    const staleList = deferred<{ items: ConversationFollowUp[]; active_run_id: string; supports_steering: boolean }>();
+    mocks.create.mockReturnValue(creation.promise);
+    const hook = renderHook(() => useConversationFollowUps({
+      conversationId: "A", isStreaming: true, sendNow: vi.fn(),
+    }));
+    await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(1));
+    mocks.list.mockReturnValue(staleList.promise);
+    let poll!: Promise<void>;
+    act(() => { poll = hook.result.current.refresh(); });
+    let enqueue!: Promise<boolean>;
+    act(() => { enqueue = hook.result.current.enqueue({ text: "只比较天津" }); });
+    expect(hook.result.current.items[0]).toMatchObject({ text: "只比较天津", status: "dispatching" });
+    await act(async () => {
+      creation.resolve(item("A", { text: "只比较天津" }));
+      expect(await enqueue).toBe(true);
+      staleList.resolve({ items: [], active_run_id: "run-A", supports_steering: true });
+      await poll;
+    });
+    expect(hook.result.current.items).toEqual([item("A", { text: "只比较天津" })]);
+  });
+
+  it("publishes acceptance once and coalesces rapid steer clicks before React rerenders", async () => {
+    const pending = item("A");
+    const acceptance = deferred<{ item: ConversationFollowUp; delivery_mode: string }>();
+    const onSteerAccepted = vi.fn();
+    mocks.list.mockResolvedValue({ items: [pending], active_run_id: "run-A", supports_steering: true });
+    mocks.steer.mockReturnValue(acceptance.promise);
+    const hook = renderHook(() => useConversationFollowUps({
+      conversationId: "A", isStreaming: true, sendNow: vi.fn(), onSteerAccepted,
+    }));
+    await waitFor(() => expect(hook.result.current.items).toHaveLength(1));
+    let request!: Promise<void>;
+    act(() => {
+      request = hook.result.current.steer(pending);
+      void hook.result.current.steer(pending);
+      void hook.result.current.refresh();
+    });
+    expect(mocks.steer).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.items[0]).toMatchObject({ status: "steering", text: pending.text });
+    expect(onSteerAccepted).not.toHaveBeenCalled();
+    const accepted = item("A", { status: "accepted", mode: "steer", target_history_id: "history-A" });
+    await act(async () => { acceptance.resolve({ item: accepted, delivery_mode: "steer" }); await request; });
+    expect(onSteerAccepted).toHaveBeenCalledTimes(1);
+    expect(onSteerAccepted).toHaveBeenCalledWith(accepted);
+    expect(mocks.info).not.toHaveBeenCalled();
+  });
+
   it("keeps an accepted steer in the visible conversation", async () => {
     const pending = item("A");
     const accepted = item("A", {
@@ -101,6 +150,23 @@ describe("useConversationFollowUps conversation isolation", () => {
     expect(hook.result.current.items[0]).toMatchObject({ status: "accepted" });
     expect(mocks.success).not.toHaveBeenCalled();
     expect(mocks.info).not.toHaveBeenCalled();
+  });
+
+  it("retains the original card and allows retry after a rejected steer without publishing a message", async () => {
+    const pending = item("A");
+    const onSteerAccepted = vi.fn();
+    mocks.list.mockResolvedValue({ items: [pending], active_run_id: "run-A", supports_steering: true });
+    mocks.steer.mockRejectedValue(new Error("network unavailable"));
+    const hook = renderHook(() => useConversationFollowUps({
+      conversationId: "A", isStreaming: true, sendNow: vi.fn(), onSteerAccepted,
+    }));
+    await waitFor(() => expect(hook.result.current.items).toHaveLength(1));
+    await act(async () => { await hook.result.current.steer(pending); });
+    expect(hook.result.current.items).toEqual([pending]);
+    expect(onSteerAccepted).not.toHaveBeenCalled();
+    expect(mocks.error).toHaveBeenCalledWith("chat.followUpSteerFailed");
+    await act(async () => { await hook.result.current.steer(pending); });
+    expect(mocks.steer).toHaveBeenCalledTimes(2);
   });
 
   it("ignores a stale queue response after switching conversations", async () => {

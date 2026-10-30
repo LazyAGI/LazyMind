@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { RoleTypes as Role } from "@/modules/chat/constants/common";
-import { applySteeringTimeline } from "./steeringTimeline";
+import { appendAcceptedSteering, applySteeringTimeline, assignSteeringIntent } from "./steeringTimeline";
 import { buildChatMessageListFromHistory } from "./message";
 
 describe("ordered steering transcript", () => {
@@ -10,6 +10,52 @@ describe("ordered steering transcript", () => {
   ];
   const first = { id: "a", text: "只比较天津和济南", accepted_at: 1 };
   const second = { id: "b", text: "预算2000元", accepted_at: 2 };
+
+  it("keeps intent badges on their own segment through later guidance, reload and replay", () => {
+    const intent = { scope: "conversation", steering_segment_id: first.id, intent_context: { goal: "天津济南" } };
+    let live = applySteeringTimeline(initial, "h", [first]);
+    live[live.length - 1] = { ...live[live.length - 1], delta: "天津更近", intent_updated: intent };
+    live = applySteeringTimeline(live, "h", [second]);
+    const replay = [{ ...first, assistant_segment: "原始部分回复" }, { ...second, assistant_segment: "天津更近", intent_updated: intent }];
+    const loaded = buildChatMessageListFromHistory([{
+      id: "h", query: "周末从北京出发", result: "原始部分回复天津更近最终建议", assistant_remainder: "最终建议",
+      intent_updated: intent, steering_messages: replay,
+    } as any]);
+    for (const list of [live, loaded, applySteeringTimeline(loaded, "h", replay, true)]) {
+      expect(list.filter(m => m.intent_updated).map(m => [m.delta, m.intent_updated])).toEqual([["天津更近", intent]]);
+    }
+    const nextIntent = { ...intent, steering_segment_id: second.id, intent_context: { goal: "1500元以内" } };
+    const updated = assignSteeringIntent(loaded, "h", nextIntent);
+    expect(updated.filter(m => m.intent_updated)).toHaveLength(2);
+    expect(updated[updated.length - 1]?.intent_updated).toEqual(nextIntent);
+  });
+
+  it("preserves unsegmented ordinary and legacy intent events", () => {
+    const ordinary = { ...initial[1], intent_updated: { scope: "conversation" } };
+    expect(assignSteeringIntent([ordinary], "h", ordinary.intent_updated)).toEqual([ordinary]);
+  });
+
+  it("normalizes every replay segment even when reconnect starts with an empty placeholder", () => {
+    const replay = [
+      { ...first, assistant_segment: '<tp>计划</tp>原始回复' },
+      { ...second, assistant_segment: '已有回复<trp>计算</trp>补充😀' },
+    ];
+    const list = applySteeringTimeline([initial[0], { ...initial[1], delta: '' }], 'h', replay, true, { version: 1 });
+    expect(list.filter(m => m.role === Role.ASSISTANT).map(m => m.delta)).toEqual(['原始回复', '已有回复补充😀', '']);
+    expect(list.filter(m => m.role === Role.ASSISTANT).every(m => m.model_output)).toBe(true);
+  });
+
+  it("shows accepted guidance immediately and orders it exactly once at the stream boundary", () => {
+    let list = appendAcceptedSteering(initial, "h", first);
+    list = appendAcceptedSteering(list, "h", second);
+    expect(list.map(m => m.delta)).toEqual([initial[0].delta, initial[1].delta, first.text, second.text]);
+    expect(appendAcceptedSteering(list, "h", first)).toBe(list);
+    list[1] = { ...list[1], delta: "旧回复的最后一段" };
+    list = applySteeringTimeline(list, "h", [first, second]);
+    expect(list.map(m => m.delta)).toEqual([initial[0].delta, "旧回复的最后一段", first.text, second.text, ""]);
+    expect(list.filter(m => m.steering_pending)).toHaveLength(0);
+    expect(applySteeringTimeline(list, "h", [first, second])).toEqual(list);
+  });
 
   it("keeps partial replies, avoids duplicates and restores identical IDs after reload", () => {
     let live = applySteeringTimeline(initial, "h", [first]);

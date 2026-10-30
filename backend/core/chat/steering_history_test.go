@@ -33,8 +33,13 @@ func TestSteeringBoundarySurvivesAlgorithmStreamDecoder(t *testing.T) {
 }
 
 func TestSteeringStreamPersistsOrderedPartialRepliesAndRestoresContext(t *testing.T) {
+	t.Run("legacy", func(t *testing.T) { testSteeringStreamPersistsOrderedPartialReplies(t, false) })
+	t.Run("model_output", func(t *testing.T) { testSteeringStreamPersistsOrderedPartialReplies(t, true) })
+}
+
+func testSteeringStreamPersistsOrderedPartialReplies(t *testing.T, fenced bool) {
 	db, cache := newRunDecisionStreamHarness(t)
-	if err := db.AutoMigrate(&orm.ConversationFollowUp{}); err != nil {
+	if err := db.AutoMigrate(&orm.ConversationFollowUp{}, &orm.ChatRunPerformance{}); err != nil {
 		t.Fatal(err)
 	}
 	const runID, historyID = "steered-run", "steered-history"
@@ -50,14 +55,41 @@ func TestSteeringStreamPersistsOrderedPartialRepliesAndRestoresContext(t *testin
 			t.Fatal(err)
 		}
 	}
-	server := streamServer(t, runID,
-		algorithmFrame(t, map[string]any{"text": "北京出发，先比较交通。"}),
-		algorithmFrame(t, map[string]any{"steering_applied": []steeringApplied{{ID: "runtime1", AcceptedAt: 1}}}),
-		algorithmFrame(t, map[string]any{"text": "天津更近，济南也方便。"}),
-		algorithmFrame(t, map[string]any{"steering_applied": []steeringApplied{{ID: "runtime2", AcceptedAt: 2}}}),
-		algorithmFrame(t, map[string]any{"text": "最终推荐天津，预算1800元。"}),
-		algorithmFrame(t, map[string]any{"runtime_event": completedRunEvent(runID, true)}),
-	)
+	frames := []string{}
+	model := func(index int, phase string, data map[string]any) {
+		if fenced {
+			data["model_output"] = &ChatModelOutput{RunID: runID, CallIndex: index, Phase: phase}
+			frames = append(frames, algorithmFrame(t, data))
+		} else if phase == "" {
+			frames = append(frames, algorithmFrame(t, data))
+		}
+	}
+	for index, text := range []string{"北京出发，先比较交通。", "天津更近，济南也方便。", "最终推荐天津，预算1800元。"} {
+		if index == 2 && fenced {
+			model(3, "begin", map[string]any{})
+			model(3, "", map[string]any{"text": "failed temporary output", "think": "failed reasoning"})
+			model(3, "rollback", map[string]any{})
+		}
+		callIndex := index + 1
+		if index == 2 && fenced {
+			callIndex++
+		}
+		model(callIndex, "begin", map[string]any{})
+		model(callIndex, "", map[string]any{"text": text})
+		model(callIndex, "commit", map[string]any{})
+		if index < 2 {
+			frames = append(frames, algorithmFrame(t, map[string]any{"intent_updated": &IntentUpdatedEvent{
+				Scope: "conversation", Operations: []IntentOperation{{Op: "set", Field: "goal", Value: []string{"周末旅行", "天津济南"}[index], Evidence: "用户明确要求"}},
+			}}))
+			id := []string{"runtime1", "runtime2"}[index]
+			frames = append(frames, algorithmFrame(t, map[string]any{"steering_applied": []steeringApplied{{ID: id, AcceptedAt: float64(index + 1)}}}))
+		}
+	}
+	if fenced {
+		frames = append(frames, algorithmFrame(t, map[string]any{"export_snapshot": &ChatExportSnapshot{Content: "最终推荐天津，预算1800元。"}}))
+	}
+	frames = append(frames, algorithmFrame(t, map[string]any{"runtime_event": completedRunEvent(runID, true)}))
+	server := streamServer(t, runID, frames...)
 	defer server.Close()
 	recorder := httptest.NewRecorder()
 	streamSingleAnswer(context.Background(), context.Background(), recorder, recorder, db, cache,
@@ -70,6 +102,12 @@ func TestSteeringStreamPersistsOrderedPartialRepliesAndRestoresContext(t *testin
 	timeline := steeringTimelineFromHistory(stored)
 	if len(timeline.Items) != 2 || stored.RunStatus != "completed" {
 		t.Fatalf("history=%+v", stored)
+	}
+	for i, owner := range []string{"", "guide1"} {
+		intent := timeline.Items[i].IntentUpdated
+		if intent == nil || intent.SteeringSegmentID == nil || *intent.SteeringSegmentID != owner {
+			t.Fatalf("intent attached to wrong segment: %+v", timeline.Items)
+		}
 	}
 	if strings.Contains(string(stored.Ext), "北京出发") || !strings.Contains(string(stored.Ext), `"other":"keep"`) {
 		t.Fatalf("body duplicated in metadata or unrelated metadata lost: %s", stored.Ext)
@@ -87,6 +125,9 @@ func TestSteeringStreamPersistsOrderedPartialRepliesAndRestoresContext(t *testin
 		t.Fatal(err)
 	}
 	messages := item["steering_messages"].([]conversationSteeringHistoryDTO)
+	if !reflect.DeepEqual(messages[1].IntentUpdated, timeline.Items[1].IntentUpdated) {
+		t.Fatalf("reload lost segment intent: %+v", messages)
+	}
 	if len(messages) != 2 || *messages[0].AssistantSegment != "北京出发，先比较交通。" || *messages[1].AssistantSegment != "天津更近，济南也方便。" || item["assistant_remainder"] != "最终推荐天津，预算1800元。" {
 		t.Fatalf("reload=%+v", item)
 	}
@@ -98,6 +139,29 @@ func TestSteeringStreamPersistsOrderedPartialRepliesAndRestoresContext(t *testin
 	replay := steeringResumeChunk(chunkPointers, mergeChunksToFirstChunk(chunkPointers))
 	if len(replay.SteeringReplay) != 2 || replay.SteeringReplay[0].ID != "guide1" || replay.Delta != item["assistant_remainder"] {
 		t.Fatalf("replay=%+v", replay)
+	}
+	if replay.SteeringReplay[0].AssistantSegment != "北京出发，先比较交通。" || replay.SteeringReplay[1].AssistantSegment != "天津更近，济南也方便。" {
+		t.Fatalf("fallback replacement overwrote earlier replies: %+v", replay.SteeringReplay)
+	}
+	if !reflect.DeepEqual(replay.SteeringReplay[1].IntentUpdated, timeline.Items[1].IntentUpdated) {
+		t.Fatalf("cache replay lost intent ownership: %+v", replay.SteeringReplay)
+	}
+	cached, err := getChatChunks(t.Context(), cache, stored.ConversationID, historyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cachedReplay := steeringResumeChunk(cached, mergeChunksToFirstChunk(cached))
+	if !reflect.DeepEqual(cachedReplay.SteeringReplay, replay.SteeringReplay) || cachedReplay.Delta != replay.Delta {
+		t.Fatalf("cached resume differs: %+v", cachedReplay)
+	}
+	cold := httptest.NewRecorder()
+	resumeFromDBOnly(t.Context(), db, "0", stored.ConversationID, cold, cold)
+	coldChunks := decodeChatChunkSSE(t, cold.Body.String())
+	if len(coldChunks) != 2 || coldChunks[0].Delta != replay.Delta || len(coldChunks[0].SteeringReplay) != 2 {
+		t.Fatalf("cold resume lost segments: %+v", coldChunks)
+	}
+	if !reflect.DeepEqual(coldChunks[0].SteeringReplay[1].IntentUpdated, replay.SteeringReplay[1].IntentUpdated) {
+		t.Fatalf("database replay lost intent ownership: %+v", coldChunks[0])
 	}
 }
 
@@ -117,6 +181,16 @@ func TestSteeringTimelineBurstDeduplicationAndRunIsolation(t *testing.T) {
 	h.Ext = withSteeringBoundary(nil, "run", 100, items)
 	if len(steeringTimelineFromHistory(h).Items) != 0 {
 		t.Fatal("invalid offset accepted")
+	}
+}
+
+func TestSteeringIntentDoesNotLeakAcrossRegeneration(t *testing.T) {
+	intent := intentForSteeringSegment(&IntentUpdatedEvent{Scope: "conversation"}, "", nil, "old-run")
+	ext := mergeIntentUpdatedIntoExt(nil, intent)
+	ext = withSteeringBoundary(ext, "new-run", 0, []steeringApplied{{ID: "new-guide", Text: "new request"}})
+	timeline := steeringTimelineFromHistory(orm.ChatHistory{RunID: "new-run", Ext: ext})
+	if len(timeline.Items) != 1 || timeline.Items[0].IntentUpdated != nil {
+		t.Fatalf("regeneration inherited an earlier run's intent badge: %+v", timeline)
 	}
 }
 

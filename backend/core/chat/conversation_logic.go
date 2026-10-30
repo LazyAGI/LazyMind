@@ -2757,7 +2757,7 @@ func streamSingleAnswer(
 	publishOutput := func(replace bool) {
 		chunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq), ModelOutput: outputOwner.metadata()}
 		if replace {
-			chunk = outputOwner.replacement(output, convID, historyID, seq)
+			chunk = outputOwner.replacement(output, historyExt, convID, historyID, seq)
 		}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
@@ -2824,6 +2824,9 @@ func streamSingleAnswer(
 			if reqCtx.Err() == nil {
 				writeSSEChunk(w, flusher, chunk)
 			}
+			thinkStart = time.Now()
+			thinkingDurationS = 0
+			output.thinkingActive = false
 			continue
 		}
 		if d.Err == nil && !accepted {
@@ -3046,7 +3049,9 @@ func streamSingleAnswer(
 		if d.IntentUpdated != nil {
 			updated := handleIntentUpdated(chatCtx, db, stateStore, convID, d.IntentUpdated)
 			if updated != nil {
+				updated = intentForSteeringSegment(updated, output.result, historyExt, runID)
 				pendingConversationIntent = updated
+				historyExt = mergeIntentUpdatedIntoExt(historyExt, updated)
 				intentChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, IntentUpdated: updated}
 				if reqCtx.Err() == nil {
 					writeSSEChunk(w, flusher, intentChunk)
@@ -3299,7 +3304,7 @@ func streamSingleAnswer(
 		finalChunk := &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq),
 			Delta: output.exportSnapshot.Content, DeltaMode: ChatDeltaModeReplace, Exports: &visibleExports, ModelRoute: chatModelRouteFromBody(reqBody), ModelSwitches: modelSwitchesFromBody(reqBody)}
 		if outputOwner.enabled() {
-			finalChunk.Delta = stripThinkTags(stripToolTags(output.result))
+			finalChunk.Delta = stripThinkTags(stripToolTags(steeringTail(output.result, historyExt, runID)))
 			finalChunk.Sources = output.sources
 		}
 		if reqCtx.Err() == nil {

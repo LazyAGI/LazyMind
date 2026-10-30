@@ -59,6 +59,24 @@ function selectMessageText(text: string) {
 }
 
 describe("native workflow Chat control wiring", () => {
+  it("hides only the empty old placeholder while accepted steering awaits its stream boundary", () => {
+    const assistant = { role: RoleTypes.ASSISTANT, history_id: "h", delta: "", reasoning_content: "thinking" };
+    const guide = { role: RoleTypes.USER, history_id: "h", delta: "只比较天津", steering_pending: true };
+    const props = {
+      sendMessage: vi.fn(), regenerate: vi.fn(), stopGeneration: vi.fn(),
+      renderText: (item: any) => <span>{item.delta}</span>, updateAssistantMessage: vi.fn(),
+    };
+    const view = render(<MessageList {...props} messageList={[assistant, guide]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="assistant"]')).toHaveLength(0);
+    expect(screen.getByText("只比较天津")).toBeInTheDocument();
+    view.rerender(<MessageList {...props} messageList={[{ ...assistant, delta: "已生成的内容" }, guide]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="assistant"]')).toHaveLength(1);
+    view.rerender(<MessageList {...props} messageList={[assistant]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="assistant"]')).toHaveLength(1);
+    view.rerender(<MessageList {...props} messageList={[{ ...assistant, ask_pending: { ask_id: "ask" } }, guide]} />);
+    expect(view.container.querySelectorAll('[data-chat-role="assistant"]')).toHaveLength(1);
+  });
+
   it.each([false, true])("keeps the Chat stop callback separate from workflow controls (multi-answer: %s)", (multiAnswer) => {
     workflowFixture.session = { session_id: 'workflow' };
     const stop = vi.fn();

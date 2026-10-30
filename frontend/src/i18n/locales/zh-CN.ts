@@ -3399,7 +3399,7 @@ const zhCN = {
     followUpQueueTitle: "待处理消息",
     followUpQueueFailed: "消息加入队列失败，原文已保留",
     followUpPending: "待处理",
-    followUpSteering: "引导提交中",
+    followUpSteering: "提交中",
     followUpFailed: "提交失败",
     followUpDispatching: "正在发送",
     followUpSteer: "引导",

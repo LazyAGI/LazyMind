@@ -3469,7 +3469,7 @@ const enUS = {
     followUpQueueTitle: "Queued messages",
     followUpQueueFailed: "Could not queue the message; the draft was preserved",
     followUpPending: "Pending",
-    followUpSteering: "Submitting guidance",
+    followUpSteering: "Submitting",
     followUpFailed: "Submission failed",
     followUpDispatching: "Sending",
     followUpSteer: "Steer",

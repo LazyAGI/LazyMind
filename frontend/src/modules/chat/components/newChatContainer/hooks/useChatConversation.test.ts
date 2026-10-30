@@ -469,6 +469,58 @@ describe("useChatConversation regeneration recovery", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("shows HTTP-accepted guidance before its stream boundary without overwriting either prior reply", async () => {
+    const live = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => live.stream) });
+    act(() => result.current.replaceMessageList("steering-output", []));
+    await act(async () => { await result.current.sendMessage({ text: "周末从北京出发" }); });
+    const emit = (frame: object) => live.listeners.get("message")?.({ data: JSON.stringify({ result: {
+      conversation_id: "steering-output", history_id: "steering-history", ...frame,
+    } }) });
+    const cursor = { run_id: "steering-run", call_index: 1 };
+    const intent = { scope: "conversation", steering_segment_id: "first", intent_context: { goal: "天津济南" } };
+    await act(async () => {
+      emit({ model_output: { ...cursor, phase: "begin" } });
+      emit({ model_output: cursor, delta: "原始回复" });
+    });
+    const guide = (id: string, text: string) => ({
+      id, text, conversation_id: "steering-output", target_history_id: "steering-history",
+      status: "accepted" as const, mode: "steer" as const, content: { text }, sort_order: 1, revision: 1,
+      created_at: "2026-10-29T00:00:00Z", updated_at: "2026-10-29T00:00:00Z",
+    });
+    act(() => result.current.showAcceptedSteering(guide("first", "只比较天津济南")));
+    expect(result.current.messageList.map(m => m.delta)).toEqual(["周末从北京出发", "原始回复", "只比较天津济南"]);
+    await act(async () => {
+      emit({ model_output: cursor, delta: "保留尾段" });
+      emit({ model_output: { ...cursor, phase: "commit" } });
+      emit({ steering_applied: [{ id: "first", text: "只比较天津济南" }] });
+      emit({ model_output: { ...cursor, call_index: 2, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 2 }, delta: "天津美食丰富" });
+      emit({ intent_updated: intent });
+    });
+    act(() => result.current.showAcceptedSteering(guide("second", "两人预算1500")));
+    await act(async () => {
+      emit({ model_output: { ...cursor, call_index: 2, phase: "commit" } });
+      emit({ steering_applied: [{ id: "second", text: "两人预算1500" }] });
+      emit({ model_output: { ...cursor, call_index: 3, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 3 }, delta: "失败的临时输出" });
+      emit({ model_output: { ...cursor, call_index: 3, phase: "rollback" }, delta_mode: "replace", delta: "", reasoning_content: "" });
+      emit({ model_output: { ...cursor, call_index: 4, phase: "begin" } });
+      emit({ model_output: { ...cursor, call_index: 4 }, delta: "最终推荐天津" });
+      emit({ model_output: { ...cursor, call_index: 4, phase: "commit" } });
+    });
+    expect(result.current.messageList.map(m => m.delta)).toEqual([
+      "周末从北京出发", "原始回复保留尾段", "只比较天津济南", "天津美食丰富", "两人预算1500", "最终推荐天津",
+    ]);
+    act(() => result.current.showAcceptedSteering(guide("second", "两人预算1500")));
+    expect(result.current.messageList.filter(m => m.steering_message)).toHaveLength(2);
+    expect(result.current.messageList.filter(m => m.intent_updated).map(m => m.delta)).toEqual(["天津美食丰富"]);
+    // A merged resume frame carries the latest intent alongside the final tail.
+    // Its ownership must still route it back to the first guided reply.
+    await act(async () => emit({ intent_updated: intent }));
+    expect(result.current.messageList.filter(m => m.intent_updated).map(m => m.delta)).toEqual(["天津美食丰富"]);
+  });
+
   it("keeps committed SDK thinking and tool previews consistent through rollback and export", async () => {
     const live = createMockStream();
     const cached = createMockStream();
@@ -494,7 +546,7 @@ describe("useChatConversation regeneration recovery", () => {
       emit({ model_output: { ...cursor, call_index: 2, phase: "rollback" }, delta_mode: "replace",
         delta: prefix + "\nKEPT BODY", reasoning_content: "COMMITTED SDK THINK", sources: [], exports: [] });
     });
-    expect(result.current.messageList[1].delta.trim()).toBe("KEPT BODY");
+    expect(result.current.messageList[1].delta.trim()).toBe("KEPT PREFIX\nKEPT BODY");
     expect(result.current.messageList[1].reasoning_content).toContain("COMMITTED SDK THINK");
     expect(result.current.messageList[1].reasoning_content).toContain("COMMITTED TOOL");
     await act(async () => {
@@ -506,7 +558,7 @@ describe("useChatConversation regeneration recovery", () => {
       emit({ delta_mode: "replace", delta: prefix + "FINAL BODY", exports: [] });
     });
     const finished = result.current.messageList[1];
-    expect(finished.delta).toBe("FINAL BODY");
+    expect(finished.delta).toBe("KEPT PREFIXFINAL BODY");
     expect(finished.reasoning_content).not.toContain("BAD");
     for (const marker of ["COMMITTED SDK THINK", "B SDK THINK", "FINAL THINK", "COMMITTED TOOL", "COMMITTED RESULT"]) {
       expect(finished.reasoning_content.split(marker)).toHaveLength(2);

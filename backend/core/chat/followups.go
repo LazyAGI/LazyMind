@@ -63,13 +63,14 @@ type activeFollowUpRun struct {
 }
 
 type conversationSteeringHistoryDTO struct {
-	ID                string     `json:"id"`
-	Text              string     `json:"text"`
-	TargetHistoryID   string     `json:"target_history_id"`
-	AssistantSnapshot string     `json:"assistant_snapshot,omitempty"`
-	AssistantSegment  *string    `json:"assistant_segment,omitempty"`
-	ReasoningContent  string     `json:"reasoning_content,omitempty"`
-	AcceptedAt        *time.Time `json:"accepted_at,omitempty"`
+	IntentUpdated     *IntentUpdatedEvent `json:"intent_updated,omitempty"`
+	ID                string              `json:"id"`
+	Text              string              `json:"text"`
+	TargetHistoryID   string              `json:"target_history_id"`
+	AssistantSnapshot string              `json:"assistant_snapshot,omitempty"`
+	AssistantSegment  *string             `json:"assistant_segment,omitempty"`
+	ReasoningContent  string              `json:"reasoning_content,omitempty"`
+	AcceptedAt        *time.Time          `json:"accepted_at,omitempty"`
 }
 
 func followUpDTO(row orm.ConversationFollowUp) conversationFollowUpDTO {

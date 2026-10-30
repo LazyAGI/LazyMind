@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from copy import deepcopy
 from dataclasses import replace
 import uuid
@@ -37,6 +38,128 @@ def travel_plan():
         force_summarize_context=question,
         execution_options=AgentExecutionOptions(enable_builtin_tools=False),
     )
+
+
+@pytest.mark.parametrize('source', ['openai', 'claude'])
+@pytest.mark.parametrize('recover', [False, True])
+def test_fallback_stream_interrupt_commits_partial_output_without_extra_switch(provider, source, recover):
+    from fallback_test_support import candidate, fail, wrapper, sse_frame
+
+    session, run = uuid.uuid4().hex, uuid.uuid4().hex
+    previous = lazyllm.globals._sid
+    lazyllm.globals._init_sid(session)
+    steering_registry.register(run, 'travel', session)
+    events = []
+
+    def sink(event):
+        events.append(event)
+        if event.get('tag') == 'text':
+            steering_registry.accept(run, 'travel', 'guide', '只比较天津和济南')
+
+    provider.script['offline-model'] = [{
+        'message': {'role': 'assistant', 'content': '已生成的回复'},
+        'frames': [sse_frame({'content': '已生成的回复'}), sse_frame({'content': '旧方向后续输出'})],
+    }]
+    try:
+        winner = candidate(provider, 'offline-model', source=source)
+        if recover:
+            fail(provider, 'unavailable-model')
+            model = wrapper(candidate(provider, 'unavailable-model'), [winner])
+        else:
+            model = wrapper(winner, [])
+        assert install_stream_interrupt_hook(model)
+        # FunctionCall shares the configured model after installing the hook.
+        with pytest.raises(SteeringInterruptedError):
+            model.share(stream={'_stream_sink': sink})('周末旅游')
+        boundaries = [event['model_output']['phase'] for event in events
+                      if (event.get('model_output') or {}).get('phase')]
+        assert boundaries == (['begin', 'rollback', 'begin', 'commit'] if recover else ['begin', 'commit'])
+        assert ''.join(event.get('delta', '') for event in events if event.get('tag') == 'text') == '已生成的回复'
+        assert model.state.failed_candidates == ({'own:unavailable-model'} if recover else set())
+        assert model.state.current.candidate_id == winner.candidate_id
+        assert len(provider.requests) == (2 if recover else 1)
+        assert steering_registry.drain_or_close(run)[0].content == '只比较天津和济南'
+    finally:
+        steering_registry.unregister(run)
+        lazyllm.globals._init_sid(previous)
+
+
+@pytest.mark.parametrize('partial_reply', [False, True])
+def test_fallback_agent_http_requests_preserve_consecutive_guidance(provider, tmp_path, partial_reply):
+    from fallback_test_support import candidate, record_fallback_effect
+    from lazymind.config import config
+
+    session, run = uuid.uuid4().hex, uuid.uuid4().hex
+    previous_global, previous_local = lazyllm.globals._sid, lazyllm.locals._sid
+    guides = ['只比较天津和济南', '两人两天一夜，预算1500以内']
+    current = candidate(provider, 'offline-steering')
+    provider.script[current.model_id] = [{'message': {'role': 'assistant', 'content': '最终只推荐天津'}}]
+
+    def accept_before_first_token(_request):
+        index = len(provider.requests) - 1
+        if index < len(guides) and not partial_reply:
+            assert steering_registry.accept(run, 'travel', str(index), guides[index]) == (True, '')
+        return {'message': {'role': 'assistant', 'content': f'已生成的旅游回复 {index}'}}
+
+    provider.on_request = accept_before_first_token
+    events = []
+
+    async def exercise():
+        plan = travel_plan()
+        plan = replace(plan, tools=[record_fallback_effect], execution_options=replace(
+            plan.execution_options, workspace=str(tmp_path), llm_config=current.llm_config,
+            model_candidates=(current,), current_model_candidate_id=current.candidate_id,
+        ))
+        raw = lazyllm.OnlineChatModule(
+            source='openai', model=current.model_id, url=provider.url, api_key='offline-key', stream=False,
+        )
+        executor = AgentExecutor()
+        agent = executor.create_agent(raw, plan)
+        for index in range(3):
+            runtime = executor.runtime_llm(agent)
+            assert install_stream_interrupt_hook(runtime)
+            if partial_reply:
+                def sink(event, index=index):
+                    lazyllm.FileSystemQueue().enqueue(json.dumps(event, ensure_ascii=False))
+                    if event.get('tag') == 'text' and index < len(guides):
+                        assert steering_registry.accept(run, 'travel', str(index), guides[index]) == (True, '')
+                runtime._stream = {'_stream_sink': sink}
+            text = []
+            try:
+                async for kind, payload in executor.stream_agent(agent, plan):
+                    if kind == 'event':
+                        events.append(payload)
+                        if payload.get('tag') == 'text':
+                            text.append(payload['delta'])
+            except SteeringInterruptedError:
+                assert index < 2
+                plan = continue_in_workspace(plan, steering_registry.drain_or_close(run), ''.join(text))
+            else:
+                assert index == 2
+
+    try:
+        lazyllm.globals._init_sid(session)
+        lazyllm.locals._init_sid(session)
+        steering_registry.register(run, 'travel', session)
+        with config.temp('context_compression_enabled', False):
+            asyncio.run(exercise())
+        assert len(provider.requests) == 3
+        for index, request in enumerate(provider.requests):
+            contents = '\n'.join(str(message.get('content', '')) for message in request['messages'])
+            assert '从北京出发' in contents and '不自驾' in contents
+            assert '优先考虑高铁' in contents
+            for guidance in guides[:index]:
+                assert guidance in contents
+            if partial_reply:
+                for earlier in range(index):
+                    assert f'已生成的旅游回复 {earlier}' in contents
+        boundaries = [(event['model_output']['call_index'], event['model_output']['phase'])
+                      for event in events if event.get('tag') == 'model_output']
+        assert boundaries == [(1, 'begin'), (1, 'commit'), (2, 'begin'), (2, 'commit'), (3, 'begin'), (3, 'commit')]
+    finally:
+        steering_registry.unregister(run)
+        lazyllm.globals._init_sid(previous_global)
+        lazyllm.locals._init_sid(previous_local)
 
 
 @pytest.fixture(autouse=True)
@@ -160,7 +283,9 @@ def test_real_cancellation_and_provider_error_still_clear_workspace(tmp_path, ca
             raise ValueError('provider failure')
 
     plan = travel_plan()
-    plan = replace(plan, tools=[unused_cleanup_probe], execution_options=replace(plan.execution_options, workspace=str(tmp_path)))
+    plan = replace(plan, tools=[unused_cleanup_probe], execution_options=replace(
+        plan.execution_options, workspace=str(tmp_path),
+    ))
     agent = AgentExecutor().create_agent(BrokenModel(), plan)
     with pytest.raises(asyncio.CancelledError if cancelled else Exception):
         agent(plan.prompt.current_input, llm_chat_history=plan.history)

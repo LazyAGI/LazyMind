@@ -144,6 +144,16 @@ class SteeringRegistry:
 steering_registry = SteeringRegistry()
 
 
+def check_stream_interrupt() -> None:
+    import lazyllm
+
+    session_id = lazyllm.globals._sid
+    if steering_registry.has_pending_for_session(session_id):
+        raise SteeringInterruptedError(
+            f'model stream interrupted by guidance for session {session_id}'
+        )
+
+
 def _install_output_interrupt_hook(target: object) -> bool:
     if getattr(target, '_lazymind_steering_interrupt_installed', False):
         return True
@@ -158,13 +168,7 @@ def _install_output_interrupt_hook(target: object) -> bool:
         *,
         cls: str | None = 'text',
     ) -> str:
-        import lazyllm
-
-        session_id = lazyllm.globals._sid
-        if steering_registry.has_pending_for_session(session_id):
-            raise SteeringInterruptedError(
-                f'model stream interrupted by guidance for session {session_id}'
-            )
+        check_stream_interrupt()
         return original(text, color, cls=cls)
 
     target._stream_output = MethodType(interruptible_stream_output, target)
@@ -180,6 +184,13 @@ def install_stream_interrupt_hook(llm: object) -> bool:
     output hook lazily after the stack has been entered. Static models can be
     hooked directly. The interrupt check itself is scoped by session ID.
     """
+    from .model_fallback import FallbackLLM
+
+    if isinstance(llm, FallbackLLM):
+        # FallbackLLM streams through copied supplier views, not its inherited
+        # _stream_output. Install on the owner of those calls instead.
+        llm._steering_interrupt_check = check_stream_interrupt
+        return True
     get_supplier = getattr(llm, '_get_supplier', None)
     if not callable(get_supplier):
         return _install_output_interrupt_hook(llm)

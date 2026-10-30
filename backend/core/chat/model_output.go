@@ -157,7 +157,7 @@ func modelOutputFromExt(raw json.RawMessage) *ChatModelOutput {
 	_ = json.Unmarshal(raw, &ext)
 	return ext.ModelOutput
 }
-func (o *chatModelOutput) replacement(p chatOutputProjection, convID, historyID string, seq int) *ChatChunkResponse {
+func (o *chatModelOutput) replacement(p chatOutputProjection, ext json.RawMessage, convID, historyID string, seq int) *ChatChunkResponse {
 	exports := []ChatExport{}
 	if p.exportSnapshot != nil {
 		exports = finalizeChatExports(p.exportSnapshot, convID, historyID, o.cursor.RunID)
@@ -166,7 +166,13 @@ func (o *chatModelOutput) replacement(p chatOutputProjection, convID, historyID 
 	if sources == nil {
 		sources = []any{}
 	}
-	return &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq), Delta: stripToolTags(p.text), DeltaMode: ChatDeltaModeReplace, ReasoningContent: extractThinkContent(p.rawResult()), Sources: sources, Exports: &exports, ModelOutput: o.metadata()}
+	raw := p.rawResult()
+	tail := steeringTail(raw, ext, o.cursor.RunID)
+	text := stripToolTags(p.text)
+	if len(tail) != len(raw) {
+		text = stripThinkTags(stripToolTags(tail))
+	}
+	return &ChatChunkResponse{ConversationID: convID, HistoryID: historyID, Seq: int32(seq), Delta: text, DeltaMode: ChatDeltaModeReplace, ReasoningContent: extractThinkContent(tail), Sources: sources, Exports: &exports, ModelOutput: o.metadata()}
 }
 
 // The first DB/REST frame hydrates the same projection as a cache snapshot.
@@ -176,7 +182,7 @@ func addModelOutputSnapshot(fields map[string]any, history orm.ChatHistory) {
 		return
 	}
 	fields["model_output"] = metadata
-	fields["reasoning_content"] = extractThinkContent(history.Result)
+	fields["reasoning_content"] = extractThinkContent(steeringTail(history.Result, history.Ext, history.RunID))
 	if values, ok := fields["sources"].([]any); !ok || values == nil {
 		fields["sources"] = []any{}
 	}

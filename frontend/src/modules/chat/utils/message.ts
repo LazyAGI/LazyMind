@@ -14,6 +14,7 @@ import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/ut
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import { mailConfirmationMetadata, mailConfirmationTurnSignature, type MailConfirmationMetadata } from "./mailConfirmationReplay";
+import { assignSteeringIntent, type SteeringIntentUpdate } from "./steeringTimeline";
 
 const CITE_MESSAGE_PATTERN = /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
 const CITE_MESSAGE_GLOBAL_PATTERN =
@@ -208,6 +209,7 @@ export type ConversationHistoryRecord = Omit<
       assistant_segment?: string;
       reasoning_content?: string;
       accepted_at?: string;
+      intent_updated?: SteeringIntentUpdate;
     }>;
     assistant_remainder?: string;
   };
@@ -335,6 +337,7 @@ export function buildChatMessageListFromHistory(
   const list: any[] = [];
 
   records.forEach((rawRecord) => {
+    const recordStart = list.length;
     // The generated Core schema is intentionally permissive. Normalize it at
     // this boundary before constructing the stricter UI message shape.
     const record = rawRecord as ConversationHistoryRecord;
@@ -455,10 +458,14 @@ export function buildChatMessageListFromHistory(
       const snapshot = snapshotsAreDurablePrefixes
         ? assistantSnapshots[steeringIndex]
         : "";
-      const segment = stripAskUserReceipt(steeringMessage.assistant_segment ?? fullAssistantContent.slice(
+      const rawSegment = steeringMessage.assistant_segment ?? fullAssistantContent.slice(
           assistantOffset,
           snapshot.length,
-        ), hasAskPending);
+        );
+      const segmentResult = record.model_output
+        ? splitModelOutputContent(rawSegment, steeringMessage.reasoning_content)
+        : { content: rawSegment, reasoning_content: steeringMessage.reasoning_content || "" };
+      const segment = stripAskUserReceipt(segmentResult.content, hasAskPending);
       // Reasoning without user-facing text is an interrupted pre-answer
       // placeholder, not a completed assistant segment. Omitting it here keeps
       // refreshed history identical to the live steering timeline without
@@ -470,9 +477,10 @@ export function buildChatMessageListFromHistory(
           original_history_id: record.id,
           seq: record.seq,
           role: RoleTypes.ASSISTANT,
-          reasoning_content: steeringMessage.reasoning_content || "",
+          reasoning_content: segmentResult.reasoning_content,
+          intent_updated: steeringMessage.intent_updated,
           delta: segment,
-          raw_delta: segment,
+          raw_delta: rawSegment,
           finish_reason:
             ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
           create_time: steeringMessage.accepted_at || record.create_time,
@@ -500,12 +508,17 @@ export function buildChatMessageListFromHistory(
       });
     });
 
-    const displayAssistantContent = stripAskUserReceipt(record.assistant_remainder ?? (snapshotsAreDurablePrefixes
+    const rawRemainder = record.assistant_remainder ?? (snapshotsAreDurablePrefixes
       ? fullAssistantContent.slice(assistantOffset)
-      : fullAssistantContent), hasAskPending);
+      : fullAssistantContent);
+    const remainderResult = record.model_output && record.assistant_remainder !== undefined
+      ? splitModelOutputContent(rawRemainder, record.reasoning_content)
+      : splitResult;
+    const displayAssistantContent = stripAskUserReceipt(record.model_output && record.assistant_remainder !== undefined
+      ? remainderResult.content : rawRemainder, hasAskPending);
     const displayReasoningContent = steeringMessages.length > 0
       && record.assistant_remainder !== undefined
-      ? record.reasoning_content || ""
+      ? record.model_output ? remainderResult.reasoning_content : record.reasoning_content || ""
       : splitResult.reasoning_content;
     const assistantMessage: any = {
       role: RoleTypes.ASSISTANT,
@@ -513,7 +526,7 @@ export function buildChatMessageListFromHistory(
       delta: displayAssistantContent,
       exports: record.exports,
       raw_delta: assistantOffset > 0 || record.assistant_remainder !== undefined
-        ? displayAssistantContent
+        ? rawRemainder
         : record.result || "",
       ...(record.model_output ? { raw_reasoning_content: record.reasoning_content || "" } : {}),
       finish_reason: isActuallyGenerating
@@ -560,6 +573,11 @@ export function buildChatMessageListFromHistory(
     }
 
     list.push(assistantMessage);
+    const intent = (record as any).intent_updated;
+    if (typeof intent?.steering_segment_id === "string") {
+      const attributed = assignSteeringIntent(list.slice(recordStart), record.id || "", intent);
+      list.splice(recordStart, list.length - recordStart, ...attributed);
+    }
   });
 
   const lastAssistant = list[list.length - 1];

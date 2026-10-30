@@ -33,7 +33,7 @@ import {
 } from "@/modules/chat/constants/chat";
 import { streamManager, type RunTerminal } from "@/modules/chat/utils/StreamManager";
 import { MailConfirmationReplayStore, mailConfirmationMetadata, mailConfirmationTurnSignature } from "@/modules/chat/utils/mailConfirmationReplay";
-import { ChatServiceApi } from "@/modules/chat/utils/request";
+import { ChatServiceApi, type ConversationFollowUp } from "@/modules/chat/utils/request";
 import type { RealtimeRefusal } from "@/modules/chat/utils/realtimeTransport";
 import UIUtils from "@/modules/chat/utils/ui";
 import {
@@ -48,7 +48,7 @@ import {
   stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
 import { mergeChatStreamDelta } from "@/modules/chat/utils/streamDelta";
-import { applySteeringTimeline } from "@/modules/chat/utils/steeringTimeline";
+import { appendAcceptedSteering, applySteeringTimeline, assignSteeringIntent } from "@/modules/chat/utils/steeringTimeline";
 import { splitModelOutputContent, splitThinkingContent } from "@/modules/chat/utils/thinking";
 import {
   buildCitedMessageText,
@@ -1133,7 +1133,7 @@ export function useChatConversation({
 
     const updateMessageListInternal = (list: any[]) => {
       const newList = Array.isArray(result.steering_replay)
-        ? applySteeringTimeline(list, result.history_id, result.steering_replay, true)
+        ? applySteeringTimeline(list, result.history_id, result.steering_replay, true, result.model_output)
         : Array.isArray(result.steering_applied)
           ? applySteeringTimeline(list, result.history_id, result.steering_applied)
           : [...list];
@@ -1283,7 +1283,7 @@ export function useChatConversation({
       };
 
       newList[assistantMessageIndex] = assistantMessage;
-      return newList;
+      return assignSteeringIntent(newList, result.history_id || assistantMessage.history_id, result.intent_updated);
     };
 
     if (isActiveConversation) {
@@ -2531,8 +2531,22 @@ export function useChatConversation({
     scheduleStreamRecovery(conversationId);
   }
 
+  function showAcceptedSteering(item: ConversationFollowUp) {
+    if (item.conversation_id !== currentConversationIdRef.current || !item.target_history_id) return;
+    const list = appendAcceptedSteering(messageListRef.current, item.target_history_id, {
+      id: item.id, text: item.text,
+      accepted_at: item.accepted_at ? Date.parse(item.accepted_at) / 1000 : undefined,
+    });
+    if (list === messageListRef.current) return;
+    messageListRef.current = list;
+    setMessageList(list);
+    conversationMessagesCache.current.set(item.conversation_id, list);
+    streamManager.saveMessageList(item.conversation_id, list);
+  }
+
   return {
     modelFallbackNotificationHolder,
+    showAcceptedSteering,
     creationError,
     draftWorkspace,
     messageList,

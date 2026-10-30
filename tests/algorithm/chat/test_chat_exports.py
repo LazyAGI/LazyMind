@@ -38,6 +38,16 @@ def test_code_fences_are_literal_and_body_fences_do_not_close_export():
     assert len(final['exports']) == 1
 
 
+def test_editable_and_export_documents_remain_distinct_without_nested_parsing():
+    editable = '```editable\n可编辑文章\n```\n'
+    _, result = parse(editable + OPEN + '# 另一份报告\n完整结论\n:::\n')
+    assert result['content'].startswith(editable)
+    assert len(result['exports']) == 1
+    item = result['exports'][0]
+    encoded = result['content'].encode('utf-16-le')
+    assert encoded[item['start'] * 2:item['end'] * 2].decode('utf-16-le') == '# 另一份报告\n完整结论'
+
+
 def test_plain_markdown_streams_without_waiting_for_newline():
     parser = ChatExportStream()
     assert parser.feed('Hello ') == 'Hello '

@@ -100,6 +100,7 @@ from lazymind.chat.engine.agent_runtime.budget import resolve_max_input_tokens
 from lazymind.chat.service.local_observation import LocalObservationWriter
 from lazymind.chat.engine.tools.file_resources.tools import build_resource_read_tools
 from lazymind.chat.engine.tools.intent_writer import (
+    append_intentwrite_guidance,
     build_intentwrite_tool,
     render_intent_section,
 )
@@ -1906,16 +1907,10 @@ async def _handle_chat_impl(
             'chat.protocol', priority=39, content_kind='instruction',
         )
     if enable_chat_exports:
+        from lazymind.chat.engine.prompts.guidance import CHAT_EXPORT_GUIDANCE
         prompt_builder.runtime(
             'chat_exports', 'Save complete chat documents',
-            'For a complete standalone plan, report or checklist delivered in Main Chat, wrap '
-            'the Markdown body in an export block with a standalone opening line '
-            ':::export{title="Document title" filename="document.md"} and a standalone closing '
-            'line :::. Use JSON-quoted attributes in exactly this order. Multiple blocks are '
-            'allowed; never nest them or wrap ordinary explanations or fragments. The UI lets '
-            'the user save the existing body manually. Do not call save_chat_artifact again '
-            'to repeat that body. This does not replace tools for explicitly requested local '
-            'file writes or generation/publishing of downloadable files.',
+            CHAT_EXPORT_GUIDANCE,
             'chat.protocol', priority=39, content_kind='instruction',
         )
     if sidechat_readonly:
@@ -2393,10 +2388,13 @@ async def _handle_chat_impl(
                         async with aclosing(guarded_agent_stream):
                             async for kind, payload in guarded_agent_stream:
                                 if kind == 'event':
-                                    if (isinstance(payload, dict)
-                                            and payload.get('tag') == 'runtime_event'
+                                    if (isinstance(payload, dict) and (
+                                            payload.get('tag') == 'tool_calls'
+                                            or payload.get('tag') == 'model_output'
+                                            and (payload.get('model_output') or {}).get('phase') in {'begin', 'rollback'}
+                                            or payload.get('tag') == 'runtime_event'
                                             and (payload.get('runtime_event') or {}).get('type')
-                                            == 'model_call_started'):
+                                            == 'model_call_started')):
                                         # Earlier model rounds already live in the workspace
                                         # tool history; only append this unfinished reply.
                                         response_text.clear()
@@ -2449,6 +2447,10 @@ async def _handle_chat_impl(
                     current_plan = continue_in_workspace(
                         current_plan, late_guidance, assistant_context,
                     )
+                    # intentwrite validates evidence against user input, not the
+                    # model's reply. Accepted guidance is additional user input
+                    # for this run and must be available to the same tool.
+                    append_intentwrite_guidance(intentwriter, [item.content for item in late_guidance])
                     current_query = current_plan.prompt.current_input
                     for frame in translator.begin_steering_segment():
                         yield log_and_emit_frame(

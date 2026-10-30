@@ -46,7 +46,24 @@ You may add one short sentence outside the block, but do not repeat the finished
 an editable writing deliverable as `text` or `markdown`. Do not put citation refs or source links
 inside the editable block; keep those markers in the surrounding explanation only. This protocol is
 only for the main Chat Agent's user-visible response; never ask or instruct a SubAgent to emit an
-`editable` block.'''
+`editable` block. If the Main Chat export protocol is also enabled, use only one delivery wrapper
+for the same document: an explicit request for editable text takes precedence; otherwise a complete
+standalone plan, report or checklist uses the export protocol. Other reusable prose keeps this
+editable protocol. Never duplicate or nest the same document in both protocols, and never create
+an empty or placeholder editable block merely to point to an export block.'''
+
+CHAT_EXPORT_GUIDANCE = '''For a complete standalone plan, report or checklist delivered in Main Chat,
+wrap the Markdown body in an export block with a standalone opening line
+:::export{title="Document title" filename="document.md"} and a standalone closing line :::.
+Use JSON-quoted attributes in exactly this order. Multiple blocks for distinct documents are allowed;
+never nest them or wrap ordinary explanations or fragments. Delivery priority: an explicit user
+request for editable text takes precedence and uses only an editable fence; otherwise complete
+standalone plans, reports and checklists use only this export wrapper. Other reusable prose follows
+the editable writing instructions. Do not duplicate a document across wrappers or emit placeholder
+editable blocks pointing to an export. Ordinary answers need neither wrapper.
+The UI lets the user save the existing body manually. Do not call save_chat_artifact again to repeat
+that body. This does not replace tools for explicitly requested local file writes or
+generation/publishing of downloadable files.'''
 
 LEARNING_GUIDANCE = '''# Learning requests
 Prioritize making the user capable over performing the task for them. Build a useful mental model,

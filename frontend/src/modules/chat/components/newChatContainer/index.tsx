@@ -427,6 +427,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       conversationId: sessionId,
       isStreaming: conversation.isStreaming,
       sendNow,
+      onSteerAccepted: conversation.showAcceptedSteering,
     });
 
     const sendMessage = useCallback(

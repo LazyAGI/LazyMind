@@ -126,7 +126,8 @@ vi.mock('@ant-design/icons', () => ({
   PictureOutlined: () => null,
 }));
 
-vi.mock('antd', () => ({
+vi.mock('antd', async (importOriginal) => ({
+  Popover: (await importOriginal<typeof import('antd')>()).Popover,
   Segmented: () => null,
   Space: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   Button: ({ children, disabled, loading, onClick }: { children: React.ReactNode; disabled?: boolean; loading?: boolean; onClick?: () => void }) => <button disabled={disabled || loading} onClick={onClick}>{children}</button>,
@@ -1376,6 +1377,7 @@ it('does not publish attempted edits made in read-only source mode', async () =>
   const onContentChange = vi.fn();
   render(<MarkdownArtifactEditor markdown={'Alpha\n'} sourceRevision={1} onSave={async()=>1} onContentChange={onContentChange} />);
   document.querySelector('details.writer-document-options')?.setAttribute('open', '');
+  fireEvent(document.querySelector('details.writer-document-options')!, new Event('toggle'));
  fireEvent.click(screen.getByRole('button', {name:'chat.writerSource.source'}));
   const input = screen.getByRole('textbox', {name:'chat.writerSource.source'});
   expect(input).toHaveAttribute('readonly');
@@ -1386,8 +1388,11 @@ it('does not publish attempted edits made in read-only source mode', async () =>
 it('ignores source edits when switching back to the rich editor', () => {
  const {container}=render(<MarkdownArtifactEditor markdown='Original paragraph' sourceRevision={1} onSave={async()=>1} />);
  document.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ fireEvent(document.querySelector('details.writer-document-options')!, new Event('toggle'));
  fireEvent.click(screen.getByRole('button',{name:'chat.writerSource.source'}));
  fireEvent.change(screen.getByRole('textbox',{name:'chat.writerSource.source'}),{target:{value:'Changed paragraph'}});
+ document.querySelector('details.writer-document-options')?.setAttribute('open', '');
+ fireEvent(document.querySelector('details.writer-document-options')!, new Event('toggle'));
  fireEvent.click(screen.getByRole('button',{name:'chat.writerLocal.backToDocument'}));
  expect(container.querySelector('.writer-markdown-editor__surface')).toHaveAttribute('data-markdown','Original paragraph');
 });

@@ -57,11 +57,12 @@ function SortableFollowUp({
     transform: CSS.Transform.toString(sortable.transform),
     transition: sortable.transition,
   };
-  const handle = item.status === "pending" ? (
+  const handle = item.status === "pending" || item.status === "steering" ? (
     <button
       type="button"
       className="follow-up-drag"
       aria-label="Reorder queued message"
+      disabled={item.status === "steering"}
       ref={sortable.setActivatorNodeRef}
       {...sortable.attributes}
       {...sortable.listeners}
@@ -169,11 +170,12 @@ export default function FollowUpQueue({
                     </span>
                   </div>
                   <div className="follow-up-actions">
-                    {item.status === "pending" && isStreaming ? (
+                    {(item.status === "pending" && isStreaming) || item.status === "steering" ? (
                       <Button
                         className="follow-up-steer"
                         type="text"
                         size="small"
+                        disabled={item.status === "steering"}
                         icon={<EnterOutlined />}
                         aria-label={t("chat.followUpSteer")}
                         onClick={() => onSteer(item)}

@@ -131,10 +131,21 @@ export function splitThinkingContent(
 }
 
 export function splitModelOutputContent(rawText?: string, rawReasoningContent?: string): ThinkingSplitResult {
-  const split = splitThinkingContent(rawText);
+  // A run may contain answer text before a later tool round. Only tagged
+  // previews are reasoning; moving the entire prefix hides earlier answers.
+  const previews: string[] = [];
+  const content = stripToolPayloads(rawText || "")
+    .replace(/<(tp|trp)\b[^>]*>[\s\S]*?<\/\1>/g, (block) => {
+      previews.push(block);
+      return "";
+    })
+    .replace(/<(?:tp|trp)\b[^>]*>[\s\S]*$/, (block) => {
+      previews.push(block);
+      return "";
+    });
   return {
-    content: split.content,
-    reasoning_content: [rawReasoningContent?.trim(), split.reasoning_content.trim()].filter(Boolean).join("\n\n"),
+    content,
+    reasoning_content: [rawReasoningContent?.trim(), ...previews].filter(Boolean).join("\n\n"),
   };
 }
 

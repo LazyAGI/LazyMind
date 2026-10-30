@@ -16,7 +16,7 @@ function setup() {
   const rendered = render(<Harness />);
   const menu = rendered.container.querySelector('details')!;
   const summary = menu.querySelector('summary')!;
-  menu.open = true;
+  act(() => { menu.open = true; fireEvent(menu, new Event('toggle')); });
   act(() => summary.focus());
   return { ...rendered, menu, summary };
 }
@@ -24,6 +24,8 @@ function setup() {
 it('keeps the menu mounted through the temporary focus gap when clicking a width label', () => {
   const { menu, summary } = setup();
   const radio = screen.getByRole('radio', { name: '公众号阅读宽度' });
+  expect(menu.contains(radio)).toBe(false);
+  expect(document.body.contains(radio)).toBe(true);
   // A label click can blur the summary before the browser focuses its radio.
   fireEvent.blur(summary, { relatedTarget: null });
   expect(menu.open).toBe(true);
@@ -78,12 +80,14 @@ it('switches all three IR widths without rewriting the document or saving it', (
   const { container } = render(<WriterIRControl document={{ document_id: 'width-test', stage: 'final', title: '草稿',
     blocks: [{ node_id: 'paragraph', type: 'paragraph', content: '这段正文在宽度切换前后保持不变。' }],
   }} onSave={onSave} onDocumentChange={onDocumentChange} />);
-  container.querySelector('details.writer-document-options')!.setAttribute('open', '');
+  const details = container.querySelector('details.writer-document-options')!;
+  details.setAttribute('open', '');
+  fireEvent(details, new Event('toggle'));
   const editor = screen.getByRole('textbox', { name: '结构化文档' });
   const markup = editor.innerHTML;
   onDocumentChange.mockClear();
-  for (const [label, width] of [['公众号阅读宽度', 'reading'], ['加宽', 'wide'], ['默认', 'default']]) {
-    fireEvent.click(screen.getByRole('radio', { name: label, exact: true }));
+  for (const [label, width] of [['公众号阅读宽度', 'reading'], ['加宽', 'wide'], ['默认', 'default']] as const) {
+    fireEvent.click(screen.getByRole('radio', { name: label }));
     expect(container.querySelector('.writer-ir')).toHaveClass(`writer-ir--width-${width}`);
     expect(editor.innerHTML).toBe(markup);
   }
