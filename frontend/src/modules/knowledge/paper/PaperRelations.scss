@@ -36,18 +36,24 @@
   .paper-detail-tab-link { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; }
 }
 .paper-relation-caption { margin-top: -6px !important; color: #8491a5; font-size: 12px; line-height: 1.6; }
-.paper-relation-list { display: grid; gap: 10px; min-width: 0; }
-.paper-relation-card, .paper-expansion-relation { display: grid; gap: 8px; min-width: 0; border: 1px solid #e5eaf1; border-radius: 9px; padding: 14px 16px; background: #fff; }
+.paper-relation-list { display: grid; min-width: 0; }
+.paper-relation-item { display: grid; gap: 8px; min-width: 0; padding: 15px 0; border-bottom: 1px solid #e5eaf1; &:first-child { padding-top: 0; } }
+.paper-relation-content { display: grid; gap: 6px; min-width: 0; }
+.paper-expansion-relation { display: grid; gap: 8px; min-width: 0; border: 1px solid #e5eaf1; border-radius: 9px; padding: 14px 16px; background: #fff; }
+.paper-relations .paper-relation-item-title { margin: 0; color: #253248; font-size: 14px; line-height: 1.65; font-weight: 400; overflow-wrap: anywhere; }
 .paper-relations .paper-relation-card-title { margin: 0; font-size: 14px; line-height: 1.65; font-weight: 600; overflow-wrap: anywhere; }
 .paper-relations .ant-typography-expand { font-size: 12px; font-weight: 400; }
 .paper-relation-card-top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; color: #8491a5; font-size: 11px; }
 .paper-relation-badge { display: inline-flex; align-items: center; flex: none; border-radius: 4px; padding: 2px 6px; background: #eff5ff; color: #5376ae; font-size: 11px; font-weight: 400; }
-.paper-relation-title {
-  display: inline; border: 0; background: transparent; padding: 0; color: #2f527e; font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere;
-  > .anticon { margin-left: 7px; font-size: 12px; color: #8ca0bb; }
-  &:hover { color: #1677ff; }
+.paper-relation-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; }
+.paper-relation-toggle, .paper-relation-action {
+  display: inline-flex; align-items: center; gap: 5px; border: 0; background: transparent; padding: 2px 0; color: #346ec0; font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+  > .anticon { font-size: 12px; }
+  &:hover { color: #1677ff; text-decoration: underline; text-underline-offset: 3px; }
   &:focus-visible { outline: 2px solid #8fb8f2; outline-offset: 3px; border-radius: 2px; }
 }
+.paper-relation-action, .paper-relation-unresolved { margin-left: auto; }
+.paper-relation-unresolved { display: inline-flex; align-items: center; gap: 5px; color: #718096; font-size: 12px; }
 .paper-relation-metadata { color: #718096; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
 .paper-relations .paper-relation-detail { margin: 0; color: #65758a; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-wrap; }
 .paper-relation-show-more { width: 100%; border: 1px solid #e5eaf1; border-radius: 7px; background: #f9fbfe; padding: 9px 12px; color: #5376ae; font-size: 12px; cursor: pointer; &:hover { background: #eff5ff; } }
@@ -72,10 +78,12 @@
   summary { cursor: pointer; color: #5376ae; font-size: 12px; line-height: 2; }
   summary span { margin-left: 6px; color: #8491a5; }
   > .paper-relation-list { margin-top: 10px; }
-  .paper-relation-card { background: #fafbfd; }
 }
 @media (max-width: 440px) {
   .paper-relations { gap: 22px; }
   .paper-relations-stats { padding: 14px 0; strong { font-size: 20px; } span { font-size: 11px; } }
-  .paper-relation-card, .paper-expansion-relation { padding: 12px; }
+  .paper-expansion-relation { padding: 12px; }
+}
+@media (pointer: coarse) {
+  .paper-relation-toggle, .paper-relation-action { min-height: 44px; }
 }

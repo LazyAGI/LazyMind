@@ -43,11 +43,8 @@ export default function PaperFilterPanel({ papers, value, onChange }: Props) {
     <Choices label="星标" value={value.star} onChange={(next) => update("star", next)} options={[
       { value: "all", label: "全部" }, { value: "starred", label: "已星标" }, { value: "unstarred", label: "未星标" },
     ]} />
-    <Choices label="PDF" value={value.pdf} onChange={(next) => update("pdf", next)} options={[
-      { value: "all", label: "全部" }, { value: "has-pdf", label: "有 PDF" }, { value: "needs-pdf", label: "无 PDF" }, { value: "uploaded", label: "已上传" },
-    ]} />
-    <Choices label="文件夹" value={value.folder} onChange={(next) => update("folder", next)} options={[
-      { value: "all", label: "全部" }, { value: "filed", label: "已归档" }, { value: "unfiled", label: "未归档" },
+    <Choices label="全文附件" value={value.pdf} onChange={(next) => update("pdf", next)} options={[
+      { value: "all", label: "全部" }, { value: "has-pdf", label: "已有 PDF" }, { value: "needs-pdf", label: "待补 PDF" },
     ]} />
     <Choices label="阅读状态" value={value.status} onChange={(next) => update("status", next)} options={[
       { value: "all", label: "全部" }, { value: "unread", label: "未读" }, { value: "reading", label: "阅读中" }, { value: "read", label: "已读" },

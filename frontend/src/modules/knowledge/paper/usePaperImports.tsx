@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject, type Dispatch, type
 import { Alert, Button, Input, Modal, Radio, Tooltip, Upload, message, type RadioChangeEvent } from 'antd';
 import { InfoCircleOutlined, UploadOutlined } from '@ant-design/icons';
 import { v4 as uuidv4 } from 'uuid';
-import { assignFolders, classifyIdentifier, parseBibTeX, parseCSV, parseRIS, planImport, paperSourceVersionLabels, type LibraryView, type PaperLibraryData, type PaperRecord } from './model';
+import { assignFolders, classifyIdentifier, parseAuthorInput, parseBibTeX, parseCSV, parseRIS, planImport, paperSourceVersionLabels, type LibraryView, type PaperLibraryData, type PaperRecord } from './model';
 import { mergeLibraryChanges, previewLibraryPapers, confirmLibraryPdf, importLibraryPapers, type LibraryChanges } from './store';
 import { previewPaperLink, importPaperLink, isImportPreviewExpired, type PaperUploadContext, type ImportPreviewItem, type ImportOperationItem } from '../api/academicReferences';
 import { paperFromPdf } from './pdfMeta';
@@ -211,7 +211,7 @@ export function usePaperImports(options: ImportOptions) {
         clearImportResult();
         const current = dataRef.current;
         const existing = current.papers.find(paper => paper.id === item.library_paper_id);
-        const metadata: PdfPaper = { ...snapshot, identityVerified: false };
+        const metadata: PdfPaper = { ...snapshot, metadata: { ...snapshot.metadata, authors: parseAuthorInput(snapshot.metadata.authors) }, identityVerified: false };
         const restored = { ...metadata, arxivVersion: item.source_version || metadata.arxivVersion, folderId: metadata.folderId && current.folders.some(folder => folder.id === metadata.folderId) ? metadata.folderId : null };
         setPending({ fresh: existing ? [] : [restored], skipped: [], folders: current.folders, attachTo: existing });
         setPendingPdf({ documentId, metadata: restored, contentHash: item.content_sha256 || '' });
@@ -463,7 +463,7 @@ export function PaperImportDialog({ imports, data, disabled, loading, saving, co
             <h3>{pending.attachTo ? "为已有文献添加 PDF" : pending.fresh.length ? `可导入 ${pending.fresh.length} 篇文献` : "文献已在库中"}</h3>
             <div className="paper-library-import-preview">
               {pending.attachTo && <p>{pending.attachTo.metadata.title}</p>}
-              {pending.fresh.map((item) => <p key={item.id}>{item.metadata.title}{item.incomplete && <small>待补全论文题名</small>}</p>)}
+              {pending.fresh.map((item) => <p key={item.id}>{item.metadata.title}{item.incomplete && <small>题录待补全</small>}</p>)}
               {pending.skipped.map((item, index) => <p key={`${item.id}-${index}`} className="paper-library-import-skipped">已跳过重复：{item.metadata.title}</p>)}
             </div>
             {pendingPdf && <PdfImportReview metadata={pendingPdf.metadata} target={pending.attachTo} papers={data.papers} candidateIds={pdfTargetCandidates(data.papers, pendingPdf.metadata).map(paper => paper.id)} file={pendingPdf.file} fixedTarget={!!importTargetPaperId} conflict={pdfConflict} requiresConfirmation={pdfRequiresConfirmation} sameVersion={samePdfVersion} confirmed={pdfConfirmed} disabled={disabled || searching || !!pendingPdf.documentId} onTargetChange={selectPdfTarget} onConfirmedChange={setPdfConfirmed}/>}

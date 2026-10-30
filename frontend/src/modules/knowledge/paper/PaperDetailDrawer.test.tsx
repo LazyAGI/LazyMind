@@ -7,6 +7,37 @@ vi.mock('./PaperAttachmentPreview', () => ({ default: ({ attachment }: { attachm
 const fixture=()=>libraryFixture({papers:[paperFixture({metadata:{year:2026}})]});
 afterEach(cleanup);
 describe('durable paper notes', () => {
+    it('keeps the paper import separate from a later PDF and from the selected primary version', () => {
+        const data = fixture();
+        Object.assign(data.papers[0], { importMethod: 'bibliography', source: 'local', sourceUrl: 'https://publisher.example/record' });
+        Object.assign(data.attachments[0], { contentRef: 'uploaded-pdf', importMethod: 'upload', sourceProvider: 'upload', source: 'arxiv' });
+        const props = { datasetId: 'library', paper: data.papers[0], data, onClose: vi.fn(), onAddNote: vi.fn() };
+        const view = render(<PaperDetailDrawer {...props} />);
+        const imported = screen.getByLabelText('论文导入信息');
+        expect(imported).toHaveTextContent('题录导入');
+        expect(imported).toHaveTextContent('本地');
+        expect(within(imported).getByRole('link')).toHaveAttribute('href', 'https://publisher.example/record');
+        expect(screen.getByLabelText('主附件来源')).toHaveTextContent('上传 PDF');
+        expect(screen.getByLabelText('主附件来源')).toHaveTextContent('本地文件');
+        const updated = { ...data, attachments: [{ ...data.attachments[0], importMethod: 'conversation' as const, sourceProvider: 'openalex', sourceUrl: 'https://publisher.example/fulltext.pdf', sourceVersion: 'publishedVersion' }] };
+        view.rerender(<PaperDetailDrawer {...props} data={updated} />);
+        expect(imported).toHaveTextContent('题录导入');
+        const attachment = screen.getByLabelText('主附件来源');
+        expect(attachment).toHaveTextContent('对话来源导入');
+        expect(attachment).toHaveTextContent('publisher.example');
+        expect(attachment).toHaveTextContent('OpenAlex');
+        expect(within(attachment).getByRole('link')).toHaveAttribute('href', 'https://publisher.example/fulltext.pdf');
+        expect(attachment).not.toHaveTextContent('arXiv');
+    });
+    it('does not infer a missing paper import or source link from its attachment', () => {
+        const data = fixture();
+        Object.assign(data.attachments[0], { importMethod: 'link', sourceProvider: 'arxiv', sourceUrl: 'https://arxiv.org/pdf/2106.09685v2' });
+        render(<PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} onClose={vi.fn()} onAddNote={vi.fn()} />);
+        const imported = screen.getByLabelText('论文导入信息');
+        expect(within(imported).getAllByText('未记录')).toHaveLength(3);
+        expect(within(imported).queryByRole('link')).not.toBeInTheDocument();
+        expect(screen.getByLabelText('主附件来源')).toHaveTextContent('链接导入');
+    });
     it.each(['notes', 'attachments'] as const)('opens metadata from %s and requires saving or cancelling before switching tabs', async initialTab => {
         const data = fixture();
         data.attachments[0].contentRef = 'main-document';

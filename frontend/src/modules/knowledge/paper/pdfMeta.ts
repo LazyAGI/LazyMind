@@ -27,7 +27,8 @@ export async function paperFromPdf(file: File, datasetId?: string): Promise<PdfP
             const preview = await previewPaperLink(identifier, datasetId), ref = preview.paper;
             const lookedTitle = ref?.title || preview.title;
             if (lookedTitle && pdfTitlesMatch(title, lookedTitle)) {
-                paper = { ...paper, identityVerified: true, incomplete: false, metadata: { ...paper.metadata, title: lookedTitle, authors: ref?.authors?.length ? ref.authors : paper.metadata.authors, venue: ref?.venue || paper.metadata.venue, year: ref?.year || paper.metadata.year, abstract: ref?.abstract || undefined, citationCount: ref?.citation_count, identifiers: { doi: ref?.doi || preview.doi || found.doi, arxiv: ref?.arxiv_id || preview.arxiv_id || found.arxiv } } };
+                const authors = parseAuthorInput(ref?.authors || []);
+                paper = { ...paper, identityVerified: true, incomplete: false, metadata: { ...paper.metadata, title: lookedTitle, authors: authors.length ? authors : paper.metadata.authors, venue: ref?.venue || paper.metadata.venue, year: ref?.year || paper.metadata.year, abstract: ref?.abstract || undefined, citationCount: ref?.citation_count, identifiers: { doi: ref?.doi || preview.doi || found.doi, arxiv: ref?.arxiv_id || preview.arxiv_id || found.arxiv } } };
             }
         }
         catch (error) {

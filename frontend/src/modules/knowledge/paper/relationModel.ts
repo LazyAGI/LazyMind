@@ -1,7 +1,7 @@
 import type { AcademicReference } from '../api/academicReferences';
 import type { Expansion, PaperRef } from '../api/paperWorkflows';
 import type { PaperLibraryData, PaperRecord } from './libraryModel';
-import { normalizeArxiv, normalizeDoi, safePaperUrl } from './model';
+import { identifiersInText, normalizeArxiv, normalizeDoi, paperLink, safePaperUrl } from './model';
 export interface RelatedPaper {
     id: string;
     title: string;
@@ -26,13 +26,14 @@ export function referenceRelations(references: AcademicReference[], data: PaperL
     const items = new Map<string,RelatedPaper>();
     const ordered = [...references].sort((left, right) => (left.ReferenceKey || left.reference_key || '').localeCompare(right.ReferenceKey || right.reference_key || '', undefined, { numeric: true }));
     for (const reference of ordered) {
-        const doi = normalizeDoi(reference.DOINormalized || reference.doi_normalized || '');
-        const arxiv = normalizeArxiv(reference.ArxivIDBase || reference.arxiv_id_base || '');
+        const raw = (reference.RawText || reference.raw_text || '').trim();
+        const identifiers = identifiersInText(raw);
+        const doi = normalizeDoi(reference.DOINormalized || reference.doi_normalized || identifiers.doi || '');
+        const arxiv = normalizeArxiv(reference.ArxivIDBase || reference.arxiv_id_base || identifiers.arxiv || '');
         const workId = reference.ResolvedWorkID || reference.resolved_work_id || '';
         const paper = findLibraryPaper(data, { paper_id: workId, doi, arxiv_id: arxiv });
         if (paper?.id === current.id)
             continue;
-        const raw = (reference.RawText || reference.raw_text || '').trim();
         const id = paper?.id || workId || doi || arxiv || raw.toLowerCase().replace(/\s+/g, ' ');
         if (!id)
             continue;
@@ -43,9 +44,10 @@ export function referenceRelations(references: AcademicReference[], data: PaperL
         const source = ['参考文献', key && `[${key.replace(/^\[|\]$/g, '')}]`, current.attachmentIds.length > 1 && attachment && (attachment.sourceVersion || attachment.name), page && page > 0 ? `第 ${page} 页` : ''].filter(Boolean).join(' · ');
         const title = paper?.metadata.title || reference.Title || reference.title || raw || doi || arxiv;
         const authors = reference.AuthorsJSON || reference.authors_json;
-        items.set(id, paper ? { ...relatedPaperItem(paper, source), detail: raw && raw !== paper.metadata.title ? raw : undefined } : {
+        const url = safePaperUrl(doi ? `https://doi.org/${doi}` : arxiv ? `https://arxiv.org/abs/${arxiv}` : paper ? paperLink(paper) || undefined : undefined);
+        items.set(id, paper ? { ...relatedPaperItem(paper, source), url, detail: raw && raw !== paper.metadata.title ? raw : undefined } : {
             id, title, source,
-            url: safePaperUrl(doi ? `https://doi.org/${doi}` : arxiv ? `https://arxiv.org/abs/${arxiv}` : undefined),
+            url,
             metadata: title !== raw ? [authors?.join(', '), reference.PublicationYear || reference.publication_year].filter(Boolean).join(' · ') : undefined,
             detail: raw && raw !== title ? raw : undefined,
         });

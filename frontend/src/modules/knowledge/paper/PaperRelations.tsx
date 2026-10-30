@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Spin, Typography } from 'antd';
-import { ArrowRightOutlined, BranchesOutlined, ExportOutlined, LinkOutlined, ReadOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Spin, Tooltip, Typography } from 'antd';
+import { ArrowRightOutlined, BranchesOutlined, DownOutlined, ExportOutlined, InfoCircleOutlined, LinkOutlined, ReadOutlined, ReloadOutlined, UpOutlined } from '@ant-design/icons';
 import { extractAcademicReferences, listAcademicReferences, type AcademicReference } from '../api/academicReferences';
 import { listExpansions, type Expansion } from '../api/paperWorkflows';
 import type { Attachment, PaperLibraryData, PaperRecord } from './libraryModel';
@@ -19,18 +19,29 @@ interface Props {
     onNotification?: (notice: PaperNotification) => void;
     onNotificationResolved?: (id: string) => void;
 }
-function PaperCard({ item, onOpenPaper }: {
+function PaperRelationItem({ item, onOpenPaper }: {
     item: RelatedPaper;
     onOpenPaper?: Props['onOpenPaper'];
 }) {
-    const title = item.paper && onOpenPaper
-        ? <button type="button" className="paper-relation-title" onClick={() => onOpenPaper(item.paper!.id)}>{item.title}<ArrowRightOutlined /></button>
-        : item.url ? <a className="paper-relation-title" href={item.url} target="_blank" rel="noopener noreferrer">{item.title}<ExportOutlined /></a> : item.title;
-    return <article className="paper-relation-card">
+    const contentId = useId();
+    const [expanded, setExpanded] = useState(false);
+    const [titleEllipsized, setTitleEllipsized] = useState(false);
+    const [detailEllipsized, setDetailEllipsized] = useState(false);
+    const action = item.paper && onOpenPaper
+        ? <button type="button" className="paper-relation-action" aria-label={`查看库内论文：${item.title}`} onClick={() => onOpenPaper(item.paper!.id)}>查看库内论文<ArrowRightOutlined aria-hidden /></button>
+        : item.url ? <a className="paper-relation-action" aria-label={`打开来源：${item.title}`} href={item.url} target="_blank" rel="noopener noreferrer">打开来源<ExportOutlined aria-hidden /></a>
+            : <Tooltip title="暂未识别到 DOI、arXiv 或可打开的库内论文"><span className="paper-relation-unresolved"><InfoCircleOutlined aria-hidden />未识别来源</span></Tooltip>;
+    return <article className="paper-relation-item">
     <div className="paper-relation-card-top"><span>{item.source}</span>{item.paper && <span className="paper-relation-badge">库内文献</span>}</div>
-    <Typography.Paragraph className="paper-relation-card-title" ellipsis={{ rows: 3, expandable: true, symbol: '展开' }}>{title}</Typography.Paragraph>
-    {item.metadata && <p className="paper-relation-metadata">{item.metadata}</p>}
-    {item.detail && <Typography.Paragraph className="paper-relation-detail" ellipsis={{ rows: 2, expandable: true, symbol: '展开' }}>{item.detail}</Typography.Paragraph>}
+    <div id={contentId} className="paper-relation-content">
+      <Typography.Paragraph className="paper-relation-item-title" ellipsis={{ rows: 3, expanded, onEllipsis: setTitleEllipsized }}>{item.title}</Typography.Paragraph>
+      {item.metadata && <p className="paper-relation-metadata">{item.metadata}</p>}
+      {item.detail && <Typography.Paragraph className="paper-relation-detail" ellipsis={{ rows: 2, expanded, onEllipsis: setDetailEllipsized }}>{item.detail}</Typography.Paragraph>}
+    </div>
+    <div className="paper-relation-footer">
+      {(expanded || titleEllipsized || detailEllipsized) && <button type="button" className="paper-relation-toggle" aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(value => !value)}>{expanded ? '收起' : '展开引用'}{expanded ? <UpOutlined aria-hidden /> : <DownOutlined aria-hidden />}</button>}
+      {action}
+    </div>
   </article>;
 }
 export default function PaperRelations({ datasetId, paper, data, attachments, onOpenPaper, onAttachments, onNotification, onNotificationResolved }: Props) {
@@ -100,7 +111,7 @@ export default function PaperRelations({ datasetId, paper, data, attachments, on
     }, [datasetId, expansionRevision]);
     const citations = useMemo(() => referenceRelations(references, data, paper), [references, data, paper]);
     const expansions = useMemo(() => paperExpansions(records, data, paper), [records, data, paper]);
-    const cardList=(items:RelatedPaper[]) => <div className="paper-relation-list">{items.map(item=><PaperCard key={item.id} item={item} onOpenPaper={onOpenPaper}/>)}</div>;
+    const relationList = (items: RelatedPaper[]) => <div className="paper-relation-list">{items.map(item => <PaperRelationItem key={item.id} item={item} onOpenPaper={onOpenPaper}/>)}</div>;
     return <div className="paper-relations">
     <div className="paper-relations-intro"><span className="paper-relations-emblem"><LinkOutlined /></span><div><h3>文献之间的联系</h3><p>沿着引用与研究线索，继续阅读。</p></div></div>
     <div className="paper-relations-stats" aria-label="关系概览">
@@ -114,7 +125,7 @@ export default function PaperRelations({ datasetId, paper, data, attachments, on
       <div className="paper-relation-heading"><h3><ReadOutlined />引用文献<span>{citations.length}</span></h3>{referencesLoading && <Spin size="small"/>}</div>
       <p className="paper-relation-caption">本篇参考文献及已记录的引用关系</p>
       {referencesError && (onNotification ? <p role="status">参考文献未完全加载。<Button type="link" size="small" onClick={() => setReferenceRevision(value => value + 1)}>重试</Button></p> : <Alert type="warning" showIcon message={referencesError} action={<Button size="small" icon={<ReloadOutlined />} onClick={() => setReferenceRevision(value => value + 1)}>重试</Button>}/>)}
-      {citations.length ? <>{cardList(allCitations ? citations : citations.slice(0, 5))}{citations.length > 5 && <button type="button" className="paper-relation-show-more" aria-expanded={allCitations} onClick={() => setAllCitations(value => !value)}>{allCitations ? '收起参考文献' : `查看全部 ${citations.length} 条参考文献`}</button>}</> : !referencesLoading && !referencesError && <div className="paper-relation-empty"><ReadOutlined /><div><strong>{documentKey ? '暂无已识别的参考文献' : '还没有可识别的 PDF'}</strong><p>{documentKey ? paper.parse === 'ready' ? '可打开全文，查看原文中的参考文献。' : '全文解析完成后，可在这里查看参考文献。' : '添加并解析 PDF 后，可在这里查看参考文献。'}</p>{!documentKey && <button type="button" className="paper-detail-tab-link" onClick={onAttachments}>前往附件<ArrowRightOutlined /></button>}</div></div>}
+      {citations.length ? <>{relationList(allCitations ? citations : citations.slice(0, 5))}{citations.length > 5 && <button type="button" className="paper-relation-show-more" aria-expanded={allCitations} onClick={() => setAllCitations(value => !value)}>{allCitations ? '收起参考文献' : `查看全部 ${citations.length} 条参考文献`}</button>}</> : !referencesLoading && !referencesError && <div className="paper-relation-empty"><ReadOutlined /><div><strong>{documentKey ? '暂无已识别的参考文献' : '还没有可识别的 PDF'}</strong><p>{documentKey ? paper.parse === 'ready' ? '可打开全文，查看原文中的参考文献。' : '全文解析完成后，可在这里查看参考文献。' : '添加并解析 PDF 后，可在这里查看参考文献。'}</p>{!documentKey && <button type="button" className="paper-detail-tab-link" onClick={onAttachments}>前往附件<ArrowRightOutlined /></button>}</div></div>}
     </section>
 
 
@@ -132,7 +143,7 @@ export default function PaperRelations({ datasetId, paper, data, attachments, on
         {others.length > 0 && <details className="paper-expansion-peers"><summary>同次扩展的文献<span>{others.length}</span></summary><div className="paper-relation-list">{others.map(item => {
                         const target = findLibraryPaper(data, item.paper);
                         const url = safePaperUrl(item.paper.paper_url) || safePaperUrl(item.paper.pdf_url);
-                        return <PaperCard key={item.paper.paper_id} onOpenPaper={onOpenPaper} item={{ id: item.paper.paper_id, paper: target, title: target?.metadata.title || item.paper.title || '未命名文献', url, source: item.is_seed ? '种子文献' : '扩展发现', detail: item.seed_relation, metadata: [item.paper.authors?.join(', '), item.paper.year].filter(Boolean).join(' · ') }}/>;
+                        return <PaperRelationItem key={item.paper.paper_id} onOpenPaper={onOpenPaper} item={{ id: item.paper.paper_id, paper: target, title: target?.metadata.title || item.paper.title || '未命名文献', url, source: item.is_seed ? '种子文献' : '扩展发现', detail: item.seed_relation, metadata: [item.paper.authors?.join(', '), item.paper.year].filter(Boolean).join(' · ') }}/>;
                     })}</div></details>}
       </article>)}
     </section>}

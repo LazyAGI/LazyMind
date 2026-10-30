@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { ConfigProvider, Modal, message } from 'antd';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PaperLibrary from './PaperLibrary';
+import { AUTH_USER_CHANGE_EVENT } from '@/components/auth';
 import PaperTasks from '../components/PaperTasks';
 import { MemoryRouter } from 'react-router-dom';
 import { libraryFixture, paperFixture } from './__tests__/fixtures';
@@ -47,6 +48,7 @@ async function confirmPdfOwnership(dialog: HTMLElement) {
 beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(PaperTasks).mockImplementation(() => <></>);
+    localStorage.clear();
     libraries.clear();
     seedLibrary();
     vi.mocked(previewLibraryPapers).mockImplementation(async (_id, papers) => papers);
@@ -91,6 +93,21 @@ function captureDownload() {
         return content;
     };
 }
+it('shows persisted paper import methods and sources by default without borrowing attachment provenance', async () => {
+    const data = readLibrary(datasetId);
+    Object.assign(data.papers[0], { importMethod: 'bibliography', source: 'local' });
+    Object.assign(data.attachments[0], { importMethod: 'upload', sourceProvider: 'upload' });
+    Object.assign(data.papers[1], { importMethod: 'conversation', source: 'arxiv' });
+    writeLibrary(datasetId, data);
+    const view = await renderLibrary();
+    const rows = within(screen.getByRole('table', { name: '论文列表' }));
+    expect(within(rows.getByRole('row', { name: /选择 Folder paper/ })).getByLabelText('导入方式与来源')).toHaveTextContent('题录导入 · 本地');
+    expect(within(rows.getByRole('row', { name: /选择 Other favorite/ })).getByLabelText('导入方式与来源')).toHaveTextContent('对话来源导入 · arXiv');
+    expect(within(rows.getByRole('row', { name: /选择 Unfiled paper/ })).getByLabelText('导入方式与来源')).toHaveTextContent('未记录 · 未记录');
+    view.unmount();
+    await renderLibrary();
+    expect(within(screen.getByRole('row', { name: /选择 Folder paper/ })).getByLabelText('导入方式与来源')).toHaveTextContent('题录导入 · 本地');
+});
 function folderTitle(name: RegExp): HTMLElement {
     return browse().getByText(name, { selector: '.paper-directory-node-name' }).closest('.paper-directory-folder-title') as HTMLElement;
 }
@@ -100,6 +117,104 @@ async function closePopover(name: string) {
     await waitFor(() => expect(screen.queryByRole("dialog", { name })).not.toBeInTheDocument());
 }
 describe('paper library behavior', () => {
+    it('lets readers change personal status from list and archive while shared edits stay disabled', async () => {
+        vi.mocked(loadPersistedPaperLibrary).mockImplementation(async id => snapshot(readLibrary(id), false));
+        await renderLibrary();
+        fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Folder paper 的阅读状态' }));
+        fireEvent.click(await screen.findByText('阅读中', { selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content' }));
+        await waitFor(() => expect(readLibrary(datasetId).papers[0].status).toBe('reading'));
+        fireEvent.click(screen.getByRole('button', { name: 'Folder paper' }));
+        const detail = within(await screen.findByRole('dialog', { name: '文献详情' }));
+        expect(detail.getByRole('button', { name: /编辑题录/ })).toBeDisabled();
+        fireEvent.mouseDown(detail.getByRole('combobox', { name: '论文阅读状态' }));
+        fireEvent.click(await screen.findByText('已读', { selector: '.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content' }));
+        await waitFor(() => expect(readLibrary(datasetId).papers[0].status).toBe('read'));
+        fireEvent.click(detail.getByRole('button', { name: '关闭' }));
+        expect(screen.getByRole('combobox', { name: 'Folder paper 的阅读状态' })).toBeEnabled();
+    });
+    it('applies batch successes immediately and retries only the failed papers', async () => {
+        const original = vi.mocked(patchLibraryPaper).getMockImplementation()!;
+        let attempts = 0;
+        vi.mocked(patchLibraryPaper).mockImplementation(async (...args) => {
+            if (args[1].id === 'b' && attempts++ === 0) throw new Error('暂时无法保存');
+            return original(...args);
+        });
+        vi.mocked(loadPersistedPaperLibrary).mockImplementation(async id => snapshot(readLibrary(id), false));
+        await renderLibrary();
+        fireEvent.click(screen.getByRole('checkbox', { name: '选择当前列表全部论文' }));
+        fireEvent.click(within(screen.getByRole('region', { name: '已选论文' })).getByRole('button', { name: /阅读状态/ }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: '标为已读' }));
+        const retry = await screen.findByRole('button', { name: '仅重试失败项' });
+        expect(screen.getByText(/《Other favorite》：暂时无法保存/)).toBeInTheDocument();
+        expect(readLibrary(datasetId).papers.map(p => p.status)).toEqual(['read', 'unread', 'read']);
+        expect(screen.getByRole('checkbox', { name: '选择 Other favorite' })).toBeChecked();
+        expect(screen.getByRole('checkbox', { name: '选择 Folder paper' })).not.toBeChecked();
+        fireEvent.click(retry);
+        await waitFor(() => expect(readLibrary(datasetId).papers.every(p => p.status === 'read')).toBe(true));
+        expect(vi.mocked(patchLibraryPaper).mock.calls.map(call => call[1].id)).toEqual(['a', 'b', 'c', 'b']);
+        expect(screen.queryByRole('button', { name: '仅重试失败项' })).not.toBeInTheDocument();
+    });
+    it('keeps list display preferences across remounts and isolates them when users switch', async () => {
+        const switchUser = async (userId: string) => act(async () => {
+            localStorage.setItem('lazymind:user', JSON.stringify({ userId, username: userId, token: 'test' }));
+            window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT));
+        });
+        await switchUser('alice');
+        const first = await renderLibrary();
+        fireEvent.click(libraryTools().getByRole('button', { name: '列表显示设置' }));
+        const display = within(await screen.findByRole('dialog', { name: '列表显示设置' }));
+        fireEvent.click(display.getByRole('checkbox', { name: '显示阅读状态' }));
+        fireEvent.click(display.getByRole('checkbox', { name: '显示重要标记' }));
+        expect(screen.queryByRole('combobox', { name: 'Folder paper 的阅读状态' })).not.toBeInTheDocument();
+        expect(readLibrary(datasetId).papers[0].important).toBe(true);
+        expect(patchLibraryPaper).not.toHaveBeenCalled();
+        first.unmount();
+        await renderLibrary();
+        expect(screen.queryByRole('combobox', { name: 'Folder paper 的阅读状态' })).not.toBeInTheDocument();
+        fireEvent.click(libraryTools().getByRole('button', { name: '筛选' }));
+        const filter = within(await screen.findByRole('dialog', { name: '筛选文献' }));
+        fireEvent.click(within(filter.getByRole('group', { name: '阅读状态' })).getByRole('button', { name: '未读' }));
+        expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument();
+        await switchUser('bob');
+        expect(await screen.findByRole('combobox', { name: 'Folder paper 的阅读状态' })).toBeEnabled();
+        await switchUser('alice');
+        await waitFor(() => expect(screen.getByRole('heading', { name: 'Folder paper' })).toBeInTheDocument());
+        expect(screen.queryByRole('combobox', { name: 'Folder paper 的阅读状态' })).not.toBeInTheDocument();
+    });
+    it('does not apply an old users pending status response after switching users', async () => {
+        let finish!: (value: Awaited<ReturnType<typeof patchLibraryPaper>>) => void;
+        localStorage.setItem('lazymind:user', JSON.stringify({ userId: 'alice', username: 'alice', token: 'test' }));
+        vi.mocked(patchLibraryPaper).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+        await renderLibrary();
+        fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Folder paper 的阅读状态' }));
+        fireEvent.click(await screen.findByText('已读', { selector: '.ant-select-item-option-content' }));
+        await act(async () => {
+            localStorage.setItem('lazymind:user', JSON.stringify({ userId: 'bob', username: 'bob', token: 'test' }));
+            window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT));
+        });
+        const old = readLibrary(datasetId); old.papers[0].status = 'read';
+        await act(async () => finish({ data: old }));
+        expect(screen.getByRole('combobox', { name: 'Folder paper 的阅读状态' }).closest('.ant-select')).toHaveTextContent('未读');
+    });
+
+    it('cleans recovered upload authors and associates the original PDF without uploading again', async () => {
+        const upload = vi.fn();
+        const paper = makePaper('pending-paper', 'Recovered PDF', null);
+        paper.metadata.authors = ['DeepSeek-AI', ' : ', '：', 'Ke Xu', 'Ke Xu'];
+        const operation: ImportOperation = { id: 'pending-upload', entry_type: 'pdf_upload', target_dataset_id: datasetId, source: { file_name: 'paper.pdf' }, status: 'awaiting_association', created_at: '2026-10-29T06:00:00Z', summary: { total: 1, ready: 0, metadata_only: 0, skipped: 0, active: 0, failed: 0, canceled: 0, deleted: 0, removed: 0, resolved_later: 0, retryable: 0, needs_action: 1 } };
+        vi.mocked(listAcademicImportBatches).mockResolvedValue({ items: [operation], next_cursor: '', notification: { active: 0, needs_action: 1 } });
+        vi.mocked(getAcademicImportBatch).mockResolvedValue({ operation, next_cursor: '', items: [{ item_id: 'pending-item', batch_id: operation.id, work_id: '', title: paper.metadata.title, target_dataset_id: datasetId, library_paper_id: paper.id, document_id: 'original-pdf', upload_request_key: 'upload-key', pending_paper: paper, status: 'succeeded', stage: 'awaiting_association', result_kind: 'imported', current_state: 'awaiting_association', document_deleted: false, resolved_later: false, can_retry: false, created_at: '', updated_at: '' }] });
+        await renderLibrary({ onUploadPdf: upload });
+        fireEvent.click(screen.getByRole('button', { name: /^通知：/ }));
+        fireEvent.click(screen.getByRole('button', { name: /^展开导入记录/ }));
+        fireEvent.click(await screen.findByRole('button', { name: '继续关联' }));
+        const dialog = await screen.findByRole('dialog', { name: '上传文献' });
+        expect(within(dialog).getAllByText('DeepSeek-AI、Ke Xu、Ke Xu')).toHaveLength(2);
+        fireEvent.click(within(dialog).getByRole('button', { name: '加入论文库' }));
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: '上传文献' })).not.toBeInTheDocument());
+        expect(confirmLibraryPdf).toHaveBeenCalledWith(datasetId, expect.objectContaining({ metadata: expect.objectContaining({ authors: ['DeepSeek-AI', 'Ke Xu', 'Ke Xu'] }) }), 'original-pdf', 'upload-key', undefined);
+        expect(upload).not.toHaveBeenCalled();
+    });
     it('opens directory papers as full pages and list papers as drawers', async () => {
         await renderLibrary();
         const tree = browse().getByRole('tree', { name: '论文目录' });
@@ -438,8 +553,8 @@ describe('paper library behavior', () => {
     it("groups search, filter, export and import notifications in the document toolbar", async () => {
         await renderLibrary();
         const tools = libraryTools();
-        expect(tools.getAllByRole("button")).toHaveLength(4);
-        for (const name of ["搜索", "筛选", "导出题录"])
+        expect(tools.getAllByRole("button")).toHaveLength(5);
+        for (const name of ["搜索", "筛选", "导出题录", "列表显示设置"])
             expect(tools.getByRole("button", { name })).toBeInTheDocument();
         expect(tools.getByRole("button", { name: /通知/ })).toHaveAttribute("aria-expanded", "false");
         expect(screen.queryByRole("textbox", { name: "搜索文献" })).not.toBeInTheDocument();
@@ -496,7 +611,7 @@ describe('paper library behavior', () => {
         expect(screen.getByRole("heading", { name: "Other favorite" })).toBeInTheDocument();
         expect(screen.queryByRole("heading", { name: "Folder paper" })).not.toBeInTheDocument();
         fireEvent.click(filter.getByRole("button", { name: "清除筛选" }));
-        fireEvent.click(within(filter.getByRole("group", { name: "PDF" })).getByRole("button", { name: "有 PDF" }));
+        fireEvent.click(within(filter.getByRole("group", { name: "全文附件" })).getByRole("button", { name: "已有 PDF" }));
         expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
         expect(screen.queryByRole("heading", { name: "Other favorite" })).not.toBeInTheDocument();
     });
@@ -507,7 +622,7 @@ describe('paper library behavior', () => {
         await closePopover("搜索文献");
         fireEvent.click(libraryTools().getByRole("button", { name: "筛选" }));
         const filter = within(await screen.findByRole("dialog", { name: "筛选文献" }));
-        fireEvent.click(within(filter.getByRole("group", { name: "PDF" })).getByRole("button", { name: "无 PDF" }));
+        fireEvent.click(within(filter.getByRole("group", { name: "全文附件" })).getByRole("button", { name: "待补 PDF" }));
         expect(screen.queryByRole("heading", { name: "Folder paper" })).not.toBeInTheDocument();
         fireEvent.click(filter.getByRole("button", { name: "清除筛选" }));
         expect(screen.getByRole("heading", { name: "Folder paper" })).toBeInTheDocument();
@@ -738,4 +853,16 @@ describe('paper library behavior', () => {
         expect(readLibrary(datasetId)).toEqual(before);
         expect(confirmLibraryPdf).not.toHaveBeenCalled();
     });
+});
+
+it('describes missing authors as incomplete bibliography', async () => {
+    const data = readLibrary(datasetId);
+    data.papers[0].metadata.authors = [];
+    data.papers[0].incomplete = true;
+    writeLibrary(datasetId, data);
+    await renderLibrary();
+    const row = (await screen.findByRole('heading', { name: 'Folder paper' })).closest('tr')!;
+    expect(within(row).getByText('作者待补全')).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: '待补全论文题名' })).not.toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: '题录待补全' })).toBeInTheDocument();
 });

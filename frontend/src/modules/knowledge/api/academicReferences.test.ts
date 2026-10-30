@@ -8,7 +8,8 @@ beforeEach(() => vi.resetAllMocks());
 it('passes the server preview receipt through selected items into asynchronous import', async () => {
   const candidate = { url: 'https://arxiv.org/pdf/2404.06654v2', source_provider: 'arxiv', version: 'v2' };
   vi.mocked(axiosInstance.post).mockResolvedValueOnce({ data: { preview_token: 'server-receipt', items: [{ work_id: 'a', reference_ids: [], fulltext_candidates: [candidate] }] } }).mockResolvedValueOnce({ data: { batch_id: 'batch' } });
-  const items = await previewPaperImport(['a'], 'papers', 'expansion');
+  const items = await previewPaperImport(['a'], 'papers', 'expansion', 1, true);
+  expect(axiosInstance.post).toHaveBeenCalledWith('/api/core/academic/imports:preview', { work_ids: ['a'], target_dataset_id: 'papers', expansion_id: 'expansion', expansion_version: 1, resolve_external: false }, { silentError: true });
   await startReferenceImport('papers', [], items, 'request', true);
   expect(axiosInstance.post).toHaveBeenLastCalledWith('/api/core/academic/imports', expect.objectContaining({ preview_token: 'server-receipt', target_dataset_id: 'papers', items: [{ work_id: 'a', reference_ids: [], candidate }] }), { silentError: true });
 });

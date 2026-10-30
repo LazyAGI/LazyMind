@@ -4,7 +4,7 @@ import { Alert, Button, Dropdown, Input, message, Modal, Select, Tabs, Tag, Tool
 import { ArrowLeftOutlined, CloseOutlined, DownOutlined, EllipsisOutlined, ExclamationCircleOutlined, FilePdfOutlined, InfoCircleOutlined, PlusOutlined, PushpinOutlined, ReadOutlined } from '@ant-design/icons';
 import type { PaperLibraryData, PaperRecord, Attachment } from './libraryModel';
 import { readingSummary } from './libraryModel';
-import { importMethodLabel, safePaperUrl, statusLabel, type PaperEdits } from './model';
+import { paperImportMethodName, paperSourceProviderLabels, safePaperUrl, sourceLabel, statusLabel, type PaperEdits } from './model';
 import type { PdfViewPosition } from '@/components/ui/RenderPdf';
 import PaperAttachmentPreview from './PaperAttachmentPreview';
 import type { DocumentAcademic } from '../api/paperWorkflows';
@@ -28,6 +28,7 @@ interface Props {
     onClose: () => void;
     onAddNote: (id:string,content:string)=>Promise<void>;
     disabled?: boolean;
+    personalDisabled?: boolean;
     onOpenAttachment?: (documentId: string) => void;
     onOpenPaper?: (id: string) => void;
     onEdit?: () => void;
@@ -44,16 +45,16 @@ interface Props {
 function sourceName(attachment?: Attachment) {
     if (!attachment)
         return '未记录';
-    if (attachment.sourceProvider === 'arxiv' || attachment.source === 'arxiv')
-        return 'arXiv';
     if (attachment.importMethod === 'upload' || attachment.sourceProvider === 'upload')
-        return '上传文件';
+        return '本地文件';
+    if (attachment.sourceProvider === 'arxiv')
+        return 'arXiv';
     const url = safePaperUrl(attachment.sourceUrl);
     if (url)
         return new URL(url).hostname;
-    return attachment.sourceProvider && attachment.sourceProvider !== 'manual' ? attachment.sourceProvider : '未记录';
+    return '未记录';
 }
-export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenAttachment, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, onAddPdf, onDetachAttachment, onNotification, onNotificationResolved, disabled = false }: Props) {
+export default function PaperDetailDrawer({ datasetId, paper, data, initialTab = 'overview', initialEditing = false, mode = 'drawer', importanceControl, onStatusChange, onSetPrimaryAttachment, academic, onClose, onAddNote, onOpenAttachment, onOpenPaper, onEdit, onSave, editError, onRetryIdentification, onReparse, reparseDisabledReason, onAddPdf, onDetachAttachment, onNotification, onNotificationResolved, disabled = false, personalDisabled = disabled }: Props) {
     const [tab, setTab] = useState<PaperDetailTab>(initialEditing ? 'overview' : initialTab);
     const [editing, setEditing] = useState(initialEditing);
     const [messageApi, messageHolder] = message.useMessage();
@@ -72,12 +73,12 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
     const primaryPdf = pdfs.find(item => item.isPrimary) || pdfs[0];
     const primary = primaryPdf || attachments[0];
     const selectedAttachment = attachments.find(item => item.id === selectedAttachmentId) || primary;
-    const method = primary?.importMethod || current.importMethod;
-    const sourceUrl = safePaperUrl(primary?.sourceUrl);
+    const sourceUrl = safePaperUrl(current.sourceUrl);
+    const attachmentSourceUrl = safePaperUrl(primary?.sourceUrl);
     const identifyStatus = academic?.state.manual ? '已手动确认' : ({ pending: '待识别', processing: '识别中', succeeded: '识别成功', failed: '识别失败' }[academic?.state.status || ''] || '未记录');
     const readButton = <Tooltip title={!primaryPdf ? '请先在附件中添加 PDF' : undefined}><Button type="primary" aria-label="阅读 PDF" icon={<ReadOutlined aria-hidden />} disabled={!primaryPdf || !onOpenAttachment} onClick={() => onOpenAttachment?.(primaryPdf!.contentRef!)}>阅读 PDF</Button></Tooltip>;
-    const run = async (action: () => Promise<void>, fallback: string) => {
-        if (disabled || savingRef.current)
+    const run = async (action: () => Promise<void>, fallback: string, personal = false) => {
+        if ((personal ? personalDisabled : disabled) || savingRef.current)
             return;
         savingRef.current = true;
         setSaving(true);
@@ -130,9 +131,9 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
             className="paper-detail-reading-status"
             aria-label="论文阅读状态"
             value={current.status}
-            disabled={disabled || saving}
+            disabled={personalDisabled || saving}
             options={Object.entries(statusLabel).map(([value, label]) => ({ value, label }))}
-            onChange={status => void run(() => onStatusChange(status), '阅读状态保存失败')}
+            onChange={(status: PaperRecord['status']) => void run(() => onStatusChange(status), '阅读状态保存失败', true)}
           /> : <Tag>{statusLabel[current.status]}</Tag>}
           {onSave && <Button type="text" disabled={disabled || saving} onClick={() => {
             if (editing) {
@@ -183,14 +184,16 @@ export default function PaperDetailDrawer({ datasetId, paper, data, initialTab =
           </>}
           <div className="paper-detail-section-head"><h3>全文附件</h3></div>
           <p className="paper-detail-muted">{pdfs.length ? <button type="button" className="paper-detail-tab-link" onClick={() => changeTab('attachments')}>PDF · {pdfs.length} 份，查看附件与版本</button> : attachments.length ? '尚未添加入库 PDF，可在附件页查看其他材料。' : '仅题录，尚未添加 PDF。'}</p>
-          <div className="paper-detail-section-head"><h3>来源</h3></div>
-          <dl><dt>导入方式</dt><dd>{method ? importMethodLabel[method] || '未记录' : '未记录'}</dd><dt>原文来源</dt><dd>{sourceName(primary)}</dd><dt>原始链接</dt><dd>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer">{sourceUrl}</a> : '未记录'}</dd><dt>来源版本</dt><dd>{primary?.sourceVersion || '未记录'}</dd></dl>
+          <div className="paper-detail-section-head"><h3>导入信息</h3></div>
+          <dl aria-label="论文导入信息"><dt>导入方式</dt><dd>{paperImportMethodName(current.importMethod)}</dd><dt>导入来源</dt><dd>{sourceLabel[current.source] || '未记录'}</dd><dt>原始链接</dt><dd>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer">{sourceUrl}</a> : '未记录'}</dd></dl>
+          {primary && <><div className="paper-detail-section-head"><h3>主附件来源</h3></div>
+          <dl aria-label="主附件来源"><dt>附件导入方式</dt><dd>{paperImportMethodName(primary.importMethod)}</dd><dt>原文来源</dt><dd>{sourceName(primary)}</dd><dt>全文提供方</dt><dd>{paperSourceProviderLabels[primary.sourceProvider || ''] || '未记录'}</dd><dt>附件链接</dt><dd>{attachmentSourceUrl ? <a href={attachmentSourceUrl} target="_blank" rel="noopener noreferrer">{attachmentSourceUrl}</a> : '未记录'}</dd><dt>来源版本</dt><dd>{primary.sourceVersion || '未记录'}</dd></dl></>}
         </div> },
             { key: 'attachments', label: `附件 ${summary.attachments}`, children: selectedAttachment ? <div className="paper-attachment-frame">
               <div className="paper-attachment-bar">
                 <div className="paper-attachment-identity"><span className="paper-attachment-icon"><FilePdfOutlined /></span><div className="paper-attachment-name">
                   <div className="paper-attachment-name-line">{attachments.length > 1 ? <label className="paper-attachment-selector"><select aria-label="选择预览附件与版本" disabled={saving || editing} value={selectedAttachment.id} onChange={event => setSelectedAttachmentId(event.target.value)}>{attachments.map(item => <option key={item.id} value={item.id}>{attachmentLabel(item)}</option>)}</select><DownOutlined /></label> : <strong>{attachmentLabel(selectedAttachment)}</strong>}{selectedAttachment.id === primaryPdf?.id && <span className="paper-attachment-primary"><PushpinOutlined />主附件</span>}</div>
-                  <span className="paper-attachment-meta">{[sourceName(selectedAttachment), !selectedAttachment.sourceVersion ? '版本未标注' : '', selectedAttachment.size ? `${(selectedAttachment.size / 1024 / 1024).toFixed(1)} MB` : ''].filter(Boolean).join(' · ')}</span>
+                  <span className="paper-attachment-meta">{[paperImportMethodName(selectedAttachment.importMethod), sourceName(selectedAttachment), !selectedAttachment.sourceVersion ? '版本未标注' : '', selectedAttachment.size ? `${(selectedAttachment.size / 1024 / 1024).toFixed(1)} MB` : ''].filter(Boolean).join(' · ')}</span>
                 </div></div>
                 <div className="paper-attachment-controls">
                   {selectedAttachment.contentRef && onOpenAttachment ? <Button onClick={() => onOpenAttachment(selectedAttachment.contentRef!)}>阅读 ↗</Button> : safePaperUrl(selectedAttachment.sourceUrl) ? <Button href={safePaperUrl(selectedAttachment.sourceUrl)} target="_blank" rel="noopener noreferrer">打开原文 ↗</Button> : null}

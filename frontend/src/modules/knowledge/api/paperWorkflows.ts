@@ -48,6 +48,7 @@ export interface ExpansionReport {
  preparation_attempts?: Array<{revision: number; model: string; metrics?: unknown}>;
 }
 export interface ExpansionPreparation {
+ original_instruction?: string;
  user_instruction: string; summary: string; error?: string;
  questions: Array<{ id: string; question: string; options?: string[] }>;
  directions: Array<{ name: string; question: string; reason: string; difference: string; paper_ids: string[]; papers?: PaperRef[] }>;
@@ -79,7 +80,8 @@ export interface PaperContent {
   paper_id: string;
   status: string;
   content_hash: string;
-  quality?: { eligible: boolean; downloaded: boolean; parsed: boolean; identity: string; text: string; material: string };
+  source_hash?: string;
+  quality?: { eligible: boolean; downloaded: boolean; parsed: boolean; identity: string; text: string; material: string; acquisition?: { started_at?: string } };
   parser_version?: string;
   error?: string;
 }
@@ -108,6 +110,8 @@ export interface DocumentAcademic {
 }
 export type PaperTask = 'expansion' | 'review' | 'reflection' | 'ppt';
 export interface PaperLaunch {
+  skip_expansion?: boolean;
+  review_scope?: 'selected' | 'direct_references';
   budget_mode?: BudgetMode;
   kind: PaperTask;
   dataset_id: string;
@@ -124,9 +128,40 @@ export async function launchPaperTask(input: PaperLaunch, silentError = false) {
   const res = await axiosInstance.post(`${core}/workflow-launches`, input, { silentError } as never);
   return unwrap<{ conversation_id?: string; expansion_id?: string; status?: string }>(res.data);
 }
-export async function resolvePaperSelection(dataset: string, documents: string[], silentError = false) {
-  const res = await axiosInstance.post(`${core}/paper-selections:resolve`, { dataset_id: dataset, document_ids: documents }, { silentError } as never);
-  return unwrap<{ papers: WorkflowPaper[]; invalid: Array<{ document_id: string; reason: string }> }>(res.data);
+export type ReviewTopicInput = Pick<PaperLaunch, 'dataset_id' | 'document_ids' | 'expansion_id' | 'expansion_version' | 'paper_ids' | 'user_instruction'>;
+export async function generateReviewTopic(input: ReviewTopicInput, signal?: AbortSignal) {
+  const res = await axiosInstance.post(`${core}/review-topic:generate`, input, { signal, timeout: 100000, silentError: true } as never);
+  return unwrap<{ topic: string }>(res.data).topic;
+}
+export interface PaperSelection {
+  papers: WorkflowPaper[];
+  invalid: Array<{ document_id: string; reason: string }>;
+  materials?: Array<{ paper_id: string; status: string; eligible: boolean; reason?: string }>;
+}
+export async function resolvePaperSelection(dataset: string, documents: string[], silentError = false, review = false) {
+  const res = await axiosInstance.post(`${core}/paper-selections:resolve`, { dataset_id: dataset, document_ids: documents, ...(review ? { kind: 'review', skip_expansion: true } : {}) }, { silentError } as never);
+  return unwrap<PaperSelection>(res.data);
+}
+export interface ReviewRecord {
+  id: string;
+  conversation_id: string;
+  expansion_id: string;
+  version: number;
+  title: string;
+  paper_count: number;
+  source_title: string;
+  source_available: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export type ReviewRecordTarget = Pick<ReviewRecord, 'id' | 'conversation_id'> & Partial<ReviewRecord>;
+export async function listResearchRecords(dataset: string, silentError = false) {
+  const res = await axiosInstance.get(`${core}/expansions`, { params: { dataset_id: dataset, include_reviews: true }, silentError } as never);
+  return unwrap<{ items: Expansion[]; reviews: ReviewRecord[] }>(res.data);
+}
+export async function getReviewRecordContext(conversationId: string, signal?: AbortSignal) {
+  const res = await axiosInstance.get(`${core}/chat-context`, { params: { conversation_id: conversationId }, signal, silentError: true } as never);
+  return unwrap<{ kind: string; input: ReviewWorkflowInput; expansion_id?: string; source_available?: boolean }>(res.data);
 }
 export async function listExpansions(dataset: string, silentError = false) {
   const res = await axiosInstance.get(`${core}/expansions`, { params: { dataset_id: dataset }, silentError } as never);

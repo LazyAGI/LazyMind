@@ -8,7 +8,7 @@ export const researchDepthOptions: Array<{ value: BudgetMode; label: string; des
 ];
 export const researchDepthLabels = { fast: '快速', balanced: '标准', deep: '深入' };
 
-export default function ResearchDepth({ value, onChange }: { value: BudgetMode; onChange: (value: BudgetMode) => void }) {
+export default function ResearchDepth({ value, onChange, hint = '本任务从初步调研到正式拓展，始终使用此深度。' }: { value: BudgetMode; onChange: (value: BudgetMode) => void; hint?: string }) {
   const name = useId();
   return <section className="paper-research-depth">
     <h3>调研深度</h3>
@@ -18,6 +18,6 @@ export default function ResearchDepth({ value, onChange }: { value: BudgetMode; 
         <span className="paper-research-depth-description">{option.description.map(line => <span key={line}>{line}</span>)}</span>
       </label>)}
     </div>
-    <p className="paper-research-depth-hint">本任务从初步调研到正式拓展，始终使用此深度。</p>
+    <p className="paper-research-depth-hint">{hint}</p>
   </section>;
 }

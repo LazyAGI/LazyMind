@@ -181,8 +181,8 @@ export async function listAcademicImportQueue(targetDatasetId: string, sourceDoc
   return unwrap<{ items: AcademicImportQueueItem[] }>(response.data).items || [];
 }
 
-export async function previewPaperImport(workIds: string[], targetDatasetId: string, expansionId?: string, silentError = false): Promise<ImportPreviewItem[]> {
-  const response = await axiosInstance.post(`${core}/imports:preview`, { work_ids: workIds, target_dataset_id: targetDatasetId, resolve_external: false, expansion_id: expansionId }, { silentError } as never);
+export async function previewPaperImport(workIds: string[], targetDatasetId: string, expansionId?: string, expansionVersion?: number, silentError = false): Promise<ImportPreviewItem[]> {
+  const response = await axiosInstance.post(`${core}/imports:preview`, { work_ids: workIds, target_dataset_id: targetDatasetId, resolve_external: false, expansion_id: expansionId, expansion_version: expansionVersion }, { silentError } as never);
   return previewItems(response.data);
 }
 

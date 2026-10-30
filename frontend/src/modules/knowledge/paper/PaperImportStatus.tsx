@@ -3,7 +3,7 @@ import { Badge, Button, Empty, Popover, Tabs, Tooltip } from 'antd';
 import { BellOutlined, CloseOutlined, DownOutlined, RightOutlined } from '@ant-design/icons';
 import { getAcademicImportBatch, listAcademicImportBatches, type ImportBatchDetail, type ImportBatchPage, type ImportOperation, type ImportOperationItem, type ImportOperationFilter } from '../api/academicReferences';
 import { usePaperNotifications, type PaperNotification } from './usePaperNotifications';
-import { paperSourceVersionLabels } from './model';
+import { paperSourceProviderLabels, paperSourceVersionLabels } from './model';
 
 function conciseError(error = '', provider?: string) {
   const source = provider === 'arxiv' ? 'arXiv' : '服务';
@@ -18,7 +18,6 @@ function conciseError(error = '', provider?: string) {
 const operationNames: Record<string, string> = { paper_expansion: '扩展导入', paper_link: '链接导入', pdf_upload: '上传 PDF', bibliography: '题录导入', single_reference: '参考文献导入', paper_references: '参考文献导入', collection_references: '参考文献导入', conversation_sources: '对话来源导入' };
 const statusNames: Record<string, string> = { running: '处理中', failed: '失败', partial_failed: '部分失败', skipped: '已存在', metadata_only: '题录已保存', canceled: '已取消', succeeded: '已完成', removed: '已移出论文库', awaiting_association: '待关联' };
 const itemNames: Record<string, string> = { importing: '导入中', processing: '处理中', ready: '已入库', metadata_only: '题录已保存', skipped: '已存在', failed: '导入失败', processing_failed: '处理失败', canceled: '已取消', deleted: '文档已删除', removed: '已移出论文库', awaiting_association: 'PDF 已上传，待关联' };
-const providers: Record<string, string> = { arxiv: 'arXiv', local: '本地 PDF', web: '网页', doi: 'DOI', openalex: 'OpenAlex', crossref: 'Crossref', unpaywall: 'Unpaywall', sciverse: 'SciVerse' };
 function resultSummary(summary: ImportOperation['summary']) {
   const results = [[summary.ready, '已入库'], [summary.metadata_only, '题录已保存'], [summary.skipped, '已存在'], [summary.active, '处理中'], [summary.failed, '失败'], [summary.canceled, '已取消'], [summary.deleted, '文档已删除'], [summary.removed, '已移出论文库']].filter(([count]) => Number(count) > 0);
   return results.length > 1 ? results.map(([count, label]) => `${label} ${count}`).join(' · ') : '';
@@ -199,7 +198,7 @@ export default function PaperImportStatus({ datasetId, page, currentPage, canWri
         : item.library_paper_id && !item.document_deleted
           ? <button type="button" className="paper-library-import-title-link" onClick={() => { onOpenChange(false); onOpenPaper(item.library_paper_id!); }}>{content}</button>
           : content}
-      <div className="paper-library-import-paper-meta"><span>{[providers[item.source_provider || ''] || item.source_provider, paperSourceVersionLabels[item.source_version || ''] || item.source_version].filter(Boolean).join(' · ')}</span>
+      <div className="paper-library-import-paper-meta"><span>{[paperSourceProviderLabels[item.source_provider || ''] || item.source_provider, paperSourceVersionLabels[item.source_version || ''] || item.source_version].filter(Boolean).join(' · ')}</span>
         <Badge className="paper-library-import-status" status={failed && !item.resolved_later ? 'error' : ['importing', 'processing'].includes(item.current_state) ? 'processing' : ['ready', 'metadata_only'].includes(item.current_state) ? 'success' : 'default'} text={`${itemNames[item.current_state] || item.current_state}${failed && item.resolved_later ? '（已解决）' : ''}`} />
       </div>
       {item.current_state === 'awaiting_association' && canWrite && onResumeAssociation && <Button size="small" type="link" onClick={() => { onOpenChange(false); onResumeAssociation(item); }}>继续关联</Button>}

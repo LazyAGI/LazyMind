@@ -17,7 +17,7 @@ describe('paper bibliography and identity', () => {
         expect(duplicateOf(items, paperFixture({ metadata: { identifiers: { doi: '10.1234/other' } } }))).toBeUndefined();
     });
     it('keeps structured authors until the edit form boundary', () => {
-        const edited = applyPaperEdits(items[0], { title: 'Corrected', authors: authors.join('；'), venue: 'Journal', year: 2025, doi: 'https://doi.org/10.1234/corrected', arxiv: '', tags: ['tag', ' '] });
+        const edited = applyPaperEdits(items[0], { title: 'Corrected', authors: [' : ', '：', '...', ...authors].join('；'), venue: 'Journal', year: 2025, doi: 'https://doi.org/10.1234/corrected', arxiv: '', tags: ['tag', ' '] });
         expect(edited.metadata).toMatchObject({ title: 'Corrected', authors, identifiers: { doi: '10.1234/corrected' } });
         expect(edited.tags).toEqual(['tag']);
     });
@@ -37,5 +37,16 @@ describe('paper bibliography and identity', () => {
         expect(identifiersInText('10.48550/arXiv.1706.03762')).toMatchObject({ doi: '10.48550/arxiv.1706.03762', arxiv: '1706.03762' });
         expect(safePaperUrl('javascript:alert(1)')).toBeUndefined();
         expect(safePaperUrl('https://user:pass@example.com')).toBeUndefined();
+    });
+    it.each(['https://publisher.example/paper', 'javascript:alert(1)', 'https://user:pass@example.com'])('retains only safe bibliography source URLs: %s', url => {
+        const papers = [
+            parseBibTeX(`@article{a, title={A study}, url={${url}}}`, 'local')[0],
+            parseRIS(`TY  - JOUR\nTI  - A study\nUR  - ${url}\nER  -`, 'local')[0],
+            parseCSV(`title,url\nA study,${url}`).papers[0],
+        ];
+        for (const paper of papers) {
+            expect(paper.sourceUrl).toBe(url.startsWith('https://publisher.') ? url : undefined);
+            expect(paper.source).toBe('local');
+        }
     });
 });

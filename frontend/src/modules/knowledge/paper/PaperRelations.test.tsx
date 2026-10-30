@@ -49,6 +49,27 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe('paper relations in the detail drawer', () => {
+    it('opens sources identified in citation text and explains references without a source', async () => {
+        vi.mocked(listAcademicReferences).mockResolvedValue([
+            { ID: 'library', RawText: 'Author. Target paper. doi: 10.1234/target.' },
+            { ID: 'external', RawText: 'Author. External method. arXiv:2305.14314v2, 2023.' },
+            { ID: 'doi', RawText: 'Author. Another method. https://doi.org/10.1234/external.' },
+            { ID: 'unresolved', RawText: 'Author. A reference without an identifier. 2024.' },
+        ]);
+        const onOpenPaper = vi.fn();
+        show(fixture(), { onOpenPaper });
+        const citations = screen.getByRole('region', { name: '引用文献' });
+        const external = await within(citations).findByRole('link', { name: /打开来源：.*External method/ });
+        expect(external).toHaveAttribute('href', 'https://arxiv.org/abs/2305.14314');
+        expect(external).toHaveAttribute('target', '_blank');
+        expect(within(citations).getByRole('link', { name: /打开来源：.*Another method/ })).toHaveAttribute('href', 'https://doi.org/10.1234/external');
+        fireEvent.click(within(citations).getByRole('button', { name: '查看库内论文：Target paper' }));
+        expect(onOpenPaper).toHaveBeenCalledWith('target');
+        const unresolved = within(citations).getByText('Author. A reference without an identifier. 2024.').closest('article')!;
+        expect(within(unresolved).getByText('未识别来源')).toBeInTheDocument();
+        expect(within(unresolved).queryByRole('link')).not.toBeInTheDocument();
+    });
+
     it('reports failed reference loading to notifications and resolves it after retry', async () => {
         const notify = vi.fn(); const resolve = vi.fn();
         vi.mocked(listAcademicReferences).mockRejectedValueOnce(new Error('references unavailable'));
