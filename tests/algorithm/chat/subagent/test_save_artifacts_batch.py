@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import lazyllm
@@ -25,10 +26,19 @@ def batch_context(tmp_path, monkeypatch):
         yield ctx, events
 
 
-def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context):
+@pytest.mark.parametrize('threshold', [4096, 32])
+def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context, monkeypatch, threshold):
+    from lazymind.document_tools.artifacts import render_document
+
+    monkeypatch.setattr(tools, 'LARGE_ARTIFACT_THRESHOLD', threshold)
     ctx, events = batch_context
+    report = ('# 2026 年报告\r\n\r\n## 一、背景\r\n### 1.1 方法 ###\r\n'
+              '1. 正文列表\r\n\r\n## 第 2 页｜结果\r\n## 2026 年展望\r\n## 3D 方法\r\n'
+              '```markdown\r\n## 1. 代码示例\r\n```\r\n')
+    expected = (report.replace('## 一、背景', '## 背景').replace('### 1.1 方法', '### 方法')
+                .replace('## 第 2 页｜结果', '## 结果'))
     result = tools.save_artifacts([
-        {'key': 'report', 'value': 'Report'},
+        {'key': 'report', 'value': {'text': report}},
         {'key': 'summary', 'value': {'ok': True}, 'content_type': 'json'},
         {'key': 'images', 'value': 'https://example.test/one.png', 'content_type': 'image'},
         {'key': 'images', 'value': 'https://example.test/two.png', 'content_type': 'image'},
@@ -36,7 +46,17 @@ def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context):
     assert result['saved_count'] == 4
     assert [event['slot'] for event in events] == ['report', 'summary', 'images', 'images']
     assert [event['seq'] for event in events] == [1, 1, 5, 6]
-    assert ctx.read_draft('report') == ('Report', 'text')
+    report_value = events[0]['value']
+    saved = (Path(report_value['path']).read_bytes().decode('utf-8')
+             if 'path' in report_value else report_value['text'])
+    assert saved == expected
+    assert ctx.read_draft('report') == (expected.replace('\r\n', '\n'), 'text')
+    rendered = render_document(saved)['export_document']
+    assert '## 1. 背景' in rendered
+    assert '### 1.1. 方法' in rendered
+    assert '## 2. 结果' in rendered
+    assert '## 3. 2026 年展望' in rendered
+    assert '## 4. 3D 方法' in rendered
     assert ctx.read_draft('summary') == ('{"ok": true}', 'json')
     assert ctx.list_pending_drafts() == []
 

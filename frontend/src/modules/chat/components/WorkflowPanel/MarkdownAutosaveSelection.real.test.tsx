@@ -60,7 +60,12 @@ async function enterParagraph(empty: boolean) {
 it.each([false, true])('keeps the actual caret and paragraph after autosave (empty paragraph: %s)', async empty => {
   let resolveSave!: (result: { markdown: string; revision: number }) => void;
   const onSave = vi.fn((_markdown: string, _revision: number) => new Promise<{ markdown: string; revision: number }>(resolve => { resolveSave = resolve; }));
-  const view = render(<MarkdownArtifactEditor markdown={source} sourceRevision={3} onSave={onSave} />);
+  const numberedSource = source.replace('Alpha beta', '## Section\n\nAlpha beta');
+  const numberingDocument = numberedSource.replace('## Section', '<a id="block-sec-1"></a>\n## Section');
+  const numbering = { ordered_style: 'hierarchical' as const, entries: { 'sec-1': { label: '1.', mode: 'ordered' as const, restart: false } } };
+  const view = render(<MarkdownArtifactEditor markdown={numberedSource} sourceRevision={3} onSave={onSave} numbering={numbering} numberingDocument={numberingDocument} />);
+  const heading = view.container.querySelector('h2');
+  await waitFor(() => expect(heading).toHaveAttribute('data-writer-numbering-label', '1.'));
   capture.editor!.getRootElement()!.focus();
   await enterParagraph(empty);
   if (empty) await act(async () => capture.editor!.update(() => {
@@ -72,11 +77,14 @@ it.each([false, true])('keeps the actual caret and paragraph after autosave (emp
   const node = capture.editor!.getElementByKey(before!.key);
   await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1), { timeout: 2500 });
   const saved = onSave.mock.calls[0][0];
+  expect(saved).toContain('<a id="block-sec-1"></a>');
   await act(async () => { resolveSave({ markdown: saved, revision: 4 }); });
-  view.rerender(<MarkdownArtifactEditor markdown={saved} sourceRevision={4} onSave={onSave} />);
+  view.rerender(<MarkdownArtifactEditor markdown={saved} sourceRevision={4} onSave={onSave} numbering={numbering} />);
   await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
   expect(caret()).toEqual(before);
   expect(capture.editor!.getElementByKey(before!.key)).toBe(node);
+  expect(view.container.querySelector('h2')).toBe(heading);
+  expect(heading).toHaveAttribute('data-writer-numbering-label', '1.');
   expect(view.container.querySelector('ol')).toHaveAttribute('start', '3');
   await act(async () => capture.editor!.update(() => {
     const selection = $getSelection();

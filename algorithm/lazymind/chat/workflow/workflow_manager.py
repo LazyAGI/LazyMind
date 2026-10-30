@@ -11,7 +11,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 import httpx
 import lazyllm
@@ -511,13 +511,51 @@ def _safe_session_tools(
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         return artifact_output(toolkit.read_artifact(str(artifact.get('artifact_id') or artifact.get('id') or '')))
 
+    def publish_patch(artifact_id: str, current: Dict[str, Any], value: Any, caption: str,
+                      numbering_style: Optional[str] = None) -> Dict[str, Any]:
+        from lazymind.document_tools.artifacts import normalize_generated_markdown, save_document
+
+        content_type = str(current.get('content_type') or 'text')
+        text_schema = isinstance(value, dict) and value.get('schema') in ('text/markdown', 'text/plain')
+        presentation = {}
+        if content_type in ('text', 'markdown', 'file', 'text/markdown', 'text/plain') or text_schema:
+            field = next((key for key in ('text', 'data')
+                          if isinstance(value, dict) and isinstance(value.get(key), str)), None)
+            text = value.get(field) if field else value
+            if isinstance(text, str):
+                text = normalize_generated_markdown(text)
+                if numbering_style is not None:
+                    rendered = save_document(text, text, {
+                        'type': 'ordered_style', 'ordered_style': numbering_style,
+                    })
+                    text = rendered['source_document']
+                    presentation['numbering'] = rendered['numbering']
+                value = {**value, field: text} if field else text
+                presentation['content_representation'] = (
+                    'Markdown source; the document editor supplies heading numbering for display and export.'
+                )
+        if value == current.get('value') and caption == str(current.get('caption') or ''):
+            return artifact_output({**current, **presentation, 'status': 'unchanged',
+                                    'message': 'The requested content already matches the stored source.'})
+        result = toolkit.patch_artifact(
+            artifact_id, int(current.get('revision') or 0), value, content_type, caption,
+            base_draft_version=int(current.get('draft_version') or 0),
+        )
+        return artifact_output({**result, **presentation})
+
     @_register_host_file(capability)
-    def patch_artifact_text(artifact_ref: str, old_text: str, new_text: str) -> Dict[str, Any]:
+    def patch_artifact_text(
+        artifact_ref: str, old_text: str, new_text: str,
+        numbering_style: Optional[Literal['hierarchical', 'chinese', 'parenthesized']] = None,
+    ) -> Dict[str, Any]:
         """Edit one unique excerpt of a selected text/Markdown artifact without rerunning steps.
 
-        Read the artifact first. Include a unique exact section/paragraph excerpt;
-        every character outside that excerpt is preserved. Does not regenerate
-        downstream pages. For a list use the exact handle returned by list_artifacts.
+        Read the artifact first. Keep the edit scoped to a unique exact
+        section/paragraph excerpt. Does not regenerate downstream pages.
+        For a list use the exact handle returned by list_artifacts.
+        Set the document's heading numbering with numbering_style: hierarchical
+        (1., 1.1.), chinese (一、, （一）), or parenthesized ((1), (a)).
+        For a style-only change, use the same excerpt for old_text and new_text.
         """
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         artifact_id = str(artifact.get('artifact_id') or artifact.get('id') or '')
@@ -537,21 +575,17 @@ def _safe_session_tools(
             raise ValueError('old_text must match exactly once; read the current artifact and retry')
         revised = text.replace(old_text, new_text, 1)
         revised_value = {**value, field: revised} if field else revised
-        return artifact_output(toolkit.patch_artifact(
-            artifact_id, int(current.get('revision') or artifact.get('revision') or 0),
-            revised_value, str(current.get('content_type') or 'text'), str(current.get('caption') or ''),
-            base_draft_version=int(current.get('draft_version') or 0),
-        ))
+        return publish_patch(
+            artifact_id, current, revised_value, str(current.get('caption') or ''),
+            numbering_style=numbering_style,
+        )
 
     @_register_host_file(capability)
     def patch_artifact(artifact_ref: str, value: Any, caption: str = '') -> Dict[str, Any]:
         """Patch a selected Artifact; Host injects id, base revision, type, and command."""
         artifact = _artifact_by_handle(toolkit, session_id(), artifact_ref)
         artifact_id = str(artifact.get('artifact_id') or artifact.get('id') or '')
-        content_type = str(artifact.get('content_type') or 'json')
-        return artifact_output(toolkit.patch_artifact(
-            artifact_id, int(artifact.get('revision') or 0), value, content_type, caption,
-        ))
+        return publish_patch(artifact_id, toolkit.read_artifact(artifact_id), value, caption)
 
     return [
         get_workflow_state, get_ready_steps, advance_step, list_workflow_inputs,

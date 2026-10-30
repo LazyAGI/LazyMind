@@ -114,11 +114,16 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   const publicationAvailable=useCallback((allowed:boolean)=>setPublicationBlocked(!allowed),[]);
   const publicationResolved=useCallback(()=>{setError('');onRefresh?.();},[onRefresh]);
   const draftContent = useRef(initial.value);
-  const [numberingView, setNumberingView] = useState<{ source: unknown; id: string; revision: number; draft?: number; result: DocumentNumberingResult }>();
-  const currentNumbering = numberingView && numberingView.source === value && numberingView.id === latest.current.id
-    && numberingView.revision === latest.current.revision && numberingView.draft === latest.current.draft
-    ? numberingView.result : undefined;
-  const numbering = currentNumbering?.numbering as WriterNumberingState | undefined;
+  const numberingEnabled = descriptor.capabilities.includes('numbering');
+  const [numberingView, setNumberingView] = useState<{ editingKey: string; source: unknown; id: string; revision: number; draft?: number; result: DocumentNumberingResult }>();
+  // Keep the displayed labels until their replacement arrives after an autosave.
+  const displayedNumbering = numberingEnabled && numberingView?.editingKey === editingKey
+    && numberingView.result.representation === representation
+    ? numberingView : undefined;
+  const currentNumbering = displayedNumbering && displayedNumbering.source === value && displayedNumbering.id === latest.current.id
+    && displayedNumbering.revision === latest.current.revision && displayedNumbering.draft === latest.current.draft
+    ? displayedNumbering.result : undefined;
+  const numbering = displayedNumbering?.result.numbering as WriterNumberingState | undefined;
   const [selection, setSelection] = useState<ArtifactRewriteSelection | null>(null);
   const [preview, setPreview] = useState<{ id: string; selection: ArtifactRewriteSelection; value: RewriteSelectionPreview } | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -301,18 +306,18 @@ export function DocumentArtifactEditor({ slot: incomingSlot, sessionId, readOnly
   }, [accept, onRefresh]);
 
   useEffect(() => {
-    if (!loaded || !descriptor.capabilities.includes('numbering')) return;
+    if (!loaded || !numberingEnabled) return;
     let canceled = false; const current = latest.current;
     void WorkflowSessionApi().previewDocumentAction(current.id, { action: 'numbering', base_revision: current.revision,
       base_draft_version: current.draft, input: {} }).then((response) => {
         if (!canceled && latest.current.id === current.id && latest.current.revision === current.revision
           && latest.current.draft === current.draft) {
-          setNumberingView({ source: value, id: current.id, revision: current.revision, draft: current.draft,
+          setNumberingView({ editingKey, source: value, id: current.id, revision: current.revision, draft: current.draft,
             result: response.data.data as DocumentNumberingResult });
         }
       }).catch(() => {});
     return () => { canceled = true; };
-  }, [loaded, version, value, slot.artifact_id, slot.draft_version, descriptor.capabilities]);
+  }, [loaded, value, currentSignature, editingKey, numberingEnabled]);
   useDocumentCopy({ enabled: loaded, editingKey, sessionId, slotId: slot.slot_id, listIndex: slot.list_index ?? -1,
     revision: latest.current.revision, draftVersion: latest.current.draft,
     document: value as string | WriterDocument, pendingReview: Boolean(preview) });

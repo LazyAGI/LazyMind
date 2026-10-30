@@ -967,9 +967,11 @@ def test_whole_document_generation_boundary(monkeypatch, tmp_path, target, maxim
     monkeypatch.setattr(execution, '_run_root', lambda name: tmp_path / name)
     monkeypatch.setattr(execution, 'require_context', lambda: SimpleNamespace(emit=lambda e: None))
     calls = []
+    saved = []
     monkeypatch.setattr(execution, 'stream_whole_document',
-                        lambda *a, **kw: calls.append('whole') or '# Story\n\nBody.')
-    monkeypatch.setattr(execution, '_save_writer_document', lambda *a, **kw: 'whole.md')
+                        lambda *a, **kw: calls.append('whole') or '# Story\n\n## 一、Background\n\n1. Body.')
+    monkeypatch.setattr(execution, '_save_writer_document',
+                        lambda key, document, **kw: saved.append(document) or 'whole.md')
     monkeypatch.setattr(execution, '_writer_generate_draft_blocks_markdown',
                         lambda **kw: calls.append('sections') or ['chapter.md'])
     monkeypatch.setattr(execution, '_assemble_draft_document_markdown', lambda **kw: 'sections.md')
@@ -978,6 +980,7 @@ def test_whole_document_generation_boundary(monkeypatch, tmp_path, target, maxim
     })
     assert calls == ['whole' if whole else 'sections']
     assert ('draft_blocks' not in result) == whole
+    assert saved == (['# Story\n\n## Background\n\n1. Body.'] if whole else [])
 
 
 def test_workspace_checkpoint_changes_when_outline_is_edited_in_place(tmp_path):

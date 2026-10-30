@@ -29,6 +29,7 @@ from lazyllm.tools.writer.utils import (
     parse_document_markdown,
     save_artifact_json,
     set_document_editable,
+    strip_heading_numbering,
     writer_document_from_lmd,
     writer_document_to_lmd,
     writer_document_to_markdown,
@@ -314,6 +315,28 @@ def _markdown_heading_rows(lines: list[str]) -> list[tuple[int, int, str]]:
                 (index, len(heading.group('marks')), heading.group('title').strip())
             )
     return rows
+
+
+def normalize_generated_markdown(markdown: str) -> str:
+    """Keep generated section titles canonical for the document numbering view."""
+    lines = markdown.splitlines(keepends=True)
+    for index, level, title in _markdown_heading_rows([line.rstrip('\r\n') for line in lines]):
+        if level == 1:
+            continue
+        heading = _MARKDOWN_ATX_HEADING_RE.match(lines[index].rstrip('\r\n'))
+        # Page labels are structural numbering too, rather than part of the title.
+        while True:
+            clean = strip_heading_numbering(title)
+            clean = re.sub(
+                r'^第\s*(?:\d+|[一二三四五六七八九十百千万零〇两]+)\s*页(?:\s*[｜|：:、.．]\s*|\s+)',
+                '', clean,
+            )
+            if not clean or clean == title:
+                break
+            title = clean
+        if title != heading['title'].strip():
+            lines[index] = lines[index][:heading.start('title')] + title + lines[index][heading.end('title'):]
+    return ''.join(lines)
 
 
 def _normalize_streamed_markdown_section(

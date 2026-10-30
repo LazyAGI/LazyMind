@@ -62,6 +62,7 @@ from lazyllm import ThreadPoolExecutor
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.subagent.context import require_context
+from lazymind.document_tools.artifacts import normalize_generated_markdown
 from lazymind.chat.engine.subagent.tools import (
     _resolve_artifact_text,
     _save_artifact,
@@ -2715,14 +2716,10 @@ def _format_deck_outline_markdown(outline: dict) -> str:
     title = _coerce_str(outline.get('topic')) or _coerce_str(outline.get('title'))
     lines: list[str] = [f'# {title or "PPT 大纲"}', '']
     pages = outline.get('pages') or []
-    for index, page in enumerate(pages, start=1):
+    for page in pages:
         if not isinstance(page, dict):
             continue
-        try:
-            page_no = int(page.get('page_no') or index)
-        except (TypeError, ValueError):
-            page_no = index
-        page_title = _coerce_str(page.get('title')) or f'第 {page_no} 页'
+        page_title = _coerce_str(page.get('title')) or '未命名页面'
         bullet_heads = [
             _coerce_str(item.get('head'))
             for item in (page.get('bullets') or [])
@@ -2736,7 +2733,7 @@ def _format_deck_outline_markdown(outline: dict) -> str:
             or '本页承接整体叙事并展开核心信息。'
         )
         lines.extend([
-            f'## 第 {page_no} 页｜{page_title}',
+            f'## {page_title}',
             '',
             f'页面描述：{description}',
             '',
@@ -2754,6 +2751,7 @@ def _split_text_outline(markdown: str) -> list[str]:
 
 
 def _publish_text_outline(deck: Path, markdown: str) -> dict[str, Any]:
+    markdown = normalize_generated_markdown(markdown)
     pages = _split_text_outline(markdown)
     # Durable source only: internal outline.json is built by generate_ppt.
     (deck / 'outline_draft.md').write_text(markdown, encoding='utf-8')
@@ -5593,6 +5591,8 @@ def _publish_ordered_ppt_artifact(
     insert_before: Optional[int] = None,
     expected_total: Optional[int] = None,
 ) -> dict[str, Any]:
+    if content_type == 'text' and isinstance(value, str):
+        value = normalize_generated_markdown(value)
     insertion = _coerce_int(insert_before, 0, lo=0)
     total = _coerce_int(expected_total, 0, lo=0)
     if insertion:

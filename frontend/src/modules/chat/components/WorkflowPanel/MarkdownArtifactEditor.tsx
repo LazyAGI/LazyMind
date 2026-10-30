@@ -1192,7 +1192,7 @@ export function MarkdownArtifactEditor({
         : serializedBaselineRef.current === undefined || sourceEditedRef.current ? nextDraft :
           preserveMarkdownSource(richSourceRef.current ?? sourceBeforeSave.markdown, serializedBaselineRef.current, nextDraft);
       const savedMarkdown = writerMarkdownForSave(numberingOnly ? sourceDraft :
-        protectWriterMarkdownAnchors(sourceBeforeSave.markdown, sourceDraft, true, true));
+        protectWriterMarkdownAnchors(numberingDocument ?? sourceBeforeSave.markdown, sourceDraft, true, true));
       const result = await onSave(savedMarkdown, revisionBeforeSave, mode, numberingUpdate);
       const savedRevision = typeof result === 'number'
         ? result
@@ -1250,7 +1250,7 @@ export function MarkdownArtifactEditor({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [onSave, readOnly, savePaused, replaceMarkdownSilently, t]);
+  }, [onSave, readOnly, savePaused, replaceMarkdownSilently, numberingDocument, t]);
 
   const saveChanges = useCallback(async (mode: MarkdownSaveMode = 'draft'): Promise<boolean> => {
     if (!dirty || savingRef.current || readOnly) return false;

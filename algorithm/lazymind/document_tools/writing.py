@@ -62,6 +62,7 @@ from .artifacts import (
     _temp_root,
     _write_document_input,
     _write_input_artifact,
+    normalize_generated_markdown,
     writer_schema,
 )
 from .references import _bind_document_cross_reference_targets
@@ -623,12 +624,12 @@ def stream_whole_document(
 
 
 def finalize_short_document(document: Any, resolved_media_assets: Any = None) -> Any:
-    """Finalize a flat draft and reject unresolved visual placeholders."""
+    """Finalize a whole draft and reject unresolved visual placeholders."""
     if resolved_media_assets is not None and isinstance(document, str):
         document = fill_markdown_media_placeholders(document, resolved_media_assets)
     if isinstance(document, str) and 'media-placeholder://' in document:
         raise ValueError('Short document contains unresolved media placeholders.')
-    return document
+    return normalize_generated_markdown(document) if isinstance(document, str) else document
 
 
 def assemble_draft_document(

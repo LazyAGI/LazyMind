@@ -8,6 +8,7 @@ import { ConfigProvider, Dropdown } from 'antd';
 import i18n from '@/i18n';
 import type { DocumentPublicationGroupState } from '@/api/generated/core-client';
 import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
+import type { WriterNumberingState } from '@/modules/chat/utils/request';
 import { DocumentArtifactEditor } from './DocumentArtifactEditor';
 import { SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { documentImageGroups } from './writerImageGroups';
@@ -24,8 +25,9 @@ vi.mock('antd', async (importOriginal) => ({
 }));
 
 vi.mock('./MarkdownArtifactEditor', () => ({
-  MarkdownArtifactEditor: ({ markdown, sourceRevision, onSave }: { markdown: string; sourceRevision: number; onSave: (text: string, revision: number, mode: 'draft') => Promise<unknown> }) => <>
+  MarkdownArtifactEditor: ({ markdown, sourceRevision, onSave, numbering }: { markdown: string; sourceRevision: number; onSave: (text: string, revision: number, mode: 'draft') => Promise<unknown>; numbering?: WriterNumberingState }) => <>
     <article>{markdown}</article>
+    <output data-testid='heading-number'>{numbering?.entries['sec-1']?.label}</output>
     <button onClick={() => void onSave('# Updated draft', sourceRevision, 'draft')}>save draft fixture</button>
   </>,
 }));
@@ -211,28 +213,42 @@ it.each(['ready', 'checking', 'failed', 'chat-disabled'])('only offers a setting
   }
 });
 
-it('copies LaTeX using the saved draft version before a parent refresh', async () => {
+it('uses the saved draft for copying and keeps heading numbers visible across a parent refresh', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
   api.convertDocument.mockResolvedValue({ data: { code: 0, data: { format: 'latex', content: 'converted fixture' } } });
+  const numbered = (label: string) => ({ data: { data: { representation: 'markdown', document: '# Draft',
+    numbering: { ordered_style: 'hierarchical', entries: { 'sec-1': { label, mode: 'ordered', restart: false } } } } } });
+  let finishNumbering!: (response: ReturnType<typeof numbered>) => void;
+  api.previewDocumentAction.mockReset().mockResolvedValueOnce(numbered('1.'))
+    .mockImplementationOnce(() => new Promise(resolve => { finishNumbering = resolve; }));
   api.saveDocumentArtifact.mockResolvedValue({ data: { ok: true, result: {
     artifact_id: 'copy-fixture', revision: 3, draft_version: 8, value: { text: '# Updated draft' },
   } } });
   let action: SlotFooterAction | undefined;
   const slot = { artifact_id: 'copy-fixture', slot_id: 'draft_document', revision: 3, draft_version: 7,
-    artifact_value: { text: '# Draft' }, document: { representation: 'markdown', editable: true, capabilities: ['save', 'convert_document'] } } as SlotRevision;
-  render(<SlotEditingContext.Provider value={{ setEditing: vi.fn(), registerFlush: () => () => {},
+    artifact_value: { text: '# Draft' }, document: { representation: 'markdown', editable: true, capabilities: ['save', 'convert_document', 'numbering'] } } as SlotRevision;
+  const editor = (slot: SlotRevision) => <SlotEditingContext.Provider value={{ setEditing: vi.fn(), registerFlush: () => () => {},
     registerFooterAction: (_key, next) => { if (next?.icon === 'copy') action = next; return () => {}; },
-  }}><DocumentArtifactEditor slot={slot} sessionId='session' /></SlotEditingContext.Provider>);
+  }}><DocumentArtifactEditor slot={slot} sessionId='session' /></SlotEditingContext.Provider>;
+  const view = render(editor(slot));
   await waitFor(() => expect(action).toBeDefined());
+  await waitFor(() => expect(screen.getByTestId('heading-number')).toHaveTextContent('1.'));
   act(() => action!.menu!.find(item => item.key === 'latex')!.onClick());
   await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
   expect(api.convertDocument).toHaveBeenLastCalledWith('session', 'draft_document', -1, 3, 'latex', '# Draft', 7);
   fireEvent.click(screen.getByRole('button', { name: 'save draft fixture' }));
   await waitFor(() => expect(screen.getByRole('article')).toHaveTextContent('# Updated draft'));
+  expect(screen.getByTestId('heading-number')).toHaveTextContent('1.');
   act(() => action!.onClick());
   await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2));
   expect(api.convertDocument).toHaveBeenLastCalledWith('session', 'draft_document', -1, 3, 'latex', '# Updated draft', 8);
+  view.rerender(editor({ ...slot, draft_version: 8, artifact_value: { text: '# Updated draft' },
+    document: { ...slot.document!, capabilities: [...slot.document!.capabilities] } }));
+  expect(api.previewDocumentAction).toHaveBeenCalledTimes(2);
+  expect(screen.getByTestId('heading-number')).toHaveTextContent('1.');
+  await act(async () => { finishNumbering(numbered('2.')); });
+  expect(screen.getByTestId('heading-number')).toHaveTextContent('2.');
 });
 
 describe('document artifact display', () => {

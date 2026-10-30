@@ -146,9 +146,11 @@ def _build_artifact_value(value: Any, content_type: str):
     """
     ctx = require_context()
     if content_type == 'text':
+        from lazymind.document_tools.artifacts import normalize_generated_markdown
+
         if isinstance(value, dict) and 'text' in value:
             value = value['text']
-        text = str(value)
+        text = normalize_generated_markdown(str(value))
         if len(text.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
             abs_path = ctx.write_large_content(text, hint='artifact_text')
             return {'type': 'text', 'path': abs_path, 'size': os.path.getsize(abs_path)}, 'file'
@@ -591,6 +593,8 @@ def save_artifacts(artifacts: Annotated[List[_ArtifactSaveInput], Field(min_leng
 
         {"artifacts": [{"key": "report", "value": "Final output", "content_type": "text"},
                        {"key": "summary", "value": {"ok": true}, "content_type": "json"}]}
+
+    Markdown headings contain section names; the document editor supplies section numbers.
     """
     from lazymind.chat.engine.tools.workspace_context import get_tool_resolution_context
 

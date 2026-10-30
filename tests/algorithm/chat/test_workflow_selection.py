@@ -1331,26 +1331,59 @@ def test_completed_actions_are_opt_in_and_domain_neutral():
     assert 'source_session' not in policy['completed_actions'][0]['params']
 
 
-def test_local_markdown_patch_preserves_other_sections_and_draft_version():
+@pytest.mark.parametrize('content_type', ['text', 'file'])
+def test_local_markdown_patch_preserves_other_sections_and_draft_version(content_type):
     from lazymind.chat.workflow.workflow_manager import _safe_session_tools
     toolkit = MagicMock()
     original = '## 第一节\n原内容\n\n## 第二节\n保持原样\n'
     toolkit.list_artifacts.return_value = {'artifacts': [
-        {'artifact_id': 'outline-7', 'slot': 'deck_outline', 'revision': 7},
+        {'artifact_id': 'outline-7', 'slot': 'deck_outline', 'revision': 7, 'content_type': content_type},
     ]}
     toolkit.read_artifact.return_value = {
-        'revision': 7, 'draft_version': 3, 'content_type': 'text',
+        'revision': 7, 'draft_version': 3, 'content_type': content_type,
         'value': {'text': original, 'meta': {'title': 'Outline'}},
     }
     toolkit.patch_artifact.return_value = {'revision': 8}
     tool = next(tool for tool in _safe_session_tools(toolkit, 'session')
                 if tool.__name__ == 'patch_artifact_text')
-    tool('deck_outline', '## 第一节\n原内容', '## 第一节\n新内容')
+    tool('deck_outline', '## 第一节\n原内容', '## 1. 第一节\n新内容')
     toolkit.patch_artifact.assert_called_once_with(
         'outline-7', 7, {'text': original.replace('原内容', '新内容'), 'meta': {'title': 'Outline'}},
-        'text', '', base_draft_version=3,
+        content_type, '', base_draft_version=3,
     )
     toolkit.advance_step.assert_not_called()
+    toolkit.patch_artifact.reset_mock()
+    tool = next(tool for tool in _safe_session_tools(toolkit, 'session')
+                if tool.__name__ == 'patch_artifact')
+    replacement = {'text': original.replace('原内容', '新内容').replace('## 第一节', '## 一、第一节'),
+                   'meta': {'title': 'Outline'}}
+    tool('deck_outline', replacement)
+    toolkit.patch_artifact.assert_called_once_with(
+        'outline-7', 7, {'text': original.replace('原内容', '新内容'), 'meta': {'title': 'Outline'}},
+        content_type, '', base_draft_version=3,
+    )
+    toolkit.patch_artifact.reset_mock()
+    unchanged = tool('deck_outline', {'text': original.replace('## 第一节', '## 一、第一节'),
+                                      'meta': {'title': 'Outline'}})
+    assert unchanged['status'] == 'unchanged'
+    assert unchanged['value']['text'] == original
+    assert 'document editor' in unchanged['content_representation']
+    toolkit.patch_artifact.assert_not_called()
+    tool = next(tool for tool in _safe_session_tools(toolkit, 'session')
+                if tool.__name__ == 'patch_artifact_text')
+    arguments = ModuleTool(apply_func=tool, schema_func=tool)._validate_input({
+        'artifact_ref': 'deck_outline', 'old_text': '## 第一节', 'new_text': '## 第一节',
+        'numbering_style': 'chinese',
+    })
+    tool(**arguments)
+    from lazymind.document_tools.artifacts import render_document
+
+    value = toolkit.patch_artifact.call_args.args[2]
+    rendered = render_document(value['text'])
+    assert rendered['numbering']['ordered_style'] == 'chinese'
+    assert '## 一、 第一节' in rendered['export_document']
+    assert '## 第二节\n保持原样' in value['text']
+    assert value['meta'] == {'title': 'Outline'}
 
 
 @pytest.mark.parametrize('excerpt', ['', 'missing', 'repeat'])
