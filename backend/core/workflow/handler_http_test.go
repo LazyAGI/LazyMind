@@ -27,10 +27,7 @@ func newHandlerTestDB(t *testing.T) *orm.DB {
 	db := newTestDB(t)
 	if err := db.AutoMigrate(
 		&orm.WorkflowDraft{},
-		&orm.WorkflowResource{},
 		&orm.WorkflowRevision{},
-		&orm.WorkflowRevisionEntry{},
-		&orm.WorkflowBlob{},
 		&orm.UserWorkflowSetting{},
 		&orm.AsyncJob{},
 		&orm.WorkflowGenerationAnalysis{},
