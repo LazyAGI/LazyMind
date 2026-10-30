@@ -24,12 +24,14 @@ vi.mock("react-i18next", async (importOriginal) => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       if (key === "settingsPage.knowledge.groups.recognition.multimodal.name") return "多模态识别";
+      if (key === "settingsPage.knowledge.groups.retrieval.title") return "知识管理";
       if (key === "settingsPage.knowledge.groups.retrieval.kb.name") return "知识库";
       if (key === "settingsPage.knowledge.groups.retrieval.kb.description") {
         return "知识库广场、知识库中查找文档、统计信息和相关片段，用于基于资料回答问题。";
       }
       if (key === "settingsPage.enabled") return "已启用";
       if (key === "settingsPage.disabled") return "已停用";
+      if (key === "settingsPage.knowledge.enabledCount") return `${values?.enabled} / ${values?.registered} 已启用`;
       if (key === "settingsPage.knowledge.openConfigAria") return `打开${values?.name}配置`;
       return key;
     },
@@ -226,15 +228,34 @@ describe("KnowledgeDataSettings", () => {
     expect(within(parsingHeader!).getByText("已启用")).toBeInTheDocument();
     expect(within(parsingHeader!).queryByText(/1\s*\/\s*1/)).not.toBeInTheDocument();
   });
-});
 
-it("shows the independent directory switch and forwards changes", async () => {
- const changed = vi.fn();
- const { rerender } = render(<KnowledgeDataSettings controlsDisabled={false} documentDirectoriesEnabled documentDirectoriesSaving={false} onDocumentDirectoriesChange={changed} documentParsingEnabled documentParsingSaving={false} onDocumentParsingChange={vi.fn()} headingRef={createRef<HTMLHeadingElement>()} />);
- const toggle = await screen.findByRole("switch", { name: "settingsPage.controls.documentDirectories.title" });
- expect(toggle).toHaveAttribute("aria-checked", "true");
- fireEvent.click(toggle);
- expect(changed).toHaveBeenCalledWith(false, expect.anything());
- rerender(<KnowledgeDataSettings controlsDisabled={false} documentDirectoriesEnabled={false} documentDirectoriesSaving={false} onDocumentDirectoriesChange={changed} documentParsingEnabled documentParsingSaving={false} onDocumentParsingChange={vi.fn()} headingRef={createRef<HTMLHeadingElement>()} />);
- expect(toggle).toHaveAttribute("aria-checked", "false");
+  it("groups directory organization with knowledge tools and forwards changes independently", async () => {
+    mocks.listToolAssetsPage.mockResolvedValueOnce({
+      records: [{ id: "kb", name: "知识库", isEnabled: true, readonly: false }],
+    });
+    const changed = vi.fn();
+    const props = {
+      controlsDisabled: false,
+      documentDirectoriesSaving: false,
+      onDocumentDirectoriesChange: changed,
+      documentParsingEnabled: true,
+      documentParsingSaving: false,
+      onDocumentParsingChange: vi.fn(),
+      headingRef: createRef<HTMLHeadingElement>(),
+    };
+    const { rerender } = render(<KnowledgeDataSettings {...props} documentDirectoriesEnabled />);
+    const group = screen.getByRole("heading", { name: "知识管理" }).closest("section")!;
+    const toggle = within(group).getByRole("switch", { name: "settingsPage.controls.documentDirectories.title" });
+
+    expect(await within(group).findByText("2 / 2 已启用")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(toggle);
+    expect(changed).toHaveBeenCalledWith(false, expect.anything());
+    expect(mocks.disableTool).not.toHaveBeenCalled();
+
+    rerender(<KnowledgeDataSettings {...props} documentDirectoriesEnabled={false} />);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(within(group).getByText("1 / 2 已启用")).toBeInTheDocument();
+    expect(within(group).getByRole("switch", { name: "settingsPage.knowledge.enableAria" })).toHaveAttribute("aria-checked", "true");
+  });
 });

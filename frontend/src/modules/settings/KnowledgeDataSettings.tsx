@@ -254,33 +254,60 @@ export default function KnowledgeDataSettings({
     </div>;
   };
 
-  const capabilityContent = toolsLoading ? (
-    <div className="settings-knowledge-loading"><Skeleton active paragraph={{ rows: 12 }} /></div>
-  ) : toolsError ? (
-    <Alert
-      action={<Button icon={<ReloadOutlined />} onClick={() => void loadTools()}>{t("settingsPage.retry")}</Button>}
-      description={t("settingsPage.knowledge.loadFailedDesc")}
-      message={t("settingsPage.knowledge.loadFailed")}
-      showIcon
-      type="error"
-    />
-  ) : (
+  const toolsReady = !toolsLoading && !toolsError;
+  const visibleGroups = toolsReady ? toolGroups : toolGroups.filter((group) => group.id === "retrieval");
+  const capabilityContent = (
     <div className="settings-knowledge-groups">
       <div className="settings-knowledge-capability-flow">
-        {toolGroups.map((group) => {
-          const registered = group.tools.filter((tool) => toolsByID.has(tool.id)).length;
-          const enabled = group.tools.filter((tool) => toolsByID.get(tool.id)?.isEnabled).length;
+        {visibleGroups.map((group) => {
+          const includesDirectories = group.id === "retrieval";
+          const registered = group.tools.filter((tool) => toolsByID.has(tool.id)).length + Number(includesDirectories);
+          const enabled = group.tools.filter((tool) => toolsByID.get(tool.id)?.isEnabled).length
+            + Number(includesDirectories && documentDirectoriesEnabled);
           return <section className={`settings-knowledge-group is-${group.id}`} key={group.id}>
             <header className="settings-knowledge-group-head">
               <span>{group.icon}</span>
               <div><h2>{group.title}</h2><p>{group.description}</p></div>
               <Tag>{t("settingsPage.knowledge.enabledCount", { enabled, registered })}</Tag>
             </header>
-            <div className="settings-knowledge-tool-list">{group.tools.map((tool) => renderTool(tool, group))}</div>
+            <div className="settings-knowledge-tool-list">
+              {toolsReady ? group.tools.map((tool) => renderTool(tool, group)) : null}
+              {includesDirectories ? (
+                <div className="settings-knowledge-tool-row">
+                  <span className="settings-knowledge-tool-icon" aria-hidden="true"><FolderOpenOutlined /></span>
+                  <div className="settings-knowledge-tool-copy">
+                    <strong>{t("settingsPage.controls.documentDirectories.title")}</strong>
+                    <p>{t("settingsPage.knowledge.groups.retrieval.documentDirectories.description")}</p>
+                  </div>
+                  <Tag className={`settings-knowledge-state ${documentDirectoriesEnabled ? "is-enabled" : "is-disabled"}`}>
+                    {documentDirectoriesEnabled ? t("settingsPage.enabled") : t("settingsPage.disabled")}
+                  </Tag>
+                  <Switch
+                    aria-label={t("settingsPage.controls.documentDirectories.title")}
+                    checked={documentDirectoriesEnabled}
+                    className="settings-ref-switch"
+                    disabled={controlsDisabled}
+                    loading={documentDirectoriesSaving}
+                    onChange={onDocumentDirectoriesChange}
+                  />
+                </div>
+              ) : null}
+            </div>
           </section>;
         })}
+        {toolsLoading ? (
+          <div className="settings-knowledge-loading"><Skeleton active paragraph={{ rows: 12 }} /></div>
+        ) : toolsError ? (
+          <Alert
+            action={<Button icon={<ReloadOutlined />} onClick={() => void loadTools()}>{t("settingsPage.retry")}</Button>}
+            description={t("settingsPage.knowledge.loadFailedDesc")}
+            message={t("settingsPage.knowledge.loadFailed")}
+            showIcon
+            type="error"
+          />
+        ) : null}
       </div>
-      <section className="settings-knowledge-group is-parser">
+      {toolsReady ? <section className="settings-knowledge-group is-parser">
         <header className="settings-knowledge-group-head">
           <span><ApiOutlined /></span>
           <div>
@@ -309,7 +336,7 @@ export default function KnowledgeDataSettings({
             visibleCategories={["parsing"]}
           />
         </div>
-      </section>
+      </section> : null}
     </div>
   );
 
@@ -320,25 +347,6 @@ export default function KnowledgeDataSettings({
         <p>{t("settingsPage.knowledge.description")}</p>
       </div>
     </header>
-    <section className="settings-knowledge-group is-parser">
-      <header className="settings-knowledge-group-head">
-        <span><FolderOpenOutlined /></span>
-        <div>
-          <h2>{t("settingsPage.controls.documentDirectories.title")}</h2>
-          <p>{t("settingsPage.controls.documentDirectories.summary")}</p>
-        </div>
-        <div className="settings-knowledge-parser-controls">
-          <Switch
-            aria-label={t("settingsPage.controls.documentDirectories.title")}
-            checked={documentDirectoriesEnabled}
-            className="settings-ref-switch"
-            disabled={controlsDisabled}
-            loading={documentDirectoriesSaving}
-            onChange={onDocumentDirectoriesChange}
-          />
-        </div>
-      </header>
-    </section>
     {capabilityContent}
     {!toolsLoading && !toolsError && managedTools.length === 0 ? <Empty description={t("settingsPage.knowledge.empty")} /> : null}
   </section>;
