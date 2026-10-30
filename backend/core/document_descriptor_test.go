@@ -40,7 +40,7 @@ func newDescriptorFixture(t *testing.T) descriptorFixture {
 	db := orm.MigrateTestDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{},
 		&orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.SubAgentTask{},
 		&orm.SubAgentArtifact{}, &orm.WorkflowSlotOrder{}, &orm.WorkflowStepIntent{},
-		&orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{}, &orm.WorkflowResource{}, &orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{})
+		&orm.WorkflowEvent{}, &orm.WorkflowAttemptInputBinding{}, &orm.WorkflowRouteDecision{})
 	corestore.Init(db.DB, nil, nil)
 	t.Cleanup(func() { corestore.Init(nil, nil, nil) })
 	now := time.Now().UTC()
@@ -846,6 +846,11 @@ func TestDocumentDescriptorOpenAPIReadContracts(t *testing.T) {
 
 func seedDescriptorPinnedHint(t *testing.T, f descriptorFixture, pinnedMarkdown bool) {
 	t.Helper()
+	// Ordinary document reads have no pinned workflow revision. Create package
+	// storage only for scenarios that exercise the pinned Markdown hint.
+	if err := f.db.AutoMigrate(&orm.WorkflowResource{}, &orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}); err != nil {
+		t.Fatalf("migrate pinned workflow models: %v", err)
+	}
 	now := time.Now().UTC()
 	resource := orm.WorkflowResource{ID: "descriptor-resource", WorkflowID: "unseen-workflow", WorkflowRef: "user:descriptor-owner/unseen-workflow", OwnerUserID: "descriptor-owner", OwnerScope: "user", RelativeRoot: "unseen-workflow", HeadRevisionID: "head", CreatedAt: now, UpdatedAt: now}
 	if err := f.db.Create(&resource).Error; err != nil {

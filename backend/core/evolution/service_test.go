@@ -12,7 +12,17 @@ import (
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
-	return orm.MigrateAllModelsForTest(t)
+	return orm.MigrateTestDB(t,
+		&orm.UserPersonalizationSetting{},
+		// Keep feature controls present so tests exercise the stored preferences.
+		&orm.UserUIPreferences{},
+		&orm.SkillV2Skill{},
+		&orm.SkillV2Blob{},
+		&orm.SkillV2Revision{},
+		&orm.SkillV2RevisionEntry{},
+		&orm.ResourceSessionSnapshot{},
+		&orm.Conversation{},
+	)
 }
 
 func createPublishedV2Skill(t *testing.T, db *orm.DB, id, userID, userName, category, skillName, content string) {

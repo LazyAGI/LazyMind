@@ -36,7 +36,21 @@ type uiPreferencesAPITestResponse struct {
 func newUIPreferencesTestDB(t *testing.T) *orm.DB {
 	t.Helper()
 
-	return orm.MigrateAllModelsForTest(t)
+	return orm.MigrateTestDB(t,
+		&orm.UserUIPreferences{},
+		&orm.MemoryCurrentEntry{},
+		&orm.SkillV2Skill{},
+		&orm.WorkflowResource{},
+		&orm.UserWorkflowSetting{},
+		&orm.UserSchedule{},
+		&orm.TaskCenterTask{},
+		&orm.UserSelectedModel{},
+		&orm.MCPServer{},
+		// Disabling document directories also revokes jobs and pending observations.
+		&orm.AsyncJob{},
+		&orm.DocumentDirectoryBatch{},
+		&orm.DocumentObservation{},
+	)
 }
 
 func decodeUIPreferencesResponse(t *testing.T, rec *httptest.ResponseRecorder) uiPreferencesAPITestResponse {
