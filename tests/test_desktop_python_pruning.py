@@ -168,7 +168,7 @@ class PrunePythonRuntimeTest(unittest.TestCase):
         with patch.object(pruning.importlib.metadata, 'distributions', return_value=[BrokenDistribution()]):
             report = pruning.trim_runtime(self.runtime, True)
         self.assertEqual(report['installed_distributions'], {
-            'deps/python/algorithm/Lib/site-packages': [],
+            str(Path('deps/python/algorithm/Lib/site-packages')): [],
         })
 
 
