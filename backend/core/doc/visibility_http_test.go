@@ -61,6 +61,17 @@ func TestDocumentVisibilityHTTPResolvesCurrentTenantFromAccount(t *testing.T) {
 	}))
 	t.Cleanup(scan.Close)
 	t.Setenv("LAZYMIND_SCAN_CONTROL_PLANE_URL", scan.URL)
+	algo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/algo/general_algo/groups" {
+			t.Errorf("unexpected algo request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"code":200,"data":[{"type":"Chunk","name":"chunk","active":true}]}`)
+	}))
+	t.Cleanup(algo.Close)
+	t.Setenv("LAZYMIND_ALGO_SERVICE_URL", algo.URL)
 	core := httptest.NewServer(http.HandlerFunc(FilterDocumentVisibilityHTTP))
 	t.Cleanup(core.Close)
 	for _, test := range []struct {

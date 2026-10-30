@@ -25,7 +25,7 @@ func TestReferenceResolutionFallsBackAfterOptionalProviderFailure(t *testing.T) 
 					if provider == "Unpaywall" {
 						return http.StatusOK, fallbackOpenAlexMetadata
 					}
-				case "export.arxiv.org":
+				case testArxivHost:
 					return http.StatusOK, fallbackArxivMatch
 				}
 				return http.StatusServiceUnavailable, "unavailable"
@@ -67,7 +67,7 @@ func TestReferenceResolutionAggregatesProviderFailuresWithoutSaving(t *testing.T
 				if host == "api.openalex.org" && provider == "Unpaywall" {
 					return http.StatusOK, fallbackOpenAlexMetadata
 				}
-				if host == "export.arxiv.org" {
+				if host == testArxivHost {
 					return http.StatusTooManyRequests, "rate limited"
 				}
 				return http.StatusServiceUnavailable, "unavailable"
@@ -98,7 +98,7 @@ func TestReferenceResolutionAggregatesProviderFailuresWithoutSaving(t *testing.T
 func TestReferenceResolutionFallbackKeepsDiagnosticsOnExistingWork(t *testing.T) {
 	db := importErrorDB(t)
 	installFallbackTransport(t, func(host string) (int, string) {
-		if host == "export.arxiv.org" {
+		if host == testArxivHost {
 			return http.StatusOK, fallbackArxivMatch
 		}
 		return http.StatusServiceUnavailable, "unavailable"
@@ -138,7 +138,7 @@ func TestReferenceResolutionKeepsOpenAlexMetadataWhenUnpaywallHasNoRecord(t *tes
 			return http.StatusOK, fallbackOpenAlexMetadata
 		case "api.unpaywall.org":
 			return http.StatusNotFound, `{"message":"DOI not found"}`
-		case "export.arxiv.org":
+		case testArxivHost:
 			return http.StatusOK, `<feed xmlns="http://www.w3.org/2005/Atom"></feed>`
 		default:
 			t.Fatalf("unexpected provider %q", host)
@@ -177,4 +177,5 @@ func installFallbackTransport(t *testing.T, response func(string) (int, string))
 		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	installTestArxivClient(t)
 }

@@ -140,7 +140,6 @@ func TestCreateExternalAgentWorkflowTaskStartsHostedConversion(t *testing.T) {
 }
 
 func TestCreateExternalAgentWorkflowTaskRejectsUnsupportedAgent(t *testing.T) {
-	newHandlerTestDB(t)
 	req := httptest.NewRequest(http.MethodPost, "/external-agent/workflow-tasks", strings.NewReader(`{
 		"agent_type":"unknown",
 		"skill":{"name":"demo-skill","url":"https://skillhub.cn/skills/user_demo/demo-skill"},
@@ -200,7 +199,6 @@ func TestCreateExternalAgentWorkflowTaskNormalizesLegacyRaccoonMarkers(t *testin
 }
 
 func TestCreateExternalAgentWorkflowTaskRejectsUnknownSchemaFields(t *testing.T) {
-	newHandlerTestDB(t)
 	req := httptest.NewRequest(http.MethodPost, "/external-agent/workflow-tasks", strings.NewReader(`{
 		"agent_type":"codex",
 		"skill_id":"skill-1",

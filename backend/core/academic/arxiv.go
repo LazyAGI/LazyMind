@@ -11,6 +11,10 @@ import (
 var citationYearTitlePattern = regexp.MustCompile(`(?i)(?:\(|\b)(?:19|20)\d{2}[a-z]?(?:\)|\.)?\s*[.,:]?\s*(.+)$`)
 var brokenWordPattern = regexp.MustCompile(`([\p{L}\p{N}])-\s*\p{M}*\s+([\p{L}\p{N}])`)
 
+// Tests can supply a client for a controlled endpoint without changing the
+// official provider's process-wide connection and pacing rules.
+var newArxivClient = arxivsource.NewClient
+
 func citationTitle(citation string) string {
 	compact := strings.Join(strings.Fields(citation), " ")
 	compact = brokenWordPattern.ReplaceAllString(compact, "$1$2")
@@ -76,7 +80,7 @@ func resolveWithArxiv(ctx context.Context, citation string) (WorkInput, bool, er
 	if len(query) > 300 {
 		query = query[:300]
 	}
-	papers, err := arxivsource.NewClient().Search(ctx, field+strconv.Quote(query), 5)
+	papers, err := newArxivClient().Search(ctx, field+strconv.Quote(query), 5)
 	if err != nil {
 		return WorkInput{}, false, err
 	}

@@ -254,7 +254,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 		importGuard = guard
 		ctx = guard.ctx
 		if selected.VerifiedPaper == nil {
-			metadata, e := arxivsource.NewClient().Lookup(ctx, urls[0])
+			metadata, e := newArxivClient().Lookup(ctx, urls[0])
 			if e != nil {
 				return e
 			}

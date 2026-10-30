@@ -68,7 +68,6 @@ func TestPromptCategoryFromPath_NoVar(t *testing.T) {
 
 // TestCreatePromptCategory_EmptyName returns 400.
 func TestCreatePromptCategory_EmptyName(t *testing.T) {
-	setupCategoryTestDB(t)
 	req := newCategoryRequest("POST", "/prompt_categories", `{"name":""}`, "u1", nil)
 	w := httptest.NewRecorder()
 	CreatePromptCategory(w, req)
@@ -80,7 +79,6 @@ func TestCreatePromptCategory_EmptyName(t *testing.T) {
 
 // TestCreatePromptCategory_NameTooLong returns 400 when name exceeds 30 runes.
 func TestCreatePromptCategory_NameTooLong(t *testing.T) {
-	setupCategoryTestDB(t)
 	longName := strings.Repeat("a", 31) // 31 runes > 30 max
 	body, _ := json.Marshal(promptCategoryRequest{Name: longName})
 	req := newCategoryRequest("POST", "/prompt_categories", string(body), "u1", nil)
@@ -115,7 +113,6 @@ func TestCreatePromptCategory_Duplicate(t *testing.T) {
 
 // TestCreatePromptCategory_MissingUserID returns 400.
 func TestCreatePromptCategory_MissingUserID(t *testing.T) {
-	setupCategoryTestDB(t)
 	req := newCategoryRequest("POST", "/prompt_categories", `{"name":"Test"}`, "", nil)
 	w := httptest.NewRecorder()
 	CreatePromptCategory(w, req)
@@ -140,7 +137,6 @@ func TestDeletePromptCategory_NotFound(t *testing.T) {
 
 // TestDeletePromptCategory_EmptyID returns 400.
 func TestDeletePromptCategory_EmptyID(t *testing.T) {
-	setupCategoryTestDB(t)
 	req := newCategoryRequest("DELETE", "/prompt_categories/", "", "u1", nil)
 	w := httptest.NewRecorder()
 	DeletePromptCategory(w, req)
@@ -171,7 +167,6 @@ func TestListPromptCategories_Empty(t *testing.T) {
 
 // TestListPromptCategories_MissingUserID returns 400.
 func TestListPromptCategories_MissingUserID(t *testing.T) {
-	setupCategoryTestDB(t)
 	req := newCategoryRequest("GET", "/prompt_categories", "", "", nil)
 	w := httptest.NewRecorder()
 	ListPromptCategories(w, req)

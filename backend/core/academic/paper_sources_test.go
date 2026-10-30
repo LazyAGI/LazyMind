@@ -55,7 +55,7 @@ func TestExternalDiscoveryReusesOnlyInitiatingCollection(t *testing.T) {
 	}
 	previous := http.DefaultTransport
 	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "export.arxiv.org" {
+		if r.URL.Host != testArxivHost {
 			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header), Request: r}, nil
 		}
 		if r.URL.Query().Get("search_query") == "" {
@@ -69,6 +69,7 @@ func TestExternalDiscoveryReusesOnlyInitiatingCollection(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(feed + `</feed>`)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	installTestArxivClient(t)
 	w = httptest.NewRecorder()
 	SearchPapers(w, paperRequest(string(marshal(map[string]any{"expansion_id": record.ID, "query": "all:agents"}))))
 	if w.Code != 200 {

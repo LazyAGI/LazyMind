@@ -60,6 +60,7 @@ func TestMetadataResolversExposeProviderErrors(t *testing.T) {
 				return &http.Response{StatusCode: test.status, Body: io.NopCloser(strings.NewReader(test.body)), Header: make(http.Header), Request: r}, nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = previous })
+			installTestArxivClient(t)
 			if err := test.lookup(context.Background()); err == nil {
 				t.Fatal("provider failure was treated as an empty successful lookup")
 			}
@@ -74,6 +75,7 @@ func TestReferenceResolutionReportsProviderFailureBeforeSaving(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusServiceUnavailable, Body: io.NopCloser(strings.NewReader("unavailable")), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	installTestArxivClient(t)
 	ref := orm.AcademicReference{ID: "ref-failure", RawText: "A. Author. 2024. A sufficiently long paper title.", AuthorsJSON: json.RawMessage(`[]`), BBoxJSON: json.RawMessage(`{}`), SegmentIDsJSON: json.RawMessage(`[]`)}
 	if err := db.Create(&ref).Error; err != nil {
 		t.Fatal(err)
@@ -108,6 +110,7 @@ func TestReferenceResolutionUsesOpenAlexFulltextWithoutAnotherLookup(t *testing.
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 			})
 			t.Cleanup(func() { http.DefaultTransport = previous })
+			installTestArxivClient(t)
 			ref := orm.AcademicReference{ID: "ref-fulltext", RawText: "A. Author. 2024. A sufficiently long paper title.", AuthorsJSON: json.RawMessage(`[]`), BBoxJSON: json.RawMessage(`{}`), SegmentIDsJSON: json.RawMessage(`[]`)}
 			if err := db.Create(&ref).Error; err != nil {
 				t.Fatal(err)
@@ -131,6 +134,7 @@ func TestReferenceResolutionStillReportsRequiredArxivLookupFailure(t *testing.T)
 		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	installTestArxivClient(t)
 	ref := orm.AcademicReference{RawText: "A. Author. 2024. A sufficiently long paper title."}
 	if _, _, _, err := resolveReferenceWithExternal(context.Background(), db, &ref, true); err == nil || !strings.Contains(err.Error(), "503") {
 		t.Fatalf("required arXiv failure must propagate: %v", err)

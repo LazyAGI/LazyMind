@@ -243,7 +243,7 @@ func TestUnifiedImportPinsMetadataBeforeBindingAndReusesItAfterFailure(t *testin
 	previous := http.DefaultTransport
 	queries := 0
 	http.DefaultTransport = sourceTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "export.arxiv.org" {
+		if r.URL.Host != testArxivHost {
 			return previous.RoundTrip(r)
 		}
 		queries++
@@ -251,6 +251,7 @@ func TestUnifiedImportPinsMetadataBeforeBindingAndReusesItAfterFailure(t *testin
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(xml)), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	installTestArxivClient(t)
 	db.Callback().Create().Before("gorm:create").Register("fail-pinned-association", func(tx *gorm.DB) {
 		if tx.Statement.Table == "academic_work_documents" {
 			tx.AddError(errors.New("association temporarily unavailable"))

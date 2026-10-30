@@ -204,7 +204,7 @@ func readKnownPaper(ctx context.Context, userID string, source paperSource, cont
 		// so a failed download or interrupted job cannot advance on retry.
 		paper.SourceVersion = content.SourceVersion
 		if paper.SourceVersion == "" {
-			metadata, err := arxivsource.NewClient().Lookup(ctx, paper.ArxivID)
+			metadata, err := newArxivClient().Lookup(ctx, paper.ArxivID)
 			if err != nil {
 				return nil, "", "", "", err
 			}

@@ -19,7 +19,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"lazymind/core/academic/arxivsource"
 	"lazymind/core/acl"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -1066,7 +1065,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if work.ID != linkedWorkID && resolveExternal {
-				metadata, e := arxivsource.NewClient().Lookup(r.Context(), work.ArxivIDBase+version)
+				metadata, e := newArxivClient().Lookup(r.Context(), work.ArxivIDBase+version)
 				if e != nil {
 					replyArxivImportError(w, e)
 					return

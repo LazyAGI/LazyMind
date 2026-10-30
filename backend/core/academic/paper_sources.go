@@ -15,7 +15,6 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
-	"lazymind/core/academic/arxivsource"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/doc"
@@ -187,7 +186,7 @@ func SearchPapers(w http.ResponseWriter, r *http.Request) {
 	if req.MaxResults == 0 {
 		req.MaxResults = 10
 	}
-	papers, err := arxivsource.NewClient().Search(r.Context(), strings.TrimSpace(req.Query), req.MaxResults)
+	papers, err := newArxivClient().Search(r.Context(), strings.TrimSpace(req.Query), req.MaxResults)
 	if err != nil {
 		replyArxivImportError(w, err)
 		return

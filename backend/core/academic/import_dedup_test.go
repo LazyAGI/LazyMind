@@ -114,12 +114,13 @@ func TestLocalPreviewDoesNotQueryArxiv(t *testing.T) {
 	previous := http.DefaultTransport
 	calls := 0
 	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Hostname() == "export.arxiv.org" {
+		if r.URL.Hostname() == testArxivHost {
 			calls++
 		}
 		return &http.Response{StatusCode: 503, Body: io.NopCloser(strings.NewReader("unavailable")), Header: http.Header{}, Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	installTestArxivClient(t)
 	w := httptest.NewRecorder()
 	PreviewImport(w, paperRequest(`{"target_dataset_id":"papers","work_ids":["a"],"resolve_external":false}`))
 	if w.Code != 200 || calls != 0 {

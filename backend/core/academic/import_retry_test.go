@@ -21,7 +21,7 @@ func TestLinkPreviewKeepsRequestedVersionWhenIdentityAlreadyExists(t *testing.T)
 	queries := []string{}
 	previous := http.DefaultTransport
 	http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		if r.URL.Host != "export.arxiv.org" {
+		if r.URL.Host != testArxivHost {
 			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{}`)), Header: make(http.Header), Request: r}, nil
 		}
 		queries = append(queries, r.URL.Query().Get("id_list"))
@@ -29,6 +29,7 @@ func TestLinkPreviewKeepsRequestedVersionWhenIdentityAlreadyExists(t *testing.T)
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header), Request: r}, nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = previous })
+	installTestArxivClient(t)
 	w := httptest.NewRecorder()
 	PreviewImport(w, paperRequest(`{"identifier":"https://arxiv.org/abs/1706.03762v6","target_dataset_id":"papers"}`))
 	if w.Code != 200 {
