@@ -448,93 +448,106 @@ def _prepare_artifact(key: str, value: Any, content_type: str = 'text',
                       publisher_list_index: Optional[int] = None,
                       slot_orders: Optional[Dict[str, List[int]]] = None) -> _PreparedArtifact:
     """Validate and materialize an artifact without allocating a revision or emitting it."""
-    ctx = require_context()
-    try:
-        validate_storage_id(key)
-        ctx.draft_path(key)
-    except ValueError as exc:
-        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: ' + str(exc)) from exc
-    policy = (ctx.params or {}).get('workflow_runtime') or {}
-    publisher_owned_slots = {
-        str(slot).strip()
-        for slot in (policy.get('publisher_owned_slots') or [])
-        if str(slot).strip()
-    } if isinstance(policy, dict) else set()
-    if key in publisher_owned_slots and not internal_publish:
-        raise ToolExecutionError(
-            f'Workflow slot {key!r} is publisher-owned. Use the package-declared '
-            'publisher tool; it writes the correct existing list_index and revision '
-            'automatically. Do not save this slot directly.',
-        )
-    if (ctx.agent_type == 'workflow_step' or ctx.output_slots) and key not in ctx.output_slots:
-        raise ToolExecutionError(
-            f'ARTIFACT_ARGUMENT_INVALID: Artifact key {key!r} is not declared for this step. '
-            f'Allowed keys: {", ".join(ctx.output_slots)}',
-        )
-    if content_type not in _CONTENT_TYPES:
-        raise ToolExecutionError(
-            f'ARTIFACT_ARGUMENT_INVALID: Unsupported content_type {content_type!r}; '
-            f'choose from {sorted(_CONTENT_TYPES)}.'
-        )
-    ct = content_type
-    contract_error = _validate_declared_artifact_type(ctx, key, ct)
-    if contract_error:
-        raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: ' + contract_error)
-    built, actual_ct = _build_artifact_value(value, ct)
-    if source_tool:
-        built['_source_tool'] = str(source_tool)
-    # A package publisher may already have resolved the durable list index from
-    # one consistent order snapshot. This avoids races when it emits several
-    # ordered artifacts in one tool call before Core has processed the earlier
-    # events. Model-facing callers must continue to use sort_order.
-    if publisher_list_index is not None:
-        if not internal_publish:
+    from lazymind.chat.engine.agent_runtime.telemetry import writer_stage_timing
+
+    with writer_stage_timing('artifact_prepare', slot=key):
+        ctx = require_context()
+        try:
+            validate_storage_id(key)
+            ctx.draft_path(key)
+        except ValueError as exc:
+            raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: ' + str(exc)) from exc
+        policy = (ctx.params or {}).get('workflow_runtime') or {}
+        publisher_owned_slots = {
+            str(slot).strip()
+            for slot in (policy.get('publisher_owned_slots') or [])
+            if str(slot).strip()
+        } if isinstance(policy, dict) else set()
+        if key in publisher_owned_slots and not internal_publish:
             raise ToolExecutionError(
-                'publisher_list_index is reserved for package publisher tools.',
+                f'Workflow slot {key!r} is publisher-owned. Use the package-declared '
+                'publisher tool; it writes the correct existing list_index and revision '
+                'automatically. Do not save this slot directly.',
             )
-        if int(publisher_list_index) < 0:
-            raise ToolExecutionError('publisher_list_index must be >= 0.')
-        built['list_index'] = int(publisher_list_index)
+        if (ctx.agent_type == 'workflow_step' or ctx.output_slots) and key not in ctx.output_slots:
+            raise ToolExecutionError(
+                f'ARTIFACT_ARGUMENT_INVALID: Artifact key {key!r} is not declared for this step. '
+                f'Allowed keys: {", ".join(ctx.output_slots)}',
+            )
+        if content_type not in _CONTENT_TYPES:
+            raise ToolExecutionError(
+                f'ARTIFACT_ARGUMENT_INVALID: Unsupported content_type {content_type!r}; '
+                f'choose from {sorted(_CONTENT_TYPES)}.'
+            )
+        ct = content_type
+        contract_error = _validate_declared_artifact_type(ctx, key, ct)
+        if contract_error:
+            raise ToolExecutionError('ARTIFACT_ARGUMENT_INVALID: ' + contract_error)
+        built, actual_ct = _build_artifact_value(value, ct)
+        if source_tool:
+            built['_source_tool'] = str(source_tool)
+        # A package publisher may already have resolved the durable list index from
+        # one consistent order snapshot. This avoids races when it emits several
+        # ordered artifacts in one tool call before Core has processed the earlier
+        # events. Model-facing callers must continue to use sort_order.
+        if publisher_list_index is not None:
+            if not internal_publish:
+                raise ToolExecutionError(
+                    'publisher_list_index is reserved for package publisher tools.',
+                )
+            if int(publisher_list_index) < 0:
+                raise ToolExecutionError('publisher_list_index must be >= 0.')
+            built['list_index'] = int(publisher_list_index)
 
-    # Translate sort_order → list_index via Go core API.
-    out_of_range_warning: Optional[str] = None
-    if sort_order is not None and publisher_list_index is None:
-        list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order, slot_orders)
-        if list_index is not None:
-            built['list_index'] = list_index
-        elif resolve_err:
-            out_of_range_warning = resolve_err
-    if caption is not None:
-        built['caption'] = str(caption)
-    return _PreparedArtifact(key, ct, actual_ct, built, out_of_range_warning)
+        # Translate sort_order → list_index via Go core API.
+        out_of_range_warning: Optional[str] = None
+        if sort_order is not None and publisher_list_index is None:
+            list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order, slot_orders)
+            if list_index is not None:
+                built['list_index'] = list_index
+            elif resolve_err:
+                out_of_range_warning = resolve_err
+        if caption is not None:
+            built['caption'] = str(caption)
+        return _PreparedArtifact(key, ct, actual_ct, built, out_of_range_warning)
 
 
-def _publish_artifact(artifact: _PreparedArtifact) -> Dict[str, Any]:
-    ctx = require_context()
-    key, ct, actual_ct, built = artifact.key, artifact.original_type, artifact.content_type, artifact.value
-    seq = ctx.next_artifact_seq(key)
-    ctx.record_local_artifact(key, actual_ct, built, seq)
-    ctx.emit({
-        'type': 'artifact',
-        'slot': key,
-        'content_type': actual_ct,
-        'seq': seq,
-        'value': built,
-    })
-    # Write draft so patch_artifact can operate on the latest committed content.
-    # list_index is embedded in built when sort_order resolved successfully.
-    _write_artifact_draft(ctx, key, ct, actual_ct, built, built.get('list_index'))
-    msg = f"Artifact '{key}' saved."
-    if artifact.warning:
-        msg += f' WARNING: {artifact.warning}'
-    ack: Dict[str, Any] = {'status': 'ok', 'key': key, 'message': msg}
-    draft_path = ctx.draft_path(key)
-    if os.path.isfile(draft_path):
-        ack['path'] = draft_path
-    elif isinstance(built, dict) and built.get('path'):
-        ack['path'] = built['path']
-    _record_artifact_coord(key, path=str(ack.get('path') or ''), revision=str(seq))
-    return ack
+def _publish_artifact(artifact: _PreparedArtifact, *, replay_seq: Optional[int] = None) -> Dict[str, Any]:
+    from lazymind.chat.engine.agent_runtime.telemetry import writer_stage_timing
+
+    with writer_stage_timing('artifact_publish', slot=artifact.key):
+        ctx = require_context()
+        key, ct, actual_ct, built = artifact.key, artifact.original_type, artifact.content_type, artifact.value
+        # Private checkpoint publishers replay the original event identity. Core deduplicates
+        # (attempt, slot, seq); a fresh seq would create another revision after a lost ack.
+        seq = ctx.next_artifact_seq(key) if replay_seq is None else replay_seq
+        if seq < 1:
+            raise ValueError('Artifact replay sequence must be positive.')
+        if replay_seq is not None:
+            ctx._artifact_counts[key] = max(ctx._artifact_counts.get(key, 0), seq)
+        ctx.emit({
+            'type': 'artifact',
+            'slot': key,
+            'content_type': actual_ct,
+            'seq': seq,
+            'value': built,
+        })
+        if not any(item['seq'] == seq for item in ctx.local_artifacts(keys=[key])):
+            ctx.record_local_artifact(key, actual_ct, built, seq)
+        # Write draft so patch_artifact can operate on the latest committed content.
+        # list_index is embedded in built when sort_order resolved successfully.
+        _write_artifact_draft(ctx, key, ct, actual_ct, built, built.get('list_index'))
+        msg = f"Artifact '{key}' saved."
+        if artifact.warning:
+            msg += f' WARNING: {artifact.warning}'
+        ack: Dict[str, Any] = {'status': 'ok', 'key': key, 'message': msg}
+        draft_path = ctx.draft_path(key)
+        if os.path.isfile(draft_path):
+            ack['path'] = draft_path
+        elif isinstance(built, dict) and built.get('path'):
+            ack['path'] = built['path']
+        _record_artifact_coord(key, path=str(ack.get('path') or ''), revision=str(seq))
+        return ack
 
 
 def resolve_artifact_files(arguments: dict) -> object:

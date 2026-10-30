@@ -31,12 +31,13 @@ value is merely a local path string does not satisfy an output and must be RETRY
 - PASS when draft_document exists.
 - draft_document must be Markdown, or non-outline WriterDocument IR with ui_editable=true.
 - An outline-stage artifact saved under draft_document is invalid and must be RETRY.
-- Generation/rewrite requires section_instructions. Only per-section generation requires
-  draft_blocks; whole-document generation does not produce draft_blocks.
-- IR generation also requires visual_plan and resolved_media_assets. IR generation must
-  not create a second Markdown draft artifact.
-- For targeted revision mode, document_revision_task, document_locate_result,
-  document_modify_plan, document_revision_set, and document_revision_result must exist.
+- Required media must be saved before the document.
+  IR generation must not create a second Markdown draft artifact.
+- For targeted revision mode, document_revision_result must report success.
+- section_instructions, draft_blocks, visual_plan, document_revision_task,
+  document_locate_result, document_modify_plan, and document_revision_set are auxiliary
+  publications. Missing auxiliary publications do not require RETRY of generation;
+  the workspace checkpoint retains them for save-only recovery.
 - When the execution started without draft_document and used a cloud-bound `.lmd`
   source_document, document_write_result must report success and draft_document must be
   the provider-confirmed document returned by the write-back.
@@ -51,11 +52,12 @@ value is merely a local path string does not satisfy an output and must be RETRY
 
 ## write_flat_document
 
-- PASS when flat_draft_document, short_writing_plan, and
-  flat_visual_plan exist.
+- PASS when flat_draft_document and its required dependencies exist.
+- short_writing_plan and flat_visual_plan are auxiliary publications. Their save failures
+  do not require RETRY of generation; recovery saves the retained checkpoint files.
 - flat_draft_document must be Markdown, or a non-outline WriterDocument IR with ui_editable=true.
 - outline_document, section_instructions, and draft_blocks must not be produced.
-- When flat_visual_plan is non-empty, flat_resolved_media_assets must also exist.
+- Required media must be saved before the document.
 - Missing mode-specific outputs → RETRY.
 
 Use exactly:
