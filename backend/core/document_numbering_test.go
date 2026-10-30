@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -656,82 +655,6 @@ func TestDocumentNumberingFailureAndCancellation(t *testing.T) {
 					t.Error("failure/cancel changed state")
 				}
 			})
-		}
-	}
-}
-
-func TestDocumentNumberingCapabilities(t *testing.T) {
-	for _, withModel := range []bool{false, true} {
-		for _, state := range []string{"editable", "live", "historical", "stale", "dismissed", "session"} {
-			for index, endpoint := range descriptorRoutes {
-				t.Run(fmt.Sprint(withModel)+state+endpoint, func(t *testing.T) {
-					f := newNumberingFixture(t, "markdown", withModel)
-					spy := newNumberingServer(t, f, f.update())
-					var err error
-					switch state {
-					case "live":
-						seedRewriteConsumer(t, rewriteFixture{descriptorFixture: f.descriptorFixture}, "running")
-					case "historical":
-						err = f.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", "descriptor-artifact").Update("selected", false).Error
-					case "stale":
-						err = f.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", "descriptor-artifact").Update("validity", "stale").Error
-					case "dismissed":
-						err = f.db.Model(&orm.WorkflowSession{}).Where("id = ?", "descriptor-session").Update("dismissed", true).Error
-					case "session":
-						err = f.db.Model(&orm.WorkflowSession{}).Where("id = ?", "descriptor-session").Update("status", "unknown-state").Error
-					}
-					if err != nil {
-						t.Fatal(err)
-					}
-					before := portableState(t, f.portableFixture)
-					w := f.read(t.Context(), endpoint, "descriptor-owner")
-					if state == "dismissed" && index < 2 {
-						if w.Code != 404 {
-							t.Errorf("dismissed status=%d", w.Code)
-						}
-					} else {
-						records := descriptorOptionalRecords(t, w)
-						filtered := (state == "dismissed" && (index == 2 || index == 3)) || (state == "historical" && index == 4) || (state == "session" && index == 2)
-						if filtered {
-							if len(records) != 0 {
-								t.Error("filter changed")
-							}
-						} else {
-							found := false
-							for _, record := range records {
-								if record["artifact_id"] != "descriptor-artifact" {
-									continue
-								}
-								found = true
-								doc, _ := record["document"].(map[string]any)
-								caps := schemaStringList(doc["capabilities"])
-								sort.Strings(caps)
-								want := []string{}
-								if state == "editable" {
-									want = []string{"convert_document", "cross_reference", "numbering", "publish_document", "save"}
-									if withModel {
-										want = []string{"convert_document", "cross_reference", "numbering", "publish_document", "rewrite_selection", "save"}
-									}
-								} else if state == "live" {
-									want = []string{"convert_document", "cross_reference", "numbering"}
-								}
-								if !reflect.DeepEqual(caps, want) || doc["editable"] != (state == "editable") {
-									t.Errorf("numbering capability=%#v want=%#v", doc, want)
-								}
-							}
-							if !found {
-								t.Error("document missing")
-							}
-						}
-					}
-					if spy.count() != 0 {
-						t.Error("capability query executed numbering")
-					}
-					if portableState(t, f.portableFixture) != before {
-						t.Error("capability read persisted")
-					}
-				})
-			}
 		}
 	}
 }

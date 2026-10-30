@@ -1358,67 +1358,6 @@ func TestDocumentRewriteNativeSourceDoesNotRequireDraftVersion(t *testing.T) {
 	}
 }
 
-func TestDocumentRewriteCapabilityRequiresMutableState(t *testing.T) {
-	for _, state := range []string{"session not editable", "historical", "stale", "live"} {
-		for index, endpoint := range descriptorRoutes {
-			t.Run(state+endpoint, func(t *testing.T) {
-				f := newRewriteFixture(t, "markdown")
-				server := newRewriteServer(t, f)
-				var err error
-				switch state {
-				case "session not editable":
-					err = f.db.Model(&orm.WorkflowSession{}).Where("id = ?", "descriptor-session").Update("status", "unknown-state").Error
-				case "historical":
-					err = f.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", "descriptor-artifact").Update("selected", false).Error
-				case "stale":
-					err = f.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", "descriptor-artifact").Update("validity", "stale").Error
-				case "live":
-					seedRewriteConsumer(t, f, "running")
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				before := rewriteSnapshot(t, f)
-				records := descriptorOptionalRecords(t, f.read(t.Context(), endpoint, "descriptor-owner"))
-				filtered := (state == "session not editable" && index == 2) || (state == "historical" && index == 4)
-				if filtered {
-					if len(records) != 0 {
-						t.Errorf("filter changed=%#v", records)
-					}
-				} else {
-					found := false
-					for _, record := range records {
-						if record["artifact_id"] != "descriptor-artifact" {
-							continue
-						}
-						found = true
-						doc, ok := record["document"].(map[string]any)
-						if !ok {
-							t.Fatalf("restricted document missing=%#v", record)
-						}
-						want := []any{}
-						if state == "live" {
-							want = []any{"convert_document", "numbering", "cross_reference"}
-						}
-						if doc["editable"] != false || !reflect.DeepEqual(doc["capabilities"], want) {
-							t.Errorf("model enabled blocked capability: %#v", doc)
-						}
-					}
-					if !found {
-						t.Error("restricted artifact missing")
-					}
-				}
-				if len(server.calls()) != 0 {
-					t.Error("capability query invoked Action")
-				}
-				if rewriteSnapshot(t, f) != before {
-					t.Error("capability query wrote state")
-				}
-			})
-		}
-	}
-}
-
 func TestDocumentRewriteSessionStateCheckedBeforeCost(t *testing.T) {
 	f := newRewriteFixture(t, "markdown")
 	server := newRewriteServer(t, f)

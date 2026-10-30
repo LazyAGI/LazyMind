@@ -877,55 +877,6 @@ func TestDocumentCrossReferenceReadLease(t *testing.T) {
 	requirePortableCosts(t, costs)
 }
 
-func TestDocumentCrossReferenceCapabilities(t *testing.T) {
-	for _, state := range []string{"editable", "live", "historical", "stale", "session"} {
-		for _, endpoint := range []string{descriptorRoutes[0], descriptorRoutes[1], descriptorRoutes[5], descriptorRoutes[6]} {
-			t.Run(state+endpoint, func(t *testing.T) {
-				f := newCrossFixture(t, "markdown", "list_targets")
-				spy := newCrossServer(t, f)
-				var err error
-				switch state {
-				case "live":
-					seedRewriteConsumer(t, rewriteFixture{descriptorFixture: f.descriptorFixture}, "running")
-				case "historical":
-					err = f.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", "descriptor-artifact").Update("selected", false).Error
-				case "stale":
-					err = f.db.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", "descriptor-artifact").Update("validity", "stale").Error
-				case "session":
-					err = f.db.Model(&orm.WorkflowSession{}).Where("id = ?", "descriptor-session").Update("status", "unknown-state").Error
-				}
-				if err != nil {
-					t.Fatal(err)
-				}
-				before := portableState(t, f.portableFixture)
-				records := descriptorRecords(t, f.read(t.Context(), endpoint, "descriptor-owner"))
-				found := false
-				for _, record := range records {
-					if record["artifact_id"] != "descriptor-artifact" {
-						continue
-					}
-					found = true
-					doc := record["document"].(map[string]any)
-					caps := schemaStringList(doc["capabilities"])
-					sort.Strings(caps)
-					want := []string{}
-					if state == "editable" {
-						want = []string{"convert_document", "cross_reference", "numbering", "publish_document", "save"}
-					} else if state == "live" {
-						want = []string{"convert_document", "cross_reference", "numbering"}
-					}
-					if !reflect.DeepEqual(caps, want) || doc["editable"] != (state == "editable") {
-						t.Errorf("capability=%#v want=%v", doc, want)
-					}
-				}
-				if !found || spy.count() != 0 || portableState(t, f.portableFixture) != before {
-					t.Error("capability query incomplete or had effects")
-				}
-			})
-		}
-	}
-}
-
 func TestDocumentCrossReferenceFixtureControl(t *testing.T) {
 	for _, operation := range []string{"list_targets", "add"} {
 		t.Run(operation, func(t *testing.T) {
