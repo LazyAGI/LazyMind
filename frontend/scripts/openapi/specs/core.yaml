@@ -1,5 +1,65 @@
 components:
     schemas:
+        publicationTargetCheckResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/PublicationTargetCheck'
+            required:
+                - code
+                - data
+            type: object
+        publicationPreflightResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/PublicationPreflightResult'
+            required:
+                - code
+                - data
+            type: object
+        PublicationVault:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                writable:
+                    type: boolean
+            required:
+                - id
+                - name
+                - writable
+            type: object
+        PublicationTargetCheck:
+            properties:
+                code:
+                    type: string
+                provider:
+                    type: string
+                state:
+                    type: string
+                target_document: {}
+                vaults:
+                    items:
+                        $ref: '#/components/schemas/PublicationVault'
+                    type: array
+            required:
+                - provider
+                - state
+                - vaults
+            type: object
+        PublicationPreflightResult:
+            properties:
+                targets:
+                    items:
+                        $ref: '#/components/schemas/PublicationTargetCheck'
+                    type: array
+            required:
+                - targets
+            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -17480,6 +17540,60 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
+    /api/core/workflow-artifacts/{artifact_id}/publications:preflight:
+        post:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DocumentPublicationGroupRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/publicationPreflightResponse'
+                    description: Target checks
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document changed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Target invalid
+            summary: Check saved document destinations without writing documents
+            tags:
+                - workflow
+    /api/core/document-providers/obsidian/status:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/publicationTargetCheckResponse'
+                    description: Obsidian availability
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Executor unavailable
+            summary: Inspect configured Obsidian vault availability on the executor
+            tags:
+                - workflow
     /api/core/academic/chat-context:
         get:
             parameters:

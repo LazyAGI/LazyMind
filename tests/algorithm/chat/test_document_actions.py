@@ -34,6 +34,8 @@ def test_v1_registry_has_exact_actions_phases_and_immutable_specs():
         "builtin:document.convert_document.v1": {"preview", "execute"},
         "builtin:document.write_document.v1": {"execute"},
         "builtin:document.wechat_draft_url.v1": {"preview"},
+        "builtin:document.publication_target.v1": {"preview"},
+        "builtin:document.reconcile.v1": {"preview"},
     }
     assert specs["builtin:document.sync_document.v1"]["execute"].external_side_effects
     assert all(
@@ -556,3 +558,31 @@ def test_native_conversion_rejects_copy_snapshot():
             {'provider': 'notion', 'document': '# Unsaved'},
             artifact={'data': '# Original'},
         )
+
+
+@pytest.mark.parametrize(('revision', 'writable', 'expected'), [
+    ('changed', True, 'PUBLICATION_TARGET_CHANGED'),
+    ('original', False, 'PUBLICATION_PERMISSION_REQUIRED'),
+    ('original', True, ''),
+])
+def test_github_publication_preflight_checks_remote_revision_and_permission(monkeypatch, revision, writable, expected):
+    from types import SimpleNamespace
+    from lazyllm.tools.writer.data_models import TargetDocument
+    from lazymind.document_tools import resources
+    target = TargetDocument(adapter='github', uri='https://github.com/fixture/repo/blob/main/note.md',
+                            meta={'revision': 'original', 'owner': 'fixture', 'repo': 'repo'})
+    loaded = target.model_copy(deep=True)
+    loaded.meta['revision'] = revision
+    # Expose read capabilities only; attempting a write would fail this fixture.
+    provider = SimpleNamespace(
+        load_document=lambda value: {'target_document': loaded},
+        _target_type=lambda value: 'repository',
+        _fs=lambda kind: SimpleNamespace(_repository=lambda owner, repo: {'permissions': {'push': writable}}),
+    )
+    monkeypatch.setattr(resources, 'get_writer_provider', lambda name: provider)
+    result = invoke_document_action('builtin:document.publication_target.v1', 'preview', {
+        'provider': 'github', 'target_document': target.model_dump(),
+    })
+    assert result['state'] == ('blocked' if expected else 'ready')
+    assert result.get('code', '') == expected
+    assert target.meta['revision'] == 'original'

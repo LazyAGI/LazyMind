@@ -50,6 +50,14 @@ func LoadWriterProviderConnectionConfig(ctx context.Context, provider, userID, c
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Obsidian uses the configured runtime vault and filesystem permissions,
+	// not an OAuth connection or a cloud account fallback.
+	if provider == "obsidian" {
+		if connectionID != "" {
+			return nil, errWriterCredentialLoad
+		}
+		return nil, nil
+	}
 	headers := map[string]string{}
 	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
 		headers["X-LazyMind-Internal-Token"] = token

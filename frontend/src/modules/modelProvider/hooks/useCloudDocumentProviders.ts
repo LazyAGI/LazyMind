@@ -47,6 +47,7 @@ import {
 import { useLocalDataSourceSettings } from "./useLocalDataSourceSettings";
 import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
 import { isDesktopRuntime } from "@/runtime/mode";
+import { WorkflowSessionApi } from "@/modules/chat/utils/request";
 import {
   clearObsidianRoot,
   obsidianConfigStatus,
@@ -112,16 +113,17 @@ export function useCloudDocumentProviders() {
   const loading = localSettings.loading || oauthLoading;
 
   const refreshObsidianConfig = async () => {
-    if (!desktopRuntime) {
-      return;
-    }
     try {
-      const nextConfig = await obsidianConfigStatus();
+      const [local, response] = await Promise.all([
+        desktopRuntime ? obsidianConfigStatus() : Promise.resolve(null),
+        WorkflowSessionApi().getObsidianPublicationStatus({ silentError: true }),
+      ]);
+      const status = response.data.data;
       if (!obsidianTransitionRef.current) {
-        setObsidianConfig(nextConfig);
+        setObsidianConfig({ ...local, configured: status.vaults.length > 0, available: status.state === 'ready' });
       }
     } catch {
-      // Keep the last known configuration when the Desktop bridge is temporarily unavailable.
+      if (!obsidianTransitionRef.current) setObsidianConfig(previous => ({ ...previous, configured: previous?.configured ?? false, available: false }));
     }
   };
 
@@ -575,7 +577,9 @@ export function useCloudDocumentProviders() {
       if (!restartResult.ok) {
         throw restartResult.error || new Error("Failed to restart the Desktop runtime");
       }
-      setObsidianConfig(nextConfig);
+      const status = (await WorkflowSessionApi().getObsidianPublicationStatus({ silentError: true })).data.data;
+      setObsidianConfig({ ...nextConfig, configured: status.vaults.length > 0, available: status.state === 'ready' });
+      if (status.state !== 'ready') throw new Error('Obsidian vault is not writable');
       message.success(t("modelProvider.cloudDocuments.obsidianConnected"));
     } catch {
       message.error(t("modelProvider.cloudDocuments.obsidianConnectFailed"));

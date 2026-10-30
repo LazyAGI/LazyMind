@@ -199,6 +199,9 @@ func RecoverDocumentPublication(ctx context.Context, db *gorm.DB, owner, id stri
 		}
 		return tx.First(result, "id = ?", id).Error
 	})
+	if err == nil && request.Action == "check" && result != nil && result.PublicationID != "" {
+		return reconcileDocumentPublication(ctx, db, owner, result)
+	}
 	return result, err
 }
 

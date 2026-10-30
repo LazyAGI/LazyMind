@@ -18,7 +18,7 @@ from lazyllm.tools.writer.provider import (
     WriterProviderBase,
     WriterProviderDocument,
     WriterProviderWriteOutcomeError,
-    get_writer_provider,
+    get_writer_provider as _get_writer_provider,
     is_ambiguous_write_error,
     list_writer_providers,
     match_writer_provider,
@@ -26,6 +26,7 @@ from lazyllm.tools.writer.provider import (
 )
 from lazyllm.tools.writer.tools import WriterResourceTools, WriterRevisionTools
 from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
+from .obsidian import LazyMindObsidianProvider
 from .artifacts import (
     WRITER_BLOCK_SCHEMA,
     WRITER_IR_SCHEMA,
@@ -42,6 +43,10 @@ _PROVIDER_LOCATOR_RE = re.compile(
     r"(?:https?://|[a-z][a-z0-9_+.-]*:(?://)?)[^\s<>\"'，。；！？、（）【】《》「」『』]+",
     re.IGNORECASE,
 )
+
+
+def get_writer_provider(provider: str):
+    return LazyMindObsidianProvider() if provider == 'obsidian' else _get_writer_provider(provider)
 
 
 def list_document_providers() -> list[dict[str, Any]]:
@@ -126,6 +131,14 @@ def sync_writer_documents(
             )
         )
     changed = bool(patch.hunks or patch.new_title is not None or patch.image_groups is not None)
+    if changed and provider_name == 'obsidian':
+        provider = get_writer_provider(provider_name)
+        converted = provider.convert_document_with_template(revised, target=target, media_assets=library)
+        written = write_document(converted, target.model_dump(), media_assets)
+        candidate = revised.model_copy(deep=True)
+        candidate.metadata['source'] = written['target_document']
+        candidate.revision = written['target_document']['meta']['publication_revision']
+        return {**written, 'persisted_document': candidate.model_dump(), 'patch_set': patch.model_dump()}
     if changed:
         output = WriterResourceTools(
             llm=None,
@@ -430,6 +443,9 @@ def _target_from_document(value: Any) -> TargetDocument | None:
         },
     )
     if target.uri or target.doc_id:
+        source = document.metadata.get('source')
+        if isinstance(source, dict) and source.get('adapter') == target.adapter and source.get('uri') == target.uri:
+            target.meta = {**source.get('meta', {}), **target.meta}
         return target
     source = document.metadata.get('source')
     if not isinstance(source, dict):
@@ -480,6 +496,10 @@ class WriterResourceCapabilities:
             raise ToolExecutionError('stage must be outline, draft, or final.')
         root = _temp_root()
         target = _source_document_target(user_input, stage=stage)
+        if target.adapter == 'obsidian':
+            loaded = get_writer_provider('obsidian').load_document(target, stage=stage)
+            loaded['target_document'] = loaded['target_document'].model_dump()
+            return _json_dumps(loaded)
         result = WriterResourceTools(
             llm=None,
             artifact_store=str(root),
@@ -541,7 +561,12 @@ class WriterResourceCapabilities:
     def create_document(
         self, title: str, parent_uri: str = '', adapter: str = ''
     ) -> str:
-        """Create an empty provider document and return its target binding."""
+        """Create a provider document and return its target binding.
+
+        Obsidian prepares a destination without creating an empty note; pass it
+        to write_document. Call obsidian_status first and ask which vault when
+        ambiguous. Existing filenames require an explicit read before updating.
+        """
         root = _temp_root()
         provider = adapter.strip()
         if not provider and parent_uri.strip():
@@ -550,6 +575,8 @@ class WriterResourceCapabilities:
             raise ToolExecutionError(
                 'adapter is required when parent_uri cannot identify a provider.'
             )
+        if provider == 'obsidian':
+            return _json_dumps(get_writer_provider(provider).create_document(title, parent_uri).model_dump())
         result = WriterResourceTools(
             llm=None,
             artifact_store=str(root),
@@ -583,6 +610,17 @@ class WriterResourceCapabilities:
             raise ToolExecutionError(
                 'source document must contain a cloud target binding.'
             )
+        if target.adapter == 'obsidian':
+            provider = get_writer_provider('obsidian')
+            converted = provider.convert_document_with_template(revised, target=target, media_assets=media_assets)
+            result = write_document(converted, target.model_dump(),
+                                    media_assets.model_dump() if media_assets else None)
+            revised.metadata['source'] = result['target_document']
+            revised.revision = result['target_document']['meta']['publication_revision']
+            return _json_dumps({'publish_result': result,
+                                'draft_document': revised.model_dump(exclude_defaults=True),
+                                'provider': 'obsidian', 'representation': 'ir',
+                                'published_link': result['write_result']['published_link']})
         result = WriterResourceTools(
             llm=None,
             artifact_store=str(root),
@@ -672,6 +710,14 @@ class WriterResourceCapabilities:
             'published_link': published_link,
             'target_document': payload['target_document'],
         })
+
+    def obsidian_status(self) -> str:
+        """List configured Obsidian vault IDs before creation. Ask the user to
+        choose if multiple vaults are returned; never choose the first vault.
+        Use obsidian://<vault_id>/<relative-file.md> as the creation parent_uri.
+        Missing permissions or target information must be resolved with the user.
+        """
+        return _json_dumps(get_writer_provider('obsidian').status())
 
 
 def resolve_provider_targets(

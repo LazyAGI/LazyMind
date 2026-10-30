@@ -131,6 +131,12 @@ func newDeliveryFixture(t *testing.T, representation string) (descriptorFixture,
 				return
 			}
 			switch call.Reference {
+			case "builtin:document.publication_target.v1":
+				if call.Phase != "preview" {
+					t.Error("target checks must not execute writes")
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"state": "ready", "target_document": s.target, "vaults": []any{}}})
+				return
 			case "builtin:document.convert_document.v1":
 				if call.Phase != "preview" {
 					t.Error("conversion must use pure preview phase")
@@ -1093,6 +1099,9 @@ func validDeliveryCall(c deliveryCall) bool {
 	allowed := map[string]bool{}
 	required := []string{}
 	switch c.Reference {
+	case "builtin:document.publication_target.v1":
+		allowed = map[string]bool{"provider": true, "title": true, "parent_uri": true, "target_document": true}
+		required = []string{"provider"}
 	case "builtin:document.render_document.v1":
 	case "builtin:document.save_document.v1":
 		allowed = map[string]bool{"base_artifact": true, "numbering_update": true}

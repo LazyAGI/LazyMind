@@ -2,22 +2,31 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CloudConnectionResponse } from '@/api/generated/auth-client';
 import { dataSourceCloudOauthApi } from '@/modules/dataSource/api/clients';
 import { getCloudConnectionItems } from '@/modules/dataSource/mappers/cloudConnection';
+import { WorkflowSessionApi } from '@/modules/chat/utils/request';
+import type { PublicationTargetCheck } from '@/api/generated/core-client';
 
 const cloudProviders = new Set(['feishu', 'github', 'googledrive', 'notion', 'wechat']);
-export type ProviderAvailability = 'checking' | 'ready' | 'authorize' | 'chat-disabled' | 'failed';
+export type ProviderAvailability = 'checking' | 'ready' | 'authorize' | 'chat-disabled' | 'failed' | 'configure';
 
 export function useWriterProviderAvailability(providers: string[]) {
   const [states, setStates] = useState<Record<string, ProviderAvailability>>({});
   const generation = useRef(0);
   const [accounts, setAccounts] = useState<Record<string, CloudConnectionResponse[]>>({});
+  const [obsidian, setObsidian] = useState<PublicationTargetCheck>();
   const signature = providers.join(',');
   const refresh = useCallback(async () => {
     const ids = signature.split(',').filter(Boolean);
     const request = ++generation.current;
     setAccounts({});
-    setStates(Object.fromEntries(ids.map(id => [id, cloudProviders.has(id) ? 'checking' : 'ready'])));
-    const results = await Promise.all(ids.filter(id => cloudProviders.has(id)).map(async id => {
+    setStates(Object.fromEntries(ids.map(id => [id, 'checking'])));
+    const results = await Promise.all(ids.filter(id => cloudProviders.has(id) || id === 'obsidian').map(async id => {
       try {
+        if (id === 'obsidian') {
+          const response = await WorkflowSessionApi().getObsidianPublicationStatus({ silentError: true });
+          const status = response.data.data;
+          if (request === generation.current) setObsidian(status);
+          return [id, status.state === 'ready' ? 'ready' : 'configure'] as const;
+        }
         const response = await dataSourceCloudOauthApi.listConnectionsApiAuthserviceV1CloudConnectionsGet({ provider: id, status: null });
         const connections = getCloudConnectionItems(response.data);
         if (request === generation.current) setAccounts(current => ({ ...current, [id]: connections.filter(item => item.status === 'ACTIVE' && item.can_use_chat === true) }));
@@ -43,5 +52,5 @@ export function useWriterProviderAvailability(providers: string[]) {
     window.addEventListener('focus', onFocus);
     return () => { generation.current++; window.removeEventListener('focus', onFocus); };
   }, [refresh]);
-  return { states, accounts, refresh };
+  return { states, accounts, obsidian, refresh };
 }
