@@ -1,0 +1,29 @@
+{
+  "task_id": "9027eae4-d01f-4c4f-994a-8ce03d4426aa",
+  "note": "Only tool events/errors; internal reasoning and model text omitted. Arguments hashed; artifact contents recorded separately. Event counts are not model calls.",
+  "tool_calls": {
+    "save_artifacts": 1
+  },
+  "events": [
+    {
+      "event_index": 55,
+      "type": "tool_calls",
+      "id": "call_00_8NoBR2oJn0NW9wJGUA1w6784",
+      "name": "save_artifacts",
+      "arguments_sha256": "adab1b0ece0a45910e034ecdb493f3344da1fc2bec771404e3227f2f98344699",
+      "arguments_bytes": 46207
+    },
+    {
+      "event_index": 56,
+      "type": "tool_results",
+      "task_id": "9027eae4-d01f-4c4f-994a-8ce03d4426aa",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"saved_count\": 1, \"results\": [{\"status\": \"ok\", \"key\": \"competitive_brief\", \"message\": \"Artifact 'competitive_brief' saved.\", \"path\": \"[LOCAL_PATH_REDACTED]\"}]}}",
+          "tool_call_id": "call_00_8NoBR2oJn0NW9wJGUA1w6784"
+        }
+      ]
+    }
+  ]
+}

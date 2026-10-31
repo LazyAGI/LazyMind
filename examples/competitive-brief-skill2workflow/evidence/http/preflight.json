@@ -1,0 +1,38 @@
+{
+  "started_at": "2026-10-27T03:37:53.185063+00:00",
+  "elapsed_seconds": 0.01,
+  "method": "POST",
+  "path": "/workflow-conversions:preflight",
+  "http_status": 200,
+  "response": {
+    "code": 0,
+    "message": "ok",
+    "data": {
+      "checks": [
+        {
+          "code": "REQUIRED_WORKFLOW_CAPABILITY",
+          "severity": "warning",
+          "message": "Skill 依赖网页搜索能力：Skill 需要搜索引擎检索网页或实时信息。",
+          "suggestion": "转换时会尝试把该能力声明到 Workflow 步骤中；转换后请确认对应步骤可正常执行。",
+          "path": "SKILL.md"
+        },
+        {
+          "code": "REQUIRED_CAPABILITY_CONFIG_MISSING",
+          "severity": "warning",
+          "message": "Skill 依赖网页搜索能力，但当前运行配置可能不可用。",
+          "suggestion": "请先在设置中配置对应工具或模型；未配置时可继续使用原 Skill，或转换后手动调整 Workflow。",
+          "path": "SKILL.md"
+        }
+      ],
+      "file_count": 2,
+      "revision_id": "3d28b649-1d99-4232-8872-2b0c02469a57",
+      "revision_no": 1,
+      "skill_id": "c4413015-1b14-4656-9166-a90318ffa267",
+      "skill_md_len": 13128,
+      "skill_name": "competitive-brief",
+      "status": "warning",
+      "summary": "Skill 可以转换，但部分内容可能被忽略或需要转换后调整。",
+      "tree_hash": "1e4b35f76bce88ba103b9ed2a0486c166372ea11730e3608dfa740a1eb77f508"
+    }
+  }
+}

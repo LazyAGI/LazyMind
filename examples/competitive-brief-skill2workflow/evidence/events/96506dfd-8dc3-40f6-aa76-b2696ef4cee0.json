@@ -1,0 +1,29 @@
+{
+  "task_id": "96506dfd-8dc3-40f6-aa76-b2696ef4cee0",
+  "note": "Only tool events/errors; internal reasoning and model text omitted. Arguments hashed; artifact contents recorded separately. Event counts are not model calls.",
+  "tool_calls": {
+    "save_artifacts": 1
+  },
+  "events": [
+    {
+      "event_index": 16,
+      "type": "tool_calls",
+      "id": "call_00_p1n9fNyCkXf6XvQ7ZMJs1333",
+      "name": "save_artifacts",
+      "arguments_sha256": "30bcbefb3a7aa53fa369a8aae3dbc86214cbf57896365652c08f87b5cd08bd35",
+      "arguments_bytes": 682
+    },
+    {
+      "event_index": 17,
+      "type": "tool_results",
+      "task_id": "96506dfd-8dc3-40f6-aa76-b2696ef4cee0",
+      "tool_results": [
+        {
+          "name": "save_artifacts",
+          "result": "{\"ok\": true, \"value\": {\"status\": \"ok\", \"saved_count\": 1, \"results\": [{\"status\": \"ok\", \"key\": \"battlecard\", \"message\": \"Artifact 'battlecard' saved.\", \"path\": \"[LOCAL_PATH_REDACTED]\"}]}}",
+          "tool_call_id": "call_00_p1n9fNyCkXf6XvQ7ZMJs1333"
+        }
+      ]
+    }
+  ]
+}

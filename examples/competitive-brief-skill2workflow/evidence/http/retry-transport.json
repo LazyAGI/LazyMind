@@ -1,0 +1,5 @@
+{
+  "request": "../requests/retry-analysis-request.json",
+  "outcome": "socket.timeout after 90 seconds; no response body recorded",
+  "followup": "projection-retry.json confirms succeeded; mutation was not resent"
+}

@@ -1,0 +1,18 @@
+{
+  "platform": "macOS-26.3-arm64-arm-64bit",
+  "architecture": "arm64",
+  "audited_main": "71a0e5a829f1ef8d9a5d9e9ce720386ba3c69d0e",
+  "serving_core_vcs_revision": null,
+  "serving_core_sha256": "64ac02b3249c704d2daf6ff69e14a3f19b537edd4b346f7691fbda0281a15e70",
+  "serving_core_go_version": "go1.25.11",
+  "workflow_model": {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "ready": true
+  },
+  "baseline_cli_version": "codex-cli 0.155.0-alpha.9",
+  "baseline_model_id": null,
+  "baseline_model_note": "--ignore-user-config; CLI default model not exposed by JSON events",
+  "same_model_comparison": false,
+  "private_inputs_used": false
+}
