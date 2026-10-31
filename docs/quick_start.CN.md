@@ -107,14 +107,14 @@ export LAZYMIND_OPENSEARCH_PASSWORD=your-password
 export LAZYMIND_FRONTEND_PORT=8080
 ```
 
-### 5. 鉴权凭据（生产环境）
+### 5. 鉴权凭据
 
-生产部署前请修改以下变量：
+执行 `make up` 或 `make up-build` 前必须设置以下变量，Compose 不再提供公开默认值：
 
 ```bash
-export LAZYMIND_JWT_SECRET=your-strong-secret
+export LAZYMIND_JWT_SECRET="$(openssl rand -base64 32)"
 export LAZYMIND_BOOTSTRAP_ADMIN_USERNAME=admin
-export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD=your-password
+export LAZYMIND_BOOTSTRAP_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 ```
 
 ### 6. 使用 `.env` 文件

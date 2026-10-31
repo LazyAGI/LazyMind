@@ -26,6 +26,7 @@ from core.security import (
     hash_refresh_token,
     jwt_ttl_seconds,
     refresh_token_expires_at,
+    validate_jwt_secret,
 )
 from models import User
 from repositories import RoleRepository, UserRepository
@@ -103,6 +104,7 @@ def _run_alembic_upgrade() -> None:
 
 @router.on_event('startup')
 def on_startup():
+    validate_jwt_secret()
     _run_alembic_upgrade()
     with SessionLocal() as db:
         bootstrap(db)
