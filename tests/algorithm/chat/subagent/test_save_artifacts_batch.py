@@ -32,9 +32,9 @@ def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context, monkeypatch,
 
     monkeypatch.setattr(tools, 'LARGE_ARTIFACT_THRESHOLD', threshold)
     ctx, events = batch_context
-    report = ('# 2026 年报告\r\n\r\n## 一、背景\r\n### 1.1 方法 ###\r\n'
-              '1. 正文列表\r\n\r\n## 第 2 页｜结果\r\n## 2026 年展望\r\n## 3D 方法\r\n'
-              '```markdown\r\n## 1. 代码示例\r\n```\r\n')
+    report = ('# 2026 年报告\n\n## 一、背景\n### 1.1 方法 ###\n'
+              '1. 正文列表\n\n## 第 2 页｜结果\n## 2026 年展望\n## 3D 方法\n'
+              '```markdown\n## 1. 代码示例\n```\n')
     expected = (report.replace('## 一、背景', '## 背景').replace('### 1.1 方法', '### 方法')
                 .replace('## 第 2 页｜结果', '## 结果'))
     result = tools.save_artifacts([
@@ -47,10 +47,10 @@ def test_batch_saves_mixed_outputs_and_repeated_keys(batch_context, monkeypatch,
     assert [event['slot'] for event in events] == ['report', 'summary', 'images', 'images']
     assert [event['seq'] for event in events] == [1, 1, 5, 6]
     report_value = events[0]['value']
-    saved = (Path(report_value['path']).read_bytes().decode('utf-8')
+    saved = (Path(report_value['path']).read_text(encoding='utf-8')
              if 'path' in report_value else report_value['text'])
     assert saved == expected
-    assert ctx.read_draft('report') == (expected.replace('\r\n', '\n'), 'text')
+    assert ctx.read_draft('report') == (expected, 'text')
     rendered = render_document(saved)['export_document']
     assert '## 1. 背景' in rendered
     assert '### 1.1. 方法' in rendered
