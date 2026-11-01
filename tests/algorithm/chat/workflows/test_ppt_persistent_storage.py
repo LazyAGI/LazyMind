@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -211,6 +212,9 @@ def test_outline_retry_reuses_deck_style_and_completed_outline(monkeypatch, tmp_
     fail_outline = True
     fail_publish = True
     deck_paths = []
+    published = []
+    publish_outline = tools._publish_deck_outline
+    monkeypatch.setattr(tools, '_save_artifact', lambda **kwargs: published.append(kwargs) or {'status': 'ok'})
 
     def stage(deck_dir, stage, sample=None):
         nonlocal fail_outline
@@ -224,7 +228,7 @@ def test_outline_retry_reuses_deck_style_and_completed_outline(monkeypatch, tmp_
             if fail_outline:
                 fail_outline = False
                 return {'ok': False, 'value': 'upstream timeout'}
-            (deck / 'outline.json').write_text('{"pages":[{"page_no":1}]}', encoding='utf-8')
+            (deck / 'outline.json').write_text('{"pages":[{"page_no":1,"title":"Background"}]}', encoding='utf-8')
         return {'status': 'ok'}
 
     def publish(deck):
@@ -232,7 +236,7 @@ def test_outline_retry_reuses_deck_style_and_completed_outline(monkeypatch, tmp_
         if fail_publish:
             fail_publish = False
             return {'ok': False, 'error': 'temporary publication failure'}
-        return {'ok': True, 'page_count': 1}
+        return publish_outline(deck)
 
     monkeypatch.setattr(tools, 'ppt_run_stage', stage)
     monkeypatch.setattr(tools, '_publish_deck_outline', publish)
@@ -256,6 +260,36 @@ def test_outline_retry_reuses_deck_style_and_completed_outline(monkeypatch, tmp_
     assert len(set(deck_paths)) == 1
     assert (deck / 'images' / 'preserved.png').read_bytes() == b'original image'
     assert not list((tmp_path / '.outline_builds').glob('*.json'))
+    from lazymind.document_tools.artifacts import render_document
+
+    assert '## Background' in published[-1]['value']
+    assert '## 1. Background' in render_document(published[-1]['value'])['export_document']
+    result = tools._publish_text_outline(deck, '# Deck\n\n## 一、Background\n\n1. Keep this list.\n')
+    assert result['ok'] and result['page_count'] == 1
+    expected = '# Deck\n\n## Background\n\n1. Keep this list.\n'
+    assert published[-1]['value'] == expected
+    assert (deck / 'outline_draft.md').read_text() == expected
+
+
+def test_ordered_publication_inserts_only_one_new_stable_index(monkeypatch):
+    tools = _load_ppt_tools()
+    order = [10, 11, 12, 13]
+    reserve = Mock(return_value=99)
+    save = Mock(return_value={'status': 'ok'})
+    monkeypatch.setattr(tools, '_reserve_ui_slot_position', reserve)
+    monkeypatch.setattr(tools, '_save_artifact', save)
+    for _ in range(2):
+        result = tools._publish_ordered_ppt_artifact(
+            slot='slide_outline', page_no=4, value='## 四、Inserted\n\n1. Keep this point.',
+            content_type='text', source_tool='ppt_publish_outline', caption='Inserted',
+            order_list=order, insert_before=4, expected_total=5,
+        )
+        assert result['status'] == 'ok'
+        assert order == [10, 11, 12, 99, 13]
+        assert save.call_args.kwargs['publisher_list_index'] == 99
+        assert save.call_args.kwargs['value'] == '## Inserted\n\n1. Keep this point.'
+    reserve.assert_called_once()
+    assert reserve.call_args.kwargs['value'] == save.call_args.kwargs['value']
 
 
 def test_legacy_standard_deck_recovers_without_recreating_assets(monkeypatch, tmp_path):
