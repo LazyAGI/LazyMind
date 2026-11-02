@@ -343,6 +343,14 @@ func ResolveProviderRuntimeConfiguration(ctx context.Context, db *gorm.DB, group
 			return err
 		}
 		if parent.ActiveKeyID == "" {
+			// Initialization skips unreadable groups so settings can recover them.
+			// Preserve the requested credential's error for runtime compatibility;
+			// only an initialized empty selection means an explicit disable.
+			if !parent.ActiveKeyInitialized {
+				if _, err := apiKeyForGroup(nil, &requested); err != nil {
+					return err
+				}
+			}
 			hasKeys, err := hasStoredProviderKeys(tx, parent)
 			if err != nil {
 				return err
