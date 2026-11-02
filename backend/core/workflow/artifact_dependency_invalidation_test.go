@@ -287,7 +287,7 @@ func writerOutlineNumberingFixture(t *testing.T) artifactDependencyFixture {
 		id    string
 		data  map[string]any
 	}{
-		{&orm.WorkflowSession{}, "session-dependency", map[string]any{"plugin_id": "writer-workflow"}},
+		{&orm.WorkflowSession{}, "session-dependency", map[string]any{"WorkflowID": "writer-workflow"}},
 		{&orm.WorkflowHumanArtifact{}, fixture.sourceHumanID, map[string]any{
 			"slot": "outline_document", "content_type": "text/markdown",
 			"value": json.RawMessage(`{"schema":"text/markdown","data":"# Title\n\n## Section\n\nBody.\n"}`),
