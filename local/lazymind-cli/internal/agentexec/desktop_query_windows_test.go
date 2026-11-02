@@ -118,3 +118,37 @@ func TestDesktopBindingInvalidatesSharedPackageCache(t *testing.T) {
 	}
 	check(3)
 }
+
+func TestExplicitBindingsSurviveUnavailablePackageCache(t *testing.T) {
+	for _, target := range []BindingTarget{CodexDesktop, CodexCLI} {
+		t.Run(string(target), func(t *testing.T) {
+			root := t.TempDir()
+			t.Setenv("LOCALAPPDATA", root)
+			t.Setenv("LAZYMIND_HOME", filepath.Join(root, "home"))
+			// A file blocks creation of the cache directory without relying on
+			// Windows permission semantics or an elevated test user's privileges.
+			if err := os.WriteFile(filepath.Join(root, "LazyMind"), []byte("blocked"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := InvalidateDesktopApplications(context.Background()); err == nil {
+				t.Fatal("fixture must make the package cache unavailable")
+			}
+			executable := filepath.Join(root, "Selected.exe")
+			if err := os.WriteFile(executable, []byte("fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := SetExecutableBinding(target, executable); err != nil {
+				t.Fatalf("valid explicit binding rejected because cache is unavailable: %v", err)
+			}
+			if path, found, err := ExecutableBinding(target); err != nil || !found || path != executable {
+				t.Fatalf("binding not persisted: path=%q found=%v err=%v", path, found, err)
+			}
+			if err := ClearExecutableBinding(target); err != nil {
+				t.Fatalf("clearing binding depends on package cache: %v", err)
+			}
+			if _, found, err := ExecutableBinding(target); err != nil || found {
+				t.Fatalf("binding not cleared: found=%v err=%v", found, err)
+			}
+		})
+	}
+}
