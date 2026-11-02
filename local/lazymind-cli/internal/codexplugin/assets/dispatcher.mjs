@@ -733,19 +733,74 @@ function readPresentationSession(readView = readCodexView) {
 
 //#endregion
 //#region src/presentation-surface.ts
-/** Locate the desktop's existing browser service by capabilities, not minified names. */
-async function prepareCodexBrowser() {
+/** Locate the existing browser service through the desktop's loaded entry modules. */
+async function prepareCodexBrowser(loadModule = (url) => import(
+	/* @vite-ignore */
+	url
+)) {
 	const host = window;
 	if (typeof host.__lazymindCodexBrowser?.pages?.getWebview === "function") return;
-	const link = Array.from(document.querySelectorAll("link[href]")).find((element) => /^app:\/\/-\/assets\/app-initial-[^/]+\.js$/.test(element.href));
-	if (!link) throw Error("Codex browser module is unavailable");
-	const exports = await import(
-		/* @vite-ignore */
-		link.href
-);
-	const manager = Object.values(exports).find((value) => value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function");
-	if (!manager) throw Error("Codex native browser interface is unavailable");
-	host.__lazymindCodexBrowser = manager;
+	const key = "__lazymindCodexBrowserDiscovery";
+	const previous = host[key];
+	if (previous?.pending) return previous.pending;
+	if (previous?.retryAfter > Date.now()) throw Error("Codex browser discovery is cooling down");
+	const state = {
+		pending: void 0,
+		retryAfter: 0
+	};
+	host[key] = state;
+	state.pending = (async () => {
+		const asset = /^app:\/\/-\/assets\/(?:index|app-main|app-initial)-[a-zA-Z0-9_-]+\.js$/;
+		const urls = Array.from(document.querySelectorAll("link[href],script[type=\"module\"][src]")).map((element) => "href" in element ? element.href : element.src).filter((url) => asset.test(url));
+		const queue = [...new Set(urls)].sort((a, b) => Number(!a.includes("/app-initial-")) - Number(!b.includes("/app-initial-")));
+		const seen = /* @__PURE__ */ new Set();
+		for (let count = 0; queue.length && count < 4; count++) {
+			const url = queue.shift();
+			if (seen.has(url)) continue;
+			seen.add(url);
+			if (url.includes("/app-initial-")) {
+				const exports = await loadModule(url);
+				const manager = Object.values(exports).find((value) => value && typeof value === "object" && typeof value.pages?.getWebview === "function" && typeof value.pages?.disposeHost === "function" && typeof value.getSnapshot === "function");
+				if (!manager) throw Error("Codex native browser interface is unavailable");
+				host.__lazymindCodexBrowser = manager;
+				return;
+			}
+			const response = await fetch(url, {
+				signal: AbortSignal.timeout(2e3),
+				redirect: "error"
+			});
+			if (!response.ok) throw Error("Codex browser entry module is unavailable");
+			const reader = response.body?.getReader();
+			if (!reader) throw Error("Codex browser entry module is unreadable");
+			let source = "", size = 0;
+			const decoder = new TextDecoder();
+			try {
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					size += value.byteLength;
+					if (size > 64 * 1024) throw Error("Codex browser entry module exceeds discovery limit");
+					source += decoder.decode(value, { stream: true });
+				}
+			} finally {
+				await reader.cancel().catch(() => {});
+				reader.releaseLock();
+			}
+			for (const match of source.matchAll(/["'`](\.\/app-(?:main|initial)-[a-zA-Z0-9_-]+\.js)["'`]/g)) {
+				const next = new URL(match[1], url).href;
+				if (asset.test(next) && !seen.has(next) && !queue.includes(next)) queue.push(next);
+			}
+		}
+		throw Error("Codex browser module is unavailable");
+	})();
+	try {
+		await state.pending;
+	} catch (error) {
+		state.retryAfter = Date.now() + 5e3;
+		throw error;
+	} finally {
+		state.pending = void 0;
+	}
 }
 /** Native browser guest: its own process and CSP, using the desktop's registration. */
 function createCodexSurface(target, url, receive, changed) {

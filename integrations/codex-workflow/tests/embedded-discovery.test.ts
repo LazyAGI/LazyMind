@@ -30,3 +30,26 @@ it('the shipped renderer probe does not evaluate a self-expanding signal family'
 
   expect(result).toEqual({ status: { ready: false }, reads: 0, cells: 1 })
 })
+
+it('the shipped panel discovers indirectly loaded browser modules', async () => {
+  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const start = bundle.indexOf('async function prepareCodexBrowser(')
+  const end = bundle.indexOf('\nfunction createCodexSurface(', start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  const host: any = {}
+  const fetched: string[] = [], imported: string[] = []
+  const manager = {pages:{getWebview(){},disposeHost(){}},getSnapshot(){}}
+  await runInNewContext(`${bundle.slice(start,end)};prepareCodexBrowser(load)`, {
+    window:host, document:{querySelectorAll:()=>[{src:'app://-/assets/index-current.js'}]},
+    URL, AbortSignal, TextDecoder,
+    fetch: async (url:string) => {
+      fetched.push(url)
+      return new Response(url.includes('/index-') ? 'import("./app-main-current.js")' : 'import{a}from"./app-initial-current.js"')
+    },
+    load:async (url:string) => {imported.push(url);return {minified:manager}},
+  }, {timeout:250})
+  expect(fetched).toEqual(['app://-/assets/index-current.js','app://-/assets/app-main-current.js'])
+  expect(imported).toEqual(['app://-/assets/app-initial-current.js'])
+  expect(host.__lazymindCodexBrowser).toBe(manager)
+})
