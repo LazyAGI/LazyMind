@@ -66,20 +66,20 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
   const { t, i18n } = useTranslation();
   const zh = (i18n?.resolvedLanguage || i18n?.language || "en").startsWith("zh");
   const copy = zh ? {
-    assistant:"论文助手", hint:"细读论文，随时提问。", ready:"论文已就绪", scope:"回答基于当前文档", quote:"原文摘录", page:"第", remove:"移除原文摘录", companion:"阅读助手", welcome:"读懂这篇论文", intro:"探索核心观点、核对证据，或选中原文提出具体问题。",
+    assistant:"论文助手", hint:"细读论文，随时提问。", ready:"论文已就绪", scope:"回答基于当前文档", quote:"原文摘录", page:"第", remove:"移除原文摘录", companion:"阅读助手", welcome:"从方法开始读懂论文", intro:"沿着方法走一遍，再回原文核对设计、实验和边界。点击下方问题可先编辑再发送。",
     prompts:[
-      ["核心贡献", "理解创新点及其意义", "请解释这篇论文的核心贡献，以及它与已有工作的区别。请引用原文作为依据。"],
-      ["解释方法", "逐步理解研究方法", "请逐步解释这篇论文的方法、关键假设，并引用相关章节。"],
-      ["关键结果", "核对研究证据", "请总结这篇论文的关键结果，包括评估设置和支持结论的证据。"],
-      ["局限性", "了解尚未解决的问题", "这篇论文有哪些局限和开放问题？请区分论文明确陈述的局限与推测。"],
+      ["方法怎么运作", "沿输入到输出走一遍", "请只基于当前论文解释方法如何运作。优先用论文自己的任务实例说明输入和预期输出；若没有实例，可用明确标注的教学示例。再按实际顺序讲清每一步的操作、输出及与下一步的连接；指出作者改变了哪个环节、为什么这样改。区分训练和推理；若不是训练型方法，就说明执行过程和运行条件。优先引用方法图与对应章节，找不到依据时明确说未找到。"],
+      ["关键设计为何有效", "聚焦机制与必要公式", "请从当前论文选出最关键的1—3处机制，不要平均复述所有模块。逐一说明它解决的具体困难、如何连接前后步骤，以及原文给出的设计理由。若涉及核心公式，先说明计算目的，再解释主要符号、各项作用和训练目标。标出相关图、公式或章节；区分作者的解释和基于原文的推断。"],
+      ["实验支持了什么", "核对主结果与消融", "请核查当前论文中最能检验核心设计的主实验和消融。保留数据集、指标、baseline、backbone及其他关键实验条件，给出原文报告的数字和图表出处；分别说明结果直接支持什么、仍不能证明什么。不要混用不同实验条件计算提升，也不要把作者的解释当成实验结论；缺少消融或比较条件时请说明。"],
+      ["边界与待核查处", "分清限制、证据和推断", "请结合当前论文的方法假设和实验覆盖范围，说明适用条件与尚未验证之处。分开列出作者明确陈述的限制、实验直接显示的边界、以及你的分析或推断，并给出对应原文位置。未找到限制时不要虚构通用批评；最后提出2—3个值得回原文核查的具体问题。"],
     ],
   } : {
-    assistant:"Paper assistant", hint:"Read closely. Ask freely.", ready:"Paper ready", scope:"Answers grounded in this document", quote:"Source quote", page:"Page", remove:"Remove source quote", companion:"Your reading companion", welcome:"Make sense of this paper", intro:"Explore its ideas, follow the evidence, or select a passage to ask a focused question.",
+    assistant:"Paper assistant", hint:"Read closely. Ask freely.", ready:"Paper ready", scope:"Answers grounded in this document", quote:"Source quote", page:"Page", remove:"Remove source quote", companion:"Your reading companion", welcome:"Understand the method first", intro:"Follow the method, then check its design, evidence, and limits against the paper. Select a question to edit it before sending.",
     prompts:[
-      ["Core contribution", "What is new, and why it matters", "Explain the core contribution of this paper and how it differs from prior work. Cite supporting passages."],
-      ["Explain the method", "Walk through the approach", "Walk me through the method in this paper step by step. Explain the key assumptions and cite the relevant sections."],
-      ["Key results", "Understand the evidence", "Summarize the key results of this paper, including the evaluation setup and evidence supporting its claims."],
-      ["Limitations", "Look beyond the headline", "What are the limitations and open questions in this paper? Distinguish stated limitations from your own inferences."],
+      ["How the method works", "Trace input to output", "Use only the current paper to explain how the method works. Start with the paper's own task example, input, and expected output; if it has no example, label any teaching example as your own. Then trace each step in order: its operation, output, and link to the next step. Identify what the authors changed and why. Distinguish training from inference; for a non-training method, explain its execution and operating conditions. Cite the method figure and relevant sections when available; say when a detail cannot be found."],
+      ["Why these designs", "Focus on mechanisms and equations", "Choose the 1–3 mechanisms most important to the current paper's method rather than summarizing every module. For each, explain the difficulty it addresses, how it connects to adjacent steps, and the authors' rationale. For a central equation, explain its purpose before defining the main symbols, terms, and training objective. Cite the relevant figure, equation, or section, and distinguish the authors' explanation from your inference."],
+      ["What the experiments show", "Check main results and ablations", "Examine the main results and ablations that test the current paper's central design. Preserve datasets, metrics, baselines, backbones, and other relevant experimental conditions. Quote the reported numbers with figure or table references, then separate what the results directly support from what they do not establish. Do not compute improvements across different settings or present the authors' interpretation as an experimental finding. State when ablations or comparison details are missing."],
+      ["Where it may not apply", "Separate evidence from inference", "Using the current paper's assumptions and experimental coverage, explain its operating conditions and unresolved questions. Separate limitations explicitly stated by the authors, boundaries directly visible in the experiments, and your own analysis or inference; give source locations for each. Do not invent generic limitations when the paper gives none. End with 2–3 specific questions worth checking in the original paper."],
     ],
   };
   const isPaper = paperMode;
@@ -401,7 +401,7 @@ const PdfTemporaryChat = forwardRef<PdfTemporaryChatHandle, PdfTemporaryChatProp
             <p>{copy.intro}</p>
             <div className="paper-assistant-prompts">
               {copy.prompts.map(([title, description, prompt]) => <button type="button" key={title} onClick={() => chatRef.current?.prepareMessage({ text: prompt, appendCitations: true })}>
-                <strong>{title}<span aria-hidden="true">↗</span></strong><span>{description}</span>
+                <strong>{title}<span aria-hidden="true">＋</span></strong><span>{description}</span>
               </button>)}
             </div>
           </section> : undefined}

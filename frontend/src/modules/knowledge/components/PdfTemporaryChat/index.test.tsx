@@ -357,7 +357,7 @@ it.each([ChatConversationsRequestActionEnum.ChatActionNext,ChatConversationsRequ
 describe("paper assistant workspace", () => {
   it("prepares each suggested question without sending it", () => {
     render(<PdfTemporaryChat datasetId="d" documentId="suggestions" fileName="paper.pdf" paperMode onClose={vi.fn()} />);
-    for (const label of ["Core contribution", "Explain the method", "Key results", "Limitations"]) {
+    for (const label of ["How the method works", "Why these designs", "What the experiments show", "Where it may not apply"]) {
       fireEvent.click(screen.getByRole("button", { name: new RegExp(label) }));
       expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: expect.any(String), appendCitations: true });
     }
@@ -395,9 +395,28 @@ it("localizes paper assistant and suggested questions in Chinese", async () => {
   render(<PdfTemporaryChat datasetId="d" documentId="p" fileName="p.pdf" paperMode onClose={vi.fn()} />);
   await screen.findByText("论文已就绪");
   expect(screen.getByText("论文助手")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", {name:/核心贡献/}));
-  expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({text: expect.stringContaining("请解释这篇论文"), appendCitations:true});
+  fireEvent.click(screen.getByRole("button", {name:/方法怎么运作/}));
+  expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({text: expect.stringContaining("输入"), appendCitations:true});
   expect(screen.queryByText("Make sense of this paper")).toBeNull();
+});
+
+it("grounds each paper prompt in the current paper and asks for distinct evidence", () => {
+  locale.language = "zh-CN";
+  render(<PdfTemporaryChat datasetId="d" documentId="grounded-prompts" fileName="paper.pdf" paperMode onClose={vi.fn()} />);
+  const cases = [
+    ["方法怎么运作", ["输入", "输出", "训练", "推理"]],
+    ["关键设计为何有效", ["机制", "公式", "原文"]],
+    ["实验支持了什么", ["数据集", "指标", "消融", "实验条件"]],
+    ["边界与待核查处", ["作者", "实验", "推断", "不要虚构"]],
+  ] as const;
+  for (const [label, terms] of cases) {
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(label) }));
+    const prepared = chatActions.prepareMessage.mock.lastCall?.[0];
+    expect(prepared).toMatchObject({ appendCitations: true });
+    for (const term of terms) expect(prepared.text).toContain(term);
+    expect(prepared.text).toContain("当前论文");
+  }
+  expect(chatActions.sendMessage).not.toHaveBeenCalled();
 });
 
 it('prepares the selection question with its citation without sending it',async()=>{
