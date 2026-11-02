@@ -64,7 +64,7 @@ it('explains a standard Attention operator even when the model omitted its defin
  render(<InteractiveFormula latex={String.raw`\operatorname{Attention}(Q,K,V)`} sourceKey="attention" definitions={[]} evidence={[]} compactEvidence onNavigate={vi.fn()}/>);
  fireEvent.click(screen.getByRole('button',{name:String.raw`Symbol: \operatorname{Attention}`}));
  expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('queries and keys');
- expect(screen.getByText('General math meaning')).toBeInTheDocument();
+ expect(screen.queryByText('General math meaning')).not.toBeInTheDocument();
 });
 
 it('keeps the compact popup focused on the symbol meaning',()=>{
@@ -89,4 +89,11 @@ it('keeps real CC contrastive loss visually intact with independently operable e
  expect(view.container.querySelector('.pdf-interactive-equation .katex-html')?.textContent).toBe(expected.querySelector('.katex-html')?.textContent);
  expect(view.container.querySelector('.pdf-interactive-equation [role="button"] [role="button"]')).toBeNull();
  fireEvent.keyDown(temperatures[0],{key:'Enter'});expect(screen.getByText('Source temperature definition')).toBeInTheDocument();
+});
+
+it('uses matching definitions instead of blocking on duplicate notation',()=>{
+ render(<InteractiveFormula latex="x" sourceKey="duplicate" definitions={[{symbol:'x',meaning:'Input vector',evidence_ids:[],inferred:true},{symbol:'x',meaning:'Input vector',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Symbol: x'}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Input vector');
+ expect(screen.queryByText(/Multiple definitions match/)).not.toBeInTheDocument();
 });

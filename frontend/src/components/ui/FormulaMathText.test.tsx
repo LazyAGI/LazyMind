@@ -20,3 +20,9 @@ describe('safe explanatory math',()=>{
  expect(view.container).toHaveTextContent('<img src=x onerror=alert(1)>');
  });
 });
+
+it('renders bare indexed variables from older explanations without changing snake_case prose',()=>{
+ const view=render(<FormulaMathText text={'维度d_ff，权重 W_1；保留 model_name。'}/>);
+ expect(view.container.querySelectorAll('.katex')).toHaveLength(2);
+ expect(view.container).toHaveTextContent('model_name');
+});

@@ -14,7 +14,7 @@ export interface FormulaExplanation {
   evidence:FormulaEvidence[]; warnings:string[]; model?:string;
 }
 const formulaMemoryCache=new Map<string,{data:FormulaExplanation;expires:number}>();
-const formulaMemoryCacheTTL=60_000;
+const formulaMemoryCacheTTL=300_000;
 const formulaMemoryCacheLimit=64;
 if(typeof window!=='undefined'){
   for(const event of [AUTH_LOGOUT_EVENT,AUTH_USER_CHANGE_EVENT,CHAT_MODEL_SELECTION_CHANGED_EVENT]){

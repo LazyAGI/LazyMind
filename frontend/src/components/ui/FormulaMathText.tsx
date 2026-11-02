@@ -10,6 +10,19 @@ function MathSpan({latex,fallback}:{latex:string;fallback:string}) {
   // always remain React text nodes, including model-supplied HTML strings.
   return html?<span className="pdf-study-inline-math" dangerouslySetInnerHTML={{__html:html}}/>:<span>{fallback}</span>;
 }
+function ProseMath({text}:{text:string}) {
+  // Conservatively recognize bare single-letter indexed variables, including
+  // legacy cached meanings. Do not reinterpret ordinary snake_case words.
+  const pattern=/(?<![A-Za-z0-9_\\])([A-Za-z])_([A-Za-z0-9]+|\{[^{}\n]+\})(?![A-Za-z0-9_])/g;
+  const nodes:React.ReactNode[]=[];let offset=0;
+  for(const match of text.matchAll(pattern)){
+    nodes.push(text.slice(offset,match.index));
+    const sub=match[2].startsWith('{')?match[2]:`{${match[2]}}`;
+    nodes.push(<MathSpan key={match.index} latex={`${match[1]}_${sub}`} fallback={match[0]}/>);
+    offset=match.index!+match[0].length;
+  }
+  nodes.push(text.slice(offset));return <>{nodes}</>;
+}
 export function FormulaMathText({text,mathOnly=false}:{text:string;mathOnly?:boolean}) {
   const parts=useMemo(()=>{
     const pattern=/\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]|(?<!\\)\$\$([\s\S]*?)(?<!\\)\$\$|(?<!\\)\$([^\n$]*?)(?<!\\)\$/g;
@@ -24,5 +37,5 @@ export function FormulaMathText({text,mathOnly=false}:{text:string;mathOnly?:boo
     return output;
   },[text]);
   if(mathOnly && !parts.some(part=>part.latex!==undefined))return <MathSpan latex={text} fallback={text}/>;
-  return <>{parts.map((part,index)=>part.latex===undefined?<span key={index}>{part.text}</span>:<MathSpan key={index} latex={part.latex} fallback={part.text}/>)}</>;
+  return <>{parts.map((part,index)=>part.latex===undefined?<ProseMath key={index} text={part.text}/>:<MathSpan key={index} latex={part.latex} fallback={part.text}/>)}</>;
 }
