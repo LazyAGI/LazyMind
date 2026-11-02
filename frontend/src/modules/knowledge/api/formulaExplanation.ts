@@ -46,7 +46,7 @@ export function useFormulaExplanation(target:PdfIRTarget, sourceKey:string, bloc
     const cached=readFormulaMemoryCache(key);
     if(cached && !force){setState({key,status:'ready',data:cached});return;}
     const request=new AbortController();controller.current=request;
-    setState({key,status:'loading'});
+    setState(previous=>({key,status:'loading',data:previous.key===key?previous.data:cached}));
     try {
       const url=`${BASE_URL}/api/core/datasets/${encodeURIComponent(target.dataset)}/documents/${encodeURIComponent(target.document)}/pdf-ir/formulas/${encodeURIComponent(blockId)}/explanation`;
       const response=await axiosInstance.post<{data:FormulaExplanation}>(url,{force,language},{signal:request.signal,timeout:120000,silentError:true} as never);
@@ -55,7 +55,7 @@ export function useFormulaExplanation(target:PdfIRTarget, sourceKey:string, bloc
       setState({key,status:'ready',data:response.data.data});
     } catch(error) {
       const detail=(error as {response?:{data?:{data?:{error_message?:string}}}})?.response?.data?.data?.error_message;
-      if(!request.signal.aborted)setState({key,status:'error',error:typeof detail==='string'?detail:undefined});
+      if(!request.signal.aborted)setState(previous=>({key,status:'error',data:previous.key===key?previous.data:undefined,error:typeof detail==='string'?detail:undefined}));
     }
   },[target.dataset,target.document,blockId,key,language]);
   useEffect(()=>{
@@ -66,6 +66,6 @@ export function useFormulaExplanation(target:PdfIRTarget, sourceKey:string, bloc
     }
     return()=>controller.current?.abort();
   },[autoExplain,key,load]);
-  const cancel=()=>{controller.current?.abort();setState({key,status:'cancelled'});};
+  const cancel=()=>{controller.current?.abort();setState(previous=>({key,status:'cancelled',data:previous.key===key?previous.data:undefined}));};
   return {...(state.key===key?state:{status:'idle' as const,data:undefined}),load,cancel};
 }

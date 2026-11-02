@@ -1,4 +1,5 @@
-import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
+import {useFormulaExplanation} from '@/modules/knowledge/api/formulaExplanation';
+import {act, fireEvent, renderHook, render, screen, waitFor} from '@testing-library/react';
 import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import i18n from '@/i18n';
 import {PdfFormulaStudy} from './PdfFormulaStudy';
@@ -143,4 +144,23 @@ it('falls back to the extracted formula when a proposed repair cannot render',as
  expect(screen.queryByText('Bad repair')).toBeNull();
  expect(view.container.querySelector('.pdf-interactive-equation .katex-html')?.textContent).toContain('x2');
  expect(mocks.post).toHaveBeenCalledTimes(1);
+});
+
+it('retains the previous explanation through regeneration failure and cancellation',async()=>{
+ mocks.post.mockResolvedValueOnce({data:{data:explanation}});
+ const {result}=renderHook(()=>useFormulaExplanation({dataset:'d',document:'doc'},'retained','f',true));
+ await waitFor(()=>expect(result.current.status).toBe('ready'));
+ let rejectUpdate:(reason:unknown)=>void=()=>{};
+ mocks.post.mockImplementationOnce(()=>new Promise((_,reject)=>{rejectUpdate=reject;}));
+ act(()=>{void result.current.load(true);});
+ expect(result.current.status).toBe('loading');
+ expect(result.current.data?.summary).toBe('Summary');
+ await act(async()=>{rejectUpdate(new Error('offline'));});
+ expect(result.current.status).toBe('error');
+ expect(result.current.data?.summary).toBe('Summary');
+ mocks.post.mockImplementationOnce(()=>new Promise(()=>{}));
+ act(()=>{void result.current.load(true);});
+ act(()=>result.current.cancel());
+ expect(result.current.status).toBe('cancelled');
+ expect(result.current.data?.summary).toBe('Summary');
 });

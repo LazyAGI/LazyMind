@@ -184,6 +184,18 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 || w.Header().Get("X-LazyMind-Formula-Cache") != "hit" {
 		t.Fatal("cache miss")
 	}
+	failModel = true
+	cachedResponse := call("owner", "f", `{}`)
+	if cachedResponse.Code != 200 || calls != 1 {
+		t.Fatal("saved result requires a model")
+	}
+	if err := json.Unmarshal(cachedResponse.Body.Bytes(), &envelope); err != nil || envelope.Data.Model != "selected" {
+		t.Fatal("cached generating model lost")
+	}
+	if response := call("owner", "f", `{"force":true}`); response.Code != 422 {
+		t.Fatal("generation should require model")
+	}
+	failModel = false
 	if w := call("owner", "f", `{"force":true}`); w.Code != 200 || calls != 2 {
 		t.Fatal("force ignored")
 	}
@@ -241,7 +253,7 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	}
 	focusedMode = ""
 	failModel = true
-	if w := call("owner", "f", `{}`); w.Code != 422 || strings.Contains(w.Body.String(), "secret") {
+	if w := call("owner", "f", `{"force":true}`); w.Code != 422 || strings.Contains(w.Body.String(), "secret") {
 		t.Fatalf("model failure: %d %s", w.Code, w.Body)
 	}
 	failModel = false

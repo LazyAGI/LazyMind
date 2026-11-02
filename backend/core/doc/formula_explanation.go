@@ -198,11 +198,6 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
 	defer cancel()
-	config, modelID, modelName, err := h.loadModel(ctx, store.UserID(r))
-	if err != nil {
-		formulaExplanationError(w, 422, "Select an available chat model in model settings before explaining formulas.")
-		return
-	}
 	key := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, "saved-explanation:"+request.Language, evidence)
 	if request.FocusSymbol != nil {
 		focusedKey, _ := json.Marshal([]string{key, *request.FocusSymbol})
@@ -210,18 +205,14 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 	cacheDir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", "formula-explanations", pdfIRResource(row.DatasetID, row.ID), pdfir.Digest(store.UserID(r)))
 	cachePath := filepath.Join(cacheDir, key+".json")
-	legacyKey := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelID+":"+request.Language, evidence)
-	if request.FocusSymbol != nil {
-		legacyFocus, _ := json.Marshal([]string{legacyKey, *request.FocusSymbol})
-		legacyKey = pdfir.Digest(string(legacyFocus))
-	}
+	cachePaths := []string{cachePath}
 	readCache := func() (formulaExplanation, bool) {
-		for _, candidatePath := range []string{cachePath, filepath.Join(cacheDir, legacyKey+".json")} {
+		for _, candidatePath := range cachePaths {
 			if f, openErr := os.Open(candidatePath); openErr == nil {
 				b, readErr := io.ReadAll(io.LimitReader(f, formulaExplanationMaxBytes+1))
 				f.Close()
 				if readErr == nil {
-					if cached, parseErr := validateFormulaExplanation(string(b), evidence); parseErr == nil && bindFormulaExplanationFocus(&cached, request.FocusSymbol) {
+					if cached, parseErr := validateCachedFormulaExplanation(string(b), evidence); parseErr == nil && bindFormulaExplanationFocus(&cached, request.FocusSymbol) {
 						// Preserve the model that actually generated this saved explanation.
 						cached.Warnings = formulaExplanationWarnings(request.Language)
 						if candidatePath != cachePath {
@@ -234,6 +225,23 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		}
 		return formulaExplanation{}, false
 	}
+	if !request.Force {
+		if cached, ok := readCache(); ok {
+			reply(cached, "hit")
+			return
+		}
+	}
+	config, modelID, modelName, err := h.loadModel(ctx, store.UserID(r))
+	if err != nil {
+		formulaExplanationError(w, 422, "Select an available chat model in model settings before explaining formulas.")
+		return
+	}
+	legacyKey := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelID+":"+request.Language, evidence)
+	if request.FocusSymbol != nil {
+		legacyFocus, _ := json.Marshal([]string{legacyKey, *request.FocusSymbol})
+		legacyKey = pdfir.Digest(string(legacyFocus))
+	}
+	cachePaths = append(cachePaths, filepath.Join(cacheDir, legacyKey+".json"))
 	if !request.Force {
 		if cached, ok := readCache(); ok {
 			reply(cached, "hit")
@@ -348,4 +356,20 @@ func bindFormulaExplanationFocus(result *formulaExplanation, focus *string) bool
 	result.Symbols[0].Symbol = *focus
 	result.Symbols[0].Inferred = true
 	return true
+}
+
+// Cache metadata was written by this server, not supplied by the model.
+func validateCachedFormulaExplanation(raw string, evidence []formulaEvidence) (formulaExplanation, error) {
+	result, err := validateFormulaExplanation(raw, evidence)
+	if err != nil {
+		return result, err
+	}
+	var metadata struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+		return formulaExplanation{}, err
+	}
+	result.Model = metadata.Model
+	return result, nil
 }
