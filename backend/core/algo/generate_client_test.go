@@ -258,3 +258,20 @@ func TestExtractGeneratedContent(t *testing.T) {
 		t.Fatalf("empty map got %q, want empty", got)
 	}
 }
+
+func TestGenerateLearningForwardsSingleAttempt(t *testing.T) {
+	serverURL := startGenerateTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["single_attempt"] != true || body["task_type"] != "learning" {
+			t.Errorf("single-attempt policy lost: %#v", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"content": `{"summary":"ready","symbols":[]}`})
+	}))
+	t.Setenv("LAZYMIND_CHAT_SERVICE_URL", serverURL)
+	if _, err := GenerateLearning(context.Background(), LearningGenerateRequest{Content: "formula", UserInstruct: "Return JSON", SingleAttempt: true}); err != nil {
+		t.Fatal(err)
+	}
+}

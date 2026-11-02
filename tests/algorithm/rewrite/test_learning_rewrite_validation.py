@@ -48,3 +48,18 @@ def test_learning_reports_each_attempt_without_source_content(monkeypatch):
     assert len(messages) == 2
     assert 'attempt=1' in messages[0] and 'attempt=2' in messages[1]
     assert all('duration_ms=' in message and 'private' not in message for message in messages)
+
+
+def test_single_attempt_disables_transport_and_json_retries(monkeypatch):
+    import pytest
+    calls = []
+
+    class InvalidModel:
+        def __call__(self, prompt, **options):
+            calls.append(options)
+            return 'not JSON'
+
+    monkeypatch.setattr(base, 'AutoModel', lambda **_kwargs: InvalidModel())
+    with pytest.raises(base.UnprocessableContentError):
+        base.rewrite_content('learning', 'formula', 'Return JSON', single_attempt=True)
+    assert calls == [{'max_retries': 1}]

@@ -29,7 +29,9 @@ func GeneratePolish(ctx context.Context, req PolishGenerateRequest) (string, err
 // GenerateLearning runs a neutral learning-data task. It must remain separate
 // from GenerateSkill because the latter enforces SKILL.md output semantics.
 func GenerateLearning(ctx context.Context, req LearningGenerateRequest) (string, error) {
-	return generate(ctx, rewritePayload("learning", req.Content, req.UserInstruct, req.LLMConfig))
+	payload := rewritePayload("learning", req.Content, req.UserInstruct, req.LLMConfig)
+	payload.SingleAttempt = req.SingleAttempt
+	return generate(ctx, payload)
 }
 
 func GenerateEditablePolish(ctx context.Context, req RewriteRequest) (map[string]any, error) {

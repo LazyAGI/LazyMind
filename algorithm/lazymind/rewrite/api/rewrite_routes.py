@@ -30,6 +30,7 @@ class RewritePayload(BaseModel):
         ...,
         description='Per-request model configuration loaded by core for the current user',
     )
+    single_attempt: bool = False
     full_content: str | None = None
     selection_ranges: list[Dict[str, Any]] | None = None
 
@@ -65,6 +66,7 @@ def rewrite(payload: RewritePayload):
             task_type=payload.task_type,
             content=payload.content,
             user_instruct=payload.user_instruct,
+            single_attempt=payload.single_attempt,
         )
         return {'content': generated}
     except BadRequestError as exc:
