@@ -75,6 +75,7 @@ REVISION_CHAT_APIS = {
     "apply_revision",
 }
 RESOURCE_CHAT_APIS = {
+    "obsidian_status",
     "load_document",
     "create_document",
     "publish_revision",
@@ -277,7 +278,7 @@ def test_concrete_toolkits_own_disjoint_capability_sets():
     assert not issubclass(WriterResourceToolkit, WriterRevisionCapabilities)
 
 
-def test_all_45_capabilities_have_one_physical_owner():
+def test_all_46_capabilities_have_one_physical_owner():
     owners = (
         WriterWritingCapabilities,
         WriterArtifactCapabilities,
@@ -305,10 +306,10 @@ def test_all_45_capabilities_have_one_physical_owner():
     assert owned[WriterResourceCapabilities] == (
         RESOURCE_CHAT_APIS | resource_workflow_apis
     )
-    assert sum(len(names) for names in owned.values()) == 45
+    assert sum(len(names) for names in owned.values()) == 46
 
 
-def test_chat_toolkit_exposure_remains_the_36_tool_snapshot():
+def test_chat_toolkit_exposure_remains_the_37_tool_snapshot():
     assert set(WriterCreateToolkit.__public_apis__) == WRITING_CHAT_APIS
     assert set(WriterRevisionToolkit.__public_apis__) == REVISION_CHAT_APIS
     assert set(WriterResourceToolkit.__public_apis__) == RESOURCE_CHAT_APIS
@@ -323,7 +324,7 @@ def test_chat_toolkit_exposure_remains_the_36_tool_snapshot():
                 ),
             )
         )
-        == 36
+        == 37
     )
     assert WORKFLOW_ONLY_APIS.isdisjoint(WriterCreateToolkit.__public_apis__)
     assert WORKFLOW_ONLY_APIS.isdisjoint(WriterResourceToolkit.__public_apis__)
