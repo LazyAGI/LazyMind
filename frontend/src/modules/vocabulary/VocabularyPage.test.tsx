@@ -19,7 +19,7 @@ vi.mock("./api", () => ({
   getVocabularyStats: vi.fn(async () => ({ total: 1, due: 1, new: 0, learning: 1, review: 0, relearning: 0, mastered: 0, weak: 0, reviewed_today: 0 })),
   listWordbooks: vi.fn(async () => [{ id: "default", name: "默认生词本" }, { id: "reading", name: "阅读" }]),
   deleteAnkiDeck: vi.fn(async () => undefined),
-  startVocabularyReviewSession: vi.fn(async () => ({ session: { id: "s1" }, questions: [{ card_id: "c1", row_version: 1, previewed_at: new Date().toISOString(), remaining: 1, prompt: "evidence", answer: "证据", options: {}, word: { id: "w1", term: "evidence" }, state: "learning", tags: [], wordbooks: [], reps: 0, lapses: 0 }] })),
+  startVocabularyReviewSession: vi.fn(async () => ({ session: { id: "s1" }, questions: [{ card_id: "c1", row_version: 1, previewed_at: new Date().toISOString(), remaining: 1, prompt: "evidence", answer: "证据", options: {}, word: { id: "w1", term: "evidence", part_of_speech:"n.",meaning:"证据",provider:"local",language:"en",phonetic:"",definition:"",user_note:"",origin_type:"user",source_name:"",source_version:"",license_id:"" }, state: "learning", tags: [], wordbooks: [], reps: 0, lapses: 0 }] })),
   submitVocabularySessionReview: vi.fn(async () => undefined),
   completeVocabularyReviewSession: vi.fn(async () => ({ session: { id: "s1" }, total: 1, correct: 1, incorrect: 0, accuracy: 1, rating_counts: { again: 0, hard: 0, good: 1, easy: 0 }, average_interval_before_days: 1, average_interval_after_days: 3, difficult_words: [], answers: [] })),
   masterVocabulary: vi.fn(), resumeVocabulary: vi.fn(), resetVocabulary: vi.fn(), resetVocabularyBatch: vi.fn(async () => ({ reset: 1 })), deleteVocabulary: vi.fn(), createWordbook: vi.fn(), deleteWordbook: vi.fn(), updateVocabularyWord: vi.fn(), reviewLogsExportUrl: () => "/logs",
@@ -37,7 +37,7 @@ describe("VocabularyPage", () => {
     expect(screen.queryByRole("tab", { name: "学习集" })).toBeNull();
   });
   it("creates a review question and reveals its answer", async () => {
-    vi.mocked(startVocabularyReviewSession).mockResolvedValueOnce({ session: { id: "s1" }, questions: [{ card_id: "c1", row_version: 1, previewed_at: new Date().toISOString(), remaining: 1, prompt: "evidence", answer: "证据", options: {}, word: { id: "w1", term: "evidence" }, state: "learning", tags: [], wordbooks: [], reps: 0, lapses: 0 }] }).mockResolvedValueOnce({session:{id:"s1"},questions:[]});
+    vi.mocked(startVocabularyReviewSession).mockResolvedValueOnce({ session: { id: "s1" }, questions: [{ card_id: "c1", row_version: 1, previewed_at: new Date().toISOString(), remaining: 1, prompt: "evidence", answer: "证据", options: {}, word: { id: "w1", term: "evidence", part_of_speech:"n.",meaning:"证据",provider:"local",language:"en",phonetic:"",definition:"",user_note:"",origin_type:"user",source_name:"",source_version:"",license_id:"" }, state: "learning", tags: [], wordbooks: [], reps: 0, lapses: 0 }] }).mockResolvedValueOnce({session:{id:"s1"},questions:[]});
     render(<VocabularyPage />);
     fireEvent.click(await screen.findByRole("button", { name: "开始复习" }));
     expect(await screen.findByRole("heading", { name: "evidence" })).toBeTruthy();
@@ -58,7 +58,7 @@ describe("VocabularyPage", () => {
     expect(screen.queryByText("当前单词本")).toBeNull();
   });
   it("submits a multiple-choice response for server-side grading", async () => {
-    vi.mocked(startVocabularyReviewSession).mockResolvedValueOnce({session:{id:"objective-session"},questions:[{card_id:"c2",row_version:1,previewed_at:new Date().toISOString(),remaining:1,prompt:"context",answer:"",interaction:"multiple_choice",choices:[{value:"语境",label:"语境",part_of_speech:"n."},{value:"奔跑",label:"奔跑",part_of_speech:"v."}],options:{},word:{id:"w2",term:"context",meaning:"语境",part_of_speech:"n.",provider:"local"},state:"new",tags:[],wordbooks:[],reps:0,lapses:0}]}).mockResolvedValueOnce({session:{id:"objective-session"},questions:[]});
+    vi.mocked(startVocabularyReviewSession).mockResolvedValueOnce({session:{id:"objective-session"},questions:[{card_id:"c2",row_version:1,previewed_at:new Date().toISOString(),remaining:1,prompt:"context",answer:"",interaction:"multiple_choice",choices:[{value:"语境",label:"语境",part_of_speech:"n."},{value:"奔跑",label:"奔跑",part_of_speech:"v."}],options:{},word:{language:"en",phonetic:"",definition:"",user_note:"",origin_type:"user",source_name:"",source_version:"",license_id:"",id:"w2",term:"context",meaning:"语境",part_of_speech:"n.",provider:"local"},state:"new",tags:[],wordbooks:[],reps:0,lapses:0}]}).mockResolvedValueOnce({session:{id:"objective-session"},questions:[]});
     render(<VocabularyPage/>);fireEvent.click(await screen.findByRole("button",{name:"开始复习"}));fireEvent.click(await screen.findByRole("button",{name:/语境/}));
     await waitFor(()=>expect(submitVocabularySessionReview).toHaveBeenCalledWith("objective-session",expect.objectContaining({response:"语境",rating:undefined})));
   });

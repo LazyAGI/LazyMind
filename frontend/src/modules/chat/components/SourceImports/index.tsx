@@ -119,7 +119,7 @@ function TargetModal({ rows, context, onCancel, onSubmitted }: { rows: api.Inspe
     <p>{tr("selectedPrefix")}{rows.length}{tr("papersSuffix")}</p>
     {error && <Alert type="error" showIcon message={error} />}
     {createdTarget && <Alert type="info" message={<span>{tr("createdWithoutTask")}<a href={`/lib/knowledge/detail/${encodeURIComponent(createdTarget)}`}>{tr("viewLibrary")}</a>。</span>} />}
-    <Radio.Group value={mode} disabled={busy || Boolean(createdTarget)} onChange={(e: { target: { value: string } }) => setMode(e.target.value)} style={{ margin: "16px 0" }}><Radio.Button value="existing">{tr("existingLibrary")}</Radio.Button><Radio.Button value="new">{tr("newLibrary")}</Radio.Button></Radio.Group>
+    <Radio.Group value={mode} disabled={busy || Boolean(createdTarget)} onChange={(e) => setMode(e.target.value)} style={{ margin: "16px 0" }}><Radio.Button value="existing">{tr("existingLibrary")}</Radio.Button><Radio.Button value="new">{tr("newLibrary")}</Radio.Button></Radio.Group>
     <Form form={form} layout="vertical" disabled={busy || Boolean(createdTarget)}>
       {mode === "existing" ? <Form.Item name="target" label={tr("target")} rules={[{ required: true, message: tr("selectLibrary") }]}><Select showSearch optionFilterProp="label" placeholder={tr("selectEditableLibrary")} options={targets.map(row => ({ value: row.dataset_id, label: row.display_name }))} /></Form.Item> : <>
         <Form.Item name="name" label={tr("name")} rules={[{ required: true, message: tr("enterName") }, { pattern: KNOWLEDGE_BASE_NAME_PATTERN, message: tr("namePattern") }]}><Input maxLength={KNOWLEDGE_BASE_NAME_MAX_LENGTH} /></Form.Item>

@@ -1035,6 +1035,7 @@ describe("task center workflow events", () => {
 
     useTaskCenterStore.getState().upsertConversationArtifact("conversation-1", {
       artifact_id: "live-1",
+      slot: "live-1",
       conversation_id: "conversation-1",
       history_id: "h1",
       producer_type: "main_agent",
@@ -1059,6 +1060,7 @@ describe("task center workflow events", () => {
       data: {
         artifacts: [{
           artifact_id: "live-1",
+      slot: "live-1",
           conversation_id: "conversation-1",
           history_id: "h1",
           producer_type: "main_agent",
@@ -1072,7 +1074,8 @@ describe("task center workflow events", () => {
     await loadPromise;
 
     expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([
-      expect.objectContaining({ artifact_id: "live-1", value: { text: "persisted" } }),
+      expect.objectContaining({ artifact_id: "live-1",
+      slot: "live-1", value: { text: "persisted" } }),
     ]);
     expect(useTaskCenterStore.getState()._loadingArtifacts["conversation-1"]).toBe(false);
   });
@@ -1084,6 +1087,7 @@ describe("task center workflow events", () => {
     const loadPromise = useTaskCenterStore.getState().loadConversationArtifacts("conversation-1");
     useTaskCenterStore.getState().upsertConversationArtifact("conversation-1", {
       artifact_id: "live-1",
+      slot: "live-1",
       conversation_id: "conversation-1",
       history_id: "h1",
       producer_type: "main_agent",
@@ -1097,6 +1101,7 @@ describe("task center workflow events", () => {
       data: {
         artifacts: [{
           artifact_id: "live-1",
+      slot: "live-1",
           conversation_id: "conversation-1",
           history_id: "h1",
           producer_type: "main_agent",
@@ -1110,7 +1115,8 @@ describe("task center workflow events", () => {
     await loadPromise;
 
     expect(useTaskCenterStore.getState().artifactsByConversation["conversation-1"]).toEqual([
-      expect.objectContaining({ artifact_id: "live-1", value: { text: "v2" } }),
+      expect.objectContaining({ artifact_id: "live-1",
+      slot: "live-1", value: { text: "v2" } }),
     ]);
     expect(requestHarness.listConversationArtifacts).toHaveBeenCalledTimes(1);
   });

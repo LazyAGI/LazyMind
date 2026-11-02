@@ -27,7 +27,7 @@ type ControlTask = KnowledgeMarketTaskDetailOpenAPIResponse & {
 let current: ControlTask;
 function fixture(): ControlTask {
   return {
-    job_id: "control-job", job_type: "knowledge_market_install", job_status: "succeeded",
+    payload: { market_item_id: "control-item" }, job_id: "control-job", job_type: "knowledge_market_install", job_status: "succeeded",
     market_item_id: "control-item", name: "测试资料库", dataset_id: "dataset",
     icon: "", install_state: "vectorizing", error_message: "", created_at: "2026-09-20T09:00:00Z",
     attempt_count: 1, max_attempts: 2, stage: "parsing", overall_percent: 60,

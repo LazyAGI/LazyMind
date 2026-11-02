@@ -38,7 +38,7 @@ it.each([['heading', 'Heading'], ['list item', 'Child'], ['checked item', 'Done'
   const range = document.createRange(); range.selectNodeContents(target);
   window.getSelection()?.addRange(range);
   fireEvent.mouseUp(target);
-  const polish = await screen.findByRole('button', { name: 'AI 润色', exact: true });
+  const polish = await screen.findByRole('button', { name: 'AI 润色' });
   expect(polish).toBeEnabled();
   fireEvent.click(polish);
   await waitFor(() => expect(onRewrite).toHaveBeenCalledTimes(1));
@@ -59,7 +59,7 @@ it('submits and applies each heading/list block once while preserving Markdown s
   const heading = editable.querySelector('h2')!, last = Array.from(editable.querySelectorAll('li')).find(item => item.textContent === 'Todo')!;
   const range = document.createRange(); range.setStartBefore(heading); range.setEndAfter(last);
   window.getSelection()?.addRange(range); fireEvent.mouseUp(last);
-  fireEvent.click(await screen.findByRole('button', { name: 'AI 润色', exact: true }));
+  fireEvent.click(await screen.findByRole('button', { name: 'AI 润色' }));
   await waitFor(() => expect(onRewrite).toHaveBeenCalledTimes(1));
   const ranges = onRewrite.mock.calls[0][0].sourceRanges!;
   expect(ranges.map(item => item.selected_text)).toEqual(['Heading', 'First', 'Child', 'Last', 'Done', 'Todo']);

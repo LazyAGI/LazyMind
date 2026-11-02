@@ -83,7 +83,7 @@ it('switches all three IR widths without rewriting the document or saving it', (
   const markup = editor.innerHTML;
   onDocumentChange.mockClear();
   for (const [label, width] of [['公众号阅读宽度', 'reading'], ['加宽', 'wide'], ['默认', 'default']]) {
-    fireEvent.click(screen.getByRole('radio', { name: label, exact: true }));
+    fireEvent.click(screen.getByRole('radio', { name: label }));
     expect(container.querySelector('.writer-ir')).toHaveClass(`writer-ir--width-${width}`);
     expect(editor.innerHTML).toBe(markup);
   }

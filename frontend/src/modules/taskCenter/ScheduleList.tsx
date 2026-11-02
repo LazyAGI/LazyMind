@@ -227,7 +227,7 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
       <TimePicker
         value={time}
         onChange={handleTimeChange}
-        onCalendarChange={handleTimeChange}
+        onCalendarChange={(value) => handleTimeChange(Array.isArray(value) ? value[0] : value)}
         format='HH:mm'
         needConfirm={false}
         allowClear={false}

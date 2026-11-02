@@ -940,7 +940,7 @@ describe('external workflow surface boundary', () => {
           id: 'review', step_id: 'prepare', execution_id: 'old-attempt', status: 'pending', version: 1, manifest_hash: 'hash',
         }] : [],
         active_executions: 0, active_execution_ids: [], admission: { can_begin: false },
-        binding: { bound: true, generation: 1 },
+        binding: { bound: true },
         delivery: scenario === 'delivery-pending' ? { kind: 'continue', status: 'accepted' } : null,
         available_actions: ['save', 'continue', 'resume', 'rewind', 'retry', 'confirm', 'confirm_and_continue'],
       } as WorkflowControlView;
@@ -1012,7 +1012,7 @@ describe('external workflow surface boundary', () => {
     const control = {
       protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 2,
       continuation: 'awaiting_executor', reviews: [], active_executions: 1, active_execution_ids: ['attempt-1'],
-      admission: { can_begin: false }, binding: { bound: true, generation: 1 }, delivery: null,
+      admission: { can_begin: false }, binding: { bound: true }, delivery: null,
       available_actions: ['stop'],
     } as WorkflowControlView;
     const execute = vi.fn(async () => {});
@@ -1036,7 +1036,7 @@ describe('external workflow surface boundary', () => {
     const control = {
       protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 2,
       continuation: 'awaiting_user', reviews: [review], active_executions: 0, active_execution_ids: [],
-      admission: { can_begin: false }, binding: { bound: true, generation: 1 }, delivery: null,
+      admission: { can_begin: false }, binding: { bound: true }, delivery: null,
       available_actions: ['confirm', 'confirm_and_continue', 'rewind'],
     } as WorkflowControlView;
     const execute = vi.fn(async () => {});
@@ -1057,7 +1057,7 @@ describe('external workflow surface boundary', () => {
     const control = {
       protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 1,
       continuation: 'completed', reviews: [], active_executions: 0, active_execution_ids: [],
-      admission: { can_begin: false }, binding: { bound: true, generation: 1 }, delivery: null,
+      admission: { can_begin: false }, binding: { bound: true }, delivery: null,
       available_actions: ['rewind'],
     } as WorkflowControlView;
     render(<WorkflowPanel conversationId='layout-test' embedded onRefresh={vi.fn(async () => {})}
@@ -1106,7 +1106,7 @@ describe('external workflow surface boundary', () => {
     const control = {
       protocol: 'workflow.control.v1', session_id: 'layout-test', state_version: 1,
       continuation: 'completed', reviews: [], active_executions: 0, active_execution_ids: [],
-      admission: { can_begin: false }, binding: { bound: true, generation: 1 }, delivery: null,
+      admission: { can_begin: false }, binding: { bound: true }, delivery: null,
       available_actions: ['rewind'],
     } as WorkflowControlView;
     render(<WorkflowPanel conversationId='layout-test'

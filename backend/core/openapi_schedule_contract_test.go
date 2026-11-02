@@ -49,3 +49,39 @@ func TestScheduleOpenAPIRequestContractsSurviveNotificationOverlay(t *testing.T)
 		t.Fatal("schedule POST lost its notification draft contract")
 	}
 }
+
+func TestScheduleOpenAPIResponseContracts(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	raw, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	paths := spec["paths"].(map[string]any)
+	for _, entry := range []struct{ path, method, schema string }{
+		{"/api/core/schedules", "get", "ScheduleListResponse"},
+		{"/api/core/schedules", "post", "ScheduleResponse"},
+		{"/api/core/schedules/{schedule_id}", "put", "ScheduleResponse"},
+		{"/api/core/schedules/{schedule_id}:enable", "post", "ScheduleResponse"},
+		{"/api/core/schedules/{schedule_id}:run-now", "post", "ScheduleRunResponse"},
+		{"/api/core/automation-groups", "get", "AutomationGroupListResponse"},
+		{"/api/core/automation-groups", "post", "AutomationGroupResponse"},
+	} {
+		t.Run(entry.method+entry.path, func(t *testing.T) {
+			op := paths[entry.path].(map[string]any)[entry.method].(map[string]any)
+			response := op["responses"].(map[string]any)["200"].(map[string]any)
+			content, ok := response["content"].(map[string]any)
+			if !ok {
+				t.Fatal("successful response has no typed body")
+			}
+			schema := content["application/json"].(map[string]any)["schema"].(map[string]any)
+			if schema["$ref"] != "#/components/schemas/"+entry.schema {
+				t.Fatalf("unexpected response: %#v", schema)
+			}
+		})
+	}
+}

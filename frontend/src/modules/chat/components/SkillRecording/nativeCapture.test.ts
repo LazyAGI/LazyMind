@@ -24,7 +24,7 @@ it('cancellation releases the helper without uploading', async () => {
 it('does not return a live controller after the helper fails during startup', async () => {
   const app = setup();
   let finish!: (value: { session_id: string; startedAt: number }) => void;
-  window.lazymindDesktop!.recordingNativeStart = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  window.lazymindDesktop!.recordingNativeStart = vi.fn(() => new Promise<{ session_id: string; startedAt: number }>(resolve => { finish = resolve; }));
   const capture = captureNative(vi.fn(), vi.fn(), vi.fn());
   const rejected = expect(capture).rejects.toThrow('recording-helper-disconnected');
   app.emit({ event: 'failed', error: 'recording-helper-disconnected' });

@@ -75,6 +75,21 @@ func manualOpenAPISpec() map[string]any {
 
 func manualSchemas() map[string]any {
 	return map[string]any{
+		"ScheduleDependencyResponse": objReq([]string{"id", "source_schedule_id", "source_name", "window_type", "incomplete_policy", "max_wait_seconds"},
+			prop("id", strSchema()), prop("source_schedule_id", strSchema()), prop("source_name", strSchema()),
+			prop("window_type", strSchema()), prop("content_types", array(strSchema())), prop("incomplete_policy", strSchema()), prop("max_wait_seconds", intSchema())),
+		"ScheduleResponse": objReq([]string{"id", "user_id", "name", "remark", "cron_expr", "timezone", "prompt_template", "group_position", "enabled", "run_count", "next_run_at", "created_at"},
+			prop("id", strSchema()), prop("user_id", strSchema()), prop("name", strSchema()), prop("remark", strSchema()),
+			prop("cron_expr", strSchema()), prop("timezone", strSchema()), prop("prompt_template", strSchema()),
+			prop("kb_ids", array(strSchema())), prop("file_ids", array(strSchema())), prop("group_id", strSchema()),
+			prop("group_position", intSchema()), prop("dependencies", nullableSchema(array(refSchema("ScheduleDependencyResponse")))),
+			prop("enabled", boolSchema()), prop("run_count", intSchema()), prop("last_run_at", strSchema()), prop("next_run_at", strSchema()), prop("created_at", strSchema())),
+		"ScheduleListResponse": objReq([]string{"items", "total"}, prop("items", array(refSchema("ScheduleResponse"))), prop("total", intSchema())),
+		"ScheduleRunResponse":  objReq([]string{"task_id", "conversation_id"}, prop("task_id", strSchema()), prop("conversation_id", strSchema()), prop("status", strSchema())),
+		"AutomationGroupResponse": objReq([]string{"id", "name", "remark", "timezone", "enabled", "created_at", "task_count"},
+			prop("id", strSchema()), prop("name", strSchema()), prop("remark", strSchema()), prop("timezone", strSchema()),
+			prop("enabled", boolSchema()), prop("created_at", strSchema()), prop("task_count", intSchema())),
+		"AutomationGroupListResponse":  objReq([]string{"items", "total"}, prop("items", array(refSchema("AutomationGroupResponse"))), prop("total", intSchema())),
 		"AutomationGroupCreateRequest": objReq([]string{"name"}, prop("name", strSchema()), prop("remark", strSchema()), prop("timezone", strSchema())),
 		"ScheduleMoveRequest":          obj(prop("group_id", nullableSchema(strSchema())), prop("position", intSchema())),
 		"ChatExport": objReq([]string{"index", "title", "filename", "content_type", "start", "end", "export_id"},
@@ -1118,11 +1133,14 @@ func manualPaths() map[string]any {
 		)},
 		"/schedules": map[string]any{"get": op(
 			"List schedules", queryParams(param("query", "include_disabled", false, boolSchema())), nil,
-			map[string]any{"description": "Schedules"},
+			response(200, "Schedules", refSchema("ScheduleListResponse")),
 		)},
-		"/automation-groups": map[string]any{"post": op(
-			"Create an automation group", nil, jsonBody(refSchema("AutomationGroupCreateRequest"), true), map[string]any{"description": "Automation group"},
-		)},
+		"/automation-groups": map[string]any{
+			"get":  op("List automation groups", nil, nil, response(200, "Automation groups", refSchema("AutomationGroupListResponse"))),
+			"post": op("Create an automation group", nil, jsonBody(refSchema("AutomationGroupCreateRequest"), true), response(200, "Automation group", refSchema("AutomationGroupResponse"))),
+		},
+		"/schedules/{schedule_id}:enable":  map[string]any{"post": op("Enable schedule", queryParams(param("path", "schedule_id", true, strSchema())), nil, response(200, "Schedule", refSchema("ScheduleResponse")))},
+		"/schedules/{schedule_id}:run-now": map[string]any{"post": op("Run schedule now", queryParams(param("path", "schedule_id", true, strSchema())), nil, response(200, "Scheduled run", refSchema("ScheduleRunResponse")))},
 		"/schedules/{schedule_id}:move": map[string]any{"post": op(
 			"Move a schedule to an automation group", queryParams(param("path", "schedule_id", true, strSchema())),
 			jsonBody(refSchema("ScheduleMoveRequest"), true), map[string]any{"description": "Schedule moved"},

@@ -1114,10 +1114,6 @@ export interface ApiCoreNotificationAccountReferencesAccountIdGet200Response {
     'code'?: number;
     'data'?: NotificationReferences;
 }
-export interface ApiCoreSchedulesPost200Response {
-    'id'?: string;
-    'name'?: string;
-}
 export interface ApiCoreSchedulesPostRequest {
     'cron_expr'?: string;
     'dependencies'?: Array<object>;
@@ -1286,6 +1282,19 @@ export interface AutomationGroupCreateRequest {
     'name': string;
     'remark'?: string;
     'timezone'?: string;
+}
+export interface AutomationGroupListResponse {
+    'items': Array<AutomationGroupResponse>;
+    'total': number;
+}
+export interface AutomationGroupResponse {
+    'created_at': string;
+    'enabled': boolean;
+    'id': string;
+    'name': string;
+    'remark': string;
+    'task_count': number;
+    'timezone': string;
 }
 export interface BatchAddACLData {
     'count'?: number;
@@ -6877,6 +6886,19 @@ export interface RunTiming {
     'requested_at': string;
     'running_attempt_count': number;
 }
+export interface ScheduleDependencyResponse {
+    'content_types'?: Array<string>;
+    'id': string;
+    'incomplete_policy': string;
+    'max_wait_seconds': number;
+    'source_name': string;
+    'source_schedule_id': string;
+    'window_type': string;
+}
+export interface ScheduleListResponse {
+    'items': Array<ScheduleResponse>;
+    'total': number;
+}
 export interface ScheduleMoveRequest {
     'group_id'?: string | null;
     'position'?: number;
@@ -6894,6 +6916,30 @@ export interface ScheduleNotificationView {
     'config': NotificationConfig | null;
     'configured': boolean;
     'revision': number;
+}
+export interface ScheduleResponse {
+    'created_at': string;
+    'cron_expr': string;
+    'dependencies'?: Array<ScheduleDependencyResponse> | null;
+    'enabled': boolean;
+    'file_ids'?: Array<string>;
+    'group_id'?: string;
+    'group_position': number;
+    'id': string;
+    'kb_ids'?: Array<string>;
+    'last_run_at'?: string;
+    'name': string;
+    'next_run_at': string;
+    'prompt_template': string;
+    'remark': string;
+    'run_count': number;
+    'timezone': string;
+    'user_id': string;
+}
+export interface ScheduleRunResponse {
+    'conversation_id': string;
+    'status'?: string;
+    'task_id': string;
 }
 export interface SearchDatasetMemberRequest {
     'is_all'?: boolean;
@@ -18559,7 +18605,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /automation-groups
+         * @summary List automation groups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -18576,6 +18622,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -18642,6 +18689,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarQueryParameter = {} as any;
 
             localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -26416,6 +26464,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
                 localVarQueryParameter['include_disabled'] = includeDisabled;
             }
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -26494,7 +26543,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /schedules/{schedule_id}:enable
+         * @summary Enable schedule
          * @param {string} scheduleId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -26515,6 +26564,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -26565,7 +26615,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /schedules/{schedule_id}:run-now
+         * @summary Run schedule now
          * @param {string} scheduleId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -26586,6 +26636,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -32495,11 +32546,11 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /automation-groups
+         * @summary List automation groups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAutomationGroupsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreAutomationGroupsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AutomationGroupListResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAutomationGroupsGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAutomationGroupsGet']?.[localVarOperationServerIndex]?.url;
@@ -32525,7 +32576,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreAutomationGroupsPost(automationGroupCreateRequest: AutomationGroupCreateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreAutomationGroupsPost(automationGroupCreateRequest: AutomationGroupCreateRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<AutomationGroupResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAutomationGroupsPost(automationGroupCreateRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAutomationGroupsPost']?.[localVarOperationServerIndex]?.url;
@@ -35458,7 +35509,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesGet(includeDisabled?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreSchedulesGet(includeDisabled?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ScheduleListResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesGet(includeDisabled, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesGet']?.[localVarOperationServerIndex]?.url;
@@ -35492,12 +35543,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /schedules/{schedule_id}:enable
+         * @summary Enable schedule
          * @param {string} scheduleId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesScheduleIdEnablePost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreSchedulesScheduleIdEnablePost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ScheduleResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdEnablePost(scheduleId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesScheduleIdEnablePost']?.[localVarOperationServerIndex]?.url;
@@ -35519,12 +35570,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /schedules/{schedule_id}:run-now
+         * @summary Run schedule now
          * @param {string} scheduleId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesScheduleIdRunNowPost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreSchedulesScheduleIdRunNowPost(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ScheduleRunResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdRunNowPost(scheduleId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesScheduleIdRunNowPost']?.[localVarOperationServerIndex]?.url;
@@ -37960,11 +38011,11 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /automation-groups
+         * @summary List automation groups
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAutomationGroupsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreAutomationGroupsGet(options?: RawAxiosRequestConfig): AxiosPromise<AutomationGroupListResponse> {
             return localVarFp.apiCoreAutomationGroupsGet(options).then((request) => request(axios, basePath));
         },
         /**
@@ -37984,7 +38035,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreAutomationGroupsPost(requestParameters: DefaultApiApiCoreAutomationGroupsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreAutomationGroupsPost(requestParameters: DefaultApiApiCoreAutomationGroupsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<AutomationGroupResponse> {
             return localVarFp.apiCoreAutomationGroupsPost(requestParameters.automationGroupCreateRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -40146,7 +40197,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesGet(requestParameters: DefaultApiApiCoreSchedulesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreSchedulesGet(requestParameters: DefaultApiApiCoreSchedulesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ScheduleListResponse> {
             return localVarFp.apiCoreSchedulesGet(requestParameters.includeDisabled, options).then((request) => request(axios, basePath));
         },
         /**
@@ -40171,12 +40222,12 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /schedules/{schedule_id}:enable
+         * @summary Enable schedule
          * @param {DefaultApiApiCoreSchedulesScheduleIdEnablePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesScheduleIdEnablePost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdEnablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreSchedulesScheduleIdEnablePost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdEnablePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ScheduleResponse> {
             return localVarFp.apiCoreSchedulesScheduleIdEnablePost(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
         },
         /**
@@ -40191,12 +40242,12 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /schedules/{schedule_id}:run-now
+         * @summary Run schedule now
          * @param {DefaultApiApiCoreSchedulesScheduleIdRunNowPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesScheduleIdRunNowPost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdRunNowPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreSchedulesScheduleIdRunNowPost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdRunNowPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ScheduleRunResponse> {
             return localVarFp.apiCoreSchedulesScheduleIdRunNowPost(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
         },
         /**
@@ -44392,7 +44443,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /automation-groups
+     * @summary List automation groups
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
@@ -46830,7 +46881,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /schedules/{schedule_id}:enable
+     * @summary Enable schedule
      * @param {DefaultApiApiCoreSchedulesScheduleIdEnablePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -46852,7 +46903,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /schedules/{schedule_id}:run-now
+     * @summary Run schedule now
      * @param {DefaultApiApiCoreSchedulesScheduleIdRunNowPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -65438,7 +65489,7 @@ export const TaskNotificationsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesPost(apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreSchedulesPost200Response>> {
+        async apiCoreSchedulesPost(apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ScheduleResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesPost(apiCoreSchedulesPostRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreSchedulesPost']?.[localVarOperationServerIndex]?.url;
@@ -65493,7 +65544,7 @@ export const TaskNotificationsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreSchedulesScheduleIdPut(scheduleId: string, apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ApiCoreSchedulesPost200Response>> {
+        async apiCoreSchedulesScheduleIdPut(scheduleId: string, apiCoreSchedulesPostRequest: ApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ScheduleResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdPut(scheduleId, apiCoreSchedulesPostRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['TaskNotificationsApi.apiCoreSchedulesScheduleIdPut']?.[localVarOperationServerIndex]?.url;
@@ -65629,7 +65680,7 @@ export const TaskNotificationsApiFactory = function (configuration?: Configurati
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesPost(requestParameters: TaskNotificationsApiApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreSchedulesPost200Response> {
+        apiCoreSchedulesPost(requestParameters: TaskNotificationsApiApiCoreSchedulesPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ScheduleResponse> {
             return localVarFp.apiCoreSchedulesPost(requestParameters.apiCoreSchedulesPostRequest, options).then((request) => request(axios, basePath));
         },
         /**
@@ -65669,7 +65720,7 @@ export const TaskNotificationsApiFactory = function (configuration?: Configurati
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreSchedulesScheduleIdPut(requestParameters: TaskNotificationsApiApiCoreSchedulesScheduleIdPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ApiCoreSchedulesPost200Response> {
+        apiCoreSchedulesScheduleIdPut(requestParameters: TaskNotificationsApiApiCoreSchedulesScheduleIdPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<ScheduleResponse> {
             return localVarFp.apiCoreSchedulesScheduleIdPut(requestParameters.scheduleId, requestParameters.apiCoreSchedulesPostRequest, options).then((request) => request(axios, basePath));
         },
         /**

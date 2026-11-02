@@ -498,20 +498,6 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
   const onCloudSkillUploaded = useCallback(() => {
     setCloudSkillRefreshKey((current) => current + 1);
   }, []);
-  const buildSkillPatchPayload = useCallback(
-    (item: StructuredAsset, overrides: Record<string, unknown> = {}) =>
-      buildSkillUpdatePayload({
-        name: item.name,
-        description: item.description,
-        category: item.category,
-        tags: item.tags,
-        autoEvo: item.autoEvo,
-        isEnabled: item.isEnabled,
-        callMode: item.callMode,
-        ...(overrides as Partial<StructuredAsset>),
-      }),
-    [],
-  );
 
   const localAvailableCategories = [
     ...new Set(currentStructuredItems.map((item) => item.category)),

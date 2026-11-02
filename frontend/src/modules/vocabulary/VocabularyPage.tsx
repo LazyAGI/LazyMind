@@ -352,9 +352,7 @@ export default function VocabularyPage() {
         <Space direction="vertical" style={{ width: "100%" }}>
           <Radio.Group
             defaultValue="move"
-            onChange={(event: {
-              target: { value: "move" | "delete_words" };
-            }) => {
+            onChange={(event) => {
               mode = event.target.value;
             }}
           >
@@ -531,14 +529,14 @@ export default function VocabularyPage() {
             {x.state === "mastered" ? (
               <Button
                 size="small"
-                onClick={() => void resumeVocabulary(x.word.id).then(load)}
+                onClick={() => void resumeVocabulary(x.word.id).then(() => load())}
               >
                 恢复
               </Button>
             ) : (
               <Button
                 size="small"
-                onClick={() => void masterVocabulary(x.word.id).then(load)}
+                onClick={() => void masterVocabulary(x.word.id).then(() => load())}
               >
                 标记学会
               </Button>
@@ -553,7 +551,7 @@ export default function VocabularyPage() {
                           key: "reset",
                           label: "重置学习状态",
                           onClick: () =>
-                            void resetVocabulary(x.word.id).then(load),
+                            void resetVocabulary(x.word.id).then(() => load()),
                         },
                       ]
                     : []),
@@ -565,7 +563,7 @@ export default function VocabularyPage() {
                       Modal.confirm({
                         title: `删除 ${x.word.term}？`,
                         content: "相关例句、来源和复习历史也会删除。",
-                        onOk: () => deleteVocabulary(x.word.id).then(load),
+                        onOk: () => deleteVocabulary(x.word.id).then(() => load()),
                       }),
                   },
                 ],
@@ -796,7 +794,7 @@ export default function VocabularyPage() {
         <Space style={{ display: "flex", justifyContent: "space-between" }}>
           <Radio.Group
             value={logRange}
-            onChange={(event: { target: { value: string } }) =>
+            onChange={(event) =>
               setLogRange(event.target.value)
             }
             optionType="button"

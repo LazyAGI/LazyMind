@@ -268,7 +268,7 @@ describe("MainLayout conversation removal", () => {
   it("keeps the home logo free of unread notifications without clearing conversation unread state", () => {
     useConversationUnreadStore.setState({ counts: { current: 2, other: 5 } });
     render(<MemoryRouter initialEntries={["/agent/chat/home/current"]}><MainLayout /></MemoryRouter>);
-    const logo = screen.getByRole("button", { name: "LazyMind", exact: true });
+    const logo = screen.getByRole("button", { name: "LazyMind" });
     expect(logo.querySelector(".ant-badge-count")).not.toBeInTheDocument();
     expect(within(logo).queryByRole("status")).not.toBeInTheDocument();
     expect(useConversationUnreadStore.getState().counts).toEqual({ current: 2, other: 5 });

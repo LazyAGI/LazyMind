@@ -226,9 +226,9 @@ describe("MessageList side chat selection", () => {
     const failed = {
       result: "old partial reply",
       run_id: "failed-run-1",
-      run_status: "failed",
+      run_status: "failed" as const,
       run_terminal: {
-        status: "failed", reason: "model_failure", code: "transport_error", partial_output: true,
+        status: "failed" as const, reason: "model_failure" as const, code: "transport_error", partial_output: true,
       },
     };
     const record = { id: "history-1", query: "question", ...failed };
@@ -273,10 +273,10 @@ describe("MessageList side chat selection", () => {
           {
             result: "failed partial answer",
             run_id: "failed-run-1",
-            run_status: "failed",
+            run_status: "failed" as const,
             run_terminal: {
               status: "failed",
-              reason: "model_failure",
+              reason: "model_failure" as const,
               code: "rate_limited",
               partial_output: true,
             },

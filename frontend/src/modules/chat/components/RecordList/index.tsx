@@ -144,7 +144,7 @@ function getDownloadFileName(contentDisposition?: string) {
 interface IRecordList {
   currentSessionId: string;
   onSelected: (props: Conversation) => void;
-  onRemove: (props: Conversation) => void;
+  onRemove: (props: Pick<Conversation, "conversation_id">) => void;
   compact?: boolean;
   hideHeader?: boolean;
   hideSearch?: boolean;
@@ -866,7 +866,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       });
     }
 
-    function showArchivedFeedback(data: Conversation) {
+    function showArchivedFeedback(data: SidebarConversation) {
       const conversationId = data.conversation_id || "";
       const messageKey = `archived:${conversationId}`;
       message.open({
