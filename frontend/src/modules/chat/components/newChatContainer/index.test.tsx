@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   latestChatInputProps: null as any,
   latestConversationOptions: null as any,
   latestUserEditOptions: null as any,
+  messageList: [] as any[],
   isStreaming: false,
   canStopGeneration: false,
   loading: false,
@@ -150,8 +151,8 @@ vi.mock("./hooks/useChatConversation", () => ({
     isStreaming: mocks.isStreaming,
     canStopGeneration: mocks.canStopGeneration,
     loading: mocks.loading,
-    messageList: [],
-    messageListRef: { current: [] },
+    messageList: mocks.messageList,
+    messageListRef: { current: mocks.messageList },
     openResumeSSE: vi.fn(),
     openSSE: vi.fn(),
     regenerate: mocks.regenerate,
@@ -242,10 +243,29 @@ describe("ChatContainerComponent wheel forwarding", () => {
     mocks.latestChatInputProps = null;
     mocks.latestConversationOptions = null;
     mocks.latestUserEditOptions = null;
+    mocks.messageList = [];
     mocks.isStreaming = false;
     mocks.canStopGeneration = false;
     mocks.loading = false;
     mocks.runtimeWaiting = false;
+  });
+
+  it('updates skill deposit counts live and excludes archived regeneration attempts', () => {
+    mocks.messageList = [
+      { role: "User", delta: "question" },
+      { role: "Assistant", tool_call_turns: 10, archived_failure: true },
+      { role: "Assistant", delta: "answer" },
+    ];
+    const props = { sessionId: "chat", setIsChatContent: vi.fn(), onOpenSSE: vi.fn(),
+      parseErrorData: vi.fn(), setChatConfigFn: vi.fn() };
+    const { rerender } = render(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 0 });
+    mocks.messageList = [...mocks.messageList.slice(0, -1), { role: "Assistant", tool_call_turns: 8 }];
+    rerender(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 8 });
+    mocks.messageList = [...mocks.messageList.slice(0, -1), { role: "Assistant", tool_call_turns: 0 }];
+    rerender(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 0 });
   });
 
   it('passes workflow hand-off stop availability without pretending Chat is streaming', () => {
@@ -255,6 +275,26 @@ describe("ChatContainerComponent wheel forwarding", () => {
     expect(mocks.latestChatInputProps.canStopGeneration).toBe(true);
     expect(mocks.latestChatInputProps.isStreaming).toBe(false);
     expect(mocks.latestChatInputProps.onStopGeneration).toEqual(expect.any(Function));
+  });
+
+  it('counts cumulative tool turns once across steering segments while keeping other histories independent', () => {
+    mocks.messageList = [
+      { role: "User", delta: "question", history_id: "h" },
+      { role: "Assistant", history_id: "steering-segment:h:a", original_history_id: "h", steering_segment: true, tool_call_turns: 2 },
+      { role: "User", delta: "guide", history_id: "h", is_resumed: true },
+      { role: "Assistant", history_id: "h", tool_call_turns: 5 },
+      { role: "User", delta: "next question", history_id: "other" },
+      { role: "Assistant", history_id: "other", tool_call_turns: 3 },
+      { role: "Assistant", original_history_id: "h", tool_call_turns: 10, archived_failure: true },
+    ];
+    const props = { sessionId: "chat", setIsChatContent: vi.fn(), onOpenSSE: vi.fn(),
+      parseErrorData: vi.fn(), setChatConfigFn: vi.fn() };
+    const view = render(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 2, toolCallTurns: 8 });
+    // A continuation starts empty while the already observed count remains.
+    mocks.messageList = mocks.messageList.slice(0, 3).concat({ role: "Assistant", history_id: "h" });
+    view.rerender(<ChatContainerComponent {...props} />);
+    expect(mocks.latestChatInputProps.skillDepositStats).toEqual({ userTurns: 1, toolCallTurns: 2 });
   });
 
   it.each(['loading', 'isStreaming', 'runtimeWaiting'] as const)('guards workflow controls during %s without changing composer streaming', (phase) => {

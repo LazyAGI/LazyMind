@@ -146,6 +146,17 @@ func nonNegativeToolCallTurns(v int64) int {
 	return int(v)
 }
 
+// Counts are cumulative observations, independent of text commit/rollback.
+func observeToolCallTurns(current int, chunk UpstreamStreamChunk, runID string) int {
+	if chunk.Err != nil || chunk.ModelOutput != nil && chunk.ModelOutput.RunID != runID {
+		return current
+	}
+	if chunk.RuntimeEvent != nil && chunk.RuntimeEvent.Validate(runID) != nil {
+		return current
+	}
+	return max(current, nonNegativeToolCallTurns(chunk.ToolCallTurns))
+}
+
 // newID text history text ID。
 func newID(prefix string) string {
 	return prefix + strconvBase36(time.Now().UnixNano())
@@ -2007,11 +2018,7 @@ func handleNonStreamChat(
 		if !accepted {
 			continue
 		}
-		if outputOwner.enabled() {
-			if next := nonNegativeToolCallTurns(chunk.ToolCallTurns); next > toolCallTurns {
-				toolCallTurns = next
-			}
-		}
+		toolCallTurns = observeToolCallTurns(toolCallTurns, chunk, runID)
 		nextBody, nextExt, nextOwner := reqBody, historyExt, outputOwner
 		if chunk.RuntimeEvent != nil {
 			if chunk.RuntimeEvent.Type == RuntimeEventModelSwitched {
@@ -2060,9 +2067,6 @@ func handleNonStreamChat(
 				runTerminal, _ = runEvent.Terminal()
 			}
 			continue
-		}
-		if next := nonNegativeToolCallTurns(chunk.ToolCallTurns); next > toolCallTurns {
-			toolCallTurns = next
 		}
 		if chunk.ReasoningText != "" {
 			output.pendingThink += chunk.ReasoningText
@@ -2184,6 +2188,7 @@ func handleNonStreamChat(
 		"history_id":      historyID,
 		"sources":         output.sources,
 		"runtime_event":   runEvent,
+		"tool_call_turns": toolCallTurns,
 		"model_route":     chatModelRouteFromBody(reqBody),
 		"model_switches":  modelSwitchesFromBody(reqBody),
 	}
@@ -2517,6 +2522,7 @@ func publishRuntimeChunk(
 	seq int,
 	event *ChatRuntimeEvent,
 	performanceMetrics *RunPerformanceMetrics,
+	toolCallTurns int,
 	writeClient bool,
 ) {
 	chunk := &ChatChunkResponse{
@@ -2525,6 +2531,9 @@ func publishRuntimeChunk(
 		HistoryID:          historyID,
 		RuntimeEvent:       event,
 		PerformanceMetrics: performanceMetrics,
+	}
+	if event != nil && event.Type == RuntimeEventRunFinished {
+		chunk.ToolCallTurns = &toolCallTurns
 	}
 	if writeClient && reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, chunk)
@@ -2814,7 +2823,7 @@ func streamSingleAnswer(
 					chatCtx, stateStore, convID, historyID, runID, runTerminal, "steering_persistence", useRunDecision,
 				)
 				event = runFinishedEvent(runID, *runTerminal)
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, event, nil, true)
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, event, nil, toolCallTurns, true)
 				break
 			}
 			chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, SteeringApplied: d.SteeringApplied}
@@ -2832,11 +2841,7 @@ func streamSingleAnswer(
 		if d.Err == nil && !accepted {
 			continue
 		}
-		if d.Err == nil && outputOwner.enabled() {
-			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > toolCallTurns {
-				toolCallTurns = next
-			}
-		}
+		toolCallTurns = observeToolCallTurns(toolCallTurns, d, runID)
 		if d.Err != nil || d.RuntimeEvent != nil && d.RuntimeEvent.Type == RuntimeEventRunFinished {
 			if outputOwner.rollback(&output) {
 				publishOutput(true)
@@ -2851,7 +2856,7 @@ func streamSingleAnswer(
 				}
 				event := failedRunEvent(runID, "model_output_persist_failed", output.rawResult() != "")
 				runTerminal, _ = event.Terminal()
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, event, nil, true)
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, event, nil, toolCallTurns, true)
 				break
 			}
 			outputOwner, historyExt = nextOwner, nextExt
@@ -2917,6 +2922,9 @@ func streamSingleAnswer(
 					}
 					return nil
 				}(), PerformanceMetrics: decision.PerformanceMetrics, ModelRoute: chatModelRouteFromBody(reqBody), ModelSwitches: modelSwitchesFromBody(reqBody)}
+				if decision.Terminal != nil {
+					chunk.ToolCallTurns = &toolCallTurns
+				}
 				if reqCtx.Err() == nil {
 					writeSSEChunk(w, flusher, chunk)
 				}
@@ -2924,7 +2932,7 @@ func streamSingleAnswer(
 					_ = appendChatChunk(chatCtx, stateStore, convID, historyID, chunk)
 				}
 			} else {
-				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, decision.PerformanceMetrics, true)
+				publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, historyID, seq, decision.Event, decision.PerformanceMetrics, toolCallTurns, true)
 			}
 			if decision.Stop {
 				break
@@ -3093,9 +3101,6 @@ func streamSingleAnswer(
 			}
 			continue
 		}
-		if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > toolCallTurns {
-			toolCallTurns = next
-		}
 		if d.ReasoningText != "" {
 			output.thinkingActive = true
 			previousThinking := ""
@@ -3190,7 +3195,7 @@ func streamSingleAnswer(
 			chatCtx, stateStore, convID, historyID, runID, runTerminal, "core_fallback", useRunDecision,
 		)
 		runEvent = runFinishedEvent(runID, *runTerminal)
-		runtimeChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: runEvent}
+		runtimeChunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: runEvent, ToolCallTurns: &toolCallTurns}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, runtimeChunk)
 		}
@@ -3315,7 +3320,7 @@ func streamSingleAnswer(
 		}
 		if exportTerminal != nil {
 			publishRuntimeChunk(reqCtx, persistCtx, w, flusher, stateStore, convID, historyID, seq,
-				exportTerminal, performanceMetrics, true)
+				exportTerminal, performanceMetrics, toolCallTurns, true)
 		}
 	}
 	finalStatus := runTerminal.Status
@@ -3472,6 +3477,7 @@ func streamDualAnswer(
 	target chatPersistTarget,
 	historyExt json.RawMessage,
 ) {
+	var primaryToolCallTurns, secondaryToolCallTurns int
 	snapshots := map[string]*ChatExportSnapshot{}
 	terminals := map[string]*ChatRuntimeEvent{}
 	envInputRequests := map[string]bool{}
@@ -3486,7 +3492,11 @@ func streamDualAnswer(
 			terminals[hid] = event
 			return
 		}
-		publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, hid, seq, event, metrics, live)
+		toolCallTurns := primaryToolCallTurns
+		if hid == secondaryHistoryID {
+			toolCallTurns = secondaryToolCallTurns
+		}
+		publishRuntimeChunk(reqCtx, chatCtx, w, flusher, stateStore, convID, hid, seq, event, metrics, toolCallTurns, live)
 	}
 	seq := target.Seq
 	primaryRunID, _ := reqBody["run_id"].(string)
@@ -3525,7 +3535,6 @@ func streamDualAnswer(
 	var primaryResult, secondaryResult string
 	var primarySources, secondarySources []any
 	var primaryPendingThink, secondaryPendingThink string
-	var primaryToolCallTurns, secondaryToolCallTurns int
 	var primaryTerminal, secondaryTerminal *RunTerminal
 	var primaryPerformance, secondaryPerformance *RunPerformanceMetrics
 	thinkStart := time.Now()
@@ -3644,6 +3653,7 @@ func streamDualAnswer(
 			if d.ExportSnapshot != nil {
 				snapshots[historyID] = d.ExportSnapshot
 			}
+			primaryToolCallTurns = observeToolCallTurns(primaryToolCallTurns, d, primaryRunID)
 			partialOutput := primaryResult != "" || primaryPendingThink != ""
 			if decision, handled := consumeRuntimeChunk(d, primaryRunID, partialOutput); handled {
 				decision = resolveRuntimeChunkDecision(
@@ -3685,9 +3695,6 @@ func streamDualAnswer(
 				)
 				continue
 			}
-			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
-				primaryToolCallTurns = next
-			}
 			appendPrimary(d.Text, d.ReasoningText, d.Sources)
 		case d, ok := <-secondaryCh:
 			if !ok {
@@ -3703,6 +3710,7 @@ func streamDualAnswer(
 			if d.ExportSnapshot != nil {
 				snapshots[secondaryHistoryID] = d.ExportSnapshot
 			}
+			secondaryToolCallTurns = observeToolCallTurns(secondaryToolCallTurns, d, secondaryRunID)
 			partialOutput := secondaryResult != "" || secondaryPendingThink != ""
 			if decision, handled := consumeRuntimeChunk(d, secondaryRunID, partialOutput); handled {
 				decision = resolveRuntimeChunkDecision(
@@ -3744,9 +3752,6 @@ func streamDualAnswer(
 				)
 				continue
 			}
-			if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > secondaryToolCallTurns {
-				secondaryToolCallTurns = next
-			}
 			appendSecondary(d.Text, d.ReasoningText, d.Sources)
 		case <-reqCtx.Done():
 			bg := chatCtx
@@ -3765,6 +3770,7 @@ func streamDualAnswer(
 						if d.ExportSnapshot != nil {
 							snapshots[historyID] = d.ExportSnapshot
 						}
+						primaryToolCallTurns = observeToolCallTurns(primaryToolCallTurns, d, primaryRunID)
 						partialOutput := primaryResult != "" || primaryPendingThink != ""
 						if decision, handled := consumeRuntimeChunk(d, primaryRunID, partialOutput); handled {
 							decision = resolveRuntimeChunkDecision(
@@ -3809,9 +3815,6 @@ func streamDualAnswer(
 							)
 							continue
 						}
-						if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > primaryToolCallTurns {
-							primaryToolCallTurns = next
-						}
 						if d.ReasoningText != "" {
 							primaryPendingThink += d.ReasoningText
 							primaryThinkingDurationS = int64(time.Since(thinkStart).Seconds())
@@ -3848,6 +3851,7 @@ func streamDualAnswer(
 						if d.ExportSnapshot != nil {
 							snapshots[secondaryHistoryID] = d.ExportSnapshot
 						}
+						secondaryToolCallTurns = observeToolCallTurns(secondaryToolCallTurns, d, secondaryRunID)
 						partialOutput := secondaryResult != "" || secondaryPendingThink != ""
 						if decision, handled := consumeRuntimeChunk(d, secondaryRunID, partialOutput); handled {
 							decision = resolveRuntimeChunkDecision(
@@ -3891,9 +3895,6 @@ func streamDualAnswer(
 								d.CapabilityDependency, false,
 							)
 							continue
-						}
-						if next := nonNegativeToolCallTurns(d.ToolCallTurns); next > secondaryToolCallTurns {
-							secondaryToolCallTurns = next
 						}
 						if d.ReasoningText != "" {
 							secondaryPendingThink += d.ReasoningText
@@ -3944,7 +3945,7 @@ dualPersist:
 			chatCtx, stateStore, convID, historyID, primaryRunID, primaryTerminal, "core_fallback", true,
 		)
 		event = runFinishedEvent(primaryRunID, *primaryTerminal)
-		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: event}
+		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: historyID, RuntimeEvent: event, ToolCallTurns: &primaryToolCallTurns}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
 		}
@@ -3967,7 +3968,7 @@ dualPersist:
 			chatCtx, stateStore, convID, secondaryHistoryID, secondaryRunID, secondaryTerminal, "core_fallback", true,
 		)
 		event = runFinishedEvent(secondaryRunID, *secondaryTerminal)
-		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: secondaryHistoryID, RuntimeEvent: event}
+		chunk := &ChatChunkResponse{ConversationID: convID, Seq: int32(seq), HistoryID: secondaryHistoryID, RuntimeEvent: event, ToolCallTurns: &secondaryToolCallTurns}
 		if reqCtx.Err() == nil {
 			writeSSEChunk(w, flusher, chunk)
 		}
@@ -4060,13 +4061,14 @@ dualPersist:
 		}
 	}
 	for _, item := range []struct {
-		id        string
-		ext       json.RawMessage
-		persisted bool
-		metrics   *RunPerformanceMetrics
+		id            string
+		ext           json.RawMessage
+		persisted     bool
+		metrics       *RunPerformanceMetrics
+		toolCallTurns int
 	}{
-		{historyID, primaryExt, primaryPersisted, primaryPerformance},
-		{secondaryHistoryID, secondaryExt, secondaryPersisted, secondaryPerformance},
+		{historyID, primaryExt, primaryPersisted, primaryPerformance, primaryToolCallTurns},
+		{secondaryHistoryID, secondaryExt, secondaryPersisted, secondaryPerformance, secondaryToolCallTurns},
 	} {
 		if snapshot := snapshots[item.id]; snapshot != nil {
 			exports := chatExportsFromExt(item.ext)
@@ -4083,7 +4085,7 @@ dualPersist:
 				_ = appendChatChunk(ctx, stateStore, convID, item.id, chunk)
 			}
 			if event := terminals[item.id]; event != nil {
-				publishRuntimeChunk(reqCtx, ctx, w, flusher, stateStore, convID, item.id, seq, event, item.metrics, true)
+				publishRuntimeChunk(reqCtx, ctx, w, flusher, stateStore, convID, item.id, seq, event, item.metrics, item.toolCallTurns, true)
 			}
 			cancel()
 		}

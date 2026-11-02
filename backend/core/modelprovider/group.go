@@ -335,7 +335,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		APIKeyCiphertext:    apiKeyCiphertext,
 		CredentialVersion:   legacyModelProviderCredentialVersion,
 		CredentialRevision:  credentialRevision,
-		IsVerified:          checkData != nil,
+		IsVerified:          checkData != nil || translationGroupConfigured(parent, apiKey),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   userID,
 			CreateUserName: userName,
@@ -670,6 +670,9 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 		updates["is_verified"] = true
 	}
+	if translationGroupConfigured(parent, effectiveAPIKey) {
+		updates["is_verified"] = true
+	}
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := updateConnectionSafely(tx, &parent, &row, baseURL, updates); err != nil {
 			return err
@@ -711,6 +714,11 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		IsVerified:          row.IsVerified,
 		Check:               checkData,
 	})
+}
+
+func translationGroupConfigured(parent orm.UserModelProvider, apiKey string) bool {
+	return parent.Category == "translation" &&
+		(strings.TrimSpace(apiKey) != "" || parent.HasCapability("keyless_translation"))
 }
 
 type deleteGroupResponse struct {
@@ -768,32 +776,7 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch models before deletion to check for embed_image types and
-	// collect IDs for user_selected_models cleanup.
-	var groupModels []orm.UserModelProviderGroupModel
-	if err := db.WithContext(r.Context()).
-		Where("user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, userID).
-		Find(&groupModels).Error; err != nil {
-		common.ReplyErr(w, "query group models failed", http.StatusInternalServerError)
-		return
-	}
-
 	hasMultimodal := false
-	hasTextEmbedding := false
-	modelIDs := make([]string, 0, len(groupModels))
-	for i := range groupModels {
-		modelIDs = append(modelIDs, groupModels[i].ID)
-		if isMultimodalEmbeddingModelType(groupModels[i].ModelType) {
-			hasMultimodal = true
-		}
-		if isTextEmbeddingModelType(groupModels[i].ModelType) {
-			hasTextEmbedding = true
-		}
-	}
-	if hasTextEmbedding && !indexedDowngradeConfirmed(r) {
-		common.ReplyErr(w, "removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked", http.StatusConflict)
-		return
-	}
 
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
@@ -803,13 +786,23 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if hasTextEmbedding {
-			count, err := downgradeIndexedDatasets(tx, userID, now)
-			if err != nil {
-				return err
-			}
-			downgradedKnowledgeBases = count
+		// Re-read model types under the supplier lock, so concurrent edits
+		// cannot turn this route into a bypass of individual-model protection.
+		var groupModels []orm.UserModelProviderGroupModel
+		if err := tx.Where("user_model_provider_group_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, userID).Find(&groupModels).Error; err != nil {
+			return err
 		}
+		modelIDs := make([]string, 0, len(groupModels))
+		for _, model := range groupModels {
+			modelIDs = append(modelIDs, model.ID)
+			hasMultimodal = hasMultimodal || isMultimodalEmbeddingModelType(model.ModelType)
+			if isTextEmbeddingModelType(model.ModelType) {
+				if err := guardEmbeddingRemoval(tx, userID); err != nil {
+					return err
+				}
+			}
+		}
+
 		if len(modelIDs) > 0 {
 			if err := tx.Where("user_model_provider_group_model_id IN ?", modelIDs).
 				Delete(&orm.UserSelectedModel{}).Error; err != nil {
@@ -838,6 +831,10 @@ func DeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return reconcileProviderActiveKey(tx, &parent)
 	})
 	if err != nil {
+		if errors.Is(err, errEmbeddingInUse) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "delete group failed", http.StatusInternalServerError)
 		return
 	}

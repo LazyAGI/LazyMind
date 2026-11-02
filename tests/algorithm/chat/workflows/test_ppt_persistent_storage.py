@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 def _load_ppt_tools():
     root = Path(__file__).resolve().parents[4]
@@ -51,6 +53,7 @@ def test_restyle_reports_partial_failure_without_claiming_global_success(monkeyp
         (tmp_path / 'pages' / f'page_{page:03d}.html').write_text(f'<html>{page}</html>')
     _write_ready_style(tmp_path)
     calls = []
+
     def stage(*args, **kwargs):
         calls.append(kwargs['page'])
         if kwargs['page'] == 2:
@@ -177,7 +180,8 @@ def test_preview_images_use_small_durable_urls_but_disk_stays_relative(monkeypat
     (deck / 'pages').mkdir()
     image = deck / 'images' / 'big image.png'
     image.write_bytes(b'x' * 2_000_000)
-    original = '<html><style>#bg{background:url("../images/big image.png")}</style><img src="../images/big image.png"></html>'
+    original = ('<html><style>#bg{background:url("../images/big image.png")}</style>'
+                '<img src="../images/big image.png"></html>')
     page = deck / 'pages' / 'page_001.html'
     page.write_text(original, encoding='utf-8')
     preview, count = tools._inline_preview_images(original, deck, page)
@@ -340,7 +344,8 @@ def test_workflow_deck_binding_survives_reworded_retry_and_other_workflows(monke
     assert len(list((tmp_path / 'ppt_decks').iterdir())) == 2
 
 
-def test_auto_background_prompts_publish_and_generate_without_style_model(monkeypatch, tmp_path):
+@pytest.mark.parametrize('explicit_deck', [False, True])
+def test_auto_background_prompts_publish_and_generate_without_style_model(monkeypatch, tmp_path, explicit_deck):
     from PIL import Image
 
     tools = _load_ppt_tools()
@@ -378,7 +383,7 @@ def test_auto_background_prompts_publish_and_generate_without_style_model(monkey
         return {'local_path': str(source)}
 
     monkeypatch.setattr(tools, 'image_generator', generate)
-    result = tools.ppt_generate_background_images(str(deck), prompts_json=prompts)
+    result = tools.ppt_generate_background_images(str(deck) if explicit_deck else None, prompts_json=prompts)
     assert result['count'] == 2
     assert generated_prompts == [item['prompt'] for item in prompts]
     assert not (deck / 'style_spec.json').exists()

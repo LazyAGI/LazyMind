@@ -10,6 +10,7 @@ export interface HostAction {
   binding_generation?: number
   execution_id?: string
   status: string
+  created_at?: string
   consumed_at?: string
 }
 export interface ActionClaim { action: HostAction; dispatch_token?: string; control: WorkflowControl }

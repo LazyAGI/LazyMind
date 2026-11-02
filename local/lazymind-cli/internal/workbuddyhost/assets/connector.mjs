@@ -445,35 +445,22 @@ var WorkBuddyAdapter = class {
 };
 
 //#endregion
-//#region src/cdp.ts
-/** Loopback-only transport. Never use a page title as a conversation identity. */
-function selectWorkBuddyTarget(targets) {
-	const pages = targets.filter((target) => {
-		if (target.type !== "page" || target.title?.toLowerCase() !== "workbuddy") return false;
-		try {
-			const url = new URL(target.url);
-			const appId = url.searchParams.get("windowAppId") ?? url.searchParams.get("windowKind") ?? "main";
-			return url.protocol === "file:" && url.pathname.endsWith("/renderer/index.html") && appId === "main";
-		} catch {
-			return false;
-		}
-	});
-	if (pages.length !== 1) throw new Error("Expected one WorkBuddy desktop target");
-	return pages[0];
-}
-var Cdp = class {
-	constructor(port) {
+//#region ../../workflow-agent-core/node/cdp.ts
+/** Shared local CDP transport; each host supplies its own target identity. */
+var CdpClient = class {
+	constructor(port, selectTarget) {
 		this.port = port;
+		this.selectTarget = selectTarget;
 		if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid CDP port");
 	}
-	async evaluate(expression, signal) {
-		const bounded = AbortSignal.any([signal, AbortSignal.timeout(8e3)]);
+	async evaluate(expression, signal, timeoutMs = 8e3) {
+		const bounded = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
 		const response = await fetch(`http://127.0.0.1:${this.port}/json/list`, {
 			signal: bounded,
 			redirect: "error"
 		});
 		if (!response.ok) throw new Error("CDP discovery failed");
-		const page = selectWorkBuddyTarget(await response.json());
+		const page = this.selectTarget(await response.json());
 		const url = new URL(page.webSocketDebuggerUrl);
 		if (url.protocol !== "ws:" || url.hostname !== "127.0.0.1" || Number(url.port) !== this.port || url.username || url.password) throw new Error("Unexpected CDP endpoint");
 		bounded.throwIfAborted();
@@ -505,7 +492,7 @@ var Cdp = class {
 				try {
 					const value = JSON.parse(String(event.data));
 					if (value.id !== 1) return;
-					if (value.error || value.result?.exceptionDetails) return finish(/* @__PURE__ */ new Error("WorkBuddy evaluation failed"));
+					if (value.error || value.result?.exceptionDetails) return finish(/* @__PURE__ */ new Error("Desktop evaluation failed"));
 					finish(void 0, value.result?.result?.value);
 				} catch {
 					finish(/* @__PURE__ */ new Error("Invalid CDP response"));
@@ -519,9 +506,32 @@ var Cdp = class {
 };
 
 //#endregion
-//#region src/tail-follow.ts
+//#region src/cdp.ts
+/** Loopback-only transport. Never use a page title as a conversation identity. */
+function selectWorkBuddyTarget(targets) {
+	const pages = targets.filter((target) => {
+		if (target.type !== "page" || target.title?.toLowerCase() !== "workbuddy") return false;
+		try {
+			const url = new URL(target.url);
+			const appId = url.searchParams.get("windowAppId") ?? url.searchParams.get("windowKind") ?? "main";
+			return url.protocol === "file:" && url.pathname.endsWith("/renderer/index.html") && appId === "main";
+		} catch {
+			return false;
+		}
+	});
+	if (pages.length !== 1) throw new Error("Expected one WorkBuddy desktop target");
+	return pages[0];
+}
+var Cdp = class extends CdpClient {
+	constructor(port) {
+		super(port, selectWorkBuddyTarget);
+	}
+};
+
+//#endregion
+//#region ../../workflow-agent-core/renderer/tail-follow.ts
 /** Serialized with the mount function; no module-scope dependencies. */
-function installTailFollow(scroller, content, panel, initiallyFollowing) {
+function installTailFollow(scroller, content, panel, initiallyFollowing, bottomButtonSelector = ".cr-scroll-to-bottom") {
 	let following = initiallyFollowing, disposed = false, dragging = false, downIntent = false;
 	let touchY;
 	const gap = () => Math.max(0, scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
@@ -596,7 +606,7 @@ function installTailFollow(scroller, content, panel, initiallyFollowing) {
 	}
 	const viewport = scroller.parentElement;
 	function bottomButton(event) {
-		const button = event.target instanceof Element ? event.target.closest(".cr-scroll-to-bottom") : null;
+		const button = event.target instanceof Element ? event.target.closest(bottomButtonSelector) : null;
 		if (!button || !viewport?.contains(button)) return;
 		following = true;
 		downIntent = false;

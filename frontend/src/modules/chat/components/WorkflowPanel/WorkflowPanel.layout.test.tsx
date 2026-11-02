@@ -23,6 +23,7 @@ vi.mock('../ArtifactPreview', () => ({ PreviewContent: ({ target, close }: any) 
 const fixture = vi.hoisted(() => ({
   session: {} as WorkflowSession,
   ui: {} as WorkflowUI,
+  fetchWorkflowUI: vi.fn<(...args: [string, string?]) => Promise<WorkflowUI>>(),
   flush: vi.fn(async () => true),
   refresh: vi.fn(),
   pause: vi.fn(),
@@ -40,7 +41,7 @@ vi.mock('@/modules/chat/store/workflowPanel', async (original) => {
     get sessionByConversation() { return { 'layout-test': fixture.session }; },
     bumpDismissedRefresh: vi.fn(), autoRunningByConversation: {}, setAutoRunning: vi.fn(),
     loadActiveSession: vi.fn(async () => {}),
-    fetchWorkflowUI: () => Promise.resolve(fixture.ui), setFocusedTab: fixture.setFocusedTab,
+    fetchWorkflowUI: fixture.fetchWorkflowUI, setFocusedTab: fixture.setFocusedTab,
     setFocusedSortOrder: vi.fn(),
     get focusedTabByConversation() { return { 'layout-test': fixture.focusedTab }; }, workflowUIByWorkflow: {},
   };
@@ -89,8 +90,9 @@ vi.mock('./SlotComponents', () => ({
 beforeEach(async () => {
   await i18n.changeLanguage('zh-CN');
   vi.clearAllMocks();
-  fixture.flush.mockResolvedValue(true);
-  fixture.pause.mockResolvedValue(undefined);
+  fixture.fetchWorkflowUI.mockReset().mockImplementation(async () => fixture.ui);
+  fixture.flush.mockReset().mockResolvedValue(true);
+  fixture.pause.mockReset().mockResolvedValue(undefined);
   fixture.focusedTab = undefined;
   fixture.setFocusedTab.mockImplementation((_id: string, tab: string) => { fixture.focusedTab = tab; });
   localStorage.clear();
@@ -114,7 +116,84 @@ beforeEach(async () => {
 });
 afterEach(cleanup);
 
+async function waitForCompletedContinueButton() {
+  await screen.findByRole('tab', { name: '成稿', selected: true });
+  return waitFor(() => {
+    const button = screen.getByRole('button', { name: '继续' });
+    expect(button).toBeEnabled();
+    return button;
+  });
+}
+
 describe('shared workflow compact layout', () => {
+  it('replaces the UI for a new pinned version of the same workflow without displaying the old tabs', async () => {
+    fixture.session.pinned_revision_id = 'v1';
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    expect(fixture.fetchWorkflowUI).toHaveBeenLastCalledWith('fixture', 'v1');
+    let resolve!: (ui: WorkflowUI) => void;
+    fixture.fetchWorkflowUI.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    fixture.session = { ...fixture.session, pinned_revision_id: 'v2' };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    expect(screen.queryByRole('tab', { name: '成稿' })).not.toBeInTheDocument();
+    expect(fixture.fetchWorkflowUI).toHaveBeenLastCalledWith('fixture', 'v2');
+    await act(async () => resolve({ tabs: [
+      { id: 'prepare', label: '新版准备', slots: [] },
+      { id: 'review', label: '新增审核', slots: [] },
+      { id: 'draft', label: '新版结果', slots: [] },
+    ] }));
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['1新版准备', '2新增审核', '3新版结果']);
+  });
+
+  it('ignores a late UI response after switching pinned versions', async () => {
+    let resolveOld!: (ui: WorkflowUI) => void;
+    fixture.fetchWorkflowUI.mockImplementationOnce(() => new Promise(done => { resolveOld = done; }));
+    fixture.session.pinned_revision_id = 'v1';
+    const view = render(<WorkflowPanel conversationId='layout-test' />);
+    fixture.session = { ...fixture.session, session_id: 'new-session', pinned_revision_id: 'v2' };
+    fixture.ui = { tabs: [{ id: 'draft', label: '新版结果', slots: [] }] };
+    view.rerender(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '新版结果' });
+    await act(async () => resolveOld({ tabs: [{ id: 'draft', label: '过期结果', slots: [] }] }));
+    expect(screen.queryByRole('tab', { name: '过期结果' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '新版结果' })).toBeVisible();
+  });
+
+  it('does not keep the previous locale visible while loading the same revision in another language', async () => {
+    fixture.session.pinned_revision_id = 'v1';
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '成稿' });
+    let resolve!: (ui: WorkflowUI) => void;
+    fixture.fetchWorkflowUI.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    await act(async () => { await i18n.changeLanguage('en-US'); });
+    expect(screen.queryByRole('tab', { name: '成稿' })).not.toBeInTheDocument();
+    await act(async () => resolve({ tabs: [{ id: 'draft', label: 'Result', slots: [] }] }));
+    expect(screen.getByRole('tab', { name: 'Result' })).toBeVisible();
+  });
+
+  it.each(['native', 'codex'] as const)('opens the actual completed result instead of the last tab on %s', async surface => {
+    fixture.ui.tabs!.reverse();
+    fixture.session.current_step_id = '';
+    fixture.session.steps = fixture.session.steps!.map((step, i) => ({
+      ...step, updated_at: `2026-09-16T00:0${i}:00Z`,
+    }));
+    const props = surface === 'codex' ? { embedded: true, externalPresentation: { activities: {}, compactEmptyStates: false } } : {};
+    const view = render(<WorkflowPanel conversationId='layout-test' {...props} />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+    expect(screen.getByRole('tab', { name: '写作准备', selected: false })).toBeVisible();
+    expect(fixture.setFocusedTab).not.toHaveBeenCalled();
+    view.unmount();
+    render(<WorkflowPanel conversationId='layout-test' {...props} />);
+    await screen.findByRole('tab', { name: '成稿', selected: true });
+  });
+
+  it('preserves a user-selected page when a workflow completes', async () => {
+    fixture.focusedTab = 'prepare';
+    fixture.session.current_step_id = '';
+    render(<WorkflowPanel conversationId='layout-test' />);
+    await screen.findByRole('tab', { name: '写作准备', selected: true });
+  });
+
   it('keeps automatic grids from reintroducing hidden output when every tab is hidden', async () => {
     fixture.ui.slotDefinitions = [{ id: 'document', label: '内部数据', type: 'text', user_visible: false }];
     fixture.ui.tabs = [{ id: 'internal', label: '内部数据', slots: fixture.ui.slotDefinitions }];
@@ -323,7 +402,7 @@ describe('shared workflow compact layout', () => {
     fixture.session.slots = [];
     fixture.ui.tabs![1].slots[0].widget = { widgetType: 'text-markdown' };
     const view = render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('tab', { name: '成稿' });
+    await screen.findByRole('tab', { name: '成稿', selected: true });
     const nativeContent = view.container.querySelector('.workflow-panel__body')!.innerHTML;
     view.rerender(<WorkflowPanel conversationId='layout-test' embedded
       externalPresentation={{ activities: {}, compactEmptyStates: false }} />);
@@ -337,7 +416,7 @@ describe('shared workflow compact layout', () => {
     fixture.session.slots![0].sort_order = 1;
     fixture.ui.tabs![1].slots.push({ id: 'template_content_brief', label: '模板内容要求', type: 'text' });
     const view = render(<WorkflowPanel conversationId='layout-test' />);
-    await screen.findByRole('tab', { name: '成稿' });
+    await screen.findByRole('tab', { name: '成稿', selected: true });
     expect(screen.getByText('正文 document')).toBeVisible();
     expect(screen.queryByText('模板内容要求')).not.toBeInTheDocument();
     expect(view.container.querySelector('.workflow-panel__slot-placeholder')).toBeNull();
@@ -585,9 +664,9 @@ describe('shared workflow compact layout', () => {
     fixture.ui.tabs![1].completed_continue_step = 'write_document';
     const send = vi.fn();
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    const continueButton = await screen.findByRole('button', { name: '继续' });
-    await act(async () => fireEvent.click(continueButton));
-    expect(send).toHaveBeenCalledOnce();
+    const button = await waitForCompletedContinueButton();
+    await act(async () => fireEvent.click(button));
+    await waitFor(() => expect(send).toHaveBeenCalledOnce());
     expect(send).toHaveBeenCalledWith(`${i18n.t('chat.workflowRollbackPrefix')}write_document`, {
       session_id: 'layout-test', kind: 'rewind', step_id: 'write_document', expected_state_version: 0,
     });
@@ -597,7 +676,8 @@ describe('shared workflow compact layout', () => {
     fixture.ui.tabs![1].completed_continue_step = 'write_document';
     const send = vi.fn(async () => false);
     render(<WorkflowPanel conversationId='layout-test' onSendMessage={send} />);
-    fireEvent.click(await screen.findByRole('button', { name: '继续' }));
+    const button = await waitForCompletedContinueButton();
+    fireEvent.click(button);
     await waitFor(() => expect(send).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.getByRole('button', { name: '继续' })).toBeEnabled());
     expect(fixture.session.projection!.display!.status).toBe('completed');
@@ -1084,7 +1164,7 @@ describe('external presentation opt-in', () => {
     fixture.ui.tabs![1].composite_behavior = { hide_empty_columns: false };
     fixture.ui.tabs![1].slots[0].widget = { widgetType: 'text-markdown', collapseWhenEmpty: true };
     const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {}, compactEmptyStates: true }} />);
-    await screen.findByRole('tab', { name: /成稿/ });
+    await screen.findByRole('tab', { name: /成稿/, selected: true });
     const button = () => view.container.querySelector<HTMLButtonElement>('.workflow-panel__slot-collapse')!;
     expect(button()).toHaveAttribute('aria-expanded', 'false');
     fixture.session.slots = [{ slot_id: 'document', slot: 'document', step_id: 'write_document', selected: true, revision: 1, artifact_value: { text: 'arrived' } }] as WorkflowSession['slots'];
@@ -1105,7 +1185,7 @@ it('keeps external streaming previews from replacing an editor with pending chan
   fixture.session.status = 'active';
   fixture.session.steps![1] = { ...fixture.session.steps![1], status: 'running', task_id: 'task' };
   const view = render(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {} }} />);
-  await screen.findByRole('tab', { name: /成稿/ });
+  await screen.findByRole('tab', { name: /成稿/, selected: true });
   fireEvent.doubleClick(screen.getByText('正文 document'));
   view.rerender(<WorkflowPanel conversationId='layout-test' externalPresentation={{ activities: {
     task: { artifacts: [{ slot: 'document', content_type: 'text', seq: 2, value: { text: 'provisional' } }] },
@@ -1275,7 +1355,7 @@ describe('workflow follow and session presentation', () => {
     fireEvent.click(following());
     fixture.session = { ...fixture.session, session_id: 'next-run', current_step_id: 'prepare' };
     view.rerender(<WorkflowPanel conversationId='layout-test' />);
-    fireEvent.click(browsing());
+    fireEvent.click(await screen.findByRole('button', { name: '自由浏览' }));
     await act(async () => complete(true));
     expect(browsing()).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('tab', { name: '写作准备', selected: true })).toBeVisible();

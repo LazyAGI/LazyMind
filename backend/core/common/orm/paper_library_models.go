@@ -69,3 +69,26 @@ type PaperLibraryAttachment struct {
 }
 
 func (PaperLibraryAttachment) TableName() string { return "paper_library_attachments" }
+
+// PaperLibrary is the immutable pre-normalization graph archive. New writes use
+// the normalized entities and PaperLibraryLegacyState auxiliary fields.
+type PaperLibrary struct {
+	DatasetID string          `gorm:"type:varchar(255);primaryKey;not null"`
+	DataJSON  json.RawMessage `gorm:"type:json;not null"`
+	Revision  int64           `gorm:"not null;default:0;check:revision >= 0"`
+	CreatedAt time.Time       `gorm:"not null"`
+	UpdatedAt time.Time       `gorm:"not null"`
+}
+
+func (PaperLibrary) TableName() string { return "paper_libraries" }
+
+// ExtrasJSON keeps fields which do not belong to normalized entities. MigratedAt
+// is committed in the same transaction as the conversion, preventing replay.
+type PaperLibraryLegacyState struct {
+	DatasetID  string          `gorm:"type:varchar(255);primaryKey;not null"`
+	ExtrasJSON json.RawMessage `gorm:"type:json;not null"`
+	MigratedAt *time.Time
+	UpdatedAt  time.Time `gorm:"not null"`
+}
+
+func (PaperLibraryLegacyState) TableName() string { return "paper_library_legacy_states" }

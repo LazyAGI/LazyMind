@@ -50,10 +50,20 @@ vi.mock("@/modules/modelProvider/pages/ModelProvidersPage", () => ({
   ),
 }));
 vi.mock("@/modules/modelProvider/pages/DefaultServicesPage", () => ({
-  default: ({ onConfigureProviders }: { onConfigureProviders: () => void }) => (
-    <div>
+  default: ({
+    onConfigureProviders,
+    onConfigureCloudService,
+    focusServiceCategory,
+  }: {
+    onConfigureProviders: () => void;
+    onConfigureCloudService: (service: "cloudParsing" | "searchEngine") => void;
+    focusServiceCategory?: string;
+  }) => (
+    <div data-focus-service={focusServiceCategory}>
       <span>Default model choices</span>
       <button onClick={onConfigureProviders}>Configure providers</button>
+      <button onClick={() => onConfigureCloudService("cloudParsing")}>Configure OCR here</button>
+      <button onClick={() => onConfigureCloudService("searchEngine")}>Configure search here</button>
     </div>
   ),
 }));
@@ -208,4 +218,32 @@ describe("separate supplier and default model settings", () => {
       ).not.toBeInTheDocument();
     },
   );
+  it.each([
+    { tool: "document-parsing", category: "parsing" },
+    { tool: "web-search", category: "search" },
+    { tool: "academic-search", category: "academic" },
+    { tool: "translation", category: "translation" },
+  ])("moves the old $tool service link into Default Models", async ({ tool, category }) => {
+    const router = renderAt(`/settings?section=knowledge&tool=${tool}`);
+    const defaultModels = await screen.findByText("Default model choices");
+    expect(defaultModels.parentElement).toHaveAttribute("data-focus-service", category);
+    await waitFor(() => {
+      const params = new URLSearchParams(router.state.location.search);
+      expect(params.get("section")).toBe("model_defaults");
+      expect(params.get("service")).toBe(category);
+      expect(params.has("tool")).toBe(false);
+    });
+  });
+  it("keeps OCR and search setup in the Default Models page", async () => {
+    const router = renderAt("/settings?section=model_defaults");
+    await screen.findByText("Default model choices");
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure OCR here" }));
+    await waitFor(() => expect(new URLSearchParams(router.state.location.search).get("service")).toBe("parsing"));
+    expect(screen.getByText("Default model choices")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure search here" }));
+    await waitFor(() => expect(new URLSearchParams(router.state.location.search).get("service")).toBe("search"));
+    expect(screen.getByText("Default model choices")).toBeVisible();
+  });
 });

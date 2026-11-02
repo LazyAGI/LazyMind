@@ -35,7 +35,6 @@ class GitHubPRToolkit:
     """Read GitHub PR descriptions for contribution summaries without a workflow."""
 
     __public_apis__ = ['collect', 'read_description']
-    __tool_auto_activate__ = [r'(?i)github|pull request|\bprs?\b|贡献|合并请求']
 
     @fc_register(host_file='NONE')
     def collect(self, repository: str, author: str = '', start_date: str = '', end_date: str = '',

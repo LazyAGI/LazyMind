@@ -285,7 +285,9 @@ func TestSteeringPersistenceFailureDoesNotPublishAcceptedBoundary(t *testing.T) 
 	if err := db.AutoMigrate(&orm.ConversationFollowUp{}); err != nil {
 		t.Fatal(err)
 	}
-	server := streamServer(t, "run", algorithmFrame(t, map[string]any{"steering_applied": []steeringApplied{{ID: "not-owned"}}}))
+	server := streamServer(t, "run",
+		algorithmFrame(t, map[string]any{"tool_call_turns": 3}),
+		algorithmFrame(t, map[string]any{"steering_applied": []steeringApplied{{ID: "not-owned"}}}))
 	defer server.Close()
 	w := httptest.NewRecorder()
 	streamSingleAnswer(context.Background(), context.Background(), w, w, db, cache, server.URL,
@@ -294,4 +296,5 @@ func TestSteeringPersistenceFailureDoesNotPublishAcceptedBoundary(t *testing.T) 
 	if strings.Contains(w.Body.String(), `"steering_applied"`) || !strings.Contains(w.Body.String(), "steering_persistence_failed") {
 		t.Fatalf("unexpected acknowledgement: %s", w.Body.String())
 	}
+	requireTerminalToolCallTurns(t, decodeChatChunkSSE(t, w.Body.String()), "h", 3)
 }

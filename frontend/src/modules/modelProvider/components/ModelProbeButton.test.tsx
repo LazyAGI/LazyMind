@@ -17,7 +17,7 @@ function setup(configurationKey = "config-1", disabledReason?: string) {
   const view = render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProbeButton {...props} /></ConfigProvider>);
   return { ...view, props, pending };
 }
-beforeEach(() => { resetProbeHealthForTests(); vi.clearAllMocks(); mocks.probe.mockResolvedValue({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 24 }); });
+beforeEach(() => { resetProbeHealthForTests(); vi.clearAllMocks(); mocks.probe.mockReset().mockResolvedValue({ status: "passed", code: "ok", model_type: "llm", elapsed_ms: 24 }); });
 
 describe("model inference probe", () => {
   it("announces measured embedding dimensions in the result tooltip", async () => {

@@ -830,7 +830,7 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var clearMultimodalSelection bool
-	confirmationRequired := errors.New("removing an embedding model requires confirmation to downgrade all indexed knowledge bases to chunked")
+	confirmationRequired := errEmbeddingInUse
 	now := time.Now().UTC()
 	var downgradedKnowledgeBases int64
 	if err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
@@ -850,16 +850,12 @@ func DeleteGroupModel(w http.ResponseWriter, r *http.Request) {
 		}
 		clearMultimodalSelection = isMultimodalEmbeddingModelType(row.ModelType)
 		removeTextEmbedding := isTextEmbeddingModelType(row.ModelType)
-		if removeTextEmbedding && !indexedDowngradeConfirmed(r) {
-			return confirmationRequired
-		}
 		if removeTextEmbedding {
-			count, err := downgradeIndexedDatasets(tx, userID, now)
-			if err != nil {
+			if err := guardEmbeddingRemoval(tx, userID); err != nil {
 				return err
 			}
-			downgradedKnowledgeBases = count
 		}
+
 		deleted := tx.Model(&orm.UserModelProviderGroupModel{}).
 			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", row.ID, userID).
 			Updates(map[string]interface{}{

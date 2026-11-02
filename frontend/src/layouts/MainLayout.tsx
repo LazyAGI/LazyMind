@@ -288,7 +288,7 @@ export default function MainLayout() {
       ),
     },
     {
-      key: "/settings?section=models",
+      key: "/settings?section=model_defaults",
       label: t("layout.modelProviderManagement"),
       icon: (
         <ApiOutlined className="settings-popover-icon" aria-hidden="true" />
@@ -1233,7 +1233,7 @@ export default function MainLayout() {
                           )}
                           {[
                             "/settings?section=overview",
-                            "/settings?section=models",
+                            "/settings?section=model_defaults",
                             "/settings?section=developer",
                           ].includes(item.key) && (
                             <RightOutlined

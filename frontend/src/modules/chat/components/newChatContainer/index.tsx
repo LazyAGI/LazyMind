@@ -63,6 +63,7 @@ const SKILL_DEPOSIT_PROMPT_PREFIXES = ["zh-CN", "en-US"].map((language) =>
 );
 
 function getSkillDepositStats(messageList: any[]): SkillDepositStats {
+  const toolTurnsByHistory = new Map<string, number>();
   return messageList.reduce<SkillDepositStats>(
     (stats, item) => {
       if (item?.role === RoleTypes.USER && !item?.is_resumed) {
@@ -72,10 +73,15 @@ function getSkillDepositStats(messageList: any[]): SkillDepositStats {
           stats.userTurns += 1;
         }
       }
-      if (item?.role === RoleTypes.ASSISTANT) {
+      if (item?.role === RoleTypes.ASSISTANT && !item?.archived_failure) {
         const toolCallTurns = Number(item.tool_call_turns ?? 0);
         if (Number.isFinite(toolCallTurns) && toolCallTurns > 0) {
-          stats.toolCallTurns += toolCallTurns;
+          // Steering splits one history into several displayed replies, but
+          // their tool counts are cumulative observations of the same run.
+          const historyId = item.original_history_id || item.history_id;
+          const previous = historyId ? toolTurnsByHistory.get(historyId) ?? 0 : 0;
+          stats.toolCallTurns += Math.max(0, toolCallTurns - previous);
+          if (historyId) toolTurnsByHistory.set(historyId, Math.max(previous, toolCallTurns));
         }
       }
       return stats;

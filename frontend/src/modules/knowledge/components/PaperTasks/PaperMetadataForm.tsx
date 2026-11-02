@@ -28,6 +28,6 @@ export default function PaperMetadataForm({ value, disabled, includeTags, onSave
     <Form.Item name="arxiv_id" label="arXiv"><Input /></Form.Item>
     <Form.Item name="abstract" label={t('paperTasks.abstract')}><Input.TextArea /></Form.Item>
     {includeTags && <Form.Item name="tags" label="标签"><Input placeholder="用分号分开" /></Form.Item>}
-    <Button type="primary" htmlType="submit" loading={disabled}>保存题录</Button>
+    <Button aria-label="保存" type="primary" htmlType="submit" loading={disabled}>保存</Button>
   </Form>;
 }

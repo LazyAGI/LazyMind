@@ -66,6 +66,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "codex-recovery" {
+		return runCodexRecovery(ctx, args[1:], stdout)
+	}
 	if len(args) == 2 && args[0] == "connection" && args[1] == "resolve" {
 		return resolveConnection(ctx, stdout)
 	}
@@ -503,8 +506,8 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		defer stopOwnerWatch()
 		if *ownerPID > 0 {
 			for _, provider := range providers {
-				if provider == "workbuddy" {
-					go assistantbridge.KeepWorkBuddyAvailable(hostCtx, credentialStore, stderr)
+				if provider == "workbuddy" || provider == "codex" {
+					go assistantbridge.KeepDesktopAgentsAvailable(hostCtx, credentialStore, stderr)
 					break
 				}
 			}
