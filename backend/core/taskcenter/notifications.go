@@ -247,14 +247,14 @@ func activeNotificationRuns(tx *gorm.DB, userID string) ([]string, error) {
 	}
 	desktopEnabled := notificationBlockReason(prefs, "desktop") == ""
 	var tasks []orm.TaskCenterTask
+	taskTypes := []string{"scheduled", "background_chat", "workflow_run"}
 	// Use the same visibility and resolved status as ListTasks. Persisted task
 	// state can lag behind a workflow completion or retry; comparing it with the
 	// UI's live task list would otherwise require confirmation indefinitely.
 	if err := tx.Table("task_center_tasks tct").Select("tct.*").
 		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id").
-		Where("tct.user_id = ? AND tct.task_type IN ? AND tct.archived_at IS NULL", userID,
-			[]string{"scheduled", "background_chat", "workflow_run"}).
-		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false").
+		Where("tct.user_id = ? AND tct.task_type IN ? AND tct.archived_at IS NULL", userID, taskTypes).
+		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false"). // workflow-naming: persistence
 		Order("tct.id").Find(&tasks).Error; err != nil {
 		return nil, err
 	}
