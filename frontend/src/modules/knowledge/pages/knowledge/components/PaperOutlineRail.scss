@@ -32,8 +32,11 @@
   width:24px;
   max-height:100%;
   overflow:hidden;
-  >span {display:block;width:14px;height:2px;min-height:2px;border-radius:2px;background:#b7bcc5;}
-  >.is-active {width:24px;background:var(--color-primary, #006ae6);}
+  >span {display:block;width:22px;height:2px;min-height:2px;border-radius:2px;background:#b7bcc5;}
+  >[data-depth="1"] {width:14px;}
+  >[data-depth="2"] {width:9px;}
+  >[data-depth="3"] {width:6px;}
+  >.is-active {background:var(--color-primary, #006ae6);}
   >.is-empty {width:18px;opacity:.6;}
  }
  &__popover {

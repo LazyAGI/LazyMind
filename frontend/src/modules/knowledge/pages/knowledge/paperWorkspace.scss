@@ -47,7 +47,7 @@
   .paper-pane-divider::after { content: ''; position: absolute; inset: 40% 3px; border-radius: 4px; background: transparent; transition: background .15s; }
   .paper-pane-divider:hover::after, .paper-pane-divider:focus-visible::after { background: var(--paper-accent); }
   .paper-workspace-dock { position: absolute; z-index: 90; right: 14px; bottom: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0; pointer-events: none; }
-  .paper-workspace-dock button { pointer-events: auto; box-shadow: 0 2px 8px #1f293714; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--paper-border); background: var(--paper-surface); color: var(--paper-muted); cursor: pointer; font-size: 17px; transition: background .15s, color .15s; }
+  .paper-workspace-dock button { pointer-events: auto; box-shadow: 0 2px 8px #1f293714; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--paper-border); background: var(--paper-surface); color: var(--paper-muted); cursor: pointer; font-size: 21px; transition: background .15s, color .15s; }
   .paper-workspace-dock button:hover { color: var(--paper-accent); background: var(--paper-tint); }
   .paper-workspace-dock button[aria-pressed=true] { background: var(--paper-accent); border-color: var(--paper-accent); color: white; }
   button:focus-visible, .paper-pane-divider:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
@@ -75,7 +75,7 @@
     .paper-workspace-header-actions { gap: 0; }
     .knowledge-paper-workspace { padding-inline: 4px; }
     .paper-workspace-dock { right: 12px; bottom: 12px; }
-    .paper-workspace-dock button { width: 34px; height: 34px; }
+    .paper-workspace-dock button { width: 48px; height: 48px; }
     .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane:not(.is-collapsed) { right: 4px; width: calc(100% - 8px); }
   }
 }
@@ -95,7 +95,7 @@
   .paper-nav-pane:not(.is-collapsed) { position: absolute; z-index: 65; inset: 52px auto 8px 8px; width: min(300px, 85%); box-shadow: 0 8px 28px #26262615; }
   .paper-chat-pane { overflow: hidden; transition: flex-basis 180ms ease, width 180ms ease, opacity 140ms ease; }
   .paper-chat-pane.is-collapsed { display: flex; width: 0; flex-basis: 0; border-width: 0; opacity: 0; visibility: hidden; pointer-events: none; }
-  .paper-chat-open-content { width: var(--paper-assistant-width, 400px); flex: 1 0 auto; }
+  .paper-chat-open-content { width: var(--paper-assistant-width, 400px); flex: 1 1 0; }
   .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane { transition: transform 180ms ease, opacity 140ms ease; position: absolute; z-index: 64; inset: 4px 4px 4px auto; width: min(420px, calc(100% - 8px)); }
   .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane.is-collapsed { transform: translateX(24px); }
   .knowledge-paper-workspace[data-compact=true] .paper-chat-open-content { width: 100%; }
@@ -144,8 +144,16 @@
   .paper-chat-toolbar > div { display: flex; align-items: center; gap: 2px; }
 }
 
-// Only the send control moves clear of the overlaid bubbles; panel width is unchanged.
-.knowledge-container.is-paper-document .knowledge-paper-workspace[data-panel-layout=right] > .paper-chat-pane .send-button { margin-right: 44px; }
+// Reserve space inside the composer, while the floating dock consumes no panel width.
+.knowledge-container.is-paper-document .paper-chat-pane .chat-main-column > .input-wrapper {
+  width: calc(100% - 68px);
+  margin-left: 0;
+  margin-right: 68px;
+  flex-shrink: 0;
+}
+.knowledge-container.is-paper-document .paper-library-back-icon { display: block; flex: 0 0 16px; width: 16px; height: 16px; }
+.knowledge-container.is-paper-document .paper-chat-toolbar { flex-shrink: 0; }
+
 
 .paper-document-loading {
   height: 100%;

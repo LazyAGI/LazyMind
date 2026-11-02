@@ -101,3 +101,10 @@ it('keeps the clicked chapter active when several headings share its page',()=>{
  expect(screen.getByRole('button',{name:'2 Method'})).toHaveAttribute('aria-current','location');
  expect(screen.getByRole('button',{name:'2.1 Detail'})).not.toHaveAttribute('aria-current');
 });
+it('uses the same heading depth for ticks and expanded chapter indentation',()=>{
+ const {container}=render(<PaperOutlineRail document={document} currentPage={1} onNavigate={vi.fn()}/>);
+ const ticks=container.querySelectorAll('.paper-outline-rail__ticks > span');
+ expect(Array.from(ticks).map(tick=>tick.getAttribute('data-depth'))).toEqual(['0','0','1']);
+ fireEvent.click(screen.getByRole('button',{name:'Outline'}));
+ expect(screen.getByRole('button',{name:'2.1 Architecture'})).toHaveStyle({paddingInlineStart:'26px'});
+});

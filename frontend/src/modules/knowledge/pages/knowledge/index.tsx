@@ -1230,7 +1230,7 @@ const KnowledgeDocumentContent = () => {
           ) : null}
             <FileViewer
               ref={fileViewerRef}
-              pdfHeaderStart={isPdfDocument ? <Button className="paper-library-back" type="text" icon={<ArrowLeftOutlined/>} onClick={()=>navigate(`/lib/knowledge/detail/${knowledgeBaseId}`)}>{i18n.language.startsWith("zh")?"论文集":"Paper collection"}</Button> : undefined}
+              pdfHeaderStart={isPdfDocument ? <button className="paper-library-back" type="button" onClick={()=>navigate(`/lib/knowledge/detail/${knowledgeBaseId}`)}><svg className="paper-library-back-icon" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m12 5-7 7 7 7M5 12h14"/></svg><span>{i18n.language.startsWith("zh")?"论文集":"Paper collection"}</span></button> : undefined}
               pdfHeaderEnd={isPdfDocument ? <div className="paper-workspace-header-actions">
           <Popover trigger="click" placement="bottomRight" overlayClassName="paper-document-actions-popover" content={<div className="paper-document-actions">{pageTitle}</div>}><Button type="text" icon={<MoreOutlined/>} aria-label={i18n.language.startsWith("zh") ? "文档操作与翻译" : "Document actions and translation"}/></Popover>
         </div> : undefined}

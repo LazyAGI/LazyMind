@@ -12,6 +12,11 @@ export interface PaperOutlineRailProps {
  disabled?:boolean;
 }
 
+function headingDepth(text?:string) {
+ const numbering=text?.trim().match(/^(\d+(?:\.\d+)*)\.?\s/);
+ return Math.min(3,numbering?numbering[1].split('.').length-1:0);
+}
+
 export function PaperOutlineRail({document:source,currentPage,onNavigate,disabled=false}:PaperOutlineRailProps){
  const {t}=useTranslation();
  const id=useId(),root=useRef<HTMLDivElement>(null),trigger=useRef<HTMLButtonElement>(null);
@@ -63,13 +68,12 @@ export function PaperOutlineRail({document:source,currentPage,onNavigate,disable
    aria-expanded={open&&!disabled} aria-controls={`${id}-outline`} disabled={disabled}
    onMouseEnter={()=>{if(!disabled)setOpen(true);}} onFocus={()=>{if(!suppressFocus.current&&!disabled)setOpen(true);}}
    onClick={()=>setOpen(true)}>
-   <span className="paper-outline-rail__ticks" aria-hidden="true">{outline.length?outline.map(block=><span key={block.id} className={block.id===active?'is-active':undefined}/>):<span className="is-empty"/>}</span>
+   <span className="paper-outline-rail__ticks" aria-hidden="true">{outline.length?outline.map(block=><span key={block.id} data-depth={headingDepth(block.text)} className={block.id===active?'is-active':undefined}/>):<span className="is-empty"/>}</span>
   </button>
   <nav id={`${id}-outline`} className={`paper-outline-rail__popover${open&&!disabled?" is-open":""}`} aria-hidden={!open||disabled} aria-label={title}>
    <div className="paper-outline-rail__title">{title}</div>
    {outline.length?<ol>{outline.map(block=>{
-    const numbering=block.text?.match(/^(\d+(?:\.\d+)*)\.?\s/);
-    const depth=Math.min(3,numbering?numbering[1].split('.').length-1:0);
+    const depth=headingDepth(block.text);
     return <li key={block.id}><button type="button" className="paper-outline-rail__chapter" style={{paddingInlineStart:12+depth*14}} aria-current={block.id===active?'location':undefined}
      onClick={()=>{setSelectedId(block.id);onNavigate(block.id);}}><span>{block.text}</span></button></li>;
    })}</ol>:<p className="paper-outline-rail__empty">{empty}</p>}
