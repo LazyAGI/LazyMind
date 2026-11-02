@@ -44,7 +44,7 @@ it('renders the actual Text CC array intact and selects each observed CrossAttn 
  const latex=String.raw`\begin{array}{c} \mathcal {L} _ {c c} = \sum_ {i = 1} ^ {l} \operatorname{ReLU} \big (C r o s s A t t n (I, T _ {N P _ {i}}) \\ - C r o s s A t t n (I, N P _ {i}) - \epsilon \big) \end{array}`;
  const defs=[{symbol:'CrossAttn(I,T_{NP_i})',meaning:'Contextual attention',evidence_ids:[],inferred:true},{symbol:'CrossAttn(I,NP_i)',meaning:'Isolated attention',evidence_ids:[],inferred:true}];
  const view=render(<InteractiveFormula latex={latex} sourceKey="cc" definitions={defs} evidence={[]} onNavigate={vi.fn()}/>);
- const calls=screen.getAllByRole('button',{name:'Symbol: C r o s s A t t n'});
+ const calls=screen.getAllByRole('button',{name:/^Symbol: C r o s s A t t n \(/});
  expect(calls).toHaveLength(2);
  expect(view.container.querySelector('.pdf-interactive-equation .katex-display')).not.toBeNull();
  fireEvent.click(calls[0]);expect(screen.getByText('Contextual attention')).toBeInTheDocument();
@@ -102,4 +102,23 @@ it('connects positional-encoding tuple subscripts to the generated meaning',()=>
  render(<InteractiveFormula latex="PE_{(pos,2i)} = x" sourceKey="pe" definitions={[{symbol:'PE_{(pos,2i)}',meaning:'Even-dimension positional encoding',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()}/>);
  fireEvent.click(screen.getByRole('button',{name:'Symbol: PE_{(pos,2i)}'}));
  expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Even-dimension positional encoding');
+});
+
+
+it('rebuilds click targets when a complete function meaning arrives, without changing the formula',()=>{
+ const latex=String.raw`L\left(w\right)+w`;
+ const props={latex,sourceKey:'loss-call',evidence:[],onNavigate:vi.fn()};
+ const view=render(<InteractiveFormula {...props} definitions={[]}/>);
+ expect(screen.getByRole('button',{name:'Symbol: L'})).toBeInTheDocument();
+ const before=view.container.querySelector('.katex-html')?.textContent;
+ view.rerender(<InteractiveFormula {...props} definitions={[{symbol:'L(w)',meaning:'Loss evaluated at parameters w',evidence_ids:[],inferred:true},{symbol:'w',meaning:'Model parameters',evidence_ids:[],inferred:true}]}/>);
+ const call=screen.getByRole('button',{name:String.raw`Symbol: L\left(w\right)`});
+ expect(screen.queryByRole('button',{name:'Symbol: L'})).toBeNull();
+ expect(screen.getAllByRole('button',{name:'Symbol: w'})).toHaveLength(1);
+ expect(view.container.querySelector('.katex-html')?.textContent).toBe(before);
+ fireEvent.keyDown(call,{key:'Enter'});
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Loss evaluated at parameters w');
+ fireEvent.click(screen.getByRole('button',{name:'Symbol: w'}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Model parameters');
+ expect(view.container.querySelector('[role="button"] [role="button"]')).toBeNull();
 });

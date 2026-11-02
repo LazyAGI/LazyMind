@@ -120,8 +120,7 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
  // braces may differ, but accents, commands and script structure stay distinct.
  const normalized=definitions.map(normalizeFormulaSymbol);
  occurrences.forEach(occurrence=>{const value=normalizeFormulaSymbol(occurrence.latex);const alias=namedOperator(occurrence.latex);normalized.forEach((definition,index)=>{if(value===definition || (alias && alias===definition))occurrence.definitionIndices.push(index);});});
- // A definition may name an observed function CALL. Its clickable function head
- // uses that exact call's definition; its arguments remain separate targets.
+ // Keep original source offsets while matching typography-independent names.
  let canonical='';const offsets:number[]=[];
  for(let i=0;i<latex.length;i++)if(!/[\s{}]/.test(latex[i])){canonical+=latex[i];offsets.push(i);}
  // Group a multi-letter identifier only when the supplied definition exactly
@@ -143,25 +142,38 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
    occurrences.push({start,end,latex:latex.slice(start,end),definitionIndices:[index]});
   }
  });
- definitions.map(value=>withinSymbolBudget(value)?looseSymbol(value):"").forEach((definition,index)=>{
-  const paren=definition.indexOf('(');if(paren<=0 || !definition.endsWith(')'))return;
-  let from=0;
-  while(true){
-   const found=canonical.indexOf(definition,from);if(found<0)break;from=found+definition.length;
-   const start=offsets[found],headLast=offsets[found+paren-1];
-   const first=occurrences.find(o=>o.start===start);
-   const last=occurrences.find(o=>o.start<=headLast&&o.end>headLast);
-   if(!first || !last)continue;
-   const end=last.end;
-   if(first!==last && latex.slice(start,end).includes('^'))continue;
-   if(looseSymbol(latex.slice(start,end))!==definition.slice(0,paren))continue;
-   const callEnd=offsets[found+definition.length-1]+1;
-   if(normalizeFormulaSymbol(latex.slice(start,callEnd))!==normalized[index])continue;
-   const existing=occurrences.find(o=>o.start===start&&o.end===end);
-   if(existing){if(!existing.definitionIndices.includes(index))existing.definitionIndices.push(index);}
-   else {occurrences=occurrences.filter(o=>o.end<=start||o.start>=end);occurrences.push({start,end,latex:latex.slice(start,end),definitionIndices:[index]});}
-  }
- });
+ // A returned call definition owns its complete source expression, including
+ // arguments. Match larger calls first so nested terms cannot fragment them.
+ // Never synthesize LaTeX or make independently nested click targets.
+ normalized.map((value,index)=>({value,index})).filter(item=>stripDelimiters(definitions[item.index]).trim().endsWith(')'))
+  .sort((a,b)=>b.value.length-a.value.length).forEach(({value,index})=>{
+   for(const first of [...occurrences]){
+    if(!occurrences.includes(first))continue;
+    const head=normalizeFormulaSymbol(first.latex);
+    if(!head || !value.startsWith(head))continue;
+    for(let end=first.end;end<=latex.length;end++){
+     if(latex[end-1]!==')')continue;
+     const source=latex.slice(first.start,end);
+     // A group must stay inside one TeX row and be syntactically complete.
+     if(/\\\\|&|\\(?:begin|end)\b/.test(source))break;
+     const candidate=normalizeFormulaSymbol(source);
+     if(candidate!==value){
+      // Extending an already complete, equally long expression cannot make
+      // it match; avoid scanning the rest of a long equation for every atom.
+      if(candidate.length>=value.length)break;
+      continue;
+     }
+     if(occurrences.some(item=>item.start<end && item.end>end))continue;
+     const existing=occurrences.find(item=>item.start===first.start&&item.end===end);
+     if(existing){if(!existing.definitionIndices.includes(index))existing.definitionIndices.push(index);}
+     else {
+      occurrences=occurrences.filter(item=>item.end<=first.start||item.start>=end);
+      occurrences.push({start:first.start,end,latex:source,definitionIndices:[index]});
+     }
+     break;
+    }
+   }
+  });
  // Model-provided semantic terms define groups, but only after matching a
  // complete source range. Preserve original TeX and ignore typography only.
  definitions.forEach((_,definitionIndex)=>{

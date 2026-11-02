@@ -6,20 +6,20 @@ it.each(['x\\', 'x\\\ny'])('rejects malformed command tokens without throwing: %
  expect(interactiveFormulaSymbols(latex,[])).toMatchObject({safe:false,occurrences:[]});
 });
 describe('deterministic complete formula symbol matching',()=>{
- it('matches the real SPS spacing/scripts and anchors full function definitions to their observed heads',()=>{
+ it('matches the real SPS spacing/scripts and groups full function definitions',()=>{
  const result=interactiveFormulaSymbols(sps,[String.raw`\mathcal{L}(I_i,T_i)`,String.raw`\mathcal{H}`,String.raw`y_i`,String.raw`\mathcal{P}_{i}^{i 2 t}`,String.raw`\tau`]);
- expect(result.occurrences.filter(o=>o.definitionIndices.includes(0)).map(o=>o.latex)).toEqual([String.raw`\mathcal {L}`]);
+ expect(result.occurrences.filter(o=>o.definitionIndices.includes(0)).map(o=>o.latex)).toEqual([String.raw`\mathcal {L} (I _ {i}, T _ {i})`]);
  expect(result.occurrences.filter(o=>o.definitionIndices.includes(1))).toHaveLength(2);
  expect(result.occurrences.filter(o=>o.definitionIndices.includes(2))).toHaveLength(2);
  expect(result.occurrences.find(o=>o.definitionIndices.includes(3))?.latex).toBe(String.raw`\mathcal {P} _ {i} ^ {i 2 t}`);
  expect(result.unmatchedDefinitions).toEqual([4]);
- expect(result.occurrences.find(o=>o.latex==='I _ {i}')?.definitionIndices).toEqual([]);
+ expect(result.occurrences.find(o=>o.latex==='I _ {i}')?.definitionIndices).toBeUndefined();
  });
- it('matches both real CC CrossAttn calls separately and preserves nested subscript atoms',()=>{
+ it('matches both real CC CrossAttn calls separately and keeps nested subscripts inside each call',()=>{
  const result=interactiveFormulaSymbols(cc,[String.raw`\mathcal{L}_{cc}`,'i',String.raw`\operatorname{ReLU}`,'CrossAttn(I, T_{NP_{i}})','CrossAttn(I, NP_{i})',String.raw`\epsilon`,'l']);
  expect(result.unmatchedDefinitions).toEqual([]);
- expect(result.occurrences.filter(o=>o.latex==='C r o s s A t t n').map(o=>o.definitionIndices)).toEqual([[3],[4]]);
- expect(result.occurrences.some(o=>o.latex==='T _ {N P _ {i}}')).toBe(true);
+ expect(result.occurrences.filter(o=>o.latex.startsWith('C r o s s A t t n (')).map(o=>o.definitionIndices)).toEqual([[3],[4]]);
+ expect(result.occurrences.some(o=>o.latex==='T _ {N P _ {i}}')).toBe(false);
  });
  it('keeps accents and subscripts whole, distinguishes ambiguous definitions, and never matches inside commands',()=>{
  const result=interactiveFormulaSymbols(String.raw`\hat {\mathbf {x}} _ i + \xi`,[String.raw`\hat{\mathbf{x}}_{i}`,String.raw`\hat{\mathbf{x}}_i`,'i']);
@@ -76,4 +76,34 @@ it('aligns semantic groups despite typesetting differences',()=>{
  const result=interactiveFormulaSymbols(String.raw`P E_{\left(pos,2i\right)}=\sin(x/d_{\mathrm{model}})`,['PE_{(pos,2i)}','sin','d_{model}']);
  expect(result.unmatchedDefinitions).toEqual([]);
  expect(result.occurrences.find(item=>item.definitionIndices.includes(0))?.latex).toBe(String.raw`P E_{\left(pos,2i\right)}`);
+});
+
+
+it.each([
+ ['L(w)+L(w)+w',['L(w)','w']],
+ [String.raw`L\left(w\right)+w`,['L(w)','w']],
+ [String.raw`\operatorname{L}(w)+w`,['L(w)','w']],
+ ['L(g(w))+w',['g(w)','L(g(w))','w']],
+])('groups complete explained calls and leaves outside variables independent: %s',(latex,definitions)=>{
+ const result=interactiveFormulaSymbols(latex,definitions);
+ const callIndex=definitions.findIndex(value=>value.startsWith('L('));
+ const calls=result.occurrences.filter(item=>item.definitionIndices.includes(callIndex));
+ expect(calls.length).toBe(latex==='L(w)+L(w)+w'?2:1);
+ expect(calls.every(item=>item.latex.endsWith(')'))).toBe(true);
+ expect(result.occurrences.filter(item=>item.latex==='w')).toHaveLength(1);
+ expect(result.occurrences.every((item,index)=>index===0||result.occurrences[index-1].end<=item.start)).toBe(true);
+});
+it('does not attach a call definition to a different argument or a partial script',()=>{
+ const result=interactiveFormulaSymbols('L(v)+L(w_i)',['L(w)']);
+ expect(result.unmatchedDefinitions).toEqual([0]);
+});
+
+it('keeps duplicate call meanings together without creating overlapping targets',()=>{
+ const result=interactiveFormulaSymbols('L(w)',['L(w)','L(w)']);
+ expect(result.occurrences).toMatchObject([{latex:'L(w)',definitionIndices:[0,1]}]);
+ expect(result.occurrences).toHaveLength(1);
+});
+it('never groups a call across array rows',()=>{
+ const result=interactiveFormulaSymbols(String.raw`\begin{array}{c} L(w\\+v) \end{array}`,['L(w+v)']);
+ expect(result.unmatchedDefinitions).toEqual([0]);
 });
