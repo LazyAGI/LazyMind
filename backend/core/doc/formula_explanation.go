@@ -203,22 +203,32 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		formulaExplanationError(w, 422, "Select an available chat model in model settings before explaining formulas.")
 		return
 	}
-	key := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelID+":"+request.Language, evidence)
+	key := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, "saved-explanation:"+request.Language, evidence)
 	if request.FocusSymbol != nil {
 		focusedKey, _ := json.Marshal([]string{key, *request.FocusSymbol})
 		key = pdfir.Digest(string(focusedKey))
 	}
 	cacheDir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", "formula-explanations", pdfIRResource(row.DatasetID, row.ID), pdfir.Digest(store.UserID(r)))
 	cachePath := filepath.Join(cacheDir, key+".json")
+	legacyKey := formulaExplanationCacheKey(*state.Document, formula.ID, formula.Latex, modelID+":"+request.Language, evidence)
+	if request.FocusSymbol != nil {
+		legacyFocus, _ := json.Marshal([]string{legacyKey, *request.FocusSymbol})
+		legacyKey = pdfir.Digest(string(legacyFocus))
+	}
 	readCache := func() (formulaExplanation, bool) {
-		if f, openErr := os.Open(cachePath); openErr == nil {
-			b, readErr := io.ReadAll(io.LimitReader(f, formulaExplanationMaxBytes+1))
-			f.Close()
-			if readErr == nil {
-				if cached, parseErr := validateFormulaExplanation(string(b), evidence); parseErr == nil && bindFormulaExplanationFocus(&cached, request.FocusSymbol) {
-					cached.Model = modelName
-					cached.Warnings = formulaExplanationWarnings(request.Language)
-					return cached, true
+		for _, candidatePath := range []string{cachePath, filepath.Join(cacheDir, legacyKey+".json")} {
+			if f, openErr := os.Open(candidatePath); openErr == nil {
+				b, readErr := io.ReadAll(io.LimitReader(f, formulaExplanationMaxBytes+1))
+				f.Close()
+				if readErr == nil {
+					if cached, parseErr := validateFormulaExplanation(string(b), evidence); parseErr == nil && bindFormulaExplanationFocus(&cached, request.FocusSymbol) {
+						// Preserve the model that actually generated this saved explanation.
+						cached.Warnings = formulaExplanationWarnings(request.Language)
+						if candidatePath != cachePath {
+							_ = saveFormulaExplanation(cacheDir, cachePath, cached)
+						}
+						return cached, true
+					}
 				}
 			}
 		}
@@ -232,7 +242,7 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 	}
 	flightKey := cachePath
 	if request.Force {
-		flightKey += ":force"
+		flightKey += ":force:" + modelID
 	}
 	result, shared, flightErr := formulaExplanationFlights.do(ctx, flightKey, func(runCtx context.Context) (formulaExplanation, error) {
 		if err := runCtx.Err(); err != nil {

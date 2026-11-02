@@ -188,7 +188,10 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 		t.Fatal("force ignored")
 	}
 	modelKey = "two"
-	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 3 {
+	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 2 {
+		t.Fatal("model selection regenerated a saved explanation")
+	}
+	if w := call("owner", "f", `{"force":true}`); w.Code != 200 || calls != 3 {
 		t.Fatal("model cache identity ignored")
 	}
 	if w := call("owner", "f", `{"language":"en"}`); w.Code != 200 || calls != 4 {

@@ -22,7 +22,7 @@ describe('formula study panel',()=>{
   expect(await screen.findByText('Summary')).toBeInTheDocument();
   expect(mocks.post).toHaveBeenCalledTimes(1);
  });
- it.each([CHAT_MODEL_SELECTION_CHANGED_EVENT,AUTH_USER_CHANGE_EVENT])('invalidates the popup cache after %s',async eventName=>{
+ it.each([CHAT_MODEL_SELECTION_CHANGED_EVENT,AUTH_USER_CHANGE_EVENT])('preserves model-independent results but clears user-specific cache after %s',async eventName=>{
   mocks.post.mockReset().mockResolvedValue({data:{data:explanation}});
   const props={target:{dataset:'d',document:'doc'},sourceKey:`invalidation-${eventName}`,blocks:[block],selected:block,autoExplain:true,onSelect:vi.fn(),onNavigate:vi.fn(),onReturn:vi.fn(),canReturn:false,onClose:vi.fn()};
   const first=render(<PdfFormulaStudy {...props}/>);
@@ -30,7 +30,7 @@ describe('formula study panel',()=>{
   first.unmount();
   act(()=>window.dispatchEvent(new Event(eventName)));
   render(<PdfFormulaStudy {...props}/>);
-  await waitFor(()=>expect(mocks.post).toHaveBeenCalledTimes(2));
+  await waitFor(()=>expect(mocks.post).toHaveBeenCalledTimes(eventName===AUTH_USER_CHANGE_EVENT?2:1));
  });
  it('makes every parsed term clickable in the source popup while keeping the full symbol list folded',async()=>{
   mocks.post.mockResolvedValue({data:{data:explanation}});

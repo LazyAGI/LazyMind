@@ -2,7 +2,6 @@ import {useTranslation} from 'react-i18next';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {axiosInstance, BASE_URL} from '@/components/request';
 import {AgentAppsAuth, AUTH_LOGOUT_EVENT, AUTH_USER_CHANGE_EVENT} from '@/components/auth';
-import {CHAT_MODEL_SELECTION_CHANGED_EVENT} from '@/modules/chat/constants/chat';
 import type {PdfIRTarget} from './pdfIR';
 export interface FormulaEvidence {id:string; text:string; page:number; bbox?:[number,number,number,number]}
 export interface FormulaExplanation {
@@ -17,7 +16,7 @@ const formulaMemoryCache=new Map<string,{data:FormulaExplanation;expires:number}
 const formulaMemoryCacheTTL=300_000;
 const formulaMemoryCacheLimit=64;
 if(typeof window!=='undefined'){
-  for(const event of [AUTH_LOGOUT_EVENT,AUTH_USER_CHANGE_EVENT,CHAT_MODEL_SELECTION_CHANGED_EVENT]){
+  for(const event of [AUTH_LOGOUT_EVENT,AUTH_USER_CHANGE_EVENT]){
     window.addEventListener(event,()=>formulaMemoryCache.clear());
   }
 }

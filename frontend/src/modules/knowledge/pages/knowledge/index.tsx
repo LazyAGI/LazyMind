@@ -208,7 +208,6 @@ const KnowledgeDocumentContent = () => {
   const [nativePdfOutline,setNativePdfOutline]=useState<import('@/modules/knowledge/api/pdfOutline').PdfNativeOutlineItem[]>([]);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const navigationSequence = useRef(0);
-  const handleStudyOpenChange = useCallback((open: boolean) => { if (open) setPreviewSideCollapsed(true); }, []);
   const [workspaceWidth, setWorkspaceWidth] = useState(1440);
   const [previewSideCollapsed, setPreviewSideCollapsed] = useState(false);
   const [activatedDocumentChatKey,setActivatedDocumentChatKey] = useState<string>();
@@ -1254,7 +1253,6 @@ const KnowledgeDocumentContent = () => {
               pdfHeaderEnd={isPaperDocument ? <div className="paper-workspace-header-actions">
           <Popover trigger="click" placement="bottomRight" overlayClassName="paper-document-actions-popover" content={<div className="paper-document-actions">{pageTitle}</div>}><Button type="text" icon={<MoreOutlined/>} aria-label={i18n.language.startsWith("zh") ? "文档操作与翻译" : "Document actions and translation"}/></Popover>
         </div> : undefined}
-              onPdfStudyOpenChange={handleStudyOpenChange}
               pdfIRTarget={isPaperDocument && pdfSourceView === "original" ? {dataset: knowledgeBaseId, document: knowledgeId, canWrite: hasWritePermission} : undefined}
               onPdfIRDocumentChange={setPaperIR}
               onPdfOutlineChange={setNativePdfOutline}
