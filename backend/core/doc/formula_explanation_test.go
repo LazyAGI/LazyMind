@@ -226,3 +226,25 @@ func TestFormulaExplanationOtherSupportedRoutes(t *testing.T) {
 		})
 	}
 }
+
+func TestFormulaExplanationNormalizesPurposeAlias(t *testing.T) {
+	for _, test := range []struct {
+		raw, summary string
+		valid        bool
+	}{
+		{`{"explain":"Loss perturbation bound","symbols":[{"symbol":"H","meaning":"Hessian"}],"model":"invented"}`, "Loss perturbation bound", true},
+		{`{"summary":"Canonical purpose","explain":"Other purpose","symbols":[]}`, "Canonical purpose", true},
+		{`{"explain":{"text":"Nested content"},"symbols":[]}`, "", false},
+		{`{"symbols":[]}`, "", false},
+		{`{"explain":"` + strings.Repeat("x", 12001) + `","symbols":[]}`, "", false},
+		{`{"explain":"Purpose","symbols":[{"symbol":"H","meaning":""}]}`, "", false},
+	} {
+		result, err := validateFormulaExplanation(test.raw, nil)
+		if (err == nil) != test.valid {
+			t.Fatalf("valid=%v, got %v", test.valid, err)
+		}
+		if test.valid && (result.Summary != test.summary || result.Model != "") {
+			t.Fatalf("incorrect canonical result: %+v", result)
+		}
+	}
+}

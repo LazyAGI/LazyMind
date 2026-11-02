@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -281,6 +282,8 @@ func (h formulaExplanationHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		}
 		result, err := validateFormulaExplanation(raw, evidence)
 		if err != nil || !bindFormulaExplanationFocus(&result, request.FocusSymbol) {
+			// Validation errors contain schema/limit diagnostics, never the model response.
+			log.Printf("formula_explanation validation_failed: %v", err)
 			return formulaExplanation{}, formulaExplanationFailure{502, "The model returned an invalid explanation. Retry with the selected model or choose another model."}
 		}
 		// A generation may take minutes. Recheck ACL and the source before
