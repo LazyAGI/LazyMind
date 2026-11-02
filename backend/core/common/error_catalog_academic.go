@@ -67,7 +67,7 @@ func init() {
 			"unpaywall request failed", "unpaywall lookup failed", "unpaywall lookup returned http %d", "unpaywall response is invalid",
 		}},
 		{2005122, http.StatusBadGateway, "OpenAlex metadata lookup failed", []string{
-			"openalex request failed", "openalex lookup failed", "openalex lookup returned http %d", "openalex response is invalid", "openalex response is missing results",
+			"openalex request failed", "openalex lookup failed", "openalex lookup returned http %d", "openalex response is invalid", "openalex response is missing results", "openalex returned a different doi",
 		}},
 		{2005123, http.StatusBadRequest, "Invalid paper library JSON", []string{"extra json value", "论文库 json 无效"}},
 		{2005124, http.StatusBadRequest, "Paper library data is empty or exceeds the supported limits", []string{
@@ -96,7 +96,7 @@ func init() {
 		{2005119, 500, "Some paper imports failed; inspect their errors before retrying", []string{"one or more paper imports failed", "verified arxiv metadata required"}},
 		{2005132, 400, "The paper upload request is invalid or conflicts with an existing request", []string{"paper upload only supports pdf", "paper upload request does not match its original context", "paper upload request key is already in use", "paper upload requires a paper library", "paper upload requires an uploaded pdf", "record paper upload"}},
 		{2005130, 400, "Paper libraries require document parsing", []string{"academic paper libraries require at least parsed processing", "enable document parsing before using an academic paper library"}},
-		{2005138, http.StatusConflict, "The paper library changed; refresh and retry", []string{"论文已在其他窗口更新，请保留草稿并加载最新内容后重试"}},
+		{2005138, http.StatusConflict, "The paper library changed; refresh and retry", []string{"论文已在其他窗口更新，请保留草稿并加载最新内容后重试", "题录已移除或合并，停止后台补全", "题录已变更，请重试补全", "题录已保存；匹配到库中已有文献，请核对重复项后合并"}},
 		{2005139, http.StatusInternalServerError, "Failed to read the paper library data", []string{"paper %s has no scholarly identity"}},
 		{2005140, http.StatusConflict, "Processing submission is unconfirmed; verify the existing task before retrying", []string{
 			"imported task metadata is unavailable; submission outcome requires verification",
@@ -117,7 +117,10 @@ func init() {
 			"legacy document has multiple memberships; original archive retained for explicit resolution",
 		}},
 		{2005145, http.StatusInternalServerError, "Failed to preserve the legacy paper library", []string{"preserve legacy library %s"}},
-		{2005147, http.StatusBadGateway, "Unable to find an available paper PDF source", []string{"pdf 来源查询失败", "PDF 来源查询失败: %s", "一次只能查找一篇文献的 PDF 来源"}},
+		{2005147, http.StatusBadGateway, "Unable to find an available paper PDF source", []string{"pdf 来源查询失败", "PDF 来源查询失败: %s", "一次只能查找一篇文献的 PDF 来源", "论文页面 doi 与目标文献不一致", "论文页面未提供可用 pdf 地址", "题录已保存，但未找到可用 pdf，可手动上传或重试。%s"}},
+		{2005150, http.StatusConflict, "Online metadata conflicts with the imported paper identity", []string{"在线元信息与题录标识不一致，未修改题录"}},
+		{2005151, http.StatusUnprocessableEntity, "Paper metadata was saved; add a DOI or arXiv ID to identify its PDF reliably", []string{"题录已保存；缺少 doi/arxiv 编号，且作者或年份不足以可靠匹配，请补充后重试", "题录已保存；在线匹配不唯一或置信度不足，请补充 doi/arxiv 编号后重试，未自动关联 pdf", "未找到匹配题录"}},
+		{2005152, http.StatusBadGateway, "Crossref bibliography matching failed", []string{"crossref 题录匹配失败（http %d）"}},
 		{2005148, http.StatusConflict, "Save the document before queuing processing", []string{"document must be saved before processing is queued"}},
 		{2005146, http.StatusConflict, "A paper folder with this name already exists", []string{"folder name already exists"}},
 	} {

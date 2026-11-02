@@ -3,6 +3,7 @@ package academic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"lazymind/core/state"
 	"lazymind/core/store"
@@ -230,5 +231,63 @@ func TestReimportMetadataOnlyPaperRestartsAcquisitionWithoutDuplicateJobs(t *tes
 	}
 	if len(readLibrary(t, "papers").Data.Papers) != 1 {
 		t.Fatal("duplicate metadata")
+	}
+}
+
+// Exercise every item after the immediate import response, not just queue creation.
+func TestBibliographyFormatsDiscoverPDFForeachBatchItem(t *testing.T) {
+	for _, format := range []string{"bib", "ris", "csv"} {
+		t.Run(format, func(t *testing.T) {
+			db := paperLibraryTestDB(t)
+			input := createImportRequest{EntryType: "bibliography", TargetDatasetID: "papers", IdempotencyKey: "batch", Format: format}
+			for i := 0; i < 10; i++ {
+				input.Items = append(input.Items, selectedImportItem{Paper: libraryDraft(fmt.Sprintf("p%d", i), fmt.Sprintf("Paper %d", i), fmt.Sprintf("10.1234/p%d", i))})
+			}
+			response := libraryRequest(t, "POST", "/imports", "papers", "owner", input)
+			if response.Code != 200 {
+				t.Fatal(response.Code, response.Body.String())
+			}
+			if len(readLibrary(t, "papers").Data.Papers) != 10 {
+				t.Fatal("metadata must be visible before PDF discovery")
+			}
+			var b orm.PaperImportBatch
+			db.First(&b)
+			var items []orm.PaperImportItem
+			db.Where("batch_id=?", b.ID).Find(&items)
+			if len(items) != 10 {
+				t.Fatal("not all entries queued", len(items))
+			}
+			db.Model(&orm.AsyncJob{}).Where("id=?", b.AsyncJobID).Updates(map[string]any{"status": "running", "attempt_count": 1})
+			old := http.DefaultTransport
+			http.DefaultTransport = importErrorTransport(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: 503, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+			})
+			t.Cleanup(func() { http.DefaultTransport = old })
+			client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
+				body := `{"results":[]}`
+				if r.URL.Host == "api.unpaywall.org" {
+					body = fmt.Sprintf(`{"best_oa_location":{"url_for_pdf":"https://example.org/%s.pdf"}}`, strings.TrimPrefix(r.URL.Path, "/v2/"))
+				}
+				if r.URL.Host == "example.org" {
+					body = "%PDF-1.7 test"
+				}
+				return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+			})}
+			ctx := context.WithValue(t.Context(), paperPDFClientKey{}, client)
+			for _, item := range items {
+				if err := enrichBibliographyItem(ctx, asyncjob.Job{ID: b.AsyncJobID, AttemptCount: 1}, b, &item, sourceImportCaller(b)); err != nil {
+					t.Fatal(err)
+				}
+				var saved orm.PaperImportItem
+				db.Where("id=?", item.ID).Take(&saved)
+				var candidate FulltextCandidate
+				if err := json.Unmarshal(saved.SelectedCandidateJSON, &candidate); err != nil {
+					t.Fatal(err)
+				}
+				if candidate.SourceProvider != "unpaywall" || candidate.URL == "" || saved.Stage != "acquire" {
+					t.Fatalf("no durable PDF candidate for %s: %+v", format, saved)
+				}
+			}
+		})
 	}
 }

@@ -9,7 +9,7 @@ import { libraryFixture, paperFixture } from './__tests__/fixtures';
 import { emptyLibrary, type PaperLibraryData } from './libraryModel';
 import type { PaperRecord } from './model';
 import * as paperModel from './model';
-import { loadPersistedPaperLibrary, previewLibraryPapers, patchLibraryPaper, confirmLibraryPdf, createLibraryFolder, removeLibraryPapers } from './store';
+import { importLibraryPapers, loadPersistedPaperLibrary, previewLibraryPapers, patchLibraryPaper, confirmLibraryPdf, createLibraryFolder, removeLibraryPapers } from './store';
 import { paperFromPdf } from './pdfMeta';
 import { setPaperImportance } from '../api/paperWorkflows';
 import { TaskServiceApi } from '../utils/request';
@@ -620,6 +620,13 @@ describe('paper library behavior', () => {
         expect(within(dialog).getByRole('status')).toHaveTextContent('已识别 10 篇文献，可立即入库');
         expect(within(dialog).getByRole('button', { name: '加入论文库' })).toBeEnabled();
         expect(previewPaperPDF).not.toHaveBeenCalled();
+        vi.mocked(importLibraryPapers).mockResolvedValueOnce({ data: emptyLibrary() });
+        fireEvent.click(within(dialog).getByRole('button', { name: '加入论文库' }));
+        await waitFor(() => expect(importLibraryPapers).toHaveBeenCalledOnce());
+        const args = vi.mocked(importLibraryPapers).mock.calls[0];
+        expect(args[1]).toHaveLength(10);
+        expect(args[4]).toBe(format === 'BibTeX' ? 'bib' : format.toLowerCase());
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     });
     it("shows synchronous bibliography parse errors without leaving a candidate to save", async () => {
         vi.spyOn(paperModel, "parseBibTeX").mockImplementation(() => { throw new Error("BibTeX 缺少闭合括号"); });

@@ -2072,5 +2072,8 @@
   "2004935": { "en-US": "The attachment checksum changed; reload Zotero metadata and select the matching file", "zh-CN": "附件校验值已变更，请重新读取 Zotero 题录并选择对应文件" },
   "2004936": { "en-US": "Local Zotero access requires the authenticated owner of a local desktop runtime", "zh-CN": "仅本地桌面运行时的已认证所有者可以访问本地 Zotero" },
   "2004937": { "en-US": "Local Zotero owner authentication is unavailable", "zh-CN": "本地 Zotero 所有者认证暂不可用" },
-  "2005148": {"en-US": "Save the document before queuing processing", "zh-CN": "请先保存文档，再提交处理任务"}
+  "2005148": {"en-US": "Save the document before queuing processing", "zh-CN": "请先保存文档，再提交处理任务"},
+  "2005150": { "en-US": "Online metadata conflicts with the imported paper identity", "zh-CN": "在线元信息与导入文献标识不一致" },
+  "2005151": { "en-US": "Paper metadata was saved; add a DOI or arXiv ID to identify its PDF reliably", "zh-CN": "文献信息已保存，请补充 DOI 或 arXiv 编号以准确查找 PDF" },
+  "2005152": { "en-US": "Crossref bibliography matching failed", "zh-CN": "Crossref 文献信息匹配失败" }
 }
