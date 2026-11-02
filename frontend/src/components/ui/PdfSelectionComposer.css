@@ -17,3 +17,9 @@
 .pdf-selection-more>div button{text-align:left;white-space:nowrap;padding:9px;border-radius:6px;}.pdf-selection-more>div button:hover{background:#f5f3f9;}
 .pdf-selection-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);}
 .pdf-selection-help{font-size:11px;color:#89808f;padding:8px 2px 0;}.pdf-selection-help a{color:var(--color-primary,#006ae6);}
+
+.pdf-selection-composer-footer{flex-wrap:wrap;row-gap:8px;}
+.pdf-selection-icons{flex-wrap:wrap;justify-content:flex-end;margin-left:auto;gap:4px;}
+.pdf-selection-icons .pdf-selection-primary-action{height:29px;padding:0 6px;border-radius:7px;white-space:nowrap;font-size:12px;}
+.pdf-selection-icons .pdf-selection-primary-action:hover:not(:disabled){background:var(--color-primary-bg,#f0f7ff);color:var(--color-primary,#006ae6);}
+.pdf-selection-composer button:focus-visible{outline:2px solid var(--color-primary,#006ae6);outline-offset:2px;}

@@ -23,7 +23,25 @@ it('passes a note draft and quote without claiming it has been saved',()=>{
  expect(screen.queryByText('已保存')).toBeNull();
 });
 it('closes on Escape and exposes optional actions in a compact menu',()=>{
- const close=vi.fn(),action=vi.fn();render(<PdfSelectionComposer selection={{text:'quote',page:1}} onClose={close} actions={[{key:'vocabulary',label:'加入生词',onClick:action}]}/>);
- fireEvent.click(screen.getByText('更多操作'));fireEvent.click(screen.getByRole('button',{name:'加入生词'}));expect(action).toHaveBeenCalledOnce();
+ const close=vi.fn(),action=vi.fn();render(<PdfSelectionComposer selection={{text:'quote',page:1}} onClose={close} actions={[{key:'reference',label:'打开链接',onClick:action}]}/>);
+ fireEvent.click(screen.getByText('更多操作'));fireEvent.click(screen.getByRole('button',{name:'打开链接'}));expect(action).toHaveBeenCalledOnce();
  fireEvent.keyDown(screen.getByRole('textbox'),{key:'Escape'});expect(close).toHaveBeenCalled();
+});
+
+it('exposes quick explanation and vocabulary without opening More',()=>{
+ const explain=vi.fn(),vocabulary=vi.fn();
+ const {container}=render(<PdfSelectionComposer selection={{text:'attention',page:1}} onClose={vi.fn()} actions={[
+  {key:'explanation',label:'快速解释',onClick:explain},
+  {key:'vocabulary',label:'加入生词',onClick:vocabulary},
+  {key:'reference',label:'打开链接',onClick:vi.fn()},
+ ]}/>);
+ for(const label of ['快速解释','加入生词'])expect(screen.getByRole('button',{name:label}).closest('details')).toBeNull();
+ expect(container.querySelector('.anticon-bulb')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'快速解释'}));expect(explain).toHaveBeenCalledOnce();
+ fireEvent.click(screen.getByRole('button',{name:'加入生词'}));expect(vocabulary).toHaveBeenCalledOnce();
+});
+it('preserves disabled primary actions and hides an empty More menu',()=>{
+ const action=vi.fn();render(<PdfSelectionComposer selection={{text:'word',page:1}} onClose={vi.fn()} actions={[{key:'explanation',label:'快速解释',disabled:true,title:'Unavailable',onClick:action}]}/>);
+ expect(screen.getByRole('button',{name:'快速解释'})).toBeDisabled();
+ expect(screen.queryByText('更多操作')).toBeNull();
 });

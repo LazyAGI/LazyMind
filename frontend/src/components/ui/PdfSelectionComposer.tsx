@@ -1,5 +1,5 @@
 import {useState, type ReactNode} from 'react';
-import {ArrowUpOutlined, BulbOutlined, CloseOutlined, TranslationOutlined} from '@ant-design/icons';
+import {ArrowUpOutlined, CloseOutlined, TranslationOutlined} from '@ant-design/icons';
 import type {PdfTextSelection} from './RenderPdf';
 import './PdfSelectionComposer.css';
 
@@ -12,14 +12,15 @@ interface Props {
  translationDisabled?:boolean;
  translationTitle?:string;
  translationHelp?:ReactNode;
- onExplain?:()=>void;
  actions?:PdfComposerAction[];
  onClose:()=>void;
 }
 /** Editing uses the captured PDF selection; textarea selection never replaces it. */
-export function PdfSelectionComposer({selection,onAsk,onNote,onTranslate,translationDisabled,translationTitle,translationHelp,onExplain,actions=[],onClose}:Props){
+export function PdfSelectionComposer({selection,onAsk,onNote,onTranslate,translationDisabled,translationTitle,translationHelp,actions=[],onClose}:Props){
  const [mode,setMode]=useState<'ask'|'note'>(onAsk?'ask':'note');
  const [draft,setDraft]=useState('');
+ const primaryActions=actions.filter(action=>action.key==='explanation'||action.key==='vocabulary');
+ const moreActions=actions.filter(action=>!primaryActions.includes(action));
  const submit=()=>{
   if(mode==='ask'&&onAsk)onAsk({...selection,...(draft.trim()?{question:draft.trim()}:{})});
   else if(mode==='note'&&onNote)onNote(selection,draft.trim());
@@ -36,8 +37,8 @@ export function PdfSelectionComposer({selection,onAsk,onNote,onTranslate,transla
    </div>
    <div className="pdf-selection-icons">
     {onTranslate&&<span title={translationTitle||'翻译'}><button type="button" className="pdf-selection-icon" aria-label="翻译" disabled={translationDisabled} onClick={()=>{onTranslate();onClose();}}><TranslationOutlined/></button></span>}
-    {onExplain&&<button type="button" className="pdf-selection-icon" aria-label="解释选中文本" title="解释选中文本" onClick={()=>{onExplain();onClose();}}><BulbOutlined/></button>}
-    {actions.length>0&&<details className="pdf-selection-more"><summary aria-label="更多操作" title="更多操作"><span className="pdf-selection-sr-only">更多操作</span>⋯</summary><div>{actions.map(action=><button type="button" key={action.key} disabled={action.disabled} title={action.title} onClick={()=>{action.onClick();onClose();}}>{action.label}</button>)}</div></details>}
+    {primaryActions.map(action=><button type="button" className="pdf-selection-primary-action" key={action.key} disabled={action.disabled} title={action.title} onClick={()=>{action.onClick();onClose();}}>{action.key==='explanation'?'快速解释':action.label}</button>)}
+    {moreActions.length>0&&<details className="pdf-selection-more"><summary aria-label="更多操作" title="更多操作"><span className="pdf-selection-sr-only">更多操作</span>⋯</summary><div>{moreActions.map(action=><button type="button" key={action.key} disabled={action.disabled} title={action.title} onClick={()=>{action.onClick();onClose();}}>{action.label}</button>)}</div></details>}
     {(onAsk||onNote)&&<button type="button" className="pdf-selection-send" aria-label={mode==='ask'?'向 AI 提问':'添加笔记草稿'} title={mode==='ask'?'向 AI 提问':'添加笔记草稿'} onClick={submit}><ArrowUpOutlined/></button>}
    </div>
   </div>

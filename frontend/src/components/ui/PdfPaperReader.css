@@ -73,9 +73,12 @@
 /* Editorial overview sections use their own separators, without the legacy timeline. */
 .pdf-reader-workspace .pdf-overview-section.pdf-guide-stage:before{display:none;}
 /* The library action and workspace actions share the centered reading tabs row. */
-.pdf-reader-workspace .pdf-reader-header{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);flex-wrap:nowrap;min-height:48px;gap:8px;}
-.pdf-reader-header [role=tablist]{justify-content:center;align-self:stretch;gap:8px;}
-.pdf-reader-header [role=tablist] button{border-radius:0;padding:12px 16px;}
+.pdf-reader-workspace .pdf-reader-header{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);flex-wrap:nowrap;min-height:40px;gap:8px;}
+.pdf-reader-header [role=tablist]{justify-content:center;align-self:center;gap:2px;padding:3px;background:#f5f5f5;border-radius:999px;}
+.pdf-reader-header [role=tablist] button{border:0;border-radius:999px;padding:3px 12px;line-height:20px;font-size:13px;font-weight:500;color:#666;transition:background .16s,color .16s,box-shadow .16s;}
+.pdf-reader-header [role=tablist] button[aria-selected=true]{border:0;background:#fff;color:var(--paper-accent,var(--color-primary,#006ae6));box-shadow:0 1px 3px #00000008;}
+.pdf-reader-header [role=tablist] button:focus-visible{outline:2px solid var(--paper-accent,var(--color-primary,#006ae6));outline-offset:2px;}
+@media(prefers-reduced-motion:reduce){.pdf-reader-header [role=tablist] button{transition:none;}}
 .pdf-reader-header .pdf-reader-header-start{justify-content:flex-start;min-width:0;overflow:hidden;}
 .pdf-reader-header .pdf-reader-header-end{justify-content:flex-end;min-width:0;}
 .pdf-reader-workspace .pdf-reader-toolbar{min-height:36px;gap:6px;flex-wrap:nowrap;padding:2px 12px;z-index:34;}
@@ -83,7 +86,7 @@
 .pdf-reader-toolbar .pdf-reader-tools{flex-wrap:nowrap;order:0;flex-basis:auto;border:0;padding:0;}
 .pdf-reader-toolbar .pdf-formula-controls{flex-basis:auto;order:0;padding:0;}
 .pdf-reader-toolbar .pdf-reader-search summary{font-size:17px;line-height:24px;padding:2px 7px;}
-@media(max-width:650px){.pdf-reader-workspace .pdf-reader-toolbar{flex-wrap:wrap;}.pdf-reader-header [role=tablist] button{padding:12px 9px;}.pdf-reader-toolbar .pdf-formula-controls{flex-wrap:wrap;}}
+@media(max-width:650px){.pdf-reader-workspace .pdf-reader-toolbar{flex-wrap:wrap;}.pdf-reader-header [role=tablist] button{padding:3px 10px;}.pdf-reader-toolbar .pdf-formula-controls{flex-wrap:wrap;}}
 
 /* The paper and the surrounding scroll canvas remain white at every zoom. */
 .pdf-reader-workspace,.pdf-reader-stage,.pdf-reader-with-study{background:#fff;}

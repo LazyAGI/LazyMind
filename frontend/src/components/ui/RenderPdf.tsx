@@ -1075,7 +1075,6 @@ export default function RenderPdf({
             translationDisabled={translationUnavailable}
             translationTitle={translationUnavailable ? translateSelectionDisabledTip : "翻译"}
             translationHelp={translationUnavailable && translateSelectionConfigureUrl ? <a href={translateSelectionConfigureUrl}>{translateSelectionConfigureLabel}</a> : undefined}
-            onExplain={onAskSelection ? ()=>onAskSelection({...selectionAction.selection,question:"请解释这段内容"}) : undefined}
             actions={(() => {
               const actions:PdfComposerAction[]=[];
               if(onRetranslateSelection)actions.push({key:"retranslate",label:retranslateSelectionLabel,onClick:()=>onRetranslateSelection(selectionAction.selection)});
