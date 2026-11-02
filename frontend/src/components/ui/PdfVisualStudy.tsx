@@ -2,8 +2,8 @@ import type {PdfIRBlock,PdfIRDocument,PdfIRTarget} from '@/modules/knowledge/api
 import {paperSourceKey,readablePaperText,usePaperReaderResource,type VisualExplanation} from '@/modules/knowledge/api/paperReader';
 import {FormulaMathText} from './FormulaMathText';
 import {paperVisualLabel,usePaperReaderLabels} from './paperReaderLabels';
-interface Props {target:PdfIRTarget;document:PdfIRDocument;block:PdfIRBlock;onNavigate:(id:string)=>void;onInspectTable:(block:PdfIRBlock)=>void;onClose:()=>void;onReturn:()=>void;canReturn:boolean}
-export function PdfVisualStudy({target,document,block,onNavigate,onInspectTable,onClose,onReturn,canReturn}:Props){
+interface Props {target:PdfIRTarget;document:PdfIRDocument;block:PdfIRBlock;sourcePreview?:string;onNavigate:(id:string)=>void;onInspectTable:(block:PdfIRBlock)=>void;onClose:()=>void;onReturn:()=>void;canReturn:boolean}
+export function PdfVisualStudy({target,document,block,sourcePreview,onNavigate,onInspectTable,onClose,onReturn,canReturn}:Props){
  const {label,language}=usePaperReaderLabels();
  const request=usePaperReaderResource<VisualExplanation>(target,paperSourceKey(target,document),document.source_sha256,`blocks/${encodeURIComponent(block.id)}/explanation`,language,true);
  const sourceIds=new Set(document.blocks.map(item=>item.id));
@@ -12,7 +12,7 @@ export function PdfVisualStudy({target,document,block,onNavigate,onInspectTable,
  const evidence=(request.data?.evidence || []).filter(item=>sourceIds.has(item.id)&&cited.has(item.id));
  return <aside className="pdf-visual-study" aria-label={label('visualTitle')}>
   <header><div><span>{paperVisualLabel(block,document.blocks,label)}</span><h2>{label('visualTitle')}</h2></div><button aria-label={label('dismiss')} onClick={onClose}>×</button></header>
-  <div className="pdf-visual-source"><p>{caption.length?caption.map(readablePaperText).join('\n'):label('noCaption')}</p><div><button onClick={()=>onNavigate(block.id)}>{label('originalRegion')}</button>{block.type==='table'&&<button onClick={()=>onInspectTable(block)}>{label('openTable')}</button>}{canReturn&&<button onClick={onReturn}>{label('back')}</button>}</div></div>
+  <div className="pdf-visual-source">{sourcePreview&&<figure className="pdf-visual-preview"><img src={sourcePreview} alt={paperVisualLabel(block,document.blocks,label)}/><figcaption>{label('originalRegion')}</figcaption></figure>}<p>{caption.length?caption.map(readablePaperText).join('\n'):label('noCaption')}</p><div><button onClick={()=>onNavigate(block.id)}>{label('originalRegion')}</button>{block.type==='table'&&<button onClick={()=>onInspectTable(block)}>{label('openTable')}</button>}{canReturn&&<button onClick={onReturn}>{label('back')}</button>}</div></div>
   <div className="pdf-visual-body"><p className="pdf-bilingual-note">{label('visualNote')}</p>
    {request.status==='loading'?<p role="status">{label('loading')} <button onClick={request.cancel}>{label('cancel')}</button></p>:<button onClick={()=>void request.load(true)}>{request.status==='ready'?label('regenerate'):label('retry')}</button>}
    {request.status==='error'&&<p role="alert">{request.sourceMismatch?label('sourceChanged'):(request.error || label('error'))}</p>}

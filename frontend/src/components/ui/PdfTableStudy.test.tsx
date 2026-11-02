@@ -27,6 +27,12 @@ describe('safe PDF table reading',()=>{
   expect(detail).toHaveTextContent('7');expect(detail).toHaveTextContent('Baseline');expect(detail).toHaveTextContent('Results');expect(detail).toHaveTextContent('Fast');
   expect(screen.getByRole('button',{name:'7'})).toHaveAttribute('aria-pressed','true');
  });
+ it('opens the table explanation from the same source dialog',()=>{
+  const explain=vi.fn();
+  render(<PdfTableStudy {...props} onExplainVisual={explain}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Explain this table'}));
+  expect(explain).toHaveBeenCalledWith(block);
+ });
  it('navigates only to authoritative mention blocks and keeps unlocated captions honest',()=>{
   const navigate=vi.fn();render(<PdfTableStudy {...props} onNavigate={navigate}/>);
   expect(screen.getByText('Table 2. Results')).toBeInTheDocument();

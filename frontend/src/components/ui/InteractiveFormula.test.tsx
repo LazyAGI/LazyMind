@@ -60,6 +60,16 @@ it('shows missing symbol explanations immediately without starting another looku
  expect(screen.queryByRole('button',{name:'Retry symbol lookup'})).toBeNull();
 });
 
+it('keeps symbol evidence compact in the source popup while retaining the jump',()=>{
+ const navigate=vi.fn();
+ render(<InteractiveFormula latex="x+y" sourceKey="compact" definitions={[{symbol:'x',meaning:'Known input',evidence_ids:['e'],inferred:false}]} evidence={evidence} compactEvidence onNavigate={navigate}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Symbol: x'}));
+ const detail=screen.getByRole('region',{name:'Selected symbol'});
+ expect(detail.querySelector('blockquote')).toBeNull();
+ fireEvent.click(screen.getByRole('button',{name:'Source · p. 3'}));
+ expect(navigate).toHaveBeenCalledWith(evidence[0]);
+});
+
 
 it('keeps real CC contrastive loss visually intact with independently operable exponent symbols',()=>{
  const latex="\\mathcal {L} _ {c o n t} = - \\log \\frac {e ^ {\\mathrm{sim} (r _ {n} ^ {q} , r _ {n} ^ {t}) / \\tau}}{e ^ {\\mathrm{sim} (r _ {n} ^ {q} , r _ {n} ^ {q -}) / \\tau} + \\sum_ {i = 1} ^ {N} e ^ {\\mathrm{sim} (r _ {n} ^ {q} , r _ {i} ^ {t}) / \\tau}}";

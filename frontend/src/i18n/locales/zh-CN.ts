@@ -99,6 +99,7 @@ const zhCN = {
     "catalogLocation": "第 {{page}} 页 · 第 {{index}} 项",
     "hint": "查看单元格，以及论文中明确指向该表格的文字。",
     "locate": "定位原表",
+    "explain": "解释这张表",
     "selectHint": "点击单元格查看内容；也可用方向键移动，按回车选中。",
     "data": "表格数据",
     "emptyCell": "空单元格",

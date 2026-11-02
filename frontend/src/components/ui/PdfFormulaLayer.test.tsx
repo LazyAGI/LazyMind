@@ -6,6 +6,13 @@ beforeAll(async()=>{await i18n.changeLanguage("zh-CN");});
 const formula = { id: 'f1', type: 'formula', page: 0, bbox: [0.1, 0.2, 0.5, 0.3] as [number, number, number, number], latex: 'x^2' };
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 describe('PDF formula interaction', () => {
+ it('opens the full source study on click without leaving the hover preview on screen',()=>{
+  const explain=vi.fn();
+  render(<div><PdfFormulaLayer blocks={[formula]} onExplain={explain}/></div>);
+  fireEvent.click(screen.getByRole('button',{name:'查看公式 1'}));
+  expect(explain).toHaveBeenCalledWith(formula);
+  expect(screen.queryByRole('dialog')).toBeNull();
+ });
  it('uses visible page normalized coordinates at every zoom without rotating twice', () => {
   expect(formulaAtPoint([formula], 150, 250, {left: 100, top: 50, width: 200, height: 800})?.id).toBe('f1');
   expect(formulaAtPoint([formula], 200, 450, {left: 100, top: 50, width: 400, height: 1600})?.id).toBe('f1');

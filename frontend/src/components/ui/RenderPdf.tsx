@@ -19,6 +19,8 @@ import { normalizePdfSelectionText } from "./pdfSelectionText";
 import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
 import { usePdfStudyLayout } from "./usePdfStudyLayout";
 import { PdfFormulaStudy } from "./PdfFormulaStudy";
+import {PdfStudyDialog} from "./PdfStudyDialog";
+import {cropPdfBlockPreview} from './pdfBlockPreview';
 import { PdfTableStudy } from "./PdfTableStudy";
 import { PdfTableLayer, hasTableGeometry } from "./PdfTableLayer";
 import { formulaNumberMap, formulaReferenceForClick } from "./pdfFormulaReferences";
@@ -105,6 +107,8 @@ const GAP_BACKGROUND = "#ffffff";
 const PAGE_BACKGROUND = "#ffffff";
 // A fixed raster size prevents PDF.js clearing canvases during sidebar animation.
 const RASTER_WIDTH = 1200;
+// The toolbar's 100% is the comfortable reading size, previously shown as 140%.
+const PDF_READING_BASE_SCALE = 1.4;
 const WIDTH_PT = 595;
 const HEIGHT_PT = 842;
 
@@ -167,6 +171,7 @@ export default function RenderPdf({
   const currentSource = useRef(fileData);
   currentSource.current = fileData;
   const [visualSelection,setVisualSelection]=useState<PdfIRBlock>();
+  const [visualPreview,setVisualPreview]=useState<string>();
   const lastRequestedNavigation=useRef("");
   const pdfIR = usePdfIR(pdfIRTarget);
   const [formulasEnabled, setFormulasEnabled] = useState(true);
@@ -284,12 +289,12 @@ export default function RenderPdf({
 
   const pageWidthPx = useMemo(() => {
     if (defaultPageWidth) {
-      return Math.round(defaultPageWidth * zoom);
+      return Math.round(defaultPageWidth * PDF_READING_BASE_SCALE * zoom);
     }
     if (!containerWidth) {
-      return Math.round(900 * zoom);
+      return Math.round(900 * PDF_READING_BASE_SCALE * zoom);
     }
-    return Math.round(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * zoom);
+    return Math.round(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * PDF_READING_BASE_SCALE * zoom);
   }, [defaultPageWidth, containerWidth, zoom]);
   const [pageSlotHeight, setPageSlotHeight] = useState(0);
 
@@ -601,6 +606,11 @@ export default function RenderPdf({
     }
     return Array.from(set).sort((a, b) => a - b);
   }, [visibleRange, pageIndex, numPages, pageSlotHeight, viewportHeight]);
+  useEffect(()=>{
+    if(!visualSelection){setVisualPreview(undefined);return;}
+    const preview=cropPdfBlockPreview(pageRefs.current[visualSelection.page],visualSelection.bbox);
+    if(preview)setVisualPreview(preview);
+  },[visualSelection,visiblePages]);
 
   const clearAllHighlights = () => {
     containerRef.current
@@ -819,6 +829,10 @@ export default function RenderPdf({
     setStudyHighlight(evidence);
     setPendingStudyNavigation(evidence);
   };
+  const navigateFromStudy = (evidence:FormulaEvidence) => {
+    navigateStudyEvidence(evidence);
+    setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(false);
+  };
   useEffect(() => {
     if (!pendingStudyNavigation) return;
     const timer = window.setTimeout(() => {
@@ -852,7 +866,7 @@ export default function RenderPdf({
     navigateStudyEvidence({id:block.id,text:block.text || block.latex || "",page:block.page,bbox:block.bbox});
   };
   const openVisualStudy = (block:PdfIRBlock) => {
-    setStudyOpen(false);setTableStudyOpen(false);setVisualSelection(block);navigateSourceBlock(block.id);
+    setStudyOpen(false);setTableStudyOpen(false);setVisualPreview(undefined);setVisualSelection(block);navigateSourceBlock(block.id);
   };
   useEffect(()=>{
     if(!pdfNavigateTo || !pdfLoaded || !formulaDocument)return;
@@ -910,6 +924,7 @@ export default function RenderPdf({
           onRenderSuccess={() => {
             tryHighlightAfterRender(index);
             window.requestAnimationFrame(() => tagReferenceTextLayer(index));
+            if(visualSelection?.page===index){const preview=cropPdfBlockPreview(pageRefs.current[index],visualSelection.bbox);if(preview)setVisualPreview(preview);}
           }}
           onRenderTextLayerSuccess={() => tagReferenceTextLayer(index)}
           onLoadSuccess={(page) => {
@@ -967,7 +982,6 @@ export default function RenderPdf({
         {formulaDocument && studyBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}>{t("pdfFormula.openCatalog")}</button>}
         {tableBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
         {imageBlocks.length>0&&<select aria-label={readerLabel("visuals")} value="" onChange={event=>{const block=imageBlocks.find(item=>item.id===event.target.value);if(block)openVisualStudy(block);}}><option value="" disabled>{readerLabel("imageRegion")} ({imageBlocks.length})</option>{imageBlocks.filter(block=>block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}{imageBlocks.some(block=>!block.image?.number)&&<optgroup label={readerLabel("imageRegion")}>{imageBlocks.filter(block=>!block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}</optgroup>}</select>}
-        {tableStudyOpen&&tableSelection&&<button onClick={()=>openVisualStudy(tableSelection)}>{readerLabel("explainVisual")}</button>}
 
       </div>}
     </div>
@@ -1148,9 +1162,11 @@ export default function RenderPdf({
         </div>
       </Document>
     </div>
-    {studyOpen && formulaDocument && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} onSelect={block=>{setStudySelection({block,explain:false});navigateStudyEvidence({id:block.id,text:block.latex || "",page:block.page,bbox:block.bbox});}} onNavigate={navigateStudyEvidence} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
-    {tableStudyOpen && formulaDocument && <PdfTableStudy key={`tables:${studySourceKey}`} sourceKey={studySourceKey} blocks={tableBlocks} allBlocks={formulaDocument.blocks} selected={tableSelection} onSelect={openTableStudy} onNavigate={navigateStudyEvidence} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
-    {visualSelection&&formulaDocument&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} onNavigate={navigateSourceBlock} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
+    {(studyOpen||tableStudyOpen||!!visualSelection)&&formulaDocument&&<PdfStudyDialog onClose={closeStudy}>
+      {studyOpen && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} compact onSelect={block=>{setStudySelection({block,explain:false});navigateStudyEvidence({id:block.id,text:block.latex || "",page:block.page,bbox:block.bbox});}} onNavigate={navigateFromStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
+      {tableStudyOpen && <PdfTableStudy key={`tables:${studySourceKey}`} sourceKey={studySourceKey} blocks={tableBlocks} allBlocks={formulaDocument.blocks} selected={tableSelection} onSelect={openTableStudy} onNavigate={navigateFromStudy} onExplainVisual={openVisualStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
+      {visualSelection&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} sourcePreview={visualPreview} onNavigate={id=>{navigateSourceBlock(id);setVisualSelection(undefined);}} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
+    </PdfStudyDialog>}
     </div>
     </div>
     </div>

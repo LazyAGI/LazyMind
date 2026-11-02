@@ -99,6 +99,7 @@ const enUS = {
     "catalogLocation": "p. {{page}} · item {{index}}",
     "hint": "Explore cells and the paper’s explicit references to this table.",
     "locate": "Locate original table",
+    "explain": "Explain this table",
     "selectHint": "Select a cell to inspect it. Use arrow keys to move between cells, then Enter to select.",
     "data": "Table data",
     "emptyCell": "Empty cell",

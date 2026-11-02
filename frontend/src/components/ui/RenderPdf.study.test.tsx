@@ -91,7 +91,7 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  const page=screen.getAllByTestId('rendered-pdf-page')[0];
  const source=state.pdfFile;
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'752px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1053px'});
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
 
  width.mockReturnValue(0);height.mockReturnValue(0);act(()=>callbacks.forEach(callback=>callback()));
@@ -99,16 +99,16 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  width.mockReturnValue(600);height.mockReturnValue(500);act(()=>callbacks.forEach(callback=>callback()));
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'564px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'790px'});
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
  expect(state.pdfFile).toBe(source);
  width.mockReturnValue(390);act(()=>callbacks.forEach(callback=>callback()));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'358px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'501px'});
  width.mockReturnValue(1600);act(()=>callbacks.forEach(callback=>callback()));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'960px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1344px'});
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1056px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1478px'});
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
  view.unmount();width.mockRestore();height.mockRestore();vi.unstubAllGlobals();
 });
@@ -126,10 +126,34 @@ it('navigates pages and changes zoom without search controls',async()=>{
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.previousPage'}));
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
- expect(screen.getAllByTestId('rendered-pdf-page')[0].closest('[data-pdf-page-index]')).toHaveStyle({width:'660px'});
+ expect(screen.getAllByTestId('rendered-pdf-page')[0].closest('[data-pdf-page-index]')).toHaveStyle({width:'924px'});
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
  expect(screen.queryByRole('searchbox')).toBeNull();
  view.unmount();
+});
+
+it('renders the default PDF at the former 140% size while the toolbar reads 100%',()=>{
+ const view=render(<RenderPdf fileData="base-scale.pdf" defaultPageWidth={600}/>);
+ const page=view.container.querySelector('[data-pdf-page-index]');
+ expect(screen.getByRole('button',{name:'100%'})).toBeInTheDocument();
+ expect(page).toHaveStyle({width:'840px'});
+ fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
+ expect(screen.getByRole('button',{name:'110%'})).toBeInTheDocument();
+ expect(page).toHaveStyle({width:'924px'});
+ fireEvent.click(screen.getByRole('button',{name:'110%'}));
+ expect(screen.getByRole('button',{name:'100%'})).toBeInTheDocument();
+ expect(page).toHaveStyle({width:'840px'});
+});
+
+it('opens formula and table reading in a floating source dialog instead of a reader sidebar',()=>{
+ const view=render(<RenderPdf fileData="source-popup.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+ fireEvent.click(view.container.querySelector('.pdf-formula-trigger')!);
+ expect(window.document.querySelector('[role="dialog"][aria-label="原文解读"]')).toBeInTheDocument();
+ expect(view.container.querySelector('.pdf-reader-with-study > .pdf-formula-study')).toBeNull();
+ fireEvent.click(window.document.querySelector('[aria-label="关闭原文解读"]')!);
+ fireEvent.click(view.container.querySelector('.pdf-table-marker')!);
+ expect(window.document.querySelector('[role="dialog"][aria-label="原文解读"]')).toBeInTheDocument();
+ expect(view.container.querySelector('.pdf-reader-with-study > .pdf-table-study')).toBeNull();
 });
 
 it('keeps zoom when verified parsing arrives and restores source-scoped reading preferences',async()=>{
@@ -293,6 +317,6 @@ it('preserves the reading anchor when a newly mounted page reveals a different h
  const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
  act(()=>state.pageLoads.get(2)!(600,1000));
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(3);
- expect(scroll).toHaveBeenLastCalledWith({top:1840,behavior:'auto'});
+ expect(scroll).toHaveBeenLastCalledWith({top:2560,behavior:'auto'});
  view.unmount();width.mockRestore();height.mockRestore();
 });

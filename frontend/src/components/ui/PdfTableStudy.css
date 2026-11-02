@@ -2,6 +2,7 @@
 .pdf-table-study .pdf-study-eyebrow{color:#467e76;}
 .pdf-table-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}
 .pdf-table-title h3{margin:0;}
+.pdf-table-title>div{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .pdf-table-study .pdf-table-title button{font-size:11px;}
 .pdf-table-caption{font-size:12px;color:#3c5267;}
 .pdf-table-scroll{overflow:auto;max-height:320px;max-width:100%;margin:12px 0;border:1px solid #c8dcd7;border-radius:7px;background:white;scrollbar-gutter:stable;}

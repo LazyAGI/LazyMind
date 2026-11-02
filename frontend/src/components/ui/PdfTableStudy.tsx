@@ -8,10 +8,10 @@ import './PdfFormulaStudy.css';
 import './PdfTableStudy.css';
 interface Props {
  sourceKey:string;blocks:PdfIRBlock[];allBlocks:PdfIRBlock[];selected?:PdfIRBlock;
- onSelect:(block:PdfIRBlock)=>void;onNavigate:(evidence:FormulaEvidence)=>void;
+ onSelect:(block:PdfIRBlock)=>void;onNavigate:(evidence:FormulaEvidence)=>void;onExplainVisual?:(block:PdfIRBlock)=>void;
  onReturn:()=>void;canReturn:boolean;onClose:()=>void;
 }
-export function PdfTableStudy({sourceKey,blocks,allBlocks,selected,onSelect,onNavigate,onReturn,canReturn,onClose}:Props){
+export function PdfTableStudy({sourceKey,blocks,allBlocks,selected,onSelect,onNavigate,onExplainVisual,onReturn,canReturn,onClose}:Props){
  const {t}=useTranslation(),panel=useRef<HTMLElement>(null),cellButtons=useRef(new Map<string,HTMLButtonElement>());
  const selectedSection=useRef<HTMLElement>(null);
  const scope=`${sourceKey}/${selected?.id || ''}`;
@@ -66,7 +66,7 @@ export function PdfTableStudy({sourceKey,blocks,allBlocks,selected,onSelect,onNa
    return <option key={block.id} value={block.id}>{label(block)} · {t('pdfTable.catalogLocation',{page:block.page+1,index,defaultValue:'p. {{page}} · item {{index}}'})}</option>;
   })}</select></label>{canReturn&&<button onClick={onReturn}>{t('pdfFormula.returnReading')}</button>}</div>
   {!selected?<div className="pdf-study-empty"><strong>{t('pdfTable.choose',{defaultValue:'Choose a table'})}</strong><p>{t('pdfTable.hint',{defaultValue:'Explore cells and the paper’s explicit references to this table.'})}</p></div>:<div className="pdf-study-body">
-   <section ref={selectedSection}><div className="pdf-table-title"><h3>{label(selected)}</h3><button onClick={()=>navigate(selected)}>{t('pdfTable.locate',{defaultValue:'Locate original table'})}</button></div>
+   <section ref={selectedSection}><div className="pdf-table-title"><h3>{label(selected)}</h3><div>{onExplainVisual&&<button onClick={()=>onExplainVisual(selected)}>{t('pdfTable.explain')}</button>}<button onClick={()=>navigate(selected)}>{t('pdfTable.locate',{defaultValue:'Locate original table'})}</button></div></div>
     {(selected.table?.captions||[]).map((caption,index)=><p className="pdf-table-caption" key={index}>{caption}</p>)}
     <p className="pdf-study-section-label">{t('pdfTable.selectHint',{defaultValue:'Select a cell to inspect it. Use arrow keys to move between cells, then Enter to select.'})}</p>
     {rows.some(row=>row.length)?<div key={scope} className="pdf-table-scroll" role="region" aria-label={t('pdfTable.data',{defaultValue:'Table data'})} tabIndex={0}><table aria-label={label(selected)}><tbody>{rows.map((row,rowIndex)=><tr key={rowIndex}>{row.map(placed=>{

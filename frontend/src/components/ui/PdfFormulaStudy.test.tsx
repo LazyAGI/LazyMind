@@ -2,12 +2,23 @@ import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
 import {beforeAll, describe, expect, it, vi} from 'vitest';
 import i18n from '@/i18n';
 import {PdfFormulaStudy} from './PdfFormulaStudy';
+import {PdfStudyDialog} from './PdfStudyDialog';
 const mocks=vi.hoisted(()=>({post:vi.fn()}));
 vi.mock('@/components/request',()=>({axiosInstance:mocks,BASE_URL:''}));
 const block={id:'f',type:'formula',page:2,latex:'x^2'};
 const explanation={summary:'Summary',symbols:[{symbol:'x',meaning:'Input',evidence_ids:['e'],inferred:false}],steps:[],evidence:[{id:'e',text:'Exact source quote',page:1,bbox:[0,0,1,.1]}],warnings:[]};
 beforeAll(async()=>{await i18n.changeLanguage('en-US');});
 describe('formula study panel',()=>{
+ it('makes every parsed term clickable in the source popup while keeping the full symbol list folded',async()=>{
+  mocks.post.mockResolvedValue({data:{data:explanation}});
+  render(<PdfStudyDialog onClose={vi.fn()}><PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="hash" blocks={[block]} selected={{...block,latex:'x+y'}} autoExplain compact onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/></PdfStudyDialog>);
+  expect(await screen.findByText('Summary')).toBeInTheDocument();
+  const symbols=screen.getAllByRole('button',{name:/Symbol:/});
+  expect(symbols).toHaveLength(2);
+  fireEvent.click(symbols[0]);
+  expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Input');
+  expect(screen.getByText(/Symbols & meanings/).closest('details')).not.toHaveAttribute('open');
+ });
  it('shows exact evidence separately from generated interpretation and navigates to it',async()=>{
  mocks.post.mockResolvedValue({data:{data:explanation}});
  const navigate=vi.fn();

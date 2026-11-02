@@ -1,0 +1,41 @@
+.pdf-study-overlay{position:fixed;inset:0;z-index:1450;display:flex;align-items:center;justify-content:center;padding:18px;background:#111a;backdrop-filter:blur(2px)}
+.pdf-study-dialog{position:relative;box-sizing:border-box;width:min(780px,100%);max-height:min(82vh,860px);overflow:auto;border:1px solid #414141;border-radius:18px;background:#111;color:#f4f4f4;box-shadow:0 24px 70px #0008;font:14px/1.65 system-ui,sans-serif;outline:none}
+.pdf-study-dialog-close{position:absolute;right:14px;top:13px;z-index:5;width:31px;height:31px;padding:0;border:1px solid #444;border-radius:50%;background:#202020;color:#eee;font-size:21px;line-height:1;cursor:pointer}
+.pdf-study-dialog-close:hover{background:#303030}
+.pdf-study-dialog-close:focus-visible,.pdf-study-dialog button:focus-visible,.pdf-study-dialog select:focus-visible{outline:2px solid #f2b4bd;outline-offset:2px}
+.pdf-study-dialog>.pdf-formula-study,.pdf-study-dialog>.pdf-visual-study{display:block;box-sizing:border-box;width:100%;max-width:none;height:auto;min-height:0;max-height:none;overflow:visible;flex:none;border:0;background:transparent;box-shadow:none;color:inherit;font:inherit}
+.pdf-study-dialog .pdf-formula-study>header,.pdf-study-dialog .pdf-visual-study>header{position:sticky;top:0;z-index:3;padding:16px 58px 13px 24px;border-bottom:1px solid #303030;background:#111111f5;color:inherit;backdrop-filter:blur(10px)}
+.pdf-study-dialog .pdf-study-eyebrow{display:none}
+.pdf-study-dialog .pdf-formula-study h2,.pdf-study-dialog .pdf-visual-study h2{margin:0;color:#f4f4f4;font-size:17px;font-weight:650}
+.pdf-study-dialog .pdf-visual-study header span{color:#aaa;font-size:12px}
+.pdf-study-dialog .pdf-study-close,.pdf-study-dialog .pdf-visual-study>header>button{display:none}
+.pdf-study-dialog .pdf-study-navigation,.pdf-study-dialog .pdf-visual-source{padding:12px 24px;border-color:#303030;color:#aaa}
+.pdf-study-dialog .pdf-study-navigation label,.pdf-study-dialog .pdf-study-section-label,.pdf-study-dialog .pdf-study-disclaimer,.pdf-study-dialog .pdf-symbol-hint{color:#aaa}
+.pdf-study-dialog .pdf-study-navigation select{background:#202020;border-color:#494949;color:#eee}
+.pdf-study-dialog .pdf-study-body,.pdf-study-dialog .pdf-visual-body{padding:4px 24px 28px;color:#eee}
+.pdf-study-dialog .pdf-study-body section{border-color:#303030}
+.pdf-study-dialog .pdf-study-body h3,.pdf-study-dialog .pdf-visual-body h3{color:#eee;font-size:14px}
+.pdf-study-dialog .pdf-formula-study button,.pdf-study-dialog .pdf-visual-study button{border:1px solid #505050;border-radius:8px;background:#202020;color:#eee;font:inherit;cursor:pointer}
+.pdf-study-dialog .pdf-formula-study button:hover,.pdf-study-dialog .pdf-visual-study button:hover{background:#303030;border-color:#777}
+.pdf-study-dialog .pdf-formula-study .pdf-study-primary{background:#f5f5f5;border-color:#f5f5f5;color:#111}
+.pdf-study-dialog .pdf-study-repair{background:#302819;color:#edc995;border-color:#c9964f}
+.pdf-study-dialog .pdf-study-preview,.pdf-study-dialog .pdf-interactive-equation{color:#f5f5f5}
+.pdf-study-dialog .pdf-interactive-equation{overflow-x:auto;padding:18px 7px 22px;text-align:center}
+.pdf-study-dialog .pdf-interactive-symbol{padding:4px 7px;margin:0 2px;border-radius:999px;box-shadow:0 0 0 1px #5b5b5b;transition:background-color .12s,color .12s,box-shadow .12s}
+.pdf-study-dialog .pdf-interactive-symbol:hover{background:#313131;box-shadow:0 0 0 1px #aaa}
+.pdf-study-dialog .pdf-interactive-symbol.is-selected{background:#f5f5f5;color:#111;box-shadow:0 0 0 2px #f5f5f5}
+.pdf-study-dialog .pdf-symbol-definition{background:#1e1e1e;border-color:#464646;color:#f4f4f4;box-shadow:none}
+.pdf-study-dialog .pdf-symbol-definition small,.pdf-study-dialog .pdf-symbol-unavailable,.pdf-study-dialog .pdf-symbol-unmatched{color:#b4b4b4}
+.pdf-study-dialog .pdf-symbol-evidence blockquote,.pdf-study-dialog .pdf-study-evidence blockquote,.pdf-study-dialog .pdf-visual-body blockquote{background:#1c1c1c;border-color:#696969;color:#c8c8c8}
+.pdf-study-dialog .pdf-symbol-raw pre{background:#202020;color:#ddd}
+.pdf-study-dialog .pdf-symbol-raw summary,.pdf-study-dialog .pdf-symbol-unmatched summary{color:#c7c7c7}
+.pdf-study-dialog .pdf-study-inferred{background:#302b22;color:#e2bf84}
+.pdf-study-dialog .pdf-study-symbol-catalog{padding:12px 0;border-bottom:1px solid #303030;color:#ccc}
+.pdf-study-dialog .pdf-study-symbol-catalog summary{cursor:pointer}
+.pdf-study-dialog .pdf-visual-source p{color:#ddd}
+.pdf-study-dialog .pdf-visual-preview{margin:0 0 12px;max-height:38vh;overflow:auto;border:1px solid #333;border-radius:10px;background:#fff;text-align:center}
+.pdf-study-dialog .pdf-visual-preview img{display:block;max-width:100%;height:auto;margin:auto}
+.pdf-study-dialog .pdf-visual-preview figcaption{padding:4px 8px;background:#171717;color:#aaa;font-size:11px}
+.pdf-study-dialog .pdf-table-scroll{max-width:100%}
+@media(max-width:600px){.pdf-study-overlay{padding:8px}.pdf-study-dialog{max-height:calc(100vh - 16px);border-radius:12px}.pdf-study-dialog .pdf-formula-study>header,.pdf-study-dialog .pdf-visual-study>header{padding-left:15px}.pdf-study-dialog .pdf-study-navigation,.pdf-study-dialog .pdf-visual-source{padding-left:15px;padding-right:15px}.pdf-study-dialog .pdf-study-body,.pdf-study-dialog .pdf-visual-body{padding-left:15px;padding-right:15px}}
+@media(prefers-reduced-motion:reduce){.pdf-study-dialog .pdf-interactive-symbol{transition:none}}
