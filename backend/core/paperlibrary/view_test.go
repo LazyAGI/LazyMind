@@ -1,6 +1,7 @@
 package paperlibrary
 
 import (
+	"context"
 	"encoding/json"
 	"lazymind/core/common/orm"
 	"testing"
@@ -46,5 +47,14 @@ func TestLibraryReadAndStatisticsUseExplicitMembership(t *testing.T) {
 	}
 	if len(view.Data.Papers[0].AttachmentIDs) != 0 || len(view.Data.Attachments) != 0 {
 		t.Fatal("detached raw file reappeared")
+	}
+}
+
+func TestOriginalAvailabilityHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := originalAvailability(ctx, map[string]orm.Document{"test": {ID: "test"}})
+	if err != context.Canceled {
+		t.Fatalf("expected cancellation, got %v", err)
 	}
 }

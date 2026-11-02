@@ -64,23 +64,24 @@ final class Recorder: NSObject, NSApplicationDelegate, @unchecked Sendable {
         guard let id = request["id"] as? Int, let method = request["method"] as? String else { return }
         switch method {
         case "permissions":
-            let screen = CGPreflightScreenCaptureAccess(), input = AXIsProcessTrusted()
-            if !input { _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) }
+            let screen = CGPreflightScreenCaptureAccess(), input = CGPreflightListenEventAccess()
+            // A passive keyboard/mouse tap needs Input Monitoring, not Accessibility.
+            if !input { _ = CGRequestListenEventAccess() }
             if !screen {
                 // ScreenCaptureKit registers the app in modern macOS privacy settings.
                 // Legacy CGRequestScreenCaptureAccess may deny without showing a prompt.
                 Task { @MainActor in
                     _ = try? await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
-                    self.reply(id, ["screen": CGPreflightScreenCaptureAccess(), "input": AXIsProcessTrusted()])
+                    self.reply(id, ["screen": CGPreflightScreenCaptureAccess(), "input": CGPreflightListenEventAccess()])
                 }
             } else { reply(id, ["screen": screen, "input": input]) }
         case "settings":
-            let section = AXIsProcessTrusted() ? "Privacy_ScreenCapture" : "Privacy_Accessibility"
+            let section = CGPreflightListenEventAccess() ? "Privacy_ScreenCapture" : "Privacy_ListenEvent"
             NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(section)")!)
             reply(id)
         case "start":
             guard session == nil && !selecting else { fail(id, "recording-busy"); return }
-            guard AXIsProcessTrusted() else { fail(id, "recording-helper-input-permission"); return }
+            guard CGPreflightListenEventAccess() else { fail(id, "recording-helper-input-permission"); return }
             guard CGPreflightScreenCaptureAccess() else { fail(id, "recording-helper-screen-permission"); return }
             selecting = true
             Task { await self.start(id) }

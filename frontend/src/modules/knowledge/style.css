@@ -84,3 +84,5 @@
 .text-single-line {
   white-space: nowrap;
 }
+
+.micro-knowledge-page:has(.knowledge-detail-page--paper) { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }

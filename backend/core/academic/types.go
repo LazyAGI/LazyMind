@@ -48,16 +48,18 @@ type PresenceResult struct {
 }
 
 type PreviewItem struct {
-	LibraryPaperID string              `json:"library_paper_id,omitempty"`
-	Paper          PaperRef            `json:"paper"`
-	WorkID         string              `json:"work_id"`
-	ReferenceIDs   []string            `json:"reference_ids,omitempty"`
-	Title          string              `json:"title"`
-	DOI            string              `json:"doi,omitempty"`
-	ArxivID        string              `json:"arxiv_id,omitempty"`
-	Presence       PresenceResult      `json:"presence"`
-	Candidates     []FulltextCandidate `json:"fulltext_candidates"`
-	Disposition    string              `json:"disposition"`
+	ManualDownloadURLs []string            `json:"manual_download_urls,omitempty"`
+	Warnings           []string            `json:"warnings,omitempty"`
+	LibraryPaperID     string              `json:"library_paper_id,omitempty"`
+	Paper              PaperRef            `json:"paper"`
+	WorkID             string              `json:"work_id"`
+	ReferenceIDs       []string            `json:"reference_ids,omitempty"`
+	Title              string              `json:"title"`
+	DOI                string              `json:"doi,omitempty"`
+	ArxivID            string              `json:"arxiv_id,omitempty"`
+	Presence           PresenceResult      `json:"presence"`
+	Candidates         []FulltextCandidate `json:"fulltext_candidates"`
+	Disposition        string              `json:"disposition"`
 }
 
 type ImportQueueItem struct {

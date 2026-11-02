@@ -57,18 +57,19 @@ def reasoning_response(request):
 
 @pytest.mark.parametrize('as_fallback', [False, True])
 @pytest.mark.parametrize('configured_limit', [None, 128, 65536])
-@pytest.mark.parametrize('window,reserved', [(131072, 32768), (32768, 16384)])
+@pytest.mark.parametrize('reserved', [4096, 8192, 32768])
 def test_reasoning_output_limit_is_legal_for_initial_and_fallback_models(
-    provider, as_fallback, configured_limit, window, reserved,
+    provider, as_fallback, configured_limit, reserved,
 ):
-    target = candidate(provider, 'o3', window=window)
+    target = candidate(provider, 'o3', window=131072)
     if configured_limit is not None:
         target.llm_config['llm']['static_params'] = {'max_completion_tokens': configured_limit}
     current = candidate(provider, 'model-a') if as_fallback else target
     fail(provider, 'model-a')
     provider.on_request = reasoning_response
     model = wrapped(current, [target] if as_fallback else [])
-    assert model('complete this request') == 'reasoning completed'
+    with config.temp('context_compression_reserved_output_tokens', reserved):
+        assert model('complete this request') == 'reasoning completed'
     expected = ['model-a', 'o3'] if as_fallback else ['o3']
     assert [request['model'] for request in provider.requests] == expected
     request = provider.requests[-1]
@@ -76,35 +77,29 @@ def test_reasoning_output_limit_is_legal_for_initial_and_fallback_models(
     if configured_limit is None:
         assert 'max_completion_tokens' not in request
     else:
-        assert request['max_completion_tokens'] == min(configured_limit, reserved)
+        assert request['max_completion_tokens'] == configured_limit
     assert target.llm_config['llm'].get('static_params', {}) == (
         {'max_completion_tokens': configured_limit} if configured_limit is not None else {}
     )
 
 
 @pytest.mark.parametrize('as_fallback', [False, True])
-@pytest.mark.parametrize('summary', [False, True])
-def test_unconfigured_output_limit_keeps_provider_default(provider, as_fallback, summary):
-    target = candidate(provider, 'gpt-4o', window=131072)
+@pytest.mark.parametrize('configured_limit', [None, 65536])
+@pytest.mark.parametrize('source,default_limit', [('openai', None), ('claude', 4096)])
+def test_standard_model_output_limit_is_independent_of_context_reservation(
+    provider, as_fallback, configured_limit, source, default_limit,
+):
+    target = candidate(provider, 'model-b', source=source, window=131072)
+    if configured_limit is not None:
+        target.llm_config['llm']['static_params'] = {'max_tokens': configured_limit}
     current = candidate(provider, 'model-a') if as_fallback else target
     fail(provider, 'model-a')
-
-    def respond(request):
-        if request['model'] == 'gpt-4o':
-            # This model accepts defaults but rejects the internal 32768 reserve.
-            if 'max_tokens' in request or 'max_completion_tokens' in request:
-                return {'error': 'invalid_value', 'status': 400}
-            return {'message': {'role': 'assistant', 'content': 'completed'}}
-
-    provider.on_request = respond
-    if summary:
-        assert _call_summarizer_llm(raw_model(target), 'Summarize.', 'Short history.',
-                                   candidate_budget=build_context_budget(131072)) == 'completed'
-    else:
-        assert wrapped(current, [target] if as_fallback else [])('Complete.') == 'completed'
-    assert provider.requests[-1]['model'] == 'gpt-4o'
-    assert 'max_tokens' not in provider.requests[-1]
-    assert 'max_completion_tokens' not in provider.requests[-1]
+    succeed(provider, 'model-b')
+    assert wrapped(current, [target] if as_fallback else [])('Complete.') == 'done:model-b'
+    request = provider.requests[-1]
+    # Native APIs may require an SDK default; fallback must not replace it with the context reserve.
+    assert request.get('max_tokens') == (configured_limit if configured_limit is not None else default_limit)
+    assert 'max_completion_tokens' not in request
 
 
 def test_explicit_completion_limit_wins_without_mutating_the_original_model(provider):
@@ -122,17 +117,24 @@ def test_explicit_completion_limit_wins_without_mutating_the_original_model(prov
     assert raw._static_params == original
 
 
-def test_candidate_summary_uses_the_same_reasoning_output_limit(provider):
+@pytest.mark.parametrize('configured_limit', [None, 128, 65536])
+def test_candidate_summary_uses_the_same_reasoning_output_limit(provider, configured_limit):
     current = candidate(provider, 'o3')
-    current.llm_config['llm']['static_params'] = {'max_completion_tokens': 128}
+    if configured_limit is not None:
+        current.llm_config['llm']['static_params'] = {'max_completion_tokens': configured_limit}
     raw = raw_model(current)
     provider.on_request = reasoning_response
     assert _call_summarizer_llm(raw, 'Summarize.', 'A short history.',
-                                candidate_budget=build_context_budget(32768)) == 'reasoning completed'
+                                candidate_budget=build_context_budget(131072)) == 'reasoning completed'
     assert len(provider.requests) == 1
-    assert provider.requests[0]['max_completion_tokens'] == 128
+    if configured_limit is None:
+        assert 'max_completion_tokens' not in provider.requests[0]
+    else:
+        assert provider.requests[0]['max_completion_tokens'] == configured_limit
     assert 'max_tokens' not in provider.requests[0]
-    assert raw._static_params == {'max_completion_tokens': 128}
+    assert raw._static_params == (
+        {'max_completion_tokens': configured_limit} if configured_limit is not None else {}
+    )
 
 
 @pytest.mark.parametrize('summary', [False, True])
@@ -421,3 +423,28 @@ def test_unknown_candidate_does_not_allow_unbounded_tool_initialization(provider
         AgentExecutor().create_agent(raw_model(a), plan)
     assert provider.requests == []
     assert {str(path): path.read_bytes() for path in tmp_path.rglob('*.json')} == before
+
+
+@pytest.mark.parametrize('as_fallback', [False, True])
+@pytest.mark.parametrize('summary', [False, True])
+def test_unconfigured_output_limit_keeps_provider_default(provider, as_fallback, summary):
+    target = candidate(provider, 'gpt-4o', window=131072)
+    current = candidate(provider, 'model-a') if as_fallback else target
+    fail(provider, 'model-a')
+
+    def respond(request):
+        if request['model'] == 'gpt-4o':
+            # This model accepts defaults but rejects the internal 32768 reserve.
+            if 'max_tokens' in request or 'max_completion_tokens' in request:
+                return {'error': 'invalid_value', 'status': 400}
+            return {'message': {'role': 'assistant', 'content': 'completed'}}
+
+    provider.on_request = respond
+    if summary:
+        assert _call_summarizer_llm(raw_model(target), 'Summarize.', 'Short history.',
+                                   candidate_budget=build_context_budget(131072)) == 'completed'
+    else:
+        assert wrapped(current, [target] if as_fallback else [])('Complete.') == 'completed'
+    assert provider.requests[-1]['model'] == 'gpt-4o'
+    assert 'max_tokens' not in provider.requests[-1]
+    assert 'max_completion_tokens' not in provider.requests[-1]

@@ -3049,6 +3049,7 @@ type writerDocumentSaveOpenAPIRequest struct {
 type translationOpenAPIRequest struct {
 	Text   string `json:"text"`
 	Target string `json:"target,omitempty"`
+	Source string `json:"source,omitempty"`
 }
 
 type translationOpenAPIResponse struct {
@@ -3057,8 +3058,18 @@ type translationOpenAPIResponse struct {
 	Target         string `json:"target"`
 }
 
+type translationDocumentProviderOpenAPIItem struct {
+	GroupID      string `json:"group_id"`
+	ProviderName string `json:"provider_name"`
+	GroupName    string `json:"group_name"`
+}
+
 type translationStatusOpenAPIResponse struct {
-	Configured bool `json:"configured"`
+	Configured        bool                                     `json:"configured"`
+	Provider          string                                   `json:"provider,omitempty"`
+	SelectedGroupID   string                                   `json:"selected_group_id,omitempty"`
+	DocumentSupported bool                                     `json:"document_supported"`
+	DocumentProviders []translationDocumentProviderOpenAPIItem `json:"document_providers"`
 }
 
 func registeredCoreOperations() []openAPIOperation {
@@ -4564,6 +4575,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Deleted custom supplier", deleteCustomModelProviderOpenAPIResponse{})},
 		},
 		{
+			Method:      "POST",
+			Path:        "/model_providers/{model_provider_id}/reset",
+			Summary:     "Reset a built-in model supplier",
+			Description: "Clears the current user's keys, models, saved selections and request configuration, and restores the catalog endpoint. Keeps the built-in supplier. Rejects removal of embeddings while indexed knowledge bases exist.",
+			Tags:        []string{"model_providers"},
+			PathParams:  modelProviderGroupPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Reset supplier", deleteCustomModelProviderOpenAPIResponse{})},
+		},
+		{
 			Method:      "GET",
 			Path:        "/model_providers:with_groups",
 			Summary:     "List user model providers that have groups",
@@ -4774,7 +4794,15 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/translation/status",
 			Summary:     "Get translation configuration status",
-			Description: "Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.",
+			Description: "Reports the current user's selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.",
+			Tags:        []string{"translation"},
+			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/translation/initialize",
+			Summary:     "Initialize free translation connections",
+			Description: "Provisions free connections and a default for the current user, preserving an existing available selection. Status queries are read-only.",
 			Tags:        []string{"translation"},
 			Responses:   map[int]openAPIResponse{200: resp("Translation configuration status", translationStatusOpenAPIResponse{})},
 		},
@@ -4782,7 +4810,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/translation:translate",
 			Summary:     "Translate selected document text",
-			Description: "Translates up to 5000 characters with the current user's server-side translation credential.",
+			Description: "Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.",
 			Tags:        []string{"translation"},
 			RequestBody: jsonBodyOf(translationOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Translated text", translationOpenAPIResponse{})},

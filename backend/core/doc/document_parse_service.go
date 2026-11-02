@@ -140,6 +140,11 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 			return EnsureDocumentParsedResult{Status: "parsed"}, nil
 		}
 	}
+	// A validated current parser task supersedes the historical upload status.
+	// loadRecord may project that older failure even while DOC_REPARSE runs.
+	if currentResult != nil && currentResult.TaskID != "" {
+		return *currentResult, nil
+	}
 	if rec.processing.ParseStatus == "failed" || NormalizeTaskStateForUI(rec.taskStat) == "FAILED" {
 		return failedDocumentParseResult(rec.diagnostic), nil
 	}

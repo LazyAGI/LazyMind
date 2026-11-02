@@ -23,6 +23,7 @@ import (
 	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/modelconfig"
 	"lazymind/core/store"
 	"lazymind/core/translation"
 )
@@ -37,14 +38,16 @@ const (
 var translationRetryBaseDelay = 500 * time.Millisecond
 
 type pdfTranslationPayload struct {
-	DatasetID      string `json:"dataset_id"`
-	DocumentID     string `json:"document_id"`
-	RenderJobID    string `json:"render_job_id"`
-	SourcePath     string `json:"source_path"`
-	LayoutPath     string `json:"layout_path"`
-	TargetLanguage string `json:"target_language"`
-	ProviderType   string `json:"provider_type"`
-	OutputFilename string `json:"output_filename"`
+	DatasetID         string                                 `json:"dataset_id"`
+	DocumentID        string                                 `json:"document_id"`
+	RenderJobID       string                                 `json:"render_job_id"`
+	SourcePath        string                                 `json:"source_path"`
+	LayoutPath        string                                 `json:"layout_path"`
+	TargetLanguage    string                                 `json:"target_language"`
+	ProviderType      string                                 `json:"provider_type"`
+	Provider          string                                 `json:"provider,omitempty"`
+	TranslationConfig *modelconfig.TranslationConfigSnapshot `json:"translation_config,omitempty"`
+	OutputFilename    string                                 `json:"output_filename"`
 }
 
 type translationLayoutManifest struct {
@@ -146,6 +149,38 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "unsupported document translation provider", http.StatusBadRequest)
 		return
 	}
+	var apiSnapshot *modelconfig.TranslationConfigSnapshot
+	if req.ProviderType == "api" {
+		requestedProviderGroupID := strings.TrimSpace(r.FormValue("provider_group_id"))
+		var providerSnapshot *modelconfig.TranslationConfigSnapshot
+		var documentSupported bool
+		var err error
+		if requestedProviderGroupID != "" {
+			providerSnapshot, documentSupported, err = translation.DocumentProviderSnapshot(r.Context(), store.DB(), store.UserID(r), requestedProviderGroupID)
+		} else {
+			providerSnapshot, documentSupported, err = translation.SelectedProviderSnapshot(r.Context(), store.UserID(r))
+		}
+		if err != nil {
+			common.ReplyErr(w, "load translation provider failed", http.StatusInternalServerError)
+			return
+		}
+		if providerSnapshot == nil {
+			common.ReplyErr(w, "selected translation source is unavailable; configure it in Default Models", http.StatusPreconditionFailed)
+			return
+		}
+		if !documentSupported {
+			common.ReplyErr(w, "selected translation provider does not support documents", http.StatusBadRequest)
+			return
+		}
+		if requested := strings.TrimSpace(req.Provider); requested != "" && requested != "Translation API" &&
+			!strings.EqualFold(requested, providerSnapshot.ProviderName) {
+			common.ReplyErr(w, "selected translation provider differs from the requested artifact provider", http.StatusConflict)
+			return
+		}
+		req.Provider = providerSnapshot.ProviderName
+		req.OptionsHash += "\x00provider-config:" + providerSnapshot.CacheIdentity()
+		apiSnapshot = providerSnapshot
+	}
 	// Markdown translation changed from paragraph replacement to a
 	// syntax-preserving executor. Include its version in the cache key so
 	// malformed artifacts produced by the legacy executor are not reused.
@@ -205,6 +240,7 @@ func createBackendTranslationPDFJob(w http.ResponseWriter, r *http.Request) {
 		Provider: req.Provider, Model: req.Model, CreatedAt: now, UpdatedAt: now, BackendManaged: true}
 	payload := pdfTranslationPayload{DatasetID: row.DatasetID, DocumentID: row.ID, RenderJobID: renderJobID,
 		SourcePath: sourcePath, LayoutPath: layoutPath, TargetLanguage: req.TargetLanguage, ProviderType: req.ProviderType,
+		Provider: req.Provider, TranslationConfig: apiSnapshot,
 		OutputFilename: strings.TrimSuffix(sourceHeader.Filename, extension) + "-" + req.TargetLanguage + extension}
 	queued, err := asyncjob.Enqueue(r.Context(), store.DB(), asyncjob.EnqueueRequest{JobType: pdfTranslationJobType,
 		ResourceType: "pdf_render_job", ResourceID: renderJobID,
@@ -280,6 +316,9 @@ func updateTranslationRenderJob(ctx context.Context, payload pdfTranslationPaylo
 }
 
 func splitRunes(value string, size int) []string {
+	if size <= 0 {
+		return []string{value}
+	}
 	runes := []rune(value)
 	var result []string
 	for start := 0; start < len(runes); start += size {
@@ -301,45 +340,6 @@ type translationChunkTask struct {
 	weight     int64
 }
 
-type translationRateGate struct {
-	mu   sync.Mutex
-	next time.Time
-}
-
-func newTranslationRateGate(providerType string) *translationRateGate {
-	if providerType != "api" {
-		return nil
-	}
-	return &translationRateGate{}
-}
-
-func (gate *translationRateGate) Wait(ctx context.Context) error {
-	if gate == nil {
-		return nil
-	}
-	gate.mu.Lock()
-	now := time.Now()
-	wait := time.Duration(0)
-	if gate.next.After(now) {
-		wait = gate.next.Sub(now)
-	}
-	gate.next = now.Add(wait + 275*time.Millisecond)
-	gate.mu.Unlock()
-	if wait == 0 {
-		return nil
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func (gate *translationRateGate) Close() {}
-
 func documentTranslationConcurrency() int {
 	value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("DOCUMENT_TRANSLATION_CONCURRENCY")))
 	if err != nil || value <= 0 {
@@ -356,7 +356,7 @@ func translateChunkWithRetry(ctx context.Context, attempts int, translate func(c
 			return value, nil
 		}
 		lastErr = err
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil || attempt == attempts {
+		if errors.Is(err, modelconfig.ErrTranslationProviderReferenceChanged) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil || attempt == attempts {
 			break
 		}
 		delay := time.Duration(1<<(attempt-1)) * translationRetryBaseDelay
@@ -463,9 +463,15 @@ func translateUnitsParallel(
 	return result, nil
 }
 
-func translateDocumentChunk(ctx context.Context, userID, providerType, text, target string) (string, error) {
+func translateDocumentChunk(ctx context.Context, userID, providerType, text, target string, apiSnapshot *modelconfig.TranslationConfigSnapshot) (string, error) {
 	if providerType == "api" {
-		response, err := translation.TranslateText(ctx, userID, text, target)
+		var response translation.Response
+		var err error
+		if apiSnapshot != nil {
+			response, err = translation.TranslateTextWithSnapshot(ctx, userID, *apiSnapshot, text, target)
+		} else {
+			response, err = translation.TranslateText(ctx, userID, text, target)
+		}
 		return response.TranslatedText, err
 	}
 	language := "简体中文"
@@ -499,6 +505,21 @@ func translateDocumentChunk(ctx context.Context, userID, providerType, text, tar
 	return strings.TrimSpace(result.Data.Message), nil
 }
 
+func resolvePDFJobAPIConfig(ctx context.Context, db *gorm.DB, userID string, payload pdfTranslationPayload) (*modelconfig.TranslationConfig, error) {
+	if payload.ProviderType != "api" {
+		return nil, nil
+	}
+	if payload.TranslationConfig == nil || payload.Provider == "" ||
+		payload.TranslationConfig.ProviderName != payload.Provider {
+		return nil, fmt.Errorf("%w: document job reference is missing or inconsistent", modelconfig.ErrTranslationProviderReferenceChanged)
+	}
+	config, err := modelconfig.ResolveTranslationConfigSnapshot(ctx, db, userID, *payload.TranslationConfig)
+	if err != nil {
+		return nil, fmt.Errorf("resolve document translation provider snapshot: %w", err)
+	}
+	return &config, nil
+}
+
 func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter) (asyncjob.Result, error) {
 	var payload pdfTranslationPayload
 	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil || payload.RenderJobID == "" {
@@ -508,7 +529,8 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			return asyncjob.Result{Permanent: true, ErrorCode: asyncjob.ErrorCodeCanceled}, err
 		}
-		willRetry := job.AttemptCount < job.MaxAttempts
+		permanent := errors.Is(err, modelconfig.ErrTranslationProviderReferenceChanged)
+		willRetry := !permanent && job.AttemptCount < job.MaxAttempts
 		_ = updateTranslationRenderJob(context.Background(), payload, func(record *pdfRenderJobRecord, _ *documentExt) error {
 			if willRetry {
 				record.Status, record.Stage = pdfJobWaiting, "RETRYING"
@@ -519,10 +541,17 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 			record.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 			return nil
 		})
-		return asyncjob.Result{Permanent: false, ErrorCode: "document_translation_failed"}, err
+		errorCode := "document_translation_failed"
+		if permanent {
+			errorCode = "translation_provider_reference_changed"
+		}
+		return asyncjob.Result{Permanent: permanent, ErrorCode: errorCode}, err
+	}
+	if _, err := resolvePDFJobAPIConfig(ctx, store.DB(), job.CreateUserID, payload); err != nil {
+		return fail(err)
 	}
 	if strings.ToLower(filepath.Ext(payload.SourcePath)) != ".pdf" {
-		result, err := executeBackendDocumentTranslation(ctx, job, reporter, payload)
+		result, err := executeBackendDocumentTranslation(ctx, job, reporter, payload, payload.TranslationConfig)
 		if err != nil {
 			return fail(err)
 		}
@@ -571,18 +600,13 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 	for _, index := range translatable {
 		units = append(units, translationWorkUnit{ID: manifest.Blocks[index].ID, Text: manifest.Blocks[index].Text})
 	}
-	chunkSize := 1800
+	chunkSize := 0
 	if payload.ProviderType == "llm" {
 		chunkSize = 5000
 	}
-	rateGate := newTranslationRateGate(payload.ProviderType)
-	defer rateGate.Close()
 	translations, err := translateUnitsParallel(ctx, units, chunkSize, documentTranslationConcurrency(),
 		func(callCtx context.Context, text string) (string, error) {
-			if err := rateGate.Wait(callCtx); err != nil {
-				return "", err
-			}
-			return translateDocumentChunk(callCtx, job.CreateUserID, payload.ProviderType, text, payload.TargetLanguage)
+			return translateDocumentChunk(callCtx, job.CreateUserID, payload.ProviderType, text, payload.TargetLanguage, payload.TranslationConfig)
 		}, func(completed, total int64) error {
 			if err := reporter.Heartbeat(ctx); err != nil {
 				return err
@@ -651,7 +675,7 @@ func handlePDFTranslationJob(ctx context.Context, job asyncjob.Job, reporter asy
 	return asyncjob.Result{ResultJSON: result}, nil
 }
 
-func executeBackendDocumentTranslation(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter, payload pdfTranslationPayload) (asyncjob.Result, error) {
+func executeBackendDocumentTranslation(ctx context.Context, job asyncjob.Job, reporter asyncjob.Reporter, payload pdfTranslationPayload, apiSnapshot *modelconfig.TranslationConfigSnapshot) (asyncjob.Result, error) {
 	executor, err := newBackendDocumentTranslationExecutor(payload.SourcePath)
 	if err != nil {
 		return asyncjob.Result{}, err
@@ -668,18 +692,13 @@ func executeBackendDocumentTranslation(ctx context.Context, job asyncjob.Job, re
 	for _, unit := range units {
 		workUnits = append(workUnits, translationWorkUnit{ID: unit.ID, Text: unit.Text})
 	}
-	chunkSize := 1800
+	chunkSize := 0
 	if payload.ProviderType == "llm" {
 		chunkSize = 5000
 	}
-	rateGate := newTranslationRateGate(payload.ProviderType)
-	defer rateGate.Close()
 	translations, err := translateUnitsParallel(ctx, workUnits, chunkSize, documentTranslationConcurrency(),
 		func(callCtx context.Context, text string) (string, error) {
-			if err := rateGate.Wait(callCtx); err != nil {
-				return "", err
-			}
-			return translateDocumentChunk(callCtx, job.CreateUserID, payload.ProviderType, text, payload.TargetLanguage)
+			return translateDocumentChunk(callCtx, job.CreateUserID, payload.ProviderType, text, payload.TargetLanguage, apiSnapshot)
 		}, func(completed, total int64) error {
 			if err := reporter.Heartbeat(ctx); err != nil {
 				return err

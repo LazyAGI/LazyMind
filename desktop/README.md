@@ -112,6 +112,23 @@ make desktop-darwin-arm64-dmg
 `electron-builder` discovers the local Developer ID identity automatically.
 The local target signs the app and DMG but does not submit them to Apple.
 
+Recorder privacy permissions depend on the signed helper's identity. Production
+packages validate both `ai.lazymind.desktop` and `ai.lazymind.recorder` after final
+signing and again inside the release DMG. Both must use Developer ID signatures
+from the expected Apple Team and retain Team/bundle-bound designated requirements;
+ad-hoc or binary-hash-bound identities fail the release check. CI takes the
+expected Team from `APPLE_TEAM_ID`. Local Developer ID builds may set
+`LAZYMIND_MACOS_TEAM_ID` to pin it explicitly.
+
+Keep the same signing Team and bundle identifiers across releases. Switching
+from an ad-hoc test package to a certificate-signed release can require one new
+authorization. Ad-hoc test helpers identify themselves by their binary hash, so
+changing their source may require renewed Screen Recording and Input Monitoring
+permissions even if System Settings still shows an older grant. The helper cache
+preserves unchanged signed artifacts; it cannot preserve identity after an ad-hoc
+helper changes. Validate authorization continuity on a native Mac with two
+successive certificate-signed builds before shipping signing-related changes.
+
 Official tag builds in `LazyAGI/LazyMind` require CI signing and notarization
 credentials. `.github/workflows/macos-installer.yml` maps them from
 `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_ID`,
@@ -161,6 +178,12 @@ For source-based Local runs, setting the same environment variable before `make 
 Desktop binds only to `127.0.0.1`. It retains the normal Local/Desktop auto-login flow through `/_local/admin-session`, while LAN auto-login remains disabled.
 
 Local and Desktop share the platform LazyMind data directory so knowledge bases remain available when switching modes, but they cannot run concurrently. Stop Local before opening Desktop and close Desktop before starting Local. Electron also enforces a single Desktop instance.
+
+Desktop stages the PPT export scripts into a content-addressed directory under
+the user runtime's `deps/editable-ppt/export-runtime` before linking Node
+dependencies. Startup and dependency preparation must not add links or files to
+the signed `.app` resources. A staging failure disables that exporter entry point
+instead of falling back to writing into the installed application.
 
 Local and Desktop also share the existing device key for auth-service cloud credentials. The identity stays in `~/Library/Application Support/lazymind-desktop/credential-device.json` on macOS and `%LOCALAPPDATA%\LazyMind\Desktop\credential-device.json` on Windows. Empty `LAZYMIND_AUTH_CLOUD_SECRET_KEY` and the old development default select this device key; existing credentials encrypted with the old default remain readable. Explicit custom keys are preserved and must be configured consistently in both modes. Keep the identity file when retaining the database. An invalid identity stops auth-service startup instead of generating a replacement key.
 

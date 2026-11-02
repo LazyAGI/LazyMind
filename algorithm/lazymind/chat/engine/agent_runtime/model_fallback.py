@@ -261,7 +261,7 @@ class FallbackLLM(ModuleBase, LLMBase):
             call_kwargs = dict(kwargs)
             call_kwargs['max_retries'] = 1
             call_kwargs['timeout'] = _request_timeout(current)
-            call_kwargs['output_limit'] = configured_output_limit(view, kwargs, budget.reserved_output_tokens)
+            call_kwargs['output_limit'] = configured_output_limit(view, kwargs)
 
             def begin_output(output_metadata=output_metadata):
                 nonlocal call_index, call_open

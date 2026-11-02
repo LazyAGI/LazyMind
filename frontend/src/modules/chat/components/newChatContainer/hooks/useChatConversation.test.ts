@@ -162,6 +162,28 @@ function createPreparedStream(clientConversationId: string) {
 }
 
 describe("useChatConversation regeneration recovery", () => {
+  it('keeps terminal tool counts live and replaces them with zero on regeneration', async () => {
+    const { stream, listeners } = createMockStream();
+    const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });
+    act(() => result.current.replaceMessageList('tool-count-chat', []));
+    await act(async () => { await result.current.sendMessage({ text: 'question' }); });
+    const emit = async (data: Record<string, unknown>) => {
+      await act(async () => listeners.get('message')?.({ data: JSON.stringify({ result: {
+        conversation_id: 'tool-count-chat', history_id: 'tool-count-history', seq: 1, ...data,
+      } }) }));
+    };
+    await emit({ delta: 'answer', tool_call_turns: 8 });
+    await emit({ delta: ' complete' });
+    expect(result.current.messageList[1].tool_call_turns).toBe(8);
+    await emit({ tool_call_turns: 8,
+      runtime_event: { type: 'run_finished', run_id: 'run-1', data: { status: 'completed' } } });
+    expect(result.current.messageList[1].tool_call_turns).toBe(8);
+    await act(async () => { await result.current.regenerate(); });
+    await emit({ delta: 'new answer', tool_call_turns: 0,
+      runtime_event: { type: 'run_finished', run_id: 'run-2', data: { status: 'completed' } } });
+    expect(result.current.messageList[1].tool_call_turns).toBe(0);
+  });
+
   it.each([false, true])('retains turn stop after workflow hand-off and confirmed pause (restored: %s)', async (restored) => {
     const { stream, listeners } = createMockStream();
     const { result } = renderConversation({ onOpenSSE: vi.fn(() => stream) });

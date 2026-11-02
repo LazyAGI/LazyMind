@@ -290,6 +290,11 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/processing-status", []string{"document.read"}, doc.GetProcessingStatus)
 
 	// ----- Academic references and paper imports -----
+	handleAPI(r, "POST", "/academic/zotero/preview", []string{"document.write"}, academic.PreviewZoteroLibrary)
+	handleAPI(r, "POST", "/academic/zotero/attachment", []string{"document.write"}, academic.DownloadZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/attachment/store", []string{"document.write"}, academic.StoreZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/attachment/transfer", []string{"document.write"}, academic.TransferZoteroAttachment)
+	handleAPI(r, "POST", "/academic/zotero/import", []string{"document.write"}, academic.ImportZoteroSnapshot)
 	handleAPI(r, "POST", "/academic/mock-handoffs/{handoff_id}:submit", []string{"qa.write"}, academic.SubmitMockHandoff)
 	handleAPI(r, "GET", "/academic/chat-context", []string{"qa.read"}, academic.AcademicChatContext)
 	handleAPI(r, "PATCH", "/academic/documents/{document_id}/identity", []string{"document.write"}, academic.UpdateDocumentIdentity)
@@ -1009,6 +1014,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/model_providers", []string{"model.write"}, modelprovider.CreateCustomProvider)
 	handleAPI(r, "PATCH", "/model_providers/{model_provider_id}", []string{"model.write"}, modelprovider.UpdateCustomProvider)
 	handleAPI(r, "DELETE", "/model_providers/{model_provider_id}", []string{"model.write"}, modelprovider.DeleteCustomProvider)
+	handleAPI(r, "POST", "/model_providers/{model_provider_id}/reset", []string{"model.write"}, modelprovider.ResetProvider)
 	handleAPI(r, "GET", "/model_providers:with_groups", []string{"model.read"}, modelprovider.ListUserProvidersWithGroups)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}:check", []string{"model.write"}, modelprovider.CheckGroup)
 	handleAPI(r, "GET", "/model_providers/models", []string{"model.read"}, modelprovider.ListUserModelsByModelType)
@@ -1041,6 +1047,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}", []string{"model.write"}, modelprovider.ReplaceKey)
 	handleAPI(r, "POST", "/model_providers/{model_provider_id}/groups/{group_id}/keys/{key_id}/reveal", []string{"model.write"}, modelprovider.RevealKey)
 	handleAPI(r, "GET", "/translation/status", []string{"document.read"}, translation.Status)
+	handleAPI(r, "POST", "/translation/initialize", []string{"document.read"}, translation.Initialize)
 	handleAPI(r, "POST", "/translation:translate", []string{"document.read"}, translation.Translate)
 
 	// ----- Vocabulary / Anki provider -----

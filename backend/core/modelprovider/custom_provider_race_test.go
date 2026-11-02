@@ -24,6 +24,13 @@ func TestCustomSupplierDeleteChecksEmbeddingAfterTakingSupplierLock(t *testing.T
 			t.Fatal(err)
 		}
 	}
+	if err := db.AutoMigrate(&orm.Dataset{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.Dataset{ID: "indexed", KbID: "indexed", ProcessingLevel: "indexed", BaseModel: p.BaseModel}).Error; err != nil {
+		t.Fatal(err)
+	}
+
 	injected := false
 	if err := db.Callback().Query().After("gorm:query").Register("test:late-embedding", func(tx *gorm.DB) {
 		_, locked := tx.Statement.Clauses["FOR"]

@@ -1,12 +1,20 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="lazymind-workflow-frontend" content="__LAZYMIND_FRONTEND_URL__"><style>
+<!doctype html><html><head><meta charset="utf-8"><meta name="lazymind-workflow-frontend" content="__LAZYMIND_FRONTEND_URL__"><meta name="lazymind-workflow-downloads" content="__LAZYMIND_DOWNLOAD_MODE__"><style>
 html,body{height:100%;margin:0;overflow:hidden;background:transparent}iframe{display:block;width:100%;height:100%;border:0}
 #notice{position:fixed;bottom:8px;left:8px;right:8px;font:14px system-ui;padding:8px;background:Canvas;color:CanvasText}
 #retry{position:fixed;top:12px;right:12px;padding:6px 12px;cursor:pointer}
 [hidden]{display:none!important}</style></head><body><p id="notice" role="status">正在载入 Workflow…</p><button id="retry" hidden>重新载入</button>
-<iframe id="workflow" title="Workflow 运行页"></iframe><script>(function startPresentationFrame() {
+<iframe id="workflow" title="Workflow 运行页" allow="clipboard-read; clipboard-write"></iframe><script>(function startPresentationFrame() {
 	const params = new URLSearchParams(location.hash.slice(1));
 	const run = params.get("run") || "", bridgeId = params.get("mount") || "";
-	if (!/^[a-zA-Z0-9_-]{1,256}$/.test(run) || !/^[a-zA-Z0-9-]{20,80}$/.test(bridgeId) || parent === window) return;
+	const native = parent === window && params.get("native") === "1";
+	if (!/^[a-zA-Z0-9_-]{1,256}$/.test(run) || !/^[a-zA-Z0-9-]{20,80}$/.test(bridgeId) || parent === window && !native) return;
+	const events = [];
+	let currentStatus = "loading";
+	const emit = (data) => {
+		if (native) {
+			if (events.length < 100) events.push(data);
+		} else parent.postMessage(data, "*");
+	};
 	const frame = document.querySelector("#workflow");
 	const notice = document.querySelector("#notice");
 	const retry = document.querySelector("#retry");
@@ -14,19 +22,25 @@ html,body{height:100%;margin:0;overflow:hidden;background:transparent}iframe{dis
 	if (!["http:", "https:"].includes(base.protocol) || base.username || base.password || base.search || base.hash) return;
 	const url = new URL(`${base.href.replace(/\/$/, "")}/workflow-runs/${run}/embed`);
 	url.searchParams.set("hostOrigin", location.origin);
-	url.searchParams.set("downloadHostOrigin", location.origin);
-	url.searchParams.set("downloadBridgeId", bridgeId);
-	url.searchParams.set("workbuddyBlobDownloads", "1");
+	if (document.querySelector("meta[name=\"lazymind-workflow-downloads\"]")?.content !== "browser") {
+		url.searchParams.set("downloadHostOrigin", location.origin);
+		url.searchParams.set("downloadBridgeId", bridgeId);
+		url.searchParams.set("workbuddyBlobDownloads", "1");
+	}
 	const pending = /* @__PURE__ */ new Map();
 	let closed = false, loading = false, navigating = false;
 	let retryTimer, loadTimer;
 	let probe;
-	const report = (status) => parent.postMessage({
+	const snapshot = () => ({
 		type: "lazymind.workflow.frame-status",
-		status,
+		status: currentStatus,
 		sessionId: run,
 		bridgeId
-	}, "*");
+	});
+	const report = (status) => {
+		currentStatus = status;
+		emit(snapshot());
+	};
 	function show(status, text, canRetry) {
 		notice.hidden = false;
 		notice.textContent = text;
@@ -67,19 +81,33 @@ html,body{height:100%;margin:0;overflow:hidden;background:transparent}iframe{dis
 	}
 	const childTypes = new Set(["lazymind.workflow.toggle-expand", "lazymind.workflow.toggle-collapse"]);
 	const hostTypes = new Set(["lazymind.workflow.expansion", "lazymind.workflow.collapse"]);
+	function receiveHost(data) {
+		if (!data || data.bridgeId !== bridgeId || data.sessionId !== run) return;
+		if (hostTypes.has(data.type)) frame.contentWindow?.postMessage(data, url.origin);
+		if (data.type === "lazymind.workflow.download.result" && pending.has(data.requestId)) {
+			window.clearTimeout(pending.get(data.requestId));
+			pending.delete(data.requestId);
+			frame.contentWindow?.postMessage(data, url.origin);
+		}
+	}
+	if (native) window.__lazymindWorkflowFrame = {
+		drain: () => events.splice(0),
+		receive: receiveHost,
+		status: snapshot
+	};
 	window.addEventListener("message", (event) => {
 		const data = event.data;
 		if (!data || typeof data !== "object") return;
 		if (event.source === frame.contentWindow && event.origin === url.origin) {
-			if (childTypes.has(data.type) && data.sessionId === run) parent.postMessage({
+			if (childTypes.has(data.type) && data.sessionId === run) emit({
 				type: data.type,
 				sessionId: run,
 				bridgeId
-			}, "*");
+			});
 			else if (data.type === "lazymind.workflow.download" && data.bridgeId === bridgeId && typeof data.requestId === "string" && /^[a-zA-Z0-9-]{20,80}$/.test(data.requestId)) {
 				if (pending.has(data.requestId)) return;
 				pending.set(data.requestId, window.setTimeout(() => pending.delete(data.requestId), 31e4));
-				parent.postMessage({
+				emit({
 					type: data.type,
 					sessionId: run,
 					bridgeId,
@@ -87,20 +115,14 @@ html,body{height:100%;margin:0;overflow:hidden;background:transparent}iframe{dis
 					action: data.action,
 					filename: data.filename,
 					blob: data.blob
-				}, "*");
+				});
 			} else if (data.type === "lazymind.workflow.compatibility" && data.bridgeId === bridgeId) {
 				notice.hidden = data.status !== "blob-download-error";
 				notice.textContent = `保存失败或取消：${String(data.detail || "请重试").slice(0, 500)}`;
 			}
 			return;
 		}
-		if (event.source !== parent || data.bridgeId !== bridgeId || data.sessionId !== run) return;
-		if (hostTypes.has(data.type)) frame.contentWindow?.postMessage(data, url.origin);
-		if (data.type === "lazymind.workflow.download.result" && pending.has(data.requestId)) {
-			window.clearTimeout(pending.get(data.requestId));
-			pending.delete(data.requestId);
-			frame.contentWindow?.postMessage(data, url.origin);
-		}
+		if (!native && event.source === parent) receiveHost(data);
 	});
 	frame.onload = () => {
 		if (closed || !navigating) return;

@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// MaxMetadataAuthors allows large scientific collaborations while bounding
+// author lists consistently across snapshot imports and metadata edits.
+const MaxMetadataAuthors = 10000
+
 type Identifiers struct {
 	DOI   string `json:"doi,omitempty"`
 	Arxiv string `json:"arxiv,omitempty"`
@@ -86,10 +90,14 @@ type Note struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 type Data struct {
-	Folders     []Folder     `json:"folders"`
-	Papers      []Paper      `json:"papers"`
-	Attachments []Attachment `json:"attachments"`
-	Notes       []Note       `json:"notes"`
+	// Legacy is an immutable export of the original graph; Extra contains live
+	// auxiliary fields projected alongside authoritative normalized entities.
+	Legacy      json.RawMessage `json:"legacy,omitempty"`
+	Extra       json.RawMessage `json:"-"`
+	Folders     []Folder        `json:"folders"`
+	Papers      []Paper         `json:"papers"`
+	Attachments []Attachment    `json:"attachments"`
+	Notes       []Note          `json:"notes"`
 }
 
 func EmptyData() Data {
@@ -116,7 +124,14 @@ func EffectiveMetadata(entry orm.PaperLibraryEntry, work orm.AcademicWork) (Meta
 			return m, err
 		}
 	}
-	m.Identifiers = Identifiers{DOI: work.DOINormalized, Arxiv: work.ArxivIDBase}
+	// Legacy duplicate identities may have a private work identity. Their
+	// confirmed identifiers remain in metadata without violating global indexes.
+	if work.DOINormalized != "" {
+		m.Identifiers.DOI = work.DOINormalized
+	}
+	if work.ArxivIDBase != "" {
+		m.Identifiers.Arxiv = work.ArxivIDBase
+	}
 	if m.Authors == nil {
 		m.Authors = []string{}
 	}

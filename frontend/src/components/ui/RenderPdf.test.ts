@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { extractPdfSelectionContext } from "./pdfSelectionContext";
-import { isLearningActionCompatible } from "./learningSelection";
+import { isLearningActionCompatible, visibleLearningSelectionActions } from "./learningSelection";
 import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
 
 describe("extractPdfSelectionContext", () => {
@@ -22,6 +22,12 @@ describe("learning action compatibility", () => {
     expect(isLearningActionCompatible({ key: "english", label: "English", languages: ["en"], subjectKinds: ["word"] }, "evidence")).toBe(true);
     expect(isLearningActionCompatible({ key: "english", label: "English", languages: ["en"], subjectKinds: ["word"] }, "求索")).toBe(false);
     expect(isLearningActionCompatible({ key: "translation", label: "Translate", languages: ["*"], subjectKinds: ["sentence"] }, "学而时习之，不亦说乎？")).toBe(true);
+  });
+
+  it("hides the extra learning translation when the reader already offers machine translation", () => {
+    const actions = [{ key: "translation", label: "翻译" }, { key: "explanation", label: "解释" }];
+    expect(visibleLearningSelectionActions(actions, "selected text", true).map((action) => action.key)).toEqual(["explanation"]);
+    expect(visibleLearningSelectionActions(actions, "selected text", false).map((action) => action.key)).toEqual(["translation", "explanation"]);
   });
 });
 

@@ -1,5 +1,4 @@
 import {
-  act,
   fireEvent,
   render,
   screen,
@@ -114,152 +113,37 @@ beforeEach(() => {
 });
 
 describe("custom supplier deletion", () => {
-  it("loads models and confirms embedding downgrade", async () => {
-      await requestDeletion();
-      expect(
-        await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
-      ).toBeInTheDocument();
-      expect(mocks.getModels).toHaveBeenCalledWith({
-        modelProviderId: provider.id,
-        groupId: group.id,
-      });
-      expect(mocks.deleteSupplier).not.toHaveBeenCalled();
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: "common.delete",
-        }),
-      );
-      await waitFor(() =>
-        expect(mocks.deleteSupplier).toHaveBeenCalledWith(
-          provider.id, true,
-        ),
-      );
-    },
-  );
-
-  it.each([
-    { models: [] },
-    { models: [{ id: "chat", name: "fixture-chat", model_type: "llm" }] },
-  ])(
-    "keeps normal confirmation for non-embedding models $models",
-    async ({ models }) => {
-      mocks.getModels.mockResolvedValue({ data: { models } });
-      await requestDeletion();
-      expect(
-        await screen.findByText("modelProvider.workspace.deleteSupplierHint"),
-      ).toBeInTheDocument();
-      expect(mocks.getModels).toHaveBeenCalled();
-      fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
-      await waitFor(() =>
-        expect(mocks.deleteSupplier).toHaveBeenCalledWith(
-          provider.id, false,
-        ),
-      );
-    },
-  );
-
-  it("does not delete when the user cancels the downgrade warning", async () => {
+  it.each(["llm", "embed", "embedding", "embed_main"])("confirms once and leaves %s dependency validation to the server", async (model_type) => {
+    mocks.getModels.mockResolvedValue({ data: { models: [{ ...embedding, model_type }] } });
     await requestDeletion();
-    expect(
-      await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
-    await waitFor(() =>
-      expect(
-        screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc"),
-      ).not.toBeInTheDocument(),
-    );
+    const dialog = within(await screen.findByRole("dialog"));
+    expect(dialog.getByText("modelProvider.workspace.deleteSupplierHint")).toBeInTheDocument();
+    expect(mocks.deleteSupplier).not.toHaveBeenCalled();
+    fireEvent.click(dialog.getByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
+    await waitFor(() => expect(mocks.deleteSupplier).toHaveBeenCalledWith(provider.id));
+  });
+
+  it("does not delete when confirmation is cancelled", async () => {
+    await requestDeletion();
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "common.cancel" }));
     expect(mocks.deleteSupplier).not.toHaveBeenCalled();
   });
 
-  it("does not offer deletion while model lookup is pending or failed", async () => {
-      let rejectLookup!: (error: Error) => void;
-      mocks.getModels.mockReturnValue(
-        new Promise((_, reject) => {
-          rejectLookup = reject;
-        }),
-      );
-      await requestDeletion();
-      await waitFor(() => expect(mocks.getModels).toHaveBeenCalled());
-      expect(
-        screen.queryByText("modelProvider.confirmDeleteEmbeddingDesc"),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByText("modelProvider.workspace.deleteSupplierHint"),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByText("modelProvider.confirmRemoveProviderDesc"),
-      ).not.toBeInTheDocument();
-      await act(async () => {
-        rejectLookup(new Error("fixture lookup failure"));
-      });
-      expect(mocks.deleteSupplier).not.toHaveBeenCalled();
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    },
-  );
+  it("keeps the supplier and shows guidance when an embedding is occupied", async () => {
+    mocks.deleteSupplier.mockRejectedValue({ response: { status: 409, data: { message: "embedding model is in use; remove indexed knowledge bases before removing the model" } } });
+    await requestDeletion();
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "modelProvider.workspace.deleteSupplier" }));
+    expect(await screen.findByText("modelProvider.embeddingInUse")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "modelProvider.workspace.deleteSupplier" })).toBeEnabled();
+    expect(mocks.deleteSupplier).toHaveBeenCalledTimes(1);
+  });
 
-  it("does not offer deleting a built-in supplier", async () => {
+  it("offers reset instead of deletion for a built-in supplier", async () => {
     mocks.getProviders.mockResolvedValue({ data: { providers: [{ ...provider, is_custom: false }] } });
     mocks.getProvidersWithGroups.mockResolvedValue({ data: { providers: [{ ...provider, is_custom: false }] } });
-    render(
-      <ConfigProvider theme={{ token: { motion: false } }}>
-        <ModelProviderPage />
-      </ConfigProvider>,
-    );
-    const navigation = await screen.findByRole("navigation", { name: "modelProvider.workspace.suppliers" });
-    await within(navigation).findByRole("button", {
-      name: "OpenAI",
-    });
-    expect(
-      screen.queryByRole("button", {
-        name: "modelProvider.workspace.deleteSupplier",
-      }),
-    ).not.toBeInTheDocument();
-  });
-
-  it.each(["embedding", "embed_main"])(
-    "recognizes the backend embedding alias %s",
-    async (model_type) => {
-      mocks.getModels.mockResolvedValue({
-        data: { models: [{ ...embedding, model_type }] },
-      });
-      await requestDeletion();
-      expect(
-        await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
-      ).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
-      await waitFor(() =>
-        expect(mocks.deleteSupplier).toHaveBeenCalledWith(
-          provider.id, true,
-        ),
-      );
-    },
-  );
-
-  it("refreshes previously expanded model data before confirming deletion", async () => {
-    mocks.getModels.mockResolvedValueOnce({
-      data: { models: [{ id: "chat", name: "Old chat", model_type: "llm" }] },
-    });
-    render(
-      <ConfigProvider theme={{ token: { motion: false } }}>
-        <ModelProviderPage />
-      </ConfigProvider>,
-    );
-    expect(await screen.findByText("Old chat")).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "modelProvider.workspace.deleteSupplier",
-      }),
-    );
-    expect(
-      await screen.findByText("modelProvider.confirmDeleteEmbeddingDesc"),
-    ).toBeInTheDocument();
-    expect(mocks.getModels).toHaveBeenCalledTimes(2);
-    fireEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", {
-        name: "common.cancel",
-      }),
-    );
-    expect(mocks.deleteSupplier).not.toHaveBeenCalled();
+    render(<ConfigProvider theme={{ token: { motion: false } }}><ModelProviderPage /></ConfigProvider>);
+    expect(await screen.findByRole("button", { name: "modelProvider.workspace.resetSupplier" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "modelProvider.workspace.deleteSupplier" })).not.toBeInTheDocument();
   });
 });

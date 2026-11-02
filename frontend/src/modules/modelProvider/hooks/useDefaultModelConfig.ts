@@ -1,3 +1,5 @@
+import { useModelSelectionStore } from "@/modules/chat/store/modelSelection";
+import { CHAT_MODEL_SELECTION_CHANGED_EVENT } from "@/modules/chat/constants/chat";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, message } from "antd";
 import { useTranslation } from "react-i18next";
@@ -1117,6 +1119,10 @@ export function useDefaultModelConfig({
           [capability]: Boolean(savedValue && savedSelection?.source !== "cloud" && savedSelection?.share),
         }));
         if (savedValue && capability === highlightTarget) onHighlightResolved?.();
+        if (capability === "llm") {
+          useModelSelectionStore.getState().resetForNewChat();
+          window.dispatchEvent(new CustomEvent(CHAT_MODEL_SELECTION_CHANGED_EVENT));
+        }
         void onModelSelectionChanged();
         if (!isAdmin) return retryCapabilityReadiness(capability, true);
       })

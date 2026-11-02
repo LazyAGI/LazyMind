@@ -76,7 +76,7 @@ def _call_summarizer_llm(llm: Any, system_prompt: str, user_prompt: str, *,
         kwargs = {'timeout': timeout} if timeout is not None else {}
         try:
             return _llm_response_text(view(
-                user_prompt, tools=[], max_retries=1, output_limit=configured_output_limit(view, kwargs, candidate_budget.reserved_output_tokens),
+                user_prompt, tools=[], max_retries=1, output_limit=configured_output_limit(view, kwargs),
                 call_control=call_control, **kwargs))
         except ModelCallError as exc:
             if exc.terminal.kind == 'finish' and exc.terminal.finish == ModelFinish.LENGTH:
