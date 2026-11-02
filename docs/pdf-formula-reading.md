@@ -4,13 +4,12 @@ The original-PDF reader can parse formulas with the selected official MinerU ser
 
 ## Reading workspace
 
-The paper workspace has a single header with a collection-back action, centered Overview/Paper tabs, and reader tools at the upper right. A compact chapter rail opens an animated outline over the rail itself; entries use source headings, omit page numbers, and remain open after chapter navigation. The original PDF stays centered on a white canvas at every zoom level. Bilingual comparison and the separate navigation/focus-reading controls are no longer exposed.
+The paper workspace has a single header with a collection-back action and reader tools at the upper right. A compact chapter rail opens an animated outline over the rail itself; entries use source headings, omit page numbers, and remain open after chapter navigation. The original PDF stays centered on a white canvas at every zoom level. Bilingual comparison and the separate navigation/focus-reading controls are no longer exposed.
 
 Floating tool buttons overlay the workspace without taking width from the reader or assistant. The assistant defaults to a sidebar; its layout menu supports left/right docking, a movable floating panel, and fullscreen. Closing or changing layout retains the conversation and drafts. Paper information and notes use the existing academic-library attachment association and write permissions; a selected quote can be transferred into a note draft before saving.
 
 Selecting PDF text opens a compact question/note composer with translation and explanation actions. Questions prepare the assistant draft with source context without automatically sending; adding a quote without a question preserves existing draft text. The selection toolbar no longer offers download-and-import for references. Vocabulary still uses the existing feature switch: enable `LAZYMIND_VOCABULARY_ENABLED` in Core and `VITE_VOCABULARY_ENABLED` when building the frontend. Formula/table/visual studies stack below the PDF when the reading area is narrower than 920 pixels.
 
-Paper insight follows five stages: problem, key insight, method, experimental evidence, and limitations. Summaries are model interpretations. Their source links use server-validated block IDs and original coordinates, and related formulas or visuals open the corresponding study view. Missing support is shown explicitly rather than manufacturing a source. The guide uses the paper structure directly and does not wait for retrieval indexing or embeddings.
 
 ## Enable and use
 
@@ -38,7 +37,7 @@ The additive `projection_version: 3` includes `block.table` with safe text cells
 
 ## Figures and contextual explanation
 
-Numbered figures appear before unidentified image regions in the visual catalog. Image blocks carry captions, footnotes, optional numbers, and explicit paragraph references when attribution is unambiguous. Uncaptioned fragments remain regions rather than invented figure numbers. The guide and visual reader link to the original highlighted region; a table can also open its structured cells.
+Numbered figures appear before unidentified image regions in the visual catalog. Image blocks carry captions, footnotes, optional numbers, and explicit paragraph references when attribution is unambiguous. Uncaptioned fragments remain regions rather than invented figure numbers. The visual reader links to the original highlighted region; a table can also open its structured cells.
 
 Visual explanations use recognized captions, table cells, and surrounding source passages. They do not analyze image pixels. Distinct observations cite authoritative source passages, and table comparisons request the reported dataset, metric, and matching experimental conditions. Unsupported visual details and statistical significance must not be invented.
 
@@ -68,13 +67,12 @@ Coordinates use `normalized_top_left`: `[left, top, right, bottom]` in `[0,1]`, 
 
 An optional `focus_symbol` requests one symbol's meaning. It must be a nonblank, exact substring of the source formula, at most 500 Unicode characters. The response must contain one symbol; its identity is bound to the requested source substring and its meaning remains an interpretation. Focused and general explanations have separate cache entries.
 
-`POST /api/core/datasets/{dataset}/documents/{document}/pdf-ir/guide` returns five ordered `stages`, authoritative `evidence`, `model`, `warnings`, and `source_sha256`. Each stage contains `key`, `title`, `summary`, `evidence_ids`, `related_block_ids`, and `inferred`.
 
 `POST /api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation` supports image and table blocks and returns `summary`, `observations`, authoritative `evidence`, `model`, `warnings`, and `source_sha256`.
 
 `POST /api/core/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/translation` translates an authoritative text block and returns `block_id`, `translated_text`, `language`, `model`, and `source_sha256`. Text blocks are limited to 8,000 Unicode characters. The endpoint remains available to integrations, although the reader no longer exposes the bilingual comparison view.
 
-All three reading endpoints accept `language` (`zh` or `en`), `force`, and an optional expected `source_sha256`. The reader supplies its displayed PDF fingerprint. A changed source returns 409 before cached content or model output is used, and the browser also checks the returned fingerprint. Invalid hash values return 400. Translation, guide, and visual caches are separate and scoped to the authenticated user and source/model configuration.
+Both reading endpoints accept `language` (`zh` or `en`), `force`, and an optional expected `source_sha256`. The reader supplies its displayed PDF fingerprint. A changed source returns 409 before cached content or model output is used, and the browser also checks the returned fingerprint. Invalid hash values return 400. Translation and visual caches are separate and scoped to the authenticated user and source/model configuration.
 
 ## Limits and correctness
 

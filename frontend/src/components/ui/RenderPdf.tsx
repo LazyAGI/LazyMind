@@ -1,5 +1,4 @@
 import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
-import {PdfPaperGuide} from "./PdfPaperGuide";
 import {PdfVisualStudy} from "./PdfVisualStudy";
 import {PdfFigureLayer} from "./PdfFigureLayer";
 import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
@@ -151,13 +150,11 @@ export default function RenderPdf({
   const { t } = useTranslation();
   const {label:readerLabel}=usePaperReaderLabels();
   const preferenceKey = pdfSourceHash && pdfIRTarget ? `pdf-reader:${pdfIRTarget?.dataset || ""}:${pdfIRTarget?.document || ""}:${pdfSourceHash}` : undefined;
-  const {readerMode:preferredMode,setReaderMode,zoom,setZoom} = usePdfReaderPreferences(preferenceKey,fileData,pdfIRTarget ? `${pdfIRTarget.dataset}:${pdfIRTarget.document}` : undefined);
-  const readerMode = pdfIRTarget ? preferredMode : "original";
+  const {zoom,setZoom} = usePdfReaderPreferences(preferenceKey,fileData,pdfIRTarget ? `${pdfIRTarget.dataset}:${pdfIRTarget.document}` : undefined);
   // PDF.js may transfer its input buffer to a worker. Retain original bytes for download.
   const pdfFile = useMemo(()=>fileData instanceof ArrayBuffer ? fileData.slice(0) : fileData,[fileData]);
   const currentSource = useRef(fileData);
   currentSource.current = fileData;
-  const [navigationOrigin,setNavigationOrigin]=useState<"insight">();
   const [visualSelection,setVisualSelection]=useState<PdfIRBlock>();
   const lastRequestedNavigation=useRef("");
   const pdfIR = usePdfIR(pdfIRTarget);
@@ -186,7 +183,7 @@ export default function RenderPdf({
   const numberedFormulas = useMemo(() => formulaNumberMap(studyBlocks), [studyBlocks]);
   const studySourceKey = formulaDocument ? `${formulaDocument.source_sha256}:${formulaDocument.version}:${formulaDocument.projection_version || 0}:${formulaDocument.parser.name}:${formulaDocument.parser.model}` : "";
   useEffect(() => {
-    setNavigationOrigin(undefined);setVisualSelection(undefined);
+    setVisualSelection(undefined);
     setStudyOpen(false); setTableStudyOpen(false); setTableSelection(undefined); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); setPendingStudyNavigation(undefined);
   }, [studySourceKey]);
   const explainFormula = (block: PdfIRBlock) => { setVisualSelection(undefined);setTableStudyOpen(false); setStudySelection({block,explain:true}); setStudyOpen(true); };
@@ -496,7 +493,6 @@ export default function RenderPdf({
     if (!pdfLoaded || !Number.isFinite(value)) return;
     const page = Math.min(numPages, Math.max(1, Math.round(value)));
     const top = pageTops[page - 1] || 0;
-    setReaderMode("original");
     containerRef.current?.scrollTo({top, behavior:"auto"});
     setScrollTop(top);
     onViewPositionChange?.({page,progress:0});
@@ -855,20 +851,10 @@ export default function RenderPdf({
 
   const navigateSourceBlock = (id:string) => {
     const block=formulaDocument?.blocks.find(item=>item.id===id);if(!block)return;
-    if(readerMode!=="original")setNavigationOrigin(readerMode);
-    setReaderMode("original");
     navigateStudyEvidence({id:block.id,text:block.text || block.latex || "",page:block.page,bbox:block.bbox});
   };
   const openVisualStudy = (block:PdfIRBlock) => {
     setStudyOpen(false);setTableStudyOpen(false);setVisualSelection(block);navigateSourceBlock(block.id);
-  };
-  const openRelatedStudy = (block:PdfIRBlock) => {
-    if(block.type==="formula"){navigateSourceBlock(block.id);explainFormula(block);}
-    else openVisualStudy(block);
-  };
-  const returnReaderMode = () => {
-    if(navigationOrigin){setReaderMode(navigationOrigin);setNavigationOrigin(undefined);closeStudy();}
-    else returnFromStudy();
   };
   useEffect(()=>{
     if(!pdfNavigateTo || !pdfLoaded || !formulaDocument)return;
@@ -966,11 +952,10 @@ export default function RenderPdf({
 
   const readerTools = (
     <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={!toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
-      {readerMode!=="insight" && <div className="pdf-reader-tools">
-        {readerMode==="original" && <><button aria-label={readerLabel("previousPage")} disabled={!pdfLoaded||currentPage<=1} onClick={()=>jumpPage(currentPage-1)}><LeftOutlined/></button><input className="pdf-reader-page-input" aria-label={readerLabel("page")} type="number" disabled={!pdfLoaded} min={1} max={numPages} value={currentPage} onChange={event=>jumpPage(Number(event.target.value))}/><span className="pdf-reader-page-total">/ {pdfLoaded ? numPages : "—"}</span><button aria-label={readerLabel("nextPage")} disabled={!pdfLoaded||currentPage>=numPages} onClick={()=>jumpPage(currentPage+1)}><RightOutlined/></button><span className="pdf-reader-tool-divider"/><button aria-label={readerLabel("zoomOut")} disabled={!pdfLoaded||zoom<=.5} onClick={()=>changeZoom(zoom-.1)}><ZoomOutOutlined/></button><button title={readerLabel("fitWidth")} onClick={()=>changeZoom(1)}>{Math.round(zoom*100)}%</button><button aria-label={readerLabel("zoomIn")} disabled={!pdfLoaded||zoom>=2} onClick={()=>changeZoom(zoom+.1)}><ZoomInOutlined/></button></>}
-      </div>}
+      <div className="pdf-reader-tools">
+        <><button aria-label={readerLabel("previousPage")} disabled={!pdfLoaded||currentPage<=1} onClick={()=>jumpPage(currentPage-1)}><LeftOutlined/></button><input className="pdf-reader-page-input" aria-label={readerLabel("page")} type="number" disabled={!pdfLoaded} min={1} max={numPages} value={currentPage} onChange={event=>jumpPage(Number(event.target.value))}/><span className="pdf-reader-page-total">/ {pdfLoaded ? numPages : "—"}</span><button aria-label={readerLabel("nextPage")} disabled={!pdfLoaded||currentPage>=numPages} onClick={()=>jumpPage(currentPage+1)}><RightOutlined/></button><span className="pdf-reader-tool-divider"/><button aria-label={readerLabel("zoomOut")} disabled={!pdfLoaded||zoom<=.5} onClick={()=>changeZoom(zoom-.1)}><ZoomOutOutlined/></button><button title={readerLabel("fitWidth")} onClick={()=>changeZoom(1)}>{Math.round(zoom*100)}%</button><button aria-label={readerLabel("zoomIn")} disabled={!pdfLoaded||zoom>=2} onClick={()=>changeZoom(zoom+.1)}><ZoomInOutlined/></button></>
+      </div>
       <div className="pdf-reader-toolbar-end"><details className="pdf-reader-search"><summary aria-label={readerLabel("search")}><SearchOutlined/></summary><form role="search" onSubmit={event=>{event.preventDefault();void searchPdf();}}><input type="search" aria-label={readerLabel("search")} value={query} onChange={event=>{setQuery(event.target.value);searchRequest.current++;setMatches([]);setSearchStatus("idle");}}/><button disabled={!pdfLoaded||searchStatus==="busy"}>{readerLabel("search")}</button><span role="status">{searchStatus==="busy"?readerLabel("searching"):searchStatus==="error"?readerLabel("searchError"):searchStatus==="done"?(matches.length ? `${matchIndex+1}/${matches.length}` : readerLabel("noMatches")):""}</span>{matches.length>1&&<><button type="button" aria-label={readerLabel("previousMatch")} onClick={()=>{const index=(matchIndex-1+matches.length)%matches.length;setMatchIndex(index);jumpPage(matches[index]);}}>↑</button><button type="button" aria-label={readerLabel("nextMatch")} onClick={()=>{const index=(matchIndex+1)%matches.length;setMatchIndex(index);jumpPage(matches[index]);}}>↓</button></>}</form></details><button aria-label={readerLabel("download")} title={readerLabel("download")} disabled={!fileData} onClick={downloadPdf}><DownloadOutlined/></button></div>
-      {navigationOrigin&&<button onClick={returnReaderMode}>{readerLabel("returnGuide")}</button>}
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
         <details className="pdf-reader-parser-details"><summary>{readerLabel("displaySettings")}</summary><div><span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
         {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
@@ -989,7 +974,6 @@ export default function RenderPdf({
   const readerHeader = (
     <nav className="pdf-reader-modebar pdf-reader-header" aria-label={readerLabel("reading")}>
       <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
-      {pdfIRTarget && <div role="tablist"><button role="tab" aria-selected={readerMode==="insight"} onClick={()=>setReaderMode("insight")}>{readerLabel("insight")}</button><button role="tab" aria-selected={readerMode!=="insight"} onClick={()=>setReaderMode("original")}>{readerLabel("reading")}</button></div>}
       <div className="pdf-reader-header-end">
         <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
           <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
@@ -1018,9 +1002,7 @@ export default function RenderPdf({
     <div className="pdf-reader-workspace" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
     {readerHeader}
     <div className="pdf-reader-stage">
-    {pdfIRTarget&&formulaDocument&&<div className="pdf-reader-reflow" hidden={readerMode!=="insight"}><PdfPaperGuide paperTitle={paperTitle} target={pdfIRTarget} document={formulaDocument} active={readerMode==="insight"} onNavigate={navigateSourceBlock} onStudy={openRelatedStudy}/></div>}
-    {pdfIRTarget&&!formulaDocument&&readerMode!=="original"&&<div className="pdf-reader-empty">{readerLabel("needsIR")}<button onClick={()=>setReaderMode("original")}>{readerLabel("original")}</button></div>}
-    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:"100%",width:"100%",display:readerMode==="original"?"flex":"none"}}>
+    <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:"100%",width:"100%",display:"flex"}}>
     <div
       className={className}
       ref={containerRef}
@@ -1150,7 +1132,7 @@ export default function RenderPdf({
     </div>
     {studyOpen && formulaDocument && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} onSelect={block=>{setStudySelection({block,explain:false});navigateStudyEvidence({id:block.id,text:block.latex || "",page:block.page,bbox:block.bbox});}} onNavigate={navigateStudyEvidence} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
     {tableStudyOpen && formulaDocument && <PdfTableStudy key={`tables:${studySourceKey}`} sourceKey={studySourceKey} blocks={tableBlocks} allBlocks={formulaDocument.blocks} selected={tableSelection} onSelect={openTableStudy} onNavigate={navigateStudyEvidence} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
-    {visualSelection&&formulaDocument&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} onNavigate={navigateSourceBlock} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnReaderMode} canReturn={!!navigationOrigin || !!studyReturn}/>}
+    {visualSelection&&formulaDocument&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} onNavigate={navigateSourceBlock} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
     </div>
     </div>
     </div>

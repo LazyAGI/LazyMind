@@ -40,10 +40,10 @@ it('publishes only source-verified IR and returns to original for an external bl
  const notify=vi.fn();const props={fileData:'test.pdf',pdfIRTarget:target,pdfSourceHash:'hash',onPdfIRDocumentChange:notify};
  const view=render(<RenderPdf {...props}/>);
  expect(notify).toHaveBeenLastCalledWith(state.document);
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
- expect(screen.getByRole('tab',{name:'pdfReader.insight'})).toHaveAttribute('aria-selected','true');
+
+ expect(screen.queryByRole('tablist')).toBeNull();
  view.rerender(<RenderPdf {...props} pdfNavigateTo={{id:'table',requestId:1}}/>);
- await waitFor(()=>expect(screen.getByRole('tab',{name:'pdfReader.reading'})).toHaveAttribute('aria-selected','true'));
+ await waitFor(()=>expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toBeInTheDocument());
  expect(view.container.querySelector('.pdf-study-highlight')).toBeInTheDocument();
  view.rerender(<RenderPdf {...props} pdfSourceHash="unverified"/>);
  expect(notify).toHaveBeenLastCalledWith(undefined);
@@ -60,10 +60,10 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  const source=state.pdfFile;
  expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'752px'});
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
+
  width.mockReturnValue(0);height.mockReturnValue(0);act(()=>callbacks.forEach(callback=>callback()));
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200');
- width.mockReturnValue(600);height.mockReturnValue(500);fireEvent.click(screen.getByRole('tab',{name:'pdfReader.reading'}));act(()=>callbacks.forEach(callback=>callback()));
+ width.mockReturnValue(600);height.mockReturnValue(500);act(()=>callbacks.forEach(callback=>callback()));
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
  expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'564px'});
@@ -102,20 +102,20 @@ it('navigates pages, changes zoom and searches actual PDF page text',async()=>{
  view.unmount();
 });
 
-it('keeps the chosen mode when verified parsing arrives and restores source-scoped reading preferences',async()=>{
+it('keeps zoom when verified parsing arrives and restores source-scoped reading preferences',async()=>{
  sessionStorage.clear();
  state.document=undefined;
  const props={fileData:"preferences.pdf",pdfIRTarget:target,pdfSourceHash:"preferences"};
  const view=render(<RenderPdf {...props}/>);
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
+
  state.document=document("preferences");
  view.rerender(<RenderPdf {...props}/>);
- expect(screen.getByRole('tab',{name:'pdfReader.insight'})).toHaveAttribute('aria-selected','true');
+ expect(screen.queryByRole('tablist')).toBeNull();
  view.unmount();
  render(<RenderPdf {...props}/>);
- expect(screen.getByRole('tab',{name:'pdfReader.insight'})).toHaveAttribute('aria-selected','true');
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.reading'}));
+ expect(screen.queryByRole('tablist')).toBeNull();
+
  expect(screen.getByRole('button',{name:'110%'})).toBeInTheDocument();
  await act(async()=>{});
  sessionStorage.clear();
@@ -142,9 +142,9 @@ it('opens an external page request in the original PDF without requiring parsed 
  const props={fileData:"page-request.pdf",pdfIRTarget:target};
  const view=render(<RenderPdf {...props}/>);
  await act(async()=>{});
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
+
  view.rerender(<RenderPdf {...props} pdfNavigateToPage={{page:2,requestId:1}}/>);
- expect(screen.getByRole('tab',{name:'pdfReader.reading'})).toHaveAttribute('aria-selected','true');
+ expect(screen.queryByRole('tablist')).toBeNull();
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
  await act(async()=>{});
 });
@@ -183,12 +183,12 @@ it('does not restore overview for a PDF without structured-reading support',asyn
 });
 
 
-it('keeps the selected mode when source hashing replaces the loaded buffer',async()=>{
+it('keeps PDF reading visible when source hashing replaces the loaded buffer',async()=>{
  state.document=undefined;
  const view=render(<RenderPdf fileData={new ArrayBuffer(4)} pdfIRTarget={target}/>);
- fireEvent.click(screen.getByRole('tab',{name:'pdfReader.insight'}));
+
  view.rerender(<RenderPdf fileData={new ArrayBuffer(4)} pdfIRTarget={target} pdfSourceHash="newly-hashed"/>);
- expect(screen.getByRole('tab',{name:'pdfReader.insight'})).toHaveAttribute('aria-selected','true');
+ expect(screen.queryByRole('tablist')).toBeNull();
  await act(async()=>{});
 });
 
@@ -206,11 +206,11 @@ it('stops searching more PDF pages after unmount',async()=>{
  expect(state.text).toHaveBeenCalledTimes(1);
 });
 
- it('exposes only overview and paper with header slots and no bilingual reflow',async()=>{
- sessionStorage.setItem('pdf-reader:d:one:hash',JSON.stringify({mode:'bilingual',zoom:1}));
+ it('retains header slots without overview or bilingual reflow',async()=>{
+ sessionStorage.setItem('pdf-reader:d:one:hash',JSON.stringify({mode:'insight',zoom:1}));
  const view=render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash" pdfHeaderStart={<button>Library</button>} pdfHeaderEnd={<button>Workspace</button>}/>);
- expect(screen.getAllByRole('tab')).toHaveLength(2);
- expect(screen.getByRole('tab',{name:'pdfReader.reading'})).toHaveAttribute('aria-selected','true');
+ expect(screen.queryAllByRole('tab')).toHaveLength(0);
+ expect(screen.queryByRole('tablist')).toBeNull();
  expect(screen.queryByRole('button',{name:'pdfReader.bilingual'})).toBeNull();
  expect(view.container.querySelector('.pdf-bilingual-reader')).toBeNull();
  expect(view.container.querySelector('.pdf-reader-header-start')).toContainElement(screen.getByRole('button',{name:'Library'}));

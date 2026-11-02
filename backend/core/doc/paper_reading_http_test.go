@@ -15,7 +15,7 @@ import (
 )
 
 func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
-	for _, kind := range []string{"guide", "visual", "translation"} {
+	for _, kind := range []string{"visual", "translation"} {
 		t.Run(kind, func(t *testing.T) {
 			installOriginalSourceTransport(t)
 			db := newDocumentTestDB(t)
@@ -50,8 +50,6 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 					t.Error("authoritative context missing")
 				}
 				switch kind {
-				case "guide":
-					return `{"stages":[{"key":"problem","title":"Problem","summary":"Original","evidence_ids":["p"]}]}`, nil
 				case "translation":
 					if strings.Contains(content, "source_blocks") {
 						t.Error("translation includes unrelated paper context")
@@ -95,7 +93,7 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 			if w := call("owner", mismatch); w.Code != 409 || modelLoads != 0 || calls != 0 {
 				t.Fatalf("stale reader reached model/cache: status=%d loads=%d", w.Code, modelLoads)
 			}
-			if kind != "guide" {
+			{
 				original := block
 				if kind == "translation" {
 					block = "v"
@@ -162,7 +160,7 @@ func TestPaperReadingHTTPACLCacheAndSourceFreshness(t *testing.T) {
 			if w := call("owner", `{}`); w.Code != 200 || calls != 4 {
 				t.Fatal("model cache reused")
 			}
-			if kind != "guide" {
+			{
 				original := block
 				if kind == "translation" {
 					block = "p2"

@@ -35,7 +35,6 @@ func servePaperReading(kind string, w http.ResponseWriter, r *http.Request) {
 		return algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: content, UserInstruct: instruction, LLMConfig: config})
 	}}}.ServeHTTP(w, r)
 }
-func GuidePDFPaper(w http.ResponseWriter, r *http.Request)    { servePaperReading("guide", w, r) }
 func ExplainPDFVisual(w http.ResponseWriter, r *http.Request) { servePaperReading("visual", w, r) }
 func TranslatePDFBlock(w http.ResponseWriter, r *http.Request) {
 	servePaperReading("translation", w, r)
@@ -102,17 +101,11 @@ func (h paperReadingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	d := *state.Document
 	var evidence []formulaEvidence
-	var related []pdfir.Block
 	var target pdfir.Block
 	blockID := mux.Vars(r)["block"]
 	input := map[string]any{}
-	instruction := paperGuideInstruction
+	instruction := ""
 	switch h.kind {
-	case "guide":
-		evidence, related = paperGuideContext(d)
-		input["source_blocks"] = evidence
-		input["related_blocks"] = related
-		blockID = ""
 	case "visual":
 		target, evidence, err = paperVisualContext(d, blockID)
 		if err != nil {
@@ -156,17 +149,13 @@ func (h paperReadingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		formulaExplanationError(w, 422, "Select an available chat model in model settings before using the paper reader.")
 		return
 	}
-	keyData, _ := json.Marshal([]any{paperReadingPromptVersion, h.kind, blockID, d.SourceSHA256, d.Parser, pdfir.Revision, d.ProjectionVersion, modelID, request.Language, evidence, related})
+	// Retain the nil related-block slot so existing visual/translation caches remain valid.
+	keyData, _ := json.Marshal([]any{paperReadingPromptVersion, h.kind, blockID, d.SourceSHA256, d.Parser, pdfir.Revision, d.ProjectionVersion, modelID, request.Language, evidence, []pdfir.Block(nil)})
 	key := pdfir.Digest(string(keyData))
 	dir := filepath.Join(filepath.Dir(pdfIRSource(ext)), ".lazymind-artifacts", "paper-reading", pdfIRResource(row.DatasetID, row.ID), pdfir.Digest(store.UserID(r)))
 	path := filepath.Join(dir, key+".json")
 	validate := func(raw string) (any, error) {
 		switch h.kind {
-		case "guide":
-			result, e := validatePaperGuide(raw, evidence, related, request.Language)
-			result.Model = modelName
-			result.SourceSHA256 = hash
-			return result, e
 		case "visual":
 			result, e := validatePaperVisual(raw, evidence, request.Language)
 			result.Model = modelName
@@ -202,12 +191,8 @@ func (h paperReadingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	content, _ := json.Marshal(input)
 	raw := ""
 	if len(evidence) == 0 {
-		if h.kind == "guide" {
-			raw = `{"stages":[{"key":"problem"}]}`
-		} else {
-			missing, _ := json.Marshal(map[string]any{"summary": paperUnavailable(request.Language), "observations": []any{}})
-			raw = string(missing)
-		}
+		missing, _ := json.Marshal(map[string]any{"summary": paperUnavailable(request.Language), "observations": []any{}})
+		raw = string(missing)
 	} else {
 		raw, err = h.model.generate(ctx, string(content), instruction, config)
 	}
@@ -236,9 +221,6 @@ func (h paperReadingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := savePaperReading(dir, path, result); err != nil {
 		switch v := result.(type) {
-		case paperGuide:
-			v.Warnings = append(v.Warnings, "The response could not be cached; a later request may regenerate it.")
-			result = v
 		case paperVisualExplanation:
 			v.Warnings = append(v.Warnings, "The response could not be cached; a later request may regenerate it.")
 			result = v

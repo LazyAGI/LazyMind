@@ -3,8 +3,6 @@ import {AgentAppsAuth,AUTH_USER_CHANGE_EVENT,AUTH_LOGOUT_EVENT} from '@/componen
 import {axiosInstance,BASE_URL} from '@/components/request';
 import type {PdfIRDocument,PdfIRTarget} from './pdfIR';
 import type {FormulaEvidence} from './formulaExplanation';
-export const PAPER_STAGES=['problem','insight','method','evidence','limitations'] as const;
-export interface PaperGuide {source_sha256:string;stages:Array<{key:typeof PAPER_STAGES[number];title:string;summary:string;evidence_ids:string[];related_block_ids:string[];inferred:boolean}>;evidence:FormulaEvidence[];model?:string;warnings:string[]}
 export interface VisualExplanation {source_sha256:string;summary:string;observations:Array<{text:string;evidence_ids:string[];inferred:boolean}>;evidence:FormulaEvidence[];model?:string;warnings:string[]}
 export function paperSourceKey(target:PdfIRTarget,document:PdfIRDocument){return `${target.dataset}/${target.document}/${document.source_sha256}/${document.version}/${document.projection_version||0}/${document.parser.name}/${document.parser.model}`;}
 export function usePaperReaderSession(){

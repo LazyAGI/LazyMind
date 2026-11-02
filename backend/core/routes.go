@@ -385,7 +385,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}", []string{"document.read"}, doc.GetDocument)
 	handleAPI(r, "GET", "/datasets/{dataset}/documents/{document}/pdf-ir", []string{"document.read"}, doc.GetPDFIR)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/formulas/{block}/explanation", []string{"document.read"}, doc.ExplainPDFFormula)
-	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/guide", []string{"document.read"}, doc.GuidePDFPaper)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/explanation", []string{"document.read"}, doc.ExplainPDFVisual)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir/blocks/{block}/translation", []string{"document.read"}, doc.TranslatePDFBlock)
 	handleAPI(r, "POST", "/datasets/{dataset}/documents/{document}/pdf-ir", []string{"document.write"}, doc.CreatePDFIR)
