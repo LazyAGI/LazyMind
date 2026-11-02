@@ -66,7 +66,7 @@ func completePresentImport(ctx context.Context, job asyncjob.Job, b orm.PaperImp
 		if e := json.Unmarshal(b.PolicySnapshotJSON, &policy); e != nil {
 			return e
 		}
-		id, e := registerRecognizedLibraryDocument(ctx, tx, d, work, b.EntryType != "bibliography", policy.FolderID, item.ID, "")
+		id, e := registerRecognizedLibraryDocument(ctx, tx, d, work, !isMetadataEnrichmentBatch(b), policy.FolderID, item.ID, "")
 		if e != nil {
 			return e
 		}
@@ -279,7 +279,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 	if err != nil {
 		return err
 	}
-	if b.EntryType == "bibliography" {
+	if isMetadataEnrichmentBatch(b) {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 90*time.Second)
 		defer cancel()
@@ -530,7 +530,7 @@ func processImportItem(ctx context.Context, job asyncjob.Job, b orm.PaperImportB
 			if e = json.Unmarshal(b.PolicySnapshotJSON, &policy); e != nil {
 				return e
 			}
-			libraryID, e := registerRecognizedLibraryDocument(ctx, tx, bound.Document, work, b.EntryType != "bibliography", policy.FolderID, item.ID, "")
+			libraryID, e := registerRecognizedLibraryDocument(ctx, tx, bound.Document, work, !isMetadataEnrichmentBatch(b), policy.FolderID, item.ID, "")
 			if e != nil {
 				return e
 			}

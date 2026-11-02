@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"lazymind/core/state"
+	"lazymind/core/store"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -167,5 +170,65 @@ func TestBibliographyTitleMatchingRequiresUnambiguousAuthorAndYear(t *testing.T)
 				t.Fatalf("doi=%s error=%v", doi, err)
 			}
 		})
+	}
+}
+
+func TestDOIEarlySaveQueuesPDFWithoutWaitingAndIsIdempotent(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	oldState := store.State()
+	shared, e := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	store.Init(db, store.LazyLLMDB(), shared)
+	t.Cleanup(func() { store.Init(db, store.LazyLLMDB(), oldState); _ = shared.Close() })
+	draft := libraryDraft("early", "Early DOI metadata", "10.1234/early")
+	work, err := resolveLibraryWork(t.Context(), db, "papers", draft.ID, draft.Metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := saveImportPreview(t.Context(), "owner", "papers", []PreviewItem{{WorkID: work.ID, Paper: PaperRef{Title: draft.Metadata.Title}, Disposition: "metadata_only", Candidates: []FulltextCandidate{}}}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := createImportRequest{EntryType: "paper_link", TargetDatasetID: "papers", IdempotencyKey: "early-doi", PreviewToken: token, Items: []selectedImportItem{{WorkID: work.ID}}}
+	for i := 0; i < 2; i++ {
+		w := libraryRequest(t, "POST", "/imports", "papers", "owner", input)
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	var batch orm.PaperImportBatch
+	db.First(&batch)
+	var jobs int64
+	db.Model(&orm.AsyncJob{}).Count(&jobs)
+	if batch.Status != "pending" || batch.AsyncJobID == "" || jobs != 1 {
+		t.Fatalf("early save dropped PDF work: status=%s jobs=%d", batch.Status, jobs)
+	}
+	if len(readLibrary(t, "papers").Data.Papers) != 1 {
+		t.Fatal("metadata not immediately visible")
+	}
+}
+
+func TestReimportMetadataOnlyPaperRestartsAcquisitionWithoutDuplicateJobs(t *testing.T) {
+	db := paperLibraryTestDB(t)
+	p := libraryDraft("retry", "Paper", "10.1234/retry")
+	importDraft(t, "papers", "first", p)
+	db.Model(&orm.PaperImportBatch{}).Where("id <> ''").Update("status", "failed")
+	db.Model(&orm.PaperImportItem{}).Where("id <> ''").Update("status", "failed")
+	db.Model(&orm.AsyncJob{}).Where("id <> ''").Update("status", "failed")
+	for _, key := range []string{"again", "while-running"} {
+		w := libraryRequest(t, "POST", "/imports", "papers", "owner", createImportRequest{EntryType: "bibliography", Format: "bib", TargetDatasetID: "papers", IdempotencyKey: key, Items: []selectedImportItem{{Paper: p}}})
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	var pending int64
+	db.Model(&orm.AsyncJob{}).Where("status='pending'").Count(&pending)
+	if pending != 1 {
+		t.Fatalf("expected one new attachment job, got %d", pending)
+	}
+	if len(readLibrary(t, "papers").Data.Papers) != 1 {
+		t.Fatal("duplicate metadata")
 	}
 }

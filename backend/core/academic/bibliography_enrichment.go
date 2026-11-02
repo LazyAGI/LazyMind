@@ -17,10 +17,25 @@ import (
 	"lazymind/core/store"
 )
 
+// The policy flag identifies metadata-first DOI imports without changing old
+// link-import batches that already carry verified download candidates.
+func isMetadataEnrichmentBatch(b orm.PaperImportBatch) bool {
+	if b.EntryType == "bibliography" {
+		return true
+	}
+	if b.EntryType != "paper_link" {
+		return false
+	}
+	var policy struct {
+		BackgroundEnrichment bool `json:"background_enrichment"`
+	}
+	return json.Unmarshal(b.PolicySnapshotJSON, &policy) == nil && policy.BackgroundEnrichment
+}
+
 // Background enrichment must never restore a paper the user removed or merged.
 // Call again inside the attachment publication transaction to close that race.
 func checkEnrichmentMembership(tx *gorm.DB, b orm.PaperImportBatch, item orm.PaperImportItem) error {
-	if b.EntryType != "bibliography" {
+	if !isMetadataEnrichmentBatch(b) {
 		return nil
 	}
 	var entry orm.PaperLibraryEntry
@@ -176,6 +191,13 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 	if metadataErr != nil {
 		warnings = append(warnings, "元信息补全: "+metadataErr.Error())
 	}
+	if candidate.URL == "" && m.Identifiers.DOI != "" {
+		fallback := lookupAuthorPDF(ctx, caller.UserID, m)
+		warnings = append(warnings, fallback.Warnings...)
+		if fallback.Candidate != nil {
+			candidate = *fallback.Candidate
+		}
+	}
 	if candidate.URL == "" {
 		return fmt.Errorf("题录已保存，但未找到可用 PDF，可手动上传或重试。%s", strings.Join(warnings, "; "))
 	}
@@ -185,7 +207,7 @@ func enrichBibliographyItem(ctx context.Context, job asyncjob.Job, b orm.PaperIm
 }
 
 func bibliographyDiagnostics(b orm.PaperImportBatch, item orm.PaperImportItem) json.RawMessage {
-	if b.EntryType != "bibliography" {
+	if !isMetadataEnrichmentBatch(b) {
 		return json.RawMessage("{}")
 	}
 	var snapshot struct {

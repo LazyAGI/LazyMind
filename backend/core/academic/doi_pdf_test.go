@@ -22,6 +22,10 @@ func pdfLookupTestClient(fn func(*http.Request) (int, string)) *http.Client {
 }
 func TestDOIPDFLookupPrefersOpenAccessAndChecksPDF(t *testing.T) {
 	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return 200, `{"results":[]}`
+		}
+
 		if r.URL.Host == "api.unpaywall.org" {
 			return 200, `{"best_oa_location":{"url_for_pdf":"https://publisher.example/paper.pdf","license":"cc-by"}}`
 		}
@@ -37,6 +41,10 @@ func TestDOIPDFLookupPrefersOpenAccessAndChecksPDF(t *testing.T) {
 }
 func TestDOIPDFLookupFallsBackAndPreservesProviderFailure(t *testing.T) {
 	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return 200, `{"results":[]}`
+		}
+
 		switch r.URL.Host {
 		case "api.unpaywall.org":
 			return 503, "unavailable"
@@ -60,6 +68,10 @@ func TestDOIPDFLookupRejectsNonPDFAndPrivateTargets(t *testing.T) {
 	for _, target := range []string{"https://files.example/paper.pdf", "http://127.0.0.1/internal", "https://169.254.169.254/latest/meta-data"} {
 		t.Run(target, func(t *testing.T) {
 			client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+				if r.URL.Host == "api.openalex.org" {
+					return 200, `{"results":[]}`
+				}
+
 				switch r.URL.Host {
 				case "api.unpaywall.org":
 					return 200, `{"best_oa_location":null}`
@@ -79,9 +91,9 @@ func TestDOIPDFLookupRejectsNonPDFAndPrivateTargets(t *testing.T) {
 	}
 }
 func TestDOIPDFLookupHonorsSharedDeadline(t *testing.T) {
-	calls := 0
+	var calls atomic.Int32
 	client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		calls++
+		calls.Add(1)
 		<-r.Context().Done()
 		return nil, r.Context().Err()
 	})}
@@ -89,8 +101,8 @@ func TestDOIPDFLookupHonorsSharedDeadline(t *testing.T) {
 	defer cancel()
 	start := time.Now()
 	result := lookupDOIPDFWithClient(ctx, "10.1234/test", "https://mirror.example", client)
-	if time.Since(start) > 300*time.Millisecond || calls != 1 || result.Candidate != nil || len(result.Warnings) == 0 {
-		t.Fatalf("deadline escaped: calls=%d %+v", calls, result)
+	if time.Since(start) > 300*time.Millisecond || calls.Load() != 2 || result.Candidate != nil || len(result.Warnings) == 0 {
+		t.Fatalf("deadline escaped: calls=%d %+v", calls.Load(), result)
 	}
 }
 func TestSciHubPDFURLResolvesRelativeAndRejectsScripts(t *testing.T) {
@@ -105,7 +117,12 @@ func TestSciHubPDFURLResolvesRelativeAndRejectsScripts(t *testing.T) {
 }
 
 func TestSciHubDirectPDFDoesNotReadEntireDocumentDuringLookup(t *testing.T) {
-	client := pdfLookupTestClient(func(r *http.Request) (int, string) { return 200, "%PDF-1.7\n" + strings.Repeat("x", 3<<20) })
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return 200, `{"results":[]}`
+		}
+		return 200, "%PDF-1.7\n" + strings.Repeat("x", 3<<20)
+	})
 	candidate, err := lookupSciHubPDF(t.Context(), client, "https://mirror.example", "10.1234/test")
 	if err != nil || candidate.URL != "https://mirror.example/10.1234/test" {
 		t.Fatal(candidate, err)
@@ -139,6 +156,10 @@ func TestDOIPreviewSeparatesMetadataAndPDFAndIssuesReceipts(t *testing.T) {
 		t.Fatalf("%+v", metadata)
 	}
 	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return 200, `{"results":[]}`
+		}
+
 		if r.URL.Host == "api.unpaywall.org" {
 			return 503, "unavailable"
 		}
@@ -162,10 +183,10 @@ func TestDOIPreviewSeparatesMetadataAndPDFAndIssuesReceipts(t *testing.T) {
 }
 
 func TestDOIPDFLookupEnforcesItsOwnProviderAndTotalDeadlines(t *testing.T) {
-	calls := 0
+	var calls atomic.Int32
 	start := time.Now()
 	client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
-		calls++
+		calls.Add(1)
 		deadline, ok := r.Context().Deadline()
 		if !ok || deadline.After(start.Add(paperPDFLookupTimeout+50*time.Millisecond)) {
 			t.Error("provider escaped shared deadline")
@@ -174,8 +195,8 @@ func TestDOIPDFLookupEnforcesItsOwnProviderAndTotalDeadlines(t *testing.T) {
 		return nil, r.Context().Err()
 	})}
 	result := lookupDOIPDFWithClient(t.Context(), "10.1234/test", "https://mirror.example", client)
-	if elapsed := time.Since(start); elapsed > paperPDFLookupTimeout+time.Second || calls != 2 || result.Candidate != nil || len(result.Warnings) < 2 {
-		t.Fatalf("unbounded lookup: %v calls=%d %+v", elapsed, calls, result)
+	if elapsed := time.Since(start); elapsed > paperPDFLookupTimeout+time.Second || calls.Load() != 3 || result.Candidate != nil || len(result.Warnings) < 2 {
+		t.Fatalf("unbounded lookup: %v calls=%d %+v", elapsed, calls.Load(), result)
 	}
 }
 
@@ -184,7 +205,12 @@ func TestDOIPreviewUnavailablePDFReturnsEmptyArrayAndWarnings(t *testing.T) {
 	if err := db.Model(&orm.AcademicWork{}).Where("id=?", "a").Update("doi_normalized", "10.1234/test").Error; err != nil {
 		t.Fatal(err)
 	}
-	client := pdfLookupTestClient(func(r *http.Request) (int, string) { return 503, "unavailable" })
+	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return 200, `{"results":[]}`
+		}
+		return 503, "unavailable"
+	})
 	req := paperRequest(`{"work_ids":["a"],"target_dataset_id":"papers","lookup_fulltext":true}`)
 	req = req.WithContext(context.WithValue(req.Context(), paperPDFClientKey{}, client))
 	w := httptest.NewRecorder()
@@ -213,6 +239,9 @@ func TestDOIPDFMultipleSourcesRaceAndCancel(t *testing.T) {
 	var active, peak atomic.Int32
 	canceled := make(chan struct{}, 5)
 	client := &http.Client{Transport: importErrorTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "api.openalex.org" {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"results":[]}`)), Request: r}, nil
+		}
 		if r.URL.Host == "api.unpaywall.org" {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"best_oa_location":null}`)), Request: r}, nil
 		}
@@ -268,6 +297,10 @@ func TestUnpaywallFallsBackAcrossLocations(t *testing.T) {
 	var bad, good atomic.Int32
 	badDone := make(chan struct{})
 	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return 200, `{"results":[]}`
+		}
+
 		switch r.URL.Host {
 		case "api.unpaywall.org":
 			return 200, `{"best_oa_location":{"url_for_pdf":"https://bad.example/p.pdf"},"oa_locations":[{"url_for_pdf":"https://bad.example/p.pdf#page=1"},{"url_for_pdf":"https://good.example/p.pdf","version":"acceptedVersion","license":"cc-by"}]}`
@@ -289,6 +322,10 @@ func TestUnpaywallFallsBackAcrossLocations(t *testing.T) {
 }
 func TestUnpaywallUsesLocationsWhenBestHasNoPDF(t *testing.T) {
 	client := pdfLookupTestClient(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return 200, `{"results":[]}`
+		}
+
 		if r.URL.Host == "api.unpaywall.org" {
 			return 200, `{"best_oa_location":{"url_for_landing_page":"https://publisher.example/article"},"oa_locations":[{"url_for_pdf":"https://repo.example/p.pdf","version":"submittedVersion"}]}`
 		}

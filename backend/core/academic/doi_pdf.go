@@ -100,7 +100,7 @@ func lookupDOIPDFSources(ctx context.Context, doi string, sources []string, clie
 	result := paperPDFLookup{}
 	// Share a bounded OA budget across metadata and candidate probes.
 	openCtx, stop := context.WithTimeout(ctx, 3*time.Second)
-	open := lookupOpenPDF(openCtx, client, doi)
+	open := lookupIndexedOpenPDF(openCtx, client, doi)
 	stop()
 	result.Warnings = append(result.Warnings, open.Warnings...)
 	if open.Candidate != nil {

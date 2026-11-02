@@ -404,7 +404,7 @@ func RetryImport(w http.ResponseWriter, r *http.Request) {
 		if active > 0 {
 			return activeBatch
 		}
-		if batch.EntryType == "bibliography" {
+		if isMetadataEnrichmentBatch(batch) {
 			// Refresh failed/expired source URLs, but never discard an already
 			// committed document receipt or retry by creating a second document.
 			if err := tx.Model(&orm.PaperImportItem{}).Where("batch_id=? AND status='failed' AND COALESCE(document_id,'')=''", batch.ID).Updates(map[string]any{"selected_candidate_json": json.RawMessage("{}"), "stage": "metadata"}).Error; err != nil {
