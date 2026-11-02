@@ -1,6 +1,7 @@
 package translation
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -140,5 +141,23 @@ func TestDispatchPreservesExplicitSourceLanguage(t *testing.T) {
 	got, err := translateWithConfigSource(t.Context(), client, t.Name(), modelconfig.TranslationConfig{ProviderName: "Google Translate Web"}, "你好", "zh", "en")
 	if err != nil || got.TranslatedText != "Hello" {
 		t.Fatalf("result=%+v error=%v", got, err)
+	}
+}
+
+func TestDocumentRevocationStopsLaterProviderChunks(t *testing.T) {
+	calls, checks := 0, 0
+	client := &http.Client{Transport: dispatchTransport(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[["first chunk","zh"]]`)), Header: make(http.Header)}, nil
+	})}
+	_, err := translateWithConfig(t.Context(), client, t.Name(), modelconfig.TranslationConfig{ProviderName: "Google Translate Web"}, strings.Repeat("字", 1001), "en", func() error {
+		checks++
+		if checks > 1 {
+			return modelconfig.ErrTranslationProviderReferenceChanged
+		}
+		return nil
+	})
+	if !errors.Is(err, modelconfig.ErrTranslationProviderReferenceChanged) || calls != 1 || checks != 2 {
+		t.Fatalf("calls=%d checks=%d error=%v", calls, checks, err)
 	}
 }

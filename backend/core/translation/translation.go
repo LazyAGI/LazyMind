@@ -219,7 +219,10 @@ func TranslateTextWithSnapshot(ctx context.Context, userID string, snapshot mode
 	if err != nil {
 		return Response{}, err
 	}
-	return translateWithConfig(ctx, nil, userID, config, text, target)
+	return translateWithConfig(ctx, nil, userID, config, text, target, func() error {
+		_, err := modelconfig.ResolveTranslationConfigSnapshot(ctx, store.DB(), userID, snapshot)
+		return err
+	})
 }
 
 func normalizeTarget(target, text string) string {

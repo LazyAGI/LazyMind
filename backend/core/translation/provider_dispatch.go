@@ -68,11 +68,11 @@ func splitProviderText(text string, spec providerSpec) ([]string, error) {
 	return parts, nil
 }
 
-func translateWithConfig(ctx context.Context, client *http.Client, userID string, config modelconfig.TranslationConfig, text, target string) (Response, error) {
-	return translateWithConfigSource(ctx, client, userID, config, text, "", target)
+func translateWithConfig(ctx context.Context, client *http.Client, userID string, config modelconfig.TranslationConfig, text, target string, validate ...func() error) (Response, error) {
+	return translateWithConfigSource(ctx, client, userID, config, text, "", target, validate...)
 }
 
-func translateWithConfigSource(ctx context.Context, client *http.Client, userID string, config modelconfig.TranslationConfig, text, source, target string) (Response, error) {
+func translateWithConfigSource(ctx context.Context, client *http.Client, userID string, config modelconfig.TranslationConfig, text, source, target string, validate ...func() error) (Response, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return Response{}, errors.New("text is required")
@@ -98,6 +98,13 @@ func translateWithConfigSource(ctx context.Context, client *http.Client, userID 
 	for _, part := range parts {
 		if err := waitForProvider(ctx, userID, spec); err != nil {
 			return Response{}, err
+		}
+		// A document snapshot can be revoked while another chunk is translating
+		// or waiting for its rate slot. Recheck immediately before sending text.
+		for _, check := range validate {
+			if err := check(); err != nil {
+				return Response{}, err
+			}
 		}
 		translated, detected, err := callSelectedProvider(ctx, client, config, spec.Name, part, source, target)
 		if err != nil {
