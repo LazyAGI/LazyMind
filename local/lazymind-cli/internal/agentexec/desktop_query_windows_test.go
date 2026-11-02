@@ -134,14 +134,31 @@ func TestExplicitBindingsSurviveUnavailablePackageCache(t *testing.T) {
 				t.Fatal("fixture must make the package cache unavailable")
 			}
 			executable := filepath.Join(root, "Selected.exe")
-			if err := os.WriteFile(executable, []byte("fixture"), 0600); err != nil {
+			body := "fixture"
+			if isCLIBindingTarget(target) {
+				// CLI bindings execute --version; use a runnable Windows script.
+				executable = filepath.Join(root, "Selected.cmd")
+				body = "@echo off\r\necho 1.0.0\r\n"
+			}
+			if err := os.WriteFile(executable, []byte(body), 0600); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := SetExecutableBinding(target, executable); err != nil {
 				t.Fatalf("valid explicit binding rejected because cache is unavailable: %v", err)
 			}
-			if path, found, err := ExecutableBinding(target); err != nil || !found || path != executable {
+			path, found, err := ExecutableBinding(target)
+			if err != nil || !found {
 				t.Fatalf("binding not persisted: path=%q found=%v err=%v", path, found, err)
+			}
+			// ResolveRunnable/ResolveDesktopApplication canonicalize paths. Compare
+			// file identity, not Windows path casing or separator spelling.
+			want, err := os.Stat(executable)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.Stat(path)
+			if err != nil || !os.SameFile(want, got) {
+				t.Fatalf("binding points to a different file: path=%q want=%q err=%v", path, executable, err)
 			}
 			if err := ClearExecutableBinding(target); err != nil {
 				t.Fatalf("clearing binding depends on package cache: %v", err)
