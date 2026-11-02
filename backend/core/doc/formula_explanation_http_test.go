@@ -48,6 +48,9 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 			if !strings.Contains(instruction, "SAME response") {
 				t.Error("repair and symbol definitions must be requested in one generation")
 			}
+			if !strings.Contains(instruction, "standard mathematical meaning") || !strings.Contains(instruction, "named operators such as Attention") {
+				t.Error("generic operator explanations must be allowed without pretending the paper defined them")
+			}
 			if !strings.Contains(content, "x is distance.") {
 				t.Error("missing neighboring source")
 			}

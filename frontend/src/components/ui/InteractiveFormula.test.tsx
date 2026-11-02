@@ -26,7 +26,7 @@ describe('symbols inside complete formulas',()=>{
  fireEvent.click(screen.getByRole('button',{name:'Source · p. 3'}));
  expect(navigate).toHaveBeenCalledWith(evidence[0]);
  fireEvent.keyDown(symbols[1],{key:'Enter'});
- expect(screen.getByText('No verified definition is available for this symbol.')).toBeInTheDocument();
+ expect(screen.getByText('No explanation is available for this term. Regenerate to try again.')).toBeInTheDocument();
  expect(symbols[1]).toHaveAttribute('aria-pressed','true');
  view.rerender(<InteractiveFormula latex="z=2" sourceKey="other" definitions={definitions} evidence={evidence} onNavigate={navigate}/>);
  expect(screen.queryByText('Feature vector')).toBeNull();
@@ -56,18 +56,25 @@ it('renders the actual Text CC array intact and selects each observed CrossAttn 
 it('shows missing symbol explanations immediately without starting another lookup',()=>{
  render(<InteractiveFormula latex="x+y" sourceKey="precomputed" definitions={[{symbol:'x',meaning:'Known input',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()}/>);
  fireEvent.click(screen.getByRole('button',{name:'Symbol: y'}));
- expect(screen.getByText('No verified definition is available for this symbol.')).toBeInTheDocument();
+ expect(screen.getByText('No explanation is available for this term. Regenerate to try again.')).toBeInTheDocument();
  expect(screen.queryByRole('button',{name:'Retry symbol lookup'})).toBeNull();
 });
 
-it('keeps symbol evidence compact in the source popup while retaining the jump',()=>{
+it('explains a standard Attention operator even when the model omitted its definition',()=>{
+ render(<InteractiveFormula latex={String.raw`\operatorname{Attention}(Q,K,V)`} sourceKey="attention" definitions={[]} evidence={[]} compactEvidence onNavigate={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:String.raw`Symbol: \operatorname{Attention}`}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('queries and keys');
+ expect(screen.getByText('General math meaning')).toBeInTheDocument();
+});
+
+it('keeps the compact popup focused on the symbol meaning',()=>{
  const navigate=vi.fn();
  render(<InteractiveFormula latex="x+y" sourceKey="compact" definitions={[{symbol:'x',meaning:'Known input',evidence_ids:['e'],inferred:false}]} evidence={evidence} compactEvidence onNavigate={navigate}/>);
  fireEvent.click(screen.getByRole('button',{name:'Symbol: x'}));
  const detail=screen.getByRole('region',{name:'Selected symbol'});
  expect(detail.querySelector('blockquote')).toBeNull();
- fireEvent.click(screen.getByRole('button',{name:'Source · p. 3'}));
- expect(navigate).toHaveBeenCalledWith(evidence[0]);
+ expect(detail.querySelector('.pdf-study-citation')).toBeNull();
+ expect(navigate).not.toHaveBeenCalled();
 });
 
 

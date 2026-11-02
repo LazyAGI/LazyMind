@@ -4,7 +4,7 @@ import {useEffect,type ReactNode} from 'react';
 import type {PdfIRDocument} from '@/modules/knowledge/api/pdfIR';
 const state=vi.hoisted(()=>({pageLoads:new Map<number,(width:number,height:number)=>void>(),document:undefined as unknown,status:'ready',failLoad:false,deferLoad:false,load:undefined as undefined|(()=>void),pdfFile:undefined as unknown,text:undefined as undefined|((page:number)=>Promise<{items:Array<{str:string}>}>)}));
 vi.mock('react-i18next',async original=>({...await original<typeof import('react-i18next')>(),useTranslation:()=>({t:(key:string)=>key})}));
-vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file}:{file:unknown;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width}/>;}}));
+vi.mock('react-pdf',()=>({pdfjs:{GlobalWorkerOptions:{}},Document:({children,onLoadSuccess,onLoadError,file}:{file:unknown;children:ReactNode;onLoadSuccess:(value:unknown)=>void;onLoadError:(error:Error)=>void})=>{state.pdfFile=file;useEffect(()=>{if(state.failLoad){onLoadError(new Error("Invalid PDF"));return;}state.load=()=>onLoadSuccess({numPages:3,getPage:async(page:number)=>({view:[0,0,600,800],getTextContent:()=>state.text?state.text(page):Promise.resolve({items:[{str:page===3?'needle result':'ordinary text'}]})})});if(!state.deferLoad)state.load();},[file]);return <>{children}</>;},Page:({width,pageNumber,onLoadSuccess,devicePixelRatio}:{width:number;pageNumber:number;onLoadSuccess:(page:unknown)=>void;devicePixelRatio?:number})=> {state.pageLoads.set(pageNumber,(w,h)=>onLoadSuccess({getViewport:()=>({width:w,height:h})}));return <div data-testid="rendered-pdf-page" data-width={width} data-pixel-ratio={devicePixelRatio}/>;}}));
 vi.mock('@/modules/knowledge/api/pdfIR',async original=>({...await original<typeof import('@/modules/knowledge/api/pdfIR')>(),usePdfIR:()=>({state,starting:false,start:vi.fn()})}));
 vi.mock('./PdfFormulaStudy',()=>({PdfFormulaStudy:()=> <aside aria-label="formula-study"/>}));
 import RenderPdf from './RenderPdf';
@@ -91,7 +91,7 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  const page=screen.getAllByTestId('rendered-pdf-page')[0];
  const source=state.pdfFile;
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1053px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'780px'});
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.nextPage'}));
 
  width.mockReturnValue(0);height.mockReturnValue(0);act(()=>callbacks.forEach(callback=>callback()));
@@ -99,16 +99,16 @@ it('retains rendered pages and source while resizing, hiding and restoring the r
  width.mockReturnValue(600);height.mockReturnValue(500);act(()=>callbacks.forEach(callback=>callback()));
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'790px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'580px'});
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
  expect(state.pdfFile).toBe(source);
  width.mockReturnValue(390);act(()=>callbacks.forEach(callback=>callback()));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'501px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'370px'});
  width.mockReturnValue(1600);act(()=>callbacks.forEach(callback=>callback()));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1344px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1152px'});
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
- expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1478px'});
+ expect(page.closest('[data-pdf-page-index]')).toHaveStyle({width:'1267px'});
  expect(screen.getAllByTestId('rendered-pdf-page')[0]).toBe(page);
  view.unmount();width.mockRestore();height.mockRestore();vi.unstubAllGlobals();
 });
@@ -126,23 +126,35 @@ it('navigates pages and changes zoom without search controls',async()=>{
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.previousPage'}));
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  await waitFor(()=>expect(screen.getAllByTestId('rendered-pdf-page')[0]).toHaveAttribute('data-width','1200'));
- expect(screen.getAllByTestId('rendered-pdf-page')[0].closest('[data-pdf-page-index]')).toHaveStyle({width:'924px'});
+ expect(screen.getAllByTestId('rendered-pdf-page')[0].closest('[data-pdf-page-index]')).toHaveStyle({width:'792px'});
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(2);
  expect(screen.queryByRole('searchbox')).toBeNull();
  view.unmount();
 });
 
-it('renders paper PDFs at the former 140% size while the toolbar reads 100%',()=>{
+it('renders paper PDFs slightly larger than source size while the toolbar reads 100%',()=>{
  const view=render(<RenderPdf fileData="base-scale.pdf" defaultPageWidth={600} paperMode/>);
  const page=view.container.querySelector('[data-pdf-page-index]');
  expect(screen.getByRole('button',{name:'100%'})).toBeInTheDocument();
- expect(page).toHaveStyle({width:'840px'});
+ expect(page).toHaveStyle({width:'720px'});
+ expect(Number(screen.getAllByTestId('rendered-pdf-page')[0].dataset.pixelRatio)).toBeGreaterThanOrEqual(1.5);
  fireEvent.click(screen.getByRole('button',{name:'pdfReader.zoomIn'}));
  expect(screen.getByRole('button',{name:'110%'})).toBeInTheDocument();
- expect(page).toHaveStyle({width:'924px'});
+ expect(page).toHaveStyle({width:'792px'});
  fireEvent.click(screen.getByRole('button',{name:'110%'}));
  expect(screen.getByRole('button',{name:'100%'})).toBeInTheDocument();
- expect(page).toHaveStyle({width:'840px'});
+ expect(page).toHaveStyle({width:'720px'});
+});
+
+it('fits the paper page inside the reading pane at default zoom when an assistant is open',()=>{
+ const callbacks:Array<()=>void>=[];
+ vi.stubGlobal('ResizeObserver',class{constructor(callback:()=>void){callbacks.push(callback)}observe(){}disconnect(){}});
+ const width=vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(600);
+ const height=vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(500);
+ const view=render(<RenderPdf fileData="sidebar.pdf" defaultPageWidth={600} paperMode/>);
+ act(()=>callbacks.forEach(callback=>callback()));
+ expect(view.container.querySelector('[data-pdf-page-index]')).toHaveStyle({width:'580px'});
+ view.unmount();width.mockRestore();height.mockRestore();vi.unstubAllGlobals();
 });
 
 it('fits ordinary documents to their available width at the default zoom',()=>{
@@ -332,6 +344,6 @@ it('preserves the reading anchor when a newly mounted page reveals a different h
  const scroll=vi.spyOn(viewport,'scrollTo');scroll.mockClear();
  act(()=>state.pageLoads.get(2)!(600,1000));
  expect(screen.getByRole('spinbutton',{name:'pdfReader.page'})).toHaveValue(3);
- expect(scroll).toHaveBeenLastCalledWith({top:2560,behavior:'auto'});
+ expect(scroll).toHaveBeenLastCalledWith({top:2200,behavior:'auto'});
  view.unmount();width.mockRestore();height.mockRestore();
 });

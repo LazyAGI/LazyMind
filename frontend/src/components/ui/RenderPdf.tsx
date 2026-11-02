@@ -108,8 +108,8 @@ const GAP_BACKGROUND = "#ffffff";
 const PAGE_BACKGROUND = "#ffffff";
 // A fixed raster size prevents PDF.js clearing canvases during sidebar animation.
 const RASTER_WIDTH = 1200;
-// The toolbar's 100% is the comfortable reading size, previously shown as 140%.
-const PDF_READING_BASE_SCALE = 1.4;
+// The toolbar's 100% is a comfortable reading size, adapted to the visible pane.
+const PDF_READING_BASE_SCALE = 1.2;
 const WIDTH_PT = 595;
 const HEIGHT_PT = 842;
 
@@ -291,13 +291,15 @@ export default function RenderPdf({
 
   const pageWidthPx = useMemo(() => {
     const baseScale = paperMode ? PDF_READING_BASE_SCALE : 1;
+    const fitDefaultPaper = (requested:number) => paperMode && zoom === 1 && containerWidth > 0
+      ? Math.min(requested, Math.max(1, containerWidth - 20)) : requested;
     if (defaultPageWidth) {
-      return Math.round(defaultPageWidth * baseScale * zoom);
+      return Math.round(fitDefaultPaper(defaultPageWidth * baseScale * zoom));
     }
     if (!containerWidth) {
       return Math.round(900 * baseScale * zoom);
     }
-    return Math.round(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * baseScale * zoom);
+    return Math.round(fitDefaultPaper(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * baseScale * zoom));
   }, [defaultPageWidth, containerWidth, zoom, paperMode]);
   const [pageSlotHeight, setPageSlotHeight] = useState(0);
 
@@ -922,6 +924,7 @@ export default function RenderPdf({
         <Page
           pageNumber={index + 1}
           width={RASTER_WIDTH}
+          devicePixelRatio={Math.min(2, Math.max(1.5, window.devicePixelRatio || 1))}
           renderTextLayer={Boolean(pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection)}
           renderAnnotationLayer
           onRenderSuccess={() => {
@@ -1149,7 +1152,7 @@ export default function RenderPdf({
       </Document>
     </div>
     {(studyOpen||tableStudyOpen||!!visualSelection)&&formulaDocument&&<PdfStudyDialog onClose={closeStudy}>
-      {studyOpen && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} compact onSelect={block=>{setStudySelection({block,explain:false});navigateStudyEvidence({id:block.id,text:block.latex || "",page:block.page,bbox:block.bbox});}} onNavigate={navigateFromStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
+      {studyOpen && pdfIRTarget && <PdfFormulaStudy key={studySourceKey} target={pdfIRTarget} sourceKey={studySourceKey} blocks={studyBlocks} selected={studySelection?.block} autoExplain={studySelection?.explain} compact onSelect={block=>setStudySelection({block,explain:false})} onNavigate={navigateFromStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
       {tableStudyOpen && <PdfTableStudy key={`tables:${studySourceKey}`} sourceKey={studySourceKey} blocks={tableBlocks} allBlocks={formulaDocument.blocks} selected={tableSelection} onSelect={openTableStudy} onNavigate={navigateFromStudy} onExplainVisual={openVisualStudy} canReturn={!!studyReturn} onReturn={returnFromStudy} onClose={closeStudy} />}
       {visualSelection&&pdfIRTarget&&<PdfVisualStudy key={`${studySourceKey}:${visualSelection.id}`} target={pdfIRTarget} document={formulaDocument} block={visualSelection} sourcePreview={visualPreview} onNavigate={id=>{navigateSourceBlock(id);setVisualSelection(undefined);}} onInspectTable={openTableStudy} onClose={closeStudy} onReturn={returnFromStudy} canReturn={!!studyReturn}/>}
     </PdfStudyDialog>}

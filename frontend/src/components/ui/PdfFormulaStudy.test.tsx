@@ -18,6 +18,8 @@ describe('formula study panel',()=>{
   fireEvent.click(symbols[0]);
   expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Input');
   expect(screen.getByText(/Symbols & meanings/).closest('details')).not.toHaveAttribute('open');
+  expect(screen.queryByRole('button',{name:'Locate original formula'})).toBeNull();
+  expect(screen.getByText('Summary').compareDocumentPosition(screen.getByText('Exact source quote')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
  });
  it('shows exact evidence separately from generated interpretation and navigates to it',async()=>{
  mocks.post.mockResolvedValue({data:{data:explanation}});
@@ -70,6 +72,14 @@ describe('explanation lifecycle',()=>{
  fireEvent.change(screen.getByRole('combobox',{name:'Formula catalog'}),{target:{value:'f'}});
  expect(select).toHaveBeenCalledWith(block);
  expect(mocks.post).not.toHaveBeenCalled();
+ });
+ it('keeps the formula catalog available before an explanation is generated',()=>{
+  mocks.post.mockReset();
+  const select=vi.fn();
+  render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="catalog" blocks={[block]} selected={block} compact onSelect={select} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
+  fireEvent.click(screen.getByText('Formula catalog',{selector:'summary'}));
+  expect(screen.getByRole('combobox',{name:'Formula catalog'})).toBeInTheDocument();
+  expect(mocks.post).not.toHaveBeenCalled();
  });
 });
 

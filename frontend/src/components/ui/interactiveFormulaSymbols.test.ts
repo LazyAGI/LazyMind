@@ -31,6 +31,13 @@ describe('deterministic complete formula symbol matching',()=>{
  expect(result.unmatchedDefinitions).toEqual([]);
  expect(result.occurrences.filter(o=>o.definitionIndices.includes(0))).toHaveLength(2);
  });
+ it('matches named operators when the explanation uses their plain names',()=>{
+  const formula=String.raw`\operatorname{Attention}(Q,K,V)+\mathrm{softmax}(QK^T)`;
+  const result=interactiveFormulaSymbols(formula,['Attention','softmax','Q','K','V']);
+  expect(result.unmatchedDefinitions).toEqual([]);
+  expect(result.occurrences.find(o=>o.latex===String.raw`\operatorname{Attention}`)?.definitionIndices).toEqual([0]);
+  expect(result.occurrences.find(o=>o.latex===String.raw`\mathrm{softmax}`)?.definitionIndices).toEqual([1]);
+ });
  it('does not confuse accent scope or nested superscripts',()=>{
  expect(interactiveFormulaSymbols(String.raw`\hat{x}_i + x_{i^j}`,[String.raw`\hat{x_i}`,String.raw`x_i^j`]).unmatchedDefinitions).toEqual([0,1]);
  });

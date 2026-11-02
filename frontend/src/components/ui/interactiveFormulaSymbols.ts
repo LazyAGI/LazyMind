@@ -18,6 +18,12 @@ function withinSymbolBudget(value:string):boolean {
 }
 function stripDelimiters(value:string){return value.replace(/^\s*(?:\$\$?|\\\()/,'').replace(/(?:\$\$?|\\\))\s*$/,'');}
 function looseSymbol(value:string){return stripDelimiters(value).replace(/[\s{}]/g,'');}
+// Explanations may name a familiar function without the TeX wrapper used to
+// typeset it. Keep this alias restricted to multi-letter named operators.
+function namedOperator(value:string){
+ const match=value.trim().match(/^\\(?:operatorname|mathrm|mathsf|text)\s*\{\s*([A-Za-z][A-Za-z0-9]+)\s*\}$/);
+ return match?.[1] || '';
+}
 export function normalizeFormulaSymbol(value:string){
  if(!withinSymbolBudget(value))return "";
  const input=stripDelimiters(value);let cursor=0;
@@ -111,7 +117,7 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
  // Match complete semantic atoms first; formatting whitespace and redundant
  // braces may differ, but accents, commands and script structure stay distinct.
  const normalized=definitions.map(normalizeFormulaSymbol);
- occurrences.forEach(occurrence=>{const value=normalizeFormulaSymbol(occurrence.latex);normalized.forEach((definition,index)=>{if(value===definition)occurrence.definitionIndices.push(index);});});
+ occurrences.forEach(occurrence=>{const value=normalizeFormulaSymbol(occurrence.latex);const alias=namedOperator(occurrence.latex);normalized.forEach((definition,index)=>{if(value===definition || (alias && alias===definition))occurrence.definitionIndices.push(index);});});
  // A definition may name an observed function CALL. Its clickable function head
  // uses that exact call's definition; its arguments remain separate targets.
  let canonical='';const offsets:number[]=[];
