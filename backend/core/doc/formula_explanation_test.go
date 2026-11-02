@@ -248,3 +248,24 @@ func TestFormulaExplanationNormalizesPurposeAlias(t *testing.T) {
 		}
 	}
 }
+
+func TestFormulaExplanationNormalizesSymbolTextAlias(t *testing.T) {
+	for _, test := range []struct {
+		raw, meaning string
+		valid        bool
+	}{
+		{`{"summary":"Normal measurement model","symbols":[{"symbol":"m_{j,s,k}","text":"Observed biomass"}]}`, "Observed biomass", true},
+		{`{"summary":"Purpose","symbols":[{"symbol":"m","meaning":"Canonical meaning","text":"Other text"}]}`, "Canonical meaning", true},
+		{`{"summary":"Purpose","symbols":[{"symbol":"m","text":{"value":"Nested"}}]}`, "", false},
+		{`{"summary":"Purpose","symbols":[{"symbol":"m","text":""}]}`, "", false},
+		{`{"summary":"Purpose","symbols":[{"symbol":"m","text":"` + strings.Repeat("x", 8001) + `"}]}`, "", false},
+	} {
+		result, err := validateFormulaExplanation(test.raw, nil)
+		if (err == nil) != test.valid {
+			t.Fatalf("valid=%v err=%v", test.valid, err)
+		}
+		if test.valid && result.Symbols[0].Meaning != test.meaning {
+			t.Fatalf("wrong meaning: %+v", result.Symbols)
+		}
+	}
+}
