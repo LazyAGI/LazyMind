@@ -1,6 +1,6 @@
 import { ConfigProvider } from "antd";
 import type { ReactNode } from "react";
-import { act, fireEvent, render as renderUI, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render as renderUI, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ConversationPreview from "./ConversationPreview";
 import { useConversationRunningStore } from "../store/conversationRunning";
@@ -12,7 +12,7 @@ vi.mock("@/components/request", () => ({ axiosInstance: {}, BASE_URL: "" }));
 
 const render = (ui: ReactNode) => renderUI(ui, { wrapper: ({ children }) => <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider> });
 
-afterEach(() => { act(() => useConversationRunningStore.setState({ entries: {} })); });
+afterEach(() => { cleanup(); act(() => useConversationRunningStore.setState({ entries: {} })); vi.useRealTimers(); });
 beforeEach(() => detail.mockReset());
 
 describe("ConversationPreview", () => {
@@ -87,10 +87,13 @@ describe("ConversationPreview", () => {
     </ConversationPreview>)}</>);
     fireEvent.mouseOver(screen.getByRole("button", { name: "First" }));
     const first = await screen.findByRole("region");
+    await waitFor(() => expect(first).toBeVisible());
+    vi.useFakeTimers();
     fireEvent.mouseOut(screen.getByRole("button", { name: "First" }));
     fireEvent.mouseOver(first.closest(".ant-popover")!);
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 200)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
     expect(first).toBeVisible();
+    vi.useRealTimers();
     fireEvent.mouseOut(first.closest(".ant-popover")!);
     fireEvent.mouseOver(screen.getByRole("button", { name: "Second" }));
     await screen.findByText("Second summary");

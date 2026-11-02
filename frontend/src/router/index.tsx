@@ -28,6 +28,7 @@ const KnowledgeApp = lazy(() => import("@/modules/knowledge/KnowledgeApp"));
 const KnowledgeList = lazy(() => import("@/modules/knowledge/pages/list"));
 const KnowledgeAuth = lazy(() => import("@/modules/knowledge/pages/auth"));
 const KnowledgeDetail = lazy(() => import("@/modules/knowledge/pages/detail"));
+const PaperPreview = lazy(() => import("@/modules/knowledge/pages/paperPreview"));
 const Knowledge = lazy(() => import("@/modules/knowledge/pages/knowledge"));
 const VocabularyPage = lazy(() => import("@/modules/vocabulary/VocabularyPage"));
 const AdminLayout = lazy(() => import("@/modules/admin/AdminLayout"));
@@ -189,6 +190,7 @@ export default function AppRouter() {
             ) : (
               <Route path="auth/:id" element={<KnowledgeAuth />} />
             )}
+            <Route path="paper-preview" element={<PaperPreview />} />
             <Route path="detail/:id" element={<KnowledgeDetail />} />
             <Route
               path="knowledge/:knowledgeBaseId/:knowledgeId"
@@ -227,7 +229,7 @@ export default function AppRouter() {
             <Route path="docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="docs/google-drive-setup" element={<GoogleDriveSetupGuide />} />
           </Route>
-          <Route path="model-providers" element={<Navigate to="/settings?section=models" replace />} />
+          <Route path="model-providers" element={<Navigate to="/settings?section=model_defaults" replace />} />
           <Route path="model-providers/default-services" element={<Navigate to="/settings?section=model_defaults" replace />} />
           <Route path="model-providers/models" element={<Navigate to="/settings?section=models&view=providers" replace />} />
           <Route path="model-providers/document-parsing" element={<Navigate to="/settings?section=model_defaults&service=parsing" replace />} />

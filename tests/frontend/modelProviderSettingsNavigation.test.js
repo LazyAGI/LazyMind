@@ -33,13 +33,13 @@ describe("model provider Settings navigation", () => {
     expect(staleFiles).toEqual([]);
   });
 
-  it("opens the Models & Services Settings section from chat setup notices", () => {
+  it("opens the default model Settings section from chat setup notices", () => {
     const newChatSource = readFileSync(
       join(frontendSourceRoot, "modules/chat/pages/newChat/index.tsx"),
       "utf8",
     );
     const settingsDestinations = newChatSource.match(
-      /navigate\("\/settings\?section=models"\)/g,
+      /navigate\("\/settings\?section=model_defaults"\)/g,
     );
 
     expect(settingsDestinations).toHaveLength(2);

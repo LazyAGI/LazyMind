@@ -1,10 +1,11 @@
 import { captureHtmlSlidePng } from './exportHtmlToPptx';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { embedSlideAssetsForExport, resolveSlideAssets } from './slideAssets';
 import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
 vi.mock('@/modules/knowledge/utils/imageUrl', () => ({
   resolveMarkdownImageUrlAsync: vi.fn(async (path: string) => `https://local.test/api/core${path}?expires=999&sig=fresh`),
 }));
+beforeEach(() => vi.mocked(resolveMarkdownImageUrlAsync).mockClear());
 describe('slide assets', () => {
   it('resolves repeated CSS and img references once without embedding image bytes', async () => {
     const html = '<style>#bg{background:url("/static-files/a.png")}</style><img src="/static-files/a.png">';

@@ -39,6 +39,8 @@ x-proxy-env: &proxy-env
   NO_PROXY: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-doc-server,lazyllm-algo,parsing,lazyllm-parse-server,processor-server,ppt-export,mineru,auth-service,office-convert-service,scan-control-plane,feishu-cli-sidecar,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 
 x-core-env: &core-env
+  ACADEMIC_SCIHUB_BASE_URL: ${ACADEMIC_SCIHUB_BASE_URL:-}
+  ACADEMIC_SCIHUB_BASE_URLS: ${ACADEMIC_SCIHUB_BASE_URLS:-}
   ACL_DB_DRIVER: postgres
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
   # Local development may execute a dev migration that is later removed from

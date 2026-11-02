@@ -22,6 +22,7 @@ import { useTranslation } from "react-i18next";
 import { runtimeFeatures } from "@/runtime/features";
 import { getProviderDisplayName, getProviderSearchText } from "../providerDisplayNames";
 import { useFocusModality } from "../hooks/useFocusModality";
+import { revealModelSetting } from "../utils/revealModelSetting";
 import {
   cloudServiceConfigs,
   normalizeProviderKey,
@@ -298,10 +299,7 @@ export default function DefaultModelConfigPanel({
     const frame = window.requestAnimationFrame(() => {
       if (!highlightedRowRef.current) return;
       focusedHighlightRef.current = highlightTarget;
-      highlightedRowRef.current?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "center",
-      });
+      revealModelSetting(highlightedRowRef.current);
       highlightedRowRef.current?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
@@ -850,7 +848,6 @@ export default function DefaultModelConfigPanel({
           <section className="model-defaults-basic" aria-label={t("modelProvider.defaults.basicTitle")}>
             <div className="model-defaults-section-heading">
               <h3>{t("modelProvider.defaults.basicTitle")}</h3>
-              <span className="model-defaults-save-note">{t("modelProvider.defaults.autoSave")}</span>
             </div>
             <div className="model-defaults-rows">{basicCards.map((card) => card.node)}</div>
           </section>

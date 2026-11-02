@@ -1,0 +1,14 @@
+# Opt-in access to the owner's local Zotero library. Never mount a whole home.
+# docker compose -f docker-compose.yml -f docker-compose.zotero.yml up -d --no-deps core
+services:
+  core:
+    environment:
+      LAZYMIND_ZOTERO_DATA_DIR: /var/lib/lazymind/zotero
+      LAZYMIND_ZOTERO_LOCAL_OWNER: ${LAZYMIND_ZOTERO_LOCAL_OWNER:?Set the LazyMind username that owns this local Zotero library}
+    volumes:
+      - type: bind
+        source: ${ZOTERO_DATA_DIR:?Set the existing Zotero data directory containing zotero.sqlite}
+        target: /var/lib/lazymind/zotero
+        read_only: true
+        bind:
+          create_host_path: false

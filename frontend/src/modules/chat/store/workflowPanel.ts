@@ -2,6 +2,7 @@ import type { Descriptor } from "@/api/generated/core-client";
 import { create } from "zustand";
 import { WorkflowInfoApi, WorkflowSessionApi, TempUploadServiceApi } from "@/modules/chat/utils/request";
 import i18n from "@/i18n";
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { extractErrorCode, getLocalizedErrorMessage } from "@/components/request";
 import {
@@ -650,7 +651,7 @@ interface WorkflowStore {
   // Whether auto-advance is running (driver agent triggered next chat turn).
   // Keyed by conversation_id. True = input should be disabled.
   autoRunningByConversation: Record<string, boolean>;
-  // Workflow UI definition cache: keyed by workflow_id.
+  // Workflow UI definitions keyed by workflow, immutable revision and locale.
   workflowUIByWorkflow: Record<string, WorkflowUI>;
   // Incremented each time a session is dismissed, keyed by conversation_id.
   // DismissedWorkflowRestoreButton subscribes to this to re-fetch the dismissed list.
@@ -675,7 +676,7 @@ interface WorkflowStore {
   patchSlot: (conversationId: string, sessionId: string, slotId: string, revision: number) => Promise<void>;
   syncSessionSearchConfig: (conversationId: string, sessionId: string, searchConfig: Record<string, unknown>) => Promise<void>;
   setAutoRunning: (conversationId: string, running: boolean) => void;
-  fetchWorkflowUI: (workflowId: string) => Promise<WorkflowUI>;
+  fetchWorkflowUI: (workflowId: string, pinnedRevisionId?: string) => Promise<WorkflowUI>;
   bumpDismissedRefresh: (conversationId: string) => void;
   fetchDismissedSessions: (conversationId: string) => Promise<void>;
   // Phase 3: slot item management.
@@ -939,14 +940,15 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     });
   },
 
-  fetchWorkflowUI: async (workflowId) => {
+  fetchWorkflowUI: async (workflowId, pinnedRevisionId) => {
     const lang = i18n.language || "";
-    const cacheKey = `${workflowId}:${lang}`;
-    // Return cached value if already fetched for this language.
+    const cacheKey = workflowUICacheKey(workflowId, pinnedRevisionId, lang);
+    // Only pinned revisions are immutable. Legacy/catalog head reads must refetch.
     const cached = get().workflowUIByWorkflow[cacheKey];
-    if (cached) return cached;
+    if (pinnedRevisionId && cached) return cached;
     try {
       const res = await WorkflowInfoApi().getWorkflow(workflowId, {
+        params: pinnedRevisionId ? { revision_id: pinnedRevisionId } : undefined,
         headers: lang ? { "Accept-Language": lang } : undefined,
       });
       const payload = res?.data?.data ?? res?.data ?? {};

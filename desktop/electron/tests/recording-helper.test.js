@@ -27,12 +27,12 @@ test('each recording refreshes only the helper and checks permissions before cap
     assert.deepEqual(app.commands.map(c => c.method), ['permissions', 'start', 'stop', 'permissions', 'start']);
   } finally { app.helper.dispose(); }
 });
-test('missing screen permission never starts capture and retry can succeed', async () => {
-  const permissions = { input: true, screen: false }; const app = fixture(permissions);
+for (const permission of ['input', 'screen']) test(`missing ${permission} permission never starts capture and retry can succeed`, async () => {
+  const permissions = { input: true, screen: true, [permission]: false }; const app = fixture(permissions);
   try {
-    await assert.rejects(app.helper.start(), /recording-helper-screen-permission/);
+    await assert.rejects(app.helper.start(), new RegExp(`recording-helper-${permission}-permission`));
     assert.equal(app.commands.some(c => c.method === 'start'), false);
-    permissions.screen = true; await app.helper.start(); assert.equal(app.clients.length, 2);
+    permissions[permission] = true; await app.helper.start(); assert.equal(app.clients.length, 2);
   } finally { app.helper.dispose(); }
 });
 test('cancel closes the private IPC connection and crash ends the session', async () => {

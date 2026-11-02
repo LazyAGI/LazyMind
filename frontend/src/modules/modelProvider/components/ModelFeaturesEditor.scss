@@ -39,14 +39,11 @@
     }
   }
   .model-feature-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
     white-space: nowrap;
-    border: 0;
+    font-size: 12px;
+  }
+  @media (max-width: 380px) {
+    .model-feature-buttons { gap: 4px; }
+    .model-feature-button { padding-inline: 4px; gap: 4px; }
   }
 }

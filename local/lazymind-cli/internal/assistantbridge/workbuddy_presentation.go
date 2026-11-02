@@ -11,6 +11,7 @@ import (
 	"lazymind/agentconnector/internal/connectorconfig"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/workbuddyhost"
+	"lazymind/agentconnector/internal/workflowpresentation"
 )
 
 var presentationID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,256}$`)
@@ -18,12 +19,20 @@ var presentationID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,256}$`)
 // Read existing bindings; displaying a run never creates or migrates a binding.
 // created_at, not updated_at, selects the newest successfully bound run.
 func (s *Server) handleWorkBuddyPresentation(w http.ResponseWriter, r *http.Request) {
+	s.handleBoundPresentation(w, r, "workbuddy")
+}
+
+func (s *Server) handleCodexPresentation(w http.ResponseWriter, r *http.Request) {
+	s.handleBoundPresentation(w, r, "codex")
+}
+
+func (s *Server) handleBoundPresentation(w http.ResponseWriter, r *http.Request, provider string) {
 	pair, api, ok := s.workflowHost(w, r)
 	if !ok {
 		return
 	}
-	if pair.Provider != "workbuddy" {
-		writeJSON(w, 403, map[string]string{"error": "WorkBuddy pairing required"})
+	if pair.Provider != provider {
+		writeJSON(w, 403, map[string]string{"error": "Matching host pairing required"})
 		return
 	}
 	driver := r.URL.Query().Get("session_id")
@@ -96,6 +105,14 @@ func (s *Server) handleWorkBuddyPresentation(w http.ResponseWriter, r *http.Requ
 // The wrapper contains no credentials or run data. Core authenticates the
 // original Workflow page independently, using its existing browser session.
 func (s *Server) handleWorkBuddyFrame(w http.ResponseWriter, r *http.Request) {
+	s.handlePresentationFrame(w, r, "workbuddy")
+}
+
+func (s *Server) handleCodexFrame(w http.ResponseWriter, r *http.Request) {
+	s.handlePresentationFrame(w, r, "codex")
+}
+
+func (s *Server) handlePresentationFrame(w http.ResponseWriter, r *http.Request, provider string) {
 	w.Header().Set("Cache-Control", "no-store")
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -109,7 +126,7 @@ func (s *Server) handleWorkBuddyFrame(w http.ResponseWriter, r *http.Request) {
 		workflowHostError(w, err)
 		return
 	}
-	connection, err := connectorconfig.ForProvider(s.store.Directory(), "workbuddy", "")
+	connection, err := connectorconfig.ForProvider(s.store.Directory(), provider, "")
 	if err == nil && connection != nil {
 		frontendURL, err = connection.URL("LAZYMIND_WEB_URL", frontendURL)
 	}
@@ -120,5 +137,9 @@ func (s *Server) handleWorkBuddyFrame(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_, _ = w.Write(workbuddyhost.PresentationHTML(frontendURL))
+	if provider == "workbuddy" {
+		_, _ = w.Write(workbuddyhost.PresentationHTML(frontendURL))
+	} else {
+		_, _ = w.Write(workflowpresentation.HTML(frontendURL, "browser"))
+	}
 }

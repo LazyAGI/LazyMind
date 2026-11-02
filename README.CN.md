@@ -30,7 +30,7 @@ LazyMind 是面向知识密集型工作的 **AI Skill Runtime**：一个把知�
 | **直接使用 LazyMind** | 本地知识工作，或团队共享工作流 | 通过桌面应用获得本地优先的使用体验，或部署团队服务；直接在 LazyMind 工作台中创建任务、使用知识库并运行 Skill 与 Workflow。 |
 | **作为其他 Agent 的插件** | 增强你已经在使用的 Agent 环境 | 在 **设置 → 助理** 中连接 LazyMind。Codex 和 DeepSeek Harness 随后即可在原生会话中调用 LazyMind 的知识、Skill 与 Workflow，并查看工作流进度、审阅节点和产物。 |
 
-实现细节参见 [Codex 集成](integrations/codex-workflow/README.md)和 [DeepSeek Harness 集成](integrations/dsh-workflow/README.md)。
+实现细节参见 [DeepSeek Harness 集成](integrations/dsh-workflow/README.md)。
 
 ---
 

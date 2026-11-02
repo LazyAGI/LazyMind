@@ -2,6 +2,7 @@ package doc
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/common/readonlyorm"
 )
 
 const RootNodeGroup = "lazyllm_root"
@@ -103,12 +105,26 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 	} else if artifact != nil {
 		return EnsureDocumentParsedResult{Status: "parsed"}, nil
 	}
-	if rec.processing.ParseStatus == "failed" || NormalizeTaskStateForUI(rec.taskStat) == "FAILED" {
-		diagnostic := rec.diagnostic
-		if diagnostic == nil {
-			diagnostic = &ProcessingDiagnostic{Stage: "parse", Code: "PROCESSING_FAILED", Message: SafeProcessingMessage(""), Recovery: "请明确发起重新解析。"}
+	if rec.lazy != nil {
+		status := strings.ToUpper(strings.TrimSpace(rec.lazy.UploadStatus))
+		if status == "SUCCESS" || status == "SUCCEEDED" {
+			// Check current service artifacts before historical Core task states:
+			// a retry can succeed while an older task still says FAILED or WORKING.
+			roots, rootsErr := s.ListDocumentChunks(r.Context(), DocumentChunksRequest{
+				UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID,
+				PageSize: 1, SegmentGroup: RootNodeGroup, Caller: req.Caller,
+			})
+			if rootsErr != nil || len(roots.Chunks) == 0 {
+				// UploadStatus is not updated by DOC_REPARSE. Missing roots may
+				// mean a failed current task, not merely delayed visibility.
+				return s.parseResultWithoutRoots(r.Context(), rec)
+			}
+			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "succeeded", "", "")
+			return EnsureDocumentParsedResult{Status: "parsed"}, nil
 		}
-		return EnsureDocumentParsedResult{Status: "failed", TaskID: diagnostic.TaskID, Error: diagnostic}, nil
+	}
+	if rec.processing.ParseStatus == "failed" || NormalizeTaskStateForUI(rec.taskStat) == "FAILED" {
+		return failedDocumentParseResult(rec.diagnostic), nil
 	}
 	if rec.processing.ParseStatus == "running" {
 		var active orm.Task
@@ -119,22 +135,6 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 		status := strings.ToUpper(strings.TrimSpace(rec.lazy.UploadStatus))
 		taskStatus := strings.ToUpper(strings.TrimSpace(rec.taskStat))
 		switch status {
-		case "SUCCESS", "SUCCEEDED":
-			// The document service is authoritative for the current document
-			// artifact. A previous Core task may still be FAILED after a later
-			// retry succeeds, so do not let that stale task mask valid roots.
-			roots, rootsErr := s.ListDocumentChunks(r.Context(), DocumentChunksRequest{
-				UserID: req.UserID, DatasetID: req.DatasetID, DocumentID: req.DocumentID,
-				PageSize: 1, SegmentGroup: RootNodeGroup, Caller: req.Caller,
-			})
-			if rootsErr != nil || len(roots.Chunks) == 0 {
-				// The parsing service can publish its terminal task status shortly
-				// before the root nodes become visible. Do not expose a false
-				// "parsed" state to consumers that require those nodes.
-				return EnsureDocumentParsedResult{Status: "parsing"}, nil
-			}
-			_ = s.updateParseState(r, req.DatasetID, req.DocumentID, "succeeded", "", "")
-			return EnsureDocumentParsedResult{Status: "parsed"}, nil
 		case "FAILED", "ERROR":
 			return EnsureDocumentParsedResult{Status: "failed", Error: rec.diagnostic}, nil
 		default:
@@ -203,6 +203,81 @@ func (s *DocumentService) EnsureDocumentParsed(r *http.Request, req EnsureDocume
 		return EnsureDocumentParsedResult{Status: "failed", TaskID: taskID}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: message, Err: startErr}
 	}
 	return EnsureDocumentParsedResult{Status: "parsing", TaskID: taskID}, nil
+}
+
+func failedDocumentParseResult(diagnostic *ProcessingDiagnostic) EnsureDocumentParsedResult {
+	if diagnostic == nil {
+		diagnostic = &ProcessingDiagnostic{Stage: "parse", Code: "PROCESSING_FAILED", Message: SafeProcessingMessage(""), Recovery: "请明确发起重新解析。"}
+	}
+	return EnsureDocumentParsedResult{Status: "failed", TaskID: diagnostic.TaskID, Error: diagnostic}
+}
+
+// Roots are authoritative when available. Otherwise consult the parser's
+// current task, which can supersede a historical failed Core task after a
+// service-side retry. Without that evidence, preserve the observed failure.
+func (s *DocumentService) parseResultWithoutRoots(ctx context.Context, rec documentServiceRecord) (EnsureDocumentParsedResult, error) {
+	fallback := EnsureDocumentParsedResult{Status: "parsing"}
+	if rec.processing.ParseStatus == "failed" || NormalizeTaskStateForUI(rec.taskStat) == "FAILED" {
+		fallback = failedDocumentParseResult(rec.diagnostic)
+	}
+	if s.lazyDB == nil || rec.dataset.KbID == "" {
+		return fallback, nil
+	}
+	queryError := func(err error) (EnsureDocumentParsedResult, error) {
+		return EnsureDocumentParsedResult{}, &DocumentServiceError{Code: DocumentServiceUnavailable, Message: "query current document parsing task failed", Err: err}
+	}
+	var current readonlyorm.LazyLLMDocParseStateRow
+	err := s.lazyDB.WithContext(ctx).Where("doc_id = ? AND kb_id = ?", rec.row.LazyllmDocID, rec.dataset.KbID).Take(&current).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return fallback, nil
+	}
+	if err != nil {
+		return queryError(err)
+	}
+	if strings.TrimSpace(current.CurrentTaskID) == "" {
+		return fallback, nil
+	}
+	var latest orm.Task
+	err = s.db.WithContext(ctx).Where("dataset_id = ? AND doc_id = ? AND deleted_at IS NULL", rec.row.DatasetID, rec.row.ID).
+		Order("created_at DESC, id DESC").Take(&latest).Error
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return queryError(err)
+	}
+	taskID := current.CurrentTaskID
+	if latest.ID != "" && latest.LazyllmTaskID == current.CurrentTaskID {
+		taskID = latest.ID
+	} else if latest.ID != "" {
+		// A new Core submission can fail before creating a parser task. Do
+		// not let the previous parser snapshot mask that newer local failure.
+		var remote readonlyorm.LazyLLMDocServiceTaskRow
+		err = s.lazyDB.WithContext(ctx).Where("task_id = ? AND doc_id = ? AND kb_id = ?", current.CurrentTaskID, rec.row.LazyllmDocID, rec.dataset.KbID).
+			Order("created_at DESC, id DESC").Take(&remote).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fallback, nil
+		}
+		if err != nil {
+			return queryError(err)
+		}
+		if !remote.CreatedAt.After(latest.CreatedAt) {
+			return fallback, nil
+		}
+	}
+	switch NormalizeTaskStateForUI(strings.ToUpper(strings.TrimSpace(current.Status))) {
+	case "FAILED", "ERROR", "CANCELED", "CANCELLED":
+		code, message := "PROCESSING_FAILED", ""
+		if current.LastErrorCode != nil && *current.LastErrorCode != "" {
+			code = *current.LastErrorCode
+		}
+		if current.LastErrorMsg != nil {
+			message = *current.LastErrorMsg
+		}
+		return failedDocumentParseResult(&ProcessingDiagnostic{Stage: "parse", Code: code, Message: SafeProcessingMessage(message), TaskID: taskID, Recovery: "请明确发起重新解析。"}), nil
+	case "SUCCESS", "WORKING", "WAITING":
+		// A successful task may publish its status before roots are visible.
+		return EnsureDocumentParsedResult{Status: "parsing", TaskID: taskID}, nil
+	default:
+		return EnsureDocumentParsedResult{Status: "unknown", TaskID: taskID}, nil
+	}
 }
 
 func (s *DocumentService) updateParseState(r *http.Request, datasetID, documentID, status, code, message string) error {

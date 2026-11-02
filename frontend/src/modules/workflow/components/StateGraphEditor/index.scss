@@ -571,3 +571,10 @@
   font-family: inherit;
   overflow-wrap: anywhere;
 }
+.sge-repair-retry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+}
