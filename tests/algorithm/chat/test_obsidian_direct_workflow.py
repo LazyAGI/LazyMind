@@ -287,6 +287,64 @@ class ObsidianDirectWorkflowTest(unittest.TestCase):
         self.assertEqual(checked['state'], 'unknown')
         self.assertFalse(copies[0].exists())
 
+    def test_workspace_tool_calls_preserve_image_references_across_staging(self):
+        from PIL import Image
+        from lazymind.document_tools.toolkits import WriterResourceToolkit
+        from lazymind.chat.engine.tools.host_access_guard import HostAccessGuard, host_access_scope
+        from lazymind.chat.engine.tools.workspace_context import (
+            ToolResolutionContext, WorkspaceContext, tool_resolution_scope, workspace_permission_scope,
+        )
+
+        task = self.root / 'workspace'
+        task.mkdir()
+        source = self.root / 'input.png'
+        Image.new('RGB', (2, 2), 'blue').save(source)
+        permission = WorkspaceContext.from_snapshot({
+            'workspace_id': 'workspace', 'root': str(task), 'workspace_version': 1,
+            'permission_mode': 'always_ask', 'permission_version': 1,
+        })
+        toolkit = WriterResourceToolkit()
+        with tool_resolution_scope(ToolResolutionContext(managed_roots=(str(task.resolve()),))), \
+                workspace_permission_scope(permission):
+            for index, uri in enumerate(('https://example.test/image.png', str(source), None)):
+                with self.subTest(uri=uri):
+                    title = f'Illustrated{index}'
+                    document = {'document_id': title, 'title': title, 'blocks': [{
+                        'node_id': 'image-block', 'type': 'image',
+                        'references': [{'type': 'media_asset', 'id': 'image'}],
+                    }]}
+                    assets = {'library_id': 'images', 'assets': {'image': {
+                        'media_asset_id': 'image', 'asset_type': 'image', 'source_type': 'input_resource',
+                        'uri': uri, 'local_path': str(source),
+                    }}}
+
+                    def invoke(method, arguments):
+                        prepared = self.prepare_call(method, arguments)
+                        self.assertTrue(prepared.ready)
+                        guard = HostAccessGuard(prepared.host_files)
+                        with host_access_scope(guard):
+                            guard.validate()
+                            return json.loads(method(**prepared.validated_arguments))
+
+                    converted = invoke(toolkit.convert_document, {
+                        'content_json': json.dumps(document), 'provider': 'obsidian',
+                        'media_assets_json': json.dumps(assets),
+                    })
+                    # The next call must use its own approved input, not a stale temporary copy.
+                    for old in (task / '.approved-inputs').rglob('input.png'):
+                        old.unlink()
+                    result = invoke(toolkit.write_document, {
+                        'converted_document_json': json.dumps(converted), 'title': title,
+                        'media_assets_json': json.dumps(assets),
+                    })
+                    written = (self.note.parent / f'{title}.md').read_text()
+                    self.assertEqual(result['provider'], 'obsidian')
+                    self.assertEqual(result['target_document']['title'], title)
+                    self.assertIn('![[assets/lazymind/', written)
+        copies = list((self.note.parent / 'assets/lazymind').glob('*.png'))
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(copies[0].read_bytes(), source.read_bytes())
+
     def test_unavailable_local_image_does_not_write_a_note(self):
         converted = resources.convert_document('# Broken\n\n![Missing](missing.png)\n', 'obsidian')
         with self.assertRaisesRegex(ValueError, 'OBSIDIAN_ATTACHMENT_UNAVAILABLE'):

@@ -503,3 +503,61 @@ it('reuses an existing create destination but takes the title from the latest co
     { provider: 'github', connection_id: 'github-account', parent_uri: 'https://github.com/fixture/repo/tree/main/docs' },
   ]);
 });
+
+it('requires a new choice when the explicitly selected vault disappears on refresh', async () => {
+  availability.states.obsidian = 'ready';
+  availability.obsidian.vaults.push({ id: 'second-vault', name: 'Second', writable: true });
+  const props = { providers: [...providers, { id: 'obsidian' }], initialProvider: 'obsidian' };
+  const { rerender } = render(view(props));
+  fireEvent.mouseDown(await screen.findByRole('combobox'));
+  fireEvent.click(await screen.findByText('Fixture · ixture', { selector: '.ant-select-item-option-content' }));
+  expect(screen.getByRole('button', { name: 'Publish to Obsidian' })).toBeEnabled();
+  availability.obsidian.vaults = [availability.obsidian.vaults[1]];
+  rerender(view(props));
+  const confirm = screen.getByRole('button', { name: 'Publish to Obsidian' });
+  expect(confirm).toBeDisabled();
+  expect(screen.getByRole('combobox')).toHaveValue('');
+  fireEvent.click(confirm);
+  expect(api.preflightPublication).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+  fireEvent.mouseDown(screen.getByRole('combobox'));
+  fireEvent.click(await screen.findByText('Second · -vault', { selector: '.ant-select-item-option-content' }));
+  fireEvent.click(confirm);
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledOnce());
+  expect(api.createPublicationGroup.mock.calls[0][1].targets[0].parent_uri).toBe('obsidian://second-vault/');
+});
+
+it.each([false, true])('restores a failed first publication destination after remount (multiple vaults: %s)', async multiple => {
+  availability.states.obsidian = 'ready';
+  if (multiple) availability.obsidian.vaults.push({ id: 'second-vault', name: 'Second', writable: true });
+  const parent = 'obsidian://vault-fixture/Articles/Chosen%20note.md';
+  state.targets.push({ provider: 'obsidian', bound: false, parent_uri: parent, operation_hash: state.current_hash,
+    operation: { operation_id: 'failed-obsidian', provider: 'obsidian', status: 'failed_no_write', actions: ['retry'],
+      provider_synced: false, source_slot_id: 'draft', item_index: -1, updated_at: '2026-10-21T00:00:00Z' } });
+  render(view({ providers: [...providers, { id: 'obsidian' }] }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Select only failed platforms to retry' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to Obsidian' }));
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledOnce());
+  expect(api.createPublicationGroup.mock.calls[0][1].targets).toEqual([
+    expect.objectContaining({ provider: 'obsidian', parent_uri: parent, retry_operation_id: 'failed-obsidian' }),
+  ]);
+});
+
+it('does not replace a saved unavailable vault with the only remaining vault', async () => {
+  availability.states.obsidian = 'ready';
+  state.targets.push({ provider: 'obsidian', bound: false, parent_uri: 'obsidian://missing-vault/Articles/Chosen.md' });
+  render(view({ providers: [...providers, { id: 'obsidian' }], initialProvider: 'obsidian' }));
+  expect(await screen.findByRole('button', { name: 'Publish to Obsidian' })).toBeDisabled();
+  expect(screen.getByRole('combobox')).toHaveValue('');
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+});
+
+it.each(['', '   '])('does not restore a GitHub destination explicitly cleared to %j', async value => {
+  state.targets[0] = { provider: 'github', bound: false, parent_uri: 'https://github.com/fixture/old-repo/tree/main/docs' };
+  render(view({ initialProvider: 'github' }));
+  fireEvent.change(await screen.findByRole('textbox'), { target: { value } });
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to GitHub' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('GitHub destination');
+  expect(api.preflightPublication).not.toHaveBeenCalled();
+  expect(api.createPublicationGroup).not.toHaveBeenCalled();
+});

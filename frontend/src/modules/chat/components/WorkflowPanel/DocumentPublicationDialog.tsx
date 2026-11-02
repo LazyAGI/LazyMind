@@ -54,7 +54,24 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
   const [obsidianVault, setObsidianVault] = useState<string>();
   const [targetProblems, setTargetProblems] = useState<Record<string, string>>({});
   const vaults = availability.obsidian?.vaults ?? [];
-  const chosenVault = vaults.find(item => item.id === obsidianVault) ?? (vaults.length === 1 ? vaults[0] : undefined);
+  const savedParent = state?.targets.find(item => item.provider === 'obsidian')?.parent_uri;
+  const savedDestination = useMemo(() => {
+    if (!savedParent) return undefined;
+    try {
+      const uri = new URL(savedParent);
+      if (uri.protocol !== 'obsidian:') return { vault: '', path: '' };
+      if (uri.hostname === 'open') {
+        const matches = vaults.filter(item => item.name === uri.searchParams.get('vault'));
+        return { vault: matches.length === 1 ? matches[0].id : '', path: uri.searchParams.get('file') ?? '' };
+      }
+      return { vault: uri.hostname, path: decodeURIComponent(uri.pathname.replace(/^\//, '')) };
+    } catch { return { vault: '', path: '' }; }
+  }, [savedParent, vaults]);
+  const requestedVault = obsidianVault ?? savedDestination?.vault;
+  const chosenVault = requestedVault !== undefined ? vaults.find(item => item.id === requestedVault)
+    : vaults.length === 1 ? vaults[0] : undefined;
+  const vaultUnavailable = requestedVault !== undefined && !chosenVault;
+  const notePath = destinations.obsidian ?? savedDestination?.path ?? '';
   const initialized = useRef(false);
   useEffect(() => { setDestinations({}); setObsidianVault(undefined); setTargetProblems({}); }, [artifactId]);
   const load = useCallback(async () => {
@@ -161,10 +178,10 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
             setAuthorizationProvider(provider);
             throw new Error(`${label(provider)}: ${t('chat.publication.accountRequired')}`);
           }
-          let parent = destinations[provider]?.trim() || existing?.parent_uri;
+          let parent = (destinations[provider] ?? existing?.parent_uri)?.trim();
           if (!existing?.bound && provider === 'obsidian') {
             if (!chosenVault?.writable) throw new Error(t('chat.publication.chooseVault'));
-            const path = destinations.obsidian?.trim() || '';
+            const path = notePath.trim();
             if (path && (path.startsWith('/') || path.split('/').some(part => ['..', '.', '.obsidian'].includes(part)) || /[\\\x00-\x1f]/.test(path))) throw new Error(t('chat.publication.targetErrors.OBSIDIAN_PATH_INVALID'));
             parent = `obsidian://${chosenVault.id}/${path.split('/').map(encodeURIComponent).join('/')}`;
           }
@@ -337,13 +354,15 @@ export function DocumentPublicationDialog({ artifactId, sourceSignature, provide
               </div>;
             })}
           </div>
-          {selected.includes('obsidian') && !state.targets.find(item => item.provider === 'obsidian')?.bound && (vaults.length > 1 || targetProblems.obsidian) && <div className='document-publication-accounts'>
+          {selected.includes('obsidian') && !state.targets.find(item => item.provider === 'obsidian')?.bound && (vaults.length > 1 || vaultUnavailable || targetProblems.obsidian) && <div className='document-publication-accounts'>
             <label htmlFor={`${resultsId}-vault`}>{t('chat.publication.chooseVault')}</label>
             <Select id={`${resultsId}-vault`} value={chosenVault?.id} placeholder={t('chat.publication.chooseVault')} disabled={submitting || uncertain}
+              status={vaultUnavailable ? 'error' : undefined} aria-invalid={vaultUnavailable}
               options={vaults.map(item => ({ value: item.id, label: `${item.name} · ${item.id.slice(-6)}`, disabled: !item.writable }))}
               onChange={setObsidianVault} />
+            {vaultUnavailable && <span className='document-publication-account-error'>{t('chat.publication.targetErrors.OBSIDIAN_VAULT_REQUIRED')}</span>}
             {targetProblems.obsidian && <><label htmlFor={`${resultsId}-note`}>{t('chat.publication.notePath')}</label>
-              <Input id={`${resultsId}-note`} value={destinations.obsidian || ''} maxLength={1024} disabled={submitting || uncertain}
+              <Input id={`${resultsId}-note`} value={notePath} maxLength={1024} disabled={submitting || uncertain}
                 placeholder={t('chat.publication.notePathPlaceholder')} onChange={(event: ChangeEvent<HTMLInputElement>) => setDestinations(current => ({ ...current, obsidian: event.target.value }))} /></>}
           </div>}
           {selected.includes('github') && !state.targets.find(item => item.provider === 'github')?.bound && <div className='document-publication-accounts'>

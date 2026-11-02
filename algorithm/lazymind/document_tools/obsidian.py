@@ -105,11 +105,28 @@ class LazyMindObsidianProvider(ObsidianWriterProvider):
 
     @staticmethod
     def _asset_path(uri, assets):
+        if uri.startswith('lazymind-media:'):
+            asset_id = unquote(uri.removeprefix('lazymind-media:'))
+            asset = next((item for item in assets if item.media_asset_id == asset_id), None)
+            if asset and asset.local_path and Path(asset.local_path).is_file():
+                return Path(asset.local_path)
+            raise ObsidianTargetError('OBSIDIAN_ATTACHMENT_UNAVAILABLE')
         path = ObsidianWriterProvider._asset_path(uri, assets)
         if path is None and (not uri.startswith(('https://', 'http://', '//'))
                              or any(uri in {asset.uri, asset.local_path} for asset in assets)):
             raise ObsidianTargetError('OBSIDIAN_ATTACHMENT_UNAVAILABLE')
         return path
+
+    @staticmethod
+    def _serialize_writer_document(document, media_assets):
+        # Staging paths last for one tool call. Keep references stable across
+        # conversion and publication; resolve bytes from the newly approved assets.
+        stable_assets = media_assets.model_copy(deep=True) if media_assets else None
+        if stable_assets:
+            for asset in stable_assets.assets.values():
+                if asset.local_path:
+                    asset.local_path = asset.uri or f'lazymind-media:{quote(asset.media_asset_id, safe="")}'
+        return ObsidianWriterProvider._serialize_writer_document(document, stable_assets)
 
     def _vaults(self):
         fs = self._fs()

@@ -377,7 +377,11 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 			if title == "" {
 				title, _ = value.SourceDocument["title"].(string)
 			}
-			checked, err := checkPublicationTarget(ctx, owner, op.Provider, op.ConnectionID, title, op.ParentURI, target)
+			parent := op.ParentURI
+			if op.SharedTarget && op.Provider == "github" && len(target) == 0 && parent == "" {
+				parent = sessionIntentText(session.IntentContext)
+			}
+			checked, err := checkPublicationTarget(ctx, owner, op.Provider, op.ConnectionID, title, parent, target)
 			if err != nil {
 				return failBefore(publicationFailure(err))
 			}
@@ -429,9 +433,6 @@ func executeDocumentPublication(ctx context.Context, db *gorm.DB, owner string, 
 		}
 		if op.ParentURI != "" {
 			args["parent_uri"] = op.ParentURI
-		}
-		if op.SharedTarget && op.Provider == "github" && len(target) == 0 && op.ParentURI == "" {
-			args["user_input"] = sessionIntentText(session.IntentContext)
 		}
 		request.Reference = "builtin:document.write_document.v1"
 		request.Arguments = args

@@ -728,8 +728,9 @@ def _write(*, context: DocumentActionContext, **arguments: Any) -> dict[str, Any
 
 
 def _publication_target(provider, title, parent_uri, target_document, *, context):
+    from lazyllm.tools.agent import ToolExecutionError
     from lazyllm.tools.writer.data_models import TargetDocument
-    from .resources import get_writer_provider
+    from .resources import get_writer_provider, _provider_create_target
     from .obsidian import ObsidianTargetError
     from lazyllm.tools.fs.supplier.github import GitHubFSError
     adapter = get_writer_provider(provider)
@@ -739,7 +740,7 @@ def _publication_target(provider, title, parent_uri, target_document, *, context
             if not title and not parent_uri and target is None:
                 return adapter.status()
             prepared = adapter.prepare_target(title, parent_uri, target)
-        elif target is not None:
+        elif target is not None and not target.meta.get('create_pending'):
             prepared = adapter.load_document(target)['target_document']
             # Preserve the publication baseline, rather than silently accepting a newer revision.
             if target.meta.get('revision') and prepared.meta.get('revision') != target.meta['revision']:
@@ -749,10 +750,17 @@ def _publication_target(provider, title, parent_uri, target_document, *, context
             if repository.get('permissions', {}).get('push') is False:
                 return {'state': 'blocked', 'code': 'PUBLICATION_PERMISSION_REQUIRED'}
         else:
-            prepared = adapter._resolve_create_target(parent_uri)
-            prepared.title = title
+            if target is not None:
+                # A saved create target identifies a directory, not an existing file.
+                prepared = adapter._resolve_create_target(target.uri)
+            else:
+                resolved = _provider_create_target(parent_uri)
+                if resolved is None or resolved[1].adapter != provider:
+                    raise ValueError('A single GitHub creation target is required.')
+                _, prepared = resolved
+            prepared.title = title or (target.title if target else '')
             # Resolve the exact proposed filename as well as the repository and branch.
-            adapter._fs(adapter._target_type(prepared)).resolve_create_target(prepared.meta, title)
+            adapter._fs(adapter._target_type(prepared)).resolve_create_target(prepared.meta, prepared.title)
         return {'state': 'ready', 'target_document': prepared.model_dump()}
     except ObsidianTargetError as exc:
         return {'state': 'blocked', 'code': exc.error_code, 'vaults': adapter.status()['vaults']}
@@ -763,7 +771,7 @@ def _publication_target(provider, title, parent_uri, target_document, *, context
                  'GITHUB_PERMISSION_DENIED': 'PUBLICATION_PERMISSION_REQUIRED',
                  'GITHUB_TARGET_NOT_FOUND': 'PUBLICATION_TARGET_MISSING'}
         return {'state': 'blocked', 'code': codes.get(exc.code, 'PUBLICATION_TARGET_UNAVAILABLE')}
-    except (ValueError, PermissionError):
+    except (ValueError, PermissionError, ToolExecutionError):
         return {'state': 'blocked', 'code': 'PUBLICATION_TARGET_UNAVAILABLE'}
 
 
