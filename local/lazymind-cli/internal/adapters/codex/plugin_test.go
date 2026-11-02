@@ -16,6 +16,9 @@ import (
 )
 
 func TestPluginConnectOfflineMigrationFailureAndDisconnect(t *testing.T) {
+	originalPrepare := prepareCodexDesktop
+	prepareCodexDesktop = func(context.Context, string) error { return nil }
+	t.Cleanup(func() { prepareCodexDesktop = originalPrepare })
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX executable fixtures")
 	}

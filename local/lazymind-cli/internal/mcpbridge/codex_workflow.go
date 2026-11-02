@@ -16,11 +16,11 @@ import (
 )
 
 // Binding occurs within workflow.start, using the same paired connector as
-// the queue dispatcher. Revalidate the account and pairing on every bind.
+// the CDP connector. Revalidate the account and pairing on every bind.
 func (b *Bridge) bindCodexController(ctx context.Context, runID, threadID string) error {
 	path := connectorconfig.Value("LAZYMIND_WORKFLOW_PAIRING_FILE")
 	if path == "" {
-		return errors.New("set LAZYMIND_WORKFLOW_PAIRING_FILE to the queue dispatcher's pairing file")
+		return errors.New("set LAZYMIND_WORKFLOW_PAIRING_FILE to the CDP connector's pairing file")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -69,6 +69,6 @@ func (b *Bridge) bindCodexController(ctx context.Context, runID, threadID string
 	var result map[string]any
 	return b.api.DoJSON(ctx, http.MethodPost, "/workflow-sessions/"+url.PathEscape(runID)+"/host-binding", map[string]any{
 		"connector_id": pair.ConnectorID, "credential": pair.Token, "provider": pair.Provider,
-		"driver_session_id": threadID, "cancellation": "none",
+		"driver_session_id": threadID, "cancellation": "session",
 	}, &result)
 }
