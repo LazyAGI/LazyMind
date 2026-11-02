@@ -7,7 +7,7 @@ import json
 import os
 from contextvars import ContextVar
 from copy import deepcopy
-from functools import wraps
+from functools import partial, wraps
 from typing import Any
 
 from lazyllm.tools import fc_register
@@ -79,7 +79,7 @@ def _resolve_writer_document_resource(uri: str, files: FileResolution) -> str:
     return uri
 
 
-def resolve_writer_files(arguments: dict, *, reading: bool = False) -> object:
+def resolve_writer_files(arguments: dict, *, operation: str = '') -> object:
     """Canonicalize nested Writer resources, assets, and output stores."""
     resolved = deepcopy(arguments)
     files = FileResolution()
@@ -88,6 +88,10 @@ def resolve_writer_files(arguments: dict, *, reading: bool = False) -> object:
         if isinstance(value, list):
             return [visit(item) for item in value]
         if not isinstance(value, dict):
+            return value
+        if value.get('adapter') == 'obsidian' and not value.get('resource_type'):
+            # Target metadata is a binding, not an input file. Only capabilities
+            # that access the note resolve it below; snapshots work offline.
             return value
         result = {}
         for key, item in value.items():
@@ -184,16 +188,23 @@ def resolve_writer_files(arguments: dict, *, reading: bool = False) -> object:
                     )
                 decoded = visit(decoded)
             resolved[key] = _json_dumps(decoded)
-    # Obsidian writes are host IO, even though their locator is not a file URI.
-    # Declare the resolved note and generated attachments before approval.
+    reading = operation == 'load_document'
+    writing = operation in {'write_document', 'publish_revision'} or (
+        operation == 'apply_revision' and resolved.get('sync_provider') is True
+    )
+    if not reading and not writing:
+        return files.finish(resolved)
+    # Obsidian creation only prepares metadata. Actual reads and writes must
+    # declare the resolved note and generated attachments before approval.
     from .obsidian import LazyMindObsidianProvider
     from lazyllm.tools.writer.data_models import TargetDocument
     target_value = resolved.get('target_document')
     if resolved.get('target_document_json'):
         target_value = json.loads(resolved['target_document_json'])
-    if not target_value and resolved.get('source_document_json'):
+    source_json = resolved.get('source_document_json') or resolved.get('writer_document_json')
+    if not target_value and source_json:
         from .resources import _target_from_document
-        source = json.loads(resolved['source_document_json'])
+        source = json.loads(source_json)
         if isinstance(source, dict) and (
             source.get('provider_binding', {}).get('provider') == 'obsidian'
             or source.get('metadata', {}).get('source', {}).get('adapter') == 'obsidian'
@@ -343,8 +354,7 @@ def declare_writer_host_files(toolkit_class):
         setattr(
             toolkit_class,
             name,
-            fc_register(host_file=(lambda arguments: resolve_writer_files(arguments, reading=True))
-                        if name == 'load_document' else resolve_writer_files)(
+            fc_register(host_file=partial(resolve_writer_files, operation=name))(
                 _stage_writer_inputs(method)
             ),
         )

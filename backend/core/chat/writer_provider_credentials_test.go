@@ -264,6 +264,16 @@ func newWriterCredentialSpy(t *testing.T, f *writerCredentialFixture, count int,
 				_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"provider": f.provider, "format": "native-fixture", "content": []any{}, "source_document": map[string]any{"document_id": "credential-doc", "blocks": []any{}}, "media_references": map[string]any{}}})
 				return
 			}
+			if action["action"] == "publication_target" {
+				if action["phase"] != "preview" {
+					t.Error("publication target must be checked without writing")
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{
+					"state": "ready", "provider": f.provider,
+					"target_document": map[string]any{"adapter": f.provider, "doc_id": "remote-1", "uri": f.provider + ":/fixture/remote-1"},
+				}})
+				return
+			}
 			result := map[string]any{"success": true, "changed": true, "provider_synced": true, "patch_result": map[string]any{"success": true}, "provider": f.provider, "persisted_document": f.document, "representation": "ir"}
 			if f.entry == "writeback" {
 				result["persisted_document"] = "# Draft\n\nBody"
@@ -322,6 +332,9 @@ func TestWriterScopedCredentialsSuccess(t *testing.T) {
 					wantActions := []string{"sync_document"}
 					if entry == "writeback" {
 						wantActions = []string{"convert_document", "write_document"}
+						if provider == "github" || provider == "obsidian" {
+							wantActions = []string{"convert_document", "publication_target", "write_document"}
+						}
 					}
 					if len(actions) != len(wantActions) {
 						t.Fatalf("Algorithm calls=%d", len(actions))
@@ -346,11 +359,15 @@ func TestWriterScopedCredentialsSuccess(t *testing.T) {
 						}
 					}
 					if provider == "obsidian" {
-						if !reflect.DeepEqual(lists, []string{provider}) || len(tokens) != 0 {
+						if len(lists) != 0 || len(tokens) != 0 {
 							t.Error("local provider fetched cloud credentials")
 						}
 					} else {
-						if !reflect.DeepEqual(lists, []string{provider}) || len(tokens) != count {
+						wantLists, wantTokens := []string{provider}, count
+						if entry == "writeback" && provider == "github" {
+							wantLists, wantTokens = []string{provider, provider}, count*2
+						}
+						if !reflect.DeepEqual(lists, wantLists) || len(tokens) != wantTokens {
 							t.Errorf("credential reads were not scoped: lists=%v token count=%d", lists, len(tokens))
 						}
 					}

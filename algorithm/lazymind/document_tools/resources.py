@@ -498,7 +498,8 @@ class WriterResourceCapabilities:
         target = _source_document_target(user_input, stage=stage)
         if target.adapter == 'obsidian':
             loaded = get_writer_provider('obsidian').load_document(target, stage=stage)
-            loaded['target_document'] = loaded['target_document'].model_dump()
+            loaded['target_document'] = loaded['target_document'].model_dump(mode='json')
+            loaded['input_resources'] = [resource.model_dump(mode='json') for resource in loaded['input_resources']]
             return _json_dumps(loaded)
         result = WriterResourceTools(
             llm=None,
