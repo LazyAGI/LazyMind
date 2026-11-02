@@ -56,6 +56,21 @@ func TestFormulaExplanationValidatesCitationsAndNeverTrustsModelEvidence(t *test
 		}
 	}
 }
+func TestFormulaExplanationKeepsBoundedDisplayRepairAndOriginalEvidence(t *testing.T) {
+	supplied := []formulaEvidence{{ID: "eq", Text: `\frac{x}{`, Page: 1}}
+	raw := `{"summary":"A ratio","display_latex":"\\frac{x}{y}","repair_note":"Closed the missing denominator brace from nearby context.","symbols":[{"symbol":"x","meaning":"numerator","evidence_ids":["eq"],"inferred":true}],"steps":[]}`
+	got, err := validateFormulaExplanation(raw, supplied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DisplayLatex != `\frac{x}{y}` || got.RepairNote == "" || got.Evidence[0].Text != `\frac{x}{` {
+		t.Fatalf("repair or source lost: %+v", got)
+	}
+	tooLong := `{"summary":"A ratio","display_latex":"` + strings.Repeat("x", 9000) + `","symbols":[],"steps":[]}`
+	if got, err := validateFormulaExplanation(tooLong, supplied); err != nil || got.DisplayLatex != "" {
+		t.Fatalf("oversized repair should be ignored without losing explanation: %+v %v", got, err)
+	}
+}
 func TestFormulaExplanationCacheIdentity(t *testing.T) {
 	d := pdfir.Document{SourceSHA256: "sha", Parser: pdfir.Parser{Name: "mineru", Model: "vlm"}}
 	evidence := []formulaEvidence{{ID: "f", Text: "x"}}

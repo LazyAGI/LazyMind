@@ -76,13 +76,27 @@ describe('source evidence selection',()=>{
 });
 
 
-it('requests the exact clicked source occurrence as a separate focused explanation',async()=>{
- mocks.post.mockReset().mockResolvedValue({data:{data:{...explanation,symbols:[{symbol:'x^2',meaning:'Squared variable',evidence_ids:['e'],inferred:true}]}}});
- render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="focus-api" blocks={[block]} selected={block} onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
- fireEvent.click(screen.getByRole('button',{name:'Symbol: x^2'}));
- expect(await screen.findByText('Squared variable')).toBeInTheDocument();
+it('shows a proposed formula repair, preserves collapsed original LaTeX, and never calls the model on symbol clicks',async()=>{
+ mocks.post.mockReset().mockResolvedValue({data:{data:{...explanation,display_latex:String.raw`\frac{x}{y}`,repair_note:'Restored a missing denominator.',symbols:[{symbol:'x',meaning:'Numerator',evidence_ids:['e'],inferred:true},{symbol:'y',meaning:'Denominator',evidence_ids:['e'],inferred:true}]}}});
+ const damaged={...block,latex:String.raw`\frac{x}{`};
+ const view=render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="repair" blocks={[damaged]} selected={damaged} autoExplain onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
+ expect(await screen.findByText('Summary')).toBeInTheDocument();
+ expect(screen.getByText('Restored a missing denominator.')).toBeInTheDocument();
+ const raw=view.container.querySelector('.pdf-symbol-raw') as HTMLDetailsElement;
+ expect(raw.open).toBe(false);
+ fireEvent.click(screen.getByRole('button',{name:'Symbol: x'}));
+ expect(screen.getAllByText('Numerator')).toHaveLength(2);
+ fireEvent.click(screen.getByRole('button',{name:'Symbol: y'}));
+ expect(screen.getAllByText('Denominator')).toHaveLength(2);
  expect(mocks.post).toHaveBeenCalledTimes(1);
- expect(mocks.post.mock.calls[0][0]).toContain('/formulas/f/explanation');
- expect(mocks.post.mock.calls[0][1]).toEqual({force:false,language:'en',focus_symbol:'x^2'});
- expect(mocks.post.mock.calls[0][2].signal).toBeInstanceOf(AbortSignal);
+ fireEvent.click(raw.querySelector('summary')!);
+ expect(raw.textContent).toContain(damaged.latex);
+});
+it('falls back to the extracted formula when a proposed repair cannot render',async()=>{
+ mocks.post.mockReset().mockResolvedValue({data:{data:{...explanation,display_latex:'x^',repair_note:'Bad repair'}}});
+ const view=render(<PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="invalid-repair" blocks={[block]} selected={block} autoExplain onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/>);
+ await screen.findByText('Summary');
+ expect(screen.queryByText('Bad repair')).toBeNull();
+ expect(view.container.querySelector('.pdf-interactive-equation .katex-html')?.textContent).toContain('x2');
+ expect(mocks.post).toHaveBeenCalledTimes(1);
 });

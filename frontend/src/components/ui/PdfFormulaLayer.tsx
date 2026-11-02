@@ -73,7 +73,7 @@ export function PdfFormulaLayer({blocks,onExplain}: {blocks:PdfIRBlock[];onExpla
     {active && createPortal(<div ref={card} className="pdf-formula-card" role="dialog" aria-label={t("pdfFormula.title")} onMouseUp={event=>event.stopPropagation()} style={position} onPointerEnter={cancelClose} onPointerLeave={scheduleClose} onFocus={cancelClose} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))scheduleClose();}}>
       <div className="pdf-formula-heading"><strong>{t("pdfFormula.formula")}</strong><button aria-label={t("pdfFormula.close")} onClick={()=>{close();trigger.current?.focus();}}>×</button></div>
       {preview ? <div className="pdf-formula-preview" dangerouslySetInnerHTML={{__html:preview}}/> : <p>{t("pdfFormula.previewError")}</p>}
-      <label>{t("pdfFormula.raw")}<textarea readOnly value={active.latex} aria-label={t("pdfFormula.raw")} /></label>
+      <details className="pdf-formula-raw"><summary>{t("pdfFormula.raw")}</summary><textarea readOnly value={active.latex} aria-label={t("pdfFormula.raw")} /></details>
       <div className="pdf-formula-footer">{onExplain&&<button onClick={()=>{onExplain(active);close();}}>{t("pdfFormula.explain")}</button>}<span role="status">{copyStatus}</span><button onClick={async()=>{try{await navigator.clipboard.writeText(active.latex!);setCopyStatus(t("pdfFormula.copied"));}catch{setCopyStatus(t("pdfFormula.copyError"));}}}>{t("pdfFormula.copy")}</button></div>
     </div>,document.body)}
   </div>;

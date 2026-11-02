@@ -3,9 +3,9 @@ import {useTranslation} from 'react-i18next';
 import katex from 'katex';
 import type {FormulaEvidence,FormulaExplanation} from '@/modules/knowledge/api/formulaExplanation';
 import {FormulaMathText} from './FormulaMathText';
-import {interactiveFormulaSymbols,normalizeFormulaSymbol} from './interactiveFormulaSymbols';
-interface Props {latex:string;sourceKey:string;definitions:FormulaExplanation['symbols'];evidence:FormulaEvidence[];onNavigate:(evidence:FormulaEvidence)=>void;resolveSymbol?:(symbol:string,signal:AbortSignal,force?:boolean)=>Promise<FormulaExplanation>}
-export function InteractiveFormula({latex,sourceKey,definitions,evidence,onNavigate,resolveSymbol}:Props){
+import {interactiveFormulaSymbols} from './interactiveFormulaSymbols';
+interface Props {latex:string;originalLatex?:string;sourceKey:string;definitions:FormulaExplanation['symbols'];evidence:FormulaEvidence[];onNavigate:(evidence:FormulaEvidence)=>void}
+export function InteractiveFormula({latex,originalLatex,sourceKey,definitions,evidence,onNavigate}:Props){
  const {t,i18n}=useTranslation();
  const zh=(i18n.resolvedLanguage || i18n.language).startsWith('zh');
  const label=(key:string,en:string,cn:string)=>t(`pdfFormula.${key}`,{defaultValue:zh?cn:en});
@@ -29,36 +29,8 @@ export function InteractiveFormula({latex,sourceKey,definitions,evidence,onNavig
  const active=selection?.key===key?selection.index:undefined;
  const occurrence=active===undefined?undefined:model.occurrences[active];
  const knownDefinition=occurrence?.definitionIndices.length===1?definitions[occurrence.definitionIndices[0]]:undefined;
- const focusSymbol=model.safe && occurrence?.definitionIndices.length===0 && occurrence.latex.length<=500?occurrence.latex:undefined;
- const lookupKey=focusSymbol?`${key}:${focusSymbol}`:'';
- const cacheScope=`${sourceKey}:${latex}:${zh}`;
- const lookupCache=useMemo(()=>new Map<string,FormulaExplanation>(),[cacheScope]);
- const forceLookup=useRef(false);
- const [lookupRevision,setLookupRevision]=useState(0);
- const [lookup,setLookup]=useState<{key:string;status:'loading'|'ready'|'error';data?:FormulaExplanation;error?:string}>();
- useEffect(()=>{
-  if(!focusSymbol || !resolveSymbol)return;
-  const normalized=normalizeFormulaSymbol(focusSymbol);
-  const force=forceLookup.current;forceLookup.current=false;
-  const cached=lookupCache.get(normalized);
-  if(cached&&!force){setLookup({key:lookupKey,status:'ready',data:cached});return;}
-  const request=new AbortController();
-  setLookup({key:lookupKey,status:'loading'});
-  void resolveSymbol(focusSymbol,request.signal,force).then(data=>{
-   if(request.signal.aborted)return;
-   lookupCache.set(normalized,data);setLookup({key:lookupKey,status:'ready',data});
-  }).catch(error=>{
-   if(request.signal.aborted)return;
-   const detail=error?.response?.data?.data?.error_message;
-   setLookup({key:lookupKey,status:'error',error:typeof detail==='string'?detail:undefined});
-  });
-  return()=>request.abort();
- },[focusSymbol,lookupKey,resolveSymbol,lookupCache,lookupRevision]);
- const focused=lookup?.key===lookupKey?lookup:undefined;
- const matched=focused?.data?.symbols.filter(symbol=>normalizeFormulaSymbol(symbol.symbol)===normalizeFormulaSymbol(focusSymbol || '')) || [];
- const definition=knownDefinition || (matched.length===1?matched[0]:undefined);
- const citationEvidence=knownDefinition?evidence:focused?.data?.evidence || [];
- const citations=definition?Array.from(new Set(definition.evidence_ids)).map(value=>citationEvidence.find(item=>item.id===value)).filter((item):item is FormulaEvidence=>!!item):[];
+ const definition=knownDefinition;
+ const citations=definition?Array.from(new Set(definition.evidence_ids)).map(value=>evidence.find(item=>item.id===value)).filter((item):item is FormulaEvidence=>!!item):[];
  useEffect(()=>{
   const container=root.current;if(!container)return;
   // KaTeX hides its visual HTML in favor of MathML. Expose this controlled
@@ -97,9 +69,9 @@ export function InteractiveFormula({latex,sourceKey,definitions,evidence,onNavig
   {(!model.safe || !rendered)&&<p className="pdf-symbol-unavailable">{label('symbolUnsupported','Interactive symbols are unavailable for this formula syntax. The original LaTeX is preserved.','此公式语法暂不支持符号交互，原始 LaTeX 已保留。')}</p>}
   {occurrence&&<div ref={card} tabIndex={-1} role="region" aria-label={label('selectedSymbol','Selected symbol','所选符号')} className="pdf-symbol-definition" onKeyDown={event=>{if(event.key==="Escape"){setSelection(undefined);root.current?.querySelector<HTMLElement>(`.pdfsym-${id}-${active}`)?.focus();}}}>
    <div className="pdf-symbol-definition-heading"><strong><FormulaMathText text={occurrence.latex} mathOnly/></strong><button aria-label={label('closeSymbol','Close symbol definition','关闭符号释义')} onClick={()=>{setSelection(undefined);root.current?.querySelector<HTMLElement>(`.pdfsym-${id}-${active}`)?.focus();}}>×</button></div>
-   {definition?<><p><FormulaMathText text={definition.meaning}/></p>{definition.symbol!==occurrence.latex&&<small>{label('matchedExpression','Matched expression:','匹配表达式：')} <FormulaMathText text={definition.symbol} mathOnly/></small>}{(definition.inferred || !citations.length)&&<span className="pdf-study-inferred">{t('pdfFormula.inferred')}</span>}<div className="pdf-symbol-evidence">{citations.map(item=><div key={item.id}><button className="pdf-study-citation" onClick={()=>onNavigate(item)}>{t('pdfFormula.sourcePage',{page:item.page+1})}</button><blockquote>{item.text}</blockquote></div>)}</div></>:<>{focused?.status==='loading'?<p role="status">{label('symbolLookingUp','Looking up this symbol in the paper…','正在结合论文查找此符号的释义…')}</p>:focused?.status==='error'?<p role="alert">{focused.error || label('symbolLookupError','Symbol lookup failed. Please retry.','符号释义查询失败，请重试。')}</p>:<p>{occurrence.definitionIndices.length>1?label('symbolAmbiguous','Multiple definitions match this symbol; a meaning cannot be selected reliably.','此符号匹配多个释义，无法可靠选择含义。'):label('symbolUnavailable','No verified definition is available for this symbol.','此符号暂无可核对的释义。')}</p>}{focusSymbol&&resolveSymbol&&focused?.status!=='loading'&&<button onClick={()=>{forceLookup.current=true;setLookupRevision(value=>value+1);}}>{label('symbolLookupRetry','Retry symbol lookup','重试符号释义')}</button>}</>}
+   {definition?<><p><FormulaMathText text={definition.meaning}/></p>{definition.symbol!==occurrence.latex&&<small>{label('matchedExpression','Matched expression:','匹配表达式：')} <FormulaMathText text={definition.symbol} mathOnly/></small>}{(definition.inferred || !citations.length)&&<span className="pdf-study-inferred">{t('pdfFormula.inferred')}</span>}<div className="pdf-symbol-evidence">{citations.map(item=><div key={item.id}><button className="pdf-study-citation" onClick={()=>onNavigate(item)}>{t('pdfFormula.sourcePage',{page:item.page+1})}</button><blockquote>{item.text}</blockquote></div>)}</div></>:<p>{occurrence.definitionIndices.length>1?label('symbolAmbiguous','Multiple definitions match this symbol; a meaning cannot be selected reliably.','此符号匹配多个释义，无法可靠选择含义。'):label('symbolUnavailable','No verified definition is available for this symbol.','此符号暂无可核对的释义。')}</p>}
   </div>}
   {!!model.unmatchedDefinitions.length&&<details className="pdf-symbol-unmatched"><summary>{label('unmatchedSymbols','Definitions not located in this formula','未在当前公式中定位的释义')} ({model.unmatchedDefinitions.length})</summary><p>{label('unmatchedSymbolsHint','These definitions may concern nearby formulas. No occurrence has been assumed.','这些释义可能属于邻近公式，未推测其对应位置。')}</p>{model.unmatchedDefinitions.map(index=><div key={index}><FormulaMathText text={definitions[index].symbol} mathOnly/></div>)}</details>}
-  <details className="pdf-symbol-raw"><summary>{t('pdfFormula.raw')}</summary><pre>{latex}</pre><button onClick={async()=>{try{await navigator.clipboard.writeText(latex);setCopyStatus(t('pdfFormula.copied'));}catch{setCopyStatus(t('pdfFormula.copyError'));}}}>{t('pdfFormula.copy')}</button>{copyStatus&&<span role="status">{copyStatus}</span>}</details>
+  <details className="pdf-symbol-raw"><summary>{t('pdfFormula.raw')}</summary>{originalLatex&&originalLatex!==latex&&<><strong>{t('pdfFormula.repairedSource')}</strong><pre>{originalLatex}</pre><strong>{t('pdfFormula.displaySource')}</strong></>}<pre>{latex}</pre><button onClick={async()=>{try{await navigator.clipboard.writeText(latex);setCopyStatus(t('pdfFormula.copied'));}catch{setCopyStatus(t('pdfFormula.copyError'));}}}>{t('pdfFormula.copy')}</button>{copyStatus&&<span role="status">{copyStatus}</span>}</details>
  </div>;
 }

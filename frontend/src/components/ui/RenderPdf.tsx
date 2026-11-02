@@ -937,6 +937,7 @@ export default function RenderPdf({
   const readerTools = (
     <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={!toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
       {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
+        {!formulaDocument && !formulaBusy && <div className="pdf-reader-service-notice"><span>{t("pdfFormula.serviceRequired")}</span><a href={`/settings?section=model_defaults&service=parsing&return_to=${encodeURIComponent(window.location.pathname+window.location.search)}`}>{t("pdfFormula.configureService")}</a></div>}
         <details className="pdf-reader-parser-details"><summary>{readerLabel("displaySettings")}</summary><div><span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
         {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
         {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}

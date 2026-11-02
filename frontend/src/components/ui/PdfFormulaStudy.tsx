@@ -1,10 +1,12 @@
-import {useCallback, useEffect, useMemo, useRef} from 'react';
+import {useEffect, useMemo, useRef} from 'react';
 import {useTranslation} from 'react-i18next';
+import katex from 'katex';
 import type {PdfIRBlock, PdfIRTarget} from '@/modules/knowledge/api/pdfIR';
-import {requestFocusedFormulaExplanation, useFormulaExplanation, type FormulaEvidence} from '@/modules/knowledge/api/formulaExplanation';
+import {useFormulaExplanation, type FormulaEvidence} from '@/modules/knowledge/api/formulaExplanation';
 import {InteractiveFormula} from './InteractiveFormula';
 import {FormulaMathText} from './FormulaMathText';
 import {formulaNumber} from './pdfFormulaReferences';
+import {interactiveFormulaSymbols} from './interactiveFormulaSymbols';
 import './PdfFormulaStudy.css';
 interface Props {
  target:PdfIRTarget; sourceKey:string; blocks:PdfIRBlock[]; selected?:PdfIRBlock; autoExplain?:boolean;
@@ -12,13 +14,17 @@ interface Props {
  onReturn:()=>void; canReturn:boolean; onClose:()=>void;
 }
 export function PdfFormulaStudy({target,sourceKey,blocks,selected,autoExplain=false,onSelect,onNavigate,onReturn,canReturn,onClose}:Props){
- const {t,i18n}=useTranslation();
- const language=(i18n.resolvedLanguage || i18n.language).startsWith("zh")?"zh":"en";
- const resolveSymbol=useCallback((symbol:string,signal:AbortSignal,force=false)=>requestFocusedFormulaExplanation({dataset:target.dataset,document:target.document},selected?.id || "",symbol,language,signal,force),[target.dataset,target.document,selected?.id,language]);
+ const {t}=useTranslation();
  const panel=useRef<HTMLElement>(null);
  useEffect(()=>{panel.current?.focus({preventScroll:true});},[]);
  const explanation=useFormulaExplanation(target,sourceKey,selected?.id,autoExplain);
  const data=explanation.data;
+ const repairedLatex=useMemo(()=>{
+  const candidate=data?.display_latex?.trim();
+  if(!candidate || candidate===selected?.latex || !interactiveFormulaSymbols(candidate,[]).safe)return;
+  try{katex.renderToString(candidate,{displayMode:true,throwOnError:true,trust:false,strict:'ignore',maxExpand:1000});return candidate;}
+  catch{return undefined;}
+ },[data?.display_latex,selected?.latex]);
  const citedEvidence=useMemo(()=>{
   const cited=new Set([...(data?.symbols || []).flatMap(symbol=>symbol.evidence_ids || []),...(data?.steps || []).flatMap(step=>step.evidence_ids || [])]);
   const seen=new Set<string>();
@@ -35,7 +41,7 @@ export function PdfFormulaStudy({target,sourceKey,blocks,selected,autoExplain=fa
   <header><div><span className="pdf-study-eyebrow">{t('pdfFormula.studyEyebrow')}</span><h2>{t('pdfFormula.study')}</h2></div><button className="pdf-study-close" aria-label={t('pdfFormula.closeStudy')} onClick={onClose}>×</button></header>
   <div className="pdf-study-navigation"><label>{t('pdfFormula.catalog')}<select aria-label={t('pdfFormula.catalog')} value={selected?.id || ''} onChange={event=>{const block=blocks.find(b=>b.id===event.target.value);if(block)onSelect(block);}}><option value="" disabled>{t('pdfFormula.chooseFormula')}</option>{blocks.map((block,index)=><option key={block.id} value={block.id}>{formulaNumber(block)?`(${formulaNumber(block)})`:t('pdfFormula.formulaIndex',{number:index+1})} · {t('pdfFormula.page',{page:block.page+1})}</option>)}</select></label>{canReturn&&<button onClick={onReturn}>{t('pdfFormula.returnReading')}</button>}</div>
   {!selected?<div className="pdf-study-empty"><strong>{t('pdfFormula.chooseFormula')}</strong><p>{t('pdfFormula.catalogHint')}</p></div>:<div className="pdf-study-body">
-   <section className="pdf-study-selected"><div className="pdf-study-section-label">{t('pdfFormula.page',{page:selected.page+1})}{formulaNumber(selected)&&` · (${formulaNumber(selected)})`}</div><InteractiveFormula key={`${sourceKey}:${selected.id}`} latex={selected.latex || ""} sourceKey={`${target.dataset}/${target.document}/${sourceKey}`} definitions={data?.symbols || []} evidence={data?.evidence || []} onNavigate={onNavigate} resolveSymbol={resolveSymbol}/><button onClick={()=>onNavigate({id:selected.id,text:selected.latex || '',page:selected.page,bbox:selected.bbox})}>{t('pdfFormula.locateFormula')}</button></section>
+   <section className="pdf-study-selected"><div className="pdf-study-section-label">{t('pdfFormula.page',{page:selected.page+1})}{formulaNumber(selected)&&` · (${formulaNumber(selected)})`}</div>{repairedLatex&&<div className="pdf-study-repair" role="note"><strong>{t('pdfFormula.repairSuggested')}</strong><span>{data?.repair_note || t('pdfFormula.repairNote')}</span></div>}<InteractiveFormula key={`${sourceKey}:${selected.id}`} latex={repairedLatex || selected.latex || ""} originalLatex={selected.latex || ""} sourceKey={`${target.dataset}/${target.document}/${sourceKey}`} definitions={data?.symbols || []} evidence={data?.evidence || []} onNavigate={onNavigate}/><button onClick={()=>onNavigate({id:selected.id,text:selected.latex || '',page:selected.page,bbox:selected.bbox})}>{t('pdfFormula.locateFormula')}</button></section>
    <p className="pdf-study-disclaimer">{t('pdfFormula.interpretationNote')}</p>
    {explanation.status==='loading'?<div className="pdf-study-loading" role="status"><span>{t('pdfFormula.explaining')}</span><button onClick={explanation.cancel}>{t('pdfFormula.cancel')}</button></div>:<div className="pdf-study-actions"><button className="pdf-study-primary" onClick={()=>void explanation.load(explanation.status==='ready')}>{explanation.status==='ready'?t('pdfFormula.regenerate'):explanation.status==='error'?t('pdfFormula.explainRetry'):t('pdfFormula.explain')}</button>{explanation.status==='error'&&<p role="alert">{explanation.error || t('pdfFormula.explainError')}</p>}{explanation.status==='cancelled'&&<p role="status">{t('pdfFormula.explainCancelled')}</p>}</div>}
    {data&&<>

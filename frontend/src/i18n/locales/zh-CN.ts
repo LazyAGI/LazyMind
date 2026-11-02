@@ -123,6 +123,12 @@ const zhCN = {
     "show": "显示表格"
   },
   pdfFormula: {
+    "serviceRequired": "完整的公式、图表和原文解释功能需要先配置文档解析服务，并解析当前 PDF。原文阅读和自带目录仍可直接使用。",
+    "configureService": "配置文档解析服务",
+    "repairSuggested": "模型建议的公式修复",
+    "repairNote": "已根据邻近原文尝试修复展示格式，请核对原始公式。",
+    "repairedSource": "原始解析结果",
+    "displaySource": "当前展示的 LaTeX",
     "symbolLookingUp": "正在核对该符号的原文释义…",
     "symbolLookupError": "暂时无法核对该符号，请重试。",
     "symbolLookupRetry": "重试符号释义",

@@ -13,6 +13,13 @@ const target={dataset:'d',document:'one'};
 function document(hash='hash'):PdfIRDocument{return {version:1,projection_version:2,source_sha256:hash,parser:{name:'mineru',model:'vlm'},coordinate_space:'normalized_top_left',pages:[{index:0}],blocks:[{id:'formula',type:'formula',page:0,latex:'x',bbox:[.1,.1,.3,.2]},{id:'table',type:'table',page:0,bbox:[.1,.4,.8,.8],table:{rows:[{cells:[{text:'Value',row_span:1,col_span:1}]}],captions:[],footnotes:[],related_blocks:[]}}]};}
 beforeEach(()=>{state.pageLoads.clear();state.failLoad=false;state.text=undefined;state.deferLoad=false;sessionStorage.clear();state.document=document();state.status='ready';});
 describe('reader study integration',()=>{
+ it('explains the parser requirement and links to its settings before full reading tools are available',async()=>{
+  state.document=undefined;state.status='not_requested';
+  render(<RenderPdf fileData="unparsed.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
+  expect(screen.getByText('pdfFormula.serviceRequired')).toBeInTheDocument();
+  expect(screen.getByRole('link',{name:'pdfFormula.configureService'})).toHaveAttribute('href',expect.stringContaining('section=model_defaults&service=parsing'));
+  await act(async()=>{});
+ });
  it('switches between formula and table studies instead of opening two panels',async()=>{
   render(<RenderPdf fileData="test.pdf" pdfIRTarget={target} pdfSourceHash="hash"/>);
   fireEvent.click(screen.getByRole('button',{name:'pdfFormula.openCatalog'}));

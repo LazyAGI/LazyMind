@@ -15,6 +15,9 @@ describe('PDF formula interaction', () => {
   Object.defineProperty(navigator, 'clipboard', { configurable:true, value: {writeText: vi.fn().mockRejectedValue(new Error('denied'))} });
   render(<div><PdfFormulaLayer blocks={[formula]} /></div>);
   fireEvent.click(screen.getByRole('button', {name: '查看公式 1'}));
+  const raw=screen.getByText('原始 LaTeX').closest('details') as HTMLDetailsElement;
+  expect(raw.open).toBe(false);
+  fireEvent.click(raw.querySelector('summary')!);
   expect(screen.getByRole('textbox', {name:'原始 LaTeX'})).toHaveValue('x^2');
   await act(async () => fireEvent.click(screen.getByRole('button', {name: '复制 LaTeX'})));
   expect(screen.getByRole('status')).toHaveTextContent('复制失败');
@@ -64,6 +67,9 @@ describe('formula hover grace',()=>{
   render(<div><PdfFormulaLayer blocks={[{...formula,latex:'\\invalidcommand'}]} /></div>);
   fireEvent.click(screen.getByRole('button',{name:'查看公式 1'}));
   expect(screen.getByText('此公式无法预览，仍可复制原始 LaTeX。')).toBeInTheDocument();
+  const raw=screen.getByText('原始 LaTeX').closest('details') as HTMLDetailsElement;
+  expect(raw.open).toBe(false);
+  fireEvent.click(raw.querySelector('summary')!);
   expect(screen.getByRole('textbox')).toHaveValue('\\invalidcommand');
  });
 });

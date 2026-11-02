@@ -1,4 +1,4 @@
-import {act,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import {fireEvent,render,screen} from '@testing-library/react';
 import {beforeAll,describe,it,expect,vi} from 'vitest';
 import i18n from '@/i18n';
 import katex from 'katex';
@@ -53,38 +53,11 @@ it('renders the actual Text CC array intact and selects each observed CrossAttn 
 });
 
 
-describe('on-demand missing symbol lookup',()=>{
- const result=(symbol:string,meaning:string)=>({summary:'',symbols:[{symbol,meaning,evidence_ids:['e'],inferred:true}],steps:[],evidence,warnings:[]});
- it('requests only unknown symbols, matches exact returned atoms, caches results and cancels stale selections',async()=>{
-  let finishY!:(value:unknown)=>void;
-  const resolve=vi.fn().mockImplementationOnce(()=>new Promise(done=>{finishY=done})).mockResolvedValueOnce(result('z','Z meaning')).mockResolvedValueOnce(result('y','Y meaning'));
-  render(<InteractiveFormula latex="x+y+z" sourceKey="lookup" definitions={[{symbol:'x',meaning:'Known',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()} resolveSymbol={resolve}/>);
-  fireEvent.click(screen.getByRole('button',{name:'Symbol: x'}));expect(resolve).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button',{name:'Symbol: y'}));expect(screen.getByRole('status')).toHaveTextContent(i18n.t('pdfFormula.symbolLookingUp'));
-  const firstSignal=resolve.mock.calls[0][1];
-  fireEvent.click(screen.getByRole('button',{name:'Symbol: z'}));
-  expect(await screen.findByText('Z meaning')).toBeInTheDocument();expect(firstSignal.aborted).toBe(true);
-  await act(async()=>finishY(result('y','Stale Y')));expect(screen.queryByText('Stale Y')).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'Symbol: y'}));expect(await screen.findByText('Y meaning')).toBeInTheDocument();
-  expect(screen.getByText('Exact source definition.')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'Symbol: z'}));expect(await screen.findByText('Z meaning')).toBeInTheDocument();
-  expect(resolve).toHaveBeenCalledTimes(3);
- });
- it('retries safe errors, rejects a mismatched response and aborts when closed',async()=>{
-  const resolve=vi.fn().mockRejectedValueOnce(new Error('failed')).mockResolvedValueOnce(result('wrong','Do not guess'));
-  const view=render(<InteractiveFormula latex="y" sourceKey="retry" definitions={[]} evidence={[]} onNavigate={vi.fn()} resolveSymbol={resolve}/>);
-  fireEvent.click(screen.getByRole('button',{name:'Symbol: y'}));
-  await screen.findByRole('alert');
-  fireEvent.click(screen.getByRole('button',{name:'Retry symbol lookup'}));
-  await waitFor(()=>expect(resolve).toHaveBeenCalledTimes(2));
-  expect(await screen.findByText('No verified definition is available for this symbol.')).toBeInTheDocument();
-  expect(screen.queryByText('Do not guess')).toBeNull();
-  resolve.mockImplementationOnce(()=>new Promise(()=>{}));
-  fireEvent.click(screen.getByRole('button',{name:'Retry symbol lookup'}));
-  fireEvent.click(screen.getByRole('button',{name:'Close symbol definition'}));
-  expect(resolve.mock.calls[2][1].aborted).toBe(true);
-  view.unmount();
- });
+it('shows missing symbol explanations immediately without starting another lookup',()=>{
+ render(<InteractiveFormula latex="x+y" sourceKey="precomputed" definitions={[{symbol:'x',meaning:'Known input',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Symbol: y'}));
+ expect(screen.getByText('No verified definition is available for this symbol.')).toBeInTheDocument();
+ expect(screen.queryByRole('button',{name:'Retry symbol lookup'})).toBeNull();
 });
 
 

@@ -16,6 +16,8 @@
 .pdf-study-body p{margin:6px 0;white-space:pre-wrap;}
 .pdf-study-preview{overflow:auto;margin:12px -4px;color:#172a44;}
 .pdf-study-section-label{font-size:11px;color:#697d93;}
+.pdf-study-repair{display:flex;flex-direction:column;gap:3px;margin-top:10px;padding:9px 11px;border-left:3px solid #c18621;background:#fff9ec;color:#604b24;font-size:11px;line-height:1.5;}
+.pdf-study-repair strong{font-weight:650;}
 .pdf-study-disclaimer{font-size:11px;color:#6b7d90;}
 .pdf-study-actions,.pdf-study-loading{padding:10px 0;}
 .pdf-study-loading{display:flex;align-items:center;justify-content:space-between;gap:8px;}
@@ -55,6 +57,7 @@
 .pdf-symbol-unmatched,.pdf-symbol-raw{margin:10px 0;}.pdf-symbol-unmatched summary,.pdf-symbol-raw summary{cursor:pointer;font-size:11px;color:#496b8e;}
 .pdf-symbol-unmatched>div{display:inline-block;margin:4px 8px 4px 0;}
 .pdf-symbol-raw pre{white-space:pre-wrap;font:11px/1.6 monospace;color:#536d87;background:#f2f5f9;padding:10px;border-radius:6px;}
+.pdf-symbol-raw strong{display:block;margin-top:10px;font-size:11px;color:#536d87;}
 .pdf-symbol-raw [role=status]{font-size:11px;margin-left:8px;color:#657b92;}
 @media(prefers-reduced-motion:reduce){.pdf-interactive-symbol{transition:none;}}
 

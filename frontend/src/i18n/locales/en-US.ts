@@ -123,6 +123,12 @@ const enUS = {
     "show": "Show tables"
   },
   pdfFormula: {
+    "serviceRequired": "Full formula, figure and source explanations require a configured document parser and a parsed PDF. The original PDF and its bookmarks remain available.",
+    "configureService": "Configure document parsing",
+    "repairSuggested": "Model-suggested formula repair",
+    "repairNote": "The display format was repaired using nearby source text. Check it against the original formula.",
+    "repairedSource": "Original extracted LaTeX",
+    "displaySource": "Displayed LaTeX",
     "symbolLookingUp": "Checking this symbol in the paper…",
     "symbolLookupError": "Could not check this symbol. Try again.",
     "symbolLookupRetry": "Retry symbol lookup",

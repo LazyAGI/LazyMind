@@ -45,6 +45,9 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 		},
 		generate: func(ctx context.Context, content, instruction string, cfg map[string]any) (string, error) {
 			calls++
+			if !strings.Contains(instruction, "SAME response") {
+				t.Error("repair and symbol definitions must be requested in one generation")
+			}
 			if !strings.Contains(content, "x is distance.") {
 				t.Error("missing neighboring source")
 			}

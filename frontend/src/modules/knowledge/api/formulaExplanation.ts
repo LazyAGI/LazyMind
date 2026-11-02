@@ -5,6 +5,8 @@ import type {PdfIRTarget} from './pdfIR';
 export interface FormulaEvidence {id:string; text:string; page:number; bbox?:[number,number,number,number]}
 export interface FormulaExplanation {
   summary:string;
+  display_latex?:string;
+  repair_note?:string;
   symbols:Array<{symbol:string; meaning:string; evidence_ids:string[]; inferred:boolean}>;
   steps:Array<{text:string; evidence_ids:string[]; inferred:boolean}>;
   evidence:FormulaEvidence[]; warnings:string[]; model?:string;
@@ -43,10 +45,4 @@ export function useFormulaExplanation(target:PdfIRTarget, sourceKey:string, bloc
   },[autoExplain,blockId,cache,key,load]);
   const cancel=()=>{controller.current?.abort();setState({key,status:'cancelled'});};
   return {...(state.key===key?state:{status:'idle' as const,data:undefined}),load,cancel};
-}
-
-export async function requestFocusedFormulaExplanation(target:PdfIRTarget,blockId:string,focusSymbol:string,language:'zh'|'en',signal:AbortSignal,force=false):Promise<FormulaExplanation> {
- const url=`${BASE_URL}/api/core/datasets/${encodeURIComponent(target.dataset)}/documents/${encodeURIComponent(target.document)}/pdf-ir/formulas/${encodeURIComponent(blockId)}/explanation`;
- const response=await axiosInstance.post<{data:FormulaExplanation}>(url,{force,language,focus_symbol:focusSymbol},{signal,timeout:120000,silentError:true} as never);
- return response.data.data;
 }
