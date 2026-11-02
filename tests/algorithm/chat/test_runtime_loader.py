@@ -187,6 +187,7 @@ import json
 import sqlite3
 import sys
 import tempfile
+from contextlib import closing
 from pathlib import Path
 from lazymind.chat.runtime_loader import ensure_chat_runtime
 ensure_chat_runtime()
@@ -194,7 +195,7 @@ loaded_before = "sqlalchemy" in sys.modules
 from lazymind.chat.engine.tools.infra import vocab_db
 with tempfile.TemporaryDirectory() as directory:
     database = Path(directory) / "vocabulary.db"
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection, connection:
         connection.execute("CREATE TABLE words (id TEXT, word TEXT, group_id TEXT, "
                            "create_user_id TEXT, deleted_at TEXT, description TEXT, reference_info TEXT)")
         connection.executemany("INSERT INTO words VALUES (?, ?, ?, ?, ?, ?, ?)", [
