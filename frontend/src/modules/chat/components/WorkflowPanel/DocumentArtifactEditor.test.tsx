@@ -12,7 +12,7 @@ import { DocumentArtifactEditor } from './DocumentArtifactEditor';
 import { SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { documentImageGroups } from './writerImageGroups';
 
-const api = vi.hoisted(() => ({ getDocumentArtifact: vi.fn(), convertDocument: vi.fn(), saveDocumentArtifact: vi.fn(), previewDocumentAction: vi.fn(), listDocumentProviders: vi.fn(), publishDocument: vi.fn(), getPublicationTargets: vi.fn(async () => ({ data: { data: { current_hash: 'fixture', preferred_providers: [], targets: [] } as DocumentPublicationGroupState } })), createPublicationGroup: vi.fn(), getPublicationForArtifact: vi.fn(async()=>({data:{data:{}}})) }));
+const api = vi.hoisted(() => ({ getDocumentArtifact: vi.fn(), convertDocument: vi.fn(), saveDocumentArtifact: vi.fn(), previewDocumentAction: vi.fn(), listDocumentProviders: vi.fn(), publishDocument: vi.fn(), getPublicationTargets: vi.fn(async () => ({ data: { data: { current_hash: 'fixture', preferred_providers: [], targets: [] } as DocumentPublicationGroupState } })), preflightPublication: vi.fn(async () => ({ data: { data: { targets: [] } } })), createPublicationGroup: vi.fn(), getPublicationForArtifact: vi.fn(async()=>({data:{data:{}}})) }));
 const download = vi.hoisted(() => vi.fn());
 const confirm = vi.hoisted(() => vi.fn());
 vi.mock('@/modules/chat/utils/request', async (importOriginal) => ({
@@ -99,7 +99,7 @@ it('both publish entrances open confirmation without saving or publishing on can
   expect(screen.getByRole('article')).toHaveTextContent('# Retained draft');
 });
 
-it.each([false, true])('uses the same Obsidian binding state in the menu and dialog (bound: %s)', async bound => {
+it.each([false, true])('allows ready Obsidian first publication and updates consistently in the menu and dialog (bound: %s)', async bound => {
   await i18n.changeLanguage('en-US');
   api.listDocumentProviders.mockResolvedValue({ data: { data: { providers: [{ id: 'notion' }, { id: 'obsidian' }] } } });
   let finish!: (value: Awaited<ReturnType<typeof api.getPublicationTargets>>) => void;
@@ -118,10 +118,10 @@ it.each([false, true])('uses the same Obsidian binding state in the menu and dia
   act(() => initial.onClick());
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   await act(async () => finish({ data: { data: { current_hash: 'fixture', preferred_providers: [], targets: [{ provider: 'obsidian', bound }] } } }));
-  await waitFor(() => expect(action!.menu!.find(item => item.key === 'obsidian')!.disabled).toBe(!bound));
+  await waitFor(() => expect(action!.menu!.find(item => item.key === 'obsidian')!.disabled).toBe(false));
   menu.rerender(<Dropdown open menu={{ items: action!.menu }}><button>publish menu</button></Dropdown>);
   const menuItem = screen.getByRole('menuitem', { name: /Obsidian/ });
-  expect(menuItem).toHaveTextContent(bound ? 'Obsidian' : 'Obsidian · Bound notes only');
+  expect(menuItem).toHaveTextContent('Obsidian');
   expect(menuItem).toHaveTextContent('Desktop / self-hosted');
   const guide = screen.getByRole('link', { name: 'View Obsidian setup guide' });
   expect(guide).toHaveAttribute('href', '/cloud-documents/docs/obsidian-setup');
@@ -133,22 +133,12 @@ it.each([false, true])('uses the same Obsidian binding state in the menu and dia
   fireEvent.click(guide);
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(api.createPublicationGroup).not.toHaveBeenCalled();
-  if (bound) expect(menuItem).not.toHaveAttribute('aria-disabled', 'true');
-  else expect(menuItem).toHaveAttribute('aria-disabled', 'true');
+  expect(menuItem).not.toHaveAttribute('aria-disabled', 'true');
   const item = action!.menu!.find(item => item.key === 'obsidian')!;
   act(() => item.onClick());
-  if (!bound) {
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    act(() => action!.onClick());
-  }
   const checkbox = await screen.findByRole('checkbox', { name: 'Obsidian' });
-  if (bound) {
-    expect(checkbox).toBeEnabled();
-    expect(checkbox).toBeChecked();
-  } else {
-    expect(checkbox).toBeDisabled();
-    expect(checkbox).not.toBeChecked();
-  }
+  expect(checkbox).toBeEnabled();
+  expect(checkbox).toBeChecked();
   expect(api.createPublicationGroup).not.toHaveBeenCalled();
 });
 

@@ -1,5 +1,65 @@
 components:
     schemas:
+        publicationTargetCheckResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/PublicationTargetCheck'
+            required:
+                - code
+                - data
+            type: object
+        publicationPreflightResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/PublicationPreflightResult'
+            required:
+                - code
+                - data
+            type: object
+        PublicationVault:
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                writable:
+                    type: boolean
+            required:
+                - id
+                - name
+                - writable
+            type: object
+        PublicationTargetCheck:
+            properties:
+                code:
+                    type: string
+                provider:
+                    type: string
+                state:
+                    type: string
+                target_document: {}
+                vaults:
+                    items:
+                        $ref: '#/components/schemas/PublicationVault'
+                    type: array
+            required:
+                - provider
+                - state
+                - vaults
+            type: object
+        PublicationPreflightResult:
+            properties:
+                targets:
+                    items:
+                        $ref: '#/components/schemas/PublicationTargetCheck'
+                    type: array
+            required:
+                - targets
+            type: object
         ACLApiResponse:
             properties:
                 code:
@@ -393,6 +453,10 @@ components:
                                 items:
                                     $ref: '#/components/schemas/AcademicImportCandidate'
                                 type: array
+                            manual_download_urls:
+                                items:
+                                    type: string
+                                type: array
                             paper:
                                 $ref: '#/components/schemas/AcademicPaperRef'
                             presence:
@@ -403,6 +467,10 @@ components:
                                 type: array
                             title:
                                 type: string
+                            warnings:
+                                items:
+                                    type: string
+                                type: array
                             work_id:
                                 type: string
                         type: object
@@ -16735,8 +16803,23 @@ components:
                 - disabled
                 - name
             type: object
+        translationDocumentProviderOpenAPIItem:
+            properties:
+                group_id:
+                    type: string
+                group_name:
+                    type: string
+                provider_name:
+                    type: string
+            required:
+                - group_id
+                - group_name
+                - provider_name
+            type: object
         translationOpenAPIRequest:
             properties:
+                source:
+                    type: string
                 target:
                     type: string
                 text:
@@ -16761,8 +16844,19 @@ components:
             properties:
                 configured:
                     type: boolean
+                document_providers:
+                    items:
+                        $ref: '#/components/schemas/translationDocumentProviderOpenAPIItem'
+                    type: array
+                document_supported:
+                    type: boolean
+                provider:
+                    type: string
+                selected_group_id:
+                    type: string
             required:
                 - configured
+                - document_supported
             type: object
         updateCustomModelProviderOpenAPIRequest:
             properties:
@@ -17482,6 +17576,60 @@ info:
     version: 0.1.0
 openapi: 3.0.3
 paths:
+    /api/core/workflow-artifacts/{artifact_id}/publications:preflight:
+        post:
+            parameters:
+                - in: path
+                  name: artifact_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DocumentPublicationGroupRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/publicationPreflightResponse'
+                    description: Target checks
+                "409":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Document changed
+                "422":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Target invalid
+            summary: Check saved document destinations without writing documents
+            tags:
+                - workflow
+    /api/core/document-providers/obsidian/status:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/publicationTargetCheckResponse'
+                    description: Obsidian availability
+                "502":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/documentActionErrorOpenAPIResponse'
+                    description: Executor unavailable
+            summary: Inspect configured Obsidian vault availability on the executor
+            tags:
+                - workflow
     /api/core/academic/chat-context:
         get:
             parameters:
@@ -17934,6 +18082,8 @@ paths:
                                     type: string
                                 identifier:
                                     type: string
+                                lookup_fulltext:
+                                    type: boolean
                                 papers:
                                     items:
                                         $ref: '#/components/schemas/PaperLibraryPaper'
@@ -18542,6 +18692,103 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/works:presence
+    /api/core/academic/zotero/attachment:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/zotero/attachment
+    /api/core/academic/zotero/attachment/store:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/zotero/attachment/store
+    /api/core/academic/zotero/attachment/transfer:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                api_key:
+                                    type: string
+                                attachment_id:
+                                    type: string
+                                expected_md5:
+                                    type: string
+                                item_key:
+                                    type: string
+                                library_id:
+                                    type: string
+                                library_type:
+                                    enum:
+                                        - users
+                                        - groups
+                                    type: string
+                                local_url:
+                                    type: string
+                                paper_id:
+                                    type: string
+                                source:
+                                    enum:
+                                        - database
+                                        - remote
+                                        - webdav
+                                        - local
+                                    type: string
+                                webdav:
+                                    properties:
+                                        password:
+                                            type: string
+                                        url:
+                                            type: string
+                                        username:
+                                            type: string
+                                    type: object
+                            required:
+                                - source
+                                - item_key
+                                - paper_id
+                                - attachment_id
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    attachment_id:
+                                        type: string
+                                    document_id:
+                                        type: string
+                                required:
+                                    - attachment_id
+                                    - document_id
+                                type: object
+                    description: Transfer a confirmed Zotero PDF server-side with bounded concurrency
+            summary: Transfer a confirmed Zotero PDF server-side with bounded concurrency
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/zotero/import:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/zotero/import
+    /api/core/academic/zotero/preview:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/zotero/preview
     /api/core/add_files_to_group:
         post:
             responses:
@@ -33243,9 +33490,22 @@ paths:
             summary: Enable tool
             tags:
                 - tools
+    /api/core/translation/initialize:
+        post:
+            description: Provisions free connections and a default for the current user, preserving an existing available selection. Status queries are read-only.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/translationStatusOpenAPIResponse'
+                    description: Translation configuration status
+            summary: Initialize free translation connections
+            tags:
+                - translation
     /api/core/translation/status:
         get:
-            description: Reports whether the current user has a selected translation provider with credentials. Secrets are never returned.
+            description: Reports the current user's selected translation provider and verified, configured document-capable provider groups. Keyless providers require no credentials. Group IDs can select a source for a document job without changing the default. Secrets are never returned.
             responses:
                 "200":
                     content:
@@ -33258,7 +33518,7 @@ paths:
                 - translation
     /api/core/translation:translate:
         post:
-            description: Translates up to 5000 characters with the current user's server-side translation credential.
+            description: Translates up to 5000 characters with the current user's selected translation provider. Some providers require server-side credentials; keyless sources may be less stable.
             requestBody:
                 content:
                     application/json:
@@ -33609,6 +33869,451 @@ paths:
                 "200":
                     description: OK
             summary: POST /v1/internal/provider-connections/feishu-cli:execute
+    /api/core/vocabulary/capabilities:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/capabilities
+    /api/core/vocabulary/dictionary:lookup:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/dictionary:lookup
+    /api/core/vocabulary/documents/{document_id}/words:
+        get:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/documents/{document_id}/words
+    /api/core/vocabulary/documents/{document_id}/words/{word_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/documents/{document_id}/words/{word_id}
+    /api/core/vocabulary/documents/{document_id}/words/{word_id}/word:
+        delete:
+            parameters:
+                - in: path
+                  name: document_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/documents/{document_id}/words/{word_id}/word
+    /api/core/vocabulary/examples/{id}:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/examples/{id}
+        patch:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /vocabulary/examples/{id}
+    /api/core/vocabulary/fsrs/profile:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/fsrs/profile
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /vocabulary/fsrs/profile
+    /api/core/vocabulary/provider:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/provider
+        put:
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /vocabulary/provider
+    /api/core/vocabulary/providers/anki/decks:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/providers/anki/decks
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/providers/anki/decks
+    /api/core/vocabulary/providers/anki/decks/{name}:
+        delete:
+            parameters:
+                - in: path
+                  name: name
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/providers/anki/decks/{name}
+    /api/core/vocabulary/providers/anki/status:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/providers/anki/status
+    /api/core/vocabulary/providers/anki:initialize:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/providers/anki:initialize
+    /api/core/vocabulary/providers/anki:request-permission:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/providers/anki:request-permission
+    /api/core/vocabulary/providers/anki:sync:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/providers/anki:sync
+    /api/core/vocabulary/review/logs:export:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/logs:export
+    /api/core/vocabulary/review/next:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/next
+    /api/core/vocabulary/review/sessions:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions
+    /api/core/vocabulary/review/sessions/{session_id}/answers:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/{session_id}/answers
+    /api/core/vocabulary/review/sessions/{session_id}/answers:register:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/{session_id}/answers:register
+    /api/core/vocabulary/review/sessions/{session_id}/questions:next:
+        get:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/sessions/{session_id}/questions:next
+    /api/core/vocabulary/review/sessions/{session_id}/questions:prepare:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/{session_id}/questions:prepare
+    /api/core/vocabulary/review/sessions/{session_id}:complete:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/{session_id}:complete
+    /api/core/vocabulary/review/sessions/active:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/sessions/active
+    /api/core/vocabulary/review/sessions/active/candidates:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/review/sessions/active/candidates
+    /api/core/vocabulary/review/sessions/active/words:issue:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/review/sessions/active/words:issue
+    /api/core/vocabulary/selection:resolve:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/selection:resolve
+    /api/core/vocabulary/stats:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/stats
+    /api/core/vocabulary/wordbooks:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/wordbooks
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/wordbooks
+    /api/core/vocabulary/wordbooks/{id}:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/wordbooks/{id}
+        patch:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /vocabulary/wordbooks/{id}
+    /api/core/vocabulary/words:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/words
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words
+    /api/core/vocabulary/words/{id}:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/words/{id}
+        patch:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /vocabulary/words/{id}
+    /api/core/vocabulary/words/{id}/examples:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{id}/examples
+    /api/core/vocabulary/words/{id}/review-history:
+        get:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /vocabulary/words/{id}/review-history
+    /api/core/vocabulary/words/{id}/tags:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{id}/tags
+    /api/core/vocabulary/words/{id}/tags/{tag}:
+        delete:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: tag
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/words/{id}/tags/{tag}
+    /api/core/vocabulary/words/{id}:reset:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{id}:reset
+    /api/core/vocabulary/words/{id}:resume:
+        post:
+            parameters:
+                - in: path
+                  name: id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{id}:resume
+    /api/core/vocabulary/words/{word_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: DELETE /vocabulary/words/{word_id}
+    /api/core/vocabulary/words/{word_id}:master:
+        post:
+            parameters:
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{word_id}:master
+    /api/core/vocabulary/words/{word_id}:review:
+        post:
+            parameters:
+                - in: path
+                  name: word_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words/{word_id}:review
+    /api/core/vocabulary/words:reset:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /vocabulary/words:reset
     /api/core/word_group:
         get:
             parameters:

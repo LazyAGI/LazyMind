@@ -15,6 +15,22 @@ import (
 )
 
 func lookupPaperLink(ctx context.Context, input string) (WorkInput, error) {
+	work, err := lookupPaperLinkMetadata(ctx, input)
+	if err != nil || work.ArxivID != "" {
+		return work, err
+	}
+	found := lookupDOIPDF(ctx, work.DOI)
+	if found.Candidate != nil {
+		c := found.Candidate
+		work.TrustedFulltext = true
+		work.Provenance["pdf_url"], work.Provenance["pdf_license"], work.Provenance["pdf_version"] = c.URL, c.License, c.Version
+		work.Provenance["pdf_provider"], work.Provenance["pdf_source_type"] = c.SourceProvider, c.SourceType
+	}
+	work.Provenance["lookup_warnings"] = found.Warnings
+	return work, nil
+}
+
+func lookupPaperLinkMetadata(ctx context.Context, input string) (WorkInput, error) {
 	if _, err := arxivsource.Parse(input); err == nil {
 		metadata, err := arxivsource.NewClient().Lookup(ctx, input)
 		if err != nil {
@@ -26,11 +42,13 @@ func lookupPaperLink(ctx context.Context, input string) (WorkInput, error) {
 	if !doiPattern.MatchString(doi) {
 		return WorkInput{}, errors.New("请输入 DOI 或 arXiv 编号、链接")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.crossref.org/works/"+url.PathEscape(doi), nil)
 	if err != nil {
 		return WorkInput{}, err
 	}
-	response, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
 		return WorkInput{}, err
 	}
@@ -74,9 +92,6 @@ func lookupPaperLink(ctx context.Context, input string) (WorkInput, error) {
 	}
 	if len(m.Issued.DateParts) > 0 && len(m.Issued.DateParts[0]) > 0 {
 		work.Year = m.Issued.DateParts[0][0]
-	}
-	if pdf, license, version, e := resolveDOIOpenAccess(ctx, doi); e == nil && pdf != "" {
-		work.Provenance["pdf_url"], work.Provenance["pdf_license"], work.Provenance["pdf_version"] = pdf, license, version
 	}
 	return work, nil
 }

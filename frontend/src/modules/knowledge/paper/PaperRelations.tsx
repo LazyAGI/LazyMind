@@ -6,7 +6,7 @@ import { listExpansions, type Expansion } from '../api/paperWorkflows';
 import type { Attachment, PaperLibraryData, PaperRecord } from './libraryModel';
 import { safePaperUrl } from './model';
 import { isStoredPdfAttachment } from './paperFilters';
-import { findLibraryPaper, paperExpansions, referenceRelations, type RelatedPaper } from './relationModel';
+import { findLibraryPaper, paperExpansions, referenceRelations, relatedPaperItem, type RelatedPaper } from './relationModel';
 import './PaperRelations.scss';
 import type { PaperNotification } from './usePaperNotifications';
 interface Props {
@@ -100,6 +100,24 @@ export default function PaperRelations({ datasetId, paper, data, attachments, on
     }, [datasetId, expansionRevision]);
     const citations = useMemo(() => referenceRelations(references, data, paper), [references, data, paper]);
     const expansions = useMemo(() => paperExpansions(records, data, paper), [records, data, paper]);
+    const savedRelations = useMemo(() => {
+        const related = new Map<string, RelatedPaper>();
+        for (const relation of data.relations || []) {
+            const outgoing = relation.fromPaperId === paper.id;
+            const incoming = relation.toPaperId === paper.id;
+            if (!outgoing && !incoming) continue;
+            const target = data.papers.find(item => item.id === (outgoing ? relation.toPaperId : relation.fromPaperId));
+            if (!target || target.id === paper.id) continue;
+            const source = relation.kind === 'related' ? '相关文献' : relation.kind === 'version_of' ? '版本关系'
+                : (relation.kind === 'cites') === outgoing ? '引用文献' : '引用本篇';
+            related.set(target.id, relatedPaperItem(target, source));
+        }
+        for (const id of paper.relatedPaperIds || []) {
+            const target = data.papers.find(item => item.id === id);
+            if (target && !related.has(id)) related.set(id, relatedPaperItem(target, '相关文献'));
+        }
+        return [...related.values()];
+    }, [data.papers, data.relations, paper]);
     const cardList=(items:RelatedPaper[]) => <div className="paper-relation-list">{items.map(item=><PaperCard key={item.id} item={item} onOpenPaper={onOpenPaper}/>)}</div>;
     return <div className="paper-relations">
     <div className="paper-relations-intro"><span className="paper-relations-emblem"><LinkOutlined /></span><div><h3>文献之间的联系</h3><p>沿着引用与研究线索，继续阅读。</p></div></div>
@@ -117,6 +135,11 @@ export default function PaperRelations({ datasetId, paper, data, attachments, on
       {citations.length ? <>{cardList(allCitations ? citations : citations.slice(0, 5))}{citations.length > 5 && <button type="button" className="paper-relation-show-more" aria-expanded={allCitations} onClick={() => setAllCitations(value => !value)}>{allCitations ? '收起参考文献' : `查看全部 ${citations.length} 条参考文献`}</button>}</> : !referencesLoading && !referencesError && <div className="paper-relation-empty"><ReadOutlined /><div><strong>{documentKey ? '暂无已识别的参考文献' : '还没有可识别的 PDF'}</strong><p>{documentKey ? paper.parse === 'ready' ? '可打开全文，查看原文中的参考文献。' : '全文解析完成后，可在这里查看参考文献。' : '添加并解析 PDF 后，可在这里查看参考文献。'}</p>{!documentKey && <button type="button" className="paper-detail-tab-link" onClick={onAttachments}>前往附件<ArrowRightOutlined /></button>}</div></div>}
     </section>
 
+
+    {savedRelations.length > 0 && <section className="paper-relation-section" aria-label="已保存关系">
+      <div className="paper-relation-heading"><h3><LinkOutlined />已保存关系<span>{savedRelations.length}</span></h3></div>
+      {cardList(savedRelations)}
+    </section>}
 
     {(expansionsLoading || expansionsError || expansions.length > 0) && <section className="paper-relation-section" aria-label="论文扩展">
       <div className="paper-relation-heading"><h3><BranchesOutlined />论文扩展<span>{expansions.length}</span></h3>{expansionsLoading && <Spin size="small"/>}</div>

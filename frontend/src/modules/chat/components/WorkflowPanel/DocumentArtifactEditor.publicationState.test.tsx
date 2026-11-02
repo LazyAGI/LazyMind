@@ -67,6 +67,7 @@ it('shares one account request per provider across the menu and dialog on mount,
   expect(connections).toHaveBeenCalledTimes(4);
   authorized = true;
   fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+  // The menu is registered in an effect after the dialog publishes its choices.
   await waitFor(() => {
     expect(screen.getByRole('checkbox', { name: 'Notion' })).toBeEnabled();
     expect(action()?.menu?.[0].disabled).toBe(false);

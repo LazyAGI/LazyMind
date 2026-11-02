@@ -736,12 +736,45 @@ func (r *Runner) applyDownMigration(mig migrationFile, remaining []historyRecord
 		}
 		nextVersion := highestAppliedVersion(remaining)
 		return r.writeState(tx, &nextVersion, false)
-	}, nil)
+	}, func(tx *sql.Tx) error {
+		if mig.Name != "v0_3/paper_library_entities" || mig.FileVersion != 20261026123247 {
+			return nil
+		}
+		return restorePaperLibraryArchiveAfterEntityDown(tx, r.driver)
+	})
 	if err != nil {
 		return err
 	}
 	log.Logger.Info().Uint64("version", mig.Version).Str("name", mig.Name).Msg("migration down applied")
 	return nil
+}
+
+// The published entity down migration recreates an empty paper_libraries table.
+// Restore the pre-drop graph inside that same transaction so even a single-step
+// rollback leaves legacy readers with their complete library. The earlier
+// backup migration removes the temporary table when it is rolled back.
+func restorePaperLibraryArchiveAfterEntityDown(tx *sql.Tx, dialect string) error {
+	var exists bool
+	switch dialect {
+	case "postgres":
+		if err := tx.QueryRow(`SELECT to_regclass('paper_library_migration_backups') IS NOT NULL`).Scan(&exists); err != nil {
+			return err
+		}
+	case "sqlite":
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='paper_library_migration_backups')`).Scan(&exists); err != nil {
+			return err
+		}
+	default:
+		return nil
+	}
+	if !exists {
+		return nil
+	}
+	_, err := tx.Exec(`INSERT INTO paper_libraries (dataset_id,data_json,revision,created_at,updated_at)
+		SELECT dataset_id,data_json,revision,created_at,updated_at
+		FROM paper_library_migration_backups WHERE TRUE
+		ON CONFLICT(dataset_id) DO NOTHING`)
+	return err
 }
 
 var sqliteForeignKeysOff = regexp.MustCompile(`(?im)^\s*PRAGMA\s+foreign_keys\s*=\s*(?:OFF|0)\s*;`)

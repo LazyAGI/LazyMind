@@ -41,6 +41,7 @@ wget-log
 .vscode
 .vite/
 .playwright-cli/
+output/playwright/
 .worktrees/
 .codex-gocache/
 .codex-gocache-linux/

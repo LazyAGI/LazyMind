@@ -16,6 +16,7 @@ vi.mock("../api", () => ({
     apiCoreModelProvidersGet: async () => ({ data: { providers: [provider] } }),
     apiCoreModelProvidersModelProviderIdGroupsGet: mocks.groups,
     apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch: mocks.patch,
+    apiCoreModelProvidersSelectedProvidersGet: async () => ({ data: { selections: [] } }),
     apiCoreModelProvidersSelectedProvidersPut: mocks.select,
   },
   modelProvidersDefaultApi: { apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDelete: mocks.remove },

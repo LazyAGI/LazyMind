@@ -523,6 +523,12 @@ export function WorkflowSessionApi() {
     getPublicationTargets(artifactId: string, options?: PublicationRequestOptions) {
       return axiosInstance.get<{ data: import('@/api/generated/core-client').DocumentPublicationGroupState }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publications`, options);
     },
+    getObsidianPublicationStatus(options?: PublicationRequestOptions) {
+      return axiosInstance.get<{ data: import('@/api/generated/core-client').PublicationTargetCheck }>(`${coreApiBaseUrl}/document-providers/obsidian/status`, options);
+    },
+    preflightPublication(artifactId: string, body: import('@/api/generated/core-client').DocumentPublicationGroupRequest, options?: PublicationRequestOptions) {
+      return axiosInstance.post<{ data: import('@/api/generated/core-client').PublicationPreflightResult }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publications:preflight`, body, options);
+    },
     createPublicationGroup(artifactId: string, body: import('@/api/generated/core-client').DocumentPublicationGroupRequest, options?: PublicationRequestOptions) {
       return axiosInstance.post<{ data: import('@/api/generated/core-client').DocumentPublicationGroupState }>(`${coreApiBaseUrl}/workflow-artifacts/${encodeURIComponent(artifactId)}/publications`, body, options);
     },

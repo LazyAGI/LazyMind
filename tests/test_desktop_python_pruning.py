@@ -57,14 +57,17 @@ class PrunePythonRuntimeTest(unittest.TestCase):
         suite = self.put('numpy/core/tests/test_example.py')
         preserve = [self.put('numpy/testing/__init__.py'), self.put('numpy/core/data.dat'),
                     self.put('scipy/_lib/_testutils.py'), self.put('unknown/tests/runtime.py'),
-                    self.put('pandas-1.dist-info/LICENSE')]
+                    self.put('pandas-1.dist-info/LICENSE'),
+                    self.put('pandas-1.dist-info/METADATA', 'Metadata-Version: 2.1\nName: pandas\nVersion: 1\n')]
         skill = self.runtime / 'builtin-skills/packages/fixture.zip'
         skill.parent.mkdir(parents=True)
         skill.write_bytes(b'unchanged')
-        pruning.trim_runtime(self.runtime, True)
+        report = pruning.trim_runtime(self.runtime, True)
         self.assertFalse(suite.exists())
         self.assertTrue(all(path.exists() for path in preserve))
         self.assertEqual(skill.read_bytes(), b'unchanged')
+        self.assertEqual(report['installed_distributions'][str(self.site.relative_to(self.runtime))],
+                         [{'name': 'pandas', 'version': '1'}])
 
     def test_symlinked_directories_are_not_followed(self):
         outside = self.root / 'outside'

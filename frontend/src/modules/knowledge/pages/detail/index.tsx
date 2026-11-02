@@ -474,13 +474,13 @@ const Detail = () => {
 
   return (
     <div
-      className="knowledge-detail-page"
+      className={`knowledge-detail-page${paperLibrary ? " knowledge-detail-page--paper" : ""}`}
       style={{
         width: "100%",
         minWidth: 0,
         display: "flex",
         flexDirection: "column",
-        paddingBottom: "24px",
+        paddingBottom: paperLibrary ? "12px" : "24px",
       }}
     >
       {!paperLibrary && <DetailPageHeader
@@ -559,6 +559,7 @@ const Detail = () => {
             key={id}
             datasetId={id}
             title={detail.display_name || "论文库"}
+            onOpenAttachment={documentId => navigate(`/lib/knowledge/knowledge/${encodeURIComponent(id)}/${encodeURIComponent(documentId)}`)}
             onBack={() => returnToList()}
             onUploadPdf={uploadPaperPdf}
             processingLevel={effectiveProcessingLevel(detail.processing_level)}
