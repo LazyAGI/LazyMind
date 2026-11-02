@@ -1000,7 +1000,7 @@ def test_whole_document_generation_boundary(monkeypatch, tmp_path, target, maxim
     calls = []
     saved = []
     monkeypatch.setattr(execution, 'stream_whole_document',
-                        lambda *a, **kw: calls.append('whole') or '# Story\n\n## 一、Background\n\n1. Body.')
+                        lambda *a, **kw: calls.append('whole') or '# Story\n\n## 1. Background\n\n1. Body.')
     monkeypatch.setattr(execution, '_save_writer_document',
                         lambda key, document, **kw: saved.append(document) or 'whole.md')
     monkeypatch.setattr(execution, '_writer_generate_draft_blocks_markdown',

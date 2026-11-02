@@ -1353,7 +1353,7 @@ def test_local_markdown_patch_preserves_other_sections_and_draft_version(content
     )
     toolkit.advance_step.assert_not_called()
     toolkit.patch_artifact.reset_mock()
-    replacement = original.replace('原内容', '新内容').replace('## 第一节', '## 一、第一节')
+    replacement = original.replace('原内容', '新内容').replace('## 第一节', '## 1.1. 第一节')
     tool('deck_outline', original, replacement)
     toolkit.patch_artifact.assert_called_once_with(
         'outline-7', 7, {'text': original.replace('原内容', '新内容'), 'meta': {'title': 'Outline'}},

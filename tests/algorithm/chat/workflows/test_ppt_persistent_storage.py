@@ -264,7 +264,7 @@ def test_outline_retry_reuses_deck_style_and_completed_outline(monkeypatch, tmp_
 
     assert '## Background' in published[-1]['value']
     assert '## 1. Background' in render_document(published[-1]['value'])['export_document']
-    result = tools._publish_text_outline(deck, '# Deck\n\n## 一、Background\n\n1. Keep this list.\n')
+    result = tools._publish_text_outline(deck, '# Deck\n\n## 1. Background\n\n1. Keep this list.\n')
     assert result['ok'] and result['page_count'] == 1
     expected = '# Deck\n\n## Background\n\n1. Keep this list.\n'
     assert published[-1]['value'] == expected
@@ -280,7 +280,7 @@ def test_ordered_publication_inserts_only_one_new_stable_index(monkeypatch):
     monkeypatch.setattr(tools, '_save_artifact', save)
     for _ in range(2):
         result = tools._publish_ordered_ppt_artifact(
-            slot='slide_outline', page_no=4, value='## 四、Inserted\n\n1. Keep this point.',
+            slot='slide_outline', page_no=4, value='## 4. Inserted\n\n1. Keep this point.',
             content_type='text', source_tool='ppt_publish_outline', caption='Inserted',
             order_list=order, insert_before=4, expected_total=5,
         )

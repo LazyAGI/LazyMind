@@ -205,9 +205,9 @@ def test_chat_tool_calls_work_without_a_workflow_context():
 
 
 @pytest.mark.parametrize('response', [
-    '# Title\n\n## 一、Revised\n\nRevised.',
-    '```markdown\n# Title\n\n## 1. Revised\n\nRevised.\n```',
-    'Here is the revision:\n# Title\n\n## （一）Revised\n\nRevised.',
+    '# Title\n\n## 1. Revised\n\nRevised.',
+    '```markdown\n# Title\n\n## 2. Revised\n\nRevised.\n```',
+    'Here is the revision:\n# Title\n\n## 1.1. Revised\n\nRevised.',
 ])
 def test_complete_markdown_revision_uses_shared_tool_once(monkeypatch, tmp_path, response):
     from lazymind.document_tools import revision
