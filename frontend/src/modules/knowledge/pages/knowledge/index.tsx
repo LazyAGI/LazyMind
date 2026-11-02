@@ -13,6 +13,8 @@ import {
   SnippetsOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
+import PaperBreadcrumb from "../../paper/PaperBreadcrumb";
+import { isPaperLibrary } from "../../paper/store";
 import moment from "moment";
 import { Doc } from "@/api/generated/core-client";
 import type { Conversation } from "@/api/generated/chatbot-client";
@@ -947,8 +949,15 @@ const KnowledgeDocumentContent = () => {
 
   return (
     <div className="knowledge-container !h-full !items-start">
+      {getKbDetail()?.dataset_id === knowledgeBaseId && isPaperLibrary(getKbDetail()?.scene) && <PaperBreadcrumb
+        libraryName={getKbDetail()?.display_name || "论文库"}
+        libraryHref={`/lib/knowledge/detail/${knowledgeBaseId}`}
+        onKnowledgeClick={() => navigate("/lib/knowledge/list")}
+        onLibraryClick={() => navigate(`/lib/knowledge/detail/${knowledgeBaseId}`)}
+        paperTitle={knowledgeDetail?.display_name}
+      />}
       <DetailPageHeader
-        breadcrumbs={[
+        breadcrumbs={getKbDetail()?.dataset_id === knowledgeBaseId && isPaperLibrary(getKbDetail()?.scene) ? undefined : [
           { title: t("layout.knowledgeBase"), href: "/lib/knowledge/list" },
           {
             title: getKbDetail()?.display_name || t("knowledge.detail"),

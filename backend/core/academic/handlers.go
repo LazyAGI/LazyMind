@@ -861,7 +861,9 @@ func candidatesForWork(work orm.AcademicWork) []FulltextCandidate {
 	}
 	license, _ := provenance["pdf_license"].(string)
 	version, _ := provenance["pdf_version"].(string)
-	return []FulltextCandidate{{URL: pdfURL, SourceType: "open_access_pdf", SourceProvider: "openalex", License: license, Version: version, ExpectedMIME: "application/pdf"}}
+	provider, _ := provenance["pdf_provider"].(string)
+	sourceType, _ := provenance["pdf_source_type"].(string)
+	return []FulltextCandidate{{URL: pdfURL, SourceType: firstNonEmpty(sourceType, "open_access_pdf"), SourceProvider: firstNonEmpty(provider, "openalex"), License: license, Version: version, ExpectedMIME: "application/pdf"}}
 }
 
 type previewRequest struct {
@@ -879,6 +881,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		Papers            []paperlibrary.Paper `json:"papers,omitempty"`
 		ExpansionID       string               `json:"expansion_id,omitempty"`
 		Identifier        string               `json:"identifier,omitempty"`
+		LookupFulltext    *bool                `json:"lookup_fulltext,omitempty"`
 		ReferenceIDs      []string             `json:"reference_ids"`
 		SourceDocumentIDs []string             `json:"source_document_ids"`
 		WorkIDs           []string             `json:"work_ids"`
@@ -899,13 +902,21 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "INVALID_REQUEST", "一次最多预览 500 条题录")
 		return
 	}
+	if req.LookupFulltext != nil && *req.LookupFulltext && strings.TrimSpace(req.Identifier) == "" && (len(req.WorkIDs) != 1 || len(req.Papers) > 0 || len(req.Works) > 0 || len(req.ReferenceIDs) > 0 || len(req.SourceDocumentIDs) > 0) {
+		replyError(w, 400, "INVALID_REQUEST", "一次只能查找一篇文献的 PDF 来源")
+		return
+	}
 	var linkInput *WorkInput
 	if strings.TrimSpace(req.Identifier) != "" && req.ResolveExternal != nil && !*req.ResolveExternal {
 		replyError(w, 422, "UNRESOLVED_REFERENCES", "链接题录尚未解析，请先查询并确认文献")
 		return
 	}
 	if strings.TrimSpace(req.Identifier) != "" {
-		work, err := lookupPaperLink(r.Context(), req.Identifier)
+		lookup := lookupPaperLink
+		if req.LookupFulltext != nil && !*req.LookupFulltext {
+			lookup = lookupPaperLinkMetadata
+		}
+		work, err := lookup(r.Context(), req.Identifier)
 		if err != nil {
 			replyError(w, 422, "RESOLUTION_FAILED", err.Error())
 			return
@@ -1055,7 +1066,21 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 			ref = documentPaperRef(ref, marshal(*linkInput))
 			work.ProvenanceJSON = marshal(linkInput.Provenance)
 		}
+		var warnings []string
+		if work.ID == linkedWorkID {
+			if values, ok := linkInput.Provenance["lookup_warnings"].([]string); ok {
+				warnings = values
+			}
+		}
 		candidates := candidatesForWork(work)
+		if req.LookupFulltext != nil && *req.LookupFulltext && strings.TrimSpace(req.Identifier) == "" && work.ArxivIDBase == "" && work.DOINormalized != "" {
+			found := lookupDOIPDF(r.Context(), work.DOINormalized)
+			warnings = found.Warnings
+			candidates = []FulltextCandidate{}
+			if found.Candidate != nil {
+				candidates = []FulltextCandidate{*found.Candidate}
+			}
+		}
 		if work.ArxivIDBase != "" && (expansion == nil || expansion.DiscoveryMode != "external") {
 			var provenance map[string]any
 			_ = json.Unmarshal(work.ProvenanceJSON, &provenance)
@@ -1123,7 +1148,7 @@ func PreviewImport(w http.ResponseWriter, r *http.Request) {
 		} else if len(candidates) == 0 {
 			disposition = "metadata_only"
 		}
-		items = append(items, PreviewItem{LibraryPaperID: draftIDs[work.ID], Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
+		items = append(items, PreviewItem{ManualDownloadURLs: sciHubManualURLs(work.DOINormalized), Warnings: warnings, LibraryPaperID: draftIDs[work.ID], Paper: ref, WorkID: work.ID, ReferenceIDs: referenceMap[work.ID], Title: ref.Title, DOI: work.DOINormalized, ArxivID: work.ArxivIDBase, Presence: p, Candidates: candidates, Disposition: disposition})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Title < items[j].Title })
 	token, err := saveImportPreview(r.Context(), userID, req.TargetDatasetID, items, verified, expansion)

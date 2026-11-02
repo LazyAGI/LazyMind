@@ -393,6 +393,10 @@ components:
                                 items:
                                     $ref: '#/components/schemas/AcademicImportCandidate'
                                 type: array
+                            manual_download_urls:
+                                items:
+                                    type: string
+                                type: array
                             paper:
                                 $ref: '#/components/schemas/AcademicPaperRef'
                             presence:
@@ -403,6 +407,10 @@ components:
                                 type: array
                             title:
                                 type: string
+                            warnings:
+                                items:
+                                    type: string
+                                type: array
                             work_id:
                                 type: string
                         type: object
@@ -17932,6 +17940,8 @@ paths:
                                     type: string
                                 identifier:
                                     type: string
+                                lookup_fulltext:
+                                    type: boolean
                                 papers:
                                     items:
                                         $ref: '#/components/schemas/PaperLibraryPaper'
@@ -18540,6 +18550,103 @@ paths:
                 "200":
                     description: OK
             summary: POST /academic/works:presence
+    /api/core/academic/zotero/attachment:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/zotero/attachment
+    /api/core/academic/zotero/attachment/store:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/zotero/attachment/store
+    /api/core/academic/zotero/attachment/transfer:
+        post:
+            parameters:
+                - in: query
+                  name: target_dataset_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            properties:
+                                api_key:
+                                    type: string
+                                attachment_id:
+                                    type: string
+                                expected_md5:
+                                    type: string
+                                item_key:
+                                    type: string
+                                library_id:
+                                    type: string
+                                library_type:
+                                    enum:
+                                        - users
+                                        - groups
+                                    type: string
+                                local_url:
+                                    type: string
+                                paper_id:
+                                    type: string
+                                source:
+                                    enum:
+                                        - database
+                                        - remote
+                                        - webdav
+                                        - local
+                                    type: string
+                                webdav:
+                                    properties:
+                                        password:
+                                            type: string
+                                        url:
+                                            type: string
+                                        username:
+                                            type: string
+                                    type: object
+                            required:
+                                - source
+                                - item_key
+                                - paper_id
+                                - attachment_id
+                            type: object
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                properties:
+                                    attachment_id:
+                                        type: string
+                                    document_id:
+                                        type: string
+                                required:
+                                    - attachment_id
+                                    - document_id
+                                type: object
+                    description: Transfer a confirmed Zotero PDF server-side with bounded concurrency
+            summary: Transfer a confirmed Zotero PDF server-side with bounded concurrency
+            tags:
+                - AcademicWorkflows
+    /api/core/academic/zotero/import:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/zotero/import
+    /api/core/academic/zotero/preview:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /academic/zotero/preview
     /api/core/add_files_to_group:
         post:
             responses:

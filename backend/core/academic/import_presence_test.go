@@ -11,6 +11,8 @@ import (
 	"lazymind/core/doc"
 	"lazymind/core/store"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,7 +27,11 @@ func TestDeletedPaperReachesDownloadThroughSharedWorker(t *testing.T) {
 	store.Init(db, db, nil)
 	t.Cleanup(func() { store.Init(prev, prev, nil) })
 	work := orm.AcademicWork{ID: "work", CanonicalTitle: "Repro", NormalizedTitle: "repro", AuthorsJSON: json.RawMessage(`[]`), ExternalIDsJSON: json.RawMessage(`{}`), ProvenanceJSON: json.RawMessage(`{}`)}
-	d := orm.Document{ID: "deleted-doc", DatasetID: "target", DisplayName: "paper.pdf", Ext: json.RawMessage(`{}`)}
+	path := filepath.Join(t.TempDir(), "paper.pdf")
+	if err := os.WriteFile(path, []byte("%PDF fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	d := orm.Document{ID: "deleted-doc", DatasetID: "target", DisplayName: "paper.pdf", Ext: marshal(map[string]string{"stored_path": path})}
 	link := orm.AcademicWorkDocument{AcademicWorkID: "work", DatasetID: "target", DocumentID: d.ID}
 	for _, row := range []any{&work, &d, &link} {
 		if e := db.Create(row).Error; e != nil {

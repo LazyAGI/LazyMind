@@ -17,16 +17,21 @@ describe('durable paper notes', () => {
         const view = render(<PaperDetailDrawer {...props} />);
         fireEvent.change(screen.getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'older-pdf' } });
         expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
-        fireEvent.click(screen.getByRole('button', { name: '阅读 ↗' }));
-        expect(open).toHaveBeenLastCalledWith('older-document');
+        fireEvent.click(screen.getByRole('button', { name: '阅读此附件' }));
+        expect(open).toHaveBeenCalledWith('older-document');
+        open.mockClear();
+        expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
         fireEvent.click(screen.getByRole('button', { name: '阅读 PDF' }));
-        expect(open).toHaveBeenLastCalledWith('main-document');
+        expect(open).toHaveBeenCalledWith('main-document');
+        expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
+        fireEvent.change(screen.getByRole('combobox', { name: '选择预览附件与版本' }), { target: { value: 'older-pdf' } });
         fireEvent.click(screen.getByRole('button', { name: '设为主附件' }));
         await waitFor(() => expect(setPrimary).toHaveBeenCalledWith(data.attachments[1]));
         const updated = { ...data, attachments: [{ ...data.attachments[0], isPrimary: false }, { ...data.attachments[1], isPrimary: true }] };
         view.rerender(<PaperDetailDrawer {...props} data={updated} />);
         fireEvent.click(screen.getByRole('button', { name: '阅读 PDF' }));
         expect(open).toHaveBeenLastCalledWith('older-document');
+        expect(screen.getByLabelText('附件预览')).toHaveTextContent('Older version.pdf');
         expect(screen.queryByRole('button', { name: '设为主附件' })).not.toBeInTheDocument();
         fireEvent.click(screen.getByRole('tab', { name: '笔记 0' }));
         expect(screen.getByText('这篇论文的所有 PDF 附件共用笔记。')).toBeInTheDocument();
@@ -66,7 +71,9 @@ describe('durable paper notes', () => {
         render(<ConfigProvider theme={{ token: { motion: false } }}><PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} academic={{ state: { document_id: 'pdf', kind: 'unknown', status: 'failed', paper_id: '', manual: false, error: 'Model unavailable' }, is_important: false }} onClose={() => { }} onAddNote={vi.fn()} onRetryIdentification={retry} onSave={vi.fn().mockResolvedValue(true)}/></ConfigProvider>);
         expect(screen.getByRole('status', { name: '论文信息自动识别' })).toHaveTextContent('识别失败');
         expect(screen.getByRole('status', { name: '正文解析状态' })).toHaveTextContent('正文解析失败');
-        expect(screen.getByRole('button', { name: '编辑题录' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: '编辑文献信息' })).toBeEnabled();
+        expect(screen.queryByRole('button', { name: '写笔记' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('combobox', { name: '论文阅读状态' })).not.toBeInTheDocument();
         expect(screen.queryByText('Model unavailable')).not.toBeInTheDocument();
         expect(screen.queryByText('invalid literal for int()')).not.toBeInTheDocument();
         expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -77,4 +84,13 @@ describe('durable paper notes', () => {
         await waitFor(() => expect(screen.getByRole('button', { name: '重试自动识别' })).toBeEnabled());
         expect(data.papers[0].metadata.title).toBe('A study');
     });
+});
+
+it('opens the selected stored attachment in the current tab without waiting for parsing', () => {
+ const data=fixture();
+ data.attachments[0].contentRef='saved-document';
+ render(<PaperDetailDrawer datasetId="library" paper={data.papers[0]} data={data} initialTab="attachments" onClose={vi.fn()} onAddNote={vi.fn()} />);
+ const link=screen.getByRole('link',{name:'阅读此附件'});
+ expect(link).toHaveAttribute('href','/lib/knowledge/knowledge/library/saved-document');
+ expect(link).not.toHaveAttribute('target','_blank');
 });

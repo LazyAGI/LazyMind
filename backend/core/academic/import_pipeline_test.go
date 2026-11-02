@@ -129,6 +129,11 @@ func TestUnifiedImportProcessingFailureAndCancellationRetainOneBinding(t *testin
 	for _, cancelAfterCommit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "submission_failure", true: "cancellation"}[cancelAfterCommit], func(t *testing.T) {
 			db, b, item, _ := importPipelineFixture(t)
+			// Stored originals are complete at bind time. Exercise cancellation
+			// of a parser submission with an actually unsubmitted parsed task.
+			if err := db.Model(&orm.Dataset{}).Where("id=?", b.TargetDatasetID).Update("processing_level", "parsed").Error; err != nil {
+				t.Fatal(err)
+			}
 			seedPipelineCache(t, db, "v2")
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
