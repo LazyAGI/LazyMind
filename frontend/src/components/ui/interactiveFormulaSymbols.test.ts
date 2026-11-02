@@ -71,3 +71,9 @@ it('does not let a compound exponent definition swallow its inner click targets'
  expect(result.unmatchedDefinitions).toEqual([0]);
  expect(result.occurrences.map(item=>item.latex)).toEqual(['e','x_i',String.raw`\tau`,'r_n^{q-}',String.raw`\mathcal{P}_i^{i2t}`]);
 });
+
+it('aligns semantic groups despite typesetting differences',()=>{
+ const result=interactiveFormulaSymbols(String.raw`P E_{\left(pos,2i\right)}=\sin(x/d_{\mathrm{model}})`,['PE_{(pos,2i)}','sin','d_{model}']);
+ expect(result.unmatchedDefinitions).toEqual([]);
+ expect(result.occurrences.find(item=>item.definitionIndices.includes(0))?.latex).toBe(String.raw`P E_{\left(pos,2i\right)}`);
+});

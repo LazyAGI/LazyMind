@@ -26,7 +26,7 @@ function namedOperator(value:string){
 }
 export function normalizeFormulaSymbol(value:string){
  if(!withinSymbolBudget(value))return "";
- const input=stripDelimiters(value);let cursor=0;
+ const input=stripDelimiters(value).replace(/\\(?:left|right)\b/g,'');let cursor=0;
  const skip=()=>{while(cursor<input.length && /\s/.test(input[cursor]))cursor++;};
  const sequence=(group=false):string=>{
   let result='';
@@ -41,6 +41,8 @@ export function normalizeFormulaSymbol(value:string){
   if(input[cursor]==='\\'){
    const command=input.slice(cursor).match(/^\\([a-zA-Z]+|.)/);if(!command){cursor++;return '\\';}
    cursor+=command[0].length;
+   if(['mathrm','mathit','mathsf','text','operatorname'].includes(command[1]))return argument();
+   if(['sin','cos','tan','log','ln','exp'].includes(command[1]))return command[1];
    return wrappers.has(command[1])?command[0]+'('+argument()+')':command[0]+';';
   }
   return input[cursor++];
@@ -158,6 +160,26 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
    const existing=occurrences.find(o=>o.start===start&&o.end===end);
    if(existing){if(!existing.definitionIndices.includes(index))existing.definitionIndices.push(index);}
    else {occurrences=occurrences.filter(o=>o.end<=start||o.start>=end);occurrences.push({start,end,latex:latex.slice(start,end),definitionIndices:[index]});}
+  }
+ });
+ // Model-provided semantic terms define groups, but only after matching a
+ // complete source range. Preserve original TeX and ignore typography only.
+ definitions.forEach((_,definitionIndex)=>{
+  if(occurrences.some(item=>item.definitionIndices.includes(definitionIndex)))return;
+  const expected=normalized[definitionIndex];if(!expected)return;
+  const ordered=[...occurrences].sort((a,b)=>a.start-b.start);
+  for(let i=0;i<ordered.length;i++){
+   for(let j=i;j<Math.min(ordered.length,i+24);j++){
+    const start=ordered[i].start,end=ordered[j].end;
+    if(normalizeFormulaSymbol(latex.slice(start,end))!==expected)continue;
+    const existing=occurrences.find(item=>item.start===start&&item.end===end);
+    if(existing)existing.definitionIndices.push(definitionIndex);
+    else {
+     occurrences=occurrences.filter(item=>item.end<=start||item.start>=end);
+     occurrences.push({start,end,latex:latex.slice(start,end),definitionIndices:[definitionIndex]});
+    }
+    break;
+   }
   }
  });
  occurrences.sort((a,b)=>a.start-b.start);
