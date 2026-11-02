@@ -104,7 +104,11 @@ export class CodexAdapter implements RuntimeAdapter<string> {
     await this.receipts.write({ actionId: claim.action.id, runId: claim.action.session_id, threadId: thread,
       kind: 'cancel', turnId: target.id, status: 'sending' })
     const result = await this.native.interrupt(thread, target.id, expectedOwnership, this.signal)
-    if (result?.rejected) throw new AdmissionRejected(result.rejected)
+    if (result?.rejected) {
+      await this.receipts.write({ actionId: claim.action.id, runId: claim.action.session_id, threadId: thread,
+        kind: 'cancel', turnId: target.id, status: 'rejected' })
+      throw new AdmissionRejected(result.rejected)
+    }
     if (result.interruptedTurnId !== target.id) throw new Error('The target turn interruption was not confirmed')
     await this.receipts.write({ actionId: claim.action.id, runId: claim.action.session_id, threadId: thread,
       kind: 'cancel', turnId: target.id, status: 'accepted' })

@@ -53,3 +53,34 @@ it('the shipped panel discovers indirectly loaded browser modules', async () => 
   expect(imported).toEqual(['app://-/assets/app-initial-current.js'])
   expect(host.__lazymindCodexBrowser).toBe(manager)
 })
+
+it('the shipped RPC reports host ownership and refuses an unfenced interruption', async () => {
+  const bundle = readFileSync(new URL('../../../local/lazymind-cli/internal/codexplugin/assets/dispatcher.mjs', import.meta.url), 'utf8')
+  const start = bundle.indexOf('async function codexOperation(')
+  const end = bundle.indexOf('\nfunction nativeExpression(', start)
+  expect(start).toBeGreaterThanOrEqual(0)
+  expect(end).toBeGreaterThan(start)
+  const result = await runInNewContext(`
+    let interrupts = 0;
+    const rpc = Object.assign(() => {}, {
+      getHostId: async () => 'local',
+      getConversation: async () => ({id:'thread', resumeState:'resumed', turns:[]}),
+      getStreamRole: async () => ({role:'owner'}),
+      interruptConversation: async () => { interrupts++; return 'turn'; },
+    });
+    globalThis.__lazymindCodexManager = {
+      __lazymindRpc: rpc, getHostId: () => 'local',
+      getConversation: rpc.getConversation, getStreamRole: rpc.getStreamRole,
+      startTurn() {}, interruptConversation: rpc.interruptConversation,
+    };
+    ${bundle.slice(start, end)}
+    (async () => ({
+      read: await codexOperation({kind:'read', threadId:'thread'}, () => undefined),
+      stop: await codexOperation({kind:'interrupt', threadId:'thread', turnId:'turn'}, () => undefined),
+      interrupts,
+    }))();
+  `, {}, {timeout:250})
+  expect(result.read).toMatchObject({owner:true, ownerScope:'host', ready:true})
+  expect(result.stop.rejected).toContain('Stop the current response in Codex')
+  expect(result.interrupts).toBe(0)
+})

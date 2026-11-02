@@ -57,7 +57,7 @@ describe('Codex renderer native API mapping',()=>{
   expect(rpc.startTurn).toHaveBeenCalledWith('thread',expect.objectContaining({request:expect.objectContaining({clientUserMessageId:'client'}),context:expect.objectContaining({useUserMessageAdmission:false})}))
   expect(disposeResult).toHaveBeenCalledOnce()
  })
- it('rechecks RPC ownership after asynchronous reads before interrupting',async()=>{
+ it('does not send RPC interrupts when ownership cannot be checked atomically',async()=>{
   const turn={id:'turn',status:'inProgress',items:[]}
   const rpc=Object.assign(()=>{}, {
    getHostId:vi.fn().mockResolvedValue('local'),
@@ -68,6 +68,7 @@ describe('Codex renderer native API mapping',()=>{
   rpcFixture(rpc)
   expect(await codexOperation({kind:'interrupt',threadId:'thread',turnId:'turn',expectedOwnership:JSON.stringify({inputs:[]})})).toHaveProperty('rejected')
   expect(rpc.interruptConversation).not.toHaveBeenCalled()
+  expect(rpc.getConversation).not.toHaveBeenCalled()
  })
  it('discovers the manager held by a desktop signal client ref',async()=>{
   const manager={getHostId:()=> 'local',getConversation:vi.fn(),startTurn:vi.fn(),interruptConversation:vi.fn()}

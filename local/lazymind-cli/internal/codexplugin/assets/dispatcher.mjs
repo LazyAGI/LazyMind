@@ -383,7 +383,17 @@ var CodexAdapter = class {
 			status: "sending"
 		});
 		const result = await this.native.interrupt(thread, target.id, expectedOwnership, this.signal);
-		if (result?.rejected) throw new AdmissionRejected(result.rejected);
+		if (result?.rejected) {
+			await this.receipts.write({
+				actionId: claim.action.id,
+				runId: claim.action.session_id,
+				threadId: thread,
+				kind: "cancel",
+				turnId: target.id,
+				status: "rejected"
+			});
+			throw new AdmissionRejected(result.rejected);
+		}
 		if (result.interruptedTurnId !== target.id) throw new Error("The target turn interruption was not confirmed");
 		await this.receipts.write({
 			actionId: claim.action.id,
@@ -1472,6 +1482,7 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 		throw new Error("Codex native conversation connection is unavailable");
 	}
 	if (input.kind === "probe") return { ready: true };
+	if (rpc && input.kind === "interrupt") return { rejected: "This Codex version cannot safely interrupt a Workflow turn. Stop the current response in Codex." };
 	const capture = (state, stream, streaming) => {
 		if (!state || state.id !== input.threadId) return { missing: true };
 		const history = state?.turnHistory;
@@ -1488,6 +1499,7 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 			turns,
 			ready,
 			owner: role === "owner",
+			ownerScope: rpc ? "host" : "window",
 			active: state.threadRuntimeStatus?.type === "active" || turns.some((turn) => turn.status === "inProgress")
 		};
 	};
@@ -1549,7 +1561,7 @@ async function codexOperation(input, readEvidence = workflowTurnEvidence) {
 		};
 	}
 	if (input.kind === "interrupt") {
-		const latest = rpc ? await snapshot() : localSnapshot();
+		const latest = localSnapshot();
 		if (latest.missing) return { interruptedTurnId: null };
 		const target = latest.turns.find((turn) => turn.id === input.turnId);
 		if (!target || target.status !== "inProgress") return { interruptedTurnId: null };
@@ -1585,8 +1597,8 @@ var CodexNative = class {
 			}, signal)
 		})))).flatMap((result) => result.status === "fulfilled" && !result.value.state?.missing && result.value.state?.id === threadId ? [result.value] : []);
 		const owners = matches.filter((match) => match.state.owner);
-		if (owners.length > 1) throw Error("Codex reports conflicting owners for this chat");
-		const selected = owners[0] ?? matches.sort((a, b) => a.id.localeCompare(b.id))[0];
+		if (owners.length > 1 && !owners.every((match) => match.state.ownerScope === "host")) throw Error("Codex reports conflicting owners for this chat");
+		const selected = (owners.length ? owners : matches).sort((a, b) => a.id.localeCompare(b.id))[0];
 		if (!selected) throw Error("Open the original Codex chat before continuing");
 		return selected;
 	}

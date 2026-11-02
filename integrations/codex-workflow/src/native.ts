@@ -3,7 +3,7 @@ import { workflowTurnEvidence } from './ownership'
 import { sessionExpression } from './presentation'
 export { selectCodexTarget } from './windows'
 export interface NativeTurn { id: string; status: string; startedAt?: number; items: any[] }
-export interface NativeThread { id: string; turns: NativeTurn[]; active: boolean; owner?: boolean; ready?: boolean }
+export interface NativeThread { id: string; turns: NativeTurn[]; active: boolean; owner?: boolean; ready?: boolean; ownerScope?: 'host' | 'window' }
 
 /** Runs inside the existing desktop renderer, never in a new App Server. */
 export async function codexOperation(input: any, readEvidence = workflowTurnEvidence): Promise<any> {
@@ -133,6 +133,12 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
     }
   }
   if (input.kind === 'probe') return { ready: true }
+  // The RPC only fences interruption by turn ID. Steering can change Workflow
+  // ownership within that same turn after any asynchronous snapshot. Until the
+  // host offers conditional interruption, never send Stop using stale evidence.
+  if (rpc && input.kind === 'interrupt') return {
+    rejected: 'This Codex version cannot safely interrupt a Workflow turn. Stop the current response in Codex.',
+  }
   const capture = (state: any, stream: any, streaming: boolean) => {
     if (!state || state.id !== input.threadId) return { missing: true as const }
     const history = state?.turnHistory
@@ -143,7 +149,8 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
       startedAt: turn.turnStartedAtMs ?? turn.startedAtMs, items: turn.items ?? [] }))
     const role = stream?.role
     const ready = state.resumeState === 'resumed' && ['owner','follower'].includes(role) && streaming
-    return { id: state.id, turns, ready, owner: role === 'owner', active: state.threadRuntimeStatus?.type === 'active' || turns.some((turn: any) => turn.status === 'inProgress') }
+    return { id: state.id, turns, ready, owner: role === 'owner', ownerScope: rpc ? 'host' as const : 'window' as const,
+      active: state.threadRuntimeStatus?.type === 'active' || turns.some((turn: any) => turn.status === 'inProgress') }
   }
   const localSnapshot = () => capture(manager.getConversation(input.threadId), manager.getStreamRole?.(input.threadId), manager.isConversationStreaming?.(input.threadId) === true)
   const snapshot = async () => {
@@ -179,12 +186,12 @@ export async function codexOperation(input: any, readEvidence = workflowTurnEvid
     return { accepted: true, turnId: matches[0].id }
   }
   if (input.kind === 'interrupt') {
-    const latest = rpc ? await snapshot() : localSnapshot()
+    const latest = localSnapshot()
     if (latest.missing) return { interruptedTurnId: null }
     const target = latest.turns.find((turn: any) => turn.id === input.turnId)
     if (!target || target.status !== 'inProgress') return { interruptedTurnId: null }
-    // Recheck ownership after all earlier reads, then pass the expected native
-    // turn ID to the manager so a replaced turn cannot be interrupted.
+    // Only the direct interface can recheck live ownership and invoke the
+    // manager in the same renderer task, with no intervening RPC round trip.
     if (!latest.owner
       || JSON.stringify(readEvidence(target)) !== input.expectedOwnership) {
       return { rejected: 'Codex execution ownership changed; no interruption was sent' }
@@ -214,8 +221,11 @@ export class CodexNative {
     const results=await Promise.allSettled(windows.map(async window=>({id:window.id,state:await this.evaluate(window.id,{kind:'read',threadId},signal) as NativeThread&{missing?:boolean}})))
     const matches=results.flatMap(result=>result.status==='fulfilled'&&!result.value.state?.missing&&result.value.state?.id===threadId?[result.value]:[])
     const owners=matches.filter(match=>match.state.owner)
-    if(owners.length>1)throw Error('Codex reports conflicting owners for this chat')
-    const selected=owners[0]??matches.sort((a,b)=>a.id.localeCompare(b.id))[0]
+    // RPC clients in main/detached windows observe the same local host manager.
+    // Their repeated owner reports are not independent window owners. Preserve
+    // the conflict check for legacy managers and mixed interface generations.
+    if(owners.length>1&&!owners.every(match=>match.state.ownerScope==='host'))throw Error('Codex reports conflicting owners for this chat')
+    const selected=(owners.length?owners:matches).sort((a,b)=>a.id.localeCompare(b.id))[0]
     if(!selected)throw Error('Open the original Codex chat before continuing')
     return selected
   }

@@ -34,6 +34,8 @@ const ownerProcessPollInterval = time.Second
 
 const maxInternalSessionBytes = 1 << 20
 
+var invalidateDesktopApplications = agentexec.InvalidateDesktopApplications
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -106,8 +108,11 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return errors.New("unexpected internal command arguments")
 	}
 	if *refreshInstallations || action == "connect" {
-		if err := agentexec.InvalidateDesktopApplications(ctx); err != nil {
-			return err
+		if err := invalidateDesktopApplications(ctx); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			fmt.Fprintf(stderr, "Desktop discovery cache refresh: %v\n", err)
 		}
 	}
 	store, err := credentials.NewStore("", "")

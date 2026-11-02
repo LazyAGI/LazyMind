@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -556,7 +557,7 @@ func (s *Server) handleSession(writer http.ResponseWriter, request *http.Request
 
 func (s *Server) handleAgentStatuses(writer http.ResponseWriter, request *http.Request) {
 	if request.URL.Query().Get("refresh_installations") == "true" {
-		if err := agentexec.InvalidateDesktopApplications(request.Context()); err != nil {
+		if err := refreshDesktopApplications(request.Context()); err != nil {
 			writeError(writer, err)
 			return
 		}
@@ -636,7 +637,7 @@ func (s *Server) agentStatus(ctx context.Context, agent string) (agentintegratio
 func (s *Server) agentAction(ctx context.Context, agent, action string) (agentintegration.Status, error) {
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if action == "connect" {
-		if err := agentexec.InvalidateDesktopApplications(ctx); err != nil {
+		if err := refreshDesktopApplications(ctx); err != nil {
 			return agentintegration.Status{}, err
 		}
 	}
@@ -684,6 +685,20 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 	default:
 		return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 	}
+}
+
+var invalidateDesktopApplications = agentexec.InvalidateDesktopApplications
+
+// Cache maintenance must not disable explicit bindings or unrelated integrations.
+// Cancellation still stops the caller's operation, unlike a cache-local timeout.
+func refreshDesktopApplications(ctx context.Context) error {
+	if err := invalidateDesktopApplications(ctx); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		log.Printf("Desktop discovery cache refresh: %v", err)
+	}
+	return nil
 }
 
 func (s *Server) withLoginStatus(status agentintegration.Status) agentintegration.Status {

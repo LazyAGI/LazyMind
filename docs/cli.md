@@ -682,6 +682,8 @@ macOS 重连只请求 Codex 正常退出，不会强制结束拒绝退出的应�
 
 插件安装确认与工作流会话控制分别报告。安装步骤确认插件配置及 Codex 启动就绪后即可进入开启确认；会话控制未就绪会单独提示，不把已安装插件判为安装失败。工作流执行及恢复仍须通过实时会话控制校验，安装成功不代表自动接续工作流已可用。
 
+在仅提供异步会话接口的 Codex 版本中，停止 Workflow 会禁止后续自动接续，但当前回复需要在 Codex 内手动停止。该接口无法在同一次操作中校验 Workflow 归属并中断回复，LazyMind 会提示手动停止，避免误中断期间收到新输入的任务。
+
 ### 16.2 Desktop 与 Docker 使用同一入口
 
 Desktop 通过 Electron IPC 调用 connector；Docker 网页通过本机回环 Assistant Bridge 调用相同 adapter。两种入口的探测、归属校验、工具预检和最终配置完全一致，没有 Plugin、Marketplace 或 Codex Skill 分支。

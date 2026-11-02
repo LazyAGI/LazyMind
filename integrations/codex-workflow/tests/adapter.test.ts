@@ -89,6 +89,16 @@ describe('CDP Workflow admission and interruption', () => {
   await adapter.host.cancelSession(thread,action)
   expect(native.interrupt).toHaveBeenCalledWith(thread,'turn-owned',JSON.stringify({runId:'run-1',inputs:[]}),expect.any(AbortSignal))
  })
+ it('records a definitely unsent Stop as rejected and preserves the manual-stop explanation',async()=>{
+  const {adapter,native,bridge,receipts}=await fixture(),action=claim('cancel')
+  bridge.action.mockResolvedValue(action)
+  native.read.mockResolvedValue({id:thread,active:true,turns:[{id:'turn-owned',status:'inProgress',startedAt:Date.parse('2026-10-26T00:00:00Z'),items:[{
+   type:'mcpToolCall',server:'lazymind',tool:'workflow.start',status:'completed',result:{structuredContent:{session_id:'run-1'}}
+  }]}]})
+  native.interrupt.mockResolvedValue({rejected:'Stop the current response in Codex'} as any)
+  await expect(adapter.host.cancelSession(thread,action)).rejects.toThrow('Stop the current response in Codex')
+  expect(await receipts.read(action.action.id)).toMatchObject({kind:'cancel',status:'rejected',turnId:'turn-owned'})
+ })
  it('refuses Stop against a new user turn or work started after Stop',async()=>{
   const {adapter,native}=await fixture()
   for(const items of [[{type:'userMessage',content:[{type:'text',text:'another task'}]}],[{type:'mcpToolCall',server:'lazymind',tool:'workflow.start',status:'completed',result:{structuredContent:{session_id:'run-1'}}}]]) {
