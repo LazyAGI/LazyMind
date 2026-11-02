@@ -97,3 +97,9 @@ it('uses matching definitions instead of blocking on duplicate notation',()=>{
  expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Input vector');
  expect(screen.queryByText(/Multiple definitions match/)).not.toBeInTheDocument();
 });
+
+it('connects positional-encoding tuple subscripts to the generated meaning',()=>{
+ render(<InteractiveFormula latex="PE_{(pos,2i)} = x" sourceKey="pe" definitions={[{symbol:'PE_{(pos,2i)}',meaning:'Even-dimension positional encoding',evidence_ids:[],inferred:true}]} evidence={[]} onNavigate={vi.fn()}/>);
+ fireEvent.click(screen.getByRole('button',{name:'Symbol: PE_{(pos,2i)}'}));
+ expect(screen.getByRole('region',{name:'Selected symbol'})).toHaveTextContent('Even-dimension positional encoding');
+});

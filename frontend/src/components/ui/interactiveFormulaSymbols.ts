@@ -125,7 +125,8 @@ export function interactiveFormulaSymbols(latex:string,definitions:string[]) {
  // Group a multi-letter identifier only when the supplied definition exactly
  // matches a complete contiguous source range; never merge partial subscripts.
  definitions.map(value=>withinSymbolBudget(value)?looseSymbol(value):"").forEach((definition,index)=>{
-  if(!definition || /[(),=+*/^-]/.test(definition))return;
+  const indexedName=/^[A-Za-z]{2,}_/.test(definition);
+  if(!definition || (!indexedName && /[(),=+*/^-]/.test(definition)))return;
   let from=0;
   while(true){
    const found=canonical.indexOf(definition,from);if(found<0)break;from=found+definition.length;
