@@ -40,6 +40,10 @@ func reconcileDeferredIndexing(ctx context.Context) {
 }
 
 func reconcileDeferredIndexingWithReady(ctx context.Context, isReady func(context.Context, string) (bool, error)) {
+	if ctx.Err() != nil || !deferredIndexingWork.Enter() {
+		return
+	}
+	defer deferredIndexingWork.Leave()
 	if !systemdeps.PythonComponentActive("rag") {
 		return
 	}

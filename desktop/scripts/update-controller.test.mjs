@@ -154,17 +154,20 @@ test("every published state has a strictly increasing revision", async () => {
   }
 });
 
-test("background checking starts once, schedules a bounded interval, and stops on disposal", async () => {
+for (const [sample, minutes] of [[0, 25], [0.5, 30], [1, 35]]) test(`background checks use a ${minutes}-minute interval and stop on disposal`, async () => {
   const timers = []; const calls = [];
   const updater = createDesktopUpdater({ currentVersion: "1.0.0", readLocalState: async () => ({}),
     invokeHelper: async (command) => { calls.push(command); return command === "config" ? { status: "enabled", config: { channel: "stable" } } : { status: "up_to_date", reason: "no_newer_compatible_release" }; },
-    clock: { setTimeout: (callback, delay) => { const timer = { callback, delay, unref() {} }; timers.push(timer); return timer; }, clearTimeout: (timer) => { timer.cancelled = true; } }, random: () => 0.5,
+    clock: { setTimeout: (callback, delay) => { const timer = { callback, delay, unref() {} }; timers.push(timer); return timer; }, clearTimeout: (timer) => { timer.cancelled = true; } }, random: () => sample,
   });
   await Promise.all([updater.start(), updater.start()]);
   assert.equal(calls.filter((command) => command === "discover").length, 1);
-  assert.equal(timers.length, 1); assert.ok(timers[0].delay >= 5.5 * 3600_000 && timers[0].delay <= 6.5 * 3600_000);
-  updater.dispose(); assert.equal(timers[0].cancelled, true);
-  await timers[0].callback(); assert.equal(calls.filter((command) => command === "discover").length, 1);
+  assert.equal(timers.length, 1); assert.equal(timers[0].delay, minutes * 60_000);
+  await timers[0].callback();
+  assert.equal(calls.filter((command) => command === "discover").length, 2, "timer must check without a renderer action");
+  assert.equal(timers.length, 2); assert.equal(timers[1].delay, minutes * 60_000);
+  updater.dispose(); assert.equal(timers[1].cancelled, true);
+  await timers[1].callback(); assert.equal(calls.filter((command) => command === "discover").length, 2);
 });
 
 test("update IPC verifies the actual main frame and origin before every privileged action", async () => {

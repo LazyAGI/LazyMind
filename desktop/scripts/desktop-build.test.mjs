@@ -780,8 +780,8 @@ test("Desktop warmup reports bundled history extraction before Core starts", () 
 
 test("selected Desktop folders become dynamic allowed roots without confirmation or restart", () => {
   const source = readFileSync(electronMainScript, "utf8");
-  const start = source.indexOf('ipcMain.handle("lazymind:authorizeLocalFolders"');
-  const end = source.indexOf('ipcMain.handle("lazymind:selectFolder"', start);
+  const start = source.indexOf('handleDesktopWork("lazymind:authorizeLocalFolders"');
+  const end = source.indexOf('handleDesktopWork("lazymind:selectFolder"', start);
   const handler = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.match(handler, /replaceFileWatcherAllowedRoots\([\s\S]*saveAccessState\([\s\S]*allowedRoots/);
@@ -808,8 +808,8 @@ test("Desktop waits for the previous runtime monitor to close before restarting"
 
 test("Desktop discovery asks for consent before choosing roots and skips protected content folders", () => {
   const source = readFileSync(electronMainScript, "utf8");
-  const start = source.indexOf('ipcMain.handle("lazymind:chooseLocalDiscoveryRoots"');
-  const end = source.indexOf('ipcMain.handle("lazymind:discoverLocalFolders"', start);
+  const start = source.indexOf('handleDesktopWork("lazymind:chooseLocalDiscoveryRoots"');
+  const end = source.indexOf('handleDesktopWork("lazymind:discoverLocalFolders"', start);
   const handler = source.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.ok(

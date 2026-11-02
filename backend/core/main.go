@@ -692,6 +692,8 @@ func coordinateShutdown(
 	onClose func(),
 ) error {
 	g, gctx := errgroup.WithContext(ctx)
+	shutdownStarted := make(chan struct{})
+	var shutdownDeadline time.Time
 
 	// Serve HTTP until Shutdown is called (returns http.ErrServerClosed) or a
 	// fatal serve error occurs. A fatal error cancels gctx, which the watchdog
@@ -711,8 +713,11 @@ func coordinateShutdown(
 	// loop's final DB write cannot race with DB close.
 	g.Go(func() error {
 		<-gctx.Done()
+		shutdownDeadline = time.Now().Add(shutdownTimeout)
+		// Closing this channel publishes the shared deadline to every waiter.
+		close(shutdownStarted)
 		cancelRuntime()
-		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		shutCtx, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
 		defer cancel()
 		if err := server.Shutdown(shutCtx); err != nil {
 			log.Logger.Warn().Err(err).Msg("http shutdown failed")
@@ -723,13 +728,21 @@ func coordinateShutdown(
 	// Wait for each background loop to fully exit, but bound the wait by the
 	// same shutdownTimeout so a handler that ignores cancellation cannot keep
 	// the process alive forever after a single SIGTERM.
-	deadline := time.After(shutdownTimeout)
 	for _, d := range backgroundDone {
 		d := d
 		g.Go(func() error {
 			select {
 			case <-d:
-			case <-deadline:
+				return nil
+			case <-shutdownStarted:
+			}
+			// Each waiter observes the same stop-time deadline; no waiter can
+			// consume another's timeout, and normal uptime spends no budget.
+			timer := time.NewTimer(time.Until(shutdownDeadline))
+			defer timer.Stop()
+			select {
+			case <-d:
+			case <-timer.C:
 				log.Logger.Warn().Msg("background loop did not exit within shutdown timeout; giving up")
 			}
 			return nil
@@ -737,8 +750,8 @@ func coordinateShutdown(
 	}
 
 	err := g.Wait()
-	// All HTTP serving, drain, and background loops have now exited (or the
-	// deadline elapsed); it is safe to release shared state and DB connections.
+	// Preserve the ordinary shutdown callback after its bounded waits. A timeout
+	// is not evidence that all writers finished and must not authorize updating.
 	if onClose != nil {
 		onClose()
 	}
@@ -899,6 +912,12 @@ func run(ctx context.Context) error {
 	chat.RegisterTaskCenterEnvCleanup()
 	startBackgroundJobs := backgroundJobsEnabled()
 	var runner *asyncjob.Runner
+	updateControl := &desktopUpdateControl{token: strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")),
+		participants: []desktopUpdateParticipant{{scheduler.PauseForUpdate, scheduler.ResumeFromUpdate}, {doc.PauseDeferredIndexingForUpdate, doc.ResumeDeferredIndexingFromUpdate}},
+		count: func(ctx context.Context) (int64, error) {
+			return desktopUpdateTaskCount(ctx, store.DB(), store.LazyLLMDB(), systemdeps.PythonComponentActive("rag"))
+		},
+	}
 	if !startBackgroundJobs {
 		log.Logger.Info().Msg("core background jobs are disabled")
 	} else {
@@ -918,11 +937,16 @@ func run(ctx context.Context) error {
 		})
 		backgroundDone = append(backgroundDone, runner.Done())
 		directoryRunner := asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{JobTypes: []string{documentdirectory.PlanJob, documentdirectory.OrganizeJob}, SerializeResources: true, Concurrency: 2, PollInterval: asyncConfig.PollInterval, LockTTL: asyncConfig.LockTTL})
+		for _, r := range []*asyncjob.Runner{runner, directoryRunner} {
+			updateControl.participants = append(updateControl.participants, desktopUpdateParticipant{r.PauseForUpdate, r.ResumeFromUpdate})
+		}
 		backgroundDone = append(backgroundDone, directoryRunner.Done(), documentdirectory.StartCleanup(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, resourceupdate.StartIdle(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig(), resourceupdate.EnabledFromEnv()))
 		backgroundDone = append(backgroundDone, workflow.StartExternalWorkflowTaskRecovery(runtimeCtx, store.DB()))
 		backgroundDone = append(backgroundDone, conversationgroup.StartTerminalJobReconciler(runtimeCtx, store.DB(), 2*time.Second))
-		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB())...)
+		backgroundDone = append(backgroundDone, chat.StartConversationTitle(runtimeCtx, store.DB(), func(r *asyncjob.Runner) {
+			updateControl.participants = append(updateControl.participants, desktopUpdateParticipant{r.PauseForUpdate, r.ResumeFromUpdate})
+		})...)
 		if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
 			backgroundDone = append(backgroundDone, doc.StartDeferredIndexing(runtimeCtx))
 		}
@@ -938,7 +962,7 @@ func run(ctx context.Context) error {
 			backgroundDone = append(backgroundDone,
 				resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig()))
 		}
-		recovery.Start(context.Background(), store.DB(), recovery.DefaultCleanupInterval)
+		backgroundDone = append(backgroundDone, recovery.Start(runtimeCtx, store.DB(), recovery.DefaultCleanupInterval))
 
 		// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
 		if n, err := subagent.MarkInterrupted(runtimeCtx, store.DB(), 5*time.Minute); err != nil {
@@ -1033,17 +1057,15 @@ func run(ctx context.Context) error {
 	}
 	log.Logger.Info().Str("addr", listener.Addr().String()).Msg("Core listening")
 
-	// DB/Redis connections are intentionally NOT closed on shutdown. The
-	// scheduler launches detached task-execution goroutines (sendScheduledChatRequest)
-	// that outlive RunScheduler's Done() channel and may still be writing task
-	// results to the DB after the background loops have exited; closing the pool
-	// would race with those final writes (sql: database is closed). This matches
-	// the pre-PR behavior — the process relied on os.Exit/Fatal, which never
-	// closed pools either. The OS reclaims the TCP connections on process exit,
-	// and PostgreSQL/Redis clean up their side on disconnect identically to a
-	// graceful QUIT (abort tx, release locks), so there is no functional or data
-	// difference. The graceful-shutdown value lives in: HTTP drain, asyncjob
-	// lease release, and short-lived background loops exiting cleanly.
+	// Keep the existing DB/Redis lifetime. Scheduler completion now includes its
+	// admitted executions and final writes, but the coordinator's bounded wait
+	// and other background owners do not yet prove that every writer has exited.
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+		r.HandleFunc("/internal/desktop-update", updateControl.control).Methods(http.MethodPost)
+		// Realtime multiplexes chat requests back through this router. Admission
+		// belongs to each routed operation, not the idle WebSocket transport.
+		r.Use(updateControl.wrap)
+	}
 	server := &http.Server{
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,

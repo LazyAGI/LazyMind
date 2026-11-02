@@ -63,6 +63,11 @@ func loadPythonComponentCatalogWithInstallationCheck(paths RuntimePaths, strictI
 	if err != nil {
 		return nil, err
 	}
+	return resolvePythonComponentCatalog(paths, data, strictInstallation)
+}
+
+// Share selection rules between startup and the read-only update preflight.
+func resolvePythonComponentCatalog(paths RuntimePaths, data []byte, strictInstallation bool) (*pythonComponentCatalog, error) {
 	var catalog pythonComponentCatalog
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return nil, fmt.Errorf("read Python component catalog: %w", err)

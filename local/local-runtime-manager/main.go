@@ -3,13 +3,18 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 func main() {
@@ -38,6 +43,9 @@ func NewCLI(out, errOut io.Writer, runner CommandRunner, execPath string) *CLI {
 }
 
 func (c *CLI) Run(ctx context.Context, args []string) error {
+	if err := initializeUnsignedRuntime(); err != nil {
+		return err
+	}
 	if len(args) == 0 {
 		c.usage()
 		return fmt.Errorf("no command")
@@ -47,6 +55,10 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	manager.SetOutput(c.out, c.errOut)
 
 	switch args[0] {
+	case "update-components-check":
+		return c.updateComponentsCommand(ctx, args[1:])
+	case "update-control":
+		return c.desktopUpdateCommand(ctx, manager, args[1:])
 	case "startup-guard":
 		opts, err := parseCommonArgs("startup-guard", args[1:], c.errOut)
 		if err != nil {
@@ -179,6 +191,11 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		}
 		return withRuntimeUpdateLease(ctx, cfg, paths, func() error { return manager.RunServiceAction(ctx, cfg, paths, service, action) })
 	case "guard":
+		guardCtx, stopSignals := ctx, func() {}
+		if desktopupdate.UnsignedTestBuild {
+			guardCtx, stopSignals = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		}
+		defer stopSignals()
 		ownerPID, opts, err := parseGuardArgs(args[1:], c.errOut)
 		if err != nil {
 			return err
@@ -187,9 +204,13 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return withRuntimeUpdateLease(ctx, cfg, paths, func() error {
-			return runRuntimeGuard(ctx, cfg, paths, ownerPID, defaultGuardPollInterval, ownerProcessAlive, manager.Down)
+		err = withRuntimeUpdateLease(guardCtx, cfg, paths, func() error {
+			return runRuntimeGuard(guardCtx, cfg, paths, ownerPID, defaultGuardPollInterval, ownerProcessAlive, manager.Down)
 		})
+		if desktopupdate.UnsignedTestBuild && errors.Is(err, context.Canceled) {
+			return nil
+		}
+		return err
 	case "internal":
 		return c.runInternal(ctx, manager, args[1:])
 	default:

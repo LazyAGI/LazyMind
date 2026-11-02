@@ -18,12 +18,20 @@ func discoverLocalRuntimeProcesses(paths RuntimePaths, cfg RuntimeConfig, scanne
 
 func discoverLocalRuntimeProcessesChecked(paths RuntimePaths, cfg RuntimeConfig, scanner localProcessScanner) ([]LocalProcessRecord, error) {
 	records := make([]LocalProcessRecord, 0, 32)
-	records = append(records, pidFileRecords(paths, cfg)...)
+	registered := map[int]bool{}
 	if registry, err := readLocalProcessRegistry(paths); err == nil {
 		for _, record := range registry.Processes {
 			if localProcessBelongsToRuntime(record, paths) {
 				records = append(records, record)
+				registered[record.PID] = true
 			}
+		}
+	}
+	for _, record := range pidFileRecords(paths, cfg) {
+		// A PID-only file has no historical identity. Re-sampling a reused PID
+		// must not override the original service registration.
+		if !registered[record.PID] {
+			records = append(records, record)
 		}
 	}
 	if scanner == nil {

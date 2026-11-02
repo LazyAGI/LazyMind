@@ -13,11 +13,7 @@ import (
 var resolveRuntimeRecoveryRoot = defaultRuntimeRecoveryRoot
 
 func defaultRuntimeRecoveryRoot() (string, error) {
-	base, err := desktopupdate.RecoveryBase()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(base, "LazyMindUpdater"), nil
+	return desktopupdate.UpdaterRoot()
 }
 
 func runtimeUpdateScope(cfg RuntimeConfig, paths RuntimePaths) (desktopupdate.UpdateScope, error) {
@@ -42,7 +38,10 @@ func runtimeUpdateScope(cfg RuntimeConfig, paths RuntimePaths) (desktopupdate.Up
 		// storage prevents automatic recovery. The separate update-state
 		// measurement rejects unsupported layouts before offering an upgrade.
 		if family == "auth" && path == "" {
-			continue
+			if updateAuthUsesExternalDatabase(cfg.AuthService.DatabaseURL) {
+				continue
+			}
+			return scope, updateStateFailure("scope_invalid")
 		}
 		if family == "segments" && !strings.EqualFold(cfg.UpdateStorage.SegmentStore, "SQLiteStore") {
 			continue

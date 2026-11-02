@@ -250,13 +250,26 @@ echo "==> Building WorkBuddy Workflow resources"
 (cd "${ROOT}/integrations/workbuddy-workflow/connector" && "${PNPM_BIN}" install --frozen-lockfile && "${PNPM_BIN}" run build)
 
 echo "==> Building Go desktop runtime binaries"
+UPDATE_BUILD_CONFIG="$(node "${ROOT}/desktop/scripts/prepare-update-build-config.mjs" --platform darwin --arch "${GO_ARCH}" --signing-mode "${SIGNING_MODE}" --package "${ROOT}/desktop/electron/package.json")"
+UNSIGNED_TEST_BUILD="$(node -e 'console.log(require(process.argv[1]).unsignedTestBuild())' "${ROOT}/desktop/scripts/unsigned-test-build.cjs")"
+UPDATE_TEST_FLAGS=()
+PRODUCT_NAME=LazyMind
+if [[ "${UNSIGNED_TEST_BUILD}" == "true" ]]; then
+  UPDATE_TEST_FLAGS=(-tags=lazymind_unsigned_test)
+  GO_BUILD_FLAGS+=(-tags=lazymind_unsigned_test)
+  PRODUCT_NAME="LazyMind Test"
+fi
 (cd "${ROOT}/backend/feishu-credential-helper" && "${GO_BIN}" build ${GO_BUILD_FLAGS[@]+"${GO_BUILD_FLAGS[@]}"} -mod=readonly -o "${RUNTIME_ROOT}/bin/feishu-credential-helper" .)
 shasum -a 256 "${RUNTIME_ROOT}/bin/feishu-credential-helper" | awk '{print $1}' > "${RUNTIME_ROOT}/bin/feishu-credential-helper.sha256"
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${DESKTOP_LAUNCHER}" ./cmd/desktop-launcher)
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
-UPDATE_BUILD_CONFIG="$(node "${ROOT}/desktop/scripts/prepare-update-build-config.mjs" --platform darwin --arch "${GO_ARCH}" --signing-mode "${SIGNING_MODE}" --package "${ROOT}/desktop/electron/package.json")"
-(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -trimpath -buildvcs=false -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/lazymind-update-helper" ./cmd/update-helper)
+(cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build ${UPDATE_TEST_FLAGS[@]+"${UPDATE_TEST_FLAGS[@]}"} -trimpath -buildvcs=false -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/lazymind-update-helper" ./cmd/update-helper)
 "${RUNTIME_ROOT}/bin/lazymind-update-helper" config >/dev/null
+if [[ "${UNSIGNED_TEST_BUILD}" == "true" ]]; then
+  (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build -tags=lazymind_unsigned_test -trimpath -buildvcs=false -ldflags="-s -w -X main.embeddedConfig=${UPDATE_BUILD_CONFIG}" -o "${RUNTIME_ROOT}/bin/unsigned-update-helper" ./cmd/unsigned-update-helper)
+else
+  rm -f "${RUNTIME_ROOT}/bin/unsigned-update-helper"
+fi
 (cd "${ROOT}/local/lazymind-cli" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/lazymind" ./cmd/lazymind)
 (cd "${ROOT}/local/local-proxy" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-proxy" ./cmd/local-proxy)
 (cd "${ROOT}/backend/core" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/core" .)
@@ -443,7 +456,7 @@ fi
 if ! (cd "${ROOT}/desktop/electron" && node -e 'require("electron")' >/dev/null 2>&1); then
   (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" rebuild electron)
 fi
-remove_generated_path "${DIST_ROOT}/${MAC_OUT}/LazyMind.app"
+remove_generated_path "${DIST_ROOT}/${MAC_OUT}/${PRODUCT_NAME}.app"
 export LAZYMIND_DESKTOP_RUNTIME_STAGE="${RUNTIME_ROOT}"
 export LAZYMIND_DESKTOP_OUTPUT_DIR="${DIST_ROOT}"
 export LAZYMIND_DESKTOP_MAC_LAUNCHER="${DESKTOP_LAUNCHER}"
@@ -455,8 +468,8 @@ else
   (cd "${ROOT}/desktop/electron" && "${PNPM_BIN}" run "pack:mac:${ELECTRON_ARCH}")
 fi
 
-APP_PATH="${DIST_ROOT}/${MAC_OUT}/LazyMind.app"
-ZIP_PATH="${DIST_ROOT}/LazyMind-darwin-${TARGET_ARCH}.zip"
+APP_PATH="${DIST_ROOT}/${MAC_OUT}/${PRODUCT_NAME}.app"
+ZIP_PATH="${DIST_ROOT}/${PRODUCT_NAME}-darwin-${TARGET_ARCH}.zip"
 DMG_PATH="${DIST_ROOT}/LazyMind-macos-${TARGET_ARCH}.dmg"
 if [[ ! -d "${APP_PATH}" ]]; then
   if [[ -d "${DIST_ROOT}/${MAC_OUT}" ]]; then

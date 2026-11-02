@@ -233,6 +233,10 @@ jobs:
           fi
           xcrun notarytool --version
 
+      - name: Install Desktop test dependencies
+        working-directory: desktop/electron
+        run: pnpm install --frozen-lockfile
+
       - name: Run Desktop tests
         run: |
           node --test desktop/scripts/*.test.mjs

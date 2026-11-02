@@ -3,6 +3,10 @@ const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const util = require("node:util");
+const { writeNativeUpdateMetadata } = require("../scripts/native-update-metadata.cjs");
+const unsignedTestBuild = require("../scripts/unsigned-test-build.cjs").unsignedTestBuild(process.env);
+const unsignedConfiguration = unsignedTestBuild ? JSON.parse(fs.readFileSync(process.env.LAZYMIND_DESKTOP_UPDATE_CONFIG, "utf8")) : null;
+const productName = unsignedTestBuild ? "LazyMind Test" : "LazyMind";
 
 const execFile = util.promisify(childProcess.execFile);
 const delay = (milliseconds) => new Promise((resolve) => {
@@ -31,6 +35,7 @@ const extraResources = [
   {
     from: runtimeStage,
     to: "runtime",
+    ...(!unsignedTestBuild ? { filter: ["**/*", "!bin/unsigned-update-helper"] } : {}),
   },
 ];
 
@@ -122,7 +127,7 @@ async function developerIdSigningContext(context) {
 function stageEmbeddedRuntime(appOutDir) {
   const runtimeRoot = path.join(
     appOutDir,
-    "LazyMind.app",
+    `${productName}.app`,
     "Contents",
     "Resources",
     "runtime",
@@ -232,6 +237,7 @@ async function splitPythonComponents(runtimeRoot) {
         "--cache", path.resolve(__dirname, "../cache/published-python/darwin-arm64"),
       );
       if (rebuild) componentArgs.push("--slim-providers");
+      if (unsignedTestBuild && !published) componentArgs.push("--allow-test-loopback-http");
       const { stdout } = await execFile(python, componentArgs, { maxBuffer: 4 * 1024 * 1024 });
       console.log(stdout);
       if (rebuild) {
@@ -264,7 +270,7 @@ async function signAndStageEmbeddedRuntime(context) {
   if (!targetMachine || targetMachine !== nativeMachine) {
     throw new Error("Mac runtime packaging requires a native host matching the Electron target");
   }
-  const appPath = path.join(context.appOutDir, "LazyMind.app");
+  const appPath = path.join(context.appOutDir, `${productName}.app`);
   const runtimeRoot = path.join(appPath, "Contents", "Resources", "runtime");
 
   if (macSigningMode === "developer-id") {
@@ -348,7 +354,7 @@ async function restoreRuntimeAndFinalizeSignature(context) {
   const runtimeRoot = restoreEmbeddedRuntime(context.appOutDir);
   refreshSignedRuntimeChecksums(runtimeRoot);
 
-  const appPath = path.join(context.appOutDir, "LazyMind.app");
+  const appPath = path.join(context.appOutDir, `${productName}.app`);
   const { entitlements, identity, keychainFile } = await developerIdSigningContext(context);
   const signArgs = [
     "--sign",
@@ -429,6 +435,7 @@ function installMacDesktopLauncher(context) {
 async function preparePackagedDesktop(context) {
   installWindowsDesktopLauncher(context);
   installMacDesktopLauncher(context);
+  await writeNativeUpdateMetadata(context);
   await signAndStageEmbeddedRuntime(context);
 }
 
@@ -447,8 +454,9 @@ module.exports = {
     if (!arch) throw new Error(`Unsupported macOS recording helper architecture: ${context.arch}`);
     require("../scripts/build-recording-helper.cjs").buildRecordingHelper({ arch, identity });
   },
-  appId: "ai.lazymind.desktop",
-  productName: "LazyMind",
+  appId: unsignedTestBuild ? "ai.lazymind.desktop.test" : "ai.lazymind.desktop",
+  productName,
+  ...(unsignedTestBuild ? { extraMetadata: { name: "lazymind-desktop-test", lazymindUnsignedTest: true, lazymindUnsignedRelease: unsignedConfiguration.releaseId } } : {}),
   artifactName: "LazyMind-${os}-${arch}.${ext}",
   asar: true,
   asarUnpack: ["node_modules/uiohook-napi/**/*", "node_modules/node-gyp-build/**/*"],
@@ -460,6 +468,7 @@ module.exports = {
     "src/**/*",
     "assets/**/*",
     "package.json",
+    ...(!unsignedTestBuild ? ["!src/unsigned-test-*.js"] : []),
   ],
   extraResources,
   mac: {

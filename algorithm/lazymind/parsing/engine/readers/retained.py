@@ -14,14 +14,16 @@ class RetainedReader(LazyLLMReaderBase):
         self._fallback = fallback
 
     def _load_data(self, file, extra_info=None, **kwargs):
+        if extra_info is not None:
+            kwargs['extra_info'] = extra_info
         route = lazyllm.globals.config['dynamic_ocr_configs'] or {}
         if (Path(file).suffix.lower() == '.pdf'
                 and str(route.get('ocr_type') or '').strip().lower() not in ('', 'none')):
             # Explicit OCR selection can enrich native text with layout/images.
             # Never hide that request behind a previous native-only parse.
-            return self._fallback(file, extra_info=extra_info, **kwargs)
+            return self._fallback(file, **kwargs)
         data = load_artifact(file)
         if data is None:
-            return self._fallback(file, extra_info=extra_info, **kwargs)
+            return self._fallback(file, **kwargs)
         return [DocNode(text=node['text'], metadata={**(extra_info or {}), **node['metadata']})
                 for node in data['roots']]

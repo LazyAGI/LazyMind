@@ -225,6 +225,10 @@ jobs:
           Write-Host "Requested ref: $env:REQUESTED_REF"
           Write-Host "Checked out commit: $(git rev-parse HEAD)"
 
+      - name: Install Desktop test dependencies
+        working-directory: desktop/electron
+        run: pnpm install --frozen-lockfile
+
       - name: Run Desktop tests
         shell: bash
         run: |

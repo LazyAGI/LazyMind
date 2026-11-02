@@ -107,9 +107,15 @@ func NewWithConfig(cfg config.Config, options ...BuildOption) (*App, error) {
 		return nil, err
 	}
 	handler := newHandlerWithComponents(built)
+	runtime := NewRuntime(built, cfg)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("LAZYMIND_RUNTIME_MODE")), "local") {
+		gate := &desktopUpdateGate{token: built.InternalToken, count: built.Repository.CountDesktopUpdateWork}
+		runtime.updateGate = gate
+		handler = gate.wrap(handler)
+	}
 	return &App{
 		server:  server.NewHTTPServer(cfg.ListenAddr(), handler),
-		runtime: NewRuntime(built, cfg),
+		runtime: runtime,
 	}, nil
 }
 
@@ -749,9 +755,11 @@ func buildTempCleanupRunner(built Components, cfg config.Config) *worker.TempCle
 
 func (a *App) Run(ctx context.Context) error {
 	runtimeCtx, stopRuntime := context.WithCancel(ctx)
-	if a.runtime != nil {
-		a.runtime.Start(runtimeCtx)
-	}
+	runtimeDone := a.runtime.Start(runtimeCtx)
+	defer func() {
+		stopRuntime()
+		<-runtimeDone
+	}()
 	serverErr := make(chan error, 1)
 	go func() {
 		if err := a.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -759,20 +767,22 @@ func (a *App) Run(ctx context.Context) error {
 		}
 	}()
 
+	var stopErr error
 	select {
 	case <-ctx.Done():
-		stopRuntime()
-		if err := a.server.Shutdown(context.Background()); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return ctx.Err()
+		stopErr = ctx.Err()
 	case err := <-serverErr:
-		stopRuntime()
-		return err
+		stopErr = err
 	}
+	stopRuntime()
+	if err := a.server.Shutdown(context.Background()); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return errors.Join(stopErr, err)
+	}
+	return stopErr
 }
 
 type Runtime struct {
+	updateGate           *desktopUpdateGate
 	workerID             string
 	scheduler            dueSyncRunEnqueuer
 	watcherRecovery      agentWatcherRecoverer
@@ -826,9 +836,11 @@ func NewRuntime(built Components, cfg config.Config) *Runtime {
 	}
 }
 
-func (r *Runtime) Start(ctx context.Context) {
-	if r == nil {
-		return
+func (r *Runtime) Start(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
+	if r == nil || ctx.Err() != nil {
+		close(done)
+		return done
 	}
 	var wg sync.WaitGroup
 	if r.watcherRecovery != nil {
@@ -872,9 +884,10 @@ func (r *Runtime) Start(ctx context.Context) {
 		})
 	}
 	go func() {
-		<-ctx.Done()
 		wg.Wait()
+		close(done)
 	}()
+	return done
 }
 
 func (r *Runtime) startWatcherRecovery(ctx context.Context, wg *sync.WaitGroup) {
@@ -882,8 +895,15 @@ func (r *Runtime) startWatcherRecovery(ctx context.Context, wg *sync.WaitGroup) 
 	go func() {
 		defer wg.Done()
 		for {
-			if _, err := r.watcherRecovery.RecoverLocalWatchers(ctx, time.Now().UTC()); err == nil {
+			if ctx.Err() != nil {
 				return
+			}
+			if r.updateGate.enter() {
+				_, err := r.watcherRecovery.RecoverLocalWatchers(ctx, time.Now().UTC())
+				r.updateGate.leave()
+				if err == nil {
+					return
+				}
 			}
 			select {
 			case <-ctx.Done():
@@ -904,7 +924,13 @@ func (r *Runtime) startLoop(ctx context.Context, wg *sync.WaitGroup, interval ti
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
-			fn(ctx)
+			if ctx.Err() != nil {
+				return
+			}
+			if r.updateGate.enter() {
+				fn(ctx)
+				r.updateGate.leave()
+			}
 			select {
 			case <-ctx.Done():
 				return

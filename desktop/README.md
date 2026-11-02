@@ -51,6 +51,63 @@ The frontend dependency tree is installed while building, but raw `frontend/node
 
 ## Outputs
 
+### Component compatibility during updates
+
+Automatic installation checks the target's immutable `components` catalog against
+the runtime's actual installed-component selection before native preparation and
+again after tasks drain, before stopping services. The artifact must be copied
+from the target bundle and its size/SHA pinned by the signed release policy.
+`same-v1` cannot replace or drop an installed component identity: compatible
+same-tag repacks can keep the selected revision, while unsupported tag/base/ABI
+changes are blocked with the current application still running. Component/data
+migration is not implemented by this check. Existing clients must first receive
+an updater with this check through a compatible same-tag bridge release; do not
+publish unsupported cross-tag edges to older clients.
+
+### Isolated macOS unsigned update tests
+
+The `unsigned-test` update build uses `LazyMind Test.app` (`ai.lazymind.desktop.test`),
+ad-hoc signing and the current non-root macOS account. Existing `LazyMind` /
+`lazymind-desktop` directories may coexist with the separate test directories;
+the test build does not reuse those application data directories. This mode is
+intended for local test accounts/data, not complete OS-level isolation from
+production. Windows test installation and Cloud login are not supported.
+
+Build with an explicit public `LAZYMIND_DESKTOP_UPDATE_CONFIG` using mode
+`unsigned-test`, an audience other than `official`, channel `personal-test`,
+`signingIdentity: "adhoc"`, independent test public keys, and a fixed
+`http://127.0.0.1:<port>` policy origin. Also set
+`LAZYMIND_DESKTOP_ALLOW_UNSIGNED_UPDATE_TEST=true`; use the existing arm64/x64
+native build script with ZIP packaging and ad-hoc signing. Version/release IDs must
+match the actual test package. No private signing key belongs in this configuration.
+
+For local RAG installation tests, also set
+`LAZYMIND_DESKTOP_REBUILD_PYTHON_COMPONENTS=true` and
+`LAZYMIND_PYTHON_COMPONENT_BASE_URL=http://127.0.0.1:18765/rag` before building.
+Serve the generated paired component ZIP/catalog under its `tags/<tag>/` path.
+Only the compiled `lazymind_unsigned_test` Core accepts literal `127.0.0.1` HTTP
+asset URLs; ordinary builds still require HTTPS, regardless of environment
+variables. Component size, hash, identity and extraction checks remain enabled.
+
+The public launcher and runtime manager are compiled with `lazymind_unsigned_test`.
+Install the first test app only at `~/Applications/LazyMind Test.app` in the current
+account. Test runtime, profile, logs, cache, device identity and updater state use
+separate `LazyMind Test`, `lazymind-desktop-test` and `LazyMindTestUpdater` locations;
+Keychain and external-tool defaults still belong to that OS account. Runtime
+overrides cannot redirect test databases or watched roots to existing app data.
+
+The test-only helper is copied outside the app before handoff. It checks the pinned
+ZIP, test identity, bundle signature integrity, actual version and extraction paths,
+then waits for the old coordinator process identity to disappear before replacement.
+Unknown/failed handoffs retain their record, original download and previous bundle
+for manual repair; they do not authorize automatic data rollback or installation
+replay. Cancelling preparation removes its staged copy while keeping the download.
+
+Production builds retain the original identity and native installer. They exclude
+the test adapter and test installer binary; environment variables cannot enable
+the test runtime in an ordinary build. Test helper validation does not establish
+Developer ID, notarization, Squirrel, Windows or real-upgrade acceptance.
+
 macOS:
 
 ```text

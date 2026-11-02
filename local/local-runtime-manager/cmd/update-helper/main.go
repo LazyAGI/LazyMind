@@ -38,8 +38,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(signals, limit)
 	defer cancel()
 	base, err := resolveRecoveryBase()
+	root := filepath.Join(base, "LazyMindUpdater")
+	if desktopupdate.UnsignedTestBuild && !(len(os.Args) == 2 && os.Args[1] == "config") {
+		root, err = desktopupdate.UpdaterRoot()
+	}
 	if err == nil {
-		err = run(ctx, os.Args[1:], os.Stdin, os.Stdout, embeddedConfig, filepath.Join(base, "LazyMindUpdater"), time.Now().UTC())
+		err = run(ctx, os.Args[1:], os.Stdin, os.Stdout, embeddedConfig, root, time.Now().UTC())
 	}
 	if err != nil {
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "check_failed", "reason": desktopupdate.ErrorCode(err)})

@@ -56,14 +56,45 @@ func cloneUpdateStorage(source *UpdateStorageSnapshot) *UpdateStorageSnapshot {
 }
 
 func updateAuthSQLitePath(address string) string {
-	if !strings.HasPrefix(address, "sqlite:///") {
+	driver, file, ok := strings.Cut(address, ":///")
+	if !ok || (driver != "sqlite" && driver != "sqlite+pysqlite") {
 		return ""
 	}
-	file := filepath.FromSlash(strings.TrimPrefix(address, "sqlite:///"))
-	if !filepath.IsAbs(file) || strings.ContainsAny(file, "?#\x00") {
+	file, rawQuery, _ := strings.Cut(file, "?")
+	query, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return ""
+	}
+	// Only these pysqlite DBAPI options leave the database filename unchanged.
+	// URI mode and SQLAlchemy plugins can change its meaning; do not guess.
+	for key, values := range query {
+		if len(values) != 1 {
+			return ""
+		}
+		switch key {
+		case "timeout", "isolation_level", "detect_types", "check_same_thread", "cached_statements":
+		default:
+			return ""
+		}
+	}
+	// SQLAlchemy does not URL-unescape its database component.
+	file = filepath.FromSlash(file)
+	if !filepath.IsAbs(file) || strings.ContainsAny(file, "#\x00") {
 		return ""
 	}
 	return filepath.Clean(file)
+}
+
+func updateAuthUsesExternalDatabase(address string) bool {
+	u, err := url.Parse(address)
+	if err != nil {
+		return false
+	}
+	dialect, _, _ := strings.Cut(u.Scheme, "+")
+	query, err := url.ParseQuery(u.RawQuery)
+	// PostgreSQL is the external authentication store supported by this runtime.
+	// A plugin may rewrite the URL, so it is not evidence of external storage.
+	return err == nil && dialect == "postgresql" && !query.Has("plugin") && !query.Has("plugins")
 }
 
 type updateSchemaEntry struct {
@@ -300,11 +331,15 @@ func inspectUpdateSQLite(ctx context.Context, file string, core bool) (updateDat
 }
 
 func measuredUpdateComponents(paths RuntimePaths, ragDisabled bool) (map[string]string, error) {
-	result := map[string]string{}
 	catalog, err := loadPythonComponentCatalogForUpdate(paths)
 	if err != nil {
 		return nil, updateStateFailure("component_state_unknown")
 	}
+	return measuredComponentsFromCatalog(paths, ragDisabled, catalog)
+}
+
+func measuredComponentsFromCatalog(paths RuntimePaths, ragDisabled bool, catalog *pythonComponentCatalog) (map[string]string, error) {
+	result := map[string]string{}
 	if catalog == nil {
 		if !ragDisabled {
 			return nil, updateStateFailure("component_state_unknown")

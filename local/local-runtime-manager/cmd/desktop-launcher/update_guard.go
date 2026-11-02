@@ -10,7 +10,7 @@ import (
 )
 
 func checkPendingDesktopUpdate(launcherPath string) error {
-	base, err := desktopupdate.RecoveryBase()
+	root, err := desktopupdate.UpdaterRoot()
 	if err != nil {
 		return err
 	}
@@ -22,5 +22,5 @@ func checkPendingDesktopUpdate(launcherPath string) error {
 	defer cancel()
 	// The public entry checks the installation before starting Electron. The
 	// internal entry then atomically registers its complete resolved data scope.
-	return desktopupdate.CheckStartup(ctx, filepath.Join(base, "LazyMindUpdater"), desktopupdate.UpdateScope{Installation: resources})
+	return desktopupdate.CheckStartup(ctx, root, desktopupdate.UpdateScope{Installation: resources})
 }

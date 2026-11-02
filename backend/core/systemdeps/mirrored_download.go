@@ -29,7 +29,9 @@ var primaryMirrorPolicy = mirrorDownloadPolicy{10 * time.Second, 15 * time.Secon
 
 func validateAssetURL(address string) error {
 	parsed, err := url.Parse(address)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
+	allowedScheme := err == nil && (parsed.Scheme == "https" ||
+		allowTestLoopbackAssetHTTP && parsed.Scheme == "http" && parsed.Hostname() == "127.0.0.1")
+	if !allowedScheme || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "" {
 		return errors.New("asset download URL must be HTTPS without embedded credentials or a fragment")
 	}
 	return nil

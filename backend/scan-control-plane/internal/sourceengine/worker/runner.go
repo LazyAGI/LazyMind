@@ -104,6 +104,7 @@ func (r *Runner) RunPending(ctx context.Context, workerID string) error {
 	limiter := newSourceLimiter(r.globalConcurrency, r.sourceConcurrency)
 	var wg sync.WaitGroup
 	errCh := make(chan error, r.globalConcurrency)
+	var claimErr error
 	deferred := []store.ParseTask{}
 	defer func() {
 		for _, task := range deferred {
@@ -116,7 +117,8 @@ func (r *Runner) RunPending(ctx context.Context, workerID string) error {
 		}
 		task, ok, err := r.worker.claim(ctx, workerID)
 		if err != nil {
-			return err
+			claimErr = err
+			break
 		}
 		if !ok {
 			break
@@ -136,6 +138,9 @@ func (r *Runner) RunPending(ctx context.Context, workerID string) error {
 	}
 	wg.Wait()
 	close(errCh)
+	if claimErr != nil {
+		return claimErr
+	}
 	for err := range errCh {
 		if err != nil {
 			return err

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/desktopupdate"
 )
 
 const (
@@ -940,6 +942,10 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 			return RuntimeConfig{}, RuntimePaths{}, err
 		}
 	}
+	if desktopupdate.UnsignedTestBuild {
+		p.UVCacheDir = filepath.Join(p.CacheDir, "uv")
+		p.PipCacheDir = filepath.Join(p.CacheDir, "pip")
+	}
 	ports := newLocalPortAllocator()
 	ports.skipPortChecks = skipPortChecks
 	networkProfile, err := localNetworkProfile()
@@ -1027,7 +1033,7 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 	if ragDisabled {
 		modeProfile.VectorStore.ManagedProcess = false
 	}
-	return RuntimeConfig{
+	cfg := RuntimeConfig{
 		UpdateStorage:      captureUpdateStorage(p, authServiceDatabaseURL(p.AuthServiceDBPath)),
 		Profile:            profile,
 		MaintenanceMode:    maintenanceMode,
@@ -1086,7 +1092,11 @@ func newRuntimeConfigWithOptions(opts RuntimeConfigOptions, skipPortChecks bool)
 			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", defaultFileWatcherHostPathStyle()),
 		},
 		PortResolutions: ports.resolutions,
-	}, p, nil
+	}
+	if err := validateUnsignedRuntime(cfg, p); err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
+	return cfg, p, nil
 }
 
 func applyDesktopManifestPaths(paths *RuntimePaths) error {
@@ -1203,6 +1213,9 @@ func runtimePathLayoutForGOOS(goos, home, localAppData, xdgDataHome, xdgCacheHom
 		home = "."
 	}
 	appName := "LazyMind"
+	if desktopupdate.UnsignedTestBuild {
+		appName = desktopupdate.TestAppName
+	}
 	documentsRoot := filepath.Join(home, "Documents", appName)
 	switch goos {
 	case "darwin":

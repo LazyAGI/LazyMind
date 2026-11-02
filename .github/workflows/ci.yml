@@ -284,6 +284,12 @@ jobs:
           go build -o "$env:RUNNER_TEMP\lazymind.exe" ./cmd/lazymind
           if ($LASTEXITCODE -ne 0) { exit 1 }
           "LAZYMIND_TEST_BRIDGE_EXE=$env:RUNNER_TEMP\lazymind.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.0.0'
+      - name: Install Desktop test dependencies
+        working-directory: desktop/electron
+        run: pnpm install --frozen-lockfile
       - name: Test Desktop shell
         shell: bash
         run: node --test desktop/scripts/*.test.mjs

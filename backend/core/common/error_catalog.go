@@ -64,6 +64,8 @@ var errorCatalog = map[string]*AppError{
 	"task removal failed":               NewAppError(http.StatusInternalServerError, 2004813, "Unable to move the task to Trash. Please retry"),
 	"task removal stopping":             NewAppError(http.StatusConflict, 2004814, "Task execution is stopping. Please retry restoring shortly"),
 	"conversation archive changed":      NewAppError(http.StatusConflict, 2004815, "Conversation archive state has changed. Please review the archived list."),
+	"scheduler is stopping":             NewAppError(http.StatusServiceUnavailable, 2004816, "Scheduled task execution is stopping. Please retry later."),
+	"desktop update is preparing":       NewAppError(http.StatusServiceUnavailable, 2004817, "An app update is about to start. Choose Update later to start new tasks."),
 	"task not found":                    NewAppError(http.StatusNotFound, 2000405, "Task not found"),
 	"prompt not found":                  NewAppError(http.StatusNotFound, 2000406, "Prompt not found"),
 	"conversation not found":            NewAppError(http.StatusNotFound, 2000407, "Conversation not found"),

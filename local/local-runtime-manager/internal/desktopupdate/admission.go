@@ -225,6 +225,11 @@ func BeginStartup(ctx context.Context, root string, scope UpdateScope, owner, ro
 		return nil, err
 	}
 	defer releaseLock(lock)
+	if UnsignedTestBuild {
+		if err := CheckUnsignedCaller(scope.Installation, os.Getenv("LAZYMIND_UNSIGNED_EXPECTED_RELEASE"), os.Getenv("LAZYMIND_UNSIGNED_EXPECTED_VERSION")); err != nil {
+			return nil, err
+		}
+	}
 	if err = checkJournals(root, scope); err != nil {
 		return nil, err
 	}

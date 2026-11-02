@@ -28,6 +28,9 @@ function createDesktopBridge(ipcRenderer) {
     updateStatus: () => ipcRenderer.invoke("lazymind:update:status"),
     updateCheck: () => ipcRenderer.invoke("lazymind:update:check"),
     updateDownload: (releaseId) => ipcRenderer.invoke("lazymind:update:download", releaseId),
+    updateResume: () => ipcRenderer.invoke("lazymind:update:resume"),
+    updateInstall: (releaseId) => ipcRenderer.invoke("lazymind:update:install", releaseId),
+    updateLater: () => ipcRenderer.invoke("lazymind:update:later"),
     updateCancel: () => ipcRenderer.invoke("lazymind:update:cancel"),
     updateReveal: () => ipcRenderer.invoke("lazymind:update:reveal"),
     onUpdateState: (handler) => {

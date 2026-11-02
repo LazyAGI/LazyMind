@@ -52,6 +52,8 @@
   "2004813": { "en-US": "Unable to move the task to Trash. Please retry.", "zh-CN": "移入回收站失败，请重试。" },
   "2004814": { "en-US": "Task execution is stopping. Please retry restoring shortly.", "zh-CN": "任务正在停止，请稍后重试恢复。" },
   "2004815": { "en-US": "Conversation archive state has changed. Please review the archived list.", "zh-CN": "会话归档状态已变化，请查看已归档列表。" },
+  "2004816": { "en-US": "Scheduled task execution is stopping. Please retry later.", "zh-CN": "定时任务执行正在停止，请稍后重试。" },
+  "2004817": { "en-US": "An app update is about to start. Choose Update later to start new tasks.", "zh-CN": "即将更新应用。如需开始新任务，请选择“稍后更新”。" },
   "2000405": { "en-US": "Task not found", "zh-CN": "任务不存在" },
   "2000406": { "en-US": "Prompt not found", "zh-CN": "提示词不存在" },
   "2000407": { "en-US": "Conversation not found", "zh-CN": "会话不存在" },
