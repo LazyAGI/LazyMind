@@ -121,7 +121,7 @@ func publicationStatusForRead(ctx context.Context, op *DocumentPublicationOperat
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	config, err := modelconfig.LoadWriterProviderToolConfig(ctx, "wechat", op.OwnerUserID)
+	config, err := modelconfig.LoadWriterProviderConnectionConfig(ctx, "wechat", op.OwnerUserID, op.ConnectionID)
 	if err != nil {
 		return status
 	}

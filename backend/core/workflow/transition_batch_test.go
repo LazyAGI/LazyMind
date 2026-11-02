@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -267,37 +268,47 @@ func TestExecuteStaleStepPreservesLaunchIntent(t *testing.T) {
 	if params["user_input"] != "写一篇克苏鲁小说" {
 		t.Fatalf("user_input=%v, want launch intent", params["user_input"])
 	}
+	if params["launch_user_input"] != "写一篇克苏鲁小说" || params["current_user_input"] != "回退到大纲，需要包含二级标题" {
+		t.Fatalf("lost launch/current request identity: %#v", params)
+	}
 	if params["retry_hint"] != "Recovery request for this rerun only: 回退到大纲，需要包含二级标题" {
 		t.Fatalf("retry_hint=%v, want current recovery request", params["retry_hint"])
 	}
 }
 
 func TestExecuteFreshStepKeepsCurrentInput(t *testing.T) {
-	db, graphHash := setupBatchTransitionSession(t)
-	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
-		Update("intent_context", `{"text":"原始请求"}`).Error; err != nil {
-		t.Fatal(err)
-	}
+	for _, input := range []string{"当前请求", "继续", "审批通过，继续执行"} {
+		t.Run(input, func(t *testing.T) {
+			db, graphHash := setupBatchTransitionSession(t)
+			if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
+				Update("intent_context", `{"text":"原始请求"}`).Error; err != nil {
+				t.Fatal(err)
+			}
 
-	w, data := runBatchTransition(t, db, graphHash, "execute", []map[string]any{
-		{"target_step_id": "branch_b", "task_id": "fresh-task-b", "user_input": "当前请求"},
-	})
-	if w.Code != http.StatusOK || data["accepted"] != true {
-		t.Fatalf("fresh transition rejected: status=%d body=%s", w.Code, w.Body.String())
-	}
-	var task orm.SubAgentTask
-	if err := db.Where("id = ?", "fresh-task-b").First(&task).Error; err != nil {
-		t.Fatal(err)
-	}
-	var params map[string]any
-	if err := json.Unmarshal(task.Params, &params); err != nil {
-		t.Fatal(err)
-	}
-	if params["user_input"] != "当前请求" {
-		t.Fatalf("user_input=%v, want current input", params["user_input"])
-	}
-	if _, exists := params["retry_hint"]; exists {
-		t.Fatalf("fresh execution unexpectedly received retry_hint=%v", params["retry_hint"])
+			w, data := runBatchTransition(t, db, graphHash, "execute", []map[string]any{
+				{"target_step_id": "branch_b", "task_id": "fresh-task-b", "user_input": input},
+			})
+			if w.Code != http.StatusOK || data["accepted"] != true {
+				t.Fatalf("fresh transition rejected: status=%d body=%s", w.Code, w.Body.String())
+			}
+			var task orm.SubAgentTask
+			if err := db.Where("id = ?", "fresh-task-b").First(&task).Error; err != nil {
+				t.Fatal(err)
+			}
+			var params map[string]any
+			if err := json.Unmarshal(task.Params, &params); err != nil {
+				t.Fatal(err)
+			}
+			if params["user_input"] != input {
+				t.Fatalf("user_input=%v, want current input", params["user_input"])
+			}
+			if params["launch_user_input"] != "原始请求" || params["current_user_input"] != input {
+				t.Fatalf("lost launch/current request identity: %#v", params)
+			}
+			if _, exists := params["retry_hint"]; exists {
+				t.Fatalf("fresh execution unexpectedly received retry_hint=%v", params["retry_hint"])
+			}
+		})
 	}
 }
 
@@ -569,6 +580,48 @@ func TestRetryPreservesOnlyBlockedConfigurationCheckpoint(t *testing.T) {
 				if !bytes.Equal(restored, expected) {
 					t.Fatalf("checkpoint changed: %s", restored)
 				}
+			}
+		})
+	}
+}
+
+func TestParameterFailureAllowsOneAutomaticRerunAndExplicitManualRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name, origin, operation string
+		count, want             int
+	}{
+		{"first_rerun", "automatic", "retry", 1, 200},
+		{"exhausted", "automatic", "retry", 2, 409},
+		{"manual", "user", "retry", 2, 200},
+		{"rewind_cannot_reset_budget", "automatic", "rewind", 2, 409},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			old, err := CreateSessionStep(t.Context(), db.DB, "batch-session", "branch_b", "old-task", 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = db.Model(&old).Updates(map[string]any{"status": StepStatusFailed, "terminal_code": "TOOL_ARGUMENT_RETRY_EXHAUSTED", "result_json": `{"error":"TOOL_ARGUMENT_RETRY_EXHAUSTED: save_artifacts: expected value"}`}).Error; err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < tc.count; i++ {
+				if err = db.Create(&orm.WorkflowTransitionCommand{CommandID: fmt.Sprintf("prior-%d", i), SessionID: "batch-session", TargetStepID: "branch_b", Operation: "retry", RetryOrigin: "automatic", Status: "accepted", ResponseJSON: json.RawMessage(`{}`)}).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+			oldDB, oldState := store.DB(), store.State()
+			store.Init(db.DB, db.DB, nil)
+			t.Cleanup(func() { store.Init(oldDB, oldDB, oldState) })
+			body, _ := json.Marshal(map[string]any{"command_id": "new-retry", "operation": tc.operation, "retry_origin": tc.origin,
+				"expected_state_version": 4, "graph_hash": hash, "target_step_id": "branch_b", "task_id": "new-task"})
+			req := mux.SetURLVars(httptest.NewRequest("POST", "/", bytes.NewReader(body)), map[string]string{"session_id": "batch-session"})
+			w := httptest.NewRecorder()
+			TransitionWorkflowSession(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("%d %s", w.Code, w.Body.String())
+			}
+			if tc.want == 409 && !strings.Contains(w.Body.String(), `"max_automatic_attempts":2`) {
+				t.Fatal(w.Body.String())
 			}
 		})
 	}

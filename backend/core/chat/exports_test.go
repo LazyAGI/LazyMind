@@ -94,7 +94,7 @@ func TestExportSnapshotPersistsBeforeTerminalAndSurvivesHistory(t *testing.T) {
 	terminal := completedRunEvent(runID, true)
 	server := streamServer(t, runID,
 		algorithmFrame(t, map[string]any{"text": "报告😀\n"}),
-		algorithmFrame(t, map[string]any{"runtime_event": terminal, "export_snapshot": snapshot}),
+		algorithmFrame(t, map[string]any{"runtime_event": terminal, "export_snapshot": snapshot, "tool_call_turns": 8}),
 	)
 	defer server.Close()
 	recorder := httptest.NewRecorder()
@@ -102,6 +102,7 @@ func TestExportSnapshotPersistsBeforeTerminalAndSurvivesHistory(t *testing.T) {
 		server.URL, map[string]any{"query": "question", "run_id": runID}, "conv-stream-decision", "question", "export-history",
 		chatPersistTarget{HistoryID: "export-history", Seq: 1}, json.RawMessage(`{"other":"keep"}`))
 	chunks := decodeChatChunkSSE(t, recorder.Body.String())
+	requireTerminalToolCallTurns(t, chunks, "export-history", 8)
 	sawExports := false
 	for _, chunk := range chunks {
 		if chunk.Exports != nil {
@@ -121,7 +122,7 @@ func TestExportSnapshotPersistsBeforeTerminalAndSurvivesHistory(t *testing.T) {
 	if err := db.First(&history, "id = ?", "export-history").Error; err != nil {
 		t.Fatal(err)
 	}
-	if history.Result != snapshot.Content || strings.Contains(buildAssistantHistoryContent(history), ":::export") {
+	if history.ToolCallTurns != 8 || history.Result != snapshot.Content || strings.Contains(buildAssistantHistoryContent(history), ":::export") {
 		t.Fatalf("history=%q", history.Result)
 	}
 	if len(chatExportsFromExt(history.Ext)) != 1 || !strings.Contains(string(history.Ext), `"other":"keep"`) {
@@ -237,7 +238,11 @@ func TestDualAnswerExportsRemainIndependent(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte(algorithmFrame(t, map[string]any{"text": "body\n"}) + "\n"))
-		_, _ = w.Write([]byte(algorithmFrame(t, map[string]any{"runtime_event": completedRunEvent(request.Conversation.RunID, true), "export_snapshot": snapshot}) + "\n"))
+		turns := 3
+		if request.Conversation.RunID == "first-run" {
+			turns = 8
+		}
+		_, _ = w.Write([]byte(algorithmFrame(t, map[string]any{"runtime_event": completedRunEvent(request.Conversation.RunID, true), "export_snapshot": snapshot, "tool_call_turns": turns}) + "\n"))
 	}))
 	defer server.Close()
 	recorder := httptest.NewRecorder()
@@ -256,6 +261,19 @@ func TestDualAnswerExportsRemainIndependent(t *testing.T) {
 		if h.Result != "body" || len(exports) != 1 {
 			t.Fatalf("history=%+v", h)
 		}
+		want := 3
+		if h.ID == "first" {
+			want = 8
+		}
+		if h.ToolCallTurns != want {
+			t.Fatalf("candidate %s count=%d, want %d", h.ID, h.ToolCallTurns, want)
+		}
+		requireTerminalToolCallTurns(t, decodeChatChunkSSE(t, recorder.Body.String()), h.ID, want)
+		cached, err := getChatChunks(t.Context(), stateStore, "conv-stream-decision", h.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requireToolCallTurns(t, mergeChunksToFirstChunk(cached), want)
 		ids[exports[0].ExportID] = true
 	}
 	if len(ids) != 2 {

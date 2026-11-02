@@ -199,10 +199,12 @@ func ListGroups(w http.ResponseWriter, r *http.Request) {
 		query = query.Where("g.is_task_conv=?", raw[0] == "true")
 	}
 	if keyword := strings.TrimSpace(r.URL.Query().Get("keyword")); keyword != "" {
-		pattern := "%" + strings.ToLower(keyword) + "%"
-		matches := store.DB().Table("conversation_group_members sm").Select("1").Joins("JOIN conversations sc ON sc.id=sm.conversation_id").Joins("LEFT JOIN conversation_opening_metadata so ON so.conversation_id=sc.id").Where("sm.group_id=g.id AND sc.deleted_at IS NULL AND sc.archived_at IS NULL AND (LOWER(sc.display_name) LIKE ? OR LOWER(so.summary) LIKE ?)", pattern, pattern)
-		matches = matches.Where("sc.id IN (?)", sourceIDs)
-		query = query.Where("LOWER(g.name) LIKE ? OR LOWER(g.project_path) LIKE ? OR EXISTS (?)", pattern, pattern, matches)
+		db := store.DB().WithContext(r.Context())
+		matches := db.Table("conversation_group_members sm").Select("1").Joins("JOIN conversations sc ON sc.id=sm.conversation_id").
+			Where("sm.group_id=g.id AND sm.user_id = ? AND sc.deleted_at IS NULL AND sc.archived_at IS NULL", uid).
+			Where("sc.id IN (?)", sourceIDs).
+			Where("sc.id IN (?)", common.ConversationKeywordIDs(db, uid, keyword))
+		query = query.Where("g.id IN (?) OR EXISTS (?)", common.ConversationGroupKeywordIDs(db, uid, keyword), matches)
 	}
 	err = query.Scan(&rows).Error
 	if err != nil {
@@ -260,8 +262,7 @@ func GetGroup(w http.ResponseWriter, r *http.Request) {
 	}, 0)
 	base = base.Joins("LEFT JOIN conversation_opening_metadata o ON o.conversation_id=c.id")
 	if keyword := strings.TrimSpace(r.URL.Query().Get("keyword")); keyword != "" {
-		pattern := "%" + strings.ToLower(keyword) + "%"
-		base = base.Where("LOWER(c.display_name) LIKE ? OR LOWER(o.summary) LIKE ?", pattern, pattern)
+		base = base.Where("c.id IN (?)", common.ConversationKeywordIDs(db, uid, keyword))
 	}
 	var filtered int64
 	if err := base.Count(&filtered).Error; err != nil {

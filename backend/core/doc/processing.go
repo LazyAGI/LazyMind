@@ -170,6 +170,10 @@ func UpdateProcessingLevel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := validateAcademicScenario(r.Context(), store.DB(), userID, ds.Scene, level); err != nil {
+		common.ReplyErr(w, err.Error(), 400)
+		return
+	}
 	if systemdeps.PythonComponentActive("rag") && level == ProcessingLevelIndexed && replyEmbedNotReady(w, r, userID) {
 		return
 	}

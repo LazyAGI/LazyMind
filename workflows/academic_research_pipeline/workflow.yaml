@@ -90,65 +90,65 @@ steps:
   - {id: process_summary, label: 研究与写作过程记录}
 
 slots:
-  - {id: research_topic, label: 研究主题, type: text, cardinality: single, external: true, exposed: false}
-  - {id: word_target, label: 目标篇幅, type: text, cardinality: single, external: true, exposed: false}
-  - {id: paper_type, label: 论文类型, type: text, cardinality: single, external: true, exposed: false}
-  - {id: paper_language, label: 正文语言, type: text, cardinality: single, external: true, exposed: false}
-  - {id: citation_style, label: 引用格式, type: text, cardinality: single, external: true, exposed: false}
-  - {id: output_format, label: 导出格式, type: text, cardinality: single, external: true, exposed: false}
+  - {id: research_topic, user_visible: false, label: 研究主题, type: text, cardinality: single, external: true, exposed: false}
+  - {id: word_target, user_visible: false, label: 目标篇幅, type: text, cardinality: single, external: true, exposed: false}
+  - {id: paper_type, user_visible: false, label: 论文类型, type: text, cardinality: single, external: true, exposed: false}
+  - {id: paper_language, user_visible: false, label: 正文语言, type: text, cardinality: single, external: true, exposed: false}
+  - {id: citation_style, user_visible: false, label: 引用格式, type: text, cardinality: single, external: true, exposed: false}
+  - {id: output_format, user_visible: false, label: 导出格式, type: text, cardinality: single, external: true, exposed: false}
 
-  - {id: generation_parameters, label: 已确认研究参数, type: json, cardinality: single, exposed: true}
-  - {id: research_question_brief, label: 研究问题简报, type: text, cardinality: single, exposed: true}
-  - {id: methodology_blueprint, label: 方法论蓝图, type: text, cardinality: single, exposed: true}
-  - {id: literature_evidence, label: 已注册检索证据, type: text, cardinality: single, exposed: true}
-  - {id: search_log, label: 检索策略与执行记录, type: text, cardinality: single, exposed: true}
-  - {id: annotated_bibliography, label: 注释书目与来源核验, type: text, cardinality: single, exposed: true}
-  - {id: research_synthesis, label: 主题综合、矛盾与研究空白, type: text, cardinality: single, exposed: true}
+  - {id: generation_parameters, user_visible: false, label: 已确认研究参数, type: json, cardinality: single, exposed: true}
+  - {id: research_question_brief, user_visible: true, label: 研究问题简报, type: text, cardinality: single, exposed: true}
+  - {id: methodology_blueprint, user_visible: true, label: 方法论蓝图, type: text, cardinality: single, exposed: true}
+  - {id: literature_evidence, user_visible: false, label: 已注册检索证据, type: text, cardinality: single, exposed: true}
+  - {id: search_log, user_visible: false, label: 检索策略与执行记录, type: text, cardinality: single, exposed: true}
+  - {id: annotated_bibliography, user_visible: true, label: 注释书目与来源核验, type: text, cardinality: single, exposed: true}
+  - {id: research_synthesis, user_visible: true, label: 主题综合、矛盾与研究空白, type: text, cardinality: single, exposed: true}
 
-  - {id: writing_task, label: Writer 写作任务, type: file, cardinality: single, exposed: false}
-  - {id: resource_profiles, label: Writer 资源画像, type: file, cardinality: single, exposed: false}
-  - {id: writing_context, label: Writer 写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: outline_document, label: 论文大纲, type: file, cardinality: single, exposed: true}
-  - {id: outline_check_report, label: 大纲检查报告, type: text, cardinality: single, exposed: true}
-  - {id: writing_context_after_outline, label: 大纲后写作上下文, type: file, cardinality: single, exposed: false}
-  - {id: effective_outline_check_report, label: 批准大纲一致性检查, type: text, cardinality: single, exposed: true}
-  - {id: section_instructions, label: Writer 章节规划, type: file, cardinality: single, exposed: false}
-  - {id: chapter_drafts, label: 分章生成稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: draft_document, label: 论文初稿, type: file, cardinality: single, exposed: true}
-  - {id: writing_context_after_draft, label: 初稿后写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: writing_task, user_visible: false, label: Writer 写作任务, type: file, cardinality: single, exposed: false}
+  - {id: resource_profiles, user_visible: false, label: Writer 资源画像, type: file, cardinality: single, exposed: false}
+  - {id: writing_context, user_visible: false, label: Writer 写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: outline_document, user_visible: true, label: 论文大纲, type: file, cardinality: single, exposed: true}
+  - {id: outline_check_report, user_visible: false, label: 大纲检查报告, type: text, cardinality: single, exposed: true}
+  - {id: writing_context_after_outline, user_visible: false, label: 大纲后写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: effective_outline_check_report, user_visible: false, label: 批准大纲一致性检查, type: text, cardinality: single, exposed: true}
+  - {id: section_instructions, user_visible: false, label: Writer 章节规划, type: file, cardinality: single, exposed: false}
+  - {id: chapter_drafts, user_visible: false, label: 分章生成稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: draft_document, user_visible: true, label: 论文初稿, type: file, cardinality: single, exposed: true}
+  - {id: writing_context_after_draft, user_visible: false, label: 初稿后写作上下文, type: file, cardinality: single, exposed: false}
 
-  - {id: pre_integrity_report, label: 审稿前完整性报告, type: text, cardinality: single, exposed: true}
-  - {id: pre_integrity_summary, label: 审稿前检查摘要, type: json, cardinality: single, exposed: true}
-  - {id: reviewer_configuration, label: 审稿视角配置, type: text, cardinality: single, exposed: true}
-  - {id: review_reports, label: 五视角审稿报告, type: text, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
-  - {id: editorial_decision, label: 编辑决定, type: text, cardinality: single, exposed: true}
-  - {id: revision_roadmap, label: 修订路线图, type: text, cardinality: single, exposed: true}
+  - {id: pre_integrity_report, user_visible: false, label: 审稿前完整性报告, type: text, cardinality: single, exposed: true}
+  - {id: pre_integrity_summary, user_visible: false, label: 审稿前检查摘要, type: json, cardinality: single, exposed: true}
+  - {id: reviewer_configuration, user_visible: false, label: 审稿视角配置, type: text, cardinality: single, exposed: true}
+  - {id: review_reports, user_visible: true, label: 五视角审稿报告, type: text, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: editorial_decision, user_visible: true, label: 编辑决定, type: text, cardinality: single, exposed: true}
+  - {id: revision_roadmap, user_visible: true, label: 修订路线图, type: text, cardinality: single, exposed: true}
 
-  - {id: revision_task, label: 一轮修订任务, type: file, cardinality: single, exposed: false}
-  - {id: revision_locate_result, label: 一轮修订定位, type: file, cardinality: single, exposed: false}
-  - {id: revision_modify_plan, label: 一轮修订计划, type: file, cardinality: single, exposed: false}
-  - {id: revision_set, label: 一轮修订集, type: file, cardinality: single, exposed: false}
-  - {id: revision_result, label: 一轮修订结果, type: file, cardinality: single, exposed: false}
-  - {id: revised_document, label: 一轮修订稿, type: file, cardinality: single, exposed: true}
-  - {id: revision_response, label: 一轮修订响应表, type: text, cardinality: single, exposed: true}
-  - {id: writing_context_after_revision, label: 一轮修订后上下文, type: file, cardinality: single, exposed: false}
-  - {id: re_review_report, label: 修订验证复审报告, type: text, cardinality: single, exposed: true}
-  - {id: re_review_decision, label: 复审决定, type: text, cardinality: single, exposed: true}
+  - {id: revision_task, user_visible: false, label: 一轮修订任务, type: file, cardinality: single, exposed: false}
+  - {id: revision_locate_result, user_visible: false, label: 一轮修订定位, type: file, cardinality: single, exposed: false}
+  - {id: revision_modify_plan, user_visible: false, label: 一轮修订计划, type: file, cardinality: single, exposed: false}
+  - {id: revision_set, user_visible: false, label: 一轮修订集, type: file, cardinality: single, exposed: false}
+  - {id: revision_result, user_visible: false, label: 一轮修订结果, type: file, cardinality: single, exposed: false}
+  - {id: revised_document, user_visible: true, label: 一轮修订稿, type: file, cardinality: single, exposed: true}
+  - {id: revision_response, user_visible: true, label: 一轮修订响应表, type: text, cardinality: single, exposed: true}
+  - {id: writing_context_after_revision, user_visible: false, label: 一轮修订后上下文, type: file, cardinality: single, exposed: false}
+  - {id: re_review_report, user_visible: true, label: 修订验证复审报告, type: text, cardinality: single, exposed: true}
+  - {id: re_review_decision, user_visible: true, label: 复审决定, type: text, cardinality: single, exposed: true}
 
-  - {id: second_revision_task, label: 二轮修订任务, type: file, cardinality: single, exposed: false}
-  - {id: second_revision_locate_result, label: 二轮修订定位, type: file, cardinality: single, exposed: false}
-  - {id: second_revision_modify_plan, label: 二轮修订计划, type: file, cardinality: single, exposed: false}
-  - {id: second_revision_set, label: 二轮修订集, type: file, cardinality: single, exposed: false}
-  - {id: second_revision_result, label: 二轮修订结果, type: file, cardinality: single, exposed: false}
-  - {id: second_revised_document, label: 二轮修订稿, type: file, cardinality: single, exposed: true}
-  - {id: second_revision_response, label: 二轮修订响应表, type: text, cardinality: single, exposed: true}
+  - {id: second_revision_task, user_visible: false, label: 二轮修订任务, type: file, cardinality: single, exposed: false}
+  - {id: second_revision_locate_result, user_visible: false, label: 二轮修订定位, type: file, cardinality: single, exposed: false}
+  - {id: second_revision_modify_plan, user_visible: false, label: 二轮修订计划, type: file, cardinality: single, exposed: false}
+  - {id: second_revision_set, user_visible: false, label: 二轮修订集, type: file, cardinality: single, exposed: false}
+  - {id: second_revision_result, user_visible: false, label: 二轮修订结果, type: file, cardinality: single, exposed: false}
+  - {id: second_revised_document, user_visible: true, label: 二轮修订稿, type: file, cardinality: single, exposed: true}
+  - {id: second_revision_response, user_visible: true, label: 二轮修订响应表, type: text, cardinality: single, exposed: true}
 
-  - {id: final_integrity_report, label: 最终完整性报告, type: text, cardinality: single, exposed: true}
-  - {id: final_integrity_summary, label: 最终完整性摘要, type: json, cardinality: single, exposed: true}
-  - {id: final_paper_markdown, label: 最终论文 Markdown, type: file, cardinality: single, exposed: true}
-  - {id: final_paper, label: 最终交付文件, type: file, cardinality: single, exposed: true}
-  - {id: delivery_metadata, label: 交付元数据, type: json, cardinality: single, exposed: true}
-  - {id: process_record, label: 研究与论文创建过程记录, type: text, cardinality: single, exposed: true}
+  - {id: final_integrity_report, user_visible: true, label: 最终完整性报告, type: text, cardinality: single, exposed: true}
+  - {id: final_integrity_summary, user_visible: false, label: 最终完整性摘要, type: json, cardinality: single, exposed: true}
+  - {id: final_paper_markdown, user_visible: true, label: 最终论文 Markdown, type: file, cardinality: single, exposed: true}
+  - {id: final_paper, user_visible: true, label: 最终交付文件, type: file, cardinality: single, exposed: true}
+  - {id: delivery_metadata, user_visible: false, label: 交付元数据, type: json, cardinality: single, exposed: true}
+  - {id: process_record, user_visible: false, label: 研究与论文创建过程记录, type: text, cardinality: single, exposed: true}
 
 ui:
   slots:

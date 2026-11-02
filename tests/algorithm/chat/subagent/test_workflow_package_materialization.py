@@ -90,9 +90,11 @@ def test_runner_loads_ppt_scripts_without_replacing_live_modules(monkeypatch, tm
     try:
         loaded = load_workflow_tools({
             'workflow_id': 'renamed-ppt', 'revision_id': 'revision-ppt',
-        }, ['ppt_prepare_style_choices'])
-        assert callable(loaded['ppt_prepare_style_choices'])
+        }, ['ppt_build_outline', 'ppt_prepare_style_choices'])
+        assert set(loaded) == {'ppt_build_outline'}
+        assert callable(loaded['ppt_build_outline'])
         assert all(sys.modules[name] is module for name, module in original_modules.items())
+        assert sys.modules['lazymind.model_config'] is lazymind.model_config
         assert hasattr(lazyllm, 'globals')
         from lazyllm import LOG
         assert LOG is not None

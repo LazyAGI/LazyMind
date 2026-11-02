@@ -66,11 +66,17 @@
   background: #eef1f6;
   border-right: 0;
   box-shadow: none;
-  transition:
-    width 180ms ease-out,
-    min-width 180ms ease-out,
-    max-width 180ms ease-out,
-    flex-basis 180ms ease-out;
+  transition: none;
+
+  &.is-manually-resized {
+    transition:
+      width 180ms ease-out,
+      min-width 180ms ease-out,
+      max-width 180ms ease-out,
+      flex-basis 180ms ease-out;
+
+    @media (prefers-reduced-motion: reduce) { transition: none; }
+  }
 
   &:has(.sider-resize-handle.is-dragging:not(.is-snapping)) {
     transition: none;

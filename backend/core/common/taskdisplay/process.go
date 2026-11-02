@@ -1,7 +1,9 @@
 package taskdisplay
 
 import (
+	"encoding/json"
 	"errors"
+	"lazymind/core/common"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -13,6 +15,12 @@ var publicID = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
 func ValidateProcessStep(step PublicProcessStep) error {
 	if !publicID.MatchString(step.StepID) || step.Revision < 1 || step.Order < 0 || step.Order > MaxProcessSteps || strings.TrimSpace(step.Title) == "" || utf8.RuneCountInString(step.Title) > 100 || utf8.RuneCountInString(step.Summary) > 300 {
 		return ErrInvalidProcessStep
+	}
+	if step.ModelSwitch != nil {
+		raw, _ := json.Marshal(step.ModelSwitch.ModelSwitchedData)
+		if step.ModelSwitch.EventID == "" || len(step.ModelSwitch.EventID) > 128 || common.ValidateModelSwitched(raw) != nil || step.Status != "succeeded" {
+			return ErrInvalidProcessStep
+		}
 	}
 	switch step.Status {
 	case "pending", "running", "succeeded", "failed", "interrupted", "canceled":

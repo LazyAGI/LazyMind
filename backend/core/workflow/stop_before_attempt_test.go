@@ -64,7 +64,7 @@ func TestStopDoesNotOverwriteSessionCompletion(t *testing.T) {
 	if err := UpdateSessionStatus(ctx, db.DB, session.ID, SessionStatusCompleted); err != nil {
 		t.Fatal(err)
 	}
-	stopWorkflowSession(ctx, db.DB, nil, session)
+	stopWorkflowSession(ctx, db.DB, nil, session, "")
 	completed, err := GetSession(ctx, db.DB, session.ID)
 	if err != nil || completed.Status != SessionStatusCompleted || completed.LastStoppedAt != nil {
 		t.Fatalf("stop overwrote completed session: %+v, %v", completed, err)

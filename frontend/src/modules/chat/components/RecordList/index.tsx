@@ -11,6 +11,7 @@ import { conversationDropPlacement, moveConversationItems, type ConversationPlac
 import ConversationRunningIndicator from "./ConversationRunningIndicator";
 import { useConversationRunningStore } from "@/modules/chat/store/conversationRunning";
 import { applyConversationOrder, isConversationPinned, sortConversationHistory, type SidebarConversation } from "./conversationHistory";
+import { readConversationSelection } from "./conversationSelection";
 import {
   CloudDownloadOutlined,
   DeleteOutlined,
@@ -44,7 +45,6 @@ import {
   Configuration as CoreConfiguration,
   ConversationsApiFactory,
   DefaultApiFactory,
-  type ConversationGroupMember,
 } from "@/api/generated/core-client";
 import {
   useCallback,
@@ -197,16 +197,36 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [keyword, setKeyword] = useState("");
     const [pageToken, setPageToken] = useState("");
     const [historyRevision, setHistoryRevision] = useState(0);
-    const [checkedList, setCheckedList] = useState<string[]>([]);
-    const [batchGroupMembers, setBatchGroupMembers] = useState<ConversationGroupMember[]>([]);
-    const [showBatchExport, setShowBatchExport] = useState(false);
-    const batchMembersByScope = useRef<Record<string, ConversationGroupMember[]>>({});
-    const updateBatchGroupMembers = useCallback((members: ConversationGroupMember[], scope = "all") => {
-      batchMembersByScope.current[scope] = members;
-      setBatchGroupMembers(Object.values(batchMembersByScope.current).flat());
+    const [checkedList, setCheckedListState] = useState<string[]>([]);
+    const checkedListRef = useRef(checkedList);
+    const setCheckedList = useCallback((next: string[] | ((previous: string[]) => string[])) => {
+      const ids = typeof next === "function" ? next(checkedListRef.current) : next;
+      checkedListRef.current = ids;
+      setCheckedListState(ids);
     }, []);
+    const restoringSelectionRef = useRef<string[] | null>(null);
+    const [showBatchExport, setShowBatchExport] = useState(false);
+    const [allBatchConversations, setAllBatchConversations] = useState<SidebarConversation[] | null>(null);
+    const [isSelectingAll, setIsSelectingAll] = useState(false);
+    const [selectionNeedsRefresh, setSelectionNeedsRefresh] = useState(false);
+    const batchSelectionRequestRef = useRef(0);
+    const selectingAllRef = useRef(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     const [batchArchiveIds, setBatchArchiveIds] = useState<string[] | null>(null);
+    const [isBatchArchiving, setIsBatchArchiving] = useState(false);
+    const batchArchiveGenerationRef = useRef(0);
+    const batchArchiveGeneration = batchArchiveGenerationRef.current;
+    const removeHistoryItemsRef = useRef<((ids: string[]) => void) | null>(removeHistoryItems);
+    removeHistoryItemsRef.current = removeHistoryItems;
+    useEffect(() => {
+      removeHistoryItemsRef.current = removeHistoryItems;
+      return () => { removeHistoryItemsRef.current = null; };
+    }, []);
+    useEffect(() => {
+      if (batchArchiveIds === null || allBatchConversations === null || isBatchArchiving) return;
+      const availableIds = new Set(allBatchConversations.filter(item => !item.organizing_run_id).map(item => item.conversation_id));
+      if (batchArchiveIds.some(id => !availableIds.has(id))) closeBatchArchive();
+    }, [batchArchiveIds, allBatchConversations, isBatchArchiving]);
     const [archiveItem, setArchiveItem] = useState<Conversation | null>(null);
     const [pinningConversationId, setPinningConversationId] = useState("");
     useEffect(() => {
@@ -225,14 +245,6 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       () => new Set(),
     );
     const [conversationFilters, setConversationFilters] = useState(readChatConversationFilters);
-    useEffect(() => {
-      setMovingConversation(null);
-      setArchiveItem(null);
-      setCheckedList([]);
-      setShowBatchExport(false);
-      batchMembersByScope.current = {};
-      setBatchGroupMembers([]);
-    }, [conversationFilters]);
     const conversationFiltersRef = useRef(conversationFilters);
     conversationFiltersRef.current = conversationFilters;
     const [externalAgents, setExternalAgents] = useState<ChatExecutorDescriptor[]>([]);
@@ -250,6 +262,19 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const batchDeleteInFlightRef = useRef(false);
     const pinningConversationRef = useRef(false);
     const historyRequestRef = useRef(0);
+    const selectionKeyword = (searchText ?? keyword).trim();
+    const selectionScope = JSON.stringify([conversationFilters, selectionKeyword]);
+    const selectionScopeRef = useRef(selectionScope);
+    selectionScopeRef.current = selectionScope;
+    useEffect(() => {
+      exitBatchMode();
+      setMovingConversation(null);
+      setArchiveItem(null);
+      setHistoryList([]);
+      setPageToken("");
+      setIsHistoryLoading(true);
+      return () => { ++batchSelectionRequestRef.current; ++batchArchiveGenerationRef.current; };
+    }, [selectionScope]);
     const historyRefreshRequiredRef = useRef(false);
     const historyViewToRestore = useRef<{ scrollTop: number; focusId?: string } | null>(null);
     useLayoutEffect(() => {
@@ -375,7 +400,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         const relation = getConversationRelation(item);
         const itemId = item.conversation_id || "";
         if (
-          !relation ||
+          !isChildConversation(item) || !relation ||
           !itemId ||
           relation.parentConversationId === itemId
         ) {
@@ -445,24 +470,102 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       { key: "recent", title: t("chat.conversationGroupRecent"), items: conversationTree.filter(node => !isConversationPinned(node.conversation)) },
     ].filter(group => group.items.length > 0), [conversationTree, t]);
 
-    const batchSelectableConversationIds = useMemo(
-      () =>
-        [...new Set([...historyList.flatMap((item) =>
-          !isChildConversation(item) && item.conversation_id &&
-          (!(compact && groupSection) || !item.group_id || isConversationPinned(item))
-            ? [item.conversation_id]
-            : [],
-        ), ...batchGroupMembers.map(item => item.conversation_id)])],
-      [historyList, batchGroupMembers, compact, groupSection],
-    );
+    const allBatchIds = useMemo(() => allBatchConversations?.map(item => item.conversation_id!) ?? [], [allBatchConversations]);
+    const matchingGroupMemberIds = useMemo(() => {
+      if (allBatchConversations === null) return undefined;
+      const groups: Record<string, string[]> = {};
+      allBatchConversations.forEach(item => {
+        if (item.group_id && item.conversation_id && !isConversationPinned(item)) {
+          (groups[item.group_id] ??= []).push(item.conversation_id);
+        }
+      });
+      return groups;
+    }, [allBatchConversations]);
+    const selectedIds = new Set(checkedList);
+    const allBatchSelected = allBatchIds.length > 0 && allBatchIds.length === selectedIds.size && allBatchIds.every(id => selectedIds.has(id));
+
+    function cancelSelectAll() {
+      ++batchSelectionRequestRef.current;
+      restoringSelectionRef.current = null;
+      selectingAllRef.current = false;
+      setIsSelectingAll(false);
+    }
+
+    function beginGroupSelection() {
+      // Version user intent when it begins, so an older group response cannot
+      // cancel a later global selection (and vice versa).
+      cancelSelectAll();
+      const requestId = batchSelectionRequestRef.current;
+      const scope = selectionScopeRef.current;
+      return () => requestId === batchSelectionRequestRef.current && scope === selectionScopeRef.current;
+    }
+
+    const invalidateBatchSelection = useCallback(() => {
+      const previousIds = restoringSelectionRef.current ?? checkedListRef.current;
+      cancelSelectAll();
+      setAllBatchConversations(null);
+      setSelectionNeedsRefresh(false);
+      setCheckedList([]);
+      // Reconcile against the complete current set, never against a loaded page.
+      // Temporarily disable actions; a new user selection cancels restoration.
+      if (previousIds.length) void loadBatchSelection(previousIds);
+    }, []);
+
+    async function loadBatchSelection(previousIds?: string[]) {
+      restoringSelectionRef.current = previousIds ?? null;
+      selectingAllRef.current = true;
+      setIsSelectingAll(true);
+      const requestId = ++batchSelectionRequestRef.current;
+      const scope = selectionScopeRef.current;
+      const [filters, query] = JSON.parse(scope) as [ChatConversationFilters, string];
+      const isCurrent = () => requestId === batchSelectionRequestRef.current && scope === selectionScopeRef.current;
+      try {
+        const conversations = await readConversationSelection(query, filters.filter === "task", filters.sources?.join(","));
+        if (!isCurrent()) return;
+        const ids = new Set(conversations.map(item => item.conversation_id!));
+        setAllBatchConversations(conversations);
+        setCheckedList(previousIds ? previousIds.filter(id => ids.has(id)) : [...ids]);
+        setSelectionNeedsRefresh(false);
+      } catch {
+        if (!isCurrent()) return;
+        if (previousIds) {
+          // Keep the user's choices on failure, but do not submit IDs whose
+          // current visibility could not be checked. Full select can retry.
+          setCheckedList(previousIds);
+          setSelectionNeedsRefresh(true);
+        }
+        message.error(t("chat.fork.historyLoadFailed"));
+      } finally {
+        if (isCurrent()) {
+          restoringSelectionRef.current = null;
+          selectingAllRef.current = false;
+          setIsSelectingAll(false);
+        }
+      }
+    }
+
+    async function selectAllConversations(checked: boolean) {
+      if (!checked) {
+        cancelSelectAll();
+        setCheckedList([]);
+        setSelectionNeedsRefresh(false);
+        return;
+      }
+      if (selectingAllRef.current) return;
+      await loadBatchSelection();
+    }
 
     function toggleBatchConversation(id: string, checked: boolean) {
       toggleBatchConversations([id], checked);
     }
 
     function toggleBatchConversations(ids: string[], checked: boolean) {
+      cancelSelectAll();
       const selectedIds = new Set(ids);
-      setCheckedList(previous => checked ? [...new Set([...previous, ...ids])] : previous.filter(item => !selectedIds.has(item)));
+      const previous = selectionNeedsRefresh ? [] : checkedListRef.current;
+      const next = checked ? [...new Set([...previous, ...ids])] : previous.filter(item => !selectedIds.has(item));
+      setCheckedList(next);
+      setSelectionNeedsRefresh(false);
     }
 
     useEffect(() => {
@@ -545,11 +648,18 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         return;
       }
       const timer = window.setTimeout(() => {
-        setKeyword(searchText);
-        getHistory({ searchText, isFirst: true });
+        setKeyword(searchText.trim());
+        getHistory({ searchText: searchText.trim(), isFirst: true });
       }, SIDEBAR_SEARCH_DEBOUNCE_MS);
       return () => window.clearTimeout(timer);
     }, [searchText]);
+
+    function fetchConversationPage(activeFilter: ChatConversationFilters, query: string, token: string) {
+      return ChatServiceApi().conversationServiceListConversations(
+        { keyword: query.trim(), pageToken: token, pageSize: 50 },
+        { params: { is_task_conv: activeFilter.filter === "task" ? "true" : "false", ...(activeFilter.sources ? { assistants: activeFilter.sources.join(",") } : {}) } },
+      );
+    }
 
     async function getHistory(params?: {
       isMore?: boolean;
@@ -560,7 +670,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       const { isMore = false, isFirst = false, searchText, preserveWindow = false } = params ?? {};
       const activeFilter = conversationFiltersRef.current;
       const requestId = ++historyRequestRef.current;
+      const scope = JSON.stringify([activeFilter, (searchText ?? keyword).trim()]);
+      const isCurrent = () => requestId === historyRequestRef.current && scope === selectionScopeRef.current;
       const replaceHistory = isFirst || historyRefreshRequiredRef.current;
+      if (replaceHistory) invalidateBatchSelection();
       const visibleCount = preserveWindow ? Math.max(1, historyList.length) : 50;
       const rememberView = () => {
         if (!preserveWindow) return;
@@ -578,11 +691,8 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         let token = replaceHistory ? "" : pageToken;
         const conversations: SidebarConversation[] = [];
         do {
-          const res = await ChatServiceApi().conversationServiceListConversations(
-            { keyword: searchText ?? keyword, pageToken: token, pageSize: 50 },
-            { params: { is_task_conv: activeFilter.filter === "task" ? "true" : "false", ...(activeFilter.sources ? { assistants: activeFilter.sources.join(",") } : {}) } },
-          );
-          if (requestId !== historyRequestRef.current) return;
+          const res = await fetchConversationPage(activeFilter, searchText ?? keyword, token);
+          if (!isCurrent()) return;
           conversations.push(...(res?.data?.conversations ?? []));
           const next = res.data.next_page_token || "";
           if (next === token) { token = ""; break; }
@@ -595,12 +705,12 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         historyRefreshRequiredRef.current = false;
         if (replaceHistory) setHistoryRevision(revision => revision + 1);
       } catch {
-        if (requestId !== historyRequestRef.current) return;
+        if (!isCurrent()) return;
         rememberView();
         message.error(t("chat.fork.historyLoadFailed"));
         setHistoryRevision(revision => revision + 1);
       } finally {
-        if (requestId === historyRequestRef.current) setIsHistoryLoading(false);
+        if (isCurrent()) setIsHistoryLoading(false);
       }
     }
 
@@ -618,10 +728,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       }
       ++historyRequestRef.current;
       setHistoryList((previous) => previous.filter((item) => !removedIds.has(item.conversation_id || "")));
-      setBatchGroupMembers((previous) => previous.filter((item) => !removedIds.has(item.conversation_id)));
+      setAllBatchConversations(previous => previous?.filter(item => !removedIds.has(item.conversation_id || "")) ?? null);
       setCheckedList((previous) => previous.filter((id) => !removedIds.has(id)));
       if (removedIds.has(currentSessionId)) {
-        onRemove([...historyList, ...batchGroupMembers].find((item) => item.conversation_id === currentSessionId)
+        onRemove(historyList.find((item) => item.conversation_id === currentSessionId)
           || { conversation_id: currentSessionId });
       }
       emitConversationGroupsChanged();
@@ -814,7 +924,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
               removeHistoryItems(deletedIds);
               setCheckedList(remainingIds);
               if (remainingIds.length) message.error(t("settingsPage.recovery.operationFailed"));
-              else setShowBatchExport(false);
+              else exitBatchMode();
             })
             .catch((error) => {
               message.error(t("settingsPage.recovery.operationFailed"));
@@ -828,17 +938,29 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }
 
     function exitBatchMode() {
+      cancelSelectAll();
+      closeBatchArchive();
       setShowBatchExport(false);
       setCheckedList([]);
-      setBatchGroupMembers([]);
+      setAllBatchConversations(null);
+      setSelectionNeedsRefresh(false);
     }
+
+    function closeBatchArchive() {
+      ++batchArchiveGenerationRef.current;
+      setBatchArchiveIds(null);
+    }
+
+    const hasLockedBatchSelection = [...(allBatchConversations ?? []), ...historyList].some(
+      item => selectedIds.has(item.conversation_id || "") && Boolean(item.organizing_run_id),
+    );
 
     const batchActionMenuItems: MenuProps["items"] = [
       {
         key: "export",
         label: t("chat.export"),
         icon: <CloudDownloadOutlined />,
-        disabled: !checkedList.length,
+        disabled: isSelectingAll || selectionNeedsRefresh || !checkedList.length,
         onClick: () => {
           if (checkedList?.length) {
             exportHistoryFn();
@@ -851,19 +973,18 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         key: "archive",
         label: t("chat.batchArchive"),
         icon: <InboxOutlined />,
-        disabled: !checkedList.length || historyList.some(
-          (item) => checkedList.includes(item.conversation_id || "") && Boolean(item.organizing_run_id),
-        ),
-        onClick: () => setBatchArchiveIds([...checkedList]),
+        disabled: isSelectingAll || selectionNeedsRefresh || !checkedList.length || hasLockedBatchSelection,
+        onClick: () => {
+          ++batchArchiveGenerationRef.current;
+          setBatchArchiveIds([...checkedList]);
+        },
       },
       {
         key: "delete",
         label: t("common.delete"),
         icon: <DeleteOutlined />,
         danger: true,
-        disabled: !checkedList.length || historyList.some(
-          (item) => checkedList.includes(item.conversation_id || "") && Boolean(item.organizing_run_id),
-        ),
+        disabled: isSelectingAll || selectionNeedsRefresh || !checkedList.length || hasLockedBatchSelection,
         onClick: () => batchDeleteHistory(),
       },
     ];
@@ -898,6 +1019,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           }
         })
         .finally(() => {
+          cancelSelectAll();
           setCheckedList([]);
         });
     }
@@ -1160,7 +1282,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           <div className="record-groups">
             {visibleSections.map((group) => (
               <div className="record-group" key={group.key}>
-                {(group.key !== "recent" || hideHeader) && <div className="record-group-title">{group.title}</div>}
+                {(group.key !== "recent" || hideHeader) && !(group.key === "pinned" && hasGlobalToolbar) && <div className="record-group-title">{group.title}</div>}
                 <Row>
                   {group.items.map((node) => renderNode(node))}
                 </Row>
@@ -1175,6 +1297,99 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         </SortableContext>
       );
     }
+
+    const hasGlobalToolbar = compact && !hideHeader && showBatchActions;
+    const splitSections = compact && (Boolean(groupSection) || hasGlobalToolbar);
+    const toolbarActions = showBatchActions ? (
+      <div className="record-toolbar-actions">
+        {showBatchExport ? (
+          <>
+            <Dropdown
+              menu={{ items: batchActionMenuItems }}
+              trigger={["click"]}
+              placement="bottomRight"
+            >
+              <Button size="small" type="link" className="record-batch-actions-trigger">
+                {t("common.actions")}
+                <DownOutlined className="record-batch-actions-caret" />
+              </Button>
+            </Dropdown>
+            <Button size="small" type="text" onClick={exitBatchMode}>
+              {t("common.cancel")}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Popover
+              open={filterPopoverOpen}
+              onOpenChange={setFilterPopoverOpen}
+              trigger="click"
+              placement="bottomRight"
+              content={
+                <div style={{ minWidth: 140 }}>
+                  <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 12, color: '#666' }}>{t("chat.filterConversationType")}</div>
+                  <Checkbox.Group
+                    value={conversationFilters.sources ?? visibleSources}
+                    onChange={(vals) => {
+                      const next = vals as string[];
+                      if (next.length === 0) {
+                        message.warning(t("chat.selectAtLeastOneConvType"));
+                        return;
+                      }
+                      selectChatConversationSources(next);
+                    }}
+                    style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
+                  >
+                    {visibleSources.map((source) => (
+                      <Checkbox key={source} value={source}>
+                        {source === "lazymind" ? t("chat.lazyMindConversation")
+                          : externalAgents.find((agent) => agent.id === source)?.display_name ?? source}
+                      </Checkbox>
+                    ))}
+                  </Checkbox.Group>
+                </div>
+              }
+            >
+              <Button
+                size="small"
+                type="text"
+                icon={<FilterOutlined />}
+                title={t("chat.filterConversationType")}
+                aria-label={t("chat.filterConversationType")}
+                style={{ padding: '0 4px' }}
+              />
+            </Popover>
+            <Tooltip title={t("settingsPage.recovery.viewArchived")}>
+              <Button size="small" type="text" icon={<InboxOutlined />}
+                aria-label={t("settingsPage.recovery.viewArchived")}
+                onClick={() => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog"))} />
+            </Tooltip>
+            <Button
+              size="small"
+              type="link"
+              style={{ padding: 0 }}
+              onClick={() => setShowBatchExport(true)}
+            >
+              {t("chat.batch")}
+            </Button>
+          </>
+        )}
+      </div>
+    ) : null;
+    const batchSelectRow = showBatchExport && (
+      <div className="record-batch-select-row" aria-busy={isSelectingAll}>
+        <Checkbox
+          indeterminate={checkedList.length > 0 && !allBatchSelected}
+          checked={allBatchSelected}
+          disabled={isSelectingAll}
+          onChange={(e: { target: { checked: boolean } }) => selectAllConversations(e.target.checked)}
+        >
+          {t("chat.selectAll")}
+          {checkedList.length > 0 && <span className="record-selected-count">{checkedList.length}</span>}
+        </Checkbox>
+        {isSelectingAll && <Spin size="small" />}
+      </div>
+    );
 
     const showOrganizerEntry = compact && !showBatchExport && conversationFilters.filter === "normal";
     return (
@@ -1203,23 +1418,36 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           title={archiveItem?.display_name}
           itemKind={(archiveItem as (Conversation & { is_task_conv?: boolean }) | null)?.is_task_conv ? "task" : "dialog"}
           onCancel={() => setArchiveItem(null)}
-          onArchived={() => {
+          onArchived={(_archivedIds, _failedIds, affectedIds) => {
             const archived = archiveItem;
             setArchiveItem(null);
             if (!archived) return;
-            removeHistoryItems([archived.conversation_id || ""]);
+            removeHistoryItems(affectedIds?.affectedIds || _archivedIds);
             showArchivedFeedback(archived);
           }}
         />
         <ArchiveConversationModal
           open={batchArchiveIds !== null}
           conversationIds={batchArchiveIds || []}
-          onCancel={() => setBatchArchiveIds(null)}
+          submitDisabled={isSelectingAll || selectionNeedsRefresh}
+          onSubmittingChange={setIsBatchArchiving}
+          onCancel={closeBatchArchive}
           onArchived={(archivedIds, failedIds, batch) => {
-            setBatchArchiveIds(null);
-            removeHistoryItems([...archivedIds, ...(batch?.skippedIds || [])]);
-            setCheckedList(failedIds);
-            if (!failedIds.length) setShowBatchExport(false);
+            const isCurrent = batchArchiveGeneration === batchArchiveGenerationRef.current && selectionScope === selectionScopeRef.current;
+            if (isCurrent) {
+              // Seed the refresh with failures before clearing successful writes.
+              // Failed targets may have left this scope while the batch ran.
+              if (failedIds.length) {
+                closeBatchArchive();
+                cancelSelectAll();
+                setCheckedList(failedIds);
+              } else exitBatchMode();
+            }
+            // Successful writes still refresh the current view. Only the batch
+            // that opened this dialog may change its selection or close it.
+            if (removeHistoryItemsRef.current) removeHistoryItemsRef.current([...archivedIds, ...(batch?.affectedIds || []), ...(batch?.skippedIds || [])]);
+            else emitConversationGroupsChanged();
+            if (!isCurrent) return;
             if (archivedIds.length) {
               showBatchArchiveFeedback({
                 count: archivedIds.length,
@@ -1230,7 +1458,15 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           }}
         />
         <ConversationMembershipModal conversation={movingConversation?.conversation_id ? { conversationId: movingConversation.conversation_id, groupId: movingConversation.group_id, title: movingConversation.display_name, isTaskConv: Boolean(movingConversation.is_task_conv) } : null} onClose={() => setMovingConversation(null)} />
-        {compact && groupSection && !showBatchExport && <>{renderItem(true)}{groupSection(undefined, [conversationFilters.filter], conversationFilters.sources?.join(","))}</>}
+        {hasGlobalToolbar && <div className="record-global-header record-header-top">
+          <div className="record-group-title">{t("chat.conversationGroupPinned")}</div>
+          {toolbarActions}
+        </div>}
+        {hasGlobalToolbar && batchSelectRow}
+        {splitSections && <div className={showBatchExport ? "export-checkbox-group" : undefined}>
+          {renderItem(true)}
+          {groupSection?.(showBatchExport ? { checkedIds: checkedList, matchingGroupMemberIds, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onInvalidate: invalidateBatchSelection, beginSelection: beginGroupSelection } : undefined, [conversationFilters.filter], conversationFilters.sources?.join(","))}
+        </div>}
         {!hideHeader && (
           <div className="record-header">
             {(!compact || showBatchActions || showOrganizerEntry) && (
@@ -1239,82 +1475,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   {compact ? t("chat.conversationGroupRecent") : title || t("chat.chatHistory")}
                 </div>
                 {showOrganizerEntry && <ConversationGroups mode="organizer" onChanged={emitConversationGroupsChanged} />}
-                {showBatchActions && (
-                  <div className="record-toolbar-actions">
-                    {showBatchExport ? (
-                      <>
-                        <Dropdown
-                          menu={{ items: batchActionMenuItems }}
-                          trigger={["click"]}
-                          placement="bottomRight"
-                        >
-                          <Button size="small" type="link" className="record-batch-actions-trigger">
-                            {t("common.actions")}
-                            <DownOutlined className="record-batch-actions-caret" />
-                          </Button>
-                        </Dropdown>
-                        <Button size="small" type="text" onClick={exitBatchMode}>
-                          {t("common.cancel")}
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Popover
-                          open={filterPopoverOpen}
-                          onOpenChange={setFilterPopoverOpen}
-                          trigger="click"
-                          placement="bottomRight"
-                          content={
-                            <div style={{ minWidth: 140 }}>
-                              <div style={{ marginBottom: 6, fontWeight: 500, fontSize: 12, color: '#666' }}>{t("chat.filterConversationType")}</div>
-                              <Checkbox.Group
-                                value={conversationFilters.sources ?? visibleSources}
-                                onChange={(vals) => {
-                                  const next = vals as string[];
-                                  if (next.length === 0) {
-                                    message.warning(t("chat.selectAtLeastOneConvType"));
-                                    return;
-                                  }
-                                  selectChatConversationSources(next);
-                                }}
-                                style={{ display: 'flex', flexDirection: 'column', gap: 8 }}
-                              >
-                                {visibleSources.map((source) => (
-                                  <Checkbox key={source} value={source}>
-                                    {source === "lazymind" ? t("chat.lazyMindConversation")
-                                      : externalAgents.find((agent) => agent.id === source)?.display_name ?? source}
-                                  </Checkbox>
-                                ))}
-                              </Checkbox.Group>
-                            </div>
-                          }
-                        >
-                          <Button
-                            size="small"
-                            type="text"
-                            icon={<FilterOutlined />}
-                            title={t("chat.filterConversationType")}
-                            aria-label={t("chat.filterConversationType")}
-                            style={{ padding: '0 4px' }}
-                          />
-                        </Popover>
-                        <Tooltip title={t("settingsPage.recovery.viewArchived")}>
-                          <Button size="small" type="text" icon={<InboxOutlined />}
-                            aria-label={t("settingsPage.recovery.viewArchived")}
-                            onClick={() => navigate(getRecoveryArchivePath(conversationFilters.filter === "task" ? "task" : "dialog"))} />
-                        </Tooltip>
-                        <Button
-                          size="small"
-                          type="link"
-                          style={{ padding: 0 }}
-                          onClick={() => setShowBatchExport(true)}
-                        >
-                          {t("chat.batch")}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                )}
+                {!compact && toolbarActions}
               </div>
             )}
             {!hideSearch && (
@@ -1325,37 +1486,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                   allowClear
                   onSearch={(value: string) => {
                     getHistory({ searchText: value, isFirst: true });
-                    setKeyword(value);
+                    setKeyword(value.trim());
                   }}
                 />
               </div>
             )}
           </div>
         )}
-        {showBatchExport && (
-          <div className="record-batch-select-row">
-            <Checkbox
-              indeterminate={
-                checkedList?.length > 0 &&
-                checkedList.length < batchSelectableConversationIds.length
-              }
-              checked={
-                batchSelectableConversationIds.length === checkedList?.length &&
-                !!checkedList?.length
-              }
-              onChange={(e) =>
-                setCheckedList(
-                  e.target.checked ? batchSelectableConversationIds : [],
-                )
-              }
-            >
-              {t("chat.selectAll")}
-              {checkedList.length > 0 && (
-                <span className="record-selected-count">{checkedList.length}</span>
-              )}
-            </Checkbox>
-          </div>
-        )}
+        {!hasGlobalToolbar && batchSelectRow}
         <div className="record-list" id={compact && groupSection ? undefined : scrollableTargetId}>
           {!isHistoryLoading && !historyList?.length && !(showBatchExport && compact && groupSection) ? (
             <div className="record-empty" role="status">
@@ -1372,14 +1510,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             >
               {showBatchExport ? (
                 <div className="export-checkbox-group">
-                  {compact && groupSection ? <>
-                    {renderItem(true)}
-                    {groupSection({ checkedIds: checkedList, onToggle: toggleBatchConversation, onToggleMany: toggleBatchConversations, onMembersChange: updateBatchGroupMembers }, [conversationFilters.filter], conversationFilters.sources?.join(","))}
-                    {renderItem(false)}
-                  </> : renderItem()}
+                  {renderItem(splitSections ? false : undefined)}
                 </div>
               ) : (
-                renderItem(compact && groupSection ? false : undefined)
+                renderItem(splitSections ? false : undefined)
               )}
             </InfiniteScroll>
           )}

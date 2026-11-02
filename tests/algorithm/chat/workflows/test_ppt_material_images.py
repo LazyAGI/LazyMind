@@ -32,15 +32,12 @@ def test_ppt_material_slot_uses_same_image_list_contract_as_image_workflow():
     assert ppt_slot == {
         **image_slot,
         'label': 'Material Images',
+        'exposed': False,
     }
 
     materials_tab = next(tab for tab in ppt['ui']['tabs'] if tab['id'] == 'materials')
     assert materials_tab['layout'] == 'list'
-    assert materials_tab['slots'] == [
-        {'id': 'uploaded_materials'},
-        {'id': 'material_summary'},
-        {'id': 'material_images'},
-    ]
+    assert materials_tab['slots'] == [{'id': 'material_summary'}]
 
 
 def test_ppt_analysis_and_material_summary_share_markdown_widget():
@@ -63,12 +60,13 @@ def test_ppt_analysis_routes_optional_collection_and_backgrounds():
 
     transitions = state['transitions']['analyze_requirements']
     assert {item['to'] for item in transitions} == {
-        'collect_materials', 'choose_style', 'plan_background_prompts', 'build_outline',
+        'collect_materials', 'plan_background_prompts', 'build_outline',
     }
     assert all(item.get('when') for item in transitions)
     routes = {item['to']: item['when'] for item in transitions}
-    assert 'preview_choice' in routes['choose_style']
-    assert all('auto' in routes[name] for name in ('plan_background_prompts', 'build_outline'))
+    assert 'choose_style' not in state['steps']
+    assert 'enabled' in routes['plan_background_prompts']
+    assert 'disabled' in routes['build_outline']
     assert state['steps']['analyze_requirements']['route'] == 'choice'
 
 

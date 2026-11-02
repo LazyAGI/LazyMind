@@ -1,3 +1,6 @@
+import json
+from unittest.mock import Mock
+
 import pytest
 from lazyllm.module.llms.onlinemodule.base import (
     ModelCallError, ModelCallTerminal, ModelFailure, ModelFailureCode,
@@ -10,7 +13,6 @@ from lazymind.conversation.schemas import TitleRequest
 
 
 def test_concurrent_requests_isolate_config_usage_and_restore_session(monkeypatch):
-    import json
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
@@ -27,7 +29,9 @@ def test_concurrent_requests_isolate_config_usage_and_restore_session(monkeypatc
         return json.dumps({'title': name, 'initial_intent_summary': name,
                            'intent_status': 'ready', 'missing_context': []})
 
-    monkeypatch.setattr(model_client, 'AutoModel', lambda **_: model)
+    mock_model = Mock(side_effect=model)
+    mock_model.formatter.return_value = mock_model
+    monkeypatch.setattr(model_client, 'AutoModel', lambda **_: mock_model)
 
     def call(name):
         before = (lazyllm.globals._sid, lazyllm.locals._sid)
@@ -48,6 +52,33 @@ def test_concurrent_requests_isolate_config_usage_and_restore_session(monkeypatc
         assert result.output['title'] == name
         assert result.usage['model_id']['model'] == name
         assert result.usage['provider_usage']['prompt_tokens'] == len(name)
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+def test_model_return_separates_reasoning_from_json(provider, provider_message, streaming):
+    config, calls = provider
+    payload = {'summary': '保留 <think>示例</think> 标签'}
+    reasoning = '示例是 {"summary":"思考中的 JSON"}，实际结果另见正文。'
+    provider_message.update(content=json.dumps(payload, ensure_ascii=False), reasoning_content=reasoning)
+    events = []
+
+    def operation(request):
+        content = model_client.call_model(
+            request, '生成会话摘要', response_format={'type': 'json_object'},
+            stream_output={'_stream_sink': events.append} if streaming else False,
+        )
+        return {'body': json.loads(content)}, {}
+
+    result = model_client.execute(TitleRequest(llm_config=config), operation)
+
+    assert result.status == 'succeeded', result
+    assert result.output['body'] == payload
+    assert len(calls) == 1
+    assert calls[0]['stream'] == streaming
+    if streaming:
+        assert any(event.get('tag') == 'think' and event.get('delta') == reasoning for event in events)
+    else:
+        assert events == []
 
 
 @pytest.mark.parametrize('code,status,retryable,expected', [

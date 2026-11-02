@@ -858,3 +858,39 @@ def test_external_document_is_not_parsed_when_authorization_denies(
         'id': 'denied', 'function': {'name': 'read_file_resource', 'arguments': {'target': str(outside)}},
     }]).results[0]
     assert not result['ok']
+
+@pytest.mark.parametrize('extension', ['txt', 'pdf', 'docx'])
+@pytest.mark.parametrize('scoped', [False, True])
+def test_workflow_inputs_read_without_chat_context(monkeypatch, tmp_path, extension, scoped):
+    _set_scope(monkeypatch, tmp_path)
+    root = tmp_path / 'attempt-1'
+    root.mkdir()
+    source = root / f'material.{extension}'
+    source.write_text('workflow evidence', encoding='utf-8')
+    monkeypatch.setattr('lazymind.chat.engine.tools.file_resources.ingest.parse_pdf_pages',
+                        lambda _: [(1, 'workflow evidence')])
+    monkeypatch.setattr(resolver, 'parse_attachment_content', lambda *_args, **_kwargs: 'workflow evidence')
+    resolver.lazyllm.globals['agentic_config'].update({
+        'agent_type': 'workflow_step', 'conversation_id': '', 'workflow_workspace_path': str(root),
+    })
+    read = workspace_tools.build_resource_read_tools()[1] if scoped else workspace_tools.read_file_resource
+    result = read(str(source))
+    assert 'workflow evidence' in result['text']
+    if extension == 'pdf':
+        assert 'workflow evidence' in read(result['file_id'])['text']
+
+
+def test_workflow_without_chat_rejects_other_attempt_and_symlink(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    root = tmp_path / 'attempt-1'
+    root.mkdir()
+    secret = tmp_path / 'other-attempt.txt'
+    secret.write_text('secret', encoding='utf-8')
+    link = root / 'escape.txt'
+    link.symlink_to(secret)
+    resolver.lazyllm.globals['agentic_config'].update({
+        'agent_type': 'workflow_step', 'conversation_id': '', 'workflow_workspace_path': str(root),
+    })
+    for target in (secret, link):
+        with pytest.raises(ToolExecutionError):
+            workspace_tools.read_file_resource(str(target))

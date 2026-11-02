@@ -700,6 +700,7 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
 
   // Add a new node — places it at the current viewport center
   const addNodeAtCenter = useCallback(() => {
+    if (readonly) return;
     const rect = containerRef.current?.querySelector(':scope > .react-flow')?.getBoundingClientRect();
     const screenCx = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
     const screenCy = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
@@ -729,7 +730,10 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
     ]);
     skipSyncRef.current = true;
     onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
-  }, [screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom]);
+    setSelectedNodeId(newId);
+    setSelectedNodeIds(new Set([newId]));
+    setSelectedEdgeId(null);
+  }, [readonly, screenToFlowPosition, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom]);
 
   const focusNode = useCallback((nodeId: string): boolean => {
     if (!getNode(nodeId)) return false;
@@ -760,6 +764,7 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
 
   const addNodeAtPosition = useCallback(
     (pos: {x:number;y:number}) => {
+      if (readonly) return;
       const newId = `step_${uuidv4().slice(0, 6)}`;
       const newNode: StepNode = {
         id: newId,
@@ -784,8 +789,11 @@ function CanvasInner({ model, errors, onModelChange, workflowModel, scenarioData
       ]);
       skipSyncRef.current = true;
       onModelChangeRef.current({ ...m, nodes: [...m.nodes, newNode], layout: newLayout });
+      setSelectedNodeId(newId);
+      setSelectedNodeIds(new Set([newId]));
+      setSelectedEdgeId(null);
     },
-    [setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom],
+    [readonly, setNodes, stableResizeEnd, stableResizeDrag, stableGetZoom],
   );
 
   const openCreateMenu=useCallback((event:MouseEvent | React.MouseEvent)=>{

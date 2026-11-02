@@ -5,7 +5,8 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { extractPdfSelectionContext } from "./pdfSelectionContext";
-import { isLearningActionCompatible, type LearningSelectionAction } from "./learningSelection";
+import { visibleLearningSelectionActions, type LearningSelectionAction } from "./learningSelection";
+import { normalizePdfSelectionText } from "./pdfSelectionText";
 import { referenceActionAtPoint, referenceActionForSelection, type PdfReferenceAction } from "./pdfReferenceGeometry";
 export type { LearningSelectionAction } from "./learningSelection";
 export type { PdfReferenceAction } from "./pdfReferenceGeometry";
@@ -13,6 +14,7 @@ export type { PdfReferenceAction } from "./pdfReferenceGeometry";
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface RenderPdfProps {
+  onPreviewError?: () => void;
   fileData: string | ArrayBuffer | File | null;
   metadata?: Record<string, unknown> | null;
   content?: string | null;
@@ -79,6 +81,7 @@ function hasUsablePdfText(value: string): boolean {
 }
 
 export default function RenderPdf({
+  onPreviewError,
   fileData,
   metadata,
   defaultPageWidth,
@@ -231,11 +234,12 @@ export default function RenderPdf({
     // during text selection. The explicit selection toolbar always wins.
     window.clearTimeout(referenceHoverTimer.current);
     window.clearTimeout(referenceHoverCloseTimer.current);
-    if ((!onAskSelection && !onTranslateSelection && !onRetranslateSelection && !onImportReferenceSelection) || !containerRef.current) {
+    if ((!onAskSelection && !onTranslateSelection && !onRetranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
       return;
     }
     const selection = window.getSelection();
-    const text = selection?.toString().trim() || "";
+    const rawText = selection?.toString().trim() || "";
+    const text = normalizePdfSelectionText(rawText);
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !text) {
       setSelectionAction(null);
       return;
@@ -277,7 +281,7 @@ export default function RenderPdf({
       selection: {
         text,
         page: selectedPageIndex + 1,
-        context: extractPdfSelectionContext(pageElement?.innerText || "", text),
+        context: normalizePdfSelectionText(extractPdfSelectionContext(pageElement?.innerText || "", rawText)),
         bbox,
       },
       left: containerRef.current.scrollLeft + Math.min(
@@ -873,7 +877,7 @@ export default function RenderPdf({
               {selectionAction.referenceAction.kind === "open" ? "打开知识库文档" : selectionAction.referenceAction.kind === "external" ? "打开链接" : "下载并加入知识库"}
             </button>
           ) : null}
-          {onAddVocabularySelection && !selectionAction.referenceHover && isSingleEnglishWord(selectionAction.selection.text) ? (
+          {onAddVocabularySelection && !selectionAction.referenceHover && /[A-Za-z]/.test(selectionAction.selection.text) ? (
             <button
               type="button"
               aria-label={addVocabularySelectionLabel}
@@ -888,7 +892,7 @@ export default function RenderPdf({
               {addVocabularySelectionLabel}
             </button>
           ) : null}
-          {!selectionAction.referenceHover && learningSelectionActions.filter((action) => isLearningActionCompatible(action, selectionAction.selection.text)).map((action) => (
+          {!selectionAction.referenceHover && visibleLearningSelectionActions(learningSelectionActions, selectionAction.selection.text, Boolean(onTranslateSelection)).map((action) => (
             <Tooltip key={action.key} title={action.disabled ? action.disabledTip : undefined}>
               <span><button type="button" aria-label={action.label} disabled={action.disabled} onMouseDown={(event)=>event.preventDefault()} onClick={() => { onLearningSelection?.(action.key,selectionAction.selection); window.getSelection()?.removeAllRanges(); setSelectionAction(null); }} style={{border:"1px solid #d9d9d9",borderRadius:6,padding:"5px 10px",background:action.disabled?"#f5f5f5":"#fff",color:action.disabled?"rgba(0,0,0,.25)":"#1677ff",cursor:action.disabled?"not-allowed":"pointer"}}>{action.label}</button></span>
             </Tooltip>
@@ -934,6 +938,7 @@ export default function RenderPdf({
           setError(null);
         }}
         onLoadError={(err) => {
+          onPreviewError?.();
           setError(err.message || "加载失败");
           setLoading(false);
         }}

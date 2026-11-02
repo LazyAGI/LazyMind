@@ -27,9 +27,12 @@ describe("conversation renaming", () => {
     expect(screen.getByRole("dialog", { name: "conversationOrganizer.renameConversation" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "common.save" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "common.cancel" })).toBeInTheDocument();
-    expect(input).toHaveFocus();
-    expect(input.selectionStart).toBe(0);
-    expect(input.selectionEnd).toBe("Original".length);
+    // The loaded value can appear before the focus/select effect has run.
+    await waitFor(() => {
+      expect(input).toHaveFocus();
+      expect(input.selectionStart).toBe(0);
+      expect(input.selectionEnd).toBe("Original".length);
+    });
     fireEvent.click(input);
     fireEvent.change(input, { target: { value: "Draft" } });
     fireEvent.keyDown(input, { key: "Escape" });

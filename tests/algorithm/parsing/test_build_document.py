@@ -157,10 +157,10 @@ def test_build_document_wires_readers_groups_and_embeddings(monkeypatch):
     docs = build_document.build_document()
 
     assert docs.kwargs['name'] == build_document.ALGO_ID
-    assert docs.kwargs['embed'] == {
-        key: f'emb-{key}'
-        for key in build_document.EMBED_KEYS
-    }
+    from lazymind.embedding_options import EmbeddingModel
+    assert isinstance(docs.kwargs['embed']['embed_main'], EmbeddingModel)
+    assert docs.kwargs['embed']['embed_main'].model == 'emb-embed_main'
+    assert docs.kwargs['embed']['embed_image'] == 'emb-embed_image'
     assert docs.kwargs['manager'].kwargs['store_conf'] == {'index_kwargs': build_document.EMBED_INDEX_KWARGS}
     assert docs.kwargs['manager'].kwargs['url'] == 'http://processor.test'
     assert ('*.pdf', 'pdf-reader') in docs.readers

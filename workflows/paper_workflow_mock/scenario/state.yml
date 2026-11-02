@@ -1,0 +1,20 @@
+initial: __start__
+transitions:
+  __start__:
+  - to: acknowledge
+  acknowledge:
+  - to: __end__
+steps:
+  acknowledge:
+    prompt: '{{runtime_instruction}}
+
+      调用 academic_handoff_submit，它会读取服务端交接，原样保存完整输入并自动发布 handoff_receipt。返回 artifact.status=ok 后立即完成，简短说明任务类型、论文数量及“材料已接收，生成能力待对接”。不要向用户展示内部标识；不要重抄交接 JSON，不要再次调用 save_artifacts，不编造正式综述、心得正文、PPT 文件或已核验结论。阅读心得可独立结束。'
+    tools:
+    - academic_handoff_submit
+    - academic_handoff_context
+    - academic_read_paper
+    outputs:
+    - material: handoff_receipt
+    inputs:
+    - material: task_context
+      required: true

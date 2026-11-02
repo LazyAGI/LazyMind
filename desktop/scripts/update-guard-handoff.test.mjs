@@ -81,6 +81,7 @@ test("the actual main entry stops only the unsigned guard and prevents restart w
       browserRecorders: new Set(), desktopUpdateAdmission: true, runtimeStopping: false,
       agentHostRestartTimer: undefined, agentHostStableTimer: undefined, clearTimeout,
       agentHostProcess: null, runtimeProcess: null, guardProcess: guard, guardPID: 0,
+      agentRecovery: { stop: async () => {} },
       managedBrowser: { clear: async () => calls.push("browser") },
       stopDesktopUpdateChild: async child => { if (child === guard) { assert.equal(calls.at(-1), "stop"); calls.push("guard"); } },
       runSidecar: async (_command, args) => { calls.push(args[1]); return JSON.stringify(args[1] === "stop" ? { status: "stopped" } : { active: 0, paused: true, epoch: Number(args[3]) }); },

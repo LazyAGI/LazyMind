@@ -690,6 +690,8 @@ export interface CreateDatabaseResponse {
  * @interface Dataset
  */
 export interface Dataset {
+  /** Persisted knowledge scene. */
+  scene?: string;
   /**
    * The resource name of the dataset. Full resource path in the format: datasets/{dataset} This is the canonical identifier used in API calls and resource references.
    * @type {string}

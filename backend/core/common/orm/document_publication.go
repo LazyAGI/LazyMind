@@ -7,6 +7,8 @@ import (
 
 // Publication operations retain external outcomes separately from local commits.
 type DocumentPublicationOperation struct {
+	PublicationID      string          `gorm:"not null;default:'';size:64;index"`
+	ConnectionID       string          `gorm:"not null;default:'';size:255"`
 	MediaAssets        json.RawMessage `gorm:"type:json"`
 	ID                 string          `gorm:"primaryKey;size:64"`
 	OwnerUserID        string          `gorm:"not null;size:255;uniqueIndex:idx_document_publication_key,priority:1"`
@@ -42,6 +44,11 @@ type DocumentPublicationOperation struct {
 func (DocumentPublicationOperation) TableName() string { return "document_publication_operations" }
 
 type DocumentPublicationBinding struct {
+	BindingScope       string `gorm:"not null;default:'';size:64;uniqueIndex:idx_document_publication_item,priority:4"`
+	ConnectionID       string `gorm:"not null;default:'';size:255"`
+	LastSuccessHash    string `gorm:"not null;default:'';size:64"`
+	LastOperationID    string `gorm:"not null;default:'';size:64"`
+	LastSuccessAt      *time.Time
 	ID                 string          `gorm:"primaryKey;size:64"`
 	SessionID          string          `gorm:"not null;size:64;uniqueIndex:idx_document_publication_item,priority:1"`
 	SlotID             string          `gorm:"not null;size:255;uniqueIndex:idx_document_publication_item,priority:2"`

@@ -118,6 +118,7 @@ export async function createTranslationPdfJob(datasetId: string, documentId: str
   target_language: string;
   provider_type: "api" | "llm";
   provider: string;
+  provider_group_id?: string;
   model?: string;
   options_hash?: string;
   force?: boolean;
@@ -133,6 +134,7 @@ export async function createTranslationPdfJob(datasetId: string, documentId: str
   body.append("target_language", input.target_language);
   body.append("provider_type", input.provider_type);
   body.append("provider", input.provider);
+  if (input.provider_group_id) body.append("provider_group_id", input.provider_group_id);
   if (input.model) body.append("model", input.model);
   if (input.options_hash) body.append("options_hash", input.options_hash);
   body.append("force", String(Boolean(input.force)));
@@ -206,18 +208,21 @@ export async function getPdfTranslationDraft(datasetId: string, documentId: stri
 export async function retranslatePdfDraftBlock(datasetId: string, documentId: string, artifactId: string, input: {
   block_id: string;
   provider_type?: "api" | "llm";
-}): Promise<{ block_id: string; translated_text: string }> {
-  const response = await axiosInstance.post<Envelope<{ block_id: string; translated_text: string }>>(
+}): Promise<{ block_id: string; translated_text: string; provider_type: "api" | "llm"; provider: string }> {
+  const response = await axiosInstance.post<Envelope<{ block_id: string; translated_text: string; provider_type: "api" | "llm"; provider: string }>>(
     `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:retranslate`, input,
     { timeout: 10 * 60 * 1000 },
   );
   return response.data.data;
 }
 
-export async function revisePdfTranslation(datasetId: string, documentId: string, artifactId: string, overrides: Record<string, string>): Promise<PdfArtifact> {
+export async function revisePdfTranslation(datasetId: string, documentId: string, artifactId: string, overrides: Record<string, string>, source?: {
+  provider_type: "api" | "llm";
+  provider: string;
+}): Promise<PdfArtifact> {
   const response = await axiosInstance.post<Envelope<PdfArtifact>>(
     `${documentBase(datasetId, documentId)}/pdf-artifacts/${encodeURIComponent(artifactId)}:revise`,
-    { overrides },
+    { overrides, ...source },
     { timeout: 20 * 60 * 1000 },
   );
   return response.data.data;

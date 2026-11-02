@@ -151,6 +151,29 @@ Path(os.environ['BUNDLER_CAPTURE']).write_text(json.dumps(sys.argv[1:]))
         self.write_lock()
         self.assertEqual(self.mode(), 'full')
 
+    def test_featured_assets_use_frozen_catalog_verification(self):
+        self.write('skills/featured/demo/assets/cover.png', 'updated cover')
+        self.assertEqual(self.mode(), 'local')
+
+    def test_featured_definitions_and_skill_code_require_full_verification(self):
+        for path in ('skills/featured/demo/featured.yaml',
+                     'skills/featured/demo/skill/scripts/tool.py'):
+            with self.subTest(path=path):
+                self.git('reset', '--hard', self.base)
+                self.write(path, 'changed')
+                self.assertEqual(self.mode(), 'full')
+
+    def test_workflow_uses_frozen_catalog_for_cover_only_change(self):
+        self.git('checkout', '-qb', 'pr')
+        self.write('skills/featured/demo/assets/cover.png', 'updated cover')
+        self.commit()
+        self.git('checkout', '-qb', 'target', self.base)
+        self.git('merge', '--no-ff', '-qm', 'PR merge fixture', 'pr')
+        args = self.workflow_args()
+        self.assertIn('--catalog-only', args)
+        self.assertIn('--frozen-lockfile', args)
+        self.assertNotIn('--verify-lock-artifacts', args)
+
     def test_remote_source_change_requires_full_verification(self):
         self.write('skills/builtin-sources.yaml', SOURCES.replace('category: search', 'category: research'))
         self.assertEqual(self.mode(), 'full')

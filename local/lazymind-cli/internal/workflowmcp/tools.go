@@ -98,13 +98,7 @@ type ArtifactGetResult struct {
 	Rendered bool     `json:"rendered_as_mcp_content,omitempty"`
 }
 
-func workflowStartDescription(provider string) string {
-	presentation := ""
-	if provider == "codex" {
-		presentation = "Also returns interaction_url. In Codex, immediately open interaction_url once with the host open_in_codex tool (target.type=browser, target.url=interaction_url, placement=bottom), without asking the user to click a link. If the host tool is unavailable or fails, report that and provide the link. "
-	}
-	return "Create a durable Workflow session and pin its revision. Returns session_id, workflow_id, and revision_id. " + presentation + "Then call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent."
-}
+const workflowStartDescription = "Create a durable Workflow session and pin its revision. Returns session_id, workflow_id, and revision_id. The host displays the Workflow panel automatically for the bound conversation. Then call workflow.step.begin for a ready step, including auto steps; start creates the session without launching steps. A prior terminal session in this same conversation is archived atomically; a conflicting active session must be handled explicitly. Other conversations are independent."
 
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
@@ -146,21 +140,11 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, InputGetResult{Resource: resource}, nil
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.start", Title: "Start a LazyMind Workflow",
-		Description: workflowStartDescription(client.HostProvider), Annotations: write},
+		Description: workflowStartDescription, Annotations: write},
 		func(ctx context.Context, request *mcp.CallToolRequest, input StartInput) (*mcp.CallToolResult, StartResult, error) {
-			if client.HostProvider == "codex" && client.RequireHostBinding {
+			if client.ResolveDriver != nil && client.RequireHostBinding {
 				var err error
-				input.DriverSessionID, err = codexDriver(request, input.DriverSessionID)
-				if err != nil {
-					return nil, StartResult{}, err
-				}
-			}
-			if client.HostProvider == "workbuddy" && client.RequireHostBinding {
-				if client.ResolveDriver == nil || request == nil || request.Params == nil {
-					return nil, StartResult{}, errors.New("WorkBuddy native identity resolver unavailable")
-				}
-				var err error
-				input.DriverSessionID, err = client.ResolveDriver(ctx, request.Params.Arguments)
+				input.DriverSessionID, err = client.ResolveDriver(ctx, request, input.DriverSessionID)
 				if err != nil {
 					return nil, StartResult{}, err
 				}
@@ -169,7 +153,7 @@ func Register(server *mcp.Server, client *Client) {
 			return nil, value, err
 		})
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.state", Title: "Read LazyMind Workflow state",
-		Description: "Read authoritative Workflow readiness, attempts and completion state. With continuation=continue and admission.can_begin=true, call workflow.step.begin for a ready step, including human steps: human/requires_approval means review AFTER execution, not another confirmation before begin. With awaiting_executor, a leftover native attempt is still running; yield. With awaiting_user, yield for panel review.", Annotations: readOnly},
+		Description: "Read authoritative Workflow readiness, attempts and completion state. With continuation=continue and admission.can_begin=true, call workflow.step.begin for one step in control.automatic_retry_steps when present, otherwise a ready step, including human steps: human/requires_approval means review AFTER execution, not another confirmation before begin. A failed run may still have automatic retry budget; follow control admission. With awaiting_executor, a leftover native attempt is still running; yield. With awaiting_user, yield for panel review. With continuation=failed, automatic recovery is unavailable; yield for user recovery.", Annotations: readOnly},
 		func(ctx context.Context, _ *mcp.CallToolRequest, input StateInput) (*mcp.CallToolResult, Projection, error) {
 			value, err := client.State(ctx, input.SessionID)
 			return nil, value, err
@@ -219,9 +203,6 @@ func Register(server *mcp.Server, client *Client) {
 			}
 			if AwaitingReview(value.State) {
 				message := "Stop this turn. The submitted step requires user review in the Workflow panel"
-				if value.State.InteractionURL != "" {
-					message += " at " + value.State.InteractionURL
-				}
 				message += ". Do not call workflow.step.begin until the user asks to continue."
 				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: message}}}, value, nil
 			}

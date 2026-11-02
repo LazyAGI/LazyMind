@@ -89,7 +89,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid execution parameters", http.StatusServiceUnavailable)
 		return
 	}
-	config, err := modelconfig.LoadLLMConfig(r.Context(), store.DB(), task.CreateUserID)
+	config, err := modelconfig.LoadConversationLLMConfig(r.Context(), store.DB(), task.CreateUserID, task.ConversationID)
 	if err != nil {
 		common.ReplyErr(w, "model config unavailable", http.StatusServiceUnavailable)
 		return
@@ -272,6 +272,9 @@ func remoteStepContent(event TaskEvent) (string, json.RawMessage) {
 	if role == "" {
 		return "", nil
 	}
+	if event.ModelOutput != nil && (role == "text" || role == "think") {
+		value.(map[string]any)["model_output"] = event.ModelOutput
+	}
 	raw, _ := json.Marshal(value)
 	return role, raw
 }
@@ -287,6 +290,7 @@ type executionTaskDTO struct {
 
 type taskDTO struct {
 	TaskID           string          `json:"task_id"`
+	ExecutionID      string          `json:"execution_id"`
 	ConversationID   string          `json:"conversation_id"`
 	TriggerHistoryID string          `json:"trigger_history_id"`
 	Seq              int             `json:"seq_in_conversation"`
@@ -343,9 +347,10 @@ type taskProgressDTO struct {
 }
 
 type stepDTO struct {
-	Seq     int             `json:"seq"`
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"`
+	ExecutionID string          `json:"execution_id,omitempty"`
+	Seq         int             `json:"seq"`
+	Role        string          `json:"role"`
+	Content     json.RawMessage `json:"content"`
 }
 
 type artifactDTO struct {
@@ -364,6 +369,7 @@ type internalArtifactDTO struct {
 func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 	return taskDTO{
 		TaskID:           t.ID,
+		ExecutionID:      t.ExecutionID,
 		ConversationID:   t.ConversationID,
 		TriggerHistoryID: t.TriggerHistoryID,
 		Seq:              t.SeqInConversation,
@@ -400,9 +406,10 @@ func toArtifactDTO(a *orm.SubAgentArtifact, workspacePath string) artifactDTO {
 
 func toStepDTO(s *orm.SubAgentStep) stepDTO {
 	return stepDTO{
-		Seq:     s.Seq,
-		Role:    s.Role,
-		Content: normalizeJSON(s.Content, "{}"),
+		Seq:         s.Seq,
+		ExecutionID: s.ExecutionID,
+		Role:        s.Role,
+		Content:     normalizeJSON(s.Content, "{}"),
 	}
 }
 
@@ -465,6 +472,9 @@ func ListConversationTasks(w http.ResponseWriter, r *http.Request) {
 		}
 		steps, _ := LoadSteps(ctx, db, tasks[i].ID)
 		for j := range steps {
+			if tasks[i].AgentType != "workflow_step" && steps[j].ExecutionID != "" && steps[j].ExecutionID != tasks[i].ExecutionID {
+				continue
+			}
 			dto.Steps = append(dto.Steps, toStepDTO(&steps[j]))
 		}
 		out = append(out, dto)

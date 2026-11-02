@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import CloudDocumentProviderPanel from "./CloudDocumentProviderPanel";
@@ -11,6 +11,8 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.notionConnectAction": "新增 Notion 账号",
   "modelProvider.cloudDocuments.obsidianTitle": "Obsidian",
   "modelProvider.cloudDocuments.obsidianSetupGuideAction": "查看 Obsidian 接入教程",
+  "modelProvider.cloudDocuments.obsidianDeploymentStatus": "按部署配置",
+  "modelProvider.cloudDocuments.obsidianEnvironmentHint": "本地 Markdown 笔记，运行 LazyMind 的机器需能访问笔记库",
   "modelProvider.cloudDocuments.obsidianUnavailableHint": "选择 Obsidian 根目录",
   "modelProvider.cloudDocuments.obsidianConnectedStatus": "已连接",
   "modelProvider.cloudDocuments.obsidianUnavailableStatus": "未配置",
@@ -140,7 +142,7 @@ describe("CloudDocumentProviderPanel", () => {
     expect(handleManageNotionAuth).not.toHaveBeenCalled();
   });
 
-  it("shows the Obsidian setup guide only in the Desktop configuration modal", async () => {
+  it("keeps the setup guide visible alongside Desktop directory controls", async () => {
     const handleManageObsidian = vi.fn();
     const handleDisconnectObsidian = vi.fn();
     const { rerender } = render(
@@ -155,10 +157,13 @@ describe("CloudDocumentProviderPanel", () => {
     );
 
     expect(screen.getByText("Obsidian")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "查看 Obsidian 接入教程" })).not.toBeInTheDocument();
+    const cardGuide = screen.getByRole("link", { name: "查看 Obsidian 接入教程" });
+    expect(cardGuide).toHaveAttribute("href", "/cloud-documents/docs/obsidian-setup");
+    expect(cardGuide).toHaveAttribute("target", "_blank");
+    expect(cardGuide).toHaveAttribute("rel", "noopener noreferrer");
 
     fireEvent.click(screen.getByRole("button", { name: /更换根目录/ }));
-    const obsidianGuide = screen.getByRole("link", { name: "查看 Obsidian 接入教程" });
+    const obsidianGuide = within(screen.getByRole("dialog")).getByRole("link", { name: "查看 Obsidian 接入教程" });
     expect(obsidianGuide).toHaveAttribute("href", "/cloud-documents/docs/obsidian-setup");
     expect(obsidianGuide).toHaveAttribute("target", "_blank");
     expect(obsidianGuide).toHaveAttribute("rel", "noreferrer");
@@ -177,13 +182,23 @@ describe("CloudDocumentProviderPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /选择根目录/ }));
     fireEvent.click(screen.getByRole("button", { name: "选择根目录" }));
     expect(handleManageObsidian).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
+  });
 
-    rerender(<CloudDocumentProviderPanel vm={createVm({ isDesktopRuntime: false })} />);
-    expect(screen.queryByRole("heading", { name: "Obsidian" })).not.toBeInTheDocument();
-
-    rerender(<CloudDocumentProviderPanel vm={createVm()} />);
-    expect(screen.queryByRole("heading", { name: "Obsidian" })).not.toBeInTheDocument();
+  it("shows deployment guidance on the web without claiming a connection or offering native controls", () => {
+    render(<CloudDocumentProviderPanel vm={createVm({
+      isDesktopRuntime: false,
+      obsidianConfig: { configured: true, available: true, root: "/tmp/stale-desktop-root" },
+    })} />);
+    expect(screen.getByRole("heading", { name: "Obsidian" })).toBeInTheDocument();
+    expect(screen.getByText("按部署配置")).toBeInTheDocument();
+    expect(screen.getByText(/本地 Markdown 笔记/)).toBeInTheDocument();
+    expect(screen.queryByText("已连接")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /选择根目录|更换根目录/ })).not.toBeInTheDocument();
+    const guide = screen.getByRole("link", { name: "查看 Obsidian 接入教程" });
+    expect(guide).toHaveAttribute("href", "/cloud-documents/docs/obsidian-setup");
+    expect(guide).toHaveAttribute("target", "_blank");
+    expect(guide).toHaveAttribute("rel", "noopener noreferrer");
   });
 
   it("passes a modal-close callback to the native Obsidian selection flow", () => {
@@ -199,11 +214,11 @@ describe("CloudDocumentProviderPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /选择根目录/ }));
-    expect(screen.getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "选择根目录" }));
 
     expect(handleManageObsidian).toHaveBeenCalledWith(expect.any(Function));
-    expect(screen.getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByRole("link", { name: "查看 Obsidian 接入教程" })).toBeInTheDocument();
   });
 
   it("shows a blocking progress modal while the Obsidian runtime is restarting", () => {

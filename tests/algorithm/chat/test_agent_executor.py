@@ -94,6 +94,21 @@ def test_executor_creates_agent_with_shared_defaults(monkeypatch) -> None:
     agent.set_stop_tools.assert_called_once_with(['stop'])
 
 
+@pytest.mark.parametrize(('configured', 'expected'), [(65536, 32768), (8192, 8192)])
+def test_executor_applies_the_named_models_output_limit_to_a_private_copy(monkeypatch, configured, expected):
+    from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
+
+    constructor = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    original = OnlineChatModule(source='dynamic', name='llm', dynamic_auth=True,
+                                static_params={'max_tokens': configured})
+    AgentExecutor().create_agent(original, _plan(llm_config={'llm': {'max_output_tokens': '32K'}}))
+    selected = constructor.call_args.kwargs['llm']
+    assert selected is not original
+    assert selected._static_params['max_tokens'] == expected
+    assert original._static_params['max_tokens'] == configured
+
+
 def test_executor_passes_authorization_gate_to_middleware(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)
@@ -135,11 +150,12 @@ def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
     agent = MagicMock()
     constructor = MagicMock(return_value=agent)
     monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
-    stop_condition = make_cancel_stop_condition()
+    stop_condition = MagicMock(return_value=False)
 
     AgentExecutor().create_agent('llm', _plan(extra_stop_condition=stop_condition))
 
-    assert constructor.call_args.kwargs['extra_stop_condition'] is stop_condition
+    assert constructor.call_args.kwargs['extra_stop_condition'](None) is False
+    stop_condition.assert_called_once_with(None)
 
 
 def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:
@@ -553,3 +569,25 @@ def test_actual_agent_recovers_evidence_after_compaction_and_reaches_new_documen
     assert calls == sequence
     assert compressions == [1]
     assert result == 'Final answer including D'
+
+
+def test_executor_omits_tools_skills_and_live_retrieval_when_disabled(monkeypatch):
+    constructor = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(executor_mod, '_ChatWithoutTools', constructor)
+    plan = _plan(llm_config={'llm': {'features': {'tool_calling': False}}},
+                 skills=True, enable_builtin_tools=True)
+    plan.tools.append(lambda: 'should not be advertised')
+    AgentExecutor().create_agent('llm', plan)
+    kwargs = constructor.call_args.kwargs
+    assert kwargs['tools'] == []
+    assert kwargs['skills'] is False
+    assert kwargs['enable_builtin_tools'] is False
+
+
+def test_plain_chat_builds_with_the_pinned_empty_tool_manager():
+    from lazyllm.module.llms.onlinemodule.chat import OnlineChatModule
+    model = OnlineChatModule(source='dynamic', name='llm', dynamic_auth=True)
+    agent = executor_mod._ChatWithoutTools(llm=model, tools=[], skills=False, enable_builtin_tools=False)
+    assert not agent._tools_manager.all_tools
+    agent.build_agent()
+    assert not agent._fc._tools_manager.all_tools

@@ -34,7 +34,7 @@ func TestCodexDriverIdentity(t *testing.T) {
 		{name: "no identity", fail: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := codexDriver(&mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: tc.meta}}, tc.fallback)
+			got, err := CodexDriver(&mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: tc.meta}}, tc.fallback)
 			if (err != nil) != tc.fail || got != tc.want {
 				t.Fatalf("got %q, %v", got, err)
 			}
@@ -103,4 +103,13 @@ func TestControlledStartBindsBeforeReturningStateAndRetainsRetryIdentity(t *test
 		}
 	}
 
+}
+
+func TestDisconnectedHostRejectsStartBeforeCreatingCoreRun(t *testing.T) {
+	checked := false
+	client := &Client{HostProvider: "codex", RequireHostBinding: true, EnsureHostReady: func(context.Context) error { checked = true; return errors.New("reconnect Codex with CDP") }}
+	_, err := client.Start(context.Background(), StartInput{WorkflowID: "acceptance", DriverSessionID: threadUUID})
+	if !checked || err == nil || !strings.Contains(err.Error(), "reconnect Codex") {
+		t.Fatalf("unexpected start: %v", err)
+	}
 }

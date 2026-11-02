@@ -8,13 +8,15 @@ import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
 
 const api = vi.hoisted(() => ({
   listDocumentProviders: vi.fn(), publishDocument: vi.fn(), previewDocumentAction: vi.fn(), saveDocumentArtifact: vi.fn(),
+  getPublicationTargets: vi.fn(), createPublicationGroup: vi.fn(),
 }));
 vi.mock('@/modules/chat/utils/request', async original => ({
   ...await original<typeof import('@/modules/chat/utils/request')>(), WorkflowSessionApi: () => api,
 }));
 vi.mock('./useDocumentCopy', () => ({ useDocumentCopy: () => {} }));
 vi.mock('./ArtifactRewriteDialog', () => ({ ArtifactRewriteDialog: () => null }));
-vi.mock('./useWriterProviderAvailability', () => ({ useWriterProviderAvailability: () => ({ states: { feishu: 'ready' }, refresh: vi.fn() }) }));
+const availability = vi.hoisted(() => ({ states: { feishu: 'ready' }, accounts: { feishu: [{ connection_id: 'fixture-account' }] }, refresh: vi.fn() }));
+vi.mock('./useWriterProviderAvailability', () => ({ useWriterProviderAvailability: () => availability }));
 vi.mock('./DocumentPublicationRecoveryPanel', () => ({
   DocumentPublicationRecoveryPanel: ({ onAvailability }: { onAvailability: (allowed: boolean) => void }) => {
     useEffect(() => onAvailability(true), [onAvailability]); return null;
@@ -43,13 +45,14 @@ function pending<T>() {
 beforeEach(async () => {
   vi.clearAllMocks();
   localStorage.clear();
-  await i18n.changeLanguage('zh-CN');
+  await i18n.changeLanguage('en-US');
+  api.getPublicationTargets.mockResolvedValue({ data: { data: { current_hash: 'fixture', preferred_providers: ['feishu'], targets: [] } } });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-it.each([false, true])('keeps the expected content after Markdown-to-IR publication, concurrent edits=%s', async (editDuringPublish) => {
+it.each([false, true])('keeps local Markdown separate from publication results, concurrent edits=%s', async (editDuringPublish) => {
   const publication = pending<unknown>();
-  api.publishDocument.mockReturnValue(publication.promise);
+  api.createPublicationGroup.mockReturnValue(publication.promise);
   api.listDocumentProviders.mockResolvedValue({ data: { data: { providers: [{ id: 'feishu' }] } } });
   let action: SlotFooterAction | undefined;
   const slot = { ...baseSlot, document: { ...baseSlot.document!, capabilities: ['save', 'publish_document'] } } as SlotRevision;
@@ -59,35 +62,36 @@ it.each([false, true])('keeps the expected content after Markdown-to-IR publicat
   const view = render(<SlotEditingContext.Provider value={context}><DocumentArtifactEditor slot={slot} sessionId='audit-session' /></SlotEditingContext.Provider>);
   await waitFor(() => expect(action?.disabled).toBe(false));
   act(() => { void action!.onClick(); });
-  expect(api.publishDocument).toHaveBeenCalledTimes(1);
+  fireEvent.click(await screen.findByRole('button', { name: /^Publish to / }));
+  await waitFor(() => expect(api.createPublicationGroup).toHaveBeenCalledTimes(1));
+  expect(api.createPublicationGroup.mock.calls[0]).toEqual(['audit-artifact', expect.objectContaining({
+    base_revision: 1, base_draft_version: 1, targets: [expect.objectContaining({ provider: 'feishu' })],
+  }), expect.anything()]);
   if (editDuringPublish) {
     fireEvent.change(screen.getByLabelText('Markdown draft'), { target: { value: '# Original\n\nUNSAVED DURING PUBLISH' } });
     expect(screen.getByLabelText('Markdown draft')).toHaveValue('# Original\n\nUNSAVED DURING PUBLISH');
   }
-  await act(async () => publication.resolve({ data: { data: { artifact_id: 'published-artifact', revision: 2, draft_version: 1,
-    provider_synced: true, artifact_saved: true, document: { document_id: 'audit-doc', stage: 'draft', title: 'Original', blocks: [] },
-  } } }));
+  await act(async () => publication.resolve({ data: { data: { current_hash: 'fixture', preferred_providers: ['feishu'], targets: [] } } }));
   const shownContent = (screen.queryByLabelText('Markdown draft') as HTMLTextAreaElement | null)?.value
     ?? screen.queryByLabelText('IR draft')?.textContent;
   expect(shownContent).toContain(editDuringPublish ? 'UNSAVED DURING PUBLISH' : 'Original');
   if (editDuringPublish) {
-    const published = { document_id: 'audit-doc', stage: 'draft', title: 'Original', blocks: [] };
     view.rerender(<SlotEditingContext.Provider value={context}><DocumentArtifactEditor slot={{ ...slot,
-      artifact_id: 'published-artifact', revision: 2, draft_version: 1, artifact_value: { data: published },
-      document: { ...slot.document!, representation: 'ir' },
+      artifact_value: { ...slot.artifact_value }, write_back_state: 'synced_clean',
     }} sessionId='audit-session' /></SlotEditingContext.Provider>);
     expect(screen.getByLabelText('Markdown draft')).toHaveValue('# Original\n\nUNSAVED DURING PUBLISH');
     api.saveDocumentArtifact.mockImplementation(async (_id, body) => ({ data: { ok: true, result: {
       artifact_id: 'saved-local', revision: 3, draft_version: 1, value: body.value,
     } } }));
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
-    await waitFor(() => expect(api.saveDocumentArtifact).toHaveBeenCalledWith('published-artifact', expect.objectContaining({
-      base_revision: 2, base_draft_version: 1, mode: 'draft', content_type: 'text/markdown',
-      value: expect.objectContaining({ schema: 'text/markdown', text: '# Original\n\nUNSAVED DURING PUBLISH' }),
+    await waitFor(() => expect(api.saveDocumentArtifact).toHaveBeenCalledWith('audit-artifact', expect.objectContaining({
+      base_revision: 1, base_draft_version: 1, mode: 'draft', content_type: 'text/markdown',
+      value: { text: '# Original\n\nUNSAVED DURING PUBLISH' },
     }), expect.anything()));
     expect(screen.getByLabelText('Markdown draft')).toHaveValue('# Original\n\nUNSAVED DURING PUBLISH');
-    expect(api.publishDocument).toHaveBeenCalledTimes(1);
+    expect(api.createPublicationGroup).toHaveBeenCalledTimes(1);
   }
+  expect(api.publishDocument).not.toHaveBeenCalled();
 });
 
 it.each([false, true])('finishes loading the file, metadata refresh during request=%s', async (refreshDuringLoad) => {

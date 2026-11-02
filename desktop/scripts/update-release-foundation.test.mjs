@@ -68,6 +68,19 @@ function builderFixture(t, mode = "adhoc") {
     __dirname: path.dirname(configPath.pathname),
     require: (name) => {
       if (name === "node:child_process") return { execFile };
+      if (name === "../scripts/verify-macos-privacy-identity.cjs") {
+        const { verifyMacosPrivacyIdentity } = require(name);
+        return { verifyMacosPrivacyIdentity: (target, options) => verifyMacosPrivacyIdentity(target, {
+          ...options,
+          run: (args) => {
+            commands.push({ command: "/usr/bin/codesign", args });
+            const identifier = args.at(-1).endsWith("LazyMind Recorder.app") ? "ai.lazymind.recorder" : "ai.lazymind.desktop";
+            if (args.includes("--requirements")) return `designated => identifier "${identifier}" and anchor apple generic and certificate leaf[subject.OU] = "ABCDEFGHIJ"`;
+            if (args.includes("--display")) return `Identifier=${identifier}\nTeamIdentifier=ABCDEFGHIJ\nAuthority=Developer ID Application: Fixture`;
+            return "";
+          },
+        }) };
+      }
       if (name === "../scripts/build-recording-helper.cjs") {
         return { buildRecordingHelper: (options) => helperBuilds.push(options) };
       }
@@ -104,6 +117,12 @@ for (const mode of ["adhoc", "developer-id"]) {
       assert.match(bytes.toString(), /-signed-fixture$/);
       assert.equal(fs.readFileSync(path.join(f.bin, `${name}.sha256`), "utf8").trim(), sha(bytes), name);
       assert.equal(manifest.checksums[`bin/${name}`], sha(bytes), `manifest ${name}`);
+    }
+    if (mode === "developer-id") {
+      const identities = f.commands.filter(({ args }) => args.includes("--test-requirement"));
+      assert.equal(identities.length, 2, "both desktop and recorder privacy identities are checked");
+      assert.deepEqual(identities.map(({ args }) => args.at(-1)).sort(),
+        [f.app, path.join(f.app, "Contents/Resources/recording-helper/LazyMind Recorder.app")].sort());
     }
     assert.equal(manifest.version, 1);
     assert.deepEqual(manifest.features, f.features);

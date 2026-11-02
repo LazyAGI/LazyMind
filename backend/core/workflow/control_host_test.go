@@ -253,7 +253,7 @@ func TestNativeChatStopUsesControlledLifecycle(t *testing.T) {
 	if err := svc.DB.First(&session, "id = ?", "run").Error; err != nil {
 		t.Fatal(err)
 	}
-	stopWorkflowSession(context.Background(), svc.DB, nil, &session)
+	stopWorkflowSession(context.Background(), svc.DB, nil, &session, "")
 	control := currentControl(t, svc.DB)
 	if control.Continuation != "stopped" || control.Delivery == nil || control.Delivery.Kind != "cancel" {
 		t.Fatalf("chat stop did not request controlled cancellation: %+v", control)

@@ -19,7 +19,7 @@ from __future__ import annotations
 from lazyllm.tools import fc_register
 
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.base import _write_agent_data
@@ -91,13 +91,46 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         question = {'text': text, 'type': q_type, 'choices': choices}
         if q_type in ('single', 'multiple'):
             question['allow_other'] = allow_other
+        attachment = q.get('attachment')
+        if attachment is not None:
+            if q_type != 'single' or not isinstance(attachment, dict):
+                raise ToolExecutionError(
+                    f'Question {i} field "attachment" requires a single-choice question.'
+                )
+            when_choice = str(attachment.get('when_choice') or '').strip()
+            material_id = str(attachment.get('material_id') or '').strip()
+            accept = attachment.get('accept') or []
+            max_files = attachment.get('max_files', 1)
+            if when_choice not in choices:
+                raise ToolExecutionError(
+                    f'Question {i} attachment.when_choice must match a declared choice.'
+                )
+            if not material_id:
+                raise ToolExecutionError(
+                    f'Question {i} attachment.material_id is required.'
+                )
+            if not isinstance(accept, (list, tuple)) or not accept:
+                raise ToolExecutionError(
+                    f'Question {i} attachment.accept must be a non-empty list.'
+                )
+            if type(max_files) is not int or (max_files != -1 and max_files < 1):
+                raise ToolExecutionError(
+                    f'Question {i} attachment.max_files must be positive, or -1 for unlimited.'
+                )
+            question['attachment'] = {
+                'when_choice': when_choice,
+                'material_id': material_id,
+                'accept': [str(value).strip().lower() for value in accept if str(value).strip()],
+                'max_files': max_files,
+                'required': attachment.get('required') is True,
+            }
         normalised.append(question)
     return normalised
 
 
 @fc_register(host_file='NONE')
 def ask_user(
-    questions: List[Dict[str, Union[bool, str, List[str]]]],
+    questions: List[Dict[str, Any]],
     title: Optional[str] = None,
     description: Optional[str] = None,
 ) -> str:
@@ -113,7 +146,9 @@ def ask_user(
             Use `text` without `choices` when useful suggestions are unavailable.
             Otherwise use choice types with a few editable string recommendations;
             "Other" is automatic unless `allow_other=false`. Follow-up questions,
-            including those after an earlier card, use another call.
+            including those after an earlier card, use another call. A host-governed
+            conditional `attachment` may augment a single-choice question; it reuses
+            normal conversation attachments rather than adding another question type.
         title: Optional card heading.
         description: Optional subtitle.
     """

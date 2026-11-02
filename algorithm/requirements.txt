@@ -15,6 +15,7 @@ python-docx
 pillow
 lxml
 python-pptx
+fonttools>=4.0.0,<5.0.0
 uvicorn
 fastapi
 pymupdf==1.24.14

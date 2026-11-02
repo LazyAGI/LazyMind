@@ -152,6 +152,11 @@ func apiKeyForGroup(db *gorm.DB, row *orm.UserModelProviderGroup) (string, error
 		return "", credentialvault.ErrInvalidContract
 	}
 	if row.CredentialRevision < 1 {
+		if db != nil {
+			if err := db.Model(&orm.UserModelProviderGroup{}).Where("id = ? AND credential_revision < 1", row.ID).Update("credential_revision", 1).Error; err != nil {
+				return "", err
+			}
+		}
 		row.CredentialRevision = 1
 	}
 	if strings.TrimSpace(row.APIKeyCiphertext) != "" && row.CredentialVersion >= modelProviderCredentialVersion {

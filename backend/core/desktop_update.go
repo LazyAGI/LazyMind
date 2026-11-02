@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
+	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/maintenancegate"
 	"lazymind/core/common/orm"
@@ -249,4 +250,12 @@ func desktopUpdateTaskCount(ctx context.Context, db, lazy *gorm.DB, ragEnabled b
 		}
 	}
 	return total, nil
+}
+
+// Register each background owner at construction so a new runner cannot be
+// omitted from the update pause/resume lifecycle.
+func (c *desktopUpdateControl) startRunner(ctx context.Context, db *gorm.DB, options asyncjob.Options) *asyncjob.Runner {
+	r := asyncjob.Start(ctx, db, options)
+	c.participants = append(c.participants, desktopUpdateParticipant{r.PauseForUpdate, r.ResumeFromUpdate})
+	return r
 }

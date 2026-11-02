@@ -43,6 +43,8 @@ def verification_mode(base):
     changed = subprocess.run([
         'git', 'diff', '--quiet', base, 'HEAD', '--',
         *(f':(top){path}' for path in protected),
+        # Presentation assets are validated by the frozen catalog build.
+        ':(top,glob,exclude)skills/featured/*/assets/**',
     ])
     if changed.returncode:
         return 'full'

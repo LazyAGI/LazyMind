@@ -5,7 +5,7 @@ const list = vi.hoisted(() => vi.fn());
 vi.mock('@/modules/dataSource/api/clients', () => ({ dataSourceCloudOauthApi: { listConnectionsApiAuthserviceV1CloudConnectionsGet: list } }));
 beforeEach(() => vi.clearAllMocks());
 it.each([
-  ['ACTIVE', true, true, 'ready'], ['ACTIVE', false, false, 'chat-disabled'], ['EXPIRED', true, false, 'authorize'],
+  ['ACTIVE', true, true, 'ready'], ['ACTIVE', false, false, 'chat-disabled'], ['EXPIRED', true, false, 'authorize'], ['EXPIRED', true, true, 'authorize'],
   ['ACTIVE', true, false, 'authorize'], ['ACTIVE', true, undefined, 'failed'],
 ])('uses server availability (%s, %s, %s)', async (status, chat_enabled, can_use_chat, expected) => {
   list.mockResolvedValue({ data: { items: [{ status, provider_options: { chat_enabled }, can_use_chat }] } });

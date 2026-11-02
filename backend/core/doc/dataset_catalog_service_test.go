@@ -125,6 +125,52 @@ func TestDatasetCatalogServiceListDatasetUsageOrders(t *testing.T) {
 	}
 }
 
+func TestDatasetCatalogServiceListPreservesProcessingState(t *testing.T) {
+	db := newDocumentTestDB(t)
+	if err := db.AutoMigrate(&orm.DatasetUserState{}); err != nil {
+		t.Fatal(err)
+	}
+	installDatasetCatalogScanTransport(t)
+	service := mustDatasetCatalogService(t, db.DB)
+	seedDatasetCatalogDataset(t, db, "ds-chunked", "user-1", "Papers", "", nil, time.Now().UTC())
+	if err := db.Model(&orm.Dataset{}).Where("id = ?", "ds-chunked").Updates(map[string]any{
+		"processing_level":         ProcessingLevelChunked,
+		"processing_revision":      7,
+		"transition_status":        "running",
+		"reader_fallback_accepted": true,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	for _, order := range []string{"", "latest_updated", "most_used", "recent_used"} {
+		t.Run("order="+order, func(t *testing.T) {
+			result, err := service.ListDatasets(context.Background(), DatasetListRequest{UserID: "user-1", OrderBy: order, Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Datasets) != 1 {
+				t.Fatalf("datasets=%v, want ds-chunked", result.Datasets)
+			}
+			got := result.Datasets[0]
+			if got.ProcessingLevel != ProcessingLevelChunked {
+				t.Errorf("processing_level=%q, want chunked", got.ProcessingLevel)
+			}
+			if got.ProcessingRevision != 7 {
+				t.Errorf("processing_revision=%d, want 7", got.ProcessingRevision)
+			}
+			if got.TransitionStatus != "running" {
+				t.Errorf("transition_status=%q, want running", got.TransitionStatus)
+			}
+			if !got.ReaderFallbackAccepted {
+				t.Error("reader_fallback_accepted=false, want true")
+			}
+			if !got.Capabilities.Search || got.Capabilities.Retrieve {
+				t.Errorf("capabilities=%+v, want chunk search without vector retrieval", got.Capabilities)
+			}
+		})
+	}
+}
+
 func datasetIDs(datasets []Dataset) []string {
 	out := make([]string, 0, len(datasets))
 	for _, ds := range datasets {

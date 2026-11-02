@@ -61,6 +61,7 @@ def _snapshot(
         content='preferences: []\n',
         items=tuple(),
         data=PreferenceStateData(
+            max_chars=int(_cfg['preference_context_max_chars']),
             stored_items=count,
             full_projection_chars=6000 if truncated else projection_chars,
             projected_items=count - 1 if truncated else count,
@@ -82,6 +83,7 @@ def _snapshot_with_items(items, *, etag='etag'):
         content=render_preference_index('', list(items)),
         items=tuple(items),
         data=PreferenceStateData(
+            max_chars=int(_cfg['preference_context_max_chars']),
             stored_items=len(items),
             full_projection_chars=1000,
             projected_items=len(items),
@@ -230,6 +232,7 @@ def test_gate_rejects_write_tool_or_order_outside_authorized_plan():
         content='preferences: []\n',
         items=(item,),
         data=PreferenceStateData(
+            max_chars=int(_cfg['preference_context_max_chars']),
             stored_items=21,
             full_projection_chars=1000,
             projected_items=21,
@@ -774,6 +777,36 @@ def test_empty_manual_index_skips_model(monkeypatch):
         task_id='preference_organizer_empty', run_id='empty-run', user_id='u', force_analysis=True
     )
     assert result.outcome == 'no_safe_changes'
+    assert result.result.initial_state is not None
+    assert result.result.final_state == result.result.initial_state
+    assert result.result.final_state.max_chars == int(_cfg['preference_context_max_chars'])
+
+
+def test_automatic_early_return_includes_verified_state_and_budget(monkeypatch):
+    snapshot = _snapshot(1, projection_chars=100, etag='current-content')
+    monkeypatch.setattr(service, 'load_preference_state', lambda: snapshot)
+    monkeypatch.setattr(service, '_run_organizer_pass', lambda **_: pytest.fail('target already reached'))
+    result = service.organize_preferences(
+        task_id='preference_organizer_early', run_id='early-run', user_id='u',
+        expected_max_chars=snapshot.data.max_chars,
+    )
+    assert result.result.passes_attempted == 0
+    assert result.result.initial_state == snapshot.data
+    assert result.result.final_state == snapshot.data
+    assert result.result.target_reached
+
+
+def test_budget_mismatch_stops_before_model_or_mutation(monkeypatch):
+    monkeypatch.setattr(service, 'load_preference_state', lambda: _snapshot(10, truncated=True))
+    monkeypatch.setattr(service, '_run_organizer_pass', lambda **_: pytest.fail('mismatched budget called agent'))
+    result = service.organize_preferences(
+        task_id='preference_organizer_mismatch', run_id='mismatch-run', user_id='u',
+        expected_max_chars=int(_cfg['preference_context_max_chars']) + 1,
+    )
+    assert result.status == 'failed'
+    assert result.error.code == 'preference_budget_mismatch'
+    assert not result.retryable
+    assert result.result.final_state is None
 
 
 def test_gate_canonical_json_and_strict_schema():

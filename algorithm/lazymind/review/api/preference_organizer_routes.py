@@ -22,6 +22,7 @@ class PreferenceOrganizerPayload(BaseModel):
     user_id: str
     llm_config: Optional[Dict[str, Any]] = None
     force_analysis: bool = False
+    expected_max_chars: Optional[int] = Field(default=None, gt=0)
 
     @model_validator(mode='after')
     def validate_payload(self) -> 'PreferenceOrganizerPayload':

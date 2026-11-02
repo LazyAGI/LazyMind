@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"lazymind/core/common"
@@ -221,6 +222,27 @@ func workflowTaskTools(taskType string) []map[string]any {
 }
 
 func callWorkflowLLMTask(ctx context.Context, taskType, instruction string, data map[string]any, files []llmTaskFile, llmConfig map[string]any) (map[string]any, error) {
+	return callWorkflowLLMTaskWithAttempts(ctx, taskType, instruction, data, files, llmConfig, 2)
+}
+
+func callWorkflowLLMTaskWithAttempts(ctx context.Context, taskType, instruction string, data map[string]any, files []llmTaskFile, llmConfig map[string]any, attempts int) (map[string]any, error) {
+	options := map[string]any{"max_retries": attempts}
+	requestTimeout := generateTimeout
+	if taskType == "workflow.repair" {
+		requestTimeout = WorkflowRepairTimeout
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, requestTimeout)
+		defer cancel()
+		deadline, _ := ctx.Deadline()
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, workflowTaskCallError(ctx.Err())
+		}
+		// Leave time for validation, response transport and failure persistence.
+		// All model/JSON attempts share this budget, including shorter caller deadlines.
+		reserve := min(30*time.Second, remaining/10)
+		options["total_timeout_seconds"] = (remaining - reserve).Seconds()
+	}
 	payload := llmTaskRequest{
 		Mode:           "agent",
 		TaskType:       taskType,
@@ -230,14 +252,21 @@ func callWorkflowLLMTask(ctx context.Context, taskType, instruction string, data
 		Tools:          workflowTaskTools(taskType),
 		ResponseFormat: map[string]any{"type": "json_object"},
 		LLMConfig:      ensureLLMConfig(llmConfig),
-		Options:        map[string]any{"max_retries": 2},
+		Options:        options,
 	}
 	var raw map[string]any
-	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &raw, generateTimeout); err != nil {
+	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &raw, requestTimeout); err != nil {
+		if taskType == "workflow.repair" {
+			return nil, workflowTaskCallError(err)
+		}
 		return nil, err
 	}
 	if data, ok := raw["data"].(map[string]any); ok {
 		raw = data
+	}
+	if taskType == "workflow.repair" && raw["status"] == "failed" {
+		body, _ := json.Marshal(map[string]any{"detail": raw})
+		return nil, workflowTaskCallError(&common.HTTPError{Body: body})
 	}
 	if output, ok := raw["output"].(map[string]any); ok {
 		return output, nil
@@ -369,26 +398,50 @@ func GenerateScenarioScripts(ctx context.Context, req GenerateScenarioScriptsReq
 
 const repairStateMachinePath = "/api/chat/generate_workflow/repair"
 
+type WorkflowEditContext struct {
+	NodeIDs          []string                  `json:"node_ids"`
+	InputCorrections []WorkflowInputCorrection `json:"input_corrections,omitempty"`
+}
+
+// Explicit user authorization to correct an unknown required material reference.
+// It never authorizes changing a valid reference or removing a requirement.
+type WorkflowInputCorrection struct {
+	NodeID string `json:"node_id"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+}
+
 // RepairStateMachineRequest is the request body for the repair endpoint.
 type RepairStateMachineRequest struct {
-	WorkflowYAML string            `json:"workflow_yaml"`
-	StateYAML    string            `json:"state_yaml"`
-	RepairHint   string            `json:"repair_hint,omitempty"`
-	Warnings     []string          `json:"warnings,omitempty"`
-	Diagnostics  []map[string]any  `json:"diagnostics,omitempty"`
-	Target       string            `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
-	ScenarioMD   string            `json:"scenario_md,omitempty"`
-	Scripts      map[string]string `json:"scripts,omitempty"`
-	LLMConfig    map[string]any    `json:"llm_config"`
+	WorkflowYAML            string               `json:"workflow_yaml"`
+	StateYAML               string               `json:"state_yaml"`
+	RepairHint              string               `json:"repair_hint,omitempty"`
+	Warnings                []string             `json:"warnings,omitempty"`
+	Diagnostics             []map[string]any     `json:"diagnostics,omitempty"`
+	Target                  string               `json:"target,omitempty"` // 'statemachine' | 'ui' | 'scenario'
+	ScenarioMD              string               `json:"scenario_md,omitempty"`
+	Scripts                 map[string]string    `json:"scripts,omitempty"`
+	LLMConfig               map[string]any       `json:"llm_config"`
+	EditContext             *WorkflowEditContext `json:"edit_context,omitempty"`
+	PreserveCurrentWorkflow bool                 `json:"preserve_current_workflow,omitempty"`
+	RepairContext           map[string]any       `json:"repair_context,omitempty"`
+	MaxModelCalls           int                  `json:"-"`
 }
 
 // RepairStateMachineResponse is the response body from the repair endpoint.
 type RepairStateMachineResponse struct {
-	StateYAML         string            `json:"state_yaml"`
-	WorkflowYAML      string            `json:"workflow_yaml"` // may be updated when slot repair was applied
-	RemainingWarnings []string          `json:"remaining_warnings"`
-	ScenarioMD        string            `json:"scenario_md"`
-	Scripts           map[string]string `json:"scripts"`
+	StateYAML         string              `json:"state_yaml"`
+	WorkflowYAML      string              `json:"workflow_yaml"` // may be updated when slot repair was applied
+	RemainingWarnings []string            `json:"remaining_warnings"`
+	ScenarioMD        string              `json:"scenario_md"`
+	Scripts           map[string]string   `json:"scripts"`
+	NeedsInput        string              `json:"needs_input"`
+	ScriptErrors      []RepairScriptError `json:"script_errors"`
+}
+
+type RepairScriptError struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
 }
 
 // RepairStateMachine calls the repair endpoint to fix an incomplete state.yml.
@@ -404,16 +457,23 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 	for path, content := range req.Scripts {
 		files = append(files, llmTaskFile{Path: path, Content: content, ContentType: "text/x-python"})
 	}
-	raw, err := callWorkflowLLMTask(ctx, "workflow.repair", "Repair only the requested Workflow target. Prefer precise edits for local changes and return final full content for changed files.", map[string]any{
-		"workflow_yaml": req.WorkflowYAML,
-		"state_yaml":    req.StateYAML,
-		"repair_hint":   req.RepairHint,
-		"warnings":      req.Warnings,
-		"diagnostics":   req.Diagnostics,
-		"target":        req.Target,
-		"scenario_md":   req.ScenarioMD,
-		"scripts":       req.Scripts,
-	}, files, req.LLMConfig)
+	attempts := 2
+	if req.MaxModelCalls == 1 {
+		attempts = 1
+	}
+	raw, err := callWorkflowLLMTaskWithAttempts(ctx, "workflow.repair", "Repair only the requested Workflow target. Prefer precise local edits; use final full content only when necessary. Edits must match the supplied input files, not a previous candidate.", map[string]any{
+		"workflow_yaml":             req.WorkflowYAML,
+		"state_yaml":                req.StateYAML,
+		"repair_hint":               req.RepairHint,
+		"warnings":                  req.Warnings,
+		"diagnostics":               req.Diagnostics,
+		"target":                    req.Target,
+		"scenario_md":               req.ScenarioMD,
+		"scripts":                   req.Scripts,
+		"edit_context":              req.EditContext,
+		"preserve_current_workflow": req.PreserveCurrentWorkflow,
+		"repair_context":            req.RepairContext,
+	}, files, req.LLMConfig, attempts)
 	if err != nil {
 		return nil, err
 	}
@@ -422,11 +482,21 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 		WorkflowYAML: extractStringField(raw, "workflow_yaml"),
 		ScenarioMD:   extractStringField(raw, "scenario_md"),
 		Scripts:      extractScripts(raw),
+		NeedsInput:   extractStringField(raw, "needs_input"),
 	}
 	if req.Target == "scenario" && resp.StateYAML == "" {
 		resp.StateYAML = resp.ScenarioMD
 	}
 	resp.RemainingWarnings = extractStringSlice(raw, "remaining_warnings")
+	if rawErrors, ok := raw["script_errors"]; ok {
+		body, err := json.Marshal(rawErrors)
+		if err != nil {
+			return nil, fmt.Errorf("invalid script diagnostics: %w", err)
+		}
+		if err := json.Unmarshal(body, &resp.ScriptErrors); err != nil {
+			return nil, fmt.Errorf("invalid script diagnostics: %w", err)
+		}
+	}
 	return resp, nil
 }
 

@@ -10,6 +10,7 @@ import (
 )
 
 func init() {
+	registerAdditionalError("order must be a complete permutation", http.StatusBadRequest, 2003173)
 	registerAdditionalError("MCP authorization required; reconnect this service in settings", http.StatusConflict, 2003103)
 	registerAdditionalError("MCP authorization service unavailable", http.StatusServiceUnavailable, 2003104)
 	registerAdditionalError("MCP connection failed; reconnect this service if authorization has expired", http.StatusBadGateway, 2003105)

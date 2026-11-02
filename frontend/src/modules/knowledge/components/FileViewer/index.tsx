@@ -37,6 +37,7 @@ import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
 import { paragraphSelectionsOverlap } from "./paragraphSelection";
 import { extractPdfSelectionContext } from "@/components/ui/pdfSelectionContext";
+import { normalizePdfSelectionText } from "@/components/ui/pdfSelectionText";
 
 import "./index.scss";
 import type { ExcelSelection } from "./renderers/render-excel";
@@ -48,6 +49,8 @@ export interface FileViewerRef {
 
 interface FileViewerProps {
   renderMarkdown?: (markdown: string) => ReactNode;
+  data?: ArrayBuffer;
+  onPreviewError?: () => void;
   file?: string;
   fileName: string;
   segment?: Segment;
@@ -109,6 +112,9 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   const { t } = useTranslation();
   const { file, segment, onExportReadyChange } = props;
   const resolvedFileUrl = useMemo(() => normalizeProxyableUrl(file), [file]);
+  const errorCallback = useRef(props.onPreviewError);
+  errorCallback.current = props.onPreviewError;
+  const onPreviewError = useCallback(() => errorCallback.current?.(), []);
   const [loading, setLoading] = useState(false);
   const [fileData, setFileData] = useState<ArrayBuffer | null>(null);
   const [meta, setMeta] = useState<Record<string, unknown> | null>(null);
@@ -211,7 +217,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     if (event.target instanceof Node && textSelectionActionRef.current?.contains(event.target)) return;
     if (props.paragraphSelectionMode) {
       const selection=window.getSelection();
-      const text=selection?.toString().trim()||"";
+      const text=normalizePdfSelectionText(selection?.toString()||"");
       if(!selection||selection.isCollapsed||!text)return;
       const anchor=selection.anchorNode instanceof Element?selection.anchorNode:selection.anchorNode?.parentElement;
       const pageElement=anchor?.closest<HTMLElement>("[data-pdf-page-index]");
@@ -288,26 +294,36 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
   );
 
   useEffect(() => {
+    if (props.data !== undefined) {
+      setFileData(props.data); setLoading(false); setPreviewError(null);
+      return;
+    }
     if (!resolvedFileUrl) {
       setFileData(null);
       setPreviewError(null);
       return;
     }
+    let cancelled = false;
     setLoading(true);
+    setFileData(null);
     setPreviewError(null);
     getFileData(resolvedFileUrl as string | ArrayBuffer | File | Blob)
       .then((data) => {
+        if (cancelled) return;
         setFileData(data);
         setLoading(false);
       })
       .catch(() => {
+        if (cancelled) return;
+        onPreviewError();
         const uiMessage = localizeErrorCode("2000509");
         message.error(uiMessage);
         setPreviewError(uiMessage);
         setLoading(false);
         setFileData(null);
       });
-  }, [resolvedFileUrl, getFileData]);
+    return () => { cancelled = true; };
+  }, [resolvedFileUrl, getFileData, props.data, onPreviewError]);
 
   useEffect(() => {
     if (!fileData || (fileType !== "image" && fileType !== "video" && fileType !== "audio")) {
@@ -372,6 +388,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             style={{
               height: "100%",
             }}
+            onPreviewError={props.onPreviewError ? onPreviewError : undefined}
             fileData={pdfPreviewData}
             metadata={meta}
             content={content}
@@ -381,12 +398,12 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             onRetranslateSelection={props.onPdfRetranslateSelection}
             retranslateSelectionLabel="重译此段"
             onAddVocabularySelection={props.onAddVocabularySelection}
-            addVocabularySelectionLabel={t("learning.addToCollection")}
+            addVocabularySelectionLabel="加入生词"
             translateSelectionLabel={t("knowledge.translateSelection")}
             translateSelectionDisabled={!props.translationConfigured}
             translateSelectionDisabledTip={t("knowledge.translationConfigureTip")}
             translateSelectionConfigureLabel={t("knowledge.translationConfigureAction")}
-            translateSelectionConfigureUrl="/settings?section=knowledge&tool=translation"
+            translateSelectionConfigureUrl="/settings?section=model_defaults&service=translation"
             learningSelectionActions={props.learningSelectionActions}
             onLearningSelection={props.onLearningSelection}
             onPdfKindDetected={props.onPdfKindDetected}
@@ -399,6 +416,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "docx":
         return (
           <RenderWord
+            onPreviewError={props.onPreviewError ? onPreviewError : undefined}
             fileData={fileData}
             content={content}
           />
@@ -406,6 +424,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "excel":
         return (
           <RenderExcel
+            onPreviewError={props.onPreviewError ? onPreviewError : undefined}
             fileData={fileData}
             fileType={fileType}
             metadata={meta}
@@ -414,13 +433,14 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
           />
         );
       case "pptx":
-        return <RenderPpt fileData={fileData} />;
+        return <RenderPpt fileData={fileData} onPreviewError={props.onPreviewError ? onPreviewError : undefined} />;
       case "image":
         return mediaObjectUrl ? (
           <div className="file-viewer-media-container">
             <img
               alt={props.fileName}
               className="file-viewer-media file-viewer-image"
+              onError={onPreviewError}
               src={mediaObjectUrl}
             />
           </div>
@@ -432,6 +452,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
               className="file-viewer-media file-viewer-video"
               controls
               preload="metadata"
+              onError={onPreviewError}
               src={mediaObjectUrl}
               title={props.fileName}
             />
@@ -444,6 +465,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
               className="file-viewer-media file-viewer-audio"
               controls
               preload="metadata"
+              onError={onPreviewError}
               src={mediaObjectUrl}
               title={props.fileName}
             />
@@ -476,6 +498,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     pdfPreviewData,
     props.fileName,
     props.renderMarkdown,
+    props.onPreviewError,
+    onPreviewError,
     props.onPdfSelection,
     props.onPdfKindDetected,
     props.onPdfTranslateSelection,
@@ -558,7 +582,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             >
               {t("knowledge.translateSelection")}
             </button> : null}
-            {props.onAddVocabularySelection && isSingleEnglishWord(textSelectionAction.text) ? <button
+            {props.onAddVocabularySelection && /[A-Za-z]/.test(textSelectionAction.text) ? <button
               type="button"
               className="file-viewer-selection-translate"
               onMouseDown={(event) => event.preventDefault()}
@@ -571,8 +595,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
                 window.getSelection()?.removeAllRanges();
                 setTextSelectionAction(null);
               }}
-            >{t("learning.addToCollection")}</button> : null}
-            {props.learningSelectionActions?.filter((action) => isLearningActionCompatible(action, textSelectionAction.text)).map((action) => <button
+            >加入生词</button> : null}
+            {props.learningSelectionActions?.filter((action) => isLearningActionCompatible(action, textSelectionAction.text) && !(props.onPdfTranslateSelection && action.key === "translation")).map((action) => <button
               key={action.key}
               type="button"
               className="file-viewer-selection-translate"

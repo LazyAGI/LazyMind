@@ -3,6 +3,8 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,5 +154,80 @@ func TestOwnedChatHistoryPreservesKnowledgeDecisionDuringTerminalSave(t *testing
 		if ext["ask_answered"] != true || pending["ask_id"] != "confirm-current" || ext["ask_saved_answers"] == nil || ext["terminal"] != "saved" {
 			t.Fatalf("decision overwritten: %s", history.Ext)
 		}
+	}
+}
+
+func TestFallbackProgressPreservesKnowledgeConfirmationThroughResume(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		answered bool
+		incoming string
+	}{
+		{"answered_card", true, `{"ask_pending":{"ask_id":"confirm-current","knowledge_management":{"confirmation_id":"confirm-current"}},"ask_answered":false}`},
+		{"answered_card_missing_from_snapshot", true, `{}`},
+		{"new_pending_card", false, `{"ask_pending":{"ask_id":"older-confirm","knowledge_management":{"confirmation_id":"older-confirm"}},"ask_answered":true,"ask_saved_answers":{"0":"old"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db := newExternalChatTestApplication(t)
+			if err := db.AutoMigrate(&orm.ChatRunPerformance{}); err != nil {
+				t.Fatal(err)
+			}
+			stored := map[string]any{"ask_pending": map[string]any{"ask_id": "confirm-current", "knowledge_management": map[string]any{"confirmation_id": "confirm-current"}}}
+			if tc.answered {
+				stored["ask_answered"] = true
+				stored["ask_saved_answers"] = map[string]any{"0": map[string]any{"type": "boolean", "value": "__ask_user_no__"}}
+			}
+			ext, _ := json.Marshal(stored)
+			if err := db.Create(&orm.ChatHistory{ID: "knowledge-progress", ConversationID: "conversation-1", RunID: "knowledge-run", RunStatus: "generating", Ext: ext}).Error; err != nil {
+				t.Fatal(err)
+			}
+			checkConfirmation := func(fields map[string]any) {
+				t.Helper()
+				pending, _ := fields["ask_pending"].(map[string]any)
+				answered, _ := fields["ask_answered"].(bool)
+				if pending["ask_id"] != "confirm-current" || answered != tc.answered || (fields["ask_saved_answers"] != nil) != tc.answered {
+					t.Fatalf("saved confirmation overwritten: %+v", fields)
+				}
+				if tc.answered {
+					answers := fields["ask_saved_answers"].(map[string]any)
+					if answers["0"].(map[string]any)["value"] != "__ask_user_no__" {
+						t.Fatalf("saved answer changed: %+v", answers)
+					}
+				}
+			}
+			stale := json.RawMessage(tc.incoming)
+			if err := persistChatFallbackProgress(t.Context(), db, "conversation-1", "knowledge-progress", "knowledge-run", "query", "", "committed output", 1, stale, nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			var history orm.ChatHistory
+			if err := db.First(&history, "id = ?", "knowledge-progress").Error; err != nil {
+				t.Fatal(err)
+			}
+			if history.Result != "committed output" {
+				t.Fatal("model progress was not persisted")
+			}
+			checkConfirmation(chatHistoryToResponseItem(history))
+			terminal, _ := completedRunEvent("knowledge-run", true).Terminal()
+			terminalJSON, _ := json.Marshal(terminal)
+			updated, err := updateOwnedChatHistory(t.Context(), db, history.ID, history.RunID, map[string]any{"ext": stale, "run_status": "completed", "run_terminal": json.RawMessage(terminalJSON)})
+			if err != nil || !updated {
+				t.Fatalf("terminal save: updated=%v err=%v", updated, err)
+			}
+			for _, completed := range []bool{false, true} {
+				recorder := httptest.NewRecorder()
+				if completed {
+					resumeCompletedFromDB(t.Context(), db, "user-1", "conversation-1", recorder, recorder)
+				} else {
+					resumeFromDBOnly(t.Context(), db, "user-1", "conversation-1", recorder, recorder)
+				}
+				var snapshot struct {
+					Result map[string]any `json:"result"`
+				}
+				if err := json.Unmarshal([]byte(strings.TrimPrefix(strings.Split(recorder.Body.String(), "\n")[0], "data: ")), &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				checkConfirmation(snapshot.Result)
+			}
+		})
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"lazymind/core/common/orm"
 	currentmemoryapi "lazymind/core/currentmemory"
 	appLog "lazymind/core/log"
+	"lazymind/core/resourceupdate"
 )
 
 const validMemoryReferenceYAML = `---
@@ -1154,5 +1155,12 @@ func TestAutomaticEnqueueFailureWarnsWithoutRollingBackPreferenceWrite(t *testin
 	}
 	if warning["level"] != "warn" || warning["event"] != "preference_organizer_enqueue_failed" || warning["user_id"] != "u1" || warning["etag"] == "" {
 		t.Fatalf("missing warning context: %v", warning)
+	}
+	if err := db.Callback().Create().Remove("test:enqueue_failure"); err != nil {
+		t.Fatal(err)
+	}
+	_, created, err := resourceupdate.EnqueuePreferenceOrganizerIfNeeded(t.Context(), db.DB, "u1", 5000, time.Now().UTC())
+	if err != nil || !created {
+		t.Fatalf("background reconciliation did not repair missed admission: created=%v err=%v", created, err)
 	}
 }

@@ -11,6 +11,7 @@ import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { isTaskFinishedWithinDays } from './recentResults';
 import { CONVERSATION_TITLE_CHANGED_EVENT, getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
+import { WORKFLOW_TASKS_CHANGED } from './events';
 
 const SECTION_LIMIT = 5;
 const ATTENTION_LIMIT = 3;
@@ -67,9 +68,11 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
       void load();
     };
     window.addEventListener(TASKS_REMOVED_EVENT, removed);
+    window.addEventListener(WORKFLOW_TASKS_CHANGED, renamed);
     window.addEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
     return () => {
       ++request.current;
+      window.removeEventListener(WORKFLOW_TASKS_CHANGED, renamed);
       window.removeEventListener(CONVERSATION_TITLE_CHANGED_EVENT, renamed);
       window.removeEventListener(TASKS_REMOVED_EVENT, removed);
     };
@@ -151,7 +154,7 @@ function AttentionSection({ tasks, expanded, onToggle, onSelect, onOpenGraph }: 
           <small>{taskMeta(task, t)}</small>
         </div>
         <p>{taskDescription(task, t)}</p>
-        <footer><time>{formatDate(task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t('taskCenter.confirmAction')} <RightOutlined /></Button></footer>
+        <footer><time>{formatDate(task.updated_at)}</time><Button type='link' size='small' onClick={() => onSelect(task)}>{t(task.status === 'paused' ? 'chat.workflowContinue' : 'taskCenter.confirmAction')} <RightOutlined /></Button></footer>
       </article>
     ))}</div> : <WorkbenchEmpty />}
   </section>;
@@ -232,7 +235,7 @@ function WorkbenchEmpty() {
 export function groupWorkbenchTasks(tasks: Task[], referenceTime = Date.now()) {
   const completed = tasks.filter((task) => ['completed', 'succeeded'].includes(task.status));
   return {
-    waiting: tasks.filter((task) => ['waiting', 'waiting_inputs', 'interrupted', 'pending'].includes(task.status)),
+    waiting: tasks.filter((task) => ['waiting', 'waiting_inputs', 'interrupted', 'pending', 'paused'].includes(task.status)),
     running: tasks.filter((task) => task.status === 'running'),
     failed: tasks.filter((task) => task.status === 'failed'),
     canceled: tasks.filter((task) => task.status === 'canceled'),

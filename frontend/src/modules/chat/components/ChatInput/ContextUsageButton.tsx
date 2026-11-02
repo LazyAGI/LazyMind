@@ -201,19 +201,13 @@ export default function ContextUsageButton({
             <div className="context-usage-routing-state is-success">
               <CheckCircleFilled className="context-usage-routing-icon" />
               <div className="context-usage-routing-copy">
-                <strong>{t("chat.contextUsageCompressedTitle", "Earlier history compressed")}</strong>
+                <strong>{t("chat.contextUsageCompressedTitle")}</strong>
                 <span>
-                  {t(
-                    "chat.contextUsageCompressedHint",
-                    "This preview includes a runtime summary for older conversation turns.",
-                  )}
+                  {t("chat.contextUsageCompressedHint")}
                 </span>
                 {report.compression_covered_through_seq ? (
                   <small>
-                    {t(
-                      "chat.contextUsageCompressedSeq",
-                      { seq: report.compression_covered_through_seq, defaultValue: "Covered through turn {{seq}}." },
-                    )}
+                    {t("chat.contextUsageCompressedSeq", { seq: report.compression_covered_through_seq })}
                   </small>
                 ) : null}
               </div>

@@ -42,9 +42,17 @@ func seedAvailableChatModel(
 ) orm.UserModelProviderGroupModel {
 	t.Helper()
 	now := time.Now().UTC()
+	// Friendly fixture names describe independent connections; each still needs
+	// a real registered runtime protocol, just like a custom supplier in the UI.
+	runtimeProvider := "OpenAI"
+	switch providerName {
+	case "OpenAI", "DeepSeek", "Moonshot", "Qwen", "Claude", "SiliconFlow":
+		runtimeProvider = providerName
+	}
 	provider := orm.UserModelProvider{
 		ID: providerID, DefaultModelProviderID: "catalog-" + providerID,
 		Name: providerName, Description: providerName, Category: "model", Capabilities: "has_models",
+		ProtocolName: runtimeProvider, IsCustom: runtimeProvider != providerName,
 		BaseModel: orm.BaseModel{
 			CreateUserID: owner, CreateUserName: owner, CreatedAt: now, UpdatedAt: now,
 		},
@@ -64,7 +72,7 @@ func seedAvailableChatModel(
 	}
 	model := orm.UserModelProviderGroupModel{
 		ID: modelID, UserModelProviderID: providerID, UserModelProviderGroupID: groupID,
-		ProviderName: providerName, Name: modelName, ModelType: modelType,
+		ProviderName: runtimeProvider, Name: modelName, ModelType: modelType,
 		BaseModel: orm.BaseModel{
 			CreateUserID: owner, CreateUserName: owner, CreatedAt: now, UpdatedAt: now,
 		},
@@ -143,11 +151,29 @@ func TestAvailableChatModelsUseUserSelectionAsDefault(t *testing.T) {
 	}
 }
 
-func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
+func TestLoadDefaultChatLLMConfigAllowsSelectedOwnerModelWithUsableUnverifiedGroup(t *testing.T) {
+	database := newChatModelTestDB(t)
+	db := database.DB
+	model := seedAvailableChatModel(t, db, "user-1", "provider-private", "group-private", "model-private", "Private", "私有 API", "private-chat", "llm", false, "private-secret")
+	seedSelectedChatModel(t, db, "user-1", model.ID, false)
+
+	config, err := LoadDefaultChatLLMConfig(context.Background(), db, "user-1")
+	if err != nil {
+		t.Fatalf("load default config for selected unverified model: %v", err)
+	}
+	if config["model"] != "private-chat" || config["api_key"] != "private-secret" {
+		t.Fatalf("config=%#v, want selected private model and key", config)
+	}
+}
+
+func TestConversationFixedModelOverridesOnlyLLMAndPreparesTemporaryFallback(t *testing.T) {
 	database := newChatModelTestDB(t)
 	db := database.DB
 	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-default", "llm", true, "secret-a")
 	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "DeepSeek", "B", "deepseek-chat", "llm", true, "secret-b")
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-b").Updates(map[string]any{"input_token_limit": "64K", "max_output_tokens": "32K"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	seedSelectedChatModel(t, db, "user-1", "model-a", false)
 
 	binding, err := resolveInitialChatModelBinding(context.Background(), db, "user-1", &initialChatModelSelection{Mode: chatModelModeFixed, ModelID: "model-b"})
@@ -176,6 +202,9 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	if llm["model"] != "deepseek-chat" || llm["api_key"] != "secret-b" {
 		t.Fatalf("fixed llm config=%#v", llm)
 	}
+	if llm["input_token_limit"] != "64K" || llm["max_output_tokens"] != "32K" {
+		t.Fatal("fixed model lost its token limits")
+	}
 	if config["embed_main"].(map[string]any)["model"] != "embedding-model" {
 		t.Fatalf("non-chat role changed: %#v", config)
 	}
@@ -194,8 +223,11 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 		t.Fatalf("delete bound model: %v", err)
 	}
 	body["llm_config"] = map[string]any{"llm": map[string]any{"model": "gpt-default"}}
-	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); !errors.Is(err, errChatModelUnavailable) {
-		t.Fatalf("deleted fixed model error=%v, want unavailable without fallback", err)
+	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil {
+		t.Fatalf("deleted fixed model should prepare an authorized temporary replacement: %v", err)
+	}
+	if got := body["llm_config"].(map[string]any)["llm"].(map[string]any)["model"]; got != "gpt-default" {
+		t.Fatalf("temporary replacement=%v", got)
 	}
 	if _, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", conversation.ID); !errors.Is(err, errChatModelUnavailable) {
 		t.Fatal("organizer silently replaced an unavailable conversation model", err)
@@ -216,6 +248,40 @@ func TestConversationFixedModelOverridesOnlyLLMAndNeverFallsBack(t *testing.T) {
 	}
 	if model := legacyBody["llm_config"].(map[string]any)["llm"].(map[string]any)["model"]; model != "legacy-default" {
 		t.Fatalf("legacy conversation default changed to %v", model)
+	}
+}
+
+func TestWorkflowConversationConfigReloadsSelectedModel(t *testing.T) {
+	db := newChatModelTestDB(t).DB
+	seedAvailableChatModel(t, db, "user-1", "provider-a", "group-a", "model-a", "OpenAI", "A", "gpt-default", "llm", true, "secret-a")
+	seedAvailableChatModel(t, db, "user-1", "provider-b", "group-b", "model-b", "DeepSeek", "B", "deepseek-chat", "llm", true, "secret-b")
+	seedSelectedChatModel(t, db, "user-1", "model-a", false)
+	conversation := orm.Conversation{ID: "workflow-model-switch", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}}
+	for _, selection := range []struct{ id, model string }{{"model-b", "deepseek-chat"}, {"model-a", "gpt-default"}} {
+		binding, err := resolveInitialChatModelBinding(context.Background(), db, "user-1", &initialChatModelSelection{Mode: chatModelModeFixed, ModelID: selection.id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		applyResolvedChatModelBinding(&conversation, binding)
+		if err := db.Save(&conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+		config, err := LoadConversationLLMConfig(context.Background(), db, "user-1", conversation.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := config["llm"].(map[string]any)["model"]; got != selection.model {
+			t.Fatalf("model = %v, want %s", got, selection.model)
+		}
+	}
+	if _, err := LoadConversationLLMConfig(context.Background(), db, "another-user", conversation.ID); err == nil {
+		t.Fatal("must reject a conversation owned by another user")
+	}
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-a").Update("deleted_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConversationLLMConfig(context.Background(), db, "user-1", conversation.ID); !errors.Is(err, errChatModelUnavailable) {
+		t.Fatalf("unavailable fixed model must fail: %v", err)
 	}
 }
 
@@ -289,12 +355,20 @@ func TestAutoChatModelStaysWithSuccessfulModelAndRoutingIsReadOnly(t *testing.T)
 	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("id = ?", "model-default").Update("deleted_at", time.Now().UTC()).Error; err != nil {
 		t.Fatal(err)
 	}
-	if route := apply(map[string]any{"query": "new turn"}); route.ModelID != "model-other" || route.Reason != "model_unavailable" {
+	if route := apply(map[string]any{"query": "new turn"}); route.ModelID != "model-default" || route.Reason != "model_unavailable" {
 		t.Fatalf("unavailable successful model did not switch: %#v", route)
 	}
+	organizer, err := LoadOrganizerChatLLMConfig(context.Background(), db, "user-1", conversation.ID)
+	if err != nil || organizer["llm"].(map[string]any)["model"] != "other-chat" {
+		t.Fatal("auto organizer did not select an available replacement", err)
+	}
 	retryBody := map[string]any{"conversation_id": conversation.ID, chatModelRetryRouteBodyKey: first}
-	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", retryBody); !errors.Is(err, errChatModelUnavailable) {
-		t.Fatalf("retry silently replaced deleted original model: %v", err)
+	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", retryBody); err != nil {
+		t.Fatal(err)
+	}
+	state := retryBody[chatModelFallbackBodyKey].(*chatFallbackState)
+	if len(state.records) != 0 || state.initialSwitch == nil || state.initialSwitch.From.ModelID != "model-default" || state.currentID != "own:model-other" {
+		t.Fatalf("unavailable retry did not preserve private preparation: %#v", state.initialSwitch)
 	}
 	if err := db.Model(&orm.Conversation{}).Where("id = ?", conversation.ID).Updates(map[string]any{
 		"chat_model_mode": chatModelModeFixed, "chat_model_id": "model-other", "chat_model_version": 2,
@@ -592,8 +666,8 @@ func TestHostResponsePreservesLastSuccessfulChatModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := map[string]any{"conversation_id": conversation.ID, "user_id": "user-1", "query": "filtered input"}
-	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil || chatModelRouteFromBody(body).ModelID != "model-b" {
-		t.Fatalf("unavailable model did not select B: %#v err=%v", chatModelRouteFromBody(body), err)
+	if err := applyConversationChatModelConfig(context.Background(), db, "user-1", body); err != nil || chatModelRouteFromBody(body).ModelID != "model-a" || llmConfigFromBody(body)["llm"].(map[string]any)["model"] != "b-chat" {
+		t.Fatalf("unavailable model did not privately prepare B while retaining A: %#v err=%v", chatModelRouteFromBody(body), err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request LazyChatRequest
@@ -786,12 +860,12 @@ func TestChatConversationPersistsUnavailableInitialSelection(t *testing.T) {
 		seedRecoveryBefore bool
 	}{
 		{
-			name:               "missing fixed model",
+			name:               "missing fixed model without alternatives",
 			conversationID:     "new-invalid-fixed",
 			selection:          `{"mode":"fixed","model_id":"missing-model"}`,
 			wantMode:           chatModelModeFixed,
 			wantModelID:        "missing-model",
-			seedRecoveryBefore: true,
+			seedRecoveryBefore: false,
 		},
 		{
 			name:           "auto without usable models",
@@ -1076,7 +1150,7 @@ func TestConversationModelHandlersPersistVersionAndBlockActiveRuns(t *testing.T)
 
 func TestBuildChatLLMConfigKeepsDeclaredVision(t *testing.T) {
 	for _, vision := range []bool{false, true} {
-		config, err := buildChatLLMConfig(context.Background(), &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
+		config, err := buildChatLLMConfig(context.Background(), nil, &availableChatModel{ProviderName: "OpenAI", ModelName: "custom", ModelType: "llm", Vision: vision})
 		if err != nil {
 			t.Fatal(err)
 		}

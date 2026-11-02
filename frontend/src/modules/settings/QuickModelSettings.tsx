@@ -27,17 +27,21 @@ interface QuickModelSettingsProps {
 function modelValue(model: {
   id?: string;
   model_id?: string;
-  user_model_provider_group_id: string;
-  user_model_provider_id: string;
+  provider_group_id?: string;
+  provider_id?: string;
+  user_model_provider_group_id?: string;
+  user_model_provider_id?: string;
 }) {
-  return `${model.user_model_provider_id}:${model.user_model_provider_group_id}:${model.id || model.model_id || ""}`;
+  const providerId = model.provider_id || model.user_model_provider_id || "";
+  const groupId = model.provider_group_id || model.user_model_provider_group_id || "";
+  return `${providerId}:${groupId}:${model.id || model.model_id || ""}`;
 }
 
 function modelID(value: string) {
   return value.split(":").slice(2).join(":");
 }
 
-function modelLabel(model: { group_name: string; name: string; provider_name: string }) {
+function modelLabel(model: { group_name?: string; name: string; provider_name: string }) {
   const source = model.group_name || model.provider_name;
   return source ? `${model.name} · ${source}` : model.name;
 }

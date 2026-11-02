@@ -23,6 +23,40 @@ func TestModelCatalogHasNoMaxInputTokens(t *testing.T) {
 	}
 }
 
+func TestTranslationCatalogMatchesRuntimeDeclarations(t *testing.T) {
+	seen := map[string]bool{}
+	for _, file := range []string{"model_catalog.yaml", "translation_providers_paused.yaml"} {
+		data, err := os.ReadFile("../config/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := loadModelCatalog(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, supplier := range catalog["translation_providers"].Suppliers {
+			spec, ok := TranslationProvider(supplier.Name)
+			if !ok {
+				t.Errorf("catalog supplier %s has no runtime declaration", supplier.Name)
+				continue
+			}
+			if spec.Available != (file == "model_catalog.yaml") {
+				t.Errorf("availability differs for %s", supplier.Name)
+			}
+			seen[strings.ToLower(supplier.Name)] = true
+			keyless := strings.Contains(strings.Join(supplier.Capabilities, ","), "keyless_translation")
+			if keyless != spec.Keyless {
+				t.Errorf("credential declaration differs for %s", supplier.Name)
+			}
+		}
+	}
+	for name := range translationProviders {
+		if !seen[name] {
+			t.Errorf("runtime provider %s missing from catalog", name)
+		}
+	}
+}
+
 func TestModelCatalogIncludesOpenRouter(t *testing.T) {
 	yamlBytes, err := os.ReadFile("../config/model_catalog.yaml")
 	if err != nil {
@@ -551,15 +585,22 @@ func TestReconcileCatalogPreservesCustomModelsAndEndpoints(t *testing.T) {
 	}
 }
 
-func TestUpgradeLegacyTokenPlanURLPreservesCustomURLs(t *testing.T) {
+func TestServiceProfileSeedPreservesSavedURLs(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.UserModelProvider{}, &orm.UserModelProviderGroup{}); err != nil {
+	if err := db.AutoMigrate(&orm.DefaultModelProvider{}, &orm.DefaultModel{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&orm.UserModelProvider{ID: "nova", DefaultModelProviderID: "catalog-nova"}).Error; err != nil {
+	if err := db.Create(&orm.UserModelProvider{ID: "nova", DefaultModelProviderID: "catalog-nova", BaseURL: "https://token.sensenova.cn/v1/chat/completions"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.DefaultModelProvider{ID: "catalog-nova", Name: "SenseNova"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/catalog.yaml"
+	if err := os.WriteFile(path, []byte("model_providers:\n  suppliers:\n    - name: SenseNova\n      description: {zh-CN: '旧服务', en-US: 'Legacy service'}\n      base_url: https://api.sensenova.cn/compatible-mode/v1/\n      models: []\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	urls := []string{"https://token.sensenova.cn/v1/chat/completions/", "https://token.sensenova.cn/v1/chat/completions", "https://proxy.example/v2/", "https://api.sensenova.cn/compatible-mode/v1/"}
@@ -569,21 +610,106 @@ func TestUpgradeLegacyTokenPlanURLPreservesCustomURLs(t *testing.T) {
 		}
 	}
 	for range 2 {
-		if err := upgradeLegacyTokenPlanURL(db, "catalog-nova"); err != nil {
+		if err := SeedModelCatalog(t.Context(), db, path); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for i, u := range urls {
+	for _, u := range urls {
 		var row orm.UserModelProviderGroup
 		if err := db.Where("id = ?", u).Take(&row).Error; err != nil {
 			t.Fatal(err)
 		}
 		want := u
-		if i < 2 {
-			want = sensenovaNewPlatformBaseURL
-		}
 		if row.BaseURL != want {
 			t.Fatalf("URL = %q, want %q", row.BaseURL, want)
 		}
 	}
+}
+
+func TestCatalogSeedPreservesDeletedModelTombstone(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.DefaultModelProvider{}, &orm.DefaultModel{}, &orm.UserModelProvider{}, &orm.UserModelProviderGroup{}, &orm.UserModelProviderGroupModel{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	catalog := orm.DefaultModelProvider{ID: "catalog", Name: "OpenAI", BaseURL: "https://api.openai.com/v1/"}
+	provider := orm.UserModelProvider{ID: "provider", DefaultModelProviderID: catalog.ID, Name: catalog.Name, BaseURL: catalog.BaseURL, Category: "model", BaseModel: orm.BaseModel{CreateUserID: "user"}}
+	group := orm.UserModelProviderGroup{ID: "group", UserModelProviderID: provider.ID, Name: "connection", BaseURL: catalog.BaseURL, BaseModel: orm.BaseModel{CreateUserID: "user"}}
+	for _, row := range []any{&catalog, &provider, &group} {
+		if err := db.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	models := []orm.UserModelProviderGroupModel{
+		{ID: "keep", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, ProviderName: catalog.Name, Name: "keep", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user"}},
+		{ID: "deleted", UserModelProviderID: provider.ID, UserModelProviderGroupID: group.ID, ProviderName: catalog.Name, Name: "deleted", ModelType: "llm", IsDefault: true, BaseModel: orm.BaseModel{CreateUserID: "user", DeletedAt: &now}},
+	}
+	if err := db.Create(&models).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := upsertDefaultModel(db, now, catalog.ID, catalog.Name, catalogModel{Name: "deleted", Type: "llm"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int64
+	if err := db.Model(&orm.UserModelProviderGroupModel{}).Where("user_model_provider_group_id = ? AND name = ?", group.ID, "deleted").Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("deleted catalog model resurrected: %d %v", count, err)
+	}
+	var deleted orm.UserModelProviderGroupModel
+	db.First(&deleted, "id = ?", "deleted")
+	if deleted.DeletedAt == nil {
+		t.Fatal("catalog seed cleared user tombstone")
+	}
+}
+
+func TestGLMCatalogUsesSupportedAPIModels(t *testing.T) {
+	data, err := os.ReadFile("../config/model_catalog.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := loadModelCatalog(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadContextWindows("../config/model_context_windows.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	for _, supplier := range catalog["model_providers"].Suppliers {
+		if supplier.Name != "GLM" {
+			continue
+		}
+		models := map[string]catalogModel{}
+		for _, model := range supplier.Models {
+			models[model.Name] = model
+		}
+		for _, name := range []string{"glm-5.3-flash", "glm-5.3-flashx", "glm-5.3-flashx-legal"} {
+			if model := models[name]; model.Type != "llm" || !model.Vision {
+				t.Fatalf("%s must preserve chat and vision capabilities: %+v", name, model)
+			}
+			if got, ok := lookupMaxInputTokens(name, "llm"); !ok || got != "1M" {
+				t.Fatalf("%s context = %s, found=%v", name, got, ok)
+			}
+		}
+		for name, kind := range map[string]string{
+			"cogview-4-250304": "text2image", "GLM-Image": "text2image", "GLM-TTS": "tts",
+			"GLM-ASR-2512": "stt", "cogvideox-3": "text2video", "cogvideox-flash": "text2video",
+			"viduq1-text": "text2video", "viduq1-image": "text2video", "viduq1-start-end": "text2video",
+			"vidu2-image": "text2video", "vidu2-start-end": "text2video", "vidu2-reference": "text2video",
+		} {
+			if models[name].Type != kind {
+				t.Fatalf("%s must be %s", name, kind)
+			}
+		}
+		for _, name := range []string{"GLM-4-Voice", "GLM-TTS-Clone", "GLM-Realtime", "GLM-OCR"} {
+			if _, ok := models[name]; ok {
+				t.Fatalf("%s requires a separate protocol, not a standard model role", name)
+			}
+		}
+		return
+	}
+	t.Fatal("GLM supplier missing")
 }

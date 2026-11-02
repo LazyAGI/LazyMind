@@ -60,6 +60,14 @@ func publicationStatus(op *DocumentPublicationOperation, now time.Time) Document
 			target = receipt.TargetDocument
 		}
 	}
+	if op.PublicationID != "" {
+		if op.Status == "outcome_unknown" {
+			result.Actions = []string{"check"}
+		}
+		if op.Status == "provider_confirmed" || op.Status == "local_persist_failed" || op.Status == "local_conflict" {
+			result.Actions = []string{"retry_local"}
+		}
+	}
 	result.TargetURL = documentPublicationTargetURL(op.Provider, target)
 	return result
 }
@@ -93,7 +101,7 @@ func FindDocumentPublication(ctx context.Context, db *gorm.DB, owner, artifactID
 		}
 		for _, item := range slots {
 			var binding orm.DocumentPublicationBinding
-			err := tx.Where("session_id = ? AND slot_id = ? AND item_index = ?", session.ID, item.slot, item.index).First(&binding).Error
+			err := tx.Where("session_id = ? AND slot_id = ? AND item_index = ?", session.ID, item.slot, item.index).Where("binding_scope = ?", "").First(&binding).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue
 			}
@@ -114,7 +122,7 @@ func FindDocumentPublication(ctx context.Context, db *gorm.DB, owner, artifactID
 			return nil
 		}
 		var op DocumentPublicationOperation
-		err = tx.Where("session_id = ? AND slot_id = ? AND item_index = ? AND owner_user_id = ?", session.ID, revision.SlotID, publicationIndex(revision.ListIndex), owner).Order("created_at DESC, id DESC").First(&op).Error
+		err = tx.Where("session_id = ? AND slot_id = ? AND item_index = ? AND owner_user_id = ?", session.ID, revision.SlotID, publicationIndex(revision.ListIndex), owner).Where("publication_id = ?", "").Order("created_at DESC, id DESC").First(&op).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
 		}
@@ -147,6 +155,9 @@ func RecoverDocumentPublication(ctx context.Context, db *gorm.DB, owner, id stri
 				}
 			}
 			return tx.First(result, "id = ?", id).Error
+		}
+		if op.PublicationID != "" {
+			return publicationError("PUBLICATION_STATE_CONFLICT")
 		}
 		next, reason := "outcome_unknown_released", "PUBLICATION_RELEASED_UNVERIFIED"
 		var receipt DocumentPublicationReceipt

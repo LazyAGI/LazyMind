@@ -26,6 +26,10 @@ const translations: Record<string, string> = {
   'taskCenter.noTitle': '（无标题）',
   'taskCenter.openConversation': '打开任务对话',
   'taskCenter.statusCompleted': '已完成',
+  'taskCenter.statusPending': '待执行',
+  'taskCenter.statusSkipped': '已跳过',
+  'taskCenter.statusFailed': '执行失败',
+  'taskCenter.statusInterrupted': '已中断',
   'taskCenter.statusRunning': '进行中',
   'taskCenter.statusSucceeded': '已完成',
   'taskCenter.statusWaiting': '等待审批',
@@ -93,6 +97,55 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('TaskDetail', () => {
+  it.each([
+    ['writer', 'write_document', '成稿', 'write_flat_document', '短文成稿', 'pruned'],
+    ['ppt', 'generate_ppt', '生成幻灯片', 'choose_style', '选择风格', 'bypassed'],
+  ])('shows the unexecuted %s branch as skipped rather than pending', async (workflow, completedID, completedLabel, skippedID, skippedLabel, branch) => {
+    const completed = { ...task, workflow_session_id: workflow, status: 'succeeded', steps: [] };
+    vi.mocked(getTask).mockResolvedValue(completed);
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: {
+      graph: {
+        static_order: ['__start__', completedID, skippedID, '__end__'],
+        nodes: { [completedID]: { label: completedLabel }, [skippedID]: { label: skippedLabel } },
+      },
+      projection: { nodes: {
+        [completedID]: { execution: 'succeeded', branch: 'active' },
+        [skippedID]: { execution: 'none', branch },
+      } },
+    } });
+    render(<TaskDetail task={completed} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    expect(await screen.findByText('已跳过')).toBeInTheDocument();
+    expect(screen.getByText(skippedLabel).closest('.task-step')).toHaveTextContent('已跳过');
+    expect(screen.getByText(completedLabel).closest('.task-step')).toHaveTextContent('已完成');
+    expect(document.querySelector('.task-detail-status')).toHaveTextContent('已完成');
+    expect(document.querySelectorAll('.task-step')).toHaveLength(2);
+    expect(screen.queryByText('待执行')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['none', 'active', '待执行'],
+    ['pending', 'active', '待执行'],
+    ['running', 'active', '进行中'],
+    ['running', 'pruned', '进行中'],
+    ['succeeded', 'bypassed', '已完成'],
+    ['failed', 'bypassed', '执行失败'],
+    ['interrupted', 'pruned', '已中断'],
+    ['waiting', 'active', '等待审批'],
+  ])('preserves execution %s on branch %s as %s', async (execution, branch, expected) => {
+    const current = { ...task, workflow_session_id: 'workflow', steps: [] };
+    vi.mocked(getTask).mockResolvedValue(current);
+    vi.mocked(axiosInstance.get).mockResolvedValue({ data: {
+      graph: { static_order: ['step'], nodes: { step: { label: '测试步骤' } } },
+      projection: { nodes: { step: { execution, branch } } },
+    } });
+    render(<TaskDetail task={current} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
+
+    const label = await screen.findByText('测试步骤');
+    expect(label.closest('.task-step')).toHaveTextContent(expected);
+    expect(screen.queryByText('已跳过')).not.toBeInTheDocument();
+  });
+
   it.each(['mouseEnter', 'focus'] as const)('shows a full goal on %s without changing the preview', async trigger => {
     render(<TaskDetail task={task} onClose={vi.fn()} onOpenConversation={vi.fn()} />);
     const preview = screen.getByText(task.title!);

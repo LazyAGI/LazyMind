@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -400,6 +401,50 @@ transitions:
 	}
 }
 
+func TestAlignWorkflowUITabsDoesNotBorrowOutputsForNoOutputSteps(t *testing.T) {
+	_, candidate := nodeIntegrationFixture()
+	candidate.WorkflowYAML = strings.Replace(candidate.WorkflowYAML, "id: final, type: text", "id: final, type: text, exposed: true", 1)
+	for _, explicitReviewTab := range []bool{false, true} {
+		t.Run(fmt.Sprint(explicitReviewTab), func(t *testing.T) {
+			workflowYAML := candidate.WorkflowYAML
+			if explicitReviewTab {
+				workflowYAML = strings.Replace(workflowYAML, "tabs: [", "tabs: [{id: review, label: Review inputs, slots: [{id: report}]}, ", 1)
+			}
+			aligned, changed, err := alignWorkflowUITabsWithStateSteps(workflowYAML, candidate.StateYAML)
+			if err != nil || !changed {
+				t.Fatalf("alignment: changed=%v err=%v", changed, err)
+			}
+			for _, profile := range []graphengine.Profile{graphengine.ProfileEditor, graphengine.ProfilePublish} {
+				compiled := graphengine.Compile(aligned, candidate.StateYAML, candidate.ScenarioMD, profile)
+				if !compiled.Valid {
+					t.Fatalf("alignment invalidated workflow (%s): %+v", profile, compiled.Diagnostics)
+				}
+			}
+			var doc map[string]any
+			if err := yaml.Unmarshal([]byte(aligned), &doc); err != nil {
+				t.Fatal(err)
+			}
+			tabs := listValue(mapValue(doc["ui"])["tabs"])
+			wantCount := 2
+			if explicitReviewTab {
+				wantCount = 3
+			}
+			if len(tabs) != wantCount {
+				t.Fatalf("tabs=%+v, want %d", tabs, wantCount)
+			}
+			for _, raw := range tabs {
+				tab := mapValue(raw)
+				if tab["step_id"] == "review" && (!explicitReviewTab || tab["label"] != "Review inputs" || strings.Join(materialIDsFromList(tab["slots"]), ",") != "report") {
+					t.Fatalf("invented or changed review display: %+v", tab)
+				}
+			}
+			if again, changed, err := alignWorkflowUITabsWithStateSteps(aligned, candidate.StateYAML); err != nil || changed || again != aligned {
+				t.Fatalf("alignment not idempotent: changed=%v err=%v", changed, err)
+			}
+		})
+	}
+}
+
 func TestValidateGeneratedScenarioContentRejectsPlaceholders(t *testing.T) {
 	stateYAML := `
 steps:
@@ -446,6 +491,23 @@ the important findings, and produces the final result material for the user.
 `
 	if err := validateGeneratedScenarioContent(scenarioMD, stateYAML); err != nil {
 		t.Fatalf("expected substantive scenario content to pass: %v", err)
+	}
+}
+
+func TestScenarioValidationUsesStepSectionNotFirstMention(t *testing.T) {
+	state := "steps:\n  review: {}\n  report: {}\n"
+	valid := "# Flow\nreview -> report\n\n## review\nRead chapter text and project summary, then produce the review result.\n\n## report\n### Inputs\nRead the review result and compose the final report with its conclusions.\n"
+	if err := validateGeneratedScenarioContent(valid, state); err != nil {
+		t.Fatalf("reference before substantive section rejected: %v", err)
+	}
+	for _, invalid := range []string{
+		"# Flow\nreview and report are mentioned here with a long description but no step sections.",
+		"## review\nshort\n## report\nRead the review result and compose the final report with its conclusions.",
+		"## review_extra\nRead chapter text and project summary, then produce the review result.\n## report\nRead the review result and compose the final report with its conclusions.",
+	} {
+		if err := validateGeneratedScenarioContent(invalid, state); err == nil {
+			t.Fatalf("invalid documentation accepted: %s", invalid)
+		}
 	}
 }
 

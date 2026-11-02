@@ -37,6 +37,13 @@ async def run_subagent(
         Body(description='Core-owned durable step snapshot used for resume'),
     ] = None,
     workspace_execution: Annotated[Optional[Dict[str, Any]], Body(description='Core private execution identity')] = None,
+    model_fallback_current_id: Annotated[str, Body(description='Core private current model candidate')] = '',
+    model_fallback_candidates: Annotated[
+        Optional[List[Dict[str, Any]]], Body(description='Core private execution candidates'),
+    ] = None,
+    model_fallback_initial_switch: Annotated[
+        Optional[Dict[str, Any]], Body(description='Core private initial model replacement'),
+    ] = None,
     disabled_tools: Annotated[Optional[List[str]], Body(description='Core-owned tool visibility snapshot')] = None,
     system_mcp_config: Annotated[
         Optional[List[Dict[str, Any]]], Body(description='Core private per-run MCP scope'),
@@ -56,6 +63,9 @@ async def run_subagent(
             task_spec=task_spec,
             initial_steps=initial_steps,
             workspace_execution=workspace_execution,
+            model_fallback_current_id=model_fallback_current_id,
+            model_fallback_candidates=model_fallback_candidates,
+            model_fallback_initial_switch=model_fallback_initial_switch,
             system_mcp_config=system_mcp_config,
             disabled_tools=disabled_tools,
         ),

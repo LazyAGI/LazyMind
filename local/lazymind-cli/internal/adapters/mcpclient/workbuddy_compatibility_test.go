@@ -12,7 +12,9 @@ import (
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/integrationstate"
 	"lazymind/agentconnector/internal/workbuddyhost"
+	"lazymind/agentconnector/internal/workflowhost"
 )
 
 func TestWorkBuddyPreflightDoesNotMutateAndStillAllowsDisconnect(t *testing.T) {
@@ -86,5 +88,49 @@ func TestWorkBuddyPreflightDoesNotMutateAndStillAllowsDisconnect(t *testing.T) {
 				t.Fatal("cleanup did not preserve unrelated entry")
 			}
 		})
+	}
+}
+
+func TestWorkBuddySignedOutDisconnectRevokesLocalPairingAndKeepsOtherServers(t *testing.T) {
+	root := t.TempDir()
+	setTestHome(t, root)
+	home := filepath.Join(root, "lazy-home")
+	t.Setenv("LAZYMIND_HOME", home)
+	t.Setenv("LAZYMIND_CONNECTOR_CONFIG", "")
+	pair, err := workflowhost.EnsureForProvider(home, "workbuddy", filepath.Join(root, "profile"), "previous-account")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := workbuddyhost.Config{Node: filepath.Join(root, "node"), PairingFile: filepath.Join(home, "workflow-hosts", pair.ConnectorID+".json"), CDPPort: 1}
+	body, _ := json.Marshal(config)
+	writeTestFile(t, workbuddyhost.ConfigPath(home), string(body))
+	if err = integrationstate.Set(home, "workbuddy", true); err != nil {
+		t.Fatal(err)
+	}
+	adapter := testAdapter(WorkBuddy)
+	adapter.self, _ = os.Executable()
+	adapter.home = home
+	path := configPath(WorkBuddy)
+	writeTestFile(t, path, `{"mcpServers":{"other":{"command":"keep"}}}`)
+	if err = writeManagedConfig(WorkBuddy, path, adapter.self, home, adapter.hostID, false); err != nil {
+		t.Fatal(err)
+	}
+	// There is deliberately no credential store for the previous account.
+	status := adapter.Disconnect(context.Background())
+	if status.State == agentintegration.Failed || status.Enabled == nil || *status.Enabled {
+		t.Fatalf("disconnect=%+v", status)
+	}
+	if _, err = workflowhost.Verify(home, pair.ConnectorID, pair.Token, "previous-account"); err == nil {
+		t.Fatal("signed-out disconnect retained authorization")
+	}
+	body, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if json.Unmarshal(body, &doc) != nil || doc.MCPServers["other"] == nil || doc.MCPServers["lazymind"] != nil {
+		t.Fatal("disconnect changed unrelated MCP entries")
 	}
 }

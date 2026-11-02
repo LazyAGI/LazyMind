@@ -23,7 +23,8 @@ import {
   ChatConversationsResponseFinishReasonEnum,
   FeedBackChatHistoryRequestTypeEnum,
 } from "@/api/generated/chatbot-client";
-import type { ChatModelRoute } from "@/api/generated/core-client";
+import type { ChatModelRoute, ChatModelSwitchRecord } from "@/api/generated/core-client";
+import { formatModelSwitchLabel } from "@/modules/chat/utils/modelSwitchDisplay";
 import { AgentAppsAuth } from "@/components/auth";
 import {
   isAskPendingReadOnly,
@@ -53,18 +54,9 @@ import {
 } from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
 import {
-  getTranslationStatus,
-  isSingleEnglishWord,
-  translateSelectionText,
   TranslationUnavailableError,
 } from "@/modules/knowledge/api/translation";
-
-let translationStatusRequest: Promise<boolean> | undefined;
-
-function loadTranslationStatus() {
-  translationStatusRequest ??= getTranslationStatus().catch(() => false);
-  return translationStatusRequest;
-}
+import { usePdfSelectionTranslation } from "@/modules/knowledge/pages/knowledge/translationUiState";
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -212,6 +204,30 @@ function ModelRouteSummary({ route }: { route?: ChatModelRoute }) {
   return reason ? <Tooltip title={reason}>{content}</Tooltip> : content;
 }
 
+function ModelSwitchHistory({ records }: { records?: ChatModelSwitchRecord[] }) {
+  const { t } = useTranslation();
+  if (!records?.length) return null;
+  const unknownWindow = t("chat.modelFallbackWindowUnknown");
+  return (
+    <details style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+      <summary>{t("chat.modelFallbackHistory")}</summary>
+      <ol>
+        {records.map(record => (
+          <li key={record.event_id}>
+            <span>{formatModelSwitchLabel(record.from, record.from_max_input_tokens, unknownWindow)}</span>{" → "}
+            <span>{formatModelSwitchLabel(record.to, record.to_max_input_tokens, unknownWindow)}</span>
+            <div>{record.reason_code === "model_config_unavailable" || record.reason_code === "model_context_not_fit"
+              ? t(`chat.modelFallbackReason.${record.reason_code}`)
+              : t(`chat.runStatus.codes.${record.reason_code}`, { defaultValue: t("chat.modelFallbackReason.unknown") })}</div>
+            <div>{t("chat.modelFallbackSucceeded")}</div>
+            {record.context_compacted === true ? <div>{t("chat.modelFallbackContextAdapted")}</div> : null}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
 type FeedbackAction =
   | { type: "OPEN_MODAL"; historyId: string }
   | { type: "CLOSE_MODAL" }
@@ -347,10 +363,20 @@ const AssistantMessage = (props: any) => {
   currentItemRef.current = item;
   const selectionActionsRef = useRef<HTMLDivElement | null>(null);
   const citeSelectionTextRef = useRef("");
-  const translationConfiguredRef = useRef(false);
   const [translationSource, setTranslationSource] = useState("");
-  const [translationResult, setTranslationResult] = useState("");
-  const [translationLoading, setTranslationLoading] = useState(false);
+  const onTranslationError = useCallback((error: unknown) => {
+    if (error instanceof TranslationUnavailableError && error.reason === "service_not_configured") {
+      window.location.href = "/settings?section=model_defaults&service=translation";
+    } else {
+      message.error(error instanceof TranslationUnavailableError ? t("knowledge.dictionaryNotFound") : t("knowledge.translationFailed"));
+    }
+  }, [t]);
+  const {
+    result: translationResult,
+    loading: translationLoading,
+    translate: translateSelectedText,
+    clear: clearSelectedTranslation,
+  } = usePdfSelectionTranslation(onTranslationError);
   const onCiteMessageRef = useRef(onCiteMessage);
   onCiteMessageRef.current = onCiteMessage;
   const onOpenSideChatRef = useRef(onOpenSideChat);
@@ -436,24 +462,14 @@ const AssistantMessage = (props: any) => {
   const handleOpenSideChatRef = useRef(handleOpenSideChat);
   handleOpenSideChatRef.current = handleOpenSideChat;
 
-  const handleTranslateSelectedText = useCallback(async () => {
+  const handleTranslateSelectedText = useCallback(() => {
     const selectedText = citeSelectionTextRef.current.trim();
     if (!selectedText) return;
     setTranslationSource(selectedText);
-    setTranslationResult("");
-    setTranslationLoading(true);
     window.getSelection()?.removeAllRanges();
     hideCiteButton();
-    try {
-      const result = await translateSelectionText(selectedText);
-      setTranslationResult(result.translated_text);
-    } catch (error) {
-      if(error instanceof TranslationUnavailableError&&error.reason==="service_not_configured")window.location.href="/settings?section=knowledge&tool=translation";
-      else message.error(error instanceof TranslationUnavailableError?t("knowledge.dictionaryNotFound"):t("knowledge.translationFailed"));
-    } finally {
-      setTranslationLoading(false);
-    }
-  }, [hideCiteButton, t]);
+    void translateSelectedText(selectedText);
+  }, [hideCiteButton, translateSelectedText]);
 
   const handleTranslateSelectedTextRef = useRef(handleTranslateSelectedText);
   handleTranslateSelectedTextRef.current = handleTranslateSelectedText;
@@ -529,19 +545,9 @@ const AssistantMessage = (props: any) => {
       );
       if (translateButton) {
         translateButton.textContent = t("knowledge.translateSelection");
-        const wordSelection=isSingleEnglishWord(text);
-        translateButton.classList.toggle("is-translation-disabled", !wordSelection);
-        translateButton.setAttribute("aria-disabled", String(!wordSelection));
-        translateButton.title = wordSelection?t("knowledge.translateSelection"):t("knowledge.translationConfigureTip");
-        void loadTranslationStatus().then((configured) => {
-          translationConfiguredRef.current = configured;
-          const disabled=!configured&&!isSingleEnglishWord(text);
-          translateButton.classList.toggle("is-translation-disabled", disabled);
-          translateButton.setAttribute("aria-disabled", String(disabled));
-          translateButton.title = !disabled
-            ? t("knowledge.translateSelection")
-            : `${t("knowledge.translationConfigureTip")} · ${t("knowledge.translationConfigureAction")}`;
-        });
+        translateButton.classList.remove("is-translation-disabled");
+        translateButton.setAttribute("aria-disabled", "false");
+        translateButton.title = t("knowledge.translateSelection");
       }
       actions.style.top = `${top}px`;
       actions.style.left = `${left}px`;
@@ -641,7 +647,7 @@ const AssistantMessage = (props: any) => {
       onCancel={() => {
         if (!translationLoading) {
           setTranslationSource("");
-          setTranslationResult("");
+          clearSelectedTranslation();
         }
       }}
     >
@@ -1388,6 +1394,7 @@ const AssistantMessage = (props: any) => {
             }
             const started = await props.sendMessage?.(payload.text, undefined, {
               ask_answers_structured: payload.structured,
+              ...(payload.files?.length ? { files: payload.files } : {}),
             });
             if (!started) return false;
             // Deletion confirmations are consumed by Core; history remains authoritative.
@@ -1571,8 +1578,8 @@ const AssistantMessage = (props: any) => {
             <WorkflowPanel
               key={sessionId}
               conversationId={sessionId}
-              onSendMessage={(text) => props.sendMessage?.(text)}
-              onStop={props.stopGeneration}
+              onSendMessage={(text, control) => props.sendMessage?.(text, undefined, control ? { workflow_control: control } : undefined)}
+              chatBusy={props.chatBusy}
             />
           )}
         </div>
@@ -1599,6 +1606,7 @@ const AssistantMessage = (props: any) => {
       <div className="chat-bot-box-single">
         <div className="chat-bot">
           <ModelRouteSummary route={item.model_route} />
+          <ModelSwitchHistory records={item.model_switches} />
           <ExternalExecutionSummary execution={item.execution} />
           <RunStatusCard
             terminal={item.run_terminal}
@@ -1645,8 +1653,8 @@ const AssistantMessage = (props: any) => {
           <WorkflowPanel
             key={sessionId}
             conversationId={sessionId}
-            onSendMessage={(text) => props.sendMessage?.(text)}
-            onStop={props.stopGeneration}
+            onSendMessage={(text, control) => props.sendMessage?.(text, undefined, control ? { workflow_control: control } : undefined)}
+            chatBusy={props.chatBusy}
           />
         )}
       </div>

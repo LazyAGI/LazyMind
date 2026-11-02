@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { buildChatMessageListFromHistory, mergeChatMessageLists } from "./message";
+import { RoleTypes } from "@/modules/chat/constants/common";
 import {
   recoveryActionAfterFailure,
   recoveryDelayForAttempt,
@@ -9,6 +11,16 @@ import {
 } from "./streamRecovery";
 
 describe("stream recovery policy", () => {
+  it("takes an authoritative empty projection and its closed cursor over cached failed previews", () => {
+    const cursor = { run_id: "recover-run", call_index: 2, phase: "rollback" as const };
+    const cached = [
+      { role: RoleTypes.USER, history_id: "h", delta: "task" },
+      { role: RoleTypes.ASSISTANT, history_id: "h", delta: "BAD", reasoning_content: "BAD THINK", sources: [{ title: "BAD" }], exports: [{ export_id: "bad" }] },
+    ];
+    const restored = buildChatMessageListFromHistory([{ id: "h", query: "task", result: "", reasoning_content: "", sources: [], exports: [], model_output: cursor }]);
+    const reconciled = preserveProviderRetryAfterReconciliation(mergeChatMessageLists(restored, cached), cached, RoleTypes.ASSISTANT);
+    expect(reconciled[1]).toMatchObject({ delta: "", reasoning_content: "", sources: [], exports: [], model_output: cursor });
+  });
   it("retries transient SSE failures and reconciles permanent client failures", () => {
     for (const status of [0, 408, 425, 429, 500, 502, 503]) {
       expect(isTemporaryStreamFailure(status)).toBe(true);

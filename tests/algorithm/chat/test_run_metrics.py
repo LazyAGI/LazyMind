@@ -159,6 +159,26 @@ def test_missing_model_duration_is_unknown_instead_of_zero():
     assert 'tok_s' not in metrics
 
 
+def test_snapshot_duration_preserves_wrapped_sdk_usage_and_unknown_placeholders():
+    tracker = RunMetricsTracker(clock=lambda: 0.0)
+    tracker.on_model_call_finished(duration_ms=250)
+    tracker.on_model_call_finished(duration_ms=750)
+    metrics = tracker.snapshot(
+        usage={'provider_usages': [{'prompt_tokens': 7, 'completion_tokens': 2}]},
+        model_events=[
+            {'data': {'usage': {'prompt_tokens': 7, 'completion_tokens': 2,
+                                'provider_usage': {'prompt_tokens': 7, 'completion_tokens': 2}}}},
+            {'data': {'usage': {'prompt_tokens': -1, 'completion_tokens': -1}}},
+        ],
+        prefer_usage_snapshot=True,
+    )
+
+    assert metrics['output_tokens'] == 2
+    assert metrics['model_steps'] == 2
+    assert metrics['model_ms'] == 1000
+    assert metrics['tok_s'] == 2
+
+
 def test_missing_tool_duration_uses_elapsed_between_calls_and_results():
     class Clock:
         def __init__(self) -> None:

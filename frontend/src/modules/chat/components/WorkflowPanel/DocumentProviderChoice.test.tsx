@@ -3,6 +3,11 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest';
 import { WriterProviderChoice, SlotRenderer, SlotEditingContext } from './SlotComponents';
 import type { SlotFooterAction } from './slotEditingContext';
+import i18n from '@/i18n';
+
+const availability = vi.hoisted(() => ({ states: { 'future-provider': 'ready' },
+  accounts: { 'future-provider': [{ connection_id: 'fixture-account' }] }, refresh: vi.fn() }));
+vi.mock('./useWriterProviderAvailability', () => ({ useWriterProviderAvailability: () => availability }));
 
 it('offers a newly registered Provider from supplied capabilities without adding a switch', () => {
   const onChange = vi.fn();
@@ -26,6 +31,8 @@ const publicationApi = vi.hoisted(() => ({
   getPublicationForArtifact: vi.fn(async () => ({ data: { data: {} } })),
   listDocumentProviders: vi.fn(async () => ({ data: { data: { providers: [{ id: 'future-provider', capabilities: ['create', 'replace'] }] } } })),
   publishDocument: vi.fn(async (..._args: unknown[]) => ({ data: { data: { artifact_id: 'saved-artifact', revision: 4, draft_version: 1, provider: 'future-provider', provider_synced: true, artifact_saved: true } } })),
+  getPublicationTargets: vi.fn(async () => ({ data: { data: { current_hash: 'fixture', preferred_providers: [], targets: [] } } })),
+  createPublicationGroup: vi.fn(async (..._args: unknown[]) => ({ data: { data: { current_hash: 'fixture', preferred_providers: [], targets: [] } } })),
 }));
 const confirm = vi.hoisted(() => vi.fn());
 vi.mock('@/modules/chat/utils/request', async (original) => ({
@@ -34,10 +41,11 @@ vi.mock('@/modules/chat/utils/request', async (original) => ({
 }));
 vi.mock('antd', async (original) => {
   const actual = await original<typeof import('antd')>();
-  return { ...actual, Modal: { ...actual.Modal, confirm } };
+  return { ...actual, Modal: Object.assign(actual.Modal, { confirm }) };
 });
 
 it('connects an arbitrary slot to the generic publication API using the server descriptor', async () => {
+  await i18n.changeLanguage('en-US');
   publicationApi.publishDocument.mockClear(); confirm.mockClear();
   let action: SlotFooterAction | undefined;
   const registerFooterAction = (_key: string, next: SlotFooterAction | null) => {
@@ -51,14 +59,18 @@ it('connects an arbitrary slot to the generic publication API using the server d
   render(createElement(SlotEditingContext.Provider, { value: { setEditing: vi.fn(), registerFlush: () => () => {}, registerFooterAction } },
     createElement(SlotRenderer, { slot, sessionId: 'unknown-session', onRefresh: vi.fn() })));
   await waitFor(() => expect(action?.disabled).toBe(false));
-  expect(action?.flushBeforeAction).toBe(true);
+  expect(action?.flushBeforeAction).toBe(false);
   act(() => action!.onClick());
   expect(confirm).not.toHaveBeenCalled();
-  await waitFor(() => expect(publicationApi.publishDocument).toHaveBeenCalledTimes(1));
-  const sent = publicationApi.publishDocument.mock.calls[0];
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'future-provider' }));
+  expect(publicationApi.createPublicationGroup).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Publish to future-provider' }));
+  await waitFor(() => expect(publicationApi.createPublicationGroup).toHaveBeenCalledTimes(1));
+  const sent = publicationApi.createPublicationGroup.mock.calls[0];
   expect(sent[0]).toBe('unknown-artifact');
   expect(sent[1]).toEqual(expect.objectContaining({
-    action: 'publish_document', base_revision: 3, base_draft_version: 7,
-    input: expect.objectContaining({ provider: 'future-provider', idempotency_key: expect.any(String) }),
+    base_revision: 3, base_draft_version: 7, idempotency_key: expect.any(String),
+    targets: [expect.objectContaining({ provider: 'future-provider', connection_id: 'fixture-account' })],
   }));
+  expect(publicationApi.publishDocument).not.toHaveBeenCalled();
 });

@@ -136,3 +136,54 @@ func TestOriginalCancellation(t *testing.T) {
 		t.Fatalf("cancellation ignored: %v", err)
 	}
 }
+
+func TestOriginalWorkerReadAndReleaseRespectOwnershipAndBinding(t *testing.T) {
+	db := newDocumentTestDB(t)
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
+	svc, _ := NewOriginalService(OriginalServiceDeps{DB: db.DB})
+	owner := DatasetCatalogCaller{UserID: "owner"}
+	foreign := DatasetCatalogCaller{UserID: "foreign"}
+	ref, err := svc.AcquireOriginal(t.Context(), owner, AcquireOriginalRequest{Filename: "paper.txt", Reader: strings.NewReader("original bytes")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.OpenOriginal(t.Context(), foreign, ref.FileRef); err == nil {
+		t.Fatal("foreign user read original")
+	}
+	if err = svc.ReleaseOriginal(t.Context(), foreign, ref.FileRef); err == nil {
+		t.Fatal("foreign user deleted original")
+	}
+	file, err := svc.OpenOriginal(t.Context(), owner, ref.FileRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	db.Model(&orm.UploadedFile{}).Where("upload_file_id=?", ref.FileRef).Updates(map[string]any{"document_id": "bound", "status": UploadedFileStateBound})
+	if err = svc.ReleaseOriginal(t.Context(), owner, ref.FileRef); err == nil {
+		t.Fatal("released bound original")
+	}
+	db.Model(&orm.UploadedFile{}).Where("upload_file_id=?", ref.FileRef).Updates(map[string]any{"document_id": "", "status": UploadedFileStateUploaded})
+	if err = svc.ReleaseOriginal(t.Context(), owner, ref.FileRef); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.OpenOriginal(t.Context(), owner, ref.FileRef); err == nil {
+		t.Fatal("released original remained readable")
+	}
+}
+func TestRemoteOriginalHonorsPaperSizeLimitAndCleansRejectedBytes(t *testing.T) {
+	db := newDocumentTestDB(t)
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
+	svc, _ := NewOriginalService(OriginalServiceDeps{DB: db.DB})
+	u, _ := url.Parse("https://example.com/paper.pdf")
+	for _, length := range []int64{100, -1} {
+		response := &http.Response{StatusCode: 200, ContentLength: length, Header: http.Header{"Content-Type": []string{"application/pdf"}}, Body: io.NopCloser(strings.NewReader("%PDF-1.7\nlong paper bytes\n%%EOF")), Request: &http.Request{URL: u}}
+		if _, err := svc.acquireResponse(t.Context(), DatasetCatalogCaller{UserID: "owner"}, AcquireRemoteOriginalRequest{MaxBytes: 16, ExpectedMIME: "application/pdf", DisplayName: "paper.pdf"}, response); err == nil {
+			t.Fatal("paper limit ignored")
+		}
+	}
+	var count int64
+	db.Model(&orm.UploadedFile{}).Count(&count)
+	if count != 0 {
+		t.Fatal("rejected acquisition left an original", count)
+	}
+}

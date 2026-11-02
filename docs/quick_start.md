@@ -200,6 +200,12 @@ Default credentials: `admin` / `admin`
 
 ---
 
+## Zotero imports
+
+Shared and Docker deployments support remote Zotero and WebDAV imports. The local Zotero source reads the machine running Core, so shared deployments reject it before contacting Zotero, including explicit `localhost`, `127.0.0.1`, and `host.docker.internal` URLs.
+
+Native local/desktop runtimes retain local Zotero access for their bootstrap owner account. The runtime manager supplies `LAZYMIND_RUNTIME_MODE=local` and an explicit `LAZYMIND_BOOTSTRAP_ADMIN_USERNAME`; Core verifies the request's Bearer token with auth-service and requires the matching user ID, configured username, and `system-admin` role. Other accounts and missing owner configuration receive 403; unavailable owner authentication receives 503. The desktop automatic login uses this account without additional configuration. Keep shared deployments outside local runtime mode; use remote Zotero credentials or import selected files there.
+
 ## Common Operations
 
 Restart containers without rebuilding:

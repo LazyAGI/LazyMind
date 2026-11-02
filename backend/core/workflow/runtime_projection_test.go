@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -10,9 +11,108 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/tasktiming"
 	"lazymind/core/workflow/artifactgraph"
 	"lazymind/core/workflow/graphengine"
 )
+
+func TestSuccessfulStepHandoffPreservesExecutionClock(t *testing.T) {
+	for _, tc := range []struct {
+		name, initial, mode, next, sibling, wantDisplay string
+		wantRunning                                     bool
+	}{
+		{"ready successor", "active", "", "ready", "", "running", true},
+		{"approval", "active", "human", "ready", "", "waiting", false},
+		{"blocked successor", "active", "", "blocked", "", "failed", false},
+		{"completed", "active", "", "end", "", "completed", false},
+		{"failed sibling", "active", "", "ready", "failed", "failed", false},
+		{"interrupted sibling", "active", "", "ready", "interrupted", "failed", false},
+		{"running sibling", "active", "", "ready", "running", "running", true},
+		{"stopping", "pausing", "", "ready", "", "running", true},
+		{"paused", "stopped", "", "ready", "", "paused", false},
+		{"not admitted", "waiting", "", "ready", "", "failed", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, hash := setupBatchTransitionSession(t)
+			must := func(err error) {
+				t.Helper()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			must(db.AutoMigrate(&orm.TaskExecutionTiming{}, &orm.TaskAttemptTiming{}))
+			graph := graphengine.CompiledStateGraph{
+				SchemaVersion: graphengine.SchemaVersion, GraphHash: hash, StartRoute: "all",
+				Nodes: map[string]graphengine.CompiledNode{
+					"prepare": {ID: "prepare", Mode: tc.mode, Route: "all"},
+					"outline": {ID: "outline", Route: "all"},
+				},
+				ControlEdges: []graphengine.CompiledEdge{
+					{ID: "start", From: "__start__", To: "prepare"},
+					{ID: "next", From: "prepare", To: "outline"},
+					{ID: "end", From: "outline", To: "__end__"},
+				},
+			}
+			if tc.next == "blocked" {
+				node := graph.Nodes["outline"]
+				node.Input = &graphengine.Expression{Material: "missing"}
+				graph.Nodes["outline"] = node
+			} else if tc.next == "end" {
+				delete(graph.Nodes, "outline")
+				graph.ControlEdges = graph.ControlEdges[:2]
+				graph.ControlEdges[1].To = "__end__"
+			}
+			if tc.sibling != "" {
+				graph.Nodes["sibling"] = graphengine.CompiledNode{ID: "sibling"}
+				graph.ControlEdges = append(graph.ControlEdges, graphengine.CompiledEdge{ID: "sibling", From: "__start__", To: "sibling"})
+				must(db.Create(&orm.WorkflowSessionStep{ID: "sibling", SessionID: "batch-session", StepID: "sibling", Status: tc.sibling, Validity: "effective"}).Error)
+			}
+			must(db.Model(&orm.WorkflowRevision{}).Where("id = ?", "batch-revision").Update("compiled_graph", graph.JSON()).Error)
+			start := time.Now().UTC().Add(-time.Minute)
+			must(db.Create(&orm.WorkflowSessionStep{ID: "prepare-attempt", TaskID: "prepare-task", SessionID: "batch-session", StepID: "prepare", Status: "succeeded", Validity: "effective", Attempt: 1, CreatedAt: start, UpdatedAt: start}).Error)
+			session, err := GetSession(t.Context(), db.DB, "batch-session")
+			must(err)
+			session.Status = "active"
+			must(tasktiming.BindWorkflow(t.Context(), db.DB, *session, start))
+			updates := map[string]any{"status": tc.initial}
+			if tc.initial == "stopped" {
+				updates["last_stopped_at"] = time.Now().UTC()
+			}
+			must(db.Model(session).Updates(updates).Error)
+
+			// Persist the real completion snapshot before the driver starts the next step.
+			must(freezeRouteDecision(t.Context(), db.DB, session.ID, "prepare", "prepare-task"))
+			var event orm.WorkflowEvent
+			must(db.Where("session_id = ? AND event_type = ?", session.ID, "workflow.snapshot").Order("created_at DESC").First(&event).Error)
+			var payload projectionResponse
+			must(json.Unmarshal(event.PayloadJSON, &payload))
+			if payload.Display.Status != tc.wantDisplay {
+				t.Fatalf("display = %+v, want %s", payload.Display, tc.wantDisplay)
+			}
+			var intervals []orm.TaskExecutionTiming
+			must(db.Where("workflow_session_id = ?", session.ID).Find(&intervals).Error)
+			if len(intervals) != 1 || (intervals[0].FinishedAt == nil) != tc.wantRunning {
+				t.Fatalf("handoff split or incorrectly stopped the clock: %+v", intervals)
+			}
+			if tc.name == "ready successor" {
+				admitted, err := prepareContinuation(t.Context(), db.DB, session.ID)
+				must(err)
+				if !admitted {
+					t.Fatal("successor continuation rejected")
+				}
+				must(db.Where("workflow_session_id = ?", session.ID).Find(&intervals).Error)
+				if len(intervals) != 1 || intervals[0].FinishedAt != nil {
+					t.Fatalf("continuation reopened the clock: %+v", intervals)
+				}
+				run, err := tasktiming.Snapshot(t.Context(), db.DB, session.CreateUserID, session.ConversationID, session.ID, start.Add(65*time.Second))
+				must(err)
+				if run == nil || run.Timing.ElapsedMS == nil || *run.Timing.ElapsedMS != 65000 {
+					t.Fatalf("step handoff lost elapsed time: %+v", run)
+				}
+			}
+		})
+	}
+}
 
 func TestFreezeRouteDecisionSerializesWithArtifactInvalidation(t *testing.T) {
 	db := newTestDB(t)

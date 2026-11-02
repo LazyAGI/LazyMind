@@ -23,6 +23,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/displaystate"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -111,6 +112,12 @@ func (p WorkflowStepParams) asMap() map[string]any {
 		"session_id":    p.SessionID,
 		"user_input":    p.UserInput,
 		"is_cold_start": p.IsColdStart,
+	}
+	if p.LaunchUserInput != "" {
+		m["launch_user_input"] = p.LaunchUserInput
+	}
+	if p.CurrentUserInput != "" {
+		m["current_user_input"] = p.CurrentUserInput
 	}
 	if p.WorkflowMode != "" {
 		m["workflow_mode"] = p.WorkflowMode
@@ -560,6 +567,13 @@ func launchWorkflowAttempt(
 		"user_input":    params.UserInput,
 		"is_cold_start": isCold,
 	}
+	// Keep request identity separate from control text such as "continue".
+	if params.LaunchUserInput != "" {
+		rawParamsMap["launch_user_input"] = params.LaunchUserInput
+	}
+	if params.CurrentUserInput != "" {
+		rawParamsMap["current_user_input"] = params.CurrentUserInput
+	}
 	refOrID := params.WorkflowRef
 	if refOrID == "" {
 		refOrID = workflowID
@@ -730,11 +744,21 @@ func OnSubAgentDone(
 	pctx *WorkflowChatContext,
 ) {
 	_ = UpdateStepStatus(ctx, db, taskID, status)
-	// A user stop is authoritative even when an executor's late failure callback
-	// loses the step update race. Do not feed that callback to the retry driver.
-	if step, err := GetStepByTaskID(ctx, db, taskID); err == nil && step != nil &&
-		step.Status == StepStatusInterrupted && step.TerminalCode == "WORKFLOW_STOPPED" {
-		return
+	if step, err := GetStepByTaskID(ctx, db, taskID); err == nil && step != nil {
+		if step.TerminalCode == "WORKFLOW_STOP_REQUESTED" {
+			// Canonical workers acknowledge after executor cleanup through the
+			// leased receipt endpoint; legacy runners report terminal interruption.
+			if step.LeaseToken == "" {
+				if err := ConfirmNativeStop(ctx, db, step.ID, ""); err != nil {
+					onSSE("workflow_error", map[string]any{"session_id": step.SessionID, "message": err.Error()})
+				}
+			}
+			return
+		}
+		// A late terminal callback must not feed a stopped attempt to the driver.
+		if step.Status == StepStatusInterrupted && step.TerminalCode == "WORKFLOW_STOPPED" {
+			return
+		}
 	}
 	stepFailed := status != subagent.StatusSucceeded && status != subagent.StatusInterrupted
 	sessionCompleted := false
@@ -814,6 +838,10 @@ func OnSubAgentDone(
 	}
 
 	if sessionCompleted {
+		// Route freezing can complete the session without UpdateSessionStatus.
+		// Publish the committed terminal state so domain projections (including
+		// paper expansion results) also catch up after a manual retry.
+		NotifyWorkflowRuntimeUpdated(ctx, db, pctx.SessionID, taskID, "completed")
 		_ = taskcenter.UpdateTaskStatusBySession(ctx, db, pctx.SessionID, "succeeded")
 		clearGeneratingChatStatus(ctx, stateStore, pctx.ConvID)
 		onSSE("workflow_completed", map[string]any{
@@ -833,6 +861,29 @@ func OnSubAgentDone(
 			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
 		}
 		return
+	}
+	if status == subagent.StatusSucceeded {
+		session, err := GetSession(ctx, db, pctx.SessionID)
+		if err != nil {
+			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+			return
+		}
+		candidate := *session
+		candidate.Status = SessionStatusWaiting
+		display, err := displaystate.Read(db.WithContext(ctx), candidate)
+		if err != nil {
+			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+			return
+		}
+		if display.Status == "waiting" {
+			if err := UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting); err != nil {
+				onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+				return
+			}
+			onSSE("step_waiting", map[string]any{"session_id": pctx.SessionID, "step_id": display.ApprovalStepID, "reason": "approval_required"})
+			go OnSubAgentDoneSnapshot(context.Background(), db, pctx)
+			return
+		}
 	}
 
 	// Determine mode: use context-level WorkflowMode (set from request body during HandleWorkflowStepCreated).
@@ -855,7 +906,14 @@ func OnSubAgentDone(
 		handOff = *pctx.HandOff
 	}
 	if !handOff {
-		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		admitted, err := prepareContinuation(ctx, db, pctx.SessionID)
+		if err != nil {
+			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+			return
+		}
+		if !admitted {
+			return
+		}
 		onSSE("step_waiting", map[string]any{
 			"session_id": pctx.SessionID,
 			"step_id":    pctx.StepID,
@@ -879,6 +937,14 @@ func OnSubAgentDone(
 		}
 		// Use a detached context: ctx originates from the SubAgent Run loop and is
 		// cancelled as soon as Run returns, before this goroutine loads LLM config.
+		admitted, err := prepareContinuation(ctx, db, pctx.SessionID)
+		if err != nil {
+			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+			return
+		}
+		if !admitted {
+			return
+		}
 		go advanceAutoMode(context.Background(), db, stateStore, status, summary, onSSE, pctx)
 	} else {
 		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
@@ -940,9 +1006,15 @@ func advanceAutoMode(
 		attempt = step.Attempt
 	}
 
-	llmConfig, configErr := modelconfig.LoadLLMConfig(ctx, db, pctx.UserID)
+	llmConfig, configErr := modelconfig.LoadConversationLLMConfig(ctx, db, pctx.UserID, pctx.ConvID)
 	if configErr != nil {
 		fmt.Printf("[Workflow] load DriverAgent LLM config failed user=%s err=%v\n", pctx.UserID, configErr)
+		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
+		onSSE("step_waiting", map[string]any{
+			"session_id": pctx.SessionID, "step_id": pctx.StepID,
+			"reason": "model_config_unavailable",
+		})
+		return
 	}
 	acceptance, driverPrompt := loadWorkflowDriverPolicy(ctx, db, pctx.SessionID, pctx.StepID)
 	artifactsSummary, _ := buildWorkflowArtifactsSummary(ctx, db, pctx.SessionID, pctx.StepID)
@@ -956,11 +1028,9 @@ func advanceAutoMode(
 			"session_id": pctx.SessionID, "step_id": pctx.StepID,
 			"reason": "driver_unavailable",
 		})
-		_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
-		onSSE("step_waiting", map[string]any{
-			"session_id": pctx.SessionID, "step_id": pctx.StepID,
-			"reason": "driver_fallback",
-		})
+		if err := failIdleSession(ctx, db, pctx.SessionID); err != nil {
+			onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+		}
 		return
 	}
 	onSSE("driver_input", map[string]any{
@@ -1084,12 +1154,9 @@ func checkAndFallbackIfStuck(
 		return
 	}
 	// Session is still active but no SubAgent is running: ChatAgent did not push a new step.
-	_ = UpdateSessionStatus(ctx, db, pctx.SessionID, SessionStatusWaiting)
-	onSSE("step_waiting", map[string]any{
-		"session_id": pctx.SessionID,
-		"step_id":    pctx.StepID,
-		"reason":     "chat_agent_no_advance",
-	})
+	if err := failIdleSession(ctx, db, pctx.SessionID); err != nil {
+		onSSE("workflow_error", map[string]any{"session_id": pctx.SessionID, "message": err.Error()})
+	}
 }
 
 // OnArtifactEvent is called when a workflow_step SubAgent emits an artifact event.

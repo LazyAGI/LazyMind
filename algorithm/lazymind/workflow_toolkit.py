@@ -121,7 +121,9 @@ def load_workflow_package_tools(
             str(package_root / path) if package_root is not None
             else f'{workflow_id}@{revision_id}/{path}'
         )
-        exec(compile(source.decode('utf-8'), module.__file__, 'exec'), module.__dict__)
+        # A package chooses its own annotation semantics. Inheriting this loader's
+        # future annotations breaks typed tool schemas defined inside the package.
+        exec(compile(source.decode('utf-8'), module.__file__, 'exec', dont_inherit=True), module.__dict__)
         for name in tuple(remaining):
             if allowed is not None and name not in allowed[path]:
                 continue
@@ -484,17 +486,38 @@ class HostWorkflowToolkit:
         """List selected output Artifact revisions, including deletion tombstones."""
         return self._client().list_artifacts(session_id).result
 
+    def reorder_artifact_pages(self, session_id: str, slot_ids: List[str],
+                               order: List[int]) -> Dict[str, Any]:
+        """Move aligned lists together using current 1-based visual page positions."""
+        if (not order or any(type(page) is not int for page in order)
+                or sorted(order) != list(range(1, len(order) + 1))):
+            raise ValueError('order must contain every current visual page exactly once')
+        client = self._client()
+        changes = []
+        for slot in sorted(set(slot_ids)):
+            state = client.get_slot_order(session_id, slot).result
+            indices = state.get('order_list') or []
+            if not indices:
+                continue
+            if len(indices) != len(order):
+                raise ValueError(f'{slot} is not aligned with the requested page order')
+            changes.append({'slot_id': slot, 'order': [indices[page - 1] for page in order],
+                            'version': int(state.get('order_version') or 0)})
+        result = client.reorder_slot_orders(session_id, changes).result
+        return {**result, 'page_order': order, 'reordered_slots': [item['slot_id'] for item in changes]}
+
     def read_artifact(self, artifact_id: str) -> Dict[str, Any]:
         """Read one authorized immutable Artifact revision and lineage."""
         return self._client().read_artifact(artifact_id).result
 
     def patch_artifact(self, artifact_id: str, base_revision: int, value: Any,
                        content_type: str = 'json', caption: str = '',
-                       command_id: str = '') -> Dict[str, Any]:
+                       command_id: str = '', base_draft_version: Optional[int] = None) -> Dict[str, Any]:
         """Create a new selected Artifact revision without overwriting history."""
         resolved_command_id = command_id or str(uuid.uuid4())
+        options = {'base_draft_version': base_draft_version} if base_draft_version is not None else {}
         result = self._client().patch_artifact(
-            artifact_id, base_revision, value, content_type, caption, resolved_command_id).result
+            artifact_id, base_revision, value, content_type, caption, resolved_command_id, **options).result
         return {**result, 'command_id': resolved_command_id}
 
     def delete_artifact(self, artifact_id: str, base_revision: int,

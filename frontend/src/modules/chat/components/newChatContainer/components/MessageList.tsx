@@ -13,6 +13,8 @@ import {
 } from "@ant-design/icons";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import AssistantMessage from "../../AssistantMessage";
+import ChatImages from "../../ChatImages";
+import ChatFiles from "../../ChatFiles";
 import type { PreferenceType } from "../../MultiAnswerDisplay";
 import "../index.scss";
 import dayjs from "dayjs";
@@ -129,6 +131,7 @@ interface MessageListProps {
   ) => void | Promise<boolean | void>;
   regenerate: () => void;
   regenerateDisabled?: boolean;
+  chatBusy?: boolean;
   stopGeneration: () => void;
   renderText: (item: any) => React.ReactNode;
   updateAssistantMessage: (data: any, id?: string, index?: number) => void;
@@ -311,6 +314,7 @@ const MessageList: React.FC<MessageListProps> = ({
   sendMessage,
   regenerate,
   regenerateDisabled = false,
+  chatBusy = false,
   stopGeneration,
   renderText,
   updateAssistantMessage,
@@ -532,12 +536,16 @@ const MessageList: React.FC<MessageListProps> = ({
                 </Space>
                 </div>
               ) : Array.isArray(item.mentions) && item.mentions.length > 0 ? (
-                <div className="chat-user-mention-text">
-                  <UserMessageWithMentions
-                    mentions={item.mentions}
-                    text={item.display_delta || item.delta || ""}
-                  />
-                </div>
+                <>
+                  {item.images?.length > 0 && <ChatImages images={item.images} />}
+                  {item.files?.length > 0 && <ChatFiles files={item.files} />}
+                  <div className="chat-user-mention-text">
+                    <UserMessageWithMentions
+                      mentions={item.mentions}
+                      text={item.display_delta || item.delta || ""}
+                    />
+                  </div>
+                </>
               ) : (
                 renderText(item)
               )}
@@ -618,6 +626,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   sendMessage={sendMessage}
                   regenerate={regenerate}
                   regenerateDisabled={regenerateDisabled}
+                  chatBusy={chatBusy}
                   stopGeneration={stopGeneration}
                   renderText={renderText}
                   updateMessage={(msg: any) =>
