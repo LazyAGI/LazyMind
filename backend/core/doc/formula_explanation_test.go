@@ -20,7 +20,7 @@ func TestFormulaExplanationContextBoundsAndAuthoritativeFormula(t *testing.T) {
 			t.Fatal("formula evidence changed")
 		}
 	}
-	if size > 20000 {
+	if size > 5000 {
 		t.Fatalf("unbounded context: %d", size)
 	}
 	if _, _, err := formulaExplanationContext(d, "intro"); err == nil {
@@ -28,6 +28,93 @@ func TestFormulaExplanationContextBoundsAndAuthoritativeFormula(t *testing.T) {
 	}
 	if _, _, err := formulaExplanationContext(d, "invented"); err == nil {
 		t.Fatal("invented block accepted")
+	}
+}
+
+func TestFormulaExplanationContextKeepsFocusedProseAndHeading(t *testing.T) {
+	long := strings.Repeat("中", 2000)
+	d := pdfir.Document{Blocks: []pdfir.Block{
+		{ID: "heading", Type: "heading", Text: "Attention method", Page: 1},
+		{ID: "old", Type: "text", Text: "irrelevant older paragraph", Page: 1},
+		{ID: "before2", Type: "text", Text: long, Page: 2},
+		{ID: "image", Type: "image", Text: "unrelated image caption", Page: 2},
+		{ID: "before1", Type: "text", Text: long, Page: 2},
+		{ID: "eq", Type: "formula", Latex: `\operatorname{Attention}(Q,K,V)`, Page: 2},
+		{ID: "after1", Type: "text", Text: "where Q denotes queries. " + long, Page: 2},
+		{ID: "other-eq", Type: "formula", Latex: "y=x", Page: 2},
+		{ID: "after2", Type: "text", Text: long, Page: 2},
+		{ID: "after3", Type: "text", Text: long, Page: 3},
+		{ID: "too-far", Type: "text", Text: "not in the formula context", Page: 3},
+	}}
+	_, evidence, err := formulaExplanationContext(d, "eq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"heading", "before2", "before1", "eq", "after1", "after2", "after3"}
+	if len(evidence) != len(want) {
+		t.Fatalf("want %v, got %+v", want, evidence)
+	}
+	bodySize := 0
+	for i, item := range evidence {
+		if item.ID != want[i] {
+			t.Fatalf("wrong context block %d: %s", i, item.ID)
+		}
+		if i != 0 && i != 3 {
+			length := len([]rune(item.Text))
+			if length > 1500 || length == 0 {
+				t.Fatalf("body block length %d: %d", i, length)
+			}
+			bodySize += length
+		}
+	}
+	if bodySize > 5000 {
+		t.Fatalf("body context exceeds budget: %d", bodySize)
+	}
+	if !strings.HasPrefix(evidence[4].Text, "where Q denotes queries") {
+		t.Fatal("definition after the formula was lost")
+	}
+}
+
+func TestFormulaExplanationContextStaysWithinItsSection(t *testing.T) {
+	d := pdfir.Document{Blocks: []pdfir.Block{
+		{ID: "old", Type: "text", Text: "previous section", Page: 0},
+		{ID: "section", Type: "heading", Text: "Current method", Page: 1},
+		{ID: "before", Type: "text", Text: "input definition", Page: 1},
+		{ID: "eq", Type: "formula", Latex: "y=f(x)", Page: 1},
+		{ID: "after", Type: "text", Text: "where y is the output", Page: 1},
+		{ID: "next-section", Type: "heading", Text: "Experiments", Page: 2},
+		{ID: "unrelated", Type: "text", Text: "accuracy on a dataset", Page: 2},
+	}}
+	_, evidence, err := formulaExplanationContext(d, "eq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, item := range evidence {
+		ids = append(ids, item.ID)
+	}
+	if strings.Join(ids, ",") != "section,before,eq,after" {
+		t.Fatalf("context crosses a section boundary: %v", ids)
+	}
+}
+
+func TestFormulaExplanationContextBoundsExtractedFormulaText(t *testing.T) {
+	d := pdfir.Document{Blocks: []pdfir.Block{{ID: "eq", Type: "formula", Latex: "x", Text: strings.Repeat("x", 20000), Page: 0}}}
+	_, evidence, err := formulaExplanationContext(d, "eq")
+	if err != nil || len(evidence) != 1 || len([]rune(evidence[0].Text)) > 8000 {
+		t.Fatalf("unbounded extracted formula text: %v %d", err, len(evidence[0].Text))
+	}
+}
+
+func TestFormulaExplanationContextFindsHeadingInLongSection(t *testing.T) {
+	blocks := []pdfir.Block{{ID: "method", Type: "heading", Text: "Long method section", Page: 0}}
+	for i := 0; i < 85; i++ {
+		blocks = append(blocks, pdfir.Block{ID: strings.Repeat("p", i+1), Type: "text", Text: "paragraph", Page: 0})
+	}
+	blocks = append(blocks, pdfir.Block{ID: "eq", Type: "formula", Latex: "x", Page: 1})
+	_, evidence, err := formulaExplanationContext(pdfir.Document{Blocks: blocks}, "eq")
+	if err != nil || len(evidence) == 0 || evidence[0].ID != "method" {
+		t.Fatalf("nearest chapter title missing: %+v %v", evidence, err)
 	}
 }
 func TestFormulaExplanationValidatesCitationsAndNeverTrustsModelEvidence(t *testing.T) {
@@ -74,17 +161,33 @@ func TestFormulaExplanationKeepsBoundedDisplayRepairAndOriginalEvidence(t *testi
 func TestFormulaExplanationCacheIdentity(t *testing.T) {
 	d := pdfir.Document{SourceSHA256: "sha", Parser: pdfir.Parser{Name: "mineru", Model: "vlm"}}
 	evidence := []formulaEvidence{{ID: "f", Text: "x"}}
-	key := formulaExplanationCacheKey(d, "f", "own:model", evidence)
-	if key == formulaExplanationCacheKey(d, "f", "own:other", evidence) {
+	key := formulaExplanationCacheKey(d, "f", `x+y`, "own:model", evidence)
+	if key == formulaExplanationCacheKey(d, "f", `x+y`, "own:other", evidence) {
 		t.Fatal("model not in cache key")
 	}
+	if key == formulaExplanationCacheKey(d, "f", `x-y`, "own:model", evidence) {
+		t.Fatal("formula LaTeX not in cache key")
+	}
 	d.SourceSHA256 = "new"
-	if key == formulaExplanationCacheKey(d, "f", "own:model", evidence) {
+	if key == formulaExplanationCacheKey(d, "f", `x+y`, "own:model", evidence) {
 		t.Fatal("source not in cache key")
 	}
 	d.SourceSHA256 = "sha"
 	evidence[0].Text = "changed"
-	if key == formulaExplanationCacheKey(d, "f", "own:model", evidence) {
+	if key == formulaExplanationCacheKey(d, "f", `x+y`, "own:model", evidence) {
 		t.Fatal("parser context not in cache key")
+	}
+}
+
+func TestFormulaExplanationCacheRebindsGeometryWithoutRegenerating(t *testing.T) {
+	d := pdfir.Document{SourceSHA256: "sha", Parser: pdfir.Parser{Name: "mineru", Model: "vlm"}}
+	first := []formulaEvidence{{ID: "f", Text: "x+y", Page: 1, BBox: []float64{.1, .2, .3, .4}}}
+	second := []formulaEvidence{{ID: "f", Text: "x+y", Page: 2, BBox: []float64{.5, .6, .7, .8}}}
+	if formulaExplanationCacheKey(d, "f", `x+y`, "model", first) != formulaExplanationCacheKey(d, "f", `x+y`, "model", second) {
+		t.Fatal("layout-only changes regenerated the formula explanation")
+	}
+	result, err := validateFormulaExplanation(`{"summary":"sum","symbols":[],"steps":[]}`, second)
+	if err != nil || result.Evidence[0].Page != 2 || result.Evidence[0].BBox[0] != .5 {
+		t.Fatalf("current source geometry was not rebound: %+v %v", result, err)
 	}
 }

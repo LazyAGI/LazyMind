@@ -1,14 +1,37 @@
 import {act, fireEvent, render, screen, waitFor} from '@testing-library/react';
-import {beforeAll, describe, expect, it, vi} from 'vitest';
+import {beforeAll, beforeEach, describe, expect, it, vi} from 'vitest';
 import i18n from '@/i18n';
 import {PdfFormulaStudy} from './PdfFormulaStudy';
 import {PdfStudyDialog} from './PdfStudyDialog';
+import {CHAT_MODEL_SELECTION_CHANGED_EVENT} from '@/modules/chat/constants/chat';
+import {AUTH_USER_CHANGE_EVENT} from '@/components/auth';
 const mocks=vi.hoisted(()=>({post:vi.fn()}));
 vi.mock('@/components/request',()=>({axiosInstance:mocks,BASE_URL:''}));
 const block={id:'f',type:'formula',page:2,latex:'x^2'};
 const explanation={summary:'Summary',symbols:[{symbol:'x',meaning:'Input',evidence_ids:['e'],inferred:false}],steps:[],evidence:[{id:'e',text:'Exact source quote',page:1,bbox:[0,0,1,.1]}],warnings:[]};
 beforeAll(async()=>{await i18n.changeLanguage('en-US');});
+beforeEach(()=>window.dispatchEvent(new Event(AUTH_USER_CHANGE_EVENT)));
 describe('formula study panel',()=>{
+ it('reuses a generated formula when its popup is reopened',async()=>{
+  mocks.post.mockReset().mockResolvedValue({data:{data:explanation}});
+  const props={target:{dataset:'d',document:'doc'},sourceKey:'memory-remount-cache',blocks:[block],selected:block,autoExplain:true,onSelect:vi.fn(),onNavigate:vi.fn(),onReturn:vi.fn(),canReturn:false,onClose:vi.fn()};
+  const first=render(<PdfFormulaStudy {...props}/>);
+  expect(await screen.findByText('Summary')).toBeInTheDocument();
+  first.unmount();
+  render(<PdfFormulaStudy {...props}/>);
+  expect(await screen.findByText('Summary')).toBeInTheDocument();
+  expect(mocks.post).toHaveBeenCalledTimes(1);
+ });
+ it.each([CHAT_MODEL_SELECTION_CHANGED_EVENT,AUTH_USER_CHANGE_EVENT])('invalidates the popup cache after %s',async eventName=>{
+  mocks.post.mockReset().mockResolvedValue({data:{data:explanation}});
+  const props={target:{dataset:'d',document:'doc'},sourceKey:`invalidation-${eventName}`,blocks:[block],selected:block,autoExplain:true,onSelect:vi.fn(),onNavigate:vi.fn(),onReturn:vi.fn(),canReturn:false,onClose:vi.fn()};
+  const first=render(<PdfFormulaStudy {...props}/>);
+  expect(await screen.findByText('Summary')).toBeInTheDocument();
+  first.unmount();
+  act(()=>window.dispatchEvent(new Event(eventName)));
+  render(<PdfFormulaStudy {...props}/>);
+  await waitFor(()=>expect(mocks.post).toHaveBeenCalledTimes(2));
+ });
  it('makes every parsed term clickable in the source popup while keeping the full symbol list folded',async()=>{
   mocks.post.mockResolvedValue({data:{data:explanation}});
   render(<PdfStudyDialog onClose={vi.fn()}><PdfFormulaStudy target={{dataset:'d',document:'doc'}} sourceKey="hash" blocks={[block]} selected={{...block,latex:'x+y'}} autoExplain compact onSelect={vi.fn()} onNavigate={vi.fn()} onReturn={vi.fn()} canReturn={false} onClose={vi.fn()}/></PdfStudyDialog>);

@@ -10,10 +10,75 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestFormulaExplanationConcurrentGenerationSharesOneCall(t *testing.T) {
+	flights := &formulaExplanationFlightGroup{active: make(map[string]*formulaExplanationFlight)}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	type answer struct {
+		value  formulaExplanation
+		shared bool
+		err    error
+	}
+	first := make(chan answer, 1)
+	firstContext, cancelFirst := context.WithCancel(context.Background())
+	defer cancelFirst()
+	go func() {
+		value, shared, err := flights.do(firstContext, "concurrent-formula-test", func(ctx context.Context) (formulaExplanation, error) {
+			calls.Add(1)
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return formulaExplanation{}, ctx.Err()
+			}
+			return formulaExplanation{Summary: "shared"}, nil
+		})
+		first <- answer{value, shared, err}
+	}()
+	<-started
+	second := make(chan answer, 1)
+	go func() {
+		value, shared, err := flights.do(context.Background(), "concurrent-formula-test", func(context.Context) (formulaExplanation, error) {
+			calls.Add(1)
+			return formulaExplanation{Summary: "duplicate"}, nil
+		})
+		second <- answer{value, shared, err}
+	}()
+	deadline := time.After(time.Second)
+	for {
+		flights.mu.Lock()
+		waiters := flights.active["concurrent-formula-test"].waiters
+		flights.mu.Unlock()
+		if waiters == 2 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("second caller never joined the flight")
+		default:
+			runtime.Gosched()
+		}
+	}
+	cancelFirst()
+	if result := <-first; !errors.Is(result.err, context.Canceled) {
+		t.Fatalf("first caller should cancel independently: %+v", result)
+	}
+	close(release)
+	if result := <-second; result.err != nil || !result.shared || result.value.Summary != "shared" {
+		t.Fatalf("second caller should receive the shared result: %+v", result)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("duplicate model calls: %d", calls.Load())
+	}
+}
 
 func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	installOriginalSourceTransport(t)
@@ -51,6 +116,9 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 			if !strings.Contains(instruction, "standard mathematical meaning") || !strings.Contains(instruction, "named operators such as Attention") {
 				t.Error("generic operator explanations must be allowed without pretending the paper defined them")
 			}
+			if !strings.Contains(instruction, "at most 2 short steps") || !strings.Contains(instruction, "one concise sentence per symbol") {
+				t.Error("formula output must stay concise to reduce generation latency")
+			}
 			if !strings.Contains(content, "x is distance.") {
 				t.Error("missing neighboring source")
 			}
@@ -59,6 +127,12 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 			}
 			var input map[string]any
 			json.Unmarshal([]byte(content), &input)
+			for _, rawBlock := range input["source_blocks"].([]any) {
+				block := rawBlock.(map[string]any)
+				if len(block) != 2 || block["id"] == nil || block["text"] == nil {
+					t.Error("model input contains location metadata or misses source text")
+				}
+			}
 			if focus, ok := input["target_symbol"].(string); ok {
 				if !strings.Contains(instruction, "target_symbol") {
 					t.Error("focused instruction missing")
@@ -98,13 +172,16 @@ func TestFormulaExplanationHandlerACLCacheForceAndSourceChange(t *testing.T) {
 	if w.Code != 200 || calls != 1 {
 		t.Fatalf("generate: %d %s", w.Code, w.Body)
 	}
+	if w.Header().Get("X-LazyMind-Formula-Cache") != "miss" || w.Header().Get("Server-Timing") == "" {
+		t.Fatalf("missing cold-path timing or cache status: %v", w.Header())
+	}
 	var envelope struct {
 		Data formulaExplanation `json:"data"`
 	}
 	if e := json.Unmarshal(w.Body.Bytes(), &envelope); e != nil || envelope.Data.Model != "selected" || len(envelope.Data.Evidence) != 2 {
 		t.Fatalf("bad envelope: %s", w.Body)
 	}
-	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 {
+	if w := call("owner", "f", `{}`); w.Code != 200 || calls != 1 || w.Header().Get("X-LazyMind-Formula-Cache") != "hit" {
 		t.Fatal("cache miss")
 	}
 	if w := call("owner", "f", `{"force":true}`); w.Code != 200 || calls != 2 {
