@@ -51,3 +51,12 @@
 .pdf-selection-help{color:#b6b6b6}
 .pdf-selection-help a{color:#91bdff}
 @media(max-width:600px){.pdf-selection-icons .pdf-selection-mark{width:40px;height:40px}.pdf-selection-colors .pdf-selection-color{width:20px;height:20px}}
+
+/* Compact actions reveal their names immediately without relying on delayed browser title tooltips. */
+.pdf-selection-composer .pdf-selection-translation{display:inline-flex;position:relative}
+.pdf-selection-composer .pdf-selection-color,.pdf-selection-composer .pdf-selection-mark,.pdf-selection-composer .pdf-selection-primary-action,.pdf-selection-composer .pdf-selection-send,.pdf-selection-composer .pdf-selection-more summary{position:relative}
+.pdf-selection-composer [data-tooltip]::after{content:attr(data-tooltip);position:absolute;z-index:5;left:50%;bottom:calc(100% + 7px);width:max-content;max-width:260px;padding:5px 8px;border:1px solid #525252;border-radius:6px;background:#171717;color:#fff;box-shadow:0 4px 12px #0005;font:12px/1.35 system-ui,sans-serif;white-space:normal;pointer-events:none;visibility:hidden;opacity:0;transform:translate(-50%,3px);transition:opacity .12s ease,transform .12s ease,visibility .12s ease}
+.pdf-selection-composer [data-tooltip]:is(:hover,:focus-visible,:focus-within)::after{visibility:visible;opacity:1;transform:translate(-50%,0)}
+.pdf-selection-composer .pdf-selection-close[data-tooltip]::after{top:calc(100% + 5px);bottom:auto;left:auto;right:0;transform:translateY(-3px)}
+.pdf-selection-composer .pdf-selection-close[data-tooltip]:is(:hover,:focus-visible)::after{transform:translateY(0)}
+@media(prefers-reduced-motion:reduce){.pdf-selection-composer [data-tooltip]::after{transition:none}}

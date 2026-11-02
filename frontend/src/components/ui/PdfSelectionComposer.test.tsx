@@ -68,5 +68,22 @@ it('exposes quick explanation and vocabulary without opening More',()=>{
 it('preserves disabled primary actions and hides an empty More menu',()=>{
  const action=vi.fn();render(<PdfSelectionComposer selection={{text:'word',page:1}} onClose={vi.fn()} actions={[{key:'explanation',label:'快速解释',disabled:true,title:'Unavailable',onClick:action}]}/>);
  expect(screen.getByRole('button',{name:'快速解释'})).toBeDisabled();
+ expect(screen.getByRole('button',{name:'快速解释'})).toHaveAttribute('data-tooltip','快速解释选中文字 · Unavailable');
  expect(screen.queryByText('更多操作')).toBeNull();
+});
+
+it('exposes a visible tooltip label for each compact icon in ask and note modes',()=>{
+ render(<PdfSelectionComposer selection={{text:'word',page:1}} onAsk={vi.fn()} onNote={vi.fn()} onTranslate={vi.fn()} translationDisabled translationTitle="请先配置翻译服务" onClose={vi.fn()} actions={[
+  {key:'vocabulary',label:'加入生词',onClick:vi.fn()},
+  {key:'explanation',label:'快速解释',onClick:vi.fn()},
+ ]}/>);
+ expect(screen.getByRole('button',{name:'关闭'})).toHaveAttribute('data-tooltip','关闭');
+ expect(screen.getByRole('button',{name:'翻译'}).parentElement).toHaveAttribute('data-tooltip','翻译 · 请先配置翻译服务');
+ expect(screen.getByRole('button',{name:'加入生词'})).toHaveAttribute('data-tooltip','加入生词');
+ expect(screen.getByRole('button',{name:'快速解释'})).toHaveAttribute('data-tooltip','快速解释选中文字');
+ fireEvent.click(screen.getByRole('button',{name:'笔记'}));
+ expect(screen.getByRole('button',{name:'黄色'})).toHaveAttribute('data-tooltip','黄色');
+ expect(screen.getByRole('button',{name:'高亮并记笔记'})).toHaveAttribute('data-tooltip','高亮并记笔记');
+ fireEvent.change(screen.getByRole('textbox'),{target:{value:'A note'}});
+ expect(screen.getByRole('button',{name:'添加笔记草稿'})).toHaveAttribute('data-tooltip','添加笔记草稿');
 });
