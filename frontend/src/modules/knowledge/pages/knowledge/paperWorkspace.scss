@@ -146,3 +146,28 @@
 
 // Only the send control moves clear of the overlaid bubbles; panel width is unchanged.
 .knowledge-container.is-paper-document .knowledge-paper-workspace[data-panel-layout=right] > .paper-chat-pane .send-button { margin-right: 44px; }
+
+.paper-document-loading {
+  height: 100%;
+  padding: 4px;
+  background: #f7f7f8;
+  .paper-document-loading-surface {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid var(--color-border, #dfe6ef);
+    border-radius: 18px;
+  }
+  .paper-document-loading-status {
+    flex: 1;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--color-text-secondary, #5f6b7e);
+  }
+}

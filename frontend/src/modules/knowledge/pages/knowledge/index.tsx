@@ -1,6 +1,6 @@
 import FileUtils from "@/modules/knowledge/utils/file";
 import { TIME_FORMAT } from "@/modules/knowledge/constants/common";
-import { Button, Input, message, Modal, Popover, Progress, Segmented, Tag, Tooltip, Select, Switch } from "antd";
+import { Button, Input, message, Modal, Popover, Progress, Segmented, Tag, Tooltip, Select, Switch, Spin } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
@@ -158,6 +158,9 @@ const KnowledgeDocumentContent = () => {
   const { t, i18n } = useTranslation();
   const displayTranslationName = (name: string) => translationProviderDisplayName(name, i18n.resolvedLanguage || i18n.language || "zh-CN");
   const [knowledgeDetail, setKnowledgeDetail] = useState<KnowledgeDetail>();
+  const [documentLoadFailed, setDocumentLoadFailed] = useState(false);
+  const [documentLoadAttempt, setDocumentLoadAttempt] = useState(0);
+  const documentReady = Boolean(knowledgeDetail);
 
   const { knowledgeBaseId = "", knowledgeId = "" } = useParams();
   const [searchParams] = useSearchParams();
@@ -208,7 +211,7 @@ const KnowledgeDocumentContent = () => {
     if(typeof ResizeObserver==='undefined')return;
     const observer=new ResizeObserver(entries=>update(entries[0]?.contentRect.width||0));observer.observe(element);
     return()=>observer.disconnect();
-  }, []);
+  }, [documentReady]);
   useEffect(()=>{setPaperDetailsOpened(false);setPanelLayout("right");setNoteDraftRequest(undefined);setPreviewSideTab("chat");setPaperIR(undefined);setPdfNavigateTo(undefined);setPdfNavigateToPage(undefined);setPaperNavTab("outline");},[knowledgeId]);
   const navigatePaperBlock=useCallback((id:string)=>{
     setPdfNavigateTo({id,requestId:++navigationSequence.current});
@@ -552,25 +555,21 @@ const KnowledgeDocumentContent = () => {
     return searchParams.get("segement_id") || "";
   }, [searchParams]);
 
-  const getDetail = useCallback(() => {
-    DocumentServiceApi()
-      .documentServiceGetDocument({
-        dataset: knowledgeBaseId,
-        document: knowledgeId,
-      })
-      .then((res) => {
-        setKnowledgeDetail(res.data);
-      });
-  }, [knowledgeBaseId, knowledgeId]);
-
   useEffect(() => {
     let cancelled = false;
-    getDetail();
+    setDocumentLoadFailed(false);
+    DocumentServiceApi()
+      .documentServiceGetDocument({dataset: knowledgeBaseId, document: knowledgeId})
+      .then((res) => {
+        if (!res.data) throw new Error("Missing document metadata");
+        if (!cancelled) setKnowledgeDetail(res.data);
+      })
+      .catch(() => { if (!cancelled) setDocumentLoadFailed(true); });
     void loadDataset(knowledgeBaseId).then(dataset => {
       if (!cancelled) setProcessingLevel((dataset as KnowledgeDatasetWithProcessingLevel).processing_level || "indexed");
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [getDetail, knowledgeBaseId, loadDataset]);
+  }, [documentLoadAttempt, knowledgeBaseId, knowledgeId, loadDataset]);
 
   useEffect(() => {
     const syncDeveloperActive = () => {
@@ -1131,6 +1130,22 @@ const KnowledgeDocumentContent = () => {
           },
         ];
 
+  // Unknown file types must not fall through to the legacy non-PDF layout.
+  if (!knowledgeDetail) {
+    const zh = i18n.language.startsWith("zh");
+    return <div className="paper-document-loading">
+      <div className="paper-document-loading-surface">
+        <Button type="text" icon={<ArrowLeftOutlined/>} onClick={() => navigate(`/lib/knowledge/detail/${knowledgeBaseId}`)}>{zh ? "返回" : "Back"}</Button>
+        <div className="paper-document-loading-status" role={documentLoadFailed ? "alert" : "status"}>
+          {documentLoadFailed ? <>
+            <span>{zh ? "文档加载失败，请重试" : "Could not load the document. Please retry."}</span>
+            <Button onClick={() => setDocumentLoadAttempt(value => value + 1)}>{zh ? "重试" : "Retry"}</Button>
+          </> : <><Spin/><span>{zh ? "正在加载文档…" : "Loading document…"}</span></>}
+        </div>
+      </div>
+    </div>;
+  }
+
   return (
     <div className={`knowledge-container !h-full !items-start${isPdfDocument ? " is-paper-document" : ""}`}>
       {!isPdfDocument && getKbDetail()?.dataset_id === knowledgeBaseId && isPaperLibrary(getKbDetail()?.scene) && <PaperBreadcrumb
@@ -1415,7 +1430,8 @@ const KnowledgeDocumentContent = () => {
 };
 
 const Detail = () => {
-  return <KnowledgeDocumentContent />;
+  const {knowledgeBaseId, knowledgeId} = useParams();
+  return <KnowledgeDocumentContent key={`${knowledgeBaseId}:${knowledgeId}`} />;
 };
 
 export default Detail;
