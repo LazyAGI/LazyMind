@@ -977,12 +977,13 @@
     text-align: left;
     transition: background-color 160ms ease, color 160ms ease;
 
-    .anticon {
+    .chat-add-resource-menu-icon {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       width: 28px;
       height: 28px;
+      flex: 0 0 28px;
       border-radius: 8px;
       background: #f1f6ff;
       color: #3978e8;
@@ -993,7 +994,7 @@
       background: #f2f6ff;
       color: #1677ff;
 
-      .anticon {
+      .chat-add-resource-menu-icon {
         background: #e5efff;
         color: #1268db;
       }
@@ -1004,17 +1005,11 @@
       color: #aeb9c9;
       cursor: not-allowed;
 
-      .anticon {
+      .chat-add-resource-menu-icon {
         background: #f4f6f9;
         color: #aeb9c9;
       }
     }
-  }
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .input-wrapper .chat-input-surface:not(:hover):not(:focus-within) .chat-add-resource-trigger:not([aria-expanded="true"]) {
-    opacity: 0;
   }
 }
 
@@ -2072,7 +2067,6 @@
   &:focus-visible { outline: 2px solid #1677ff; border-radius: 3px; }
 }
 
-.chat-add-resource-popover,
 .chat-model-selector-popover.chat-composer-menu,
 .chat-featured-popover,
 .chat-config-popover-overlay.chat-composer-menu {

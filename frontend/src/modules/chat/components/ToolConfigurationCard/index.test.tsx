@@ -10,6 +10,22 @@ const response = (actions = [action]) => ({ data: { data: { actions } } });
 
 describe("configuration cards", () => {
   beforeEach(() => { get.mockReset(); vi.restoreAllMocks(); });
+  it.each([
+    ["web_search", "/settings?section=knowledge&tool=web-search"],
+    ["web_search/tavily", "/settings?section=knowledge&tool=web-search"],
+    ["academic_search", "/settings?section=knowledge&tool=academic-search"],
+    ["academic_search/sciverse", "/settings?section=knowledge&tool=academic-search"],
+  ])("opens the dedicated configuration page for %s after rechecking", async (service, path) => {
+    get.mockResolvedValue(response([{ ...action, service }]));
+    const destination = { opener: window, close: vi.fn(), location: { replace: vi.fn() } };
+    vi.spyOn(window, "open").mockReturnValue(destination as unknown as Window);
+    const onContinue = vi.fn();
+    render(<ToolConfigurationCard conversationId="c" historyId="h" active={false} onContinue={onContinue} />);
+    fireEvent.click(await screen.findByText("toolConfiguration.configure"));
+    await waitFor(() => expect(destination.location.replace).toHaveBeenCalledWith(path));
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(onContinue).not.toHaveBeenCalled();
+  });
   it("dedicates one mailbox entry and rechecks before opening configuration", async () => {
     get.mockResolvedValue(response());
     const destination = { opener: window, close: vi.fn(), location: { replace: vi.fn() } };

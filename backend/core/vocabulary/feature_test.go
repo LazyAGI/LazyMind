@@ -4,8 +4,8 @@ import "testing"
 
 func TestEnabled(t *testing.T) {
 	t.Setenv("LAZYMIND_VOCABULARY_ENABLED", "")
-	if Enabled() {
-		t.Fatal("vocabulary must be disabled by default")
+	if !Enabled() {
+		t.Fatal("vocabulary must be enabled by default")
 	}
 
 	for _, value := range []string{"1", "true", "TRUE", "yes", "on"} {

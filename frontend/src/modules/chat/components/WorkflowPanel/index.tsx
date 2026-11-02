@@ -33,6 +33,7 @@ import { workflowDisplayLabel, type NativeWorkflowControl } from '@/modules/chat
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import StateGraphModal from '@/components/StateGraphModal';
 import {
   WORKFLOW_PANEL_EXPANDED_EVENT,
@@ -390,14 +391,13 @@ function getPresentSlotIds(
 
 /**
  * Resolve which slot ids should be visible for a tab from `composite_behavior`.
- * Returns null when no behavior is declared (show all configured columns/slots).
+ * Empty slots are hidden by default; explicit false retains authoring placeholders.
  */
 function resolveVisibleSlotIds(
   tab: TabDef,
   session: WorkflowSession,
 ): Set<string> | null {
-  const behavior = tab.composite_behavior;
-  if (!behavior) return null;
+  const behavior = tab.composite_behavior ?? {};
 
   const scope = behavior.empty_column_scope === 'tab' ? 'tab' : 'selected';
   const present = getPresentSlotIds(tab, session, scope);
@@ -416,7 +416,7 @@ function resolveVisibleSlotIds(
     }
   }
 
-  if (behavior.hide_empty_columns) {
+  if (behavior.hide_empty_columns !== false) {
     for (const id of [...allowed]) {
       if (!present.has(id)) allowed.delete(id);
     }
@@ -841,7 +841,7 @@ function CompositeSlotGrid({
     buildColumns(tab),
     resolveVisibleSlotIds(tab, session),
   );
-  const hideEmptyCells = Boolean(tab.composite_behavior?.hide_empty_columns);
+  const hideEmptyCells = tab.composite_behavior?.hide_empty_columns !== false;
   const hideImageMutationActions = ['result', 'generate_image', 'enhance_image'].includes(tab.id);
 
   // Compute total weight for flex proportions.
@@ -1587,7 +1587,7 @@ function TabSlotGrid({
     && getTabSlotRevisions(session, tab, process.result_slot).some(revision => revision.selected)
     && findWriterArtifactStream(session, getTabStepId(tab), process.result_slot, tasks)?.state !== 'streaming';
   const processSlots = resultReady ? visibleSlots.filter(slot => slot.id !== process.result_slot && process.slots.includes(slot.id)) : [];
-  const allHidden = visibleSlots.length === 0 || Boolean(tab.composite_behavior?.hide_empty_columns)
+  const allHidden = visibleSlots.length === 0 || tab.composite_behavior?.hide_empty_columns !== false
     && visibleSlots.every(def => getTabSlotRevisions(session, tab, def.id).length === 0
       && !findWriterArtifactStream(session, getTabStepId(tab), def.id, tasks));
   if (compactEmptyStates && allHidden) return <div className='workflow-panel__empty' role='status'>
@@ -1602,7 +1602,7 @@ function TabSlotGrid({
       slotDef.id,
       tasks,
     );
-    const hideEmpty = Boolean(tab.composite_behavior?.hide_empty_columns);
+    const hideEmpty = tab.composite_behavior?.hide_empty_columns !== false;
     if (hideEmpty && revisions.length === 0 && !artifactStream) {
       return null;
     }
@@ -1678,8 +1678,10 @@ export function WorkflowPanel({
   const setFocusedSortOrder = useWorkflowStore((s) => s.setFocusedSortOrder);
   const focusedTabByConversation = useWorkflowStore((s) => s.focusedTabByConversation);
   const persistedFocusedTab = conversationId ? focusedTabByConversation[conversationId] : undefined;
-  const [uiResponse, setUIResponse] = useState<{ workflowId: string; ui: WorkflowUI } | null>(null);
-  const uiReady = uiResponse?.workflowId === session?.workflow_id && Boolean(session);
+  const uiCacheKey = session ? workflowUICacheKey(session.workflow_id, session.pinned_revision_id, i18n.language || '') : '';
+  const uiRequestKey = JSON.stringify([session?.session_id, uiCacheKey]);
+  const [uiResponse, setUIResponse] = useState<{ requestKey: string; ui: WorkflowUI } | null>(null);
+  const uiReady = uiResponse?.requestKey === uiRequestKey && Boolean(session);
   const rawUI = uiReady ? uiResponse!.ui : undefined;
   const [developerMode, setDeveloperMode] = useState(isDeveloperModeActive);
   useEffect(() => {
@@ -1851,13 +1853,14 @@ export function WorkflowPanel({
     if (!session?.workflow_id) return;
     let disposed = false;
     const workflowId = session.workflow_id;
-    const cached = useWorkflowStore.getState().workflowUIByWorkflow[`${workflowId}:${i18n.language || ''}`];
-    if (cached) setUIResponse({ workflowId, ui: cached });
-    void fetchWorkflowUI(workflowId).then(config => {
-      if (!disposed) setUIResponse({ workflowId, ui: config });
+    const pinnedRevisionId = session.pinned_revision_id;
+    const cached = pinnedRevisionId ? useWorkflowStore.getState().workflowUIByWorkflow[uiCacheKey] : undefined;
+    if (cached) setUIResponse({ requestKey: uiRequestKey, ui: cached });
+    void fetchWorkflowUI(workflowId, pinnedRevisionId).then(config => {
+      if (!disposed) setUIResponse({ requestKey: uiRequestKey, ui: config });
     });
     return () => { disposed = true; };
-  }, [session?.workflow_id, fetchWorkflowUI, i18n.language]);
+  }, [session?.workflow_id, session?.pinned_revision_id, fetchWorkflowUI, uiCacheKey, uiRequestKey]);
 
   useEffect(() => {
     if (!uiReady || !session || !tabs.length || previewTarget) return;
@@ -1873,9 +1876,9 @@ export function WorkflowPanel({
     // Unconfigured workflows retain their existing implicit navigation behavior.
     const focused = tabs.find(tab => tab.id === persistedFocusedTab);
     if (focused) { updateView({ tabId: focused.id }); return; }
-    let index = tabs.findIndex(tab => getTabStepId(tab) === session.current_step_id);
-    if (index === -1 && ['completed', 'failed'].includes(session.status)) index = tabs.length - 1;
-    if (index !== -1) updateView({ tabId: tabs[index].id });
+    // Page order is presentation, not execution. The runtime resolver also
+    // handles cleared terminal pointers, stale attempts and grouped result tabs.
+    if (runtimeTabId) updateView({ tabId: runtimeTabId });
   }, [uiReady, session, tabs, previewTarget, followingEnabled, view.mode, runtimeTabId, activeTabId, persistedFocusedTab, updateView]);
 
   const resumeFollowing = async () => {

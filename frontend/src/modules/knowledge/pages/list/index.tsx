@@ -173,7 +173,7 @@ interface KnowledgePageProps {
 }
 
 const KnowledgePage: FC<KnowledgePageProps> = ({
-  modelSettingsPath = "/settings?section=models",
+  modelSettingsPath = "/settings?section=model_defaults",
 }) => {
   const navigate = useNavigate();
   const location = useLocation();

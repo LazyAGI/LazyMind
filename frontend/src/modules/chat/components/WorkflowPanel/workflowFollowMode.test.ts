@@ -47,6 +47,22 @@ describe('workflow runtime position', () => {
       { ...step('plan', 'succeeded', 3), validity: 'stale' },
     ] }), tabs)).toBe(1);
   });
+  it('keeps a valid current pointer as a tie-break when legacy timestamps are identical', () => {
+    expect(resolveWorkflowRealTabIndex(session({ status: 'completed', current_step_id: 'write',
+      steps: [step('plan', 'succeeded', 1), step('write', 'succeeded', 1)],
+    }), tabs)).toBe(1);
+  });
+  it('locates the actual final result even when it is the first tab and the current pointer is empty', () => {
+    expect(resolveWorkflowRealTabIndex(session({ status: 'completed', steps: [
+      step('plan', 'succeeded', 1), step('write_short', 'succeeded', 2),
+      { ...step('plan', 'succeeded', 3), validity: 'stale' },
+    ] }), [tabs[1], tabs[0]])).toBe(0);
+  });
+  it.each(['pending', 'running'])('keeps a resumed %s producer visible before the session status patch arrives', status => {
+    expect(resolveWorkflowRealTabIndex(session({ status: 'completed', current_step_id: 'write', steps: [
+      step('plan', 'succeeded', 1), step('write', status, 2),
+    ] }), tabs)).toBe(1);
+  });
   it('locates the effective failed attempt and ignores obsolete failed branches', () => {
     expect(resolveWorkflowRealTabIndex(session({ status: 'failed', current_step_id: 'write',
       steps: [step('plan', 'failed', 1), step('write', 'failed', 2)],

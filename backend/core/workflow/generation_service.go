@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/asyncjob"
 	"lazymind/core/common/orm"
@@ -46,8 +47,11 @@ func queueWorkflowDraftGeneration(ctx context.Context, db *gorm.DB, userID, draf
 	}
 
 	var draft orm.WorkflowDraft
-	if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
+	if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
 		return orm.WorkflowDraft{}, &workflowServiceError{Status: http.StatusNotFound, Message: "not found"}
+	}
+	if draft.GenerateStatus == generateStatusRepairing {
+		return orm.WorkflowDraft{}, &workflowServiceError{Status: http.StatusConflict, Message: "workflow repair in progress"}
 	}
 	if err := validateGenerateResumePoint(draft, body.StartPhase); err != nil {
 		return orm.WorkflowDraft{}, &workflowServiceError{Status: http.StatusBadRequest, Message: "invalid generation resume point: " + err.Error()}

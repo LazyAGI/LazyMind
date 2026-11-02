@@ -84,10 +84,10 @@ func TestPanelURLScopeOnMCPWire(t *testing.T) {
 					if strings.Contains(text, "https://stale.example") {
 						t.Fatal("Core presentation URL leaked")
 					}
-					if strings.Contains(text, "https://panel.example/workflow-runs/run-1/embed") != (provider == "codex") {
+					if strings.Contains(text, "https://panel.example/workflow-runs/run-1/embed") {
 						t.Fatalf("wrong panel URL scope for %s: %s", call.name, text)
 					}
-					if provider != "codex" && strings.Contains(text, "interaction_url") {
+					if strings.Contains(text, "interaction_url") {
 						t.Fatalf("empty URL field retained: %s", text)
 					}
 				}

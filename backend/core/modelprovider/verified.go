@@ -9,11 +9,24 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
+	"lazymind/core/common/orm"
 	"lazymind/core/store"
 )
 
 func isSelectableProviderGroup(ctx context.Context, db *gorm.DB, defaultProviderID, baseURL, apiKey string) bool {
-	return strings.TrimSpace(apiKey) != "" || isCustomBaseURL(ctx, db, defaultProviderID, baseURL)
+	if strings.TrimSpace(apiKey) != "" || isCustomBaseURL(ctx, db, defaultProviderID, baseURL) {
+		return true
+	}
+	if db == nil || strings.TrimSpace(defaultProviderID) == "" {
+		return false
+	}
+	var catalog orm.DefaultModelProvider
+	if err := db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", defaultProviderID).Take(&catalog).Error; err != nil {
+		return false
+	}
+	return catalog.Category == "translation" &&
+		strings.Contains(","+catalog.Capabilities+",", ",keyless_translation,") &&
+		normalizeBaseURLForCompare(baseURL) == normalizeBaseURLForCompare(catalog.BaseURL)
 }
 
 type verifiedGroupItem struct {
@@ -131,6 +144,9 @@ func loadVerifiedGroupsForUser(ctx context.Context, db *gorm.DB, userID, categor
 
 	out := make([]verifiedGroupItem, 0, len(rows))
 	for _, r := range rows {
+		if r.Category == "translation" && !IsTranslationProviderAvailable(r.ProviderName) {
+			continue
+		}
 		r.APIKey, err = ResolveAPIKey(r.APIKey, r.APIKeyCiphertext)
 		if err != nil {
 			return nil, err

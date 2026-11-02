@@ -350,9 +350,6 @@ class StyleFlowCombinationTest(unittest.TestCase):
                 deck = self._prepared_deck(Path(temp), 'preview_choice', False, 0)
                 (deck / 'style_samples.json').unlink()
                 with mock.patch.object(TOOLS, '_resolve_deck_dir', return_value=deck), \
-                     mock.patch.object(TOOLS, 'ppt_prepare_style_choices', return_value={
-                         'status': 'ok', 'default_selection': 'A',
-                     }) as choices, \
                      mock.patch.object(TOOLS, 'ppt_run_stage', return_value={'status': 'ok'}) as stage:
                     result = TOOLS.ppt_prepare_style(
                         user_query='儿童春节，一页，不看风格，不生成背景图',
@@ -361,7 +358,7 @@ class StyleFlowCombinationTest(unittest.TestCase):
                     )
                 self.assertEqual(result['style_flow'], 'auto')
                 self.assertIsNone(result['style_selection'])
-                choices.assert_not_called()
+                self.assertFalse(hasattr(TOOLS, 'ppt_prepare_style_choices'))
                 self.assertIsNone(stage.call_args.kwargs['sample'])
                 pack = json.loads((deck / 'task_pack.json').read_text())
                 self.assertEqual(pack['params']['style_flow'], 'auto')

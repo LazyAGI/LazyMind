@@ -20,6 +20,7 @@ _ERROR_LINE = re.compile(
 )
 _EXIT_CODE = re.compile(r'(?:exit(?:\s*code)?|return(?:ed)?\s*code|status)\s*[:=]?\s*(-?\d+)', re.I)
 _URL = re.compile(r'https?://[^\s\'"<>]+', re.IGNORECASE)
+_IMAGE_TOOLS = {'image_generator', 'image_editor'}
 
 
 @dataclass(frozen=True)
@@ -220,6 +221,8 @@ def _classify(tool_name: str) -> str:
     if special:
         return special
     name = str(tool_name or '').strip().lower()
+    if name in _IMAGE_TOOLS:
+        return 'image'
     if not name:
         return 'generic'
     if any(token in name for token in (
@@ -393,6 +396,48 @@ def compact_search_result(tool_name: str, content: Any, observation: Any = None)
     return '\n'.join(lines), 'search'
 
 
+def _image_result_metadata(tool_name: str, content: Any, observation: Any = None) -> list[str]:
+    if str(tool_name or '').strip().lower() not in _IMAGE_TOOLS:
+        return []
+    if isinstance(observation, dict) and observation.get('ok') is False and observation.get('error'):
+        return ['Image tool failure (no successful output is confirmed):',
+                json.dumps({'ok': False, 'error': observation['error']}, ensure_ascii=False)]
+    parsed = _structured_payload(content, observation)
+    if not isinstance(parsed, dict):
+        return []
+    payload = _result_payload(parsed)
+    # Keep exact locators, never a head/tail excerpt of signed URLs. Prompts and
+    # provider metadata can be much longer than the actual image result.
+    fields = ('local_path', 'image_url', 'image_markdown')
+    evidence = {key: payload[key] for key in ('ok', 'success', 'status', 'error', 'message', 'msg') if key in payload}
+    for key in ('ok', 'error'):
+        if key in parsed:
+            evidence[key] = parsed[key]
+    if isinstance(observation, dict) and observation.get('ok') is False:
+        evidence['ok'] = False
+    failed = evidence.get('ok') is False or evidence.get('success') is False or bool(evidence.get('error'))
+    if not failed:
+        evidence.update({key: payload[key] for key in fields if isinstance(payload.get(key), str)})
+        images = payload.get('images')
+        if isinstance(images, list):
+            evidence['images'] = [
+                {key: item[key] for key in fields if isinstance(item.get(key), str)}
+                for item in images if isinstance(item, dict)
+            ]
+    if not evidence:
+        return []
+    return ['Image tool evidence (copy output links exactly; do not invent file_id references):',
+            json.dumps(evidence, ensure_ascii=False, separators=(',', ':'))]
+
+
+def compact_image_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
+    metadata = _image_result_metadata(tool_name, content, observation)
+    if not metadata:
+        # Unknown/failed result formats must not lose their diagnostic content.
+        return _as_text(content), 'noop'
+    return '\n'.join(['[Earlier tool result compacted]', f'Tool: {tool_name}', *metadata]), 'image'
+
+
 def compact_generic_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
     _ = observation
     text = _as_text(content)
@@ -409,6 +454,7 @@ def compact_generic_result(tool_name: str, content: Any, observation: Any = None
 
 
 _COMPACTORS: dict[str, Callable[[str, Any, Any], tuple[str, str]]] = {
+    'image': compact_image_result,
     'shell': compact_shell_result,
     'file': compact_file_result,
     'search': compact_search_result,
@@ -613,6 +659,7 @@ def format_spilled_tool_notice(
     rel_path: str,
     size_bytes: int,
     workspace: str = '',
+    observation: Any = None,
 ) -> str:
     size_kb = size_bytes / 1024
     lines = [
@@ -625,6 +672,7 @@ def format_spilled_tool_notice(
         'Omitting offset repeats the first window; turn is not a page number.',
     ]
     lines.extend(_browser_spill_metadata(tool_name, content))
+    lines.extend(_image_result_metadata(tool_name, content, observation))
     lines.extend([
         'Excerpt:',
         _head_tail(_as_text(content), head=500, tail=300),
@@ -652,7 +700,7 @@ def compact_or_spill_tool_result(
         except Exception:
             rel_path = None
         if rel_path:
-            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes, workspace)
+            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes, workspace, observation)
             return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
@@ -680,7 +728,7 @@ def plan_tool_result_compaction(
         )
         rel_path = os.path.join('tool_spills', filename)
         spill_bytes = len(spill_text.encode('utf-8', errors='replace'))
-        notice = format_spilled_tool_notice(tool_name, content, rel_path, spill_bytes, workspace)
+        notice = format_spilled_tool_notice(tool_name, content, rel_path, spill_bytes, workspace, observation)
         after = estimate_tokens(notice)
         if after < before:
             return ToolCompactionPlan(

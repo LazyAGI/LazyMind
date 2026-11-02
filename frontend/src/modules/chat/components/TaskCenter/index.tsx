@@ -7,6 +7,7 @@ import i18n from "i18next";
 import { formatTaskDuration, useRunTiming } from "./runTiming";
 import { WorkflowTaskProgress } from "../WorkflowPanel/WorkflowTaskProgress";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import { workflowUICacheKey } from '@/modules/chat/utils/workflowUIIdentity';
 import { reconcileWorkflowTasks } from "@/modules/chat/utils/workflowTaskStatus";
 import { workflowDisplayLabel } from "@/modules/chat/store/workflowStatus";
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
@@ -1136,7 +1137,7 @@ const TaskCenter = (props: Props) => {
   );
   const workflowSession = useWorkflowStore((s) => sessionId ? s.sessionByConversation[sessionId] : undefined);
   const { i18n } = useTranslation();
-  const taskPresentation = useWorkflowStore(s => workflowSession ? s.workflowUIByWorkflow[`${workflowSession.workflow_id}:${i18n.language || ""}`]?.task_presentation : undefined);
+  const taskPresentation = useWorkflowStore(s => workflowSession ? s.workflowUIByWorkflow[workflowUICacheKey(workflowSession.workflow_id, workflowSession.pinned_revision_id, i18n.language || "")]?.task_presentation : undefined);
   const tasks = useMemo(() => reconcileWorkflowTasks(storedTasks, workflowSession?.steps), [storedTasks, workflowSession?.steps]);
   const loading = useTaskCenterStore((s) =>
     sessionId ? Boolean(s._loadingTasks[sessionId]) : false,

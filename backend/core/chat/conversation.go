@@ -1210,6 +1210,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		return nil
 	}
 	var fullDelta, fullReasoning string
+	var toolCallTurns *int
 	var intentUpdated *IntentUpdatedEvent
 	var modelRoute *chatModelRoute
 	var sources []any
@@ -1247,11 +1248,16 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 			}
 			if modelOutput == nil && metadata.CallIndex == 0 || modelOutput != nil && metadata.RunID != modelOutput.RunID {
 				fullDelta, fullReasoning, sources, exports, modelSwitches = "", "", nil, nil, nil
+				toolCallTurns = nil
 			}
 			if modelOutput == nil || metadata.Phase != "" {
 				copy := *metadata
 				modelOutput = &copy
 			}
+		}
+		if ch.ToolCallTurns != nil && (toolCallTurns == nil || *ch.ToolCallTurns > *toolCallTurns) {
+			count := *ch.ToolCallTurns
+			toolCallTurns = &count
 		}
 		if ch.DeltaMode == ChatDeltaModeReplace {
 			fullDelta = ch.Delta
@@ -1301,6 +1307,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		Delta:            fullDelta,
 		DeltaMode:        ChatDeltaModeReplace,
 		ReasoningContent: fullReasoning,
+		ToolCallTurns:    toolCallTurns,
 		Sources:          sources,
 		Exports:          exports,
 		IntentUpdated:    intentUpdated,

@@ -110,6 +110,19 @@ func loadProcessingSnapshot(ctx context.Context, db, lazyDB *gorm.DB, datasetID,
 				if message == "" && row.Message != nil {
 					message = *row.Message
 				}
+				// Parser callbacks use code=200/message=success for ordinary acknowledgements.
+				// An actual error on this same task overrides a success status.
+				code = strings.TrimSpace(code)
+				if code == "200" {
+					code = ""
+				}
+				if strings.EqualFold(strings.TrimSpace(message), "success") {
+					message = ""
+				}
+				explicitError := row.ErrorMsg != nil && strings.TrimSpace(*row.ErrorMsg) != "" && !strings.EqualFold(strings.TrimSpace(*row.ErrorMsg), "success")
+				if code != "" || explicitError {
+					snapshot.external[key] = "FAILED"
+				}
 				snapshot.diagnostics[key] = [2]string{code, message}
 			}
 		}
@@ -158,7 +171,7 @@ func (snapshot processingSnapshot) observe(document orm.Document) (orm.DocumentP
 	switch NormalizeTaskStateForUI(raw) {
 	case "SUCCESS":
 		status = "succeeded"
-	case "FAILED":
+	case "FAILED", "CANCELED":
 		status = "failed"
 	case "WORKING", "WAITING":
 		status = "running"

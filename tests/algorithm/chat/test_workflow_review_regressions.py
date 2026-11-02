@@ -75,6 +75,41 @@ def test_product_body_preserves_business_content():
     assert module._present_reader_facing_markdown('handoff', source) == source
 
 
+@pytest.mark.parametrize('package,prefix,slot,passes', [
+    ('bid_tech_proposal_writer', 'bid', 'draft_document', 1),
+    ('product_solution_delivery', 'product', 'prd_document', 2),
+])
+def test_revision_passes_keep_current_task(monkeypatch, tmp_path, package, prefix, slot, passes):
+    from unittest.mock import Mock
+
+    module = load(package, 'writer_bridge')
+    source = tmp_path / 'document.md'
+    context = tmp_path / 'context.json'
+    source.write_text('# Report\n\nOriginal body.', encoding='utf-8')
+    context.write_text('{"context_id":"ctx"}', encoding='utf-8')
+    task = json.dumps({'query': 'Revise the title and body; retain the budget.', 'task_type': 'revise'})
+    toolkit = Mock()
+    toolkit.build_revision_task.return_value = task
+    toolkit.locate_revision_target.return_value = '{}'
+    toolkit.generate_modify_plan.return_value = json.dumps({
+        'title_instruction': {'title': 'Revised'}, 'instructions': [{'instruction': 'Revise body'}],
+    })
+    toolkit.generate_string_replace_set.return_value = '{}'
+    toolkit.apply_string_replace.return_value = json.dumps({'revised_document': '# Revised\n\nUpdated body.'})
+    monkeypatch.setattr(module, 'WriterRevisionToolkit', lambda: toolkit)
+    monkeypatch.setattr(module, '_run_root', lambda name: tmp_path)
+
+    result = getattr(module, prefix + '_writer_revise_markdown')(
+        str(source), str(context), json.loads(task)['query'], slot,
+    )
+
+    assert toolkit.generate_string_replace_set.call_count == passes
+    for call in toolkit.generate_string_replace_set.call_args_list:
+        assert call.kwargs['writing_task_json'] == task
+        assert json.loads(call.kwargs['writing_context_json']) == {'context_id': 'ctx'}
+    assert 'Updated body.' in Path(result[slot]).read_text(encoding='utf-8')
+
+
 def test_flowchart_preserves_both_branch_labels_and_cycles():
     module = load('product_solution_delivery', 'writer_bridge')
     rendered = module._render_flow('flowchart TD\nA{已付款?} -->|是| B[发货]\nA -->|否| C[取消]\nC --> A')

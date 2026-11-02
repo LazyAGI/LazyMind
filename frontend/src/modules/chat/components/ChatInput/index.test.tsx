@@ -612,9 +612,9 @@ describe("ChatInput model switch save lock", () => {
     expect(screen.getByTestId("local-workspace-control")).toHaveTextContent("conversation-1");
   });
 
-  it("reports whether the resource picker is open and closes after choosing an action", async () => {
+  it("reports whether the compact resource picker is open, aligns its action icons, and closes after choosing an action", async () => {
     render(<ChatInput value="" onChange={vi.fn()} isChatContent
-      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} />);
+      showConversationConfig={false} showHistoryButton={false} showPromptSuggestions={false} showSkillDeposit={false} />);
 
     const trigger = screen.getByRole("button", { name: "chat.addResource" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -622,7 +622,17 @@ describe("ChatInput model switch save lock", () => {
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     const attachment = await screen.findByRole("button", { name: /chat\.addAttachment/ });
-    expect(document.getElementById(trigger.getAttribute("aria-controls")!)).toContainElement(attachment);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    expect(menu).toContainElement(attachment);
+    const actions = within(menu).getAllByRole("button");
+    expect(actions).toHaveLength(4);
+    for (const action of actions) {
+      expect.soft(action.firstElementChild).toHaveClass("chat-add-resource-menu-icon");
+    }
+    const popoverInner = menu.closest<HTMLElement>(".ant-popover-inner")!;
+    expect(popoverInner).not.toBeNull();
+    expect.soft(popoverInner.style.height).toBe("");
+    expect.soft(menu.closest<HTMLElement>(".ant-popover-inner-content")!.style.height).toBe("");
 
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "false");
