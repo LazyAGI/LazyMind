@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,7 +92,7 @@ func (group *formulaExplanationFlightGroup) do(ctx context.Context, key string, 
 // embedding, retrieval, translation, or the document ingestion pipeline.
 func ExplainPDFFormula(w http.ResponseWriter, r *http.Request) {
 	formulaExplanationHandler{loadModel: loadFormulaExplanationModel, generate: func(ctx context.Context, content, instruction string, config map[string]any) (string, error) {
-		return algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: content, UserInstruct: instruction, LLMConfig: config})
+		return algo.GenerateLearning(ctx, algo.LearningGenerateRequest{Content: content, UserInstruct: instruction, LLMConfig: formulaExplanationGenerationConfig(config)})
 	}}.ServeHTTP(w, r)
 }
 func loadFormulaExplanationModel(ctx context.Context, user string) (map[string]any, string, string, error) {
@@ -372,4 +373,41 @@ func validateCachedFormulaExplanation(raw string, evidence []formulaEvidence) (f
 	}
 	result.Model = metadata.Model
 	return result, nil
+}
+
+// Keep bounded formula definitions out of supported providers' default reasoning mode.
+// This is request-local and never changes the user's saved chat settings.
+func formulaExplanationGenerationConfig(config map[string]any) map[string]any {
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return config
+	}
+	var cloned map[string]any
+	if json.Unmarshal(raw, &cloned) != nil {
+		return config
+	}
+	role, ok := cloned["llm"].(map[string]any)
+	if !ok {
+		return config
+	}
+	endpoint, _ := role["base_url"].(string)
+	parsed, err := url.Parse(endpoint)
+	model, _ := role["model"].(string)
+	if err != nil {
+		return config
+	}
+	supported := parsed.Hostname() == "zenmux.ai" && strings.HasPrefix(model, "deepseek/deepseek-v4")
+	if parsed.Hostname() == "api.deepseek.com" || parsed.Hostname() == "aihubmix.com" {
+		supported = strings.HasPrefix(model, "deepseek-v4") || model == "deepseek-flash"
+	}
+	if !supported {
+		return config
+	}
+	features, ok := role["features"].(map[string]any)
+	if !ok {
+		features = map[string]any{}
+		role["features"] = features
+	}
+	features["reasoning"] = false
+	return cloned
 }

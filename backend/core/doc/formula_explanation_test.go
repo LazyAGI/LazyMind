@@ -191,3 +191,38 @@ func TestFormulaExplanationCacheRebindsGeometryWithoutRegenerating(t *testing.T)
 		t.Fatalf("current source geometry was not rebound: %+v %v", result, err)
 	}
 }
+
+func TestFormulaExplanationZenMuxRequestLocalReasoning(t *testing.T) {
+	config := map[string]any{"llm": map[string]any{"model": "deepseek/deepseek-v4-flash", "base_url": "https://zenmux.ai/api/v1/", "features": map[string]any{"reasoning": true, "vision": true}}}
+	got := formulaExplanationGenerationConfig(config)
+	features := got["llm"].(map[string]any)["features"].(map[string]any)
+	if features["reasoning"] != false || features["vision"] != true {
+		t.Fatal("formula configuration is not bounded")
+	}
+	if config["llm"].(map[string]any)["features"].(map[string]any)["reasoning"] != true {
+		t.Fatal("user configuration mutated")
+	}
+}
+
+func TestFormulaExplanationOtherSupportedRoutes(t *testing.T) {
+	for _, test := range []struct {
+		host, model string
+		disabled    bool
+	}{
+		{"api.deepseek.com", "deepseek-flash", true},
+		{"aihubmix.com", "deepseek-v4-flash-0731-fast", true},
+		{"aihubmix.com", "unrelated-model", false},
+		{"aihubmix.com.example.test", "deepseek-v4-flash", false},
+	} {
+		t.Run(test.host+test.model, func(t *testing.T) {
+			config := map[string]any{"llm": map[string]any{"model": test.model, "base_url": "https://" + test.host + "/v1", "features": map[string]any{"reasoning": true}}}
+			got := formulaExplanationGenerationConfig(config)
+			if got["llm"].(map[string]any)["features"].(map[string]any)["reasoning"] != !test.disabled {
+				t.Fatal("wrong reasoning policy")
+			}
+			if config["llm"].(map[string]any)["features"].(map[string]any)["reasoning"] != true {
+				t.Fatal("saved config mutated")
+			}
+		})
+	}
+}

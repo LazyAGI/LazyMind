@@ -381,3 +381,29 @@ def test_runtime_preserves_explicit_unsupported_json_transport_reason(monkeypatc
         monkeypatch.setattr(module, '_get_supplier', lambda: Supplier())
         with pytest.raises(Exception, match='extra JSON body is unsupported'):
             module('test')
+
+
+@pytest.mark.parametrize('host,expected', [
+    ('zenmux.ai', {'enabled': False}), ('example.test', None), ('zenmux.ai.example.test', None),
+])
+def test_disabled_reasoning_does_not_restore_zenmux_default(host, expected):
+    original = {'model': 'deepseek/deepseek-v4-flash', 'messages': [], 'reasoning': {'effort': 'high'}}
+    result = apply_request_advanced({}, method='POST', url=f'https://{host}/api/v1/chat/completions',
+                                    json_body=original, features={'reasoning': False})
+    assert result['json'].get('reasoning') == expected
+    assert original['reasoning'] == {'effort': 'high'}
+
+
+@pytest.mark.parametrize('host,model,expected', [
+    ('api.deepseek.com', 'deepseek-flash', {'type': 'disabled'}),
+    ('aihubmix.com', 'deepseek-v4-flash-0731-fast', {'type': 'disabled'}),
+    ('aihubmix.com', 'unrelated-model', None),
+    ('aihubmix.com.example.test', 'deepseek-v4-flash', None),
+])
+def test_explicit_nonthinking_for_supported_deepseek_routes(host, model, expected):
+    result = apply_request_advanced(
+        {}, method='POST', url=f'https://{host}/v1/chat/completions',
+        json_body={'model': model, 'messages': [], 'thinking': {'type': 'enabled'}},
+        features={'reasoning': False},
+    )
+    assert result['json'].get('thinking') == expected
