@@ -4,7 +4,8 @@ import PdfTemporaryChat from "./index";
 import { ChatConversationsRequestActionEnum } from "@/api/generated/chatbot-client";
 
 const requests = vi.hoisted(() => ({ options: [] as Array<{ payload: string }> }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+const locale = vi.hoisted(() => ({ language: "en-US" }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: locale }) }));
 vi.mock("@/components/auth", () => ({ AgentAppsAuth: { getAuthHeaders: () => ({}) } }));
 vi.mock("@/components/request", () => ({
   BASE_URL: "",
@@ -42,12 +43,13 @@ vi.mock("@/modules/chat/components/newChatContainer", async () => {
         sendMessage: chatActions.sendMessage,
         prepareMessage: chatActions.prepareMessage,
       }));
-      return <button onClick={() => onOpenSSE([{ query: "Summarize this document" }], "query", {})}>Ask document</button>;
+      return <>{composer.initialCard}<button onClick={() => onOpenSSE([{ query: "Summarize this document" }], "query", {})}>Ask document</button></>;
     }),
   };
 });
 
 beforeEach(() => {
+  locale.language = "en-US";
   requests.options.length = 0;
   chatActions.createNewChat.mockClear();
   chatActions.sendMessage.mockReset().mockResolvedValue(true);
@@ -77,7 +79,7 @@ describe("document question context", () => {
     rerender(<PdfTemporaryChat {...props} selection={{ ...selection }} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(chatActions.prepareMessage).toHaveBeenCalledTimes(2);
-    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "capabilities", appendCitations: true });
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ citeMessage: "capabilities", appendCitations: true });
   });
 
   it("starts on-demand parsing when document chat is first opened", async () => {
@@ -107,7 +109,7 @@ describe("document question context", () => {
     ensureDocumentParsed.mockResolvedValueOnce({ status: "parsed" });
     render(<PdfTemporaryChat datasetId="dataset-a" documentId="ready-pdf" fileName="ready.pdf" onClose={() => {}} />);
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByText("knowledge.pdfChatParsed")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Paper ready");
     expect(screen.queryByText("knowledge.pdfChatParsing")).not.toBeInTheDocument();
   });
 
@@ -131,7 +133,7 @@ describe("document question context", () => {
     await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByRole("button", { name: "knowledge.pdfChatRefreshStatus" }));
     await act(async () => { await Promise.resolve(); });
-    expect(screen.getByText("knowledge.pdfChatParsed")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Paper ready");
     expect(screen.queryByText("Status service unavailable")).not.toBeInTheDocument();
     expect(retryDocumentParsed).not.toHaveBeenCalled();
   });
@@ -241,7 +243,7 @@ describe("document question context", () => {
     rerender(<PdfTemporaryChat {...props} selection={{ ...selection }} />);
     await act(async () => { await vi.advanceTimersByTimeAsync(50); });
     expect(chatActions.prepareMessage).toHaveBeenCalledTimes(2);
-    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "Workloads", appendCitations: true });
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ citeMessage: "Workloads", appendCitations: true });
   });
 
   it("keeps the selection available when translation is not sent", async () => {
@@ -260,7 +262,7 @@ describe("document question context", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(100); });
     expect(chatActions.sendMessage).toHaveBeenCalledOnce();
     expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
-    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "Workloads", appendCitations: true });
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ citeMessage: "Workloads", appendCitations: true });
   });
 
   it("does not consume the new chat selection when an earlier translation finishes", async () => {
@@ -285,7 +287,7 @@ describe("document question context", () => {
     expect(chatActions.sendMessage).toHaveBeenCalledOnce();
     expect(chatActions.createNewChat).toHaveBeenCalledTimes(2);
     expect(chatActions.prepareMessage).toHaveBeenCalledOnce();
-    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: "", citeMessage: "Workloads", appendCitations: true });
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ citeMessage: "Workloads", appendCitations: true });
   });
 });
 
@@ -301,7 +303,7 @@ it('removes the fixed new/save action row only from paper chat',()=>{
  const props={datasetId:'d',documentId:'paper-actions-test',onClose:vi.fn()};
  const {rerender,container}=render(<PdfTemporaryChat {...props} fileName="paper.pdf"/>);
  expect(container.querySelector(".pdf-temporary-chat--paper")).not.toBeNull();
- expect(screen.queryByRole('button',{name:/knowledge.pdfChatNew/})).not.toBeInTheDocument();
+ expect(screen.getByRole('button',{name:/knowledge.pdfChatNew/})).toBeInTheDocument();
  expect(screen.queryByRole('button',{name:/knowledge.pdfChatSave/})).not.toBeInTheDocument();
  rerender(<PdfTemporaryChat {...props} fileName="notes.md"/>);
  expect(container.querySelector(".pdf-temporary-chat--paper")).toBeNull();
@@ -323,3 +325,66 @@ it.each([ChatConversationsRequestActionEnum.ChatActionNext,ChatConversationsRequ
  expect(payload.conversation.search_config.dataset_list).toEqual([{id:'paper-dataset'}]);
  expect(payload.input).toEqual([{query:'Explain the core contribution of this paper.'}]);
 });
+
+
+describe("paper assistant workspace", () => {
+  it("prepares each suggested question without sending it", () => {
+    render(<PdfTemporaryChat datasetId="d" documentId="suggestions" fileName="paper.pdf" onClose={vi.fn()} />);
+    for (const label of ["Core contribution", "Explain the method", "Key results", "Limitations"]) {
+      fireEvent.click(screen.getByRole("button", { name: new RegExp(label) }));
+      expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ text: expect.any(String), appendCitations: true });
+    }
+    expect(chatActions.prepareMessage).toHaveBeenCalledTimes(4);
+    expect(chatActions.sendMessage).not.toHaveBeenCalled();
+    expect(requests.options).toHaveLength(0);
+  });
+
+  it("starts a fresh paper conversation from the header", () => {
+    const onConversationChange = vi.fn();
+    render(<PdfTemporaryChat datasetId="d" documentId="new-paper" fileName="paper.pdf" onClose={vi.fn()} onConversationChange={onConversationChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /knowledge.pdfChatNew/ }));
+    expect(chatActions.createNewChat).toHaveBeenCalledOnce();
+    expect(onConversationChange).toHaveBeenCalledWith(undefined);
+  });
+
+  it("removes dismissed source context from both composer and request", async () => {
+    vi.useFakeTimers();
+    const onClearSelection = vi.fn();
+    const selection = { source: "pdf" as const, text: "A quoted result", page: 4 };
+    render(<PdfTemporaryChat datasetId="d" documentId="quote" fileName="paper.pdf" selection={selection} onClearSelection={onClearSelection} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove source quote" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(onClearSelection).toHaveBeenCalledOnce();
+    expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({ citeMessages: [] });
+    fireEvent.click(screen.getByRole("button", { name: "Ask document" }));
+    expect(JSON.parse(requests.options[0].payload).document_context.selected_text).toBeUndefined();
+    expect(screen.queryByText("A quoted result")).not.toBeInTheDocument();
+  });
+});
+
+it("localizes paper assistant and suggested questions in Chinese", async () => {
+  locale.language = "zh-CN";
+  ensureDocumentParsed.mockResolvedValueOnce({status:"parsed"});
+  render(<PdfTemporaryChat datasetId="d" documentId="p" fileName="p.pdf" onClose={vi.fn()} />);
+  await screen.findByText("论文已就绪");
+  expect(screen.getByText("论文助手")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", {name:/核心贡献/}));
+  expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({text: expect.stringContaining("请解释这篇论文"), appendCitations:true});
+  expect(screen.queryByText("Make sense of this paper")).toBeNull();
+});
+
+it('prepares the selection question with its citation without sending it',async()=>{
+ vi.useFakeTimers();
+ render(<PdfTemporaryChat datasetId="d" documentId="question-draft" fileName="paper.pdf" selection={{source:'pdf',text:'Original quote',page:2,question:'Why is this true?'}} onClose={vi.fn()}/>);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(50)});
+ expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({text:'Why is this true?',citeMessage:'Original quote',appendCitations:true});
+ expect(chatActions.sendMessage).not.toHaveBeenCalled();
+});
+
+ it('does not overwrite the chat draft when a quoted selection has a blank question',async()=>{
+ vi.useFakeTimers();
+ render(<PdfTemporaryChat datasetId="d" documentId="quote-preserves-draft" fileName="paper.pdf" selection={{source:'pdf',text:'Additional quote',page:2,question:'   '}} onClose={vi.fn()}/>);
+ await act(async()=>{await vi.advanceTimersByTimeAsync(50)});
+ expect(chatActions.prepareMessage).toHaveBeenLastCalledWith({citeMessage:'Additional quote',appendCitations:true});
+ expect(chatActions.sendMessage).not.toHaveBeenCalled();
+ });

@@ -1,13 +1,14 @@
+import {usePdfReaderPreferences} from "./usePdfReaderPreferences";
 import {PdfPaperGuide} from "./PdfPaperGuide";
-import {PdfBilingualReader} from "./PdfBilingualReader";
 import {PdfVisualStudy} from "./PdfVisualStudy";
 import {PdfFigureLayer} from "./PdfFigureLayer";
 import {usePaperReaderLabels,paperVisualLabel} from "./paperReaderLabels";
 import "./PdfPaperReader.css";
 import { useTranslation } from "react-i18next";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { Tooltip } from "antd";
+import {PdfSelectionComposer, type PdfComposerAction} from "./PdfSelectionComposer";
+import {ControlOutlined, SearchOutlined, DownloadOutlined, ZoomInOutlined, ZoomOutOutlined, LeftOutlined, RightOutlined} from "@ant-design/icons";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { isSingleEnglishWord } from "@/modules/knowledge/api/translation";
@@ -31,8 +32,13 @@ export type { PdfReferenceAction } from "./pdfReferenceGeometry";
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface RenderPdfProps {
+  pdfHeaderStart?: React.ReactNode;
+  pdfHeaderEnd?: React.ReactNode;
+  paperTitle?: string;
+  onStudyOpenChange?: (open: boolean) => void;
   onPdfIRDocumentChange?: (document: PdfIRDocument | undefined) => void;
   pdfNavigateTo?: {id: string; requestId: number};
+  pdfNavigateToPage?: {page:number;requestId:number};
   pdfIRTarget?: PdfIRTarget;
   pdfSourceHash?: string;
   onPreviewError?: () => void;
@@ -46,6 +52,7 @@ interface RenderPdfProps {
   style?: React.CSSProperties;
   gapBackground?: string;
   onAskSelection?: (selection: PdfTextSelection) => void;
+  onNoteSelection?: (selection: PdfTextSelection, note: string) => void;
   askSelectionLabel?: string;
   onTranslateSelection?: (selection: PdfTextSelection) => void;
   onRetranslateSelection?: (selection: PdfTextSelection) => void;
@@ -72,6 +79,7 @@ export interface PdfViewPosition {
 }
 
 export interface PdfTextSelection {
+  question?: string;
   text: string;
   page: number;
   context?: string;
@@ -89,8 +97,10 @@ interface SelectionAction {
 
 const GAP = 20;
 const BUFFER_PAGES = 3;
-const GAP_BACKGROUND = "#DFE6EF";
+const GAP_BACKGROUND = "#ffffff";
 const PAGE_BACKGROUND = "#ffffff";
+// A fixed raster size prevents PDF.js clearing canvases during sidebar animation.
+const RASTER_WIDTH = 1200;
 const WIDTH_PT = 595;
 const HEIGHT_PT = 842;
 
@@ -103,8 +113,13 @@ function hasUsablePdfText(value: string): boolean {
 
 export default function RenderPdf({
   onPreviewError,
+  pdfHeaderStart,
+  pdfHeaderEnd,
+  paperTitle,
+  onStudyOpenChange,
   onPdfIRDocumentChange,
   pdfNavigateTo,
+  pdfNavigateToPage,
   pdfIRTarget,
   pdfSourceHash,
   fileData,
@@ -113,16 +128,14 @@ export default function RenderPdf({
   renderMode = "canvas",
   loadingText = "正在加载PDF...",
   className,
-  gapBackground = GAP_BACKGROUND,
   style,
   onAskSelection,
-  askSelectionLabel = "向 LazyMind 提问",
+  onNoteSelection,
   onTranslateSelection,
   onRetranslateSelection,
   retranslateSelectionLabel = "重译此段",
   onAddVocabularySelection,
   addVocabularySelectionLabel = "加入生词",
-  translateSelectionLabel = "翻译",
   translateSelectionDisabled = false,
   translateSelectionDisabledTip,
   translateSelectionConfigureLabel = "去配置",
@@ -137,8 +150,14 @@ export default function RenderPdf({
 }: RenderPdfProps) {
   const { t } = useTranslation();
   const {label:readerLabel}=usePaperReaderLabels();
-  const [readerMode,setReaderMode]=useState<"original"|"bilingual"|"insight">("original");
-  const [navigationOrigin,setNavigationOrigin]=useState<"bilingual"|"insight">();
+  const preferenceKey = pdfSourceHash && pdfIRTarget ? `pdf-reader:${pdfIRTarget?.dataset || ""}:${pdfIRTarget?.document || ""}:${pdfSourceHash}` : undefined;
+  const {readerMode:preferredMode,setReaderMode,zoom,setZoom} = usePdfReaderPreferences(preferenceKey,fileData,pdfIRTarget ? `${pdfIRTarget.dataset}:${pdfIRTarget.document}` : undefined);
+  const readerMode = pdfIRTarget ? preferredMode : "original";
+  // PDF.js may transfer its input buffer to a worker. Retain original bytes for download.
+  const pdfFile = useMemo(()=>fileData instanceof ArrayBuffer ? fileData.slice(0) : fileData,[fileData]);
+  const currentSource = useRef(fileData);
+  currentSource.current = fileData;
+  const [navigationOrigin,setNavigationOrigin]=useState<"insight">();
   const [visualSelection,setVisualSelection]=useState<PdfIRBlock>();
   const lastRequestedNavigation=useRef("");
   const pdfIR = usePdfIR(pdfIRTarget);
@@ -167,7 +186,7 @@ export default function RenderPdf({
   const numberedFormulas = useMemo(() => formulaNumberMap(studyBlocks), [studyBlocks]);
   const studySourceKey = formulaDocument ? `${formulaDocument.source_sha256}:${formulaDocument.version}:${formulaDocument.projection_version || 0}:${formulaDocument.parser.name}:${formulaDocument.parser.model}` : "";
   useEffect(() => {
-    setReaderMode("original");setNavigationOrigin(undefined);setVisualSelection(undefined);
+    setNavigationOrigin(undefined);setVisualSelection(undefined);
     setStudyOpen(false); setTableStudyOpen(false); setTableSelection(undefined); setStudySelection(undefined); setStudyHighlight(undefined); setStudyReturn(undefined); setPendingStudyNavigation(undefined);
   }, [studySourceKey]);
   const explainFormula = (block: PdfIRBlock) => { setVisualSelection(undefined);setTableStudyOpen(false); setStudySelection({block,explain:true}); setStudyOpen(true); };
@@ -181,10 +200,20 @@ export default function RenderPdf({
   }, [formulaDocument]);
   const formulaCount = Array.from(formulaPages.values()).reduce((count, blocks) => count + blocks.length, 0);
   const formulaBusy = pdfIR.starting || pdfIR.state.status === "queued" || pdfIR.state.status === "running";
+  const [toolsOpen,setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!toolsOpen)return;
+    const close=(event:PointerEvent)=>{if(event.target instanceof Node && !toolsRef.current?.contains(event.target))setToolsOpen(false);};
+    document.addEventListener("pointerdown",close);
+    return()=>document.removeEventListener("pointerdown",close);
+  },[toolsOpen]);
   const [numPages, setNumPages] = useState(1);
-  const [pdfLoaded, setPdfLoaded] = useState(false);
+  const [loadedSource,setLoadedSource] = useState<{fileData:RenderPdfProps["fileData"]}>();
+  const pdfLoaded = !!loadedSource && loadedSource.fileData === fileData;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const errorSource = useRef<RenderPdfProps["fileData"]>();
   const [pageSizesMap, setPageSizesMap] = useState<
     Record<number, { width: number; height: number }>
   >({});
@@ -223,19 +252,36 @@ export default function RenderPdf({
     }
   };
 
+  const zoomPosition = useRef<PdfViewPosition>();
+  const pdfDocument = useRef<{source: RenderPdfProps["fileData"]; document: {numPages:number;getPage:(page:number)=>Promise<{getTextContent:()=>Promise<{items:unknown[]}>}>}}>();
+  const lastPageNavigation = useRef("");
+  const searchRequest = useRef(0);
+  const [query, setQuery] = useState("");
+  const [matches, setMatches] = useState<number[]>([]);
+  const [matchIndex, setMatchIndex] = useState(0);
+  const [searchStatus, setSearchStatus] = useState<"idle"|"busy"|"done"|"error">("idle");
+  useEffect(() => {
+    lastPageNavigation.current = "";
+    searchRequest.current++;
+    setMatches([]); setQuery(""); setSearchStatus("idle");
+    setScrollTop(0);
+    appliedPositionRef.current = "";
+    return () => { searchRequest.current++; };
+  }, [fileData]);
+  useEffect(() => { onStudyOpenChange?.(studyOpen || tableStudyOpen || !!visualSelection); }, [studyOpen, tableStudyOpen, visualSelection, onStudyOpenChange]);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
 
   const pageWidthPx = useMemo(() => {
     if (defaultPageWidth) {
-      return defaultPageWidth;
+      return Math.round(defaultPageWidth * zoom);
     }
     if (!containerWidth) {
-      return 900;
+      return Math.round(900 * zoom);
     }
-    return Math.floor(containerWidth * 0.94);
-  }, [defaultPageWidth, containerWidth]);
+    return Math.round(Math.min(960, Math.max(1, containerWidth - 32), Math.floor(containerWidth * 0.94)) * zoom);
+  }, [defaultPageWidth, containerWidth, zoom]);
   const [pageSlotHeight, setPageSlotHeight] = useState(0);
 
   const [pendingHighlight, setPendingHighlight] = useState(false);
@@ -305,11 +351,12 @@ export default function RenderPdf({
   };
 
   const updateSelectionAction = () => {
+    if (document.activeElement?.closest("[data-pdf-selection-toolbar]")) return;
     // A hover timer may have been scheduled while the pointer was moving
     // during text selection. The explicit selection toolbar always wins.
     window.clearTimeout(referenceHoverTimer.current);
     window.clearTimeout(referenceHoverCloseTimer.current);
-    if ((!onAskSelection && !onTranslateSelection && !onRetranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
+    if ((!onAskSelection && !onNoteSelection && !onTranslateSelection && !onRetranslateSelection && !onImportReferenceSelection && !onAddVocabularySelection && !onLearningSelection) || !containerRef.current) {
       return;
     }
     const selection = window.getSelection();
@@ -408,7 +455,7 @@ export default function RenderPdf({
         (event.clientX - pageRect.left) * pageSize.width / pageRect.width,
         (event.clientY - pageRect.top) * pageSize.height / pageRect.height,
       );
-      if (!action) return;
+      if (!action || action.kind === "download") return;
       const rect = target.getBoundingClientRect();
       const containerRect = containerRef.current.getBoundingClientRect();
       setSelectionAction({
@@ -424,7 +471,7 @@ export default function RenderPdf({
   const pageHeightsPx = useMemo(() => {
     const arr = [];
     for (let i = 0; i < numPages; i++) {
-      const { width, height } = pageSizesMap[i] || {
+      const { width, height } = pageSizesMap[i] || pageSizesMap[0] || {
         width: WIDTH_PT,
         height: HEIGHT_PT,
       };
@@ -444,11 +491,73 @@ export default function RenderPdf({
     return arr;
   }, [pageHeightsPx, numPages]);
 
+  const currentPage = Math.max(1, pageTops.reduce((page, top, index) => top <= scrollTop + 1 ? index + 1 : page, 1));
+  const jumpPage = (value: number) => {
+    if (!pdfLoaded || !Number.isFinite(value)) return;
+    const page = Math.min(numPages, Math.max(1, Math.round(value)));
+    const top = pageTops[page - 1] || 0;
+    setReaderMode("original");
+    containerRef.current?.scrollTo({top, behavior:"auto"});
+    setScrollTop(top);
+    onViewPositionChange?.({page,progress:0});
+  };
+  useEffect(() => {
+    if (!pdfNavigateToPage || !Number.isFinite(pdfNavigateToPage.page) || !pdfLoaded || pdfDocument.current?.source !== fileData) return;
+    const key = `${pdfNavigateToPage.requestId}:${pdfNavigateToPage.page}`;
+    if (lastPageNavigation.current === key) return;
+    lastPageNavigation.current = key;
+    jumpPage(pdfNavigateToPage.page);
+  }, [pdfNavigateToPage?.page,pdfNavigateToPage?.requestId,pdfLoaded,pageTops,numPages,fileData]);
+  const changeZoom = (value: number) => {
+    zoomPosition.current = {page:currentPage,progress:Math.max(0,(scrollTop-(pageTops[currentPage-1]||0))/(pageHeightsPx[currentPage-1]||1))};
+    setZoom(Math.min(2, Math.max(.5, Math.round(value * 10) / 10)));
+  };
+  const previousGeometry = useRef({width:pageWidthPx,tops:pageTops,heights:pageHeightsPx});
+  useLayoutEffect(() => {
+    const previous = previousGeometry.current;
+    previousGeometry.current = {width:pageWidthPx,tops:pageTops,heights:pageHeightsPx};
+    if (previous.width === pageWidthPx && previous.heights.length === pageHeightsPx.length && previous.heights.every((height,index)=>height===pageHeightsPx[index]) && !zoomPosition.current) return;
+    const previousPage = previous.tops.reduce((page, top, index)=>top<=scrollTop+1?index:page,0);
+    const position = zoomPosition.current || {page:previousPage+1,progress:Math.max(0,(scrollTop-(previous.tops[previousPage]||0))/(previous.heights[previousPage]||1))};
+    zoomPosition.current = undefined;
+    const top = (pageTops[position.page-1]||0) + (pageHeightsPx[position.page-1]||0)*position.progress;
+    containerRef.current?.scrollTo({top,behavior:"auto"});
+    setScrollTop(top);
+  }, [pageWidthPx,pageTops,pageHeightsPx]);
+  const searchPdf = async () => {
+    const request = ++searchRequest.current;
+    const doc = pdfDocument.current?.source === fileData ? pdfDocument.current.document : undefined;
+    const term = query.trim().toLocaleLowerCase();
+    setMatches([]); setMatchIndex(0);
+    if (!doc || !term) { setSearchStatus("idle"); return; }
+    setSearchStatus("busy");
+    try {
+      const found:number[] = [];
+      for (let page = 1; page <= doc.numPages; page++) {
+        if (request !== searchRequest.current) return;
+        const text = await (await doc.getPage(page)).getTextContent();
+        if (text.items.map(item => typeof item === "object" && item !== null && "str" in item ? String(item.str) : "").join(" ").toLocaleLowerCase().includes(term)) found.push(page);
+      }
+      if (request !== searchRequest.current) return;
+      setMatches(found); setSearchStatus("done");
+      if (found.length) jumpPage(found[0]);
+    } catch { if (request === searchRequest.current) setSearchStatus("error"); }
+  };
+  const downloadPdf = () => {
+    if (!fileData) return;
+    const objectUrl = typeof fileData === "string" ? undefined : URL.createObjectURL(fileData instanceof File ? fileData : new Blob([fileData],{type:"application/pdf"}));
+    const link = document.createElement("a");
+    link.href = objectUrl || String(fileData);
+    link.download = paperTitle ? (/\.pdf$/i.test(paperTitle) ? paperTitle : paperTitle + ".pdf") : "paper.pdf";
+    link.click();
+    if (objectUrl) window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  };
+
   useEffect(() => {
     if (!viewPosition || !pdfLoaded || !containerRef.current || !pageTops.length) return;
     const page = Math.min(Math.max(viewPosition.page, 1), numPages) - 1;
     const progress = Math.min(1, Math.max(0, viewPosition.progress));
-    const key = `${page}:${progress.toFixed(4)}:${Math.round(pageWidthPx)}`;
+    const key = `${page}:${progress.toFixed(4)}`;
     if (appliedPositionRef.current === key) return;
     appliedPositionRef.current = key;
     const top = (pageTops[page] || 0) + (pageHeightsPx[page] || 0) * progress;
@@ -771,7 +880,7 @@ export default function RenderPdf({
   },[pdfNavigateTo?.id,pdfNavigateTo?.requestId,pdfLoaded,formulaDocument]);
 
   const renderVirtualPage = (index: number) => {
-    const { width, height } = pageSizesMap[index] || {
+    const { width, height } = pageSizesMap[index] || pageSizesMap[0] || {
       width: WIDTH_PT,
       height: HEIGHT_PT,
     };
@@ -802,14 +911,16 @@ export default function RenderPdf({
           width: pageWidthPx,
           height: pageHeightPx,
           background: PAGE_BACKGROUND,
-          boxShadow: "0 2px 6px rgba(0,0,0,0.08)",
+          boxShadow: "none",
           overflow: "hidden",
         }}
       >
+        {/* Keep PDF.js canvas and text geometry stable during workspace resizing. */}
+        <div style={{width:RASTER_WIDTH,transform:`scale(${pageWidthPx / RASTER_WIDTH})`,transformOrigin:"top left"}}>
         <Page
           pageNumber={index + 1}
-          width={pageWidthPx}
-          renderTextLayer={Boolean(pdfIRTarget || onAskSelection || onTranslateSelection || onImportReferenceSelection)}
+          width={RASTER_WIDTH}
+          renderTextLayer={Boolean(pdfIRTarget || onNoteSelection || onAskSelection || onTranslateSelection || onImportReferenceSelection)}
           renderAnnotationLayer
           onRenderSuccess={() => {
             tryHighlightAfterRender(index);
@@ -818,15 +929,12 @@ export default function RenderPdf({
           onRenderTextLayerSuccess={() => tagReferenceTextLayer(index)}
           onLoadSuccess={(page) => {
             const viewport = page.getViewport({ scale: 1 });
-            setPageSizesMap((prev) => ({
-              ...prev,
-              [index]: {
-                width: viewport.width,
-                height: viewport.height,
-              },
-            }));
+            setPageSizesMap(prev => prev[index]?.width === viewport.width && prev[index]?.height === viewport.height ? prev : {
+              ...prev,[index]:{width:viewport.width,height:viewport.height},
+            });
           }}
         />
+        </div>
         {studyHighlight?.page === index && <div className="pdf-study-highlight" style={(() => {
           const box = studyHighlight.bbox;
           const valid = box && box.length === 4 && box.every(value=>Number.isFinite(value)&&value>=0&&value<=1) && box[0]<box[2] && box[1]<box[3];
@@ -856,10 +964,47 @@ export default function RenderPdf({
     );
   };
 
-  if (error) {
+  const readerTools = (
+    <div className="pdf-reader-modebar pdf-reader-toolbar" hidden={!toolsOpen} style={{maxWidth:containerWidth ? Math.max(180,containerWidth-24) : undefined}}>
+      {readerMode!=="insight" && <div className="pdf-reader-tools">
+        {readerMode==="original" && <><button aria-label={readerLabel("previousPage")} disabled={!pdfLoaded||currentPage<=1} onClick={()=>jumpPage(currentPage-1)}><LeftOutlined/></button><input className="pdf-reader-page-input" aria-label={readerLabel("page")} type="number" disabled={!pdfLoaded} min={1} max={numPages} value={currentPage} onChange={event=>jumpPage(Number(event.target.value))}/><span className="pdf-reader-page-total">/ {pdfLoaded ? numPages : "—"}</span><button aria-label={readerLabel("nextPage")} disabled={!pdfLoaded||currentPage>=numPages} onClick={()=>jumpPage(currentPage+1)}><RightOutlined/></button><span className="pdf-reader-tool-divider"/><button aria-label={readerLabel("zoomOut")} disabled={!pdfLoaded||zoom<=.5} onClick={()=>changeZoom(zoom-.1)}><ZoomOutOutlined/></button><button title={readerLabel("fitWidth")} onClick={()=>changeZoom(1)}>{Math.round(zoom*100)}%</button><button aria-label={readerLabel("zoomIn")} disabled={!pdfLoaded||zoom>=2} onClick={()=>changeZoom(zoom+.1)}><ZoomInOutlined/></button></>}
+      </div>}
+      <div className="pdf-reader-toolbar-end"><details className="pdf-reader-search"><summary aria-label={readerLabel("search")}><SearchOutlined/></summary><form role="search" onSubmit={event=>{event.preventDefault();void searchPdf();}}><input type="search" aria-label={readerLabel("search")} value={query} onChange={event=>{setQuery(event.target.value);searchRequest.current++;setMatches([]);setSearchStatus("idle");}}/><button disabled={!pdfLoaded||searchStatus==="busy"}>{readerLabel("search")}</button><span role="status">{searchStatus==="busy"?readerLabel("searching"):searchStatus==="error"?readerLabel("searchError"):searchStatus==="done"?(matches.length ? `${matchIndex+1}/${matches.length}` : readerLabel("noMatches")):""}</span>{matches.length>1&&<><button type="button" aria-label={readerLabel("previousMatch")} onClick={()=>{const index=(matchIndex-1+matches.length)%matches.length;setMatchIndex(index);jumpPage(matches[index]);}}>↑</button><button type="button" aria-label={readerLabel("nextMatch")} onClick={()=>{const index=(matchIndex+1)%matches.length;setMatchIndex(index);jumpPage(matches[index]);}}>↓</button></>}</form></details><button aria-label={readerLabel("download")} title={readerLabel("download")} disabled={!fileData} onClick={downloadPdf}><DownloadOutlined/></button></div>
+      {navigationOrigin&&<button onClick={returnReaderMode}>{readerLabel("returnGuide")}</button>}
+      {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
+        <details className="pdf-reader-parser-details"><summary>{readerLabel("displaySettings")}</summary><div><span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
+        {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
+        {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}
+        {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
+        </div></details>
+        {formulaDocument && studyBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}>{t("pdfFormula.openCatalog")}</button>}
+        {tableBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
+        {imageBlocks.length>0&&<select aria-label={readerLabel("visuals")} value="" onChange={event=>{const block=imageBlocks.find(item=>item.id===event.target.value);if(block)openVisualStudy(block);}}><option value="" disabled>{readerLabel("imageRegion")} ({imageBlocks.length})</option>{imageBlocks.filter(block=>block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}{imageBlocks.some(block=>!block.image?.number)&&<optgroup label={readerLabel("imageRegion")}>{imageBlocks.filter(block=>!block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}</optgroup>}</select>}
+        {tableStudyOpen&&tableSelection&&<button onClick={()=>openVisualStudy(tableSelection)}>{readerLabel("explainVisual")}</button>}
+
+      </div>}
+    </div>
+  );
+
+  const readerHeader = (
+    <nav className="pdf-reader-modebar pdf-reader-header" aria-label={readerLabel("reading")}>
+      <div className="pdf-reader-header-start">{pdfHeaderStart}</div>
+      {pdfIRTarget && <div role="tablist"><button role="tab" aria-selected={readerMode==="insight"} onClick={()=>setReaderMode("insight")}>{readerLabel("insight")}</button><button role="tab" aria-selected={readerMode!=="insight"} onClick={()=>setReaderMode("original")}>{readerLabel("reading")}</button></div>}
+      <div className="pdf-reader-header-end">
+        <div ref={toolsRef} className="pdf-reader-tools-popover" onKeyDown={event=>{if(event.key==="Escape"){setToolsOpen(false);toolsRef.current?.querySelector<HTMLButtonElement>("button")?.focus();}}}>
+          <button type="button" aria-label="阅读工具" title="阅读工具" aria-expanded={toolsOpen} onClick={()=>setToolsOpen(open=>!open)}><ControlOutlined/></button>
+          {readerTools}
+        </div>
+        {pdfHeaderEnd}
+      </div>
+    </nav>
+  );
+
+  if (error && errorSource.current === fileData) {
     return (
-      <div style={{ padding: 20, textAlign: "center", color: "red" }}>
-        <p>加载失败: {error}</p>
+      <div className="pdf-reader-workspace" style={{height:style?.height || "100%",width:"100%"}}>
+        {readerHeader}
+        <div role="alert" style={{padding:20,textAlign:"center",color:"#a6574c"}}>加载失败: {error}</div>
       </div>
     );
   }
@@ -871,9 +1016,9 @@ export default function RenderPdf({
   const translationUnavailable=translateSelectionDisabled&&!isSingleEnglishWord(selectionAction?.selection.text||"");
   return (
     <div className="pdf-reader-workspace" style={{height:style?.height || "calc(100vh - 220px)",width:"100%"}}>
-    {pdfIRTarget&&<nav className="pdf-reader-modebar" aria-label={readerLabel("reading")}><div role="tablist"><button role="tab" aria-selected={readerMode!=="insight"} onClick={()=>setReaderMode("original")}>{readerLabel("reading")}</button><button role="tab" aria-selected={readerMode==="insight"} onClick={()=>setReaderMode("insight")}>{readerLabel("insight")}</button></div>{readerMode!=="insight"&&<div className="pdf-reader-view-toggle"><button aria-pressed={readerMode==="original"} onClick={()=>setReaderMode("original")}>{readerLabel("original")}</button><button aria-pressed={readerMode==="bilingual"} onClick={()=>setReaderMode("bilingual")}>{readerLabel("bilingual")}</button></div>}{navigationOrigin&&<button onClick={returnReaderMode}>{readerLabel(navigationOrigin==="insight"?"returnGuide":"returnBilingual")}</button>}</nav>}
+    {readerHeader}
     <div className="pdf-reader-stage">
-    {pdfIRTarget&&formulaDocument&&<><div className="pdf-reader-reflow" hidden={readerMode!=="insight"}><PdfPaperGuide target={pdfIRTarget} document={formulaDocument} active={readerMode==="insight"} onNavigate={navigateSourceBlock} onStudy={openRelatedStudy}/></div><div className="pdf-reader-reflow" hidden={readerMode!=="bilingual"}><PdfBilingualReader target={pdfIRTarget} document={formulaDocument} active={readerMode==="bilingual"} onNavigate={navigateSourceBlock} onStudy={openRelatedStudy}/></div></>}
+    {pdfIRTarget&&formulaDocument&&<div className="pdf-reader-reflow" hidden={readerMode!=="insight"}><PdfPaperGuide paperTitle={paperTitle} target={pdfIRTarget} document={formulaDocument} active={readerMode==="insight"} onNavigate={navigateSourceBlock} onStudy={openRelatedStudy}/></div>}
     {pdfIRTarget&&!formulaDocument&&readerMode!=="original"&&<div className="pdf-reader-empty">{readerLabel("needsIR")}<button onClick={()=>setReaderMode("original")}>{readerLabel("original")}</button></div>}
     <div ref={studyReaderRef} data-study-layout={studyLayout} className="pdf-reader-with-study" style={{height:"100%",width:"100%",display:readerMode==="original"?"flex":"none"}}>
     <div
@@ -884,30 +1029,19 @@ export default function RenderPdf({
       onMouseMove={handleReferenceHover}
       onMouseLeave={() => {
         window.clearTimeout(referenceHoverTimer.current);
-        if (selectionAction?.referenceHover) {
+        if (selectionAction?.referenceHover && !document.activeElement?.closest("[data-pdf-selection-toolbar]")) {
           referenceHoverCloseTimer.current = window.setTimeout(() => setSelectionAction(null), 250);
         }
       }}
       style={{
         overflow: "auto",
         position: "relative",
-        backgroundColor: gapBackground,
         ...style,
+        backgroundColor: GAP_BACKGROUND,
         flex: "1 1 0", minWidth: 0, minHeight: 0, height: "100%",
       }}
     >
-      {pdfIRTarget && <div className="pdf-formula-controls" onMouseUp={event => event.stopPropagation()}>
-        <span role="status">{formulaBusy ? t("pdfFormula.processing") : pdfIR.state.status === "ready" ? !globalThis.crypto?.subtle ? t("pdfFormula.insecure") : !pdfSourceHash ? t("pdfFormula.checking") : formulaDocument ? formulaCount ? t("pdfFormula.count", {count:formulaCount}) : t("pdfFormula.empty") : t("pdfFormula.mismatch") : pdfIR.state.error_message || t("pdfFormula.intro")}</span>
-        {formulaDocument && studyBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setTableStudyOpen(false);setStudyOpen(true);}}>{t("pdfFormula.openCatalog")}</button>}
-        {tableBlocks.length > 0 && <button onClick={() => {setVisualSelection(undefined);setStudyOpen(false);setTableStudyOpen(true);}}>{t("pdfTable.openCatalog", {count:tableBlocks.length})}</button>}
-        {imageBlocks.length>0&&<select aria-label={readerLabel("visuals")} value="" onChange={event=>{const block=imageBlocks.find(item=>item.id===event.target.value);if(block)openVisualStudy(block);}}><option value="" disabled>{readerLabel("imageRegion")} ({imageBlocks.length})</option>{imageBlocks.filter(block=>block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}{imageBlocks.some(block=>!block.image?.number)&&<optgroup label={readerLabel("imageRegion")}>{imageBlocks.filter(block=>!block.image?.number).map(block=><option key={block.id} value={block.id}>{paperVisualLabel(block,formulaDocument!.blocks,readerLabel)}</option>)}</optgroup>}</select>}
-        {tableStudyOpen&&tableSelection&&<button onClick={()=>openVisualStudy(tableSelection)}>{readerLabel("explainVisual")}</button>}
-        <details className="pdf-reader-display-settings"><summary>{readerLabel("displaySettings")}</summary><div>
-        {formulaDocument && formulaCount > 0 && <button onClick={() => setFormulasEnabled(value => !value)} aria-pressed={formulasEnabled}>{formulasEnabled ? t("pdfFormula.hide") : t("pdfFormula.show")}</button>}
-        {tableBlocks.length > 0 && <button onClick={() => setTablesEnabled(value => !value)} aria-pressed={tablesEnabled}>{t(tablesEnabled ? "pdfTable.hide" : "pdfTable.show")}</button>}
-        {!formulaBusy && pdfIRTarget.canWrite !== false && <button onClick={() => void pdfIR.start(pdfIR.state.status === "ready" || pdfIR.state.status === "failed")}>{pdfIR.state.status === "not_requested" ? t("pdfFormula.enable") : t("pdfFormula.retry")}</button>}
-        </div></details>
-      </div>}
+
       {selectionHighlights.map((highlight, index) => (
         <div
           key={`${highlight.left}-${highlight.top}-${index}`}
@@ -919,167 +1053,49 @@ export default function RenderPdf({
             top: highlight.top,
             width: highlight.width,
             height: highlight.height,
-            background: "rgba(22, 119, 255, 0.28)",
+            background: "color-mix(in srgb, var(--color-primary, #006ae6) 22%, transparent)",
             borderRadius: 1,
             pointerEvents: "none",
           }}
         />
       ))}
       {selectionAction ? (
-        <div
-          data-pdf-selection-toolbar
-          onMouseDown={(event) => event.stopPropagation()}
-          onMouseUp={(event) => event.stopPropagation()}
-          onMouseEnter={() => window.clearTimeout(referenceHoverCloseTimer.current)}
-          onMouseLeave={() => {
-            if (selectionAction.referenceHover) {
-              referenceHoverCloseTimer.current = window.setTimeout(() => setSelectionAction(null), 250);
-            }
-          }}
-          style={{
-            position: "absolute",
-            zIndex: 30,
-            left: selectionAction.left,
-            top: selectionAction.top,
-            transform: "translateX(-50%)",
-            borderRadius: 8,
-            padding: 4,
-            background: "#fff",
-            boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
-            fontSize: 13,
-            whiteSpace: "nowrap",
-            display: "flex",
-            gap: 4,
-          }}
-        >
-          {onAskSelection && !selectionAction.referenceHover ? (
-            <button
-              type="button"
-              aria-label={askSelectionLabel}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onAskSelection(selectionAction.selection);
-                window.getSelection()?.removeAllRanges();
-                setSelectionAction(null);
-              }}
-              style={{ border: 0, borderRadius: 6, padding: "6px 10px", background: "#1677ff", color: "#fff", cursor: "pointer" }}
-            >
-              {askSelectionLabel}
-            </button>
-          ) : null}
-          {onTranslateSelection && !selectionAction.referenceHover ? (
-            <Tooltip
-              mouseEnterDelay={0}
-              title={translationUnavailable ? (
-                <span>
-                  {translateSelectionDisabledTip}
-                  {translateSelectionConfigureUrl ? (
-                    <>
-                      {" · "}
-                      <a
-                        href={translateSelectionConfigureUrl}
-                        onMouseDown={(event) => event.stopPropagation()}
-                      >
-                        {translateSelectionConfigureLabel}
-                      </a>
-                    </>
-                  ) : null}
-                </span>
-              ) : undefined}
-            >
-              <span style={{ display: "inline-flex" }}>
-                <button
-                  type="button"
-                  aria-label={translateSelectionLabel}
-                  disabled={translationUnavailable}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    onTranslateSelection(selectionAction.selection);
-                    window.getSelection()?.removeAllRanges();
-                    setSelectionAction(null);
-                  }}
-                  style={{
-                    border: "1px solid #d9d9d9",
-                    borderRadius: 6,
-                    padding: "5px 10px",
-                    background: translationUnavailable ? "#f5f5f5" : "#fff",
-                    color: translationUnavailable ? "rgba(0,0,0,.25)" : "#1677ff",
-                    cursor: translationUnavailable ? "not-allowed" : "pointer",
-                    pointerEvents: translationUnavailable ? "none" : "auto",
-                  }}
-                >
-                  {translateSelectionLabel}
-                </button>
-              </span>
-            </Tooltip>
-          ) : null}
-          {onRetranslateSelection && !selectionAction.referenceHover ? (
-            <button
-              type="button"
-              aria-label={retranslateSelectionLabel}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onRetranslateSelection(selectionAction.selection);
-                window.getSelection()?.removeAllRanges();
-                setSelectionAction(null);
-              }}
-              style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: "5px 10px", background: "#fff", color: "#1677ff", cursor: "pointer" }}
-            >
-              {retranslateSelectionLabel}
-            </button>
-          ) : null}
-          {onImportReferenceSelection && selectionAction.referenceAction ? (
-            <button
-              type="button"
-              aria-label={selectionAction.referenceAction.kind === "open" ? "打开知识库文档" : selectionAction.referenceAction.kind === "external" ? "打开链接" : "下载并加入知识库"}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                if ((selectionAction.referenceAction?.kind === "open" || selectionAction.referenceAction?.kind === "external") && selectionAction.referenceAction.href) {
-                  if (selectionAction.referenceAction.kind === "external") window.open(selectionAction.referenceAction.href, "_blank", "noopener,noreferrer");
-                  else window.location.assign(selectionAction.referenceAction.href);
-                } else {
-                  onImportReferenceSelection({
-                    ...selectionAction.selection,
-                    text: selectionAction.referenceAction?.rawText || selectionAction.selection.text,
-                    referenceId: selectionAction.referenceAction?.referenceId,
-                  });
-                }
-                window.getSelection()?.removeAllRanges();
-                setSelectionAction(null);
-              }}
-              style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: "5px 10px", background: "#fff", color: "#1677ff", cursor: "pointer" }}
-            >
-              {selectionAction.referenceAction.kind === "open" ? "打开知识库文档" : selectionAction.referenceAction.kind === "external" ? "打开链接" : "下载并加入知识库"}
-            </button>
-          ) : null}
-          {onAddVocabularySelection && !selectionAction.referenceHover && /[A-Za-z]/.test(selectionAction.selection.text) ? (
-            <button
-              type="button"
-              aria-label={addVocabularySelectionLabel}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onAddVocabularySelection(selectionAction.selection);
-                window.getSelection()?.removeAllRanges();
-                setSelectionAction(null);
-              }}
-              style={{ border: "1px solid #d9d9d9", borderRadius: 6, padding: "5px 10px", background: "#fff", color: "#1677ff", cursor: "pointer" }}
-            >
-              {addVocabularySelectionLabel}
-            </button>
-          ) : null}
-          {!selectionAction.referenceHover && visibleLearningSelectionActions(learningSelectionActions, selectionAction.selection.text, Boolean(onTranslateSelection)).map((action) => (
-            <Tooltip key={action.key} title={action.disabled ? action.disabledTip : undefined}>
-              <span><button type="button" aria-label={action.label} disabled={action.disabled} onMouseDown={(event)=>event.preventDefault()} onClick={() => { onLearningSelection?.(action.key,selectionAction.selection); window.getSelection()?.removeAllRanges(); setSelectionAction(null); }} style={{border:"1px solid #d9d9d9",borderRadius:6,padding:"5px 10px",background:action.disabled?"#f5f5f5":"#fff",color:action.disabled?"rgba(0,0,0,.25)":"#1677ff",cursor:action.disabled?"not-allowed":"pointer"}}>{action.label}</button></span>
-            </Tooltip>
-          ))}
+        <div data-pdf-selection-toolbar
+          onMouseDown={event=>event.stopPropagation()}
+          onMouseUp={event=>event.stopPropagation()}
+          onMouseEnter={()=>window.clearTimeout(referenceHoverCloseTimer.current)}
+          style={{position:"absolute",zIndex:30,left:(containerRef.current?.scrollLeft||0)+Math.max(8,Math.min(selectionAction.left-(containerRef.current?.scrollLeft||0)-190,(containerRef.current?.clientWidth || 396)-388)),top:Math.max((containerRef.current?.scrollTop||0)+8,Math.min(selectionAction.top-86,(containerRef.current?.scrollTop||0)+(containerRef.current?.clientHeight||720)-160)),width:"min(380px, calc(100% - 16px))"}}>
+          <PdfSelectionComposer
+            key={`${selectionAction.selection.page}:${selectionAction.selection.text}`}
+            selection={selectionAction.selection}
+            onAsk={onAskSelection}
+            onNote={onNoteSelection}
+            onClose={()=>{window.getSelection()?.removeAllRanges();setSelectionAction(null);}}
+            onTranslate={onTranslateSelection ? ()=>onTranslateSelection(selectionAction.selection) : undefined}
+            translationDisabled={translationUnavailable}
+            translationTitle={translationUnavailable ? translateSelectionDisabledTip : "翻译"}
+            translationHelp={translationUnavailable && translateSelectionConfigureUrl ? <a href={translateSelectionConfigureUrl}>{translateSelectionConfigureLabel}</a> : undefined}
+            onExplain={onAskSelection ? ()=>onAskSelection({...selectionAction.selection,question:"请解释这段内容"}) : undefined}
+            actions={(() => {
+              const actions:PdfComposerAction[]=[];
+              if(onRetranslateSelection)actions.push({key:"retranslate",label:retranslateSelectionLabel,onClick:()=>onRetranslateSelection(selectionAction.selection)});
+              if(onAddVocabularySelection && /[A-Za-z]/.test(selectionAction.selection.text))actions.push({key:"vocabulary",label:addVocabularySelectionLabel,onClick:()=>onAddVocabularySelection(selectionAction.selection)});
+              for(const action of visibleLearningSelectionActions(learningSelectionActions,selectionAction.selection.text,Boolean(onTranslateSelection)))actions.push({key:action.key,label:action.label,disabled:action.disabled,title:action.disabledTip,onClick:()=>onLearningSelection?.(action.key,selectionAction.selection)});
+              const reference=selectionAction.referenceAction;
+              if(reference?.href && (reference.kind==="open" || reference.kind==="external"))actions.push({key:"reference",label:reference.kind==="open"?"打开知识库文档":"打开链接",onClick:()=>{if(reference.kind==="external")window.open(reference.href,"_blank","noopener,noreferrer");else window.location.assign(reference.href!);}});
+              return actions;
+            })()}
+          />
         </div>
       ) : null}
       <Document
-        file={fileData}
+        file={pdfFile}
         renderMode={renderMode}
         loading={renderNoDataFn()}
         noData={renderNoDataFn()}
         onLoadSuccess={(doc) => {
+          if (currentSource.current !== fileData) return;
+          pdfDocument.current = {source:fileData,document:doc};
           setNumPages(doc.numPages);
           if (onPdfKindDetected) {
             void (async () => {
@@ -1091,6 +1107,7 @@ export default function RenderPdf({
                 const value = text.items.map((item) => "str" in item ? item.str : "").join(" ");
                 if (hasUsablePdfText(value)) pagesWithText++;
               }
+              if (currentSource.current !== fileData) return;
               onPdfKindDetected(pagesWithText === 0 ? "image_only" : pagesWithText === sampledPages ? "native_text" : "mixed");
             })().catch(() => undefined);
           }
@@ -1108,12 +1125,14 @@ export default function RenderPdf({
               },
             }));
           });
-          setPdfLoaded(true);
+          setLoadedSource({fileData});
           setLoading(false);
           setError(null);
         }}
         onLoadError={(err) => {
+          if (currentSource.current !== fileData) return;
           onPreviewError?.();
+          errorSource.current = fileData;
           setError(err.message || "加载失败");
           setLoading(false);
         }}
@@ -1123,7 +1142,7 @@ export default function RenderPdf({
             position: "relative",
             height: totalHeight,
             minWidth: pageWidthPx + 32,
-            background: gapBackground,
+            background: GAP_BACKGROUND,
           }}
         >
           {visiblePages.map((i) => renderVirtualPage(i))}

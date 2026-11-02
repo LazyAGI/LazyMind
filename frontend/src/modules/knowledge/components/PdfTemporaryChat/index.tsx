@@ -33,6 +33,8 @@ interface PdfTemporaryChatProps {
   onConversationChange?: (conversationId?: string) => void;
   onHistoryChange?: () => void;
   onClose: () => void;
+  onClearSelection?: () => void;
+  onNavigateSelection?: (selection: DocumentChatSelection) => void;
 }
 
 function newPreviewConversationId() {
@@ -52,9 +54,31 @@ export default function PdfTemporaryChat({
   onConversationChange,
   onHistoryChange,
   onClose,
+  onClearSelection,
+  onNavigateSelection,
 }: PdfTemporaryChatProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const zh = (i18n?.resolvedLanguage || i18n?.language || "en").startsWith("zh");
+  const copy = zh ? {
+    assistant:"论文助手", hint:"细读论文，随时提问。", ready:"论文已就绪", scope:"回答基于当前文档", quote:"原文摘录", page:"第", remove:"移除原文摘录", companion:"阅读助手", welcome:"读懂这篇论文", intro:"探索核心观点、核对证据，或选中原文提出具体问题。",
+    prompts:[
+      ["核心贡献", "理解创新点及其意义", "请解释这篇论文的核心贡献，以及它与已有工作的区别。请引用原文作为依据。"],
+      ["解释方法", "逐步理解研究方法", "请逐步解释这篇论文的方法、关键假设，并引用相关章节。"],
+      ["关键结果", "核对研究证据", "请总结这篇论文的关键结果，包括评估设置和支持结论的证据。"],
+      ["局限性", "了解尚未解决的问题", "这篇论文有哪些局限和开放问题？请区分论文明确陈述的局限与推测。"],
+    ],
+  } : {
+    assistant:"Paper assistant", hint:"Read closely. Ask freely.", ready:"Paper ready", scope:"Answers grounded in this document", quote:"Source quote", page:"Page", remove:"Remove source quote", companion:"Your reading companion", welcome:"Make sense of this paper", intro:"Explore its ideas, follow the evidence, or select a passage to ask a focused question.",
+    prompts:[
+      ["Core contribution", "What is new, and why it matters", "Explain the core contribution of this paper and how it differs from prior work. Cite supporting passages."],
+      ["Explain the method", "Walk through the approach", "Walk me through the method in this paper step by step. Explain the key assumptions and cite the relevant sections."],
+      ["Key results", "Understand the evidence", "Summarize the key results of this paper, including the evaluation setup and evidence supporting its claims."],
+      ["Limitations", "Look beyond the headline", "What are the limitations and open questions in this paper? Distinguish stated limitations from your own inferences."],
+    ],
+  };
   const isPaper = /\.pdf$/i.test(fileName);
+  const [dismissedSelection, setDismissedSelection] = useState<DocumentChatSelection>();
+  const activeSelection = selection !== dismissedSelection ? selection : undefined;
   const chatRef = useRef<ChatImperativeProps>(null);
   const initialConversationIdRef = useRef(newPreviewConversationId());
   const conversationIdRef = useRef(initialConversationIdRef.current);
@@ -133,27 +157,27 @@ export default function PdfTemporaryChat({
   }, [conversationToLoad, documentId]);
 
   useEffect(() => {
-    if (!selection) return;
-    if (preparedSelectionRef.current === selection) return;
+    if (!activeSelection) return;
+    if (preparedSelectionRef.current === activeSelection) return;
     let attempts = 0;
     const sendWhenReady = () => {
-      if (preparedSelectionRef.current === selection) return;
+      if (preparedSelectionRef.current === activeSelection) return;
       if (!chatRef.current && attempts < 10) {
         attempts += 1;
         timer = window.setTimeout(sendWhenReady, 50);
         return;
       }
       if (!chatRef.current) return;
-      preparedSelectionRef.current = selection;
+      preparedSelectionRef.current = activeSelection;
       chatRef.current.prepareMessage({
-        text: "",
-        citeMessage: selection.text,
+        ...(activeSelection.question?.trim() ? {text: activeSelection.question.trim()} : {}),
+        citeMessage: activeSelection.text,
         appendCitations: true,
       });
     };
     let timer = window.setTimeout(sendWhenReady, 50);
     return () => window.clearTimeout(timer);
-  }, [restartKey, selection]);
+  }, [restartKey, selection, activeSelection]);
 
   const openSSE = (
     input: Query[],
@@ -198,13 +222,13 @@ export default function PdfTemporaryChat({
         dataset_id: datasetId,
         document_id: documentId,
         file_name: fileName,
-        page: selection?.page,
-        bbox: selection?.bbox,
-        segment_id: selection?.segmentId,
-        segment_number: selection?.segmentNumber,
-        segment_group: selection?.group,
-        selected_text: selection?.text,
-        paragraph_text: selection?.context,
+        page: activeSelection?.page,
+        bbox: activeSelection?.bbox,
+        segment_id: activeSelection?.segmentId,
+        segment_number: activeSelection?.segmentNumber,
+        segment_group: activeSelection?.group,
+        selected_text: activeSelection?.text,
+        paragraph_text: activeSelection?.context,
       },
     }),
     callbacks,
@@ -300,11 +324,13 @@ export default function PdfTemporaryChat({
       <header className="pdf-temporary-chat__header">
         <div>
           <MessageOutlined />
-          <strong>{t("knowledge.pdfChatPanelLabel")}</strong>
-          <span>{t("knowledge.pdfChatTemporaryHint")}</span>
+          <strong>{isPaper ? copy.assistant : t("knowledge.pdfChatPanelLabel")}</strong>
+          <span>{isPaper ? copy.hint : t("knowledge.pdfChatTemporaryHint")}</span>
         </div>
+        {isPaper && <Button type="text" icon={<PlusOutlined />} aria-label={t("knowledge.pdfChatNew")} title={t("knowledge.pdfChatNew")} onClick={() => void startNewConversation()} />}
         <Button type="text" icon={<CloseOutlined />} aria-label={t("common.close")} onClick={onClose} />
       </header>
+      {isPaper && parseState === "parsed" && <div className="paper-assistant-ready" role="status"><span />{copy.ready}<span className="paper-assistant-ready__scope">{copy.scope}</span></div>}
       {!isPaper && <div className="pdf-temporary-chat__actions">
         <Button size="small" icon={<PlusOutlined />} onClick={() => void startNewConversation()}>
           {t("knowledge.pdfChatNew")}
@@ -320,11 +346,25 @@ export default function PdfTemporaryChat({
           {t("knowledge.pdfChatSave")}
         </Button>
       </div>}
+      {isPaper && activeSelection && <div className="paper-assistant-quote">
+        <div className="paper-assistant-quote__heading">
+          <button type="button" disabled={!onNavigateSelection} onClick={() => onNavigateSelection?.(activeSelection)}>
+            {copy.quote}{activeSelection.page ? (zh ? ` · 第 ${activeSelection.page} 页` : ` · Page ${activeSelection.page}`) : ""}
+          </button>
+          <Button type="text" size="small" icon={<CloseOutlined />} aria-label={copy.remove} onClick={() => {
+            setDismissedSelection(activeSelection);
+            preparedSelectionRef.current = activeSelection;
+            chatRef.current?.prepareMessage({ citeMessages: [] });
+            onClearSelection?.();
+          }} />
+        </div>
+        <blockquote>{activeSelection.text}</blockquote>
+      </div>}
       <div className="pdf-temporary-chat__body">
         {parseState === "parsing" ? (
           <Alert className="pdf-temporary-chat__parse-status" type="info" showIcon message={t("knowledge.pdfChatParsing")} description={t("knowledge.pdfChatParsingHint")} />
         ) : null}
-        {parseState === "parsed" ? (
+        {parseState === "parsed" && !isPaper ? (
           <Alert className="pdf-temporary-chat__parse-status" type="success" showIcon message={t("knowledge.pdfChatParsed")} />
         ) : null}
         {parseState === "failed" ? (
@@ -345,6 +385,15 @@ export default function PdfTemporaryChat({
         />}
         <ChatContainerComponent
           ref={chatRef}
+          initialCard={isPaper ? <section className="paper-assistant-welcome">
+            <h2>{copy.welcome}</h2>
+            <p>{copy.intro}</p>
+            <div className="paper-assistant-prompts">
+              {copy.prompts.map(([title, description, prompt]) => <button type="button" key={title} onClick={() => chatRef.current?.prepareMessage({ text: prompt, appendCitations: true })}>
+                <strong>{title}<span aria-hidden="true">↗</span></strong><span>{description}</span>
+              </button>)}
+            </div>
+          </section> : undefined}
           canChat={parseState === "parsed"}
           disabledReason={parseState === "parsed" ? undefined : t(parseState === "failed" ? "knowledge.pdfChatParseFailed" : parseState === "parsing" ? "knowledge.pdfChatParsing" : parseState === "loading" ? "knowledge.pdfChatChecking" : "knowledge.pdfChatUnknown")}
           sessionId={conversationId}

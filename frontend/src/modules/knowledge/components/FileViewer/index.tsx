@@ -40,6 +40,7 @@ import { extractPdfSelectionContext } from "@/components/ui/pdfSelectionContext"
 import { normalizePdfSelectionText } from "@/components/ui/pdfSelectionText";
 
 import "./index.scss";
+import "@/components/ui/PdfPaperReader.css";
 import type { ExcelSelection } from "./renderers/render-excel";
 
 export interface FileViewerRef {
@@ -48,8 +49,13 @@ export interface FileViewerRef {
 }
 
 interface FileViewerProps {
+  onPdfNoteSelection?: (selection: PdfTextSelection, note: string) => void;
+  pdfHeaderStart?: ReactNode;
+  pdfHeaderEnd?: ReactNode;
+  onPdfStudyOpenChange?: (open: boolean) => void;
   onPdfIRDocumentChange?: (document: import("@/modules/knowledge/api/pdfIR").PdfIRDocument | undefined) => void;
   pdfNavigateTo?: {id: string; requestId: number};
+  pdfNavigateToPage?: {page: number; requestId: number};
   pdfIRTarget?: import("@/modules/knowledge/api/pdfIR").PdfIRTarget;
   renderMarkdown?: (markdown: string) => ReactNode;
   data?: ArrayBuffer;
@@ -399,10 +405,15 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
       case "pdf":
         return pdfPreviewData ? (
           <RenderPdf
+            pdfHeaderStart={props.pdfHeaderStart}
+            pdfHeaderEnd={props.pdfHeaderEnd}
             key={`${props.pdfIRTarget?.dataset || ""}:${props.pdfIRTarget?.document || ""}:${props.file || ""}`}
+            paperTitle={props.fileName.replace(/\.pdf$/i, "")}
+            onStudyOpenChange={props.onPdfStudyOpenChange}
             pdfIRTarget={props.pdfIRTarget}
             onPdfIRDocumentChange={props.onPdfIRDocumentChange}
             pdfNavigateTo={props.pdfNavigateTo}
+            pdfNavigateToPage={props.pdfNavigateToPage}
             pdfSourceHash={pdfFingerprint?.data === fileData ? pdfFingerprint?.hash : undefined}
             className="scroll-container"
             style={{
@@ -413,6 +424,7 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             metadata={meta}
             content={content}
             onAskSelection={props.onPdfSelection}
+            onNoteSelection={props.onPdfNoteSelection}
             askSelectionLabel={t("knowledge.askPdfSelection")}
             onTranslateSelection={props.onPdfTranslateSelection}
             onRetranslateSelection={props.onPdfRetranslateSelection}
@@ -520,12 +532,16 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
     props.pdfIRTarget,
     props.onPdfIRDocumentChange,
     props.pdfNavigateTo,
+    props.pdfNavigateToPage,
+    props.pdfHeaderStart,
+    props.pdfHeaderEnd,
     props.file,
     props.fileName,
     props.renderMarkdown,
     props.onPreviewError,
     onPreviewError,
     props.onPdfSelection,
+    props.onPdfNoteSelection,
     props.onPdfKindDetected,
     props.onPdfTranslateSelection,
     props.onPdfViewPositionChange,
@@ -573,6 +589,13 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
 
   return (
     <div className={`file-viewer-container${props.paragraphSelectionMode?" is-paragraph-selecting":""}`}>
+      {fileType === "pdf" && (loading || !fileData || !pdfPreviewData) && (props.pdfHeaderStart || props.pdfHeaderEnd) && <div className="pdf-reader-workspace" style={{flexShrink:0}}>
+        <nav className="pdf-reader-modebar pdf-reader-header" aria-label={t("pdfReader.reading")}>
+          <div className="pdf-reader-header-start">{props.pdfHeaderStart}</div>
+          <div />
+          <div className="pdf-reader-header-end">{props.pdfHeaderEnd}</div>
+        </nav>
+      </div>}
       {props.paragraphSelectionMode?<div className="file-viewer-paragraph-selection-panel"><div className="file-viewer-paragraph-selection-bar"><span>{t("learning.paragraphSelectionInstruction")}</span><strong>{t("learning.paragraphSelectionCount",{count:paragraphSelections.length})}</strong>{paragraphSelections.length?<button type="button" onClick={()=>setParagraphSelections([])}>{t("learning.clearParagraphSelections")}</button>:null}<button type="button" onClick={props.onParagraphSelectionCancel}>{t("learning.exitParagraphSelection")}</button><button type="button" disabled={!paragraphSelections.length} onClick={()=>props.onParagraphSelectionConfirm?.(paragraphSelections)}>{t("common.confirm")}</button></div>{paragraphSelections.length?<div className="file-viewer-paragraph-selection-list">{paragraphSelections.map((item,index)=><div key={`${item.page}-${item.text}-${index}`} title={item.text}><span>{index+1}. {item.text}</span><button type="button" aria-label={t("learning.removeSelectedParagraph",{index:index+1})} onClick={()=>setParagraphSelections(current=>current.filter((_,currentIndex)=>currentIndex!==index))}>×</button></div>)}</div>:null}</div>:null}
       <div ref={previewRef} className="file-viewer-content" onMouseUp={handlePreviewSelection}>
         {textSelectionAction&&!props.paragraphSelectionMode ? (

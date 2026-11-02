@@ -6,8 +6,8 @@ const zhCN = {
   pdfReader: {
   "displaySettings": "显示与解析",
   "sourceChanged": "原 PDF 已变化，请重新加载原文后再生成解读。",
-  "reading": "阅读",
-  "insight": "论文透视",
+  "reading": "论文",
+  "insight": "概览",
   "original": "原文",
   "bilingual": "双语对照",
   "problem": "问题",
@@ -65,6 +65,7 @@ const zhCN = {
   "translationSource": "原文"
 },
   paperShell: {
+    askPlaceholder: "询问这篇论文，或选中文字引用…",
   "outline": "目录",
   "references": "参考文献",
   "vocabulary": "生词",

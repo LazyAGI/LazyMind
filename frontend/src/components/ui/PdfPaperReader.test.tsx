@@ -119,3 +119,43 @@ it('offers cited visual blocks as drill-downs even when related IDs omit them',a
  fireEvent.click(await screen.findByRole('button',{name:'Table 1'}));expect(study).toHaveBeenLastCalledWith(table);
  fireEvent.click(screen.getByRole('button',{name:'Formula (2)'}));expect(study).toHaveBeenLastCalledWith(formula);
 });
+
+
+it('uses explicit title and abstract blocks without mistaking body paragraphs for metadata',async()=>{
+ api.post.mockReset().mockResolvedValue({data:{data:{source_sha256:'source',stages:[],evidence:[],warnings:[]}}});
+ const view=render(<PdfPaperGuide target={target} document={{...document,blocks:[{id:'title',type:'title',page:0,text:'A grounded paper title'},{id:'abstract',type:'text',page:0,text:'Abstract. We evaluate a source-grounded method.'},...document.blocks]}} active onNavigate={vi.fn()} onStudy={vi.fn()}/>);
+ await waitFor(()=>expect(screen.queryByRole('status')).toBeNull());
+ expect(screen.getByRole('heading',{level:1,name:'A grounded paper title'})).toBeInTheDocument();
+ expect(screen.getByText('We evaluate a source-grounded method.')).toBeInTheDocument();
+ view.rerender(<PdfPaperGuide target={target} document={document} active onNavigate={vi.fn()} onStudy={vi.fn()}/>);
+ expect(screen.queryByRole('heading',{level:1})).toBeNull();
+ expect(screen.queryByText('Original 1 paragraph.')).toBeNull();
+});
+it('previews real formula and table content while preserving drill-down button names',async()=>{
+ const formula={id:'eq-preview',type:'formula',page:0,latex:'E=mc^2'};
+ const table={id:'table-preview',type:'table',page:0,table:{number:'2',rows:[{cells:[{text:'Accuracy',row_span:1,col_span:1},{text:'92%',row_span:1,col_span:1}]}],captions:['Measured results'],footnotes:[],related_blocks:[]}};
+ api.post.mockReset().mockResolvedValue({data:{data:{source_sha256:'source',stages:[{key:'evidence',summary:'Results',evidence_ids:[],related_block_ids:['eq-preview','table-preview']}],evidence:[],warnings:[]}}});
+ render(<PdfPaperGuide target={target} document={{...document,blocks:[formula,table]}} active onNavigate={vi.fn()} onStudy={vi.fn()}/>);
+ expect(await screen.findByText('Accuracy')).toBeInTheDocument();
+ expect(screen.getByText('92%')).toBeInTheDocument();
+ expect(screen.getByRole('button',{name:'Table 2'})).toBeInTheDocument();
+ expect(screen.getByText('Measured results')).toBeInTheDocument();
+});
+
+it.each(['heading','title','text'])('extracts abstract paragraphs only after a standalone %s label and before the next section',async(type)=>{
+ api.post.mockReset().mockResolvedValue({data:{data:{source_sha256:'source',stages:[],evidence:[],warnings:[]}}});
+ const blocks=[{id:'before',type:'text',page:0,text:'Unrelated preceding body.'},{id:'abs-label',type,page:0,text:'Abstract'},{id:'abs-body',type:'text',page:0,text:'Actual abstract paragraph.'},{id:'abs-image',type:'image',page:0,text:'Unrelated figure caption.'},{id:'abs-body2',type:'text',page:0,text:'Second abstract paragraph.'},{id:'intro',type:'heading',page:0,text:'Introduction'},{id:'body',type:'text',page:0,text:'Introduction body must stay out.'}];
+ const view=render(<PdfPaperGuide target={target} document={{...document,blocks}} active onNavigate={vi.fn()} onStudy={vi.fn()}/>);
+ await waitFor(()=>expect(screen.queryByRole('status')).toBeNull());
+ expect(view.container.querySelector('.pdf-overview-abstract')).toHaveTextContent('Actual abstract paragraph. Second abstract paragraph.');
+ expect(view.container.querySelector('.pdf-overview-abstract')).not.toHaveTextContent('Unrelated');
+ expect(view.container.querySelector('.pdf-overview-abstract')).not.toHaveTextContent('Introduction body');
+ expect(screen.queryByRole('heading',{level:1})).toBeNull();
+});
+it.each(['$$E=mc^2$$',String.raw`\[E=mc^2\]`])('renders already delimited formula %s as math',async(latex)=>{
+ api.post.mockReset().mockResolvedValue({data:{data:{source_sha256:'source',stages:[{key:'method',summary:'Method preview',evidence_ids:[],related_block_ids:['eq-delimited']}],evidence:[],warnings:[]}}});
+ const view=render(<PdfPaperGuide target={target} document={{...document,blocks:[{id:'eq-delimited',type:'formula',page:0,latex}]}} active onNavigate={vi.fn()} onStudy={vi.fn()}/>);
+ await screen.findByText('Method preview');
+ expect(view.container.querySelector('.pdf-overview-formula .katex')).toBeInTheDocument();
+ expect(view.container.querySelector('.pdf-overview-formula')).not.toHaveTextContent('$$');
+});

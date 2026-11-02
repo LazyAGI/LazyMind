@@ -198,3 +198,109 @@
     }
   }
 }
+
+.pdf-temporary-chat--paper {
+  color: #262626;
+  background: #fff;
+
+  .pdf-temporary-chat__header {
+    align-items: center;
+    padding: 16px 14px;
+    border-color: #e5e5e3;
+    gap: 2px;
+
+    > div:first-child { flex: 1; gap: 4px 8px; }
+    > div:first-child > .anticon { color: var(--color-primary, #006ae6); }
+    strong { font-size: 14px; font-weight: 600; }
+    > div:first-child > span:last-child { color: #737373; font-size: 11px; }
+    > .ant-btn { flex: none; color: #737373; }
+  }
+
+  .pdf-temporary-chat__body { display: flex; flex-direction: column; }
+  .chat-chat-container { flex: 1; min-height: 0; }
+  .paper-chat-composer { border-color: #e5e5e3; box-shadow: 0 2px 10px #26262606; }
+  .chat-chat-container .chat-box .input-wrapper { padding: 12px 14px 16px; }
+  .ant-btn:focus-visible, button:focus-visible { outline: 2px solid var(--color-primary, #006ae6); outline-offset: 3px; }
+}
+
+.paper-assistant-ready {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  color: #737373;
+  font-size: 10px;
+  border-bottom: 1px solid #f1f1ef;
+
+  > span:first-child { width: 5px; height: 5px; border-radius: 50%; background: #738975; }
+  &__scope { margin-left: auto; }
+}
+
+.paper-assistant-welcome {
+  padding: 16px 10px 12px;
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  box-sizing: border-box;
+
+  &__eyebrow { color: var(--color-primary, #006ae6); font-size: 9px; font-weight: 600; letter-spacing: .12em; }
+  h2 { margin: 0 0 8px; color: #262626; font-family: inherit; font-size: clamp(22px, 2vw, 27px); line-height: 1.2; font-weight: 400; letter-spacing: -.025em; }
+  > p { color: #737373; font-size: 12px; line-height: 1.8; margin: 0 0 14px; }
+}
+
+.paper-assistant-prompts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+
+  > button {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #e5e5e3;
+    border-radius: 7px;
+    background: #fff;
+    color: #262626;
+    cursor: pointer;
+    font: inherit;
+    transition: border-color .15s, background .15s;
+
+    &:hover { border-color: #c5a2aa; background: #fcf9fa; }
+    > strong { gap: 4px; width: 100%; font-size: 12px; font-weight: 500; display: flex; justify-content: space-between; }
+    > strong span { color: var(--color-primary, #006ae6); }
+    > span { font-size: 11px; color: #737373; line-height: 1.5; }
+  }
+}
+
+.paper-assistant-quote {
+  margin: 12px 14px 0;
+  padding: 8px 10px;
+  background: #f7f7f6;
+  border: 1px solid #e5e5e3;
+  border-left: 2px solid var(--color-primary, #006ae6);
+  border-radius: 5px;
+
+  &__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  &__heading > button:first-child { border: 0; padding: 0; background: transparent; color: var(--color-primary, #006ae6); font: inherit; font-size: 10px; cursor: pointer; }
+  &__heading > button:disabled { cursor: default; }
+  blockquote { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; margin: 4px 0; color: #737373; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+}
+
+@media (prefers-reduced-motion: reduce) { .paper-assistant-prompts > button { transition: none; } }
+
+// The workspace supplies the title and history control; retain a compact new-chat action.
+.paper-chat-pane .pdf-temporary-chat--paper .pdf-temporary-chat__header {
+  display: flex;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  min-height: 30px;
+  > div:first-child { display: none; }
+  > .ant-btn:last-child { display: none; }
+}
+
+.pdf-temporary-chat:has(.paper-assistant-quote) .paper-assistant-welcome { display: none; }
+.paper-assistant-prompts > button:hover { border-color: var(--color-primary-border, #a8bfff); background: var(--color-primary-bg, #e8f3fd); }

@@ -6,8 +6,8 @@ const enUS = {
   pdfReader: {
   "displaySettings": "Display & parsing",
   "sourceChanged": "The source PDF changed. Reload the original PDF before generating an explanation.",
-  "reading": "Reading",
-  "insight": "Paper insight",
+  "reading": "Paper",
+  "insight": "Overview",
   "original": "Original",
   "bilingual": "Bilingual",
   "problem": "Problem",
@@ -65,6 +65,7 @@ const enUS = {
   "translationSource": "Original text"
 },
   paperShell: {
+    askPlaceholder: "Ask about this paper, or select a passage to quote…",
   "outline": "Outline",
   "references": "References",
   "vocabulary": "Vocabulary",

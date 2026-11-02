@@ -38,3 +38,13 @@ it('keeps vocabulary visible for PDFs when the feature is unavailable',()=>{
  expect(screen.getByRole('tab',{name:'Vocabulary'})).toBeInTheDocument();
  expect(screen.getByText('Vocabulary is not enabled in this workspace. Contact your administrator to enable it.')).toBeVisible();
 });
+
+it('offers source-backed figures and tables and highlights the current section',()=>{
+ const navigate=vi.fn();
+ const source={...doc,blocks:[...doc.blocks,{id:'figure',type:'image',page:4,text:'Architecture',image:{number:'1',captions:['Architecture'],footnotes:[],related_blocks:[]}}]};
+ const view=render(<PaperReaderSidebar document={source} currentPage={4} activeTab="outline" onTabChange={vi.fn()} onNavigate={navigate} onCollapse={vi.fn()} references={<div/>}/>);
+ expect(screen.getByRole('button',{name:/3.2. The Model/})).toHaveAttribute('aria-current','location');
+ view.rerender(<PaperReaderSidebar document={source} currentPage={4} activeTab="visuals" onTabChange={vi.fn()} onNavigate={navigate} onCollapse={vi.fn()} references={<div/>}/>);
+ fireEvent.click(screen.getByRole('button',{name:/Figure 1/}));
+ expect(navigate).toHaveBeenCalledWith('figure');
+});

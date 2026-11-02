@@ -18,7 +18,7 @@ export interface ChatImperativeProps {
   createNewChat: () => void;
   sendMessage: (params: SendMessageParams) => Promise<boolean>;
   prepareMessage: (
-    params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages"> & {
+    params: Partial<Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages">> & {
       appendCitations?: boolean;
     },
   ) => void;

@@ -511,7 +511,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         citeMessages: nextCiteMessages,
         appendCitations = false,
       }) => {
-        conversation.setContent(text);
+        if (text !== undefined) conversation.setContent(text);
         if (!appendCitations) {
           clearCiteMessages();
         }
@@ -690,6 +690,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               showSkillDeposit={showSkillDeposit}
               showConversationConfig={showConversationConfig}
               showModelSelector={showModelSelector}
+              placeholder={composerVariant === "paper" ? t("paperShell.askPlaceholder") : undefined}
               composerVariant={composerVariant}
               modelSelectionDraft={modelSelectionDraft}
               modelSelectorBusy={conversation.runtimeWaiting}

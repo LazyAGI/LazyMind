@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { forwardRef } from "react";
+import { createRef, forwardRef, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ChatContainerComponent from "./index";
+import ChatContainerComponent, { type ChatImperativeProps } from "./index";
 
 const mocks = vi.hoisted(() => ({
   chatContentRef: { current: null as HTMLDivElement | null },
@@ -139,10 +139,11 @@ vi.mock("../CapabilityConfigCard", () => ({ default: () => null }));
 vi.mock("./hooks/useChatConversation", () => ({
   useChatConversation: (options: any) => {
     mocks.latestConversationOptions = options;
+    const [content, setContent] = useState("");
     return {
     activeStreamRef: { current: false },
     appendAutoAdvanceTurn: vi.fn(),
-    content: "",
+    content,
     conversationMessagesCache: { current: new Map() },
     createNewChat: vi.fn(),
     currentConversationIdRef: { current: "conversation-1" },
@@ -176,7 +177,7 @@ vi.mock("./hooks/useChatConversation", () => ({
       unreadCount: 0,
     },
     sendMessage: mocks.conversationSendMessage,
-    setContent: vi.fn(),
+    setContent,
     setMessageList: vi.fn(),
     stopGeneration: vi.fn(),
     streamRecovery: {},
@@ -433,4 +434,14 @@ describe("ChatContainerComponent wheel forwarding", () => {
     expect(mocks.regenerate).toHaveBeenCalledOnce();
     expect(mocks.conversationSendMessage).toHaveBeenCalledOnce();
   });
+});
+
+
+it("preserves a typed draft when clearing only citations imperatively", () => {
+  const ref = createRef<ChatImperativeProps>();
+  render(<ChatContainerComponent ref={ref} onOpenSSE={vi.fn()} parseErrorData={(data) => data} setIsChatContent={vi.fn()} setChatConfigFn={vi.fn()} />);
+  act(() => ref.current?.prepareMessage({ text: "My unfinished question" }));
+  expect(mocks.latestChatInputProps.value).toBe("My unfinished question");
+  act(() => ref.current?.prepareMessage({ citeMessages: [] }));
+  expect(mocks.latestChatInputProps.value).toBe("My unfinished question");
 });

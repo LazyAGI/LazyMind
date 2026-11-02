@@ -139,3 +139,19 @@ it("forwards source outline callbacks and repeated navigation requests to the PD
  rerender(<FileViewer {...props} pdfNavigateTo={{id:"source-block",requestId:2}}/>);
  await waitFor(()=>expect(pdfProps.current.pdfNavigateTo).toEqual({id:"source-block",requestId:2}));
 });
+
+it('keeps the library action during PDF fetching and after fetch failure',async()=>{
+ let reject!:(reason:Error)=>void;
+ vi.stubGlobal('fetch',vi.fn(()=>new Promise((_resolve,fail)=>{reject=fail})));
+ const back=vi.fn();
+ render(<FileViewer file="https://example.test/missing.pdf" fileName="missing.pdf" pdfHeaderStart={<button onClick={back}>Library</button>}/>);
+ expect(screen.getAllByRole('button',{name:'Library'})).toHaveLength(1);
+ reject(new Error('offline'));
+ await screen.findByText('2000509');
+ expect(screen.getAllByRole('button',{name:'Library'})).toHaveLength(1);
+ fireEvent.click(screen.getByRole('button',{name:'Library'}));expect(back).toHaveBeenCalledOnce();
+});
+it('keeps the library action when PDF data is absent',()=>{
+ render(<FileViewer fileName="empty.pdf" pdfHeaderStart={<button>Library</button>}/>);
+ expect(screen.getAllByRole('button',{name:'Library'})).toHaveLength(1);
+});

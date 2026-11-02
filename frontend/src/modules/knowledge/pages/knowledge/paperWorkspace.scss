@@ -1,0 +1,148 @@
+// Paper-only workspace; generic document previews keep their existing layout.
+.knowledge-container.is-paper-document {
+  --paper-surface: #fff;
+  --paper-canvas: #f7f7f8;
+  --paper-ink: var(--color-text, #262626);
+  --paper-muted: var(--color-text-secondary, #5f6b7e);
+  --paper-border: var(--color-border, #dfe6ef);
+  --paper-accent: var(--color-primary, #006ae6);
+  --paper-tint: var(--color-primary-bg, #e8f3fd);
+  width: 100%;
+  min-width: 0;
+  background: var(--paper-canvas);
+  color: var(--paper-ink);
+
+  .paper-workspace-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 58px;
+    width: 100%;
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+  .paper-workspace-heading { min-width: 0; flex: 1; }
+  .paper-workspace-heading > span { color: var(--paper-muted); font-size: 11px; }
+  .paper-workspace-heading h1 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .paper-workspace-header-actions { display: flex; align-items: center; gap: 4px; }
+  .paper-workspace-header .ant-btn { color: var(--paper-muted); width: 34px; height: 34px; }
+  .paper-workspace-header .ant-btn[aria-pressed=true] { color: var(--paper-accent); background: var(--paper-tint); }
+  .knowledge-paper-workspace {
+    width: 100%; margin: 0; padding: 4px; box-sizing: border-box;
+    border: 0; border-radius: 0; background: transparent; gap: 0;
+  }
+  .paper-reader-pane { border: 1px solid var(--paper-border); border-radius: 12px; background: var(--paper-surface); gap: 0; }
+  .paper-nav-pane { width: 236px; flex-basis: 236px; margin-right: 8px; border: 1px solid var(--paper-border); border-radius: 12px; overflow: hidden; }
+  .paper-nav-pane.is-collapsed { display: none; }
+  .paper-chat-pane { width: var(--paper-assistant-width, 400px); flex-basis: var(--paper-assistant-width, 400px); border: 1px solid var(--paper-border); border-radius: 12px; }
+  .paper-chat-pane.is-collapsed { display: none; }
+  .paper-chat-open-content { background: var(--paper-surface); }
+  .paper-chat-toolbar { min-height: 46px; padding: 6px 14px; border-bottom: 1px solid var(--paper-border); color: var(--paper-ink); box-sizing: border-box; }
+  .paper-chat-toolbar strong { font-size: 13px; font-weight: 600; }
+  .paper-chat-toolbar strong > .anticon { display: none; }
+  .paper-chat-toolbar .ant-btn { color: var(--paper-muted); }
+  .paper-assistant-tabs { display: none; }
+  .paper-assistant-pane { background: var(--paper-surface); }
+  .paper-pane-divider { flex: 0 0 6px; cursor: col-resize; touch-action: none; position: relative; outline-offset: -2px; }
+  .paper-pane-divider::after { content: ''; position: absolute; inset: 40% 3px; border-radius: 4px; background: transparent; transition: background .15s; }
+  .paper-pane-divider:hover::after, .paper-pane-divider:focus-visible::after { background: var(--paper-accent); }
+  .paper-workspace-dock { position: absolute; z-index: 90; right: 14px; bottom: 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 0; pointer-events: none; }
+  .paper-workspace-dock button { pointer-events: auto; box-shadow: 0 2px 8px #1f293714; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--paper-border); background: var(--paper-surface); color: var(--paper-muted); cursor: pointer; font-size: 17px; transition: background .15s, color .15s; }
+  .paper-workspace-dock button:hover { color: var(--paper-accent); background: var(--paper-tint); }
+  .paper-workspace-dock button[aria-pressed=true] { background: var(--paper-accent); border-color: var(--paper-accent); color: white; }
+  button:focus-visible, .paper-pane-divider:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+  .paper-reader-sidebar { color: var(--paper-ink); }
+  .paper-reader-sidebar > header { border-color: var(--paper-border); }
+  .paper-shell-eyebrow { color: var(--paper-muted); font-size: 12px; letter-spacing: normal; }
+  .paper-reader-sidebar__tabs { border-color: var(--paper-border); }
+  .paper-reader-sidebar__tabs button { color: var(--paper-muted); }
+  .paper-reader-sidebar__tabs button[aria-selected=true] { color: var(--paper-accent); border-color: var(--paper-accent); }
+  .paper-outline button { color: var(--paper-ink); border-radius: 6px; }
+  .paper-outline button:hover { background: var(--paper-tint); color: var(--paper-accent); }
+  .paper-sidebar-segments { display: none; }
+  .paper-shell-empty { color: var(--paper-muted); }
+  .knowledge-paper-workspace[data-narrow=true] > .paper-nav-pane:not(.is-collapsed) { inset: 0 auto 8px 8px; z-index: 65; }
+  .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane:not(.is-collapsed) { inset: 4px 4px 4px auto; width: min(420px, calc(100% - 8px)); border-radius: 12px; }
+}
+.paper-document-actions-popover .paper-document-actions { max-width: min(520px, calc(100vw - 48px)); padding: 6px; }
+.paper-document-actions > span { flex-wrap: wrap; }
+.paper-document-actions .detail-title-text { display: none; }
+.paper-document-metadata { max-width: min(400px, calc(100vw - 64px)); overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .knowledge-container.is-paper-document {
+    .paper-workspace-header { padding: 0 4px; gap: 4px; }
+    .paper-workspace-heading h1 { font-size: 12px; }
+    .paper-workspace-header-actions { gap: 0; }
+    .knowledge-paper-workspace { padding-inline: 4px; }
+    .paper-workspace-dock { right: 12px; bottom: 12px; }
+    .paper-workspace-dock button { width: 34px; height: 34px; }
+    .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane:not(.is-collapsed) { right: 4px; width: calc(100% - 8px); }
+  }
+}
+@media (prefers-reduced-motion: reduce) { .knowledge-container.is-paper-document * { transition: none !important; } }
+.knowledge-container.is-paper-document .paper-outline button[aria-current=location] { background: var(--paper-tint); color: var(--paper-accent); font-weight: 600; }
+.knowledge-container.is-paper-document .paper-reader-sidebar__tabs { flex-wrap: wrap; }
+.knowledge-container.is-paper-document .paper-reader-sidebar__tabs button { flex: 1 0 40%; padding-block: 9px; }
+
+// The reader owns the single navigation row; surrounding panels never remount it.
+.knowledge-container.is-paper-document {
+  background: var(--paper-canvas);
+  .knowledge-paper-workspace { padding-top: 4px; }
+  .paper-reader-pane { position: relative; border: 1px solid var(--paper-border); border-radius: 18px; overflow: hidden; }
+  .paper-library-back { display: inline-flex; align-items: center; gap: 6px; padding-inline: 8px; color: var(--paper-muted); font-size: 13px; }
+  .paper-workspace-header-actions { display: flex; gap: 0; align-items: center; }
+  .paper-workspace-header-actions .ant-btn { width: 30px; padding: 0; color: var(--paper-muted); }
+  .paper-nav-pane:not(.is-collapsed) { position: absolute; z-index: 65; inset: 52px auto 8px 8px; width: min(300px, 85%); box-shadow: 0 8px 28px #26262615; }
+  .paper-chat-pane { overflow: hidden; transition: flex-basis 180ms ease, width 180ms ease, opacity 140ms ease; }
+  .paper-chat-pane.is-collapsed { display: flex; width: 0; flex-basis: 0; border-width: 0; opacity: 0; visibility: hidden; pointer-events: none; }
+  .paper-chat-open-content { width: var(--paper-assistant-width, 400px); flex: 1 0 auto; }
+  .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane { transition: transform 180ms ease, opacity 140ms ease; position: absolute; z-index: 64; inset: 4px 4px 4px auto; width: min(420px, calc(100% - 8px)); }
+  .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane.is-collapsed { transform: translateX(24px); }
+  .knowledge-paper-workspace[data-compact=true] .paper-chat-open-content { width: 100%; }
+}
+@media (max-width: 600px) {
+  .knowledge-container.is-paper-document {
+    .paper-workspace-header-actions .ant-btn { width: 26px; }
+    .knowledge-paper-workspace[data-compact=true] > .paper-chat-pane { right: 4px; width: calc(100% - 8px); }
+  }
+}
+@media (prefers-reduced-motion: reduce) { .knowledge-container.is-paper-document * { transition: none !important; } }
+
+.knowledge-container.is-paper-document .knowledge-paper-workspace {
+  > .paper-reader-pane { order: 2; }
+  > .paper-pane-divider { order: 3; }
+  > .paper-chat-pane { order: 4; }
+  > .paper-workspace-dock { flex: none; }
+  &[data-panel-layout=left] {
+    > .paper-chat-pane { order: 0; }
+    > .paper-pane-divider { order: 1; }
+  }
+  &[data-panel-layout=floating][data-panel-open=true] > .paper-chat-pane {
+    position: absolute; z-index: 70;
+    inset: auto;
+    top: clamp(8px, var(--paper-panel-y, 56px), max(8px, calc(100% - 628px)));
+    left: clamp(8px, var(--paper-panel-x, 32px), max(8px, calc(100% - var(--paper-assistant-width, 400px) - 8px)));
+    width: min(var(--paper-assistant-width, 400px), calc(100% - 16px));
+    height: min(620px, calc(100% - 16px));
+    border: 1px solid var(--paper-border); border-radius: 16px;
+    box-shadow: 0 12px 40px rgba(24, 39, 58, .14);
+    transition: opacity 140ms ease;
+    .paper-chat-open-content { width: 100%; }
+    .paper-chat-toolbar { cursor: grab; touch-action: none; }
+    .paper-chat-toolbar:active { cursor: grabbing; }
+  }
+  &[data-panel-layout=fullscreen][data-panel-open=true] {
+    > .paper-reader-pane, > .paper-nav-pane { visibility: hidden; }
+    > .paper-chat-pane {
+      position: absolute; z-index: 75; inset: 4px;
+      width: calc(100% - 8px); height: calc(100% - 8px); border-radius: 12px;
+      .paper-chat-open-content { width: 100%; }
+      .paper-assistant-pane > .pdf-temporary-chat { max-width: 960px; width: 100%; margin-inline: auto; }
+    }
+  }
+  &[data-panel-layout=left][data-compact=true] > .paper-chat-pane:not(.is-collapsed) { left: 4px; right: auto; }
+  .paper-chat-toolbar > div { display: flex; align-items: center; gap: 2px; }
+}
+
+// Only the send control moves clear of the overlaid bubbles; panel width is unchanged.
+.knowledge-container.is-paper-document .knowledge-paper-workspace[data-panel-layout=right] > .paper-chat-pane .send-button { margin-right: 44px; }
