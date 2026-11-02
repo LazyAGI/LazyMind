@@ -1857,6 +1857,7 @@ def product_writer_revise_markdown(
     passes = []
     for current_plan in plans:
         replace_set = toolkit.generate_string_replace_set(
+            writing_task_json=revision_task,
             markdown_document=revised, modify_plan_json=current_plan,
             writing_context_json=context_json,
         )

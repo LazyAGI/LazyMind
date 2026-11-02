@@ -700,6 +700,7 @@ def bid_writer_revise_markdown(
         writing_context_json=context_json,
     )
     replace_set = toolkit.generate_string_replace_set(
+        writing_task_json=revision_task,
         markdown_document=document,
         modify_plan_json=plan,
         writing_context_json=context_json,
