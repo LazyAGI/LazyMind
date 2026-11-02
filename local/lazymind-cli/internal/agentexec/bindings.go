@@ -1,6 +1,7 @@
 package agentexec
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,6 +77,9 @@ func SetExecutableBinding(target BindingTarget, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve %s binding: %w", target, err)
 	}
+	if err := InvalidateDesktopApplications(context.Background()); err != nil {
+		return "", err
+	}
 	bindingsMu.Lock()
 	defer bindingsMu.Unlock()
 	unlock, err := lockBindings()
@@ -121,6 +125,9 @@ func desktopApplicationBindings() []string {
 
 func ClearExecutableBinding(target BindingTarget) error {
 	if err := validateBindingTarget(target); err != nil {
+		return err
+	}
+	if err := InvalidateDesktopApplications(context.Background()); err != nil {
 		return err
 	}
 	bindingsMu.Lock()

@@ -806,6 +806,8 @@ describe("AgentIntegrationPage", () => {
     });
     fireEvent.click(recheckButton);
     expect(mocks.statuses).toHaveBeenCalledTimes(2);
+    expect(mocks.statuses).toHaveBeenNthCalledWith(1, false);
+    expect(mocks.statuses).toHaveBeenNthCalledWith(2, true);
 
     act(() => finishRefresh({ ok: true, data: { codex: readyCodexStatus } }));
     await waitFor(() => {

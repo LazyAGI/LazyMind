@@ -555,6 +555,12 @@ func (s *Server) handleSession(writer http.ResponseWriter, request *http.Request
 }
 
 func (s *Server) handleAgentStatuses(writer http.ResponseWriter, request *http.Request) {
+	if request.URL.Query().Get("refresh_installations") == "true" {
+		if err := agentexec.InvalidateDesktopApplications(request.Context()); err != nil {
+			writeError(writer, err)
+			return
+		}
+	}
 	statuses, err := Statuses(request.Context(), s.bridge)
 	if err != nil {
 		writeError(writer, err)
@@ -629,6 +635,11 @@ func (s *Server) agentStatus(ctx context.Context, agent string) (agentintegratio
 
 func (s *Server) agentAction(ctx context.Context, agent, action string) (agentintegration.Status, error) {
 	agent = strings.ToLower(strings.TrimSpace(agent))
+	if action == "connect" {
+		if err := agentexec.InvalidateDesktopApplications(ctx); err != nil {
+			return agentintegration.Status{}, err
+		}
+	}
 	if agent == "codex" {
 		adapter, err := codex.New("", "", s.bridge)
 		if err != nil {

@@ -157,7 +157,7 @@ export default function AgentIntegrationPage() {
   const refreshVersion = useRef(0);
   const refreshInFlight = useRef<Promise<void> | null>(null);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback((refreshInstallations = false) => {
     if (refreshInFlight.current) return refreshInFlight.current;
     const version = ++refreshVersion.current;
     const isCurrent = () => refreshVersion.current === version;
@@ -172,7 +172,7 @@ export default function AgentIntegrationPage() {
         else localBridgeUnavailable = true;
       };
       try {
-        const result = await retryBridgeResult(agentIntegrationStatuses);
+        const result = await retryBridgeResult(() => agentIntegrationStatuses(refreshInstallations));
         if (!isCurrent()) return;
         if (result.ok) setStatuses(result.data);
         else recordBridgeFailure(result.reason);
@@ -444,7 +444,7 @@ export default function AgentIntegrationPage() {
         </div>
         <Button
           icon={<ReloadOutlined />}
-          onClick={() => void refresh()}
+          onClick={() => void refresh(true)}
           loading={loading || refreshing}
           disabled={loading || refreshing}
         >
@@ -505,7 +505,7 @@ export default function AgentIntegrationPage() {
                       setExternalConfigurationAgent(target);
                       if (target === "workbuddy") setPendingLoginAgent(target);
                     }}
-                    onRefresh={refresh}
+                    onRefresh={() => refresh(true)}
                     t={t}
                   />
                 ))}

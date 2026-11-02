@@ -98,11 +98,17 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	flags := flag.NewFlagSet("internal agent "+agent+" "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	agentBinary := flags.String("agent-bin", "", "external Agent CLI executable")
+	refreshInstallations := flags.Bool("refresh-installations", false, "refresh cached desktop installation discovery")
 	if err := flags.Parse(args[3:]); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("unexpected internal command arguments")
+	}
+	if *refreshInstallations || action == "connect" {
+		if err := agentexec.InvalidateDesktopApplications(ctx); err != nil {
+			return err
+		}
 	}
 	store, err := credentials.NewStore("", "")
 	if err != nil {
