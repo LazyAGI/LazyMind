@@ -1282,6 +1282,8 @@ const enUS = {
     providerGroupsAria: "{{name}} connections",
     verified: "Verified",
     pendingVerify: "Pending",
+    credentialUnavailable: "Key unavailable",
+    credentialUnavailableHelp: "The saved key cannot be read. Enter a replacement in the API Key field, press Enter to save, then check the connection.",
     addModel: "Add Model",
     fetchAvailableModels: "Fetch available models",
     customModel: "Custom model",

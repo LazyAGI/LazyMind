@@ -146,9 +146,13 @@ func NotificationPreferences(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
-			slices.Sort(req.Confirm)
-			if len(ids) > 0 && !slices.Equal(ids, req.Confirm) {
-				return &notificationError{status: 409, reason: "NOTIFICATION_CONFIRMATION_REQUIRED", affected: ids}
+			// Completed runs may disappear while the confirmation is open. They
+			// do not widen the action the user approved; only newly affected runs
+			// require another review.
+			for _, id := range ids {
+				if !slices.Contains(req.Confirm, id) {
+					return &notificationError{status: 409, reason: "NOTIFICATION_CONFIRMATION_REQUIRED", affected: ids}
+				}
 			}
 			if err := tx.Model(&orm.TaskNotification{}).Where("user_id = ? AND status IN ('pending','queued')", owner).Updates(map[string]any{"status": "skipped", "reason": "NOTIFICATIONS_DISABLED", "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err

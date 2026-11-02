@@ -57,6 +57,7 @@ const { waitForRendererWithRuntimeRecovery } = require("./renderer-recovery");
 const { createDesktopNotifications, isTrustedNotificationSender } = require("./native-notifications.js");
 const { createNotificationSession } = require("./notification-session.js");
 const { createAgentRecovery, runRecoveryCommand } = require("./agent-recovery.js");
+const { registerNotificationSettingsIPC } = require("./notification-settings.js");
 const {
   desktopNotificationAPIOrigin,
   desktopNotificationInstanceID,
@@ -2600,6 +2601,11 @@ ipcMain.handle("lazymind:browserOpen", async (event, url) => {
 });
 app.on("will-quit", () => { void managedBrowser.clear(); });
 
+registerNotificationSettingsIPC({
+  ipcMain,
+  shell,
+  isTrustedSender: (event) => !isQuitting && isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin()),
+});
 ipcMain.handle("lazymind:assistantSessionSet", async (event, value) => {
   if (isQuitting || !isTrustedNotificationSender(event, mainWindow, notificationFrontendOrigin())) {
     throw new Error("DESKTOP_SESSION_UNAVAILABLE");

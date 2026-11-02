@@ -247,12 +247,28 @@ func activeNotificationRuns(tx *gorm.DB, userID string) ([]string, error) {
 	}
 	desktopEnabled := notificationBlockReason(prefs, "desktop") == ""
 	var tasks []orm.TaskCenterTask
-	if err := tx.Where("user_id = ? AND task_type IN ? AND status IN ('pending','running','waiting','waiting_inputs') AND archived_at IS NULL", userID,
-		[]string{"scheduled", "background_chat", "workflow_run"}).Order("id").Find(&tasks).Error; err != nil {
+	// Use the same visibility and resolved status as ListTasks. Persisted task
+	// state can lag behind a workflow completion or retry; comparing it with the
+	// UI's live task list would otherwise require confirmation indefinitely.
+	if err := tx.Table("task_center_tasks tct").Select("tct.*").
+		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id").
+		Where("tct.user_id = ? AND tct.task_type IN ? AND tct.archived_at IS NULL", userID,
+			[]string{"scheduled", "background_chat", "workflow_run"}).
+		Where("tct.plugin_session_id IS NULL OR ps.dismissed = false").
+		Order("tct.id").Find(&tasks).Error; err != nil {
 		return nil, err
 	}
 	ids := []string{}
 	for _, task := range tasks {
+		task, err = resolveTaskForResponse(tx.Statement.Context, tx, task)
+		if err != nil {
+			return nil, err
+		}
+		switch task.Status {
+		case "pending", "running", "waiting", "waiting_inputs":
+		default:
+			continue
+		}
 		if task.TaskType != "scheduled" || task.NotificationConfig == nil {
 			if desktopEnabled {
 				ids = append(ids, task.ID)
@@ -263,8 +279,8 @@ func activeNotificationRuns(tx *gorm.DB, userID string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, channel := range config.Channels {
-			if channel.Enabled {
+		for name, channel := range config.Channels {
+			if channel.Enabled && notificationBlockReason(prefs, name) == "" {
 				ids = append(ids, task.ID)
 				break
 			}

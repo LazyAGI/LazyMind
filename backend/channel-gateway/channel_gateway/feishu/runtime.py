@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from channel_gateway.common.domain.channel import (
+    FEISHU_BOT_MENU_UNAVAILABLE,
     InboundEnvelope,
 )
 from channel_gateway.common.domain.chat import (
@@ -419,7 +420,7 @@ class FeishuRuntime:
                 publish_version=f'1.0.{_BOT_MENU_CONFIG_VERSION}',
             )
         except FeishuRuntimeError as exc:
-            worker.menu_error = str(exc)[:500]
+            worker.menu_error = f'{FEISHU_BOT_MENU_UNAVAILABLE}: {exc}'[:500]
             worker.next_menu_attempt_at = now + _BOT_MENU_RETRY_SECONDS
             _logger.warning(
                 'feishu_bot_menu_configuration_pending error=%s',

@@ -23,6 +23,7 @@ function createDesktopBridge(ipcRenderer) {
     browserOpen: (url) => ipcRenderer.invoke("lazymind:browserOpen", url),
     openLogsDir: () => ipcRenderer.invoke("lazymind:openLogsDir"),
     openDataDir: () => ipcRenderer.invoke("lazymind:openDataDir"),
+    openNotificationSettings: () => ipcRenderer.invoke("lazymind:openNotificationSettings"),
     openBrowserExtensionDir: () => ipcRenderer.invoke("lazymind:openBrowserExtensionDir"),
     runtimeStatus: () => ipcRenderer.invoke("lazymind:runtimeStatus"),
     agentIntegrationStatuses: () => ipcRenderer.invoke("lazymind:agentIntegrationStatuses"),

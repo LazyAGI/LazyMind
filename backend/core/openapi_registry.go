@@ -1615,6 +1615,7 @@ type listModelProviderGroupsOpenAPIItem struct {
 	HasAPIKey           bool                               `json:"has_api_key"`
 	ModelCount          int                                `json:"model_count" description:"Number of undeleted models owned by the current user in this supplier group; returned without loading model contents"`
 	IsVerified          bool                               `json:"is_verified"`
+	CredentialStatus    string                             `json:"credential_status,omitempty"`
 }
 
 type listModelProviderGroupsOpenAPIResponse struct {

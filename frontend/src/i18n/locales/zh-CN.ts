@@ -1262,6 +1262,8 @@ const zhCN = {
     providerGroupsAria: "{{name}} 连接实例",
     verified: "已验证",
     pendingVerify: "待验证",
+    credentialUnavailable: "密钥不可用",
+    credentialUnavailableHelp: "已保存的密钥暂时无法读取。请在 API Key 输入框中填写新密钥并按回车保存，再检查连接。",
     addModel: "添加模型",
     fetchAvailableModels: "获取可用模型",
     customModel: "自定义模型",

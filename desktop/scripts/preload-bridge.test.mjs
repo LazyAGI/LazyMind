@@ -46,6 +46,7 @@ test("maps bridge methods to their exact IPC channels and arguments", async () =
     ["recordingInputCancel", ["session"], "lazymind:recordingInputCancel", ["session"]],
     ["openLogsDir", [], "lazymind:openLogsDir", []],
     ["openDataDir", [], "lazymind:openDataDir", []],
+    ["openNotificationSettings", ["https://ignored.example"], "lazymind:openNotificationSettings", []],
     ["runtimeStatus", [], "lazymind:runtimeStatus", []],
     ["agentIntegrationStatuses", [], "lazymind:agentIntegrationStatuses", []],
     ["agentIntegrationAction", ["cursor", "connect"], "lazymind:agentIntegrationAction", ["cursor", "connect"]],

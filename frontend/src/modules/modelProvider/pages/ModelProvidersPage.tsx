@@ -138,6 +138,7 @@ export interface ProviderConnectionGroup {
   source: string;
   baseUrl: string;
   apiKeyConfigured: boolean;
+  credentialUnavailable?: boolean;
   verified: boolean;
   models: ProviderModel[];
   modelCount?: number;
@@ -194,6 +195,7 @@ function createConnectionGroup(
     source: provider.source,
     baseUrl: overrides.baseUrl || provider.baseUrl,
     apiKeyConfigured: overrides.apiKeyConfigured ?? false,
+    credentialUnavailable: overrides.credentialUnavailable ?? false,
     verified: overrides.verified ?? false,
     models: overrides.models || provider.models.map((model) => ({ ...model })),
     modelCount: overrides.modelCount ?? overrides.models?.length ?? provider.models.length,
@@ -353,6 +355,7 @@ interface ApiGroup {
   name: string;
   base_url?: string;
   has_api_key?: boolean;
+  credential_status?: string;
   model_count?: number;
   is_verified?: boolean;
   user_model_provider_id: string;
@@ -448,8 +451,11 @@ function mapApiGroup(
     apiKeyConfigured: isApiGroup
       ? Boolean((group as ApiGroup).has_api_key)
       : (group as ProviderConnectionGroup).apiKeyConfigured,
+    credentialUnavailable: isApiGroup
+      ? (group as ApiGroup).credential_status === "unavailable"
+      : (group as ProviderConnectionGroup).credentialUnavailable,
     verified: isApiGroup
-      ? Boolean((group as ApiGroup).is_verified)
+      ? (group as ApiGroup).credential_status !== "unavailable" && Boolean((group as ApiGroup).is_verified)
       : (group as ProviderConnectionGroup).verified,
     models: sortCustomModelsFirst(models.map((model) => ({
       id: model.id,

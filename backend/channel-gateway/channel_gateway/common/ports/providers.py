@@ -5,6 +5,9 @@ from channel_gateway.common.ports.messaging import IngestionRepository
 
 
 class AccountAdapter(Protocol):
+    def archive_account(self, owner_user_id: str, account_id: str) -> None:
+        ...
+
     def list_accounts(
         self,
         owner_user_id: str,
@@ -28,6 +31,9 @@ class AccountAdapterResolver(Protocol):
 
 
 class AccountLookupRepository(Protocol):
+    def get_account_internal(self, account_id: str) -> dict[str, Any] | None:
+        ...
+
     def get_account(
         self,
         owner_user_id: str,

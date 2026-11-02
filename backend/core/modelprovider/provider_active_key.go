@@ -204,6 +204,13 @@ func initializeProviderActiveKey(tx *gorm.DB, parent *orm.UserModelProvider) err
 	for i := range groups {
 		pool, err := apiKeyForGroup(tx, &groups[i])
 		if err != nil {
+			// Unreadable encrypted groups remain visible for explicit recovery.
+			// A database write failure must still fail initialization.
+			if strings.TrimSpace(groups[i].APIKeyCiphertext) != "" {
+				if _, decryptErr := apiKeyForGroup(nil, &groups[i]); decryptErr != nil {
+					continue
+				}
+			}
 			return err
 		}
 		if keys := splitAPIKeys(pool); len(keys) > 0 {
